@@ -1,6 +1,7 @@
 # See http://help.github.com/ignore-files/ for more about ignoring files.
 
-src/api/proto-http/*
+// TODO: add
+# src/api/proto-http/*
 
 angular-8-jwt-authentication-example
 #
