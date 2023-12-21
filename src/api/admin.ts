@@ -23,7 +23,7 @@ import {
   GetDictionaryResponse,
 } from './proto-http/admin';
 
-const adminService = createAdminServiceClient(axiosRequestHandler);
+export const adminService = createAdminServiceClient(axiosRequestHandler);
 
 export function getAllUploadedFiles(
   request: ListObjectsPagedRequest,

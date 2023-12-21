@@ -4,6 +4,7 @@ import {
   common_Product,
   common_FilterConditions,
   GetProductsPagedRequest,
+  common_OrderFactor,
 } from 'api/proto-http/admin';
 import { getProductsPaged, deleteProductByID } from 'api/admin';
 import { initialFilter } from './componentsOfPageProduct/initialFilterStates';

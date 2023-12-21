@@ -152,7 +152,7 @@ export const AddProducts: FC = () => {
             onChange={handleInputChange}
             className={styles.product_input}
           >
-            {/* TODO: how do it dinamically */}
+            {/* TODO: how do it dynamically */}
             <option value='GENDER_ENUM_MALE'>Male</option>
             <option value='GENDER_ENUM_FEMALE'>Female</option>
             <option value='GENDER_ENUM_UNISEX'>Unisex</option>
