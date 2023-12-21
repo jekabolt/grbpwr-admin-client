@@ -1,0 +1,28 @@
+.form {
+  display: grid;
+  grid-template-columns: repeat(1);
+  align-items: center;
+  justify-content: center;
+  gap: 72px;
+  position: relative;
+
+  .product_container {
+    display: grid;
+
+    .title {
+      justify-self: flex-start;
+      color: #fff;
+      background-color: black;
+      font-size: 35px;
+      font-style: normal;
+      font-weight: 600;
+      line-height: normal;
+      text-transform: uppercase;
+    }
+
+    .product_input {
+      height: 69px;
+      width: 334px;
+    }
+  }
+}

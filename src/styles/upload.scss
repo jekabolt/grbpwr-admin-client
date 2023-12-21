@@ -1,0 +1,145 @@
+.media_name {
+  width: 325px;
+  margin: 54px 0 79px 730px;
+  background-color: black;
+  color: #fff;
+  font-size: 35px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: normal;
+}
+
+.files_container {
+  display: flex;
+  justify-content: center;
+  position: relative;
+
+  .sorter_container {
+    position: sticky;
+    top: 164px;
+    right: calc(100% + 10px);
+    display: grid;
+    height: 200px;
+    grid-template-columns: repeat(1);
+    padding: 0;
+    gap: 18px;
+
+    .sort_btn_title {
+      justify-self: flex-start;
+      background-color: black;
+      color: #fff;
+      font-size: 35px;
+      font-style: normal;
+      font-weight: 600;
+      line-height: normal;
+      text-transform: uppercase;
+      margin-bottom: 26px;
+    }
+
+    .sort_btn {
+      justify-self: flex-start;
+      background-color: black;
+      color: #fff;
+      font-size: 35px;
+      font-style: normal;
+      font-weight: 600;
+      line-height: normal;
+      text-transform: uppercase;
+    }
+  }
+
+  .uploaded_files {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    padding: 0;
+    margin-bottom: 173.5px;
+
+    .uploaded_file {
+      border: 1px solid black;
+      width: 239px;
+      height: 329px;
+      position: relative;
+
+      .delete_btn,
+      .copy_btn,
+      .date {
+        display: none;
+        opacity: 0; /* Сначала элементы невидимы */
+        transition: opacity 1s ease-out; /* Добавляем плавную анимацию */
+      }
+
+      &:hover .delete_btn,
+      &:hover .copy_btn,
+      &:hover .date {
+        display: block;
+        cursor: pointer;
+        opacity: 1;
+        z-index: 5;
+      }
+
+      &:hover .video,
+      &:hover .uploaded_img {
+        opacity: 0.3;
+      }
+      // DELETE BTN
+      .delete_btn {
+        border: none;
+        position: absolute;
+        right: 0;
+        display: none;
+        width: 30px;
+        background-color: black;
+        color: #fff;
+        font-size: 25px;
+        font-style: normal;
+        font-weight: 600;
+        line-height: normal;
+      }
+
+      // COPY LINK BTN
+
+      .urlText {
+        display: none;
+      }
+
+      .copy_btn {
+        display: none;
+        position: absolute;
+        bottom: 100px;
+        background-color: black;
+        color: #fff;
+        font-size: 35px;
+        font-style: normal;
+        font-weight: 600;
+        line-height: normal;
+        text-transform: uppercase;
+      }
+
+      // DATE TEXT
+      .date {
+        width: 238px;
+        display: none;
+        position: absolute;
+        bottom: 39px;
+        background-color: black;
+        color: #fff;
+        font-size: 35px;
+        font-style: normal;
+        font-weight: 600;
+        line-height: normal;
+        text-transform: uppercase;
+      }
+      // IMG && VIDEO
+      .uploaded_img,
+      .video {
+        width: 100%;
+        height: 100%;
+        object-fit: scale-down;
+        opacity: 1;
+        transition: opacity 1s ease;
+      }
+    }
+  }
+}

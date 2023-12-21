@@ -1,5 +1,6 @@
 # See http://help.github.com/ignore-files/ for more about ignoring files.
 
+src/api/proto-http/*
 
 angular-8-jwt-authentication-example
 #
@@ -46,6 +47,7 @@ testem.log
 server/compiled/
 src/img/uploads/
 src/assets/uploads
+jsconfig.json
 
 # e2e
 /e2e/*.js

@@ -1,0 +1,22 @@
+.main {
+  display: grid;
+  align-items: center;
+  justify-content: center;
+  margin: 254px auto;
+
+  .btn {
+    // justify-self: center;
+    background-color: black;
+    color: #fff;
+    font-size: 35px;
+    font-style: normal;
+    font-weight: 600;
+    line-height: normal;
+    text-transform: uppercase;
+    margin-bottom: 22px;
+  }
+
+  .btn:last-child {
+    margin-bottom: 0;
+  }
+}

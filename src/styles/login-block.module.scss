@@ -1,0 +1,73 @@
+.login_wrapper {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+
+  .logo {
+    background: url(../img/tex-text.png) center/cover no-repeat;
+    width: 50px;
+    height: 50px;
+  }
+
+  .card_body {
+    .form {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+
+      .user_container {
+        .input {
+          text-align: center;
+          width: 312px;
+          height: 54px;
+          cursor: pointer;
+          border: none;
+          background-color: black;
+          color: white;
+          font-size: 29px;
+          font-style: normal;
+          font-weight: 500;
+          line-height: normal;
+
+          input:-webkit-autofill {
+            -webkit-box-shadow: 0 0 0 1000px black inset !important;
+            -webkit-text-fill-color: white !important;
+          }
+
+          &:focus {
+            -webkit-box-shadow: 0 0 0 1000px black inset !important;
+            -webkit-text-fill-color: white !important;
+          }
+
+          &:active {
+            -webkit-box-shadow: 0 0 0 1000px black inset !important;
+            -webkit-text-fill-color: white !important;
+          }
+        }
+      }
+
+      button {
+        text-align: center;
+        width: 150px;
+        height: 54px;
+        cursor: pointer;
+        border: none;
+        background-color: black;
+        color: white;
+        font-size: 29px;
+        font-style: normal;
+        font-weight: 500;
+        line-height: normal;
+        text-transform: uppercase;
+      }
+    }
+  }
+}

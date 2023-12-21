@@ -1,12 +1,26 @@
-run:
-	ng serve --host 0.0.0.0
+DEFAULT_GOAL := up
+VERSION := $(shell git describe --tags --always --long |sed -e "s/^v//")
+GO_LINT_VERSION := v1.53.3
 
+.PHONY: generate internal/statics proto
 
+init: submodules clean install proto
 
-BASE_HREF = https://admin.grbpwr.com
-build-static:
-	ng build --base-href ${BASE_HREF} --configuration production --output-path=output
+install: ## Install the web dependencies
+	yarn install --ignore-engines
 
-BASE_HREF_LOCAL = ./
-build-static-local:
-	ng build --base-href ${BASE_HREF_LOCAL} --configuration production --output-path=output
+dev: ## Run the local dev server
+	yarn dev
+
+build-dist: ## Build dist version
+	yarn build
+
+proto:
+	buf generate
+
+clean:
+	rm -rf dist
+	rm -rf src/api/proto-http/*
+
+submodules:
+	git submodule update --init --recursive

@@ -1,0 +1,150 @@
+.product_container {
+  position: relative;
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 60px;
+  gap: 200px;
+
+  .product_wrapper {
+    display: grid;
+    gap: 70px;
+
+    .product_list {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: repeat(2, 1fr);
+      gap: 52px;
+
+      li {
+        position: relative;
+        height: 300px;
+        width: 300px;
+        display: grid;
+        justify-content: center;
+        align-items: center;
+        border: 2px solid black;
+
+        img {
+          width: 200px;
+          height: 255px;
+          object-fit: scale-down;
+        }
+
+        // button {
+        //   position: absolute;
+        //   right: 0;
+        //   top: 0;
+        //   border: none;
+        //   display: none;
+        //   width: 30px;
+        //   background-color: black;
+        //   color: #fff;
+        //   font-size: 25px;
+        //   font-style: normal;
+        //   font-weight: 600;
+        //   line-height: normal;
+        // }
+
+        h5 {
+          justify-self: center;
+          color: #000;
+          font-family: Inter;
+          font-size: 35px;
+          font-style: normal;
+          font-weight: 600;
+          line-height: normal;
+          text-transform: uppercase;
+        }
+
+        // &:hover button {
+        //   display: block;
+        // }
+      }
+    }
+
+    .product_pagination {
+      display: flex;
+      justify-self: center;
+      gap: 50px;
+
+      button {
+        background-color: #fff;
+        color: #000;
+        border: 1px solid black;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 15px;
+        font-family: Inter;
+        font-size: 15px;
+        font-style: normal;
+        font-weight: 600;
+        line-height: normal;
+        text-transform: uppercase;
+
+        &:hover {
+          color: #fff;
+          background-color: #000;
+          cursor: pointer;
+        }
+      }
+    }
+  }
+
+  form {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: grid;
+    gap: 2px;
+
+    h6 {
+      justify-self: center;
+      color: #000;
+      font-size: 35px;
+      font-style: normal;
+      font-weight: 600;
+      line-height: normal;
+      text-transform: uppercase;
+    }
+
+    select {
+      height: 50px;
+      background-color: #000;
+      color: #fff;
+      text-align: start;
+      font-size: 15px;
+      text-transform: uppercase;
+    }
+
+    input {
+      height: 50px;
+      background-color: #000;
+      color: #fff;
+      text-align: start;
+      font-size: 15px;
+      text-transform: uppercase;
+    }
+
+    button {
+      justify-self: center;
+      padding: 5px;
+      margin-top: 15px;
+      color: #000;
+      font-size: 25px;
+      font-style: normal;
+      font-weight: 600;
+      line-height: normal;
+      text-transform: uppercase;
+      background-color: #fff;
+      color: #000;
+      cursor: pointer;
+
+      &:hover {
+        background-color: #000;
+        color: #fff;
+        border: none;
+      }
+    }
+  }
+}
