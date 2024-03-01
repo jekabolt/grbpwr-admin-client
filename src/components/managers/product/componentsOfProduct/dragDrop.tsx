@@ -51,7 +51,7 @@ export const DragDrop: FC = () => {
             folder: 'your folder name',
             imageName: fileName,
           });
-          setSelectedFiles([]); // Clear files after upload
+          setSelectedFiles([]);
           setSelectedFileUrl(null);
         } catch (error) {
           alert('error uploading file' + error);
@@ -84,7 +84,7 @@ export const DragDrop: FC = () => {
         onDragEnter={(e) => handleDrag(e, true)}
         onDragLeave={(e) => handleDrag(e, false)}
         onDrop={handleFileChange}
-        className={`${styles.drag_drop_label_wrapper} ${isDragging ? styles.drag_drop_label : ''}`}
+        className={`${styles.drag_drop_label} ${isDragging ? styles.drag_drop_label : ''}`}
       >
         {!selectedFileUrl && <label htmlFor='files'>DRAG AND DROP FILES HERE</label>}
         <input
@@ -95,7 +95,7 @@ export const DragDrop: FC = () => {
           onChange={handleFileChange}
           style={{ display: 'none' }}
         />
-        {selectedFileUrl && <h3>image is selected</h3>}
+        {selectedFileUrl && <p className={styles.drag_drop_img_selected}>image is selected</p>}
       </div>
       <div className={styles.drag_drop_naming}>
         <input

@@ -1,17 +1,14 @@
-import React, { FC, useState, useEffect } from 'react';
+import React, { FC, useState } from 'react';
 import {
-  common_Size,
-  common_MeasurementName,
   common_ProductSizeInsert,
   googletype_Decimal,
   common_ProductNew,
   common_Dictionary,
 } from 'api/proto-http/admin';
-import { getDictionary } from 'api/admin';
-import styles from 'styles/addProd.scss';
+import styles from 'styles/sizesMeasurement.scss';
+import { findInDictionary } from 'components/managers/orders/utility';
 
 interface sizeProps {
-  // product: common_ProductNew;
   setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>;
   dictionary: common_Dictionary | undefined;
 }
@@ -20,8 +17,14 @@ interface SelectedMeasurements {
   [sizeIndex: number]: number | undefined;
 }
 
+const pattern: { [key: string]: RegExp } = {
+  size: /SIZE_ENUM_/,
+  measurement: /MEASUREMENT_NAME_ENUM_/,
+};
+
 export const Sizes: FC<sizeProps> = ({ setProduct, dictionary }) => {
   const [selectedMeasurements, setSelectedMeasurements] = useState<SelectedMeasurements>({});
+  const [numSizes, setNumSizes] = useState(0);
 
   const handleMeasurementSelection = (sizeIndex: number | undefined, measurementId: number) => {
     if (typeof sizeIndex === 'undefined') {
@@ -73,11 +76,11 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary }) => {
     sizeIndex: number | undefined,
   ) => {
     if (typeof sizeIndex === 'undefined') {
-      // Handle the undefined case
       return;
     }
 
-    const { name, value } = e.target;
+    const { value } = e.target;
+    setNumSizes(parseInt(value) || 0);
     setProduct((prevProduct) => {
       const updatedSizeMeasurements = [...(prevProduct.sizeMeasurements || [])];
       const sizeQuantity: googletype_Decimal = { value: value };
@@ -106,61 +109,56 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary }) => {
     });
   };
 
-  const getSizeName = (sizeId: number | undefined): string => {
-    const size = dictionary?.sizes?.find((s) => s.id === sizeId);
-    if (size && size.name) {
-      return size.name.replace('SIZE_ENUM_', '');
-    }
-    return 'size not found';
-  };
-
-  const getMeasurementName = (id: number | undefined): string => {
-    const measurement = dictionary?.measurements?.find((m) => m.id === id);
-    if (measurement && measurement.name) {
-      return measurement.name.replace('MEASUREMENT_NAME_ENUM_', '');
-    }
-    return 'size not found';
-  };
-
   return (
-    <div className={styles.product_container}>
-      <label className={styles.title}>Sizes</label>
-      <ul>
+    <div className={styles.size_measurement_container}>
+      <label className={styles.size_measurement_container_title}>Sizes</label>
+      <ul className={styles.size_measurement_list}>
         {dictionary?.sizes?.map((size) => (
           <li key={size.id}>
-            <strong>{getSizeName(size.id)}</strong>
-            <input
-              type='number'
-              id={size.name}
-              name='quantity'
-              onChange={(e) => handleSizeChange(e, size.id)}
-            />
-            <div className={styles.sizeMeasurement}>
-              <select
-                className={styles.measurementSelect}
-                onChange={(e) => handleMeasurementSelection(size.id, parseInt(e.target.value, 10))}
-              >
-                <option value=''>select measurement</option>
-                {dictionary.measurements?.map((measurement) => (
-                  <option key={measurement.id} value={measurement.id}>
-                    {getMeasurementName(measurement.id)}
-                  </option>
-                ))}
-              </select>
-              {selectedMeasurements[size.id as number] && (
-                <input
-                  type='number'
-                  className={styles.measurementInput}
-                  onChange={(e) =>
-                    handleMeasurementValueChange(
-                      size.id,
-                      selectedMeasurements[size.id as number],
-                      parseInt(e.target.value, 10),
-                    )
-                  }
-                />
-              )}
+            <div className={styles.size_selector}>
+              <p className={styles.size_name}>
+                {findInDictionary(dictionary, size.id, 'size', pattern)}
+              </p>
+              <input
+                type='number'
+                id={size.name}
+                name='quantity'
+                onChange={(e) => handleSizeChange(e, size.id)}
+                className={styles.size_input}
+                placeholder='quantity'
+              />
             </div>
+            {numSizes > 0 && (
+              <div className={styles.measurement_selector}>
+                <select
+                  className={styles.measurementSelect}
+                  onChange={(e) =>
+                    handleMeasurementSelection(size.id, parseInt(e.target.value, 10))
+                  }
+                >
+                  <option value=''>measurements</option>
+                  {dictionary.measurements?.map((measurement) => (
+                    <option key={measurement.id} value={measurement.id}>
+                      {findInDictionary(dictionary, measurement.id, 'measurement', pattern)}
+                    </option>
+                  ))}
+                </select>
+                {selectedMeasurements[size.id as number] && (
+                  <input
+                    type='number'
+                    className={styles.measurementInput}
+                    placeholder='quantity'
+                    onChange={(e) =>
+                      handleMeasurementValueChange(
+                        size.id,
+                        selectedMeasurements[size.id as number],
+                        parseInt(e.target.value, 10),
+                      )
+                    }
+                  />
+                )}
+              </div>
+            )}
           </li>
         ))}
       </ul>

@@ -16,7 +16,6 @@ export const Thumbnail: FC<ThumbnailProps> = ({ product, setProduct }) => {
   const [filesUrl, setFilesUrl] = useState<common_Media[]>([]);
   const [showMediaSelector, setShowMediaSelector] = useState(false);
   const [mediaNumber, setMediaNumber] = useState<number[]>([]);
-  // const [imagesAdded, setImagesAdded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -216,7 +215,7 @@ export const Thumbnail: FC<ThumbnailProps> = ({ product, setProduct }) => {
                       >
                         X
                       </button>
-                      <img src={media.fullSize} alt={`Media ${index}`} className={styles.imgs} />
+                      <img src={media.fullSize} alt={`Media ${index}`} className={styles.image} />
                     </li>
                   ))}
                 </ul>
@@ -234,11 +233,7 @@ export const Thumbnail: FC<ThumbnailProps> = ({ product, setProduct }) => {
                         onChange={(e) => setImageUrl(e.target.value)}
                         className={styles.by_url_input}
                       />
-                      <button
-                        type='button'
-                        onClick={handleImage}
-                        className={styles.media_selector_by_url_btn}
-                      >
+                      <button type='button' onClick={handleImage} className={styles.by_url_btn}>
                         OK
                       </button>
                     </div>
@@ -246,10 +241,10 @@ export const Thumbnail: FC<ThumbnailProps> = ({ product, setProduct }) => {
                   <div className={styles.media_selector_upload_new}>
                     <DragDrop />
                   </div>
-                  <div>
+                  <div className={styles.show_img_btn_container}>
                     <button
                       type='button'
-                      className={styles.show_images_btn} // Add appropriate styles in your CSS
+                      className={styles.show_img_btn}
                       onClick={() => setShowAddedImages(!showAddedImages)}
                     >
                       Show Added Images

@@ -9,7 +9,16 @@ import { Tags } from './componentsOfProduct/tag';
 import { Categories } from './componentsOfProduct/categories';
 import { ColorHEX } from './componentsOfProduct/colorHEX';
 import { InputField } from './componentsOfProduct/inputFields';
+import { findInDictionary } from '../orders/utility';
 import styles from 'styles/addProd.scss';
+
+const pattern: { [key: string]: RegExp } = {
+  size: /SIZE_ENUM_/,
+  order: /ORDER_STATUS_ENUM_/,
+  payment: /PAYMENT_METHOD_NAME_ENUM_/,
+  status: /ORDER_STATUS_ENUM_/,
+  gender: /GENDER_ENUM_/,
+};
 
 export const initialProductState: common_ProductNew = {
   media: [],
@@ -61,7 +70,6 @@ export const AddProducts: FC = () => {
     handleChange(e, setProduct);
   };
 
-  // const [gender, setGender] = useState<common_Genders[] | undefined>([]);
   const [dictionary, setDictionary] = useState<common_Dictionary>();
 
   useEffect(() => {
@@ -105,7 +113,7 @@ export const AddProducts: FC = () => {
   const updateTags = (updatedTags: any) => {
     setProduct((prevProduct) => ({
       ...prevProduct,
-      tags: updatedTags, // Update the tags in the product state
+      tags: updatedTags,
     }));
   };
 
@@ -166,9 +174,10 @@ export const AddProducts: FC = () => {
             className={styles.product_input}
           >
             <option value=''>select gender</option>
-            {dictionary?.genders?.map((gender) => (
-              <option value={gender.id} key={gender.id}>
-                {gender.name?.replace('GENDER_ENUM_', '')}
+            {dictionary?.genders?.map((gender, id) => (
+              <option value={gender.id} key={id}>
+                {/* in dictionary common_SizeEnum is a string so that doesn't show gender*/}
+                {gender.id && findInDictionary(dictionary, parseInt(gender.id), 'gender', pattern)}
               </option>
             ))}
           </select>
