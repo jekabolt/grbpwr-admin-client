@@ -76,7 +76,7 @@ jobs:
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         branch: gh-pages # Specifies the deployment branch
-        folder: build # Specifies the folder to deploy
+        folder: dist # Specifies the folder to deploy
         clean: true # Ensures a clean deployment
 
     # Sends a success notification to Telegram if deployment succeeds
