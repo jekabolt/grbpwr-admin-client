@@ -1,4 +1,3 @@
-import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Outlet, ReactLocation, Router, Route, DefaultGenerics } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -24,6 +23,7 @@ import { Settings } from 'components/managers/settings/settings';
 import { Orders } from 'components/managers/orders/orders';
 import { OrderId } from 'components/managers/orders/orderId';
 import 'styles/global.scss';
+import { StrictMode } from 'react';
 
 const container = document.getElementById('root') ?? document.body;
 const root = createRoot(container);
