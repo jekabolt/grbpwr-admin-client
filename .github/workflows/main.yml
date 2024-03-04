@@ -47,6 +47,18 @@ jobs:
           -o /usr/local/bin/buf
         chmod +x /usr/local/bin/buf
 
+    # Install Go and protoc-gen-typescript-http
+    - name: Install Go and protoc-gen-typescript-http
+      run: |
+        sudo add-apt-repository ppa:longsleep/golang-backports -y
+        sudo apt-get update
+        sudo apt-get install golang-go -y
+        export GOPATH=$HOME/go
+        export PATH=$PATH:$GOPATH/bin
+        go install github.com/einride/protoc-gen-typescript-http@latest
+        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+        echo "PATH=$PATH" >> $GITHUB_ENV
+
     # Custom step to prepare your code for the build process
     - name: Prepare the Code for Build
       run: make init
