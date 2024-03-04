@@ -1,6 +1,4 @@
-import React, { StrictMode } from 'react';
-import ReactDOM from 'react-dom';
-// import { StrictMode } from 'react'; -- TODO: what is it used for
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Outlet, ReactLocation, Router, Route, DefaultGenerics } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -56,13 +54,13 @@ const routes: Route<DefaultGenerics>[] = [
 ];
 
 root.render(
-  // <StrictMode>
-  <ContextProvider>
-    <QueryClientProvider client={queryClient}>
-      <Router location={location} routes={routes}>
-        <Outlet />
-      </Router>
-    </QueryClientProvider>
-  </ContextProvider>,
-  // </StrictMode>,
+  <StrictMode>
+    <ContextProvider>
+      <QueryClientProvider client={queryClient}>
+        <Router location={location} routes={routes}>
+          <Outlet />
+        </Router>
+      </QueryClientProvider>
+    </ContextProvider>
+  </StrictMode>,
 );
