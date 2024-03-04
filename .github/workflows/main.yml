@@ -40,6 +40,13 @@ jobs:
         npm audit --production # Focuses on production dependencies
       continue-on-error: true # Allows the workflow to continue even if vulnerabilities are found
 
+    - name: Install Buf
+      run: |
+        curl -sSL \
+          "https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64" \
+          -o /usr/local/bin/buf
+        chmod +x /usr/local/bin/buf
+
     # Custom step to prepare your code for the build process
     - name: Prepare the Code for Build
       run: make proto
