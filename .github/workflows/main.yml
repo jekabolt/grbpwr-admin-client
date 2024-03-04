@@ -55,10 +55,9 @@ jobs:
         sudo apt-get install golang-go -y
         export GOPATH=$HOME/go
         export PATH=$PATH:$GOPATH/bin
-        go mod tidy  # Update Go module
-        go install github.com/einride/protoc-gen-typescript-http@latest
+        go install go.einride.tech/protoc-gen-typescript-http@latest
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "PATH=$PATH" >> $GITHUB_ENV
+        echo "PATH=$PATH:$GOPATH/bin" >> $GITHUB_ENV
 
     # Custom step to prepare your code for the build process
     - name: Prepare the Code for Build
