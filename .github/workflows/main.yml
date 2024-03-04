@@ -49,7 +49,7 @@ jobs:
 
     # Custom step to prepare your code for the build process
     - name: Prepare the Code for Build
-      run: make proto
+      run: make init
 
     # Builds your React application
     - name: Build React Application
