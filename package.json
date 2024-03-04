@@ -6,7 +6,6 @@
   "author": "maksim hodasevich (dapp team)",
   "license": "UNLICENSED",
   "private": true,
-  "homepage": "https://mikevelko.github.io/grbpwr-admin-client/",
   "scripts": {
     "dev": "webpack-dev-server --hot",
     "build": "NODE_ENV=production webpack",
