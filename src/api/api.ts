@@ -1,8 +1,10 @@
 import axios from 'axios';
 import { ROUTES } from 'constants/routes';
 
+const BASE_URL = process.env.BASE_URL;
+
 const axiosInstance = axios.create({
-  baseURL: 'http://backend.grbpwr.com:8081',
+  baseURL: BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
