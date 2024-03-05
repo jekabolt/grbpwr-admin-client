@@ -19,6 +19,8 @@ const axiosInstance = axios.create({
   },
 });
 
+console.log(BASE_URL);
+
 axiosInstance.interceptors.request.use(
   (config) => {
     const authToken = localStorage.getItem('authToken');

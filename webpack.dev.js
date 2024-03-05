@@ -16,7 +16,7 @@ module.exports = {
         context: ['/api'],
         secure: false,
         changeOrigin: true,
-        target: 'http://backend.grbpwr.com:8081',
+        target: process.env.SERVER_URL,
         router: () => process.env.REACT_APP_API_BASE_URL || 'http://localhost:3999',
       }
     ],
