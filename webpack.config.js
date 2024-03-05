@@ -4,7 +4,6 @@ const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const TsConfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 const { BundleStatsWebpackPlugin } = require('bundle-stats-webpack-plugin');
 const webpackDev = require('./webpack.dev');
-const webpackProd = require('./webpack.prod');
 const Dotenv = require('dotenv-webpack');
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -54,5 +53,5 @@ module.exports = {
         new Dotenv(),
     ],
     // Conditionally add development configurations
-    ...(isProduction ? webpackProd : webpackDev),
+    ...(isProduction ? {} : webpackDev),
 };
