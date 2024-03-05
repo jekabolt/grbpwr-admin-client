@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { Outlet, ReactLocation, Router, Route, DefaultGenerics } from '@tanstack/react-location';
+import { Outlet, ReactLocation, Router, Route, DefaultGenerics, createMemoryHistory } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContextProvider } from 'context';
 import { ROUTES } from 'constants/routes';
@@ -29,7 +29,11 @@ const container = document.getElementById('root') ?? document.body;
 const root = createRoot(container);
 
 const queryClient = new QueryClient();
-const location = new ReactLocation();
+
+const memoryHistory = createMemoryHistory({
+  initialEntries: ['/'],
+})
+const location = new ReactLocation({history: memoryHistory});
 
 const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.login, element: <LoginBlock /> },
@@ -53,6 +57,8 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.ordersById, element: <OrderId /> },
 ];
 
+
+
 root.render(
   <StrictMode>
     <ContextProvider>
@@ -64,3 +70,4 @@ root.render(
     </ContextProvider>
   </StrictMode>,
 );
+
