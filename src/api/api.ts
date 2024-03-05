@@ -1,14 +1,15 @@
 import axios from 'axios';
 import { ROUTES } from 'constants/routes';
 
-const BASE_URL = process.env.SERVER_URL;
+const BASE_URL = process.env.REACT_APP_SERVER_URL;
 
+// check how to take origin from window browser
 let originUrl;
 if (process.env.NODE_ENV === 'development') {
-  originUrl = 'http://localhost:4040'; // Example port, replace with your actual port
+  originUrl = 'http://localhost:4040';
 } else {
-  // GitHub Pages origin URL
-  originUrl = 'https://mikevelko.github.io/grbpwr-admin-client/'; // Replace with your GitHub Pages origin URL
+  
+  originUrl = 'https://mikevelko.github.io/grbpwr-admin-client/'; 
 }
 
 const axiosInstance = axios.create({
