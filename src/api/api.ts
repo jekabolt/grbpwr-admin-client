@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { ROUTES } from 'constants/routes';
+require('dotenv').config();
 
 const BASE_URL = process.env.SERVER_URL;
 
