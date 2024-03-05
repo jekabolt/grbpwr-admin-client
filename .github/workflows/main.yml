@@ -63,6 +63,10 @@ jobs:
     - name: Prepare the Code for Build
       run: make init
 
+    - name: Echo server url secret
+      run: |
+        echo "SERVER_URL: ${{ secrets.SERVER_URL }}"
+
     # Builds your React application
     - name: Build React Application
       env:
