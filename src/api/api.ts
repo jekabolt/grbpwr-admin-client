@@ -3,10 +3,19 @@ import { ROUTES } from 'constants/routes';
 
 const BASE_URL = process.env.SERVER_URL;
 
+let originUrl;
+if (process.env.NODE_ENV === 'development') {
+  originUrl = 'http://localhost:4040'; // Example port, replace with your actual port
+} else {
+  // GitHub Pages origin URL
+  originUrl = 'https://mikevelko.github.io/grbpwr-admin-client/'; // Replace with your GitHub Pages origin URL
+}
+
 const axiosInstance = axios.create({
   baseURL: BASE_URL,
   headers: {
     'Content-Type': 'application/json',
+    'Origin': originUrl
   },
 });
 
@@ -17,7 +26,7 @@ axiosInstance.interceptors.request.use(
       config.headers = config.headers || {};
       config.headers['Grpc-Metadata-Authorization'] = `Bearer ${authToken}`;
     }
-    return config;
+        return config;
   },
   (error) => {
     return Promise.reject(error);
