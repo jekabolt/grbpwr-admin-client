@@ -3,20 +3,11 @@ import { ROUTES } from 'constants/routes';
 
 const BASE_URL = process.env.REACT_APP_SERVER_URL;
 
-// check how to take origin from window browser
-let originUrl;
-if (process.env.NODE_ENV === 'development') {
-  originUrl = 'http://localhost:4040';
-} else {
-  
-  originUrl = 'https://mikevelko.github.io/grbpwr-admin-client/'; 
-}
-
 const axiosInstance = axios.create({
   baseURL: BASE_URL,
   headers: {
     'Content-Type': 'application/json',
-    'Origin': originUrl
+    'Origin': window.location.origin
   },
 });
 
