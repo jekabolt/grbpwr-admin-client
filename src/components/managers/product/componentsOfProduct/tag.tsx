@@ -1,33 +1,68 @@
-import React, { FC, useState, useEffect } from 'react';
-import { common_ProductTagInsert, common_ProductNew } from 'api/proto-http/admin';
+import React, { FC, useEffect, useState } from 'react';
+import { common_ProductNew, common_ProductTagInsert } from 'api/proto-http/admin';
 import styles from 'styles/tag.scss';
 
 interface TagProps {
-  updateTags: (tags: common_ProductTagInsert[]) => void;
+  product: common_ProductNew;
+  setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>;
 }
 
-export const Tags: FC<TagProps> = ({ updateTags }) => {
-  const [categoryInput, setCategoryInput] = useState<string>('');
-  const [tags, setTags] = useState<common_ProductTagInsert[]>([]);
+export const Tags: FC<TagProps> = ({ setProduct, product }) => {
+  const [tagInput, setTagInput] = useState<string>('');
+  const [pendingTags, setPendingTags] = useState<string[]>(() => {
+    const storedTags = localStorage.getItem('pendingTags');
+    return storedTags ? JSON.parse(storedTags) : [];
+  });
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
-  const addTag = () => {
-    if (categoryInput.trim() !== '') {
-      const newTag: common_ProductTagInsert = {
-        tag: categoryInput,
-      };
+  useEffect(() => {
+    localStorage.setItem('pendingTags', JSON.stringify(pendingTags));
+  }, [pendingTags]);
 
-      const updatedTags = [...tags, newTag];
-      setTags(updatedTags);
-      setCategoryInput('');
-      updateTags(updatedTags); // Notify the parent component about the change
-    }
+  const handleTagInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setTagInput(e.target.value);
   };
 
-  const deleteTag = (index: number) => {
-    const updatedTags = [...tags];
-    updatedTags.splice(index, 1);
-    setTags(updatedTags);
-    updateTags(updatedTags); // Notify the parent component about the change
+  const handleAddTag = () => {
+    if (tagInput.trim() === '') return;
+
+    if (!pendingTags.includes(tagInput.trim())) {
+      setPendingTags((prevTags) => [...prevTags, tagInput.trim()]);
+    }
+    setTagInput('');
+    setProduct((prevProduct) => ({
+      ...prevProduct,
+      tags: [],
+    }));
+  };
+
+  const handleTagClick = (tag: string) => {
+    const isSelected = selectedTags.includes(tag);
+    let updatedProductTags = [...(product.tags || [])];
+
+    if (isSelected) {
+      updatedProductTags = updatedProductTags.filter((t) => t.tag !== tag);
+    } else {
+      const newTag: common_ProductTagInsert = {
+        tag: tag,
+      };
+      updatedProductTags.push(newTag);
+    }
+
+    setProduct((prevProduct) => ({
+      ...prevProduct,
+      tags: updatedProductTags,
+    }));
+
+    const updatedSelectedTags = isSelected
+      ? selectedTags.filter((selectedTag) => selectedTag !== tag)
+      : [...selectedTags, tag];
+    setSelectedTags(updatedSelectedTags);
+  };
+
+  const handleDeleteTag = (tag: string) => {
+    const updatedTags = pendingTags.filter((t) => t !== tag);
+    setPendingTags(updatedTags);
   };
 
   return (
@@ -38,28 +73,30 @@ export const Tags: FC<TagProps> = ({ updateTags }) => {
           className={styles.tag_input}
           type='text'
           name='categoryInput'
-          value={categoryInput}
-          onChange={(e) => setCategoryInput(e.target.value)}
-          placeholder='Enter a category'
+          placeholder='create tag'
+          value={tagInput}
+          onChange={handleTagInputChange}
         />
-        <button className={styles.tag_container_btn} type='button' onClick={addTag}>
-          OK
+        <button className={styles.tag_container_btn} type='button' onClick={handleAddTag}>
+          Add
         </button>
       </div>
-      <ul className={styles.tags_popup}>
-        {tags.map((tag, index) => (
-          <li key={index} className={styles.tag}>
-            <button
-              type='button'
-              onClick={() => deleteTag(index)}
-              className={styles.tag_delete_btn}
-            >
-              X
+      <div className={styles.select_tag_container}>
+        {pendingTags.map((tag, index) => (
+          <p
+            key={index}
+            className={`${styles.tag} ${
+              selectedTags.includes(tag) ? styles.selected_tag : styles.tag
+            }`}
+            onClick={() => handleTagClick(tag)}
+          >
+            {tag}
+            <button type='button' onClick={() => handleDeleteTag(tag)}>
+              x
             </button>
-            {tag.tag}
-          </li>
+          </p>
         ))}
-      </ul>
+      </div>
     </div>
   );
 };

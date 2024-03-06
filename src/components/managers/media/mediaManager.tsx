@@ -143,16 +143,12 @@ export const MediaManager: FC = () => {
           if (contentType.startsWith('image')) {
             const response = await uploadContentImage({
               rawB64Image: baseData64,
-              folder: 'your-folder-name',
-              imageName: fileName,
             });
             console.log('uploaded:', response);
           } else if (contentType.startsWith('video')) {
             const raw = trimBeforeBase64(baseData64);
             const response = uploadContentVideo({
               raw: raw,
-              folder: 'your-folder-name',
-              videoName: fileName,
               contentType: contentType,
             });
             console.log('uploaded:', response);

@@ -34,10 +34,71 @@
       text-transform: uppercase;
     }
 
+    .product_container_size_list {
+      display: grid;
+      gap: 10px;
+      padding: 5px 0 0 5px;
+
+      .product_container_size_item {
+        display: grid;
+        gap: 5px;
+
+        .define_size_quantity_container {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+
+          h3 {
+            border: 2px solid black;
+            width: 40px;
+            text-align: center;
+          }
+
+          input {
+            height: 28px;
+            text-align: center;
+            width: 70px;
+            font-size: 20px;
+          }
+        }
+
+        .define_measurement_container {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+
+          select {
+            width: 120px;
+          }
+
+          input {
+            text-align: center;
+            width: 70px;
+            font-size: 20px;
+          }
+        }
+      }
+    }
+
+    input,
+    select {
+      height: 29px;
+      width: 150px;
+      outline: none;
+      border: 2px solid black;
+    }
+
     .product_input {
       height: 29px;
       width: 150px;
-      outline: black;
+      outline: none;
+      border: 2px solid black;
+    }
+
+    input::-webkit-outer-spin-button,
+    input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
     }
   }
 }

@@ -1,4 +1,4 @@
-import React, { FC, useState, useRef } from 'react';
+import React, { FC, useState, useRef, useEffect } from 'react';
 import { ChromePicker } from 'react-color';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { handleChange } from '../addProduct';
@@ -14,6 +14,21 @@ export const ColorHEX: FC<colorHEXProps> = ({ product, setProduct }) => {
   const [color, setColor] = useState('#000000');
   const [showHex, setShowHex] = useState(false);
   const colorPickerRef = useRef<any>(null);
+  const productContainerRef = useRef<any>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (productContainerRef.current && !productContainerRef.current.contains(event.target)) {
+        setShowHex(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     handleChange(e, setProduct);
   };
@@ -34,7 +49,7 @@ export const ColorHEX: FC<colorHEXProps> = ({ product, setProduct }) => {
   };
 
   return (
-    <div className={styles.product_container}>
+    <div className={styles.product_container} ref={productContainerRef}>
       <label htmlFor='color_hex' className={styles.title}>
         Color Hex
       </label>

@@ -1,13 +1,17 @@
 import React, { FC, useState } from 'react';
 import { uploadContentImage } from 'api/admin';
-import styles from 'styles/thumbnail.scss';
+import styles from 'styles/mediaSelector.scss';
 
-export const DragDrop: FC = () => {
+interface DragDropProps {
+  reloadFile: () => void;
+}
+
+export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
   const [selectedFile, setSelectedFiles] = useState<File[]>([]);
-  const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null);
+  const [selectedFileUrl, setSelectedFileUrl] = useState<string>();
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
-  const processFiles = (files: FileList | null) => {
+  const processFiles = (files: FileList) => {
     if (files && files.length) {
       setSelectedFiles(Array.from(files));
       setSelectedFileUrl(URL.createObjectURL(files[0]));
@@ -40,7 +44,7 @@ export const DragDrop: FC = () => {
     setIsDragging(dragging);
   };
 
-  const uploadFile = async (file: File, fileName: string) => {
+  const uploadFile = async (file: File) => {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const base64 = e.target?.result;
@@ -48,13 +52,12 @@ export const DragDrop: FC = () => {
         try {
           await uploadContentImage({
             rawB64Image: base64,
-            folder: 'your folder name',
-            imageName: fileName,
           });
           setSelectedFiles([]);
-          setSelectedFileUrl(null);
+          setSelectedFileUrl('');
+          await reloadFile();
         } catch (error) {
-          alert('error uploading file' + error);
+          alert('error uploading file: ' + error);
         }
       }
     };
@@ -65,16 +68,7 @@ export const DragDrop: FC = () => {
     if (selectedFile.length === 0) {
       alert('select a file to upload');
     }
-
-    const fileNameInput = document.getElementById('file_name') as HTMLInputElement;
-    const fileName = fileNameInput.value.trim();
-    if (!fileName) {
-      alert('enter name');
-    }
-
-    await uploadFile(selectedFile[0], fileName);
-
-    fileNameInput.value = '';
+    await uploadFile(selectedFile[0]);
   };
 
   return (
@@ -84,7 +78,7 @@ export const DragDrop: FC = () => {
         onDragEnter={(e) => handleDrag(e, true)}
         onDragLeave={(e) => handleDrag(e, false)}
         onDrop={handleFileChange}
-        className={`${styles.drag_drop_label} ${isDragging ? styles.drag_drop_label : ''}`}
+        className={`${styles.drag_drop_container} ${isDragging ? styles.drag_drop_label : ''}`}
       >
         {!selectedFileUrl && <label htmlFor='files'>DRAG AND DROP FILES HERE</label>}
         <input
@@ -96,14 +90,6 @@ export const DragDrop: FC = () => {
           style={{ display: 'none' }}
         />
         {selectedFileUrl && <p className={styles.drag_drop_img_selected}>image is selected</p>}
-      </div>
-      <div className={styles.drag_drop_naming}>
-        <input
-          id='file_name'
-          type='text'
-          placeholder='Enter file name'
-          className={styles.drag_drop_input}
-        />
         <button type='button' onClick={handleUpload} className={styles.drag_drop_btn}>
           UPLOAD
         </button>

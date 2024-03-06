@@ -62,7 +62,7 @@ export const OrderId: FC = () => {
       <div className={styles.orders_info}>
         <h3>id:{orders?.order?.id}</h3>
         <div className={styles.order_status}>
-          <h3>{findInDictionary(dictionary, orders?.order?.orderStatusId, 'status', pattern)}</h3>
+          <h3>{findInDictionary(dictionary, orders?.order?.orderStatusId, 'status')}</h3>
           <div
             className={
               styles[
@@ -70,7 +70,6 @@ export const OrderId: FC = () => {
                   dictionary,
                   orders?.order?.orderStatusId,
                   'status',
-                  pattern,
                 )?.toLowerCase()}`
               ]
             }
@@ -97,7 +96,7 @@ export const OrderId: FC = () => {
                   <td>{item.orderItem?.quantity}</td>
                   <td>
                     {dictionary
-                      ? findInDictionary(dictionary, item.orderItem?.sizeId, 'size', pattern)
+                      ? findInDictionary(dictionary, item.orderItem?.sizeId, 'size')
                       : null}
                   </td>
                 </tr>
@@ -118,7 +117,7 @@ export const OrderId: FC = () => {
           <div className={styles.promo_code_info}>
             <h3>
               shipping method:{' '}
-              {findInDictionary(dictionary, orders?.shipment?.carrierId, 'carrier', pattern)}
+              {findInDictionary(dictionary, orders?.shipment?.carrierId, 'carrier')}
               {dictionary?.shipmentCarriers?.find((s) => s.id === orders?.shipment?.carrierId)
                 ?.shipmentCarrier?.price?.value
                 ? parseFloat(

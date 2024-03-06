@@ -5,13 +5,17 @@ type Pattern = {
     [key: string]: RegExp;
 };
 
+const pattern: Pattern = {
+    size: /SIZE_ENUM_/,
+    measurement: /MEASUREMENT_NAME_ENUM_/,
+}
+
 type dictionaryTypes = 'size' | 'order' | 'carrier' | 'status' | 'gender' | 'measurement';
 
 export const findInDictionary = (
     dictionary: common_Dictionary | undefined,
     id: number | undefined,
     type: dictionaryTypes,
-    pattern: Pattern,
 ) => {
     if (!dictionary || id === undefined) return null;
 

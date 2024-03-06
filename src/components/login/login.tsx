@@ -1,22 +1,16 @@
-import { FC, useState, useEffect, ChangeEvent, FormEvent } from 'react';
+import { FC, useState, ChangeEvent, FormEvent } from 'react';
 import { LoginResponse } from 'api/proto-http/auth';
 import { login } from 'api/auth';
 import { ROUTES } from 'constants/routes';
 import { useNavigate } from '@tanstack/react-location';
 import styles from 'styles/login-block.module.scss';
+import { getDictionary } from 'api/admin';
 
 export const LoginBlock: FC = () => {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const authToken = localStorage.getItem('authToken');
-    if (authToken) {
-      navigate({ to: ROUTES.main, replace: true });
-    }
-  }, [navigate]);
 
   const handlePasswordSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -36,7 +30,18 @@ export const LoginBlock: FC = () => {
 
       localStorage.setItem('authToken', authToken);
 
+      await fetchDictionary();
+
       navigate({ to: ROUTES.main, replace: true });
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const fetchDictionary = async () => {
+    try {
+      const response = await getDictionary({});
+      localStorage.setItem('dictionary', JSON.stringify(response.dictionary));
     } catch (error) {
       console.error(error);
     }
