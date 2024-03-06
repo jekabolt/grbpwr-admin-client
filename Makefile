@@ -4,10 +4,10 @@ GO_LINT_VERSION := v1.53.3
 
 .PHONY: generate internal/statics proto
 
-init: submodules clean install proto
+init: submodules clean proto
 
 install: ## Install the web dependencies
-	yarn install --ignore-engines
+	yarn install
 
 dev: ## Run the local dev server
 	yarn dev
