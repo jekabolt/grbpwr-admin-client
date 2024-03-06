@@ -1,8 +1,5 @@
-/* eslint-disable no-undef */
-/* eslint-disable @typescript-eslint/no-var-requires */
-// eslint-disable-next-line no-undef
 const path = require('path');
-
+require('dotenv').config();
 
 module.exports = {
   mode: 'development',
@@ -10,19 +7,18 @@ module.exports = {
   devServer: {
     historyApiFallback: true,
     static: {
-      // eslint-disable-next-line no-undef
       directory: path.join(__dirname, 'public/'),
     },
     compress: true,
     port: 4040,
-    proxy: {
-      '/api': {
+    proxy: [
+      {
+        context: ['/api'],
         secure: false,
         changeOrigin: true,
-        target: 'http://backend.grbpwr.com:8081',
-        // // eslint-disable-next-line no-undef
-        // router: () => process.env.REACT_APP_API_BASE_URL || 'http://localhost:3999',
-      },
-    },
+        target: process.env.REACT_APP_SERVER_URL,
+        router: () => process.env.REACT_APP_API_BASE_URL || 'http://localhost:3999',
+      }
+    ],
   },
 };
