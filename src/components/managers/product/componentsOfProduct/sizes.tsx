@@ -101,6 +101,47 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
     });
   };
 
+  const handleAddMeasurement = (
+    sizeIndex: number | undefined,
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent>,
+  ) => {
+    e.preventDefault(); // Prevent default behavior
+    e.stopPropagation(); // Stop event propagation
+
+    if (typeof sizeIndex === 'undefined') {
+      return;
+    }
+
+    const selectedMeasurementId = selectedMeasurements[sizeIndex];
+    const measurementValue =
+      (product.sizeMeasurements &&
+        product.sizeMeasurements[sizeIndex] &&
+        product.sizeMeasurements[sizeIndex].productSize?.quantity?.value) ||
+      '0';
+
+    if (selectedMeasurementId !== undefined) {
+      setProduct((prevProduct) => {
+        const updatedProduct = JSON.parse(JSON.stringify(prevProduct));
+        const measurementIndex = updatedProduct.sizeMeasurements[sizeIndex].measurements.findIndex(
+          (m: { measurementNameId: number }) => m.measurementNameId === selectedMeasurementId,
+        );
+
+        if (measurementIndex === -1) {
+          updatedProduct.sizeMeasurements[sizeIndex].measurements.push({
+            measurementNameId: selectedMeasurementId,
+            measurementValue: { value: measurementValue },
+          });
+        } else {
+          updatedProduct.sizeMeasurements[sizeIndex].measurements[
+            measurementIndex
+          ].measurementValue = { value: measurementValue };
+        }
+
+        return updatedProduct;
+      });
+    }
+  };
+
   return (
     <div className={styles.product_container}>
       <label className={styles.title}>Sizes</label>
@@ -150,6 +191,9 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
                           }
                         />
                       )}
+                      <button onClick={(e) => handleAddMeasurement(size.id, e)}>
+                        Add Measurement
+                      </button>
                     </div>
                   )}
               </>
