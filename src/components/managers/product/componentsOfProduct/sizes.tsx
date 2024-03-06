@@ -191,9 +191,7 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
                           }
                         />
                       )}
-                      <button onClick={(e) => handleAddMeasurement(size.id, e)}>
-                        Add Measurement
-                      </button>
+                      <button onClick={(e) => handleAddMeasurement(size.id, e)}>ok</button>
                     </div>
                   )}
               </>
