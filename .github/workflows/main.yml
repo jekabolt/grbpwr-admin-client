@@ -66,9 +66,9 @@ jobs:
     # Builds your React application
     - name: Build React Application
       env:
-        REACT_APP_SERVER_URL: ${{ secrets.SERVER_URL }} # Uses a secret for the server URL
+        REACT_APP_SERVER_URL: ${{ env.SERVER_URL }} # Uses a env variable for the server URL
       run: |
-        echo "REACT_APP_SERVER_URL=${{ secrets.SERVER_URL }}" > .env
+        echo "REACT_APP_SERVER_URL=${{ env.SERVER_URL }}" > .env
         yarn install
         yarn build
 
