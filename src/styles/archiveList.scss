@@ -1,148 +1,146 @@
 .archive_list_container {
-    display:flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 30px;
-    margin: 100px auto;
-    height: 500px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 30px;
+  margin: 100px auto;
+  height: 500px;
 
-    button {
-        border: none;
-        background-color: white;
+  button {
+    border: none;
+    background-color: white;
+  }
+
+  .archive_info {
+    border: 2px solid black;
+    display: grid;
+    padding: 20px;
+    gap: 20px;
+    position: relative;
+
+    .delete_archive {
+      position: absolute;
+      top: 0;
+      right: 0;
+      display: none;
+      background-color: black;
+      color: white;
+      border: none;
     }
 
-    .archive_info {
-        border: 2px solid black;
-        display: grid;
-        padding: 20px;
-        gap: 20px;
-        position: relative;
+    .edit_archive {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      display: none;
+      background-color: black;
+      color: white;
+      border: none;
+    }
 
-        .delete_archive {
+    input {
+      width: 237px;
+      height: 42px;
+      text-align: left;
+    }
+
+    h3 {
+      width: 237px;
+      height: 42px;
+      border: 1px solid black;
+      display: flex;
+      align-items: center;
+    }
+
+    .list_archive {
+      display: grid;
+      gap: 10px;
+
+      ul {
+        display: flex;
+        gap: 15px;
+
+        .new_item {
+          border: 1px solid black;
+          position: relative;
+          width: 157px;
+          height: 217px;
+
+          input {
+            width: 157px;
+            height: 30px;
+            margin-bottom: 5px;
+          }
+
+          .button {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+          }
+
+          div {
+            display: grid;
+            gap: 15px;
+          }
+        }
+
+        .item {
+          border: 1px solid black;
+          position: relative;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          width: 157px;
+          height: 217px;
+
+          img {
+            object-fit: scale-down;
+            width: 157px;
+            height: 217px;
+          }
+
+          button {
             position: absolute;
             top: 0;
             right: 0;
             display: none;
-            background-color: black;
-            color: white;
-            border: none;
+          }
 
-        }
-
-        .edit_archive {
+          .id {
             position: absolute;
-            bottom: 0;
-            right: 0;
-            display: none;
-            background-color: black;
-            color: white;
-            border: none;
-        }
+            top: 0;
+            left: 0;
+          }
 
-        input {
-          width: 237px;
-          height: 42px;
-          text-align:left
-        }
-
-        h3 {
-            width: 237px;
-            height: 42px;
-            border: 1px solid black;
-            display: flex;
-            align-items: center;
-        }
-
-        .list_archive {
+          div {
             display: grid;
-            gap: 10px;
+            gap: 5px;
+            justify-content: center;
+            align-items: center;
+            position: absolute;
+            left: 0;
+            bottom: 0;
 
-            ul {
-                display: flex;
-                gap: 15px;
-
-                .new_item {
-                    border: 1px solid black;
-                    position: relative;
-                    width: 157px;
-                    height: 217px;
-
-                    input { 
-                        width: 157px;
-                        height: 30px;
-                        margin-bottom: 5px;
-                    }
-
-                    .button {
-                        position: absolute;
-                        bottom: 0;
-                        right: 0;
-                    }
-
-                    div {
-                        display: grid;
-                        gap: 15px;
-                    }
-                }
-
-                .item {
-                    border: 1px solid black;
-                    position: relative;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    width: 157px;
-                    height: 217px;
-
-                    img {
-                        object-fit: scale-down;
-                        width: 157px;
-                        height: 217px;
-
-                    }
-
-                    button {
-                        position: absolute;
-                        top: 0;
-                        right: 0;
-                        display: none;
-                    }
-
-                    .id {
-                        position: absolute;
-                        top: 0;
-                        left: 0;
-                    }
-
-
-                    div {
-                        display: grid;
-                        gap: 5px;
-                        justify-content: center;
-                        align-items: center;
-                        position: absolute;
-                        left: 0;
-                        bottom: 0;
-
-                        p {
-                            background-color: white;
-                            color: black;
-                        }
-                    }
-
-                    &:hover {
-                        button {
-                            display: block;
-                        }
-                    }
-                }
+            p {
+              background-color: white;
+              color: black;
             }
-        }
+          }
 
-        &:hover {
-            .delete_archive, .edit_archive {
-                display: block;
+          &:hover {
+            button {
+              display: block;
             }
+          }
         }
+      }
     }
+
+    &:hover {
+      .delete_archive,
+      .edit_archive {
+        display: block;
+      }
+    }
+  }
 }

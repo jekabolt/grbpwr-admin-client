@@ -1,6 +1,5 @@
-import React, { FC, useEffect, useState } from 'react';
+import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
-import { Layout } from 'components/login/layout';
 import {
   common_PaymentMethod,
   common_PaymentMethodNameEnum,
@@ -13,10 +12,9 @@ import {
   setShipmentCarrierPrice,
   setSiteAvailability,
 } from 'api/settings';
+import { Layout } from 'components/login/layout';
+import { FC, useEffect, useState } from 'react';
 import styles from 'styles/settings.scss';
-import { useNavigate } from '@tanstack/react-location';
-import { ROUTES } from 'constants/routes';
-
 
 export const Settings: FC = () => {
   const [payment, setPayment] = useState<common_PaymentMethod[] | undefined>([]);
@@ -36,7 +34,7 @@ export const Settings: FC = () => {
         ).filter((c): c is common_ShipmentCarrierInsert => c !== undefined);
 
         setCarrier(carrierData);
-        setMaxItems(response.dictionary?.maxOrderItems)
+        setMaxItems(response.dictionary?.maxOrderItems);
         setSiteEnabled(response.dictionary?.siteEnabled);
       } catch (error) {
         console.error(error);
@@ -47,8 +45,8 @@ export const Settings: FC = () => {
 
   const handlerPaymentMethod = async (paymentMethod: string | undefined, allow: boolean) => {
     if (paymentMethod) {
-      setPayment(prevPayment => {
-        return prevPayment?.map(method => {
+      setPayment((prevPayment) => {
+        return prevPayment?.map((method) => {
           if (method.name === paymentMethod) {
             return { ...method, allowed: allow };
           }
@@ -114,8 +112,6 @@ export const Settings: FC = () => {
       console.error(error);
     }
   };
-
-
 
   const handleSiteAvailability = async (available: boolean) => {
     setSiteEnabled(available);

@@ -1,120 +1,118 @@
 .thumbnail_wrapper {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 3px;
-    position: relative;
-    width: 70%;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px;
+  position: relative;
+  width: 70%;
 
-    .thumbnail_title {
-        justify-self: flex-start;
-        color: #FFF;
-        background-color: black;
-        font-size: 35px;
-        font-style: normal;
-        font-weight: 600;
-        line-height: normal;
-        text-transform: uppercase;
+  .thumbnail_title {
+    justify-self: flex-start;
+    color: #fff;
+    background-color: black;
+    font-size: 35px;
+    font-style: normal;
+    font-weight: 600;
+    line-height: normal;
+    text-transform: uppercase;
+  }
+
+  .thumbnail_container {
+    border: 2px solid black;
+    padding: 118px 0;
+    width: 458px;
+    height: 458px;
+    display: grid;
+    justify-items: center;
+    align-items: center;
+    gap: 48px;
+    position: relative;
+
+    .thumbnail_btn {
+      color: #fff;
+      background-color: black;
+      font-size: 35px;
+      font-style: normal;
+      font-weight: 600;
+      line-height: normal;
+      text-transform: uppercase;
     }
 
-    .thumbnail_container {
-        border: 2px solid black;
-        padding: 118px 0;
-        width: 458px;
-        height: 458px;
-        display: grid;
-        justify-items: center;
-        align-items: center;
-        gap: 48px;
+    .by_url_left {
+      transform: translateX(-150px);
+    }
+
+    .by_url_container {
+      top: 26%;
+      right: 10px;
+      position: absolute;
+
+      .by_url_input {
+        height: 45px;
+        width: 270px;
+        font-size: 25px;
+      }
+    }
+  }
+
+  .thumbnail_uploaded_media_wrapper {
+    width: 350px;
+    border: 2px solid black;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    .thhumbnail_uploaded_media_container {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      height: 450px;
+      overflow-y: scroll;
+      gap: 15px;
+
+      &::-webkit-scrollbar {
+        width: 0;
+      }
+
+      li {
+        border: 1px solid black;
+        width: 157px;
+        height: 216px;
+        text-align: center;
         position: relative;
 
-        .thumbnail_btn {
-            color: #FFF;
-            background-color: black;
-            font-size: 35px;
-            font-style: normal;
-            font-weight: 600;
-            line-height: normal;
-            text-transform: uppercase;
-
+        &:hover .delete_img {
+          display: block;
         }
 
-        .by_url_left {
-            transform: translateX(-150px);
+        img {
+          width: 150px;
+          height: 216px;
+          object-fit: scale-down;
         }
 
-        .by_url_container {
-            top: 26%;
-            right: 10px;
-            position: absolute;
-
-            .by_url_input {
-                height: 45px;
-                width: 270px;
-                font-size: 25px;
-            }
+        .delete_img {
+          display: none;
+          position: absolute;
+          top: 0;
+          right: 0;
+          background-color: black;
+          border: 1px solid black;
+          color: #fff;
+          text-align: center;
+          padding: 2px;
+          cursor: pointer;
         }
+
+        .media_number {
+          position: absolute;
+          bottom: 0;
+          right: 0;
+          background-color: black;
+          color: #fff;
+          padding: 3px;
+          font-weight: 100;
+          font-size: 10px;
+        }
+      }
     }
-
-    .thumbnail_uploaded_media_wrapper {
-        width: 350px;
-        border: 2px solid black;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-
-        .thhumbnail_uploaded_media_container {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            height: 450px;
-            overflow-y: scroll;
-            gap: 15px;
-
-            &::-webkit-scrollbar {
-                width: 0;
-            }
-
-            li {
-                border: 1px solid black;
-                width: 157px;
-                height: 216px;
-                text-align: center;
-                position: relative;
-
-                &:hover .delete_img {
-                    display: block;
-                }
-
-                img {
-                    width: 150px;
-                    height: 216px;
-                    object-fit: scale-down;
-                }
-
-                .delete_img {
-                    display: none;
-                    position: absolute;
-                    top: 0;
-                    right: 0;
-                    background-color: black;
-                    border: 1px solid black;
-                    color: #FFF;
-                    text-align: center;
-                    padding: 2px;
-                    cursor: pointer;
-                }
-
-                .media_number {
-                    position: absolute;
-                    bottom: 0;
-                    right: 0;
-                    background-color: black;
-                    color: #FFF;
-                    padding: 3px;
-                    font-weight: 100;
-                    font-size: 10px;
-                  }
-            }
-        }
-    }
-
+  }
 }

@@ -1,42 +1,42 @@
 import { adminService } from './admin';
 import {
-    SetShipmentCarrierAllowanceRequest,
-    SetShipmentCarrierAllowanceResponse,
-    SetPaymentMethodAllowanceRequest,
-    SetPaymentMethodAllowanceResponse,
-    SetShipmentCarrierPriceRequest,
-    SetShipmentCarrierPriceResponse,
-    SetSiteAvailabilityRequest,
-    SetSiteAvailabilityResponse,
-    SetMaxOrderItemsRequest,
+  SetShipmentCarrierAllowanceRequest,
+  SetShipmentCarrierAllowanceResponse,
+  SetPaymentMethodAllowanceRequest,
+  SetPaymentMethodAllowanceResponse,
+  SetShipmentCarrierPriceRequest,
+  SetShipmentCarrierPriceResponse,
+  SetSiteAvailabilityRequest,
+  SetSiteAvailabilityResponse,
+  SetMaxOrderItemsRequest,
 } from './proto-http/admin';
 
 export function setShipmentCarrier(
-    request: SetShipmentCarrierAllowanceRequest,
+  request: SetShipmentCarrierAllowanceRequest,
 ): Promise<SetShipmentCarrierAllowanceResponse> {
-    return adminService.SetShipmentCarrierAllowance(request);
+  return adminService.SetShipmentCarrierAllowance(request);
 }
 
 export function setPaymentMethod(
-    request: SetPaymentMethodAllowanceRequest,
+  request: SetPaymentMethodAllowanceRequest,
 ): Promise<SetPaymentMethodAllowanceResponse> {
-    return adminService.SetPaymentMethodAllowance(request);
+  return adminService.SetPaymentMethodAllowance(request);
 }
 
 export function setShipmentCarrierPrice(
-    request: SetShipmentCarrierPriceRequest,
+  request: SetShipmentCarrierPriceRequest,
 ): Promise<SetShipmentCarrierPriceResponse> {
-    return adminService.SetShipmentCarrierPrice(request);
+  return adminService.SetShipmentCarrierPrice(request);
 }
 
 export function setSiteAvailability(
-    request: SetSiteAvailabilityRequest,
+  request: SetSiteAvailabilityRequest,
 ): Promise<SetSiteAvailabilityResponse> {
-    return adminService.SetSiteAvailability(request);
+  return adminService.SetSiteAvailability(request);
 }
 
 export function setMaxOrderItems(
-    request: SetMaxOrderItemsRequest,
+  request: SetMaxOrderItemsRequest,
 ): Promise<SetSiteAvailabilityResponse> {
-    return adminService.SetMaxOrderItems(request);
+  return adminService.SetMaxOrderItems(request);
 }

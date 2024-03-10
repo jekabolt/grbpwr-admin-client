@@ -1,79 +1,77 @@
 .promo {
-    margin: 40px auto;
+  margin: 40px auto;
+  display: grid;
+  gap: 50px;
+
+  .promo_fields_container {
+    // margin: 0 auto;
     display: grid;
-    gap: 50px;
+    gap: 20px;
+    justify-content: center;
+    align-items: center;
 
-    .promo_fields_container {
-        // margin: 0 auto;
-        display: grid;
-        gap: 20px;
-        justify-content: center;
-        align-items: center;
+    .boolean {
+      display: flex;
+      align-items: center;
+      gap: 5px;
 
-        
-        .boolean {
-            display: flex;
-            align-items: center;
-            gap: 5px;
+      label {
+        justify-self: flex-start;
+        text-transform: uppercase;
+        font-size: 25px;
+      }
 
-            label {
-                justify-self: flex-start;
-                text-transform: uppercase;
-                font-size: 25px;
-            }
-
-            input[type='checkbox'] {
-                width: 30px;
-                height: 30px;
-                accent-color: #000;
-                border: 2px solid #000;
-            }
-        }
-
-        .fields {
-            display: grid;
-            gap: 5px;
-
-            label {
-                justify-self: flex-start;
-                text-transform: uppercase;
-                font-size: 25px;
-            }
-
-            input {
-                height: 40px;
-                width: 200px;
-                font-size: 25px;
-                outline: none;
-            }
-        }
-
-        label {
-            background-color: #000;
-            color: #FFF;
-        }
-        
+      input[type='checkbox'] {
+        width: 30px;
+        height: 30px;
+        accent-color: #000;
+        border: 2px solid #000;
+      }
     }
 
-    .promo_btns {
-        justify-self: center;
-        display: grid;
-        gap: 10px;
+    .fields {
+      display: grid;
+      gap: 5px;
 
-        button {
-            background-color: #000;
-            color: #FFF;
-            border: none;
-            color: #FFF;
-            background-color: #000;
-            font-family: Inter;
-            font-size: 25px;
-            font-style: normal;
-            font-weight: 600;
-            line-height: normal;
-            text-transform: uppercase;
-            text-align: center;
-            cursor: pointer;
-        }
+      label {
+        justify-self: flex-start;
+        text-transform: uppercase;
+        font-size: 25px;
+      }
+
+      input {
+        height: 40px;
+        width: 200px;
+        font-size: 25px;
+        outline: none;
+      }
     }
+
+    label {
+      background-color: #000;
+      color: #fff;
+    }
+  }
+
+  .promo_btns {
+    justify-self: center;
+    display: grid;
+    gap: 10px;
+
+    button {
+      background-color: #000;
+      color: #fff;
+      border: none;
+      color: #fff;
+      background-color: #000;
+      font-family: Inter;
+      font-size: 25px;
+      font-style: normal;
+      font-weight: 600;
+      line-height: normal;
+      text-transform: uppercase;
+      text-align: center;
+      cursor: pointer;
+    }
+  }
 }

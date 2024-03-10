@@ -173,7 +173,9 @@ $refunded: #000;
         overflow: hidden;
         max-height: 0; // Start with max-height 0 to hide the content
         opacity: 0; // Start with opacity 0 to hide the content
-        transition: max-height 0.5s ease, opacity 0.5s ease;
+        transition:
+          max-height 0.5s ease,
+          opacity 0.5s ease;
       }
 
       .show_billing_info {

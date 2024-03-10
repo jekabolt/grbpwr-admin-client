@@ -1,76 +1,73 @@
 .archive_form {
+  display: grid;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  margin: 100px auto;
+
+  input {
+    width: 212px;
+    height: 34px;
+    justify-self: center;
+    font-size: 29px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: normal;
+    text-transform: uppercase;
+  }
+
+  div {
     display: grid;
-    justify-content: center;
-    align-items: center;
-    gap: 15px;
-    margin: 100px auto;
+    gap: 10px;
+    width: 300px;
+    border: 2px solid black;
+    padding: 50px;
+    position: relative;
 
-    input {
-        width: 212px;
-        height: 34px;
-        justify-self: center;
-        font-size: 29px;
-        font-style: normal;
-        font-weight: 500;
-        line-height: normal;
-        text-transform: uppercase;
+    .button {
+      background-color: black;
+      color: white;
+      border: none;
+      justify-self: center;
+      width: 212px;
+      height: 34px;
+      font-size: 29px;
+      font-style: normal;
+      font-weight: 500;
+      text-transform: uppercase;
     }
 
-    div {
-        display: grid;
-        gap: 10px;
-        width: 300px;
-        border: 2px solid black;
-        padding: 50px;
-        position: relative;
-
-        .button { 
-            background-color: black;
-            color: white;
-            border: none;
-            justify-self: center;
-            width: 212px;
-            height: 34px;
-            font-size: 29px;
-            font-style: normal;
-            font-weight: 500;
-            text-transform: uppercase;
-        
-        }
-
-        .submit {
-            background-color: black;
-            color: white;
-            border: none;
-            justify-self: center;
-            width: 112px;
-            height: 24px;
-            font-size: 19px;
-            font-style: normal;
-            font-weight: 500;
-            text-transform: uppercase;
-            position: absolute;
-            bottom: 0;
-            right: 0;
-        }
-
-        ul {
-            display: flex;
-        }
-
+    .submit {
+      background-color: black;
+      color: white;
+      border: none;
+      justify-self: center;
+      width: 112px;
+      height: 24px;
+      font-size: 19px;
+      font-style: normal;
+      font-weight: 500;
+      text-transform: uppercase;
+      position: absolute;
+      bottom: 0;
+      right: 0;
     }
 
-
-    .btn {
-        background-color: black;
-        color: white;
-        border: none;
-        justify-self: center;
-        width: 212px;
-        height: 34px;
-        font-size: 29px;
-        font-style: normal;
-        font-weight: 500;
-        text-transform: uppercase;
+    ul {
+      display: flex;
     }
+  }
+
+  .btn {
+    background-color: black;
+    color: white;
+    border: none;
+    justify-self: center;
+    width: 212px;
+    height: 34px;
+    font-size: 29px;
+    font-style: normal;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
 }

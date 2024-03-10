@@ -93,7 +93,7 @@ export const PageProduct: FC = () => {
                   [key]: value,
                 },
               }),
-        } as GetProductsPagedRequest),
+        }) as GetProductsPagedRequest,
     );
   };
 
