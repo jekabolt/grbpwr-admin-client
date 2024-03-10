@@ -1,5 +1,5 @@
-import React, { FC, useEffect, useState } from 'react';
 import { common_ProductNew, common_ProductTagInsert } from 'api/proto-http/admin';
+import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/tag.scss';
 
 interface TagProps {

@@ -1,9 +1,9 @@
-import React, { FC, useState, useRef, useEffect } from 'react';
-import { ChromePicker } from 'react-color';
 import { common_ProductNew } from 'api/proto-http/admin';
-import { handleChange } from '../addProduct';
 import update from 'immutability-helper';
+import React, { FC, useEffect, useRef, useState } from 'react';
+import { ChromePicker } from 'react-color';
 import styles from 'styles/addProd.scss';
+import { handleChange } from '../addProduct';
 
 interface colorHEXProps {
   product: common_ProductNew;

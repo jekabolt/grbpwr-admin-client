@@ -1,7 +1,7 @@
-import React, { FC, useEffect, useState } from 'react';
-import { Layout } from 'components/login/layout';
 import { getPromo } from 'api/promo';
 import { common_PromoCode } from 'api/proto-http/admin';
+import { Layout } from 'components/login/layout';
+import { FC, useEffect, useState } from 'react';
 import styles from 'styles/getPromo.scss';
 
 function formatDate(dateString: string | number | Date | undefined) {

@@ -1,13 +1,13 @@
 /* eslint-disable no-case-declarations */
-import queryString from 'query-string';
-import React, { FC, useEffect, useState } from 'react';
+import { useNavigate } from '@tanstack/react-location';
+import { getDictionary } from 'api/admin';
 import { orderById } from 'api/orders';
 import { common_Dictionary, common_OrderFull } from 'api/proto-http/admin';
-import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
-import { getDictionary } from 'api/admin';
-import styles from 'styles/orderId.scss';
 import arrow from 'img/arrow-right.jpg';
+import queryString from 'query-string';
+import { FC, useEffect, useState } from 'react';
+import styles from 'styles/orderId.scss';
 import { findInDictionary } from './utility';
 
 function formatDate(dateString: string | number | Date | undefined) {

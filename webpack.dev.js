@@ -18,7 +18,7 @@ module.exports = {
         changeOrigin: true,
         target: process.env.REACT_APP_SERVER_URL,
         router: () => process.env.REACT_APP_API_BASE_URL || 'http://localhost:3999',
-      }
+      },
     ],
   },
 };

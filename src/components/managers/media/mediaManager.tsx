@@ -1,9 +1,9 @@
-import { FC, useState } from 'react';
-import styles from 'styles/media-manager.scss';
-import { ROUTES } from 'constants/routes';
 import { useNavigate } from '@tanstack/react-location';
 import { uploadContentImage, uploadContentVideo } from 'api/admin';
 import { Layout } from 'components/login/layout';
+import { ROUTES } from 'constants/routes';
+import { FC, useState } from 'react';
+import styles from 'styles/media-manager.scss';
 
 const fileExtensionToContentType: { [key: string]: string } = {
   jpg: 'image/jpg',

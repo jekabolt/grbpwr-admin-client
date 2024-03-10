@@ -1,16 +1,16 @@
-import React, { FC, useEffect, useState } from 'react';
-import { getArchive, addArchiveItem, deleteArchive, updateArchive } from 'api/archive';
+import { getAllUploadedFiles } from 'api/admin';
+import { addArchiveItem, deleteArchive, getArchive, updateArchive } from 'api/archive';
 import {
   common_ArchiveFull,
   common_ArchiveInsert,
   common_ArchiveItemInsert,
   common_Media,
 } from 'api/proto-http/admin';
-import styles from 'styles/archiveList.scss';
-import { getAllUploadedFiles } from 'api/admin';
-import { ArchivePaged } from './archiveComponents/archivePaged';
 import { Layout } from 'components/login/layout';
 import arrow from 'img/arrow-right.jpg';
+import { FC, useEffect, useState } from 'react';
+import styles from 'styles/archiveList.scss';
+import { ArchivePaged } from './archiveComponents/archivePaged';
 
 export const GetArchive: FC = () => {
   const [archive, setArchive] = useState<common_ArchiveFull[] | undefined>([]);

@@ -1,7 +1,7 @@
-import React, { FC } from 'react';
-import { AddMediaByID } from './addMediaById';
-import styles from 'styles/productID.scss';
 import { common_ProductFull } from 'api/proto-http/admin';
+import { FC } from 'react';
+import styles from 'styles/productID.scss';
+import { AddMediaByID } from './addMediaById';
 
 interface ProductMedia {
   product: common_ProductFull | undefined;

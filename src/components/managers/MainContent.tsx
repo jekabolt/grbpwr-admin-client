@@ -1,7 +1,7 @@
-import { FC } from 'react';
 import { useNavigate } from '@tanstack/react-location';
-import { ROUTES } from 'constants/routes';
 import { Layout } from 'components/login/layout';
+import { ROUTES } from 'constants/routes';
+import { FC } from 'react';
 import styles from 'styles/main.scss';
 
 export const Main: FC = () => {

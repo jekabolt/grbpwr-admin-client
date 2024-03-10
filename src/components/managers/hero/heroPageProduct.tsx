@@ -1,11 +1,14 @@
-import React, { FC, useState, useEffect } from 'react';
-import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
 import { getProductsPaged } from 'api/admin';
-import { initialFilter } from '../product/componentsOfPageProduct/initialFilterStates';
-import { GetProductsPagedResponse } from 'api/proto-http/admin';
-import { HeroProducts } from './page/heroProducts';
-import styles from 'styles/hero.scss';
+import {
+  GetProductsPagedRequest,
+  GetProductsPagedResponse,
+  common_Product,
+} from 'api/proto-http/admin';
 import arrow from 'img/arrow-right.jpg';
+import { FC, useEffect, useState } from 'react';
+import styles from 'styles/hero.scss';
+import { initialFilter } from '../product/componentsOfPageProduct/initialFilterStates';
+import { HeroProducts } from './page/heroProducts';
 
 interface HeroProductsProps {
   productIds: number[];

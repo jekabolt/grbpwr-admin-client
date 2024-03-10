@@ -1,5 +1,5 @@
-import React, { FC, useState } from 'react';
 import { uploadContentImage } from 'api/admin';
+import React, { FC, useState } from 'react';
 import styles from 'styles/dragDrop.scss';
 
 interface DragDropProps {

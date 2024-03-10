@@ -1,7 +1,7 @@
-import React, { FC, useCallback, useEffect, useState } from 'react';
-import { getAllUploadedFiles, deleteFiles } from 'api/admin';
+import { deleteFiles, getAllUploadedFiles } from 'api/admin';
 import { common_Media } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
+import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/upload.scss';
 
 function copyToClipboard(text: string | undefined) {

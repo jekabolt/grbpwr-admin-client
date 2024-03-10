@@ -1,10 +1,10 @@
-import React, { FC, useState } from 'react';
 import {
   GetProductsPagedRequest,
+  common_FilterConditions,
   common_OrderFactor,
   common_SortFactor,
-  common_FilterConditions,
 } from 'api/proto-http/admin';
+import React, { FC } from 'react';
 import { FilterInput } from './filterInput';
 
 interface FilterProps {

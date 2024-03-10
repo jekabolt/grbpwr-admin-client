@@ -1,8 +1,8 @@
-import React, { FC } from 'react';
 import { useNavigate } from '@tanstack/react-location';
 import { Layout } from 'components/login/layout';
-import styles from 'styles/mainArchive.scss';
 import { ROUTES } from 'constants/routes';
+import { FC } from 'react';
+import styles from 'styles/mainArchive.scss';
 
 export const MainArchive: FC = () => {
   const navigate = useNavigate();

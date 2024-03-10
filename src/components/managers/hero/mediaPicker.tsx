@@ -1,12 +1,12 @@
 import { getAllUploadedFiles } from 'api/admin';
 import { addHero } from 'api/hero';
 import { common_HeroInsert, common_Media } from 'api/proto-http/admin';
+import { Layout } from 'components/login/layout';
+import React, { FC, useEffect, useState } from 'react';
+import styles from 'styles/hero.scss';
+import { HeroPageProduct } from './heroPageProduct';
 import { Ads } from './pickerComponents/ads';
 import { MainHero } from './pickerComponents/main';
-import { HeroPageProduct } from './heroPageProduct';
-import styles from 'styles/hero.scss';
-import { Layout } from 'components/login/layout';
-import React, { FC, useState, useEffect } from 'react';
 
 // move in separate file ?
 const determineContentType = (link: string) => {

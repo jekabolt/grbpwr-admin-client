@@ -1,8 +1,8 @@
 import { deleteFiles, getAllUploadedFiles } from 'api/admin';
-import { DragDrop } from '../dragDrop';
 import { common_Media, common_ProductNew } from 'api/proto-http/admin';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/thumbnailSelector.scss';
+import { DragDrop } from '../dragDrop';
 
 interface ThumbnailPickerProps {
   product: common_ProductNew;

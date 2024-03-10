@@ -1,9 +1,9 @@
-import React, { FC, useState } from 'react';
+import { useNavigate } from '@tanstack/react-location';
 import { addPromo } from 'api/promo';
 import { AddPromoRequest } from 'api/proto-http/admin';
-import { useNavigate } from '@tanstack/react-location';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
+import { FC, useState } from 'react';
 import styles from 'styles/promo.scss';
 
 interface PromoState {

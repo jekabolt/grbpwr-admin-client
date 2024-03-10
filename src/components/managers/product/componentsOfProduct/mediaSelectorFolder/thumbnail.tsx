@@ -1,8 +1,8 @@
 import { common_ProductNew } from 'api/proto-http/admin';
 import React, { FC, useEffect, useState } from 'react';
-import { ThumbnailPicker } from './thumbnailPicker';
-import { SelectedThumbnailImage } from './selectedThumbnailImg';
 import styles from 'styles/thumbnailSelector.scss';
+import { SelectedThumbnailImage } from './selectedThumbnailImg';
+import { ThumbnailPicker } from './thumbnailPicker';
 
 interface ThumbnailProps {
   product: common_ProductNew;

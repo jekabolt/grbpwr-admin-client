@@ -1,18 +1,18 @@
-import React, { FC, useState, useEffect, MouseEvent } from 'react';
-import { Layout } from 'components/login/layout';
-import {
-  common_Product,
-  common_FilterConditions,
-  GetProductsPagedRequest,
-} from 'api/proto-http/admin';
-import { getProductsPaged, deleteProductByID } from 'api/admin';
-import { initialFilter } from './componentsOfPageProduct/initialFilterStates';
 import { useNavigate } from '@tanstack/react-location';
-import { GetProductsPagedResponse } from 'api/proto-http/admin';
-import { Filter } from './componentsOfPageProduct/filterProducts';
-import { Products } from './componentsOfPageProduct/products';
+import { deleteProductByID, getProductsPaged } from 'api/admin';
+import {
+  GetProductsPagedRequest,
+  GetProductsPagedResponse,
+  common_FilterConditions,
+  common_Product,
+} from 'api/proto-http/admin';
+import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
+import React, { FC, MouseEvent, useEffect, useState } from 'react';
 import styles from 'styles/paged.scss';
+import { Filter } from './componentsOfPageProduct/filterProducts';
+import { initialFilter } from './componentsOfPageProduct/initialFilterStates';
+import { Products } from './componentsOfPageProduct/products';
 
 export const PageProduct: FC = () => {
   const [products, setProducts] = useState<common_Product[] | undefined>([]);

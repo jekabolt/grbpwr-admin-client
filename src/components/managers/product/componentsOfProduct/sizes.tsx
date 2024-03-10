@@ -1,6 +1,6 @@
-import React, { FC, useState } from 'react';
-import { googletype_Decimal, common_ProductNew, common_Dictionary } from 'api/proto-http/admin';
+import { common_Dictionary, common_ProductNew, googletype_Decimal } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
+import React, { FC, useState } from 'react';
 import styles from 'styles/addProd.scss';
 
 interface sizeProps {

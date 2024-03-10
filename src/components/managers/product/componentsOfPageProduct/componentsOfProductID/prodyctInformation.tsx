@@ -5,12 +5,11 @@ import {
   common_ProductSize,
 } from 'api/proto-http/admin';
 import React, { FC } from 'react';
-import { UpdateSizeMeasurements } from './updateSizeMeasurements';
+import styles from 'styles/productID.scss';
+import { MeasurementUpdates, ProductFields } from './productIdReducer';
 import { UpdateColors } from './updateColors';
 import { UpdateInputField } from './updateInputField';
-import { MeasurementUpdates } from './productIdReducer';
-import { ProductFields } from './productIdReducer';
-import styles from 'styles/productID.scss';
+import { UpdateSizeMeasurements } from './updateSizeMeasurements';
 
 interface ProductInfo {
   product: common_ProductFull | undefined; // Replace with your actual product type

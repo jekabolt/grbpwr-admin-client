@@ -1,8 +1,8 @@
-import { FC } from 'react';
 import { useNavigate } from '@tanstack/react-location';
-import { ROUTES } from 'constants/routes';
-import styles from 'styles/product.scss';
 import { Layout } from 'components/login/layout';
+import { ROUTES } from 'constants/routes';
+import { FC } from 'react';
+import styles from 'styles/product.scss';
 
 export const Product: FC = () => {
   const navigate = useNavigate();

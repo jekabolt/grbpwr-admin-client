@@ -1,7 +1,7 @@
-import React, { FC, useEffect, useState } from 'react';
 import { getHero } from 'api/hero';
 import { common_HeroFull } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
+import { FC, useEffect, useState } from 'react';
 
 export const GetHero: FC = () => {
   const [hero, setHero] = useState<common_HeroFull>();

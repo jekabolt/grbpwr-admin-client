@@ -1,6 +1,6 @@
+import arrow from 'img/arrow-right.png';
 import React, { FC, useState } from 'react';
 import styles from 'styles/hero.scss';
-import arrow from 'img/arrow-right.png';
 
 interface MainProps {
   handleMainByUrlOrFile: (value: string) => void;

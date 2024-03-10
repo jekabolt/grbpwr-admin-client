@@ -1,11 +1,10 @@
-import React, { FC, useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-location';
-import { addArchive } from 'api/archive';
-import { AddArchiveRequest } from 'api/proto-http/admin';
-import { common_Media } from 'api/proto-http/admin';
 import { getAllUploadedFiles } from 'api/admin';
+import { addArchive } from 'api/archive';
+import { AddArchiveRequest, common_Media } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
+import { FC, useEffect, useState } from 'react';
 import styles from 'styles/addNewArchive.scss';
 
 export const Archive: FC = () => {

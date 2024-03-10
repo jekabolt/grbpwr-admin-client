@@ -1,6 +1,6 @@
 import { common_ProductNew } from 'api/proto-http/admin';
+import { FC } from 'react';
 import styles from 'styles/thumbnailSelector.scss';
-import React, { FC } from 'react';
 
 interface SelectedIMagesProps {
   product: common_ProductNew;

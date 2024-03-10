@@ -1,8 +1,8 @@
-import { FC, useState, useEffect, ChangeEvent, FormEvent } from 'react';
-import { LoginResponse } from 'api/proto-http/auth';
-import { login } from 'api/auth';
-import { ROUTES } from 'constants/routes';
 import { useNavigate } from '@tanstack/react-location';
+import { login } from 'api/auth';
+import { LoginResponse } from 'api/proto-http/auth';
+import { ROUTES } from 'constants/routes';
+import { ChangeEvent, FC, FormEvent, useEffect, useState } from 'react';
 import styles from 'styles/login-block.module.scss';
 
 export const LoginBlock: FC = () => {

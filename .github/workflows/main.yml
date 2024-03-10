@@ -15,118 +15,118 @@ jobs:
     runs-on: ubuntu-latest # The type of runner that the job will run on
 
     steps:
-    # Checks out your repository under $GITHUB_WORKSPACE, so your job can access it
-    - name: Checkout Repository
-      uses: actions/checkout@v3
+      # Checks out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-    # Sets up a Node.js environment using the version specified in .nvmrc
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version-file: '.nvmrc'
+      # Sets up a Node.js environment using the version specified in .nvmrc
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version-file: '.nvmrc'
 
-    # Caches dependencies for faster subsequent runs
-    - name: Cache Node Modules
-      uses: actions/cache@v2
-      with:
-        path: ~/.npm
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
+      # Caches dependencies for faster subsequent runs
+      - name: Cache Node Modules
+        uses: actions/cache@v2
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
-    # Performs security scanning to identify known vulnerabilities in dependencies
-    - name: Security Scanning
-      run: |
-        npm install
-        npm audit --production # Focuses on production dependencies
-      continue-on-error: true # Allows the workflow to continue even if vulnerabilities are found
+      # Performs security scanning to identify known vulnerabilities in dependencies
+      - name: Security Scanning
+        run: |
+          npm install
+          npm audit --production # Focuses on production dependencies
+        continue-on-error: true # Allows the workflow to continue even if vulnerabilities are found
 
-    - name: Install Buf
-      run: |
-        curl -sSL \
-          "https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64" \
-          -o /usr/local/bin/buf
-        chmod +x /usr/local/bin/buf
+      - name: Install Buf
+        run: |
+          curl -sSL \
+            "https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64" \
+            -o /usr/local/bin/buf
+          chmod +x /usr/local/bin/buf
 
-    # Install Go and protoc-gen-typescript-http
-    - name: Install Go and protoc-gen-typescript-http
-      run: |
-        sudo add-apt-repository ppa:longsleep/golang-backports -y
-        sudo apt-get update
-        sudo apt-get install golang-go -y
-        export GOPATH=$HOME/go
-        export PATH=$PATH:$GOPATH/bin
-        go install go.einride.tech/protoc-gen-typescript-http@latest
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "PATH=$PATH:$GOPATH/bin" >> $GITHUB_ENV
+      # Install Go and protoc-gen-typescript-http
+      - name: Install Go and protoc-gen-typescript-http
+        run: |
+          sudo add-apt-repository ppa:longsleep/golang-backports -y
+          sudo apt-get update
+          sudo apt-get install golang-go -y
+          export GOPATH=$HOME/go
+          export PATH=$PATH:$GOPATH/bin
+          go install go.einride.tech/protoc-gen-typescript-http@latest
+          echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+          echo "PATH=$PATH:$GOPATH/bin" >> $GITHUB_ENV
 
-    # Custom step to prepare your code for the build process
-    - name: Prepare the Code for Build
-      run: make init
+      # Custom step to prepare your code for the build process
+      - name: Prepare the Code for Build
+        run: make init
 
-    # Builds your React application
-    - name: Build React Application
-      env:
-        REACT_APP_SERVER_URL: ${{ secrets.SERVER_URL }} # Uses a secret for the server URL
-      run: |
-        echo "REACT_APP_SERVER_URL=${{ secrets.SERVER_URL }}" > .env
-        yarn install
-        yarn build
+      # Builds your React application
+      - name: Build React Application
+        env:
+          REACT_APP_SERVER_URL: ${{ secrets.SERVER_URL }} # Uses a secret for the server URL
+        run: |
+          echo "REACT_APP_SERVER_URL=${{ secrets.SERVER_URL }}" > .env
+          yarn install
+          yarn build
 
-    # Deploys the built site to GitHub Pages
-    - name: Deploy to GitHub Pages
-      uses: JamesIves/github-pages-deploy-action@v4
-      with:
-        branch: gh-pages # Specifies the deployment branch
-        folder: dist # Specifies the folder to deploy
-        clean: true # Ensures a clean deployment
+      # Deploys the built site to GitHub Pages
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages # Specifies the deployment branch
+          folder: dist # Specifies the folder to deploy
+          clean: true # Ensures a clean deployment
 
-    # Sends a success notification to Telegram if deployment succeeds
-    - name: Notification for Success
-      if: success()
-      uses: appleboy/telegram-action@master
-      with:
-        to: ${{ secrets.TELEGRAM_CHAT_ID }}
-        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        message: Deployment to GitHub Pages succeeded!
+      # Sends a success notification to Telegram if deployment succeeds
+      - name: Notification for Success
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: Deployment to GitHub Pages succeeded!
 
-    # Sends a failure notification to Telegram if deployment fails
-    - name: Notification for Failure
-      if: failure()
-      uses: appleboy/telegram-action@master
-      with:
-        to: ${{ secrets.TELEGRAM_CHAT_ID }}
-        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        message: Deployment to GitHub Pages failed. Please check the Actions log.
+      # Sends a failure notification to Telegram if deployment fails
+      - name: Notification for Failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: Deployment to GitHub Pages failed. Please check the Actions log.
 
   # Job for updating dependencies on a schedule
   update-dependencies:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' # Only runs for scheduled events
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version-file: '.nvmrc'
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version-file: '.nvmrc'
 
-    - name: Cache Node Modules
-      uses: actions/cache@v2
-      with:
-        path: ~/.npm
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
+      - name: Cache Node Modules
+        uses: actions/cache@v2
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
-    # Updates all dependencies in package.json to their latest versions
-    - name: Update Dependencies
-      run: |
-        npm install -g npm-check-updates
-        ncu -u
-        npm install
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git commit -am "Update dependencies" --allow-empty # Commits changes if there are any
-        git push
+      # Updates all dependencies in package.json to their latest versions
+      - name: Update Dependencies
+        run: |
+          npm install -g npm-check-updates
+          ncu -u
+          npm install
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git commit -am "Update dependencies" --allow-empty # Commits changes if there are any
+          git push

@@ -1,4 +1,4 @@
-import { FC, createContext, useReducer, ReactNode, Dispatch } from 'react';
+import { Dispatch, FC, ReactNode, createContext, useReducer } from 'react';
 
 const initialContexValue = {};
 

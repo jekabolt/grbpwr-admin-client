@@ -1,6 +1,6 @@
-import React, { FC, useState, useEffect } from 'react';
-import styles from 'styles/mediaSelector.scss';
 import { common_ProductNew } from 'api/proto-http/admin';
+import React, { FC, useEffect, useState } from 'react';
+import styles from 'styles/mediaSelector.scss';
 import { MediaPicker } from './mediaPicker';
 import { SelectedImages } from './selectedImages';
 

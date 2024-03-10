@@ -1,9 +1,9 @@
-import React, { FC, useState, useEffect } from 'react';
-import { common_Media } from 'api/proto-http/admin';
-import { addMediaByID, getAllUploadedFiles, deleteFiles } from 'api/admin';
 import { useNavigate } from '@tanstack/react-location';
+import { addMediaByID, deleteFiles, getAllUploadedFiles } from 'api/admin';
+import { common_Media } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import queryString from 'query-string';
+import { FC, useEffect, useState } from 'react';
 import styles from 'styles/addMediaById.scss';
 
 export const AddMediaByID: FC = () => {

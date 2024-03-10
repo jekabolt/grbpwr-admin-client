@@ -1,8 +1,8 @@
-import React, { FC, ReactNode } from 'react';
-import styles from 'styles/layout.scss';
 import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
 import logo from 'img/tex-text.png';
+import { FC, ReactNode } from 'react';
+import styles from 'styles/layout.scss';
 
 interface LayoutProps {
   children: ReactNode;

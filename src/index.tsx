@@ -1,35 +1,34 @@
-import { createRoot } from 'react-dom/client';
 import {
+  DefaultGenerics,
   Outlet,
   ReactLocation,
-  Router,
   Route,
-  DefaultGenerics,
+  Router,
   createMemoryHistory,
 } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ContextProvider } from 'context';
-import { ROUTES } from 'constants/routes';
 import { LoginBlock } from 'components/login/login';
-import { MediaManager } from 'components/managers/media/mediaManager';
-import { UploadPage } from 'components/managers/media/upload';
 import { Main } from 'components/managers/MainContent';
-import { Product } from 'components/managers/product/product';
-import { AddProducts } from 'components/managers/product/addProduct';
-import { PageProduct } from 'components/managers/product/pageProduct';
-import { Hero } from 'components/managers/hero/hero';
-import { MediaPicker } from 'components/managers/hero/mediaPicker';
-import { GetHero } from 'components/managers/hero/getHero';
-import { Promo } from 'components/managers/promo/promo';
-import { GetPromo } from 'components/managers/promo/getPromo';
-import { MainArchive } from 'components/managers/archive/mainArchive';
 import { Archive } from 'components/managers/archive/archive';
 import { GetArchive } from 'components/managers/archive/getArchive';
-import { Settings } from 'components/managers/settings/settings';
-import { Orders } from 'components/managers/orders/orders';
+import { MainArchive } from 'components/managers/archive/mainArchive';
+import { GetHero } from 'components/managers/hero/getHero';
+import { Hero } from 'components/managers/hero/hero';
+import { MediaPicker } from 'components/managers/hero/mediaPicker';
+import { MediaManager } from 'components/managers/media/mediaManager';
+import { UploadPage } from 'components/managers/media/upload';
 import { OrderId } from 'components/managers/orders/orderId';
+import { Orders } from 'components/managers/orders/orders';
+import { AddProducts } from 'components/managers/product/addProduct';
+import { PageProduct } from 'components/managers/product/pageProduct';
+import { Product } from 'components/managers/product/product';
+import { GetPromo } from 'components/managers/promo/getPromo';
+import { Promo } from 'components/managers/promo/promo';
+import { Settings } from 'components/managers/settings/settings';
+import { ROUTES } from 'constants/routes';
+import { ContextProvider } from 'context';
+import { createRoot } from 'react-dom/client';
 import 'styles/global.scss';
-import { StrictMode } from 'react';
 
 const container = document.getElementById('root') ?? document.body;
 const root = createRoot(container);

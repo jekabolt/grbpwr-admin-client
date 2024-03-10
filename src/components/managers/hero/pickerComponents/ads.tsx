@@ -1,6 +1,6 @@
-import React, { FC, useState } from 'react';
-import styles from 'styles/hero.scss';
 import arrow from 'img/arrow-right.png';
+import { FC, useState } from 'react';
+import styles from 'styles/hero.scss';
 
 interface AdsProps {
   filesUrl: string[];

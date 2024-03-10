@@ -1,21 +1,21 @@
-import React, { FC, useEffect, useState } from 'react';
-import update from 'immutability-helper';
-import { Layout } from 'components/login/layout';
+import { addProduct, getDictionary } from 'api/admin';
 import {
-  common_ProductNew,
   AddProductRequest,
   common_Dictionary,
+  common_ProductNew,
   googletype_Decimal,
 } from 'api/proto-http/admin';
-import { addProduct, getDictionary } from 'api/admin';
-import { Sizes } from './componentsOfProduct/sizes';
-import { Tags } from './componentsOfProduct/tag';
+import { Layout } from 'components/login/layout';
+import update from 'immutability-helper';
+import React, { FC, useEffect, useState } from 'react';
+import styles from 'styles/addProd.scss';
 import { Categories } from './componentsOfProduct/categories';
 import { ColorHEX } from './componentsOfProduct/colorHEX';
 import { InputField } from './componentsOfProduct/inputFields';
 import { MediaSelector } from './componentsOfProduct/mediaSelectorFolder/mediaSelector';
 import { Thumbnail } from './componentsOfProduct/mediaSelectorFolder/thumbnail';
-import styles from 'styles/addProd.scss';
+import { Sizes } from './componentsOfProduct/sizes';
+import { Tags } from './componentsOfProduct/tag';
 
 interface ProductInsert {
   preorder: string | undefined;

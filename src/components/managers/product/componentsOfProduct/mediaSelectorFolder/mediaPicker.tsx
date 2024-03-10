@@ -1,8 +1,8 @@
+import { deleteFiles, getAllUploadedFiles } from 'api/admin';
+import { common_Media, common_ProductMediaInsert, common_ProductNew } from 'api/proto-http/admin';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/mediaSelector.scss';
 import { DragDrop } from '../dragDrop';
-import { deleteFiles, getAllUploadedFiles } from 'api/admin';
-import { common_Media, common_ProductMediaInsert, common_ProductNew } from 'api/proto-http/admin';
 
 interface MediaSelectorProps {
   product: common_ProductNew;

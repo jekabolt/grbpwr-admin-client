@@ -1,5 +1,5 @@
-import React, { FC } from 'react';
 import { googletype_Decimal } from 'api/proto-http/admin';
+import React from 'react';
 import styles from 'styles/addProd.scss';
 
 interface InputFieldProps {

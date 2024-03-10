@@ -1,7 +1,6 @@
-import React, { FC, useState, useEffect } from 'react';
 import { common_Category, common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import update from 'immutability-helper';
-import { getDictionary } from 'api/admin';
+import React, { FC, useState } from 'react';
 import styles from 'styles/addProd.scss';
 
 interface categoriesProps {
