@@ -1,17 +1,24 @@
-import { FC, useState, ChangeEvent, FormEvent } from 'react';
+import { FC, useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import { LoginResponse } from 'api/proto-http/auth';
 import { login } from 'api/auth';
 import { ROUTES } from 'constants/routes';
 import { useNavigate } from '@tanstack/react-location';
 import styles from 'styles/login-block.module.scss';
-import { getDictionary } from 'api/admin';
 
 export const LoginBlock: FC = () => {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const navigate = useNavigate();
 
-  const handlePasswordSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    const authToken = localStorage.getItem('authToken');
+    if (authToken) {
+      navigate({ to: ROUTES.main, replace: true });
+    }
+  }, [navigate]);
+
+  const handleLoginSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     try {
@@ -21,45 +28,36 @@ export const LoginBlock: FC = () => {
       const response: LoginResponse = await login({ username: username, password: password });
 
       if (!response.authToken) {
-        alert('token not received');
+        setErrorMessage('token not received');
         return;
       }
 
-      const authToken = response.authToken || '';
+      const authToken = response.authToken;
 
       localStorage.setItem('authToken', authToken);
 
-      await fetchDictionary();
-
       navigate({ to: ROUTES.main, replace: true });
     } catch (error) {
-      console.error(error);
-      console.log(error);
-    }
-  };
-
-  const fetchDictionary = async () => {
-    try {
-      const response = await getDictionary({});
-      localStorage.setItem('dictionary', JSON.stringify(response.dictionary));
-    } catch (error) {
-      console.error(error);
+      setErrorMessage('error occured during login process');
     }
   };
 
   const handlePasswordChange = (e: ChangeEvent<HTMLInputElement>) => {
     setPassword(e.target.value);
+    setErrorMessage('');
   };
 
   const handleUsernameChange = (e: ChangeEvent<HTMLInputElement>) => {
     setUsername(e.target.value);
+    setErrorMessage('');
   };
 
   return (
     <div className={styles.login_wrapper}>
       <div className={styles.logo}></div>
       <div className={styles.card_body}>
-        <form className={styles.form} onSubmit={(e) => handlePasswordSubmit(e)}>
+        {errorMessage && <p className={styles.error}>{errorMessage}</p>}
+        <form className={styles.form} onSubmit={handleLoginSubmit}>
           <div className={styles.user_container}>
             <input
               className={styles.input}
@@ -78,7 +76,9 @@ export const LoginBlock: FC = () => {
               placeholder='PASSWORD'
             />
           </div>
-          <button type='submit'>Login</button>
+          <button type='submit' disabled={!username || !password}>
+            Login
+          </button>
         </form>
       </div>
     </div>
