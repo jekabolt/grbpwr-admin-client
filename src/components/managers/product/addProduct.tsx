@@ -85,13 +85,14 @@ export const AddProducts: FC = () => {
     handleChange(e, setProduct);
   };
 
+  // TODO:
   const checkFormValidity = () => {
     if (!product || !product.product) {
       setIsFormValid(false);
       return;
     }
 
-    const productData = product.product as ProductInsert; // Утверждаем тип product как ProductInsert
+    const productData = product.product as ProductInsert;
 
     const nameFields: (keyof ProductInsert)[] = [
       'name',

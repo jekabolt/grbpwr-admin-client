@@ -17,7 +17,6 @@ import { Main } from 'components/managers/MainContent';
 import { Product } from 'components/managers/product/product';
 import { AddProducts } from 'components/managers/product/addProduct';
 import { PageProduct } from 'components/managers/product/pageProduct';
-import { ProductId } from 'components/managers/product/componentsOfPageProduct/productID';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaPicker } from 'components/managers/hero/mediaPicker';
 import { GetHero } from 'components/managers/hero/getHero';
@@ -50,7 +49,6 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.product, element: <Product /> },
   { path: ROUTES.addProduct, element: <AddProducts /> },
   { path: ROUTES.pagedProduct, element: <PageProduct /> },
-  { path: ROUTES.singleProduct, element: <ProductId productId={undefined} /> },
   { path: ROUTES.hero, element: <Hero /> },
   { path: ROUTES.addHero, element: <MediaPicker /> },
   { path: ROUTES.getHero, element: <GetHero /> },
