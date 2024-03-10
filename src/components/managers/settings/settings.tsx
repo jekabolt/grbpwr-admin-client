@@ -7,18 +7,24 @@ import {
   common_ShipmentCarrierInsert,
 } from 'api/proto-http/admin';
 import {
+  setMaxOrderItems,
   setPaymentMethod,
   setShipmentCarrier,
   setShipmentCarrierPrice,
   setSiteAvailability,
 } from 'api/settings';
 import styles from 'styles/settings.scss';
+import { useNavigate } from '@tanstack/react-location';
+import { ROUTES } from 'constants/routes';
+
 
 export const Settings: FC = () => {
   const [payment, setPayment] = useState<common_PaymentMethod[] | undefined>([]);
   const [carrier, setCarrier] = useState<common_ShipmentCarrierInsert[]>([]);
   const [price, setPrice] = useState<{ [name: string]: string }>({});
+  const [maxItems, setMaxItems] = useState<number>();
   const [siteEnabled, setSiteEnabled] = useState<boolean>();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchDictionary = async () => {
@@ -30,6 +36,7 @@ export const Settings: FC = () => {
         ).filter((c): c is common_ShipmentCarrierInsert => c !== undefined);
 
         setCarrier(carrierData);
+        setMaxItems(response.dictionary?.maxOrderItems)
         setSiteEnabled(response.dictionary?.siteEnabled);
       } catch (error) {
         console.error(error);
@@ -39,12 +46,21 @@ export const Settings: FC = () => {
   }, []);
 
   const handlerPaymentMethod = async (paymentMethod: string | undefined, allow: boolean) => {
+    if (paymentMethod) {
+      setPayment(prevPayment => {
+        return prevPayment?.map(method => {
+          if (method.name === paymentMethod) {
+            return { ...method, allowed: allow };
+          }
+          return method;
+        });
+      });
+    }
     try {
-      const response = await setPaymentMethod({
+      await setPaymentMethod({
         paymentMethod: paymentMethod as common_PaymentMethodNameEnum,
         allow,
       });
-      console.log(response);
     } catch (error) {
       console.error(error);
     }
@@ -70,11 +86,10 @@ export const Settings: FC = () => {
     const newPrice = price[carrier];
     if (newPrice) {
       try {
-        const response = await setShipmentCarrierPrice({
+        await setShipmentCarrierPrice({
           carrier: carrier,
           price: { value: newPrice },
         });
-        console.log(response);
       } catch (error) {
         console.error(error);
       }
@@ -89,12 +104,25 @@ export const Settings: FC = () => {
     }
   };
 
-  const handleSiteAvailability = async (available: boolean) => {
+  const handlerMaxOrderItems = async (e: string) => {
+    const maxOrderItemsParsed = parseInt(e, 10);
+    setMaxItems(maxOrderItemsParsed);
+
     try {
-      const response = await setSiteAvailability({
+      await setMaxOrderItems({ maxOrderItems: maxItems });
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+
+
+  const handleSiteAvailability = async (available: boolean) => {
+    setSiteEnabled(available);
+    try {
+      await setSiteAvailability({
         available,
       });
-      console.log(response);
     } catch (error) {
       console.error(error);
     }
@@ -113,6 +141,7 @@ export const Settings: FC = () => {
               <h3>{cutUnusedPartOfPaymentName(m.name)}</h3>
               <input
                 type='checkbox'
+                checked={m.allowed}
                 onChange={(e) => handlerPaymentMethod(m.name, e.target.checked)}
               />
             </div>
@@ -138,11 +167,20 @@ export const Settings: FC = () => {
                   onChange={(e) => handlePriceChange(c.carrier, e.target.value)}
                 />
                 <button type='button' onClick={() => handleShipmentCarrierPrice(c.carrier)}>
-                  upload
+                  update price
                 </button>
               </div>
             </div>
           ))}
+        </div>
+
+        <div className={styles.max_items_container}>
+          <h2>max items</h2>
+          <input
+            type='number'
+            defaultValue={maxItems}
+            onChange={(e) => handlerMaxOrderItems(e.target.value)}
+          />
         </div>
 
         <div className={styles.site}>

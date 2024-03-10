@@ -18,7 +18,7 @@ export const LoginBlock: FC = () => {
     }
   }, [navigate]);
 
-  const handlePasswordSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleLoginSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     try {
@@ -38,16 +38,18 @@ export const LoginBlock: FC = () => {
 
       navigate({ to: ROUTES.main, replace: true });
     } catch (error) {
-      console.error(error);
+      setErrorMessage('error occured during login process');
     }
   };
 
   const handlePasswordChange = (e: ChangeEvent<HTMLInputElement>) => {
     setPassword(e.target.value);
+    setErrorMessage('');
   };
 
   const handleUsernameChange = (e: ChangeEvent<HTMLInputElement>) => {
     setUsername(e.target.value);
+    setErrorMessage('');
   };
 
   return (
@@ -55,7 +57,7 @@ export const LoginBlock: FC = () => {
       <div className={styles.logo}></div>
       <div className={styles.card_body}>
         {errorMessage && <p className={styles.error}>{errorMessage}</p>}
-        <form className={styles.form} onSubmit={handlePasswordSubmit}>
+        <form className={styles.form} onSubmit={handleLoginSubmit}>
           <div className={styles.user_container}>
             <input
               className={styles.input}
@@ -74,7 +76,7 @@ export const LoginBlock: FC = () => {
               placeholder='PASSWORD'
             />
           </div>
-          <button type='submit'>Login</button>
+          <button type='submit' disabled={!username || !password}>Login</button>
         </form>
       </div>
     </div>

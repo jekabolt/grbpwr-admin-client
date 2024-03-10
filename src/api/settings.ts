@@ -8,6 +8,7 @@ import {
     SetShipmentCarrierPriceResponse,
     SetSiteAvailabilityRequest,
     SetSiteAvailabilityResponse,
+    SetMaxOrderItemsRequest,
 } from './proto-http/admin';
 
 export function setShipmentCarrier(
@@ -32,4 +33,10 @@ export function setSiteAvailability(
     request: SetSiteAvailabilityRequest,
 ): Promise<SetSiteAvailabilityResponse> {
     return adminService.SetSiteAvailability(request);
+}
+
+export function setMaxOrderItems(
+    request: SetMaxOrderItemsRequest,
+): Promise<SetSiteAvailabilityResponse> {
+    return adminService.SetMaxOrderItems(request);
 }

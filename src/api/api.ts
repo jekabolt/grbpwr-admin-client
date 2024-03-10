@@ -6,8 +6,7 @@ const BASE_URL = process.env.REACT_APP_SERVER_URL;
 const axiosInstance = axios.create({
   baseURL: BASE_URL,
   headers: {
-    'Content-Type': 'application/json',
-    'Origin': window.location.origin
+    'Content-Type': 'application/json'
   },
 });
 
@@ -32,7 +31,6 @@ axiosInstance.interceptors.response.use(
   (error) => {
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('authToken');
-      return Promise.reject((window.location.href = ROUTES.login));
     }
     return Promise.reject(error);
   },
@@ -53,7 +51,6 @@ export const axiosRequestHandler = async ({ path, method, body }: AxiosRequestCo
     });
     return response.data;
   } catch (error) {
-    console.error('api request error', error);
     throw error;
   }
 };

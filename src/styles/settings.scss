@@ -76,6 +76,18 @@
         }
     }
 
+    .max_items_container {
+        display: grid;
+        gap: 10px;
+
+        input {
+            width: 100px;
+            font-size: 20px;
+            font-weight: bold;
+            border: 2px solid black;
+        }
+    }
+
     .site {
         display: flex;
         align-items: center;

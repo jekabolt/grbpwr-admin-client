@@ -56,7 +56,6 @@ export const MediaManager: FC = () => {
       const authToken = localStorage.getItem('authToken');
 
       if (!authToken) {
-        console.log('fuck off');
         alert('Authentication token not found');
         return;
       }
