@@ -1,33 +1,25 @@
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/mediaSelector.scss';
-import { DragDrop } from './dragDrop';
+import { DragDrop } from '../dragDrop';
 import { deleteFiles, getAllUploadedFiles } from 'api/admin';
 import { common_Media, common_ProductMediaInsert, common_ProductNew } from 'api/proto-http/admin';
-import { InputField } from './inputFields';
 
 interface MediaSelectorProps {
   product: common_ProductNew;
-  filesUrl: common_Media[] | undefined;
-  setFilesUrl: React.Dispatch<React.SetStateAction<common_Media[]>>;
   handleCloseMediaSelector: (e: React.MouseEvent<HTMLDivElement>) => void;
   closeMediaPicker: () => void;
   setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>;
   handleAddClick: () => void;
-  handleInputChange: (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
-  ) => void;
 }
 
 export const MediaPicker: FC<MediaSelectorProps> = ({
-  filesUrl,
-  setFilesUrl,
   handleCloseMediaSelector,
   closeMediaPicker,
   setProduct,
   handleAddClick,
   product,
-  handleInputChange,
 }) => {
+  const [filesUrl, setFilesUrl] = useState<common_Media[]>([]);
   const [imageUrl, setImageUrl] = useState<string>('');
   const [selectedImage, setSelectedImage] = useState<string[]>([]);
   const [mediaNumber, setMediaNumber] = useState<number[]>([]);
@@ -55,21 +47,19 @@ export const MediaPicker: FC<MediaSelectorProps> = ({
     }
   };
 
-  const normalizeUrl = (url: string) => {
-    // Normalize the URL by removing trailing slashes and converting to lowercase
-    return url.trim().replace(/\/+$/, '').toLowerCase();
-  };
-
   const handleImage = () => {
     let updatedMedia: common_ProductMediaInsert[] = [];
 
     if (selectedImage && selectedImage.length > 0) {
-      // Filter selected images to remove duplicates
       const uniqueSelectedImages = selectedImage.filter(
         (imageUrl, index) => selectedImage.indexOf(imageUrl) === index,
       );
 
-      updatedMedia = uniqueSelectedImages.map((imageUrl) => ({
+      const uniqueImagesToAdd = uniqueSelectedImages.filter(
+        (imageUrl) => !product.media || !product.media.some((media) => media.fullSize === imageUrl),
+      );
+
+      updatedMedia = uniqueImagesToAdd.map((imageUrl) => ({
         fullSize: imageUrl,
         thumbnail: imageUrl,
         compressed: imageUrl.replace(/-og\.jpg$/, '-compressed.jpg'),
@@ -125,30 +115,6 @@ export const MediaPicker: FC<MediaSelectorProps> = ({
     return () => window.removeEventListener('scroll', handleScroll);
   }, [isLoading, hasMore]);
 
-  const fetchUploadedFiles = async () => {
-    if (isLoading || !hasMore) return;
-    setIsLoading(true);
-    const limit = 10;
-    try {
-      const response = await getAllUploadedFiles({
-        limit: limit,
-        offset: offset,
-        orderFactor: 'ORDER_FACTOR_ASC',
-      });
-      const newFiles = response.list || [];
-      const uniqueNewFiles = newFiles.filter(
-        (file) => !filesUrl?.some((existingFile) => existingFile.id === file.id),
-      );
-      setFilesUrl((prevUrls) => [...prevUrls, ...uniqueNewFiles]);
-      setOffset((prevOffset) => prevOffset + uniqueNewFiles.length);
-      setHasMore(uniqueNewFiles.length === limit);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const reloadFiles = async () => {
     setIsLoading(true);
     setOffset(0);
@@ -160,9 +126,33 @@ export const MediaPicker: FC<MediaSelectorProps> = ({
         orderFactor: 'ORDER_FACTOR_ASC',
       });
       const newFiles = response.list || [];
-      setFilesUrl(newFiles);
+      setFilesUrl(newFiles); // Clearing filesUrl before setting new files
       setOffset(newFiles.length);
       setHasMore(newFiles.length > 0);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchUploadedFiles = async () => {
+    if (isLoading || !hasMore) return;
+    setIsLoading(true);
+    const limit = 5;
+    try {
+      const response = await getAllUploadedFiles({
+        limit: limit,
+        offset: offset,
+        orderFactor: 'ORDER_FACTOR_ASC',
+      });
+      const newFiles = response.list || [];
+      const uniqueNewFiles = newFiles.filter((newFile) =>
+        filesUrl?.every((existingFile) => existingFile.media?.fullSize !== newFile.media?.fullSize),
+      );
+      setFilesUrl((prevFiles) => [...prevFiles, ...uniqueNewFiles]);
+      setOffset((prevOffset) => prevOffset + uniqueNewFiles.length);
+      setHasMore(uniqueNewFiles.length === limit);
     } catch (error) {
       console.error(error);
     } finally {
@@ -196,17 +186,14 @@ export const MediaPicker: FC<MediaSelectorProps> = ({
           <div className={styles.media_picker_upload_new}>
             <DragDrop reloadFile={reloadFiles} />
           </div>
-          <InputField
-            label='THUMBNAIL'
-            value={product.product?.thumbnail}
-            name='thumbnail'
-            onChange={handleInputChange}
-          />
         </div>
         <div className={styles.media_picker_img_wrapper}>
           <ul className={styles.media_selector_img_container}>
             {filesUrl?.map((media) => (
-              <li key={media.id} className={styles.media_selector_img_wrapper}>
+              <li
+                key={`${media.id}-${media.media?.fullSize}`}
+                className={styles.media_selector_img_wrapper}
+              >
                 <button
                   className={styles.media_selector_delete_img}
                   type='button'

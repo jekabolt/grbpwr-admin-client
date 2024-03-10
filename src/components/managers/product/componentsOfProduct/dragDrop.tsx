@@ -1,6 +1,6 @@
 import React, { FC, useState } from 'react';
 import { uploadContentImage } from 'api/admin';
-import styles from 'styles/mediaSelector.scss';
+import styles from 'styles/dragDrop.scss';
 
 interface DragDropProps {
   reloadFile: () => void;
@@ -12,9 +12,10 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
   const processFiles = (files: FileList) => {
-    if (files && files.length) {
-      setSelectedFiles(Array.from(files));
-      setSelectedFileUrl(URL.createObjectURL(files[0]));
+    if (files && files.length > 0) {
+      const file = files[0];
+      setSelectedFiles([file]);
+      setSelectedFileUrl(URL.createObjectURL(file));
     }
   };
 

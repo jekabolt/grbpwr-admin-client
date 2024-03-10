@@ -19,6 +19,20 @@
     cursor: pointer;
   }
 
+  .disabled {
+    opacity: 0.5;
+    border: none;
+    background-color: black;
+    color: #fff;
+    font-size: 15px;
+    font-style: normal;
+    font-weight: 600;
+    line-height: normal;
+    text-transform: uppercase;
+    justify-self: center;
+    padding: 10px;
+  }
+
   .product_container {
     display: grid;
     gap: 5px;
@@ -75,6 +89,38 @@
             text-align: center;
             width: 70px;
             font-size: 20px;
+          }
+        }
+
+        .added_measurements_container {
+          display: grid;
+          justify-content: center;
+          gap: 5px;
+          width: 150px;
+          height: 50px;
+          overflow-y: scroll;
+          border: 2px solid black;
+          padding: 10px;
+
+          .added_measurement {
+            padding: 10px;
+            border: 1px solid black;
+            width: 150px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+
+            .delete_measurement {
+              position: absolute;
+              top: 0;
+              right: 0;
+              background-color: #000;
+              color: #fff;
+              border: none;
+              cursor: pointer;
+            }
           }
         }
       }

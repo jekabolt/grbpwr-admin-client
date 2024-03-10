@@ -1,5 +1,12 @@
 import { createRoot } from 'react-dom/client';
-import { Outlet, ReactLocation, Router, Route, DefaultGenerics, createMemoryHistory } from '@tanstack/react-location';
+import {
+  Outlet,
+  ReactLocation,
+  Router,
+  Route,
+  DefaultGenerics,
+  createMemoryHistory,
+} from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContextProvider } from 'context';
 import { ROUTES } from 'constants/routes';
@@ -32,8 +39,8 @@ const queryClient = new QueryClient();
 
 const memoryHistory = createMemoryHistory({
   initialEntries: ['/'],
-})
-const location = new ReactLocation({history: memoryHistory});
+});
+const location = new ReactLocation({ history: memoryHistory });
 
 const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.login, element: <LoginBlock /> },
@@ -43,7 +50,7 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.product, element: <Product /> },
   { path: ROUTES.addProduct, element: <AddProducts /> },
   { path: ROUTES.pagedProduct, element: <PageProduct /> },
-  { path: ROUTES.singleProduct, element: <ProductId /> },
+  { path: ROUTES.singleProduct, element: <ProductId productId={undefined} /> },
   { path: ROUTES.hero, element: <Hero /> },
   { path: ROUTES.addHero, element: <MediaPicker /> },
   { path: ROUTES.getHero, element: <GetHero /> },
@@ -57,17 +64,14 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.ordersById, element: <OrderId /> },
 ];
 
-
-
 root.render(
-  <StrictMode>
-    <ContextProvider>
-      <QueryClientProvider client={queryClient}>
-        <Router location={location} routes={routes}>
-          <Outlet />
-        </Router>
-      </QueryClientProvider>
-    </ContextProvider>
-  </StrictMode>,
+  // <StrictMode>
+  <ContextProvider>
+    <QueryClientProvider client={queryClient}>
+      <Router location={location} routes={routes}>
+        <Outlet />
+      </Router>
+    </QueryClientProvider>
+  </ContextProvider>,
+  // </StrictMode>,
 );
-

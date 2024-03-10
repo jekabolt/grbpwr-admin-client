@@ -1,15 +1,37 @@
 import React, { FC, useEffect, useState } from 'react';
 import update from 'immutability-helper';
 import { Layout } from 'components/login/layout';
-import { common_ProductNew, AddProductRequest, common_Dictionary } from 'api/proto-http/admin';
+import {
+  common_ProductNew,
+  AddProductRequest,
+  common_Dictionary,
+  googletype_Decimal,
+} from 'api/proto-http/admin';
 import { addProduct, getDictionary } from 'api/admin';
 import { Sizes } from './componentsOfProduct/sizes';
 import { Tags } from './componentsOfProduct/tag';
 import { Categories } from './componentsOfProduct/categories';
 import { ColorHEX } from './componentsOfProduct/colorHEX';
 import { InputField } from './componentsOfProduct/inputFields';
-import { MediaSelector } from './componentsOfProduct/mediaSelector';
+import { MediaSelector } from './componentsOfProduct/mediaSelectorFolder/mediaSelector';
+import { Thumbnail } from './componentsOfProduct/mediaSelectorFolder/thumbnail';
 import styles from 'styles/addProd.scss';
+
+interface ProductInsert {
+  preorder: string | undefined;
+  name: string | undefined;
+  brand: string | undefined;
+  sku: string | undefined;
+  color: string | undefined;
+  colorHex: string | undefined;
+  countryOfOrigin: string | undefined;
+  thumbnail: string | undefined;
+  price: googletype_Decimal | undefined;
+  salePercentage: googletype_Decimal | undefined;
+  categoryId: number | undefined;
+  description: string | undefined;
+  targetGender: string | undefined;
+}
 
 export const initialProductState: common_ProductNew = {
   media: [],
@@ -22,12 +44,12 @@ export const initialProductState: common_ProductNew = {
     colorHex: '',
     countryOfOrigin: '',
     thumbnail: '',
-    price: undefined,
-    salePercentage: undefined,
+    price: { value: '0' },
+    salePercentage: { value: '0' },
     categoryId: 0,
     description: '',
     hidden: false,
-    targetGender: undefined,
+    targetGender: 'GENDER_ENUM_UNKNOWN',
   },
   sizeMeasurements: [],
   tags: [],
@@ -54,6 +76,8 @@ export const AddProducts: FC = () => {
   const [product, setProduct] = useState<common_ProductNew>({
     ...initialProductState,
   });
+  const [dictionary, setDictionary] = useState<common_Dictionary>();
+  const [isFormValid, setIsFormValid] = useState<boolean | undefined>(false);
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -61,7 +85,47 @@ export const AddProducts: FC = () => {
     handleChange(e, setProduct);
   };
 
-  const [dictionary, setDictionary] = useState<common_Dictionary>();
+  const checkFormValidity = () => {
+    if (!product || !product.product) {
+      setIsFormValid(false);
+      return;
+    }
+
+    const productData = product.product as ProductInsert; // Утверждаем тип product как ProductInsert
+
+    const nameFields: (keyof ProductInsert)[] = [
+      'name',
+      'countryOfOrigin',
+      'brand',
+      'price',
+      'preorder',
+      'sku',
+      'color',
+      'colorHex',
+      'categoryId',
+      'description',
+      'salePercentage',
+      'thumbnail',
+      'targetGender',
+    ];
+    const isNameFieldsValid = nameFields.every(
+      (field: keyof ProductInsert) => !!productData[field],
+    );
+    const isTagsValid = product.tags && product.tags.length > 0;
+
+    // Проверяем медиа
+    const isMediaValid = product.media && product.media.length > 0;
+
+    // Проверяем измерения размеров
+    const isSizeMeasurementsValid = product.sizeMeasurements && product.sizeMeasurements.length > 0;
+    const isValid = isNameFieldsValid && isTagsValid && isMediaValid && isSizeMeasurementsValid;
+
+    setIsFormValid(isValid);
+  };
+
+  useEffect(() => {
+    checkFormValidity();
+  }, [product]);
 
   useEffect(() => {
     const storedDictionary = localStorage.getItem('dictionary');
@@ -113,28 +177,28 @@ export const AddProducts: FC = () => {
         <InputField
           label='NAME'
           name='name'
-          value={product.product?.name}
+          value={product?.product?.name || ''}
           onChange={handleInputChange}
         />
 
         <InputField
           label='COUNTRY'
           name='countryOfOrigin'
-          value={product.product?.countryOfOrigin}
+          value={product?.product?.countryOfOrigin || ''}
           onChange={handleInputChange}
         />
 
         <InputField
           label='BRAND'
           name='brand'
-          value={product.product?.brand}
+          value={product?.product?.brand || ''}
           onChange={handleInputChange}
         />
 
         <InputField
           label='PRICE'
           name='price'
-          value={product.product?.price}
+          value={product?.product?.price || ''}
           onChange={handleInputChange}
           type='number'
         />
@@ -142,7 +206,7 @@ export const AddProducts: FC = () => {
         <InputField
           label='SALES'
           name='salePercentage'
-          value={product.product?.salePercentage}
+          value={product?.product?.salePercentage || ''}
           onChange={handleInputChange}
           type='number'
         />
@@ -150,18 +214,18 @@ export const AddProducts: FC = () => {
         <InputField
           label='PREORDER'
           name='preorder'
-          value={product.product?.preorder}
+          value={product?.product?.preorder || ''}
           onChange={handleInputChange}
         />
 
-        <div className={styles.product_container}>
+        <div className={styles?.product_container}>
           <label htmlFor='gender' className={styles.title}>
             GENDER
           </label>
           <select
             name='targetGender'
             id='gender'
-            value={product.product?.targetGender}
+            value={product?.product?.targetGender || ''}
             onChange={handleInputChange}
             className={styles.product_input}
           >
@@ -181,7 +245,7 @@ export const AddProducts: FC = () => {
           <textarea
             name='description'
             id='descrip'
-            value={product.product?.description}
+            value={product?.product?.description || ''}
             cols={1}
             rows={2}
             style={{ width: '150px' }}
@@ -192,24 +256,22 @@ export const AddProducts: FC = () => {
         <InputField
           label='VENDORE CODE'
           name='sku'
-          value={product.product?.sku}
+          value={product?.product?.sku || ''}
           onChange={handleInputChange}
         />
 
         <InputField
           label='COLOR'
           name='color'
-          value={product.product?.color}
+          value={product?.product?.color || ''}
           onChange={handleInputChange}
         />
 
         <ColorHEX product={product} setProduct={setProduct} />
 
-        <MediaSelector
-          product={product}
-          setProduct={setProduct}
-          handleInputChange={handleInputChange}
-        />
+        <Thumbnail product={product} setProduct={setProduct} />
+
+        <MediaSelector product={product} setProduct={setProduct} />
 
         <Categories product={product} setProduct={setProduct} dictionary={dictionary} />
 
@@ -217,7 +279,11 @@ export const AddProducts: FC = () => {
 
         <Tags setProduct={setProduct} product={product} />
 
-        <button type='submit' className={styles.submit}>
+        <button
+          type='submit'
+          className={`${isFormValid ? styles.submit : styles.disabled}`}
+          disabled={!isFormValid}
+        >
           SUBMIT
         </button>
       </form>

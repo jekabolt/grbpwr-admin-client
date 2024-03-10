@@ -9,7 +9,6 @@ import { getDictionary } from 'api/admin';
 export const LoginBlock: FC = () => {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
   const navigate = useNavigate();
 
   const handlePasswordSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -22,11 +21,11 @@ export const LoginBlock: FC = () => {
       const response: LoginResponse = await login({ username: username, password: password });
 
       if (!response.authToken) {
-        setErrorMessage('token not received');
+        alert('token not received');
         return;
       }
 
-      const authToken = response.authToken;
+      const authToken = response.authToken || '';
 
       localStorage.setItem('authToken', authToken);
 
@@ -35,6 +34,7 @@ export const LoginBlock: FC = () => {
       navigate({ to: ROUTES.main, replace: true });
     } catch (error) {
       console.error(error);
+      console.log(error);
     }
   };
 
@@ -59,8 +59,7 @@ export const LoginBlock: FC = () => {
     <div className={styles.login_wrapper}>
       <div className={styles.logo}></div>
       <div className={styles.card_body}>
-        {errorMessage && <p className={styles.error}>{errorMessage}</p>}
-        <form className={styles.form} onSubmit={handlePasswordSubmit}>
+        <form className={styles.form} onSubmit={(e) => handlePasswordSubmit(e)}>
           <div className={styles.user_container}>
             <input
               className={styles.input}

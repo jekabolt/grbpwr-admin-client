@@ -30,6 +30,7 @@ export const UploadPage: FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [isFetchingData, setIsFetchingData] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -58,7 +59,14 @@ export const UploadPage: FC = () => {
         orderFactor: 'ORDER_FACTOR_ASC',
       });
       const url = response.list || [];
-      setFilesUrl((prevUrls) => [...prevUrls, ...url]);
+      const uniqueNewFiles = url.filter(
+        (newFile) =>
+          !filesUrl.some(
+            (existingFile) => existingFile.media?.fullSize === newFile.media?.fullSize,
+          ),
+      );
+      setFilesUrl((prevFiles) => [...prevFiles, ...uniqueNewFiles]);
+
       setOffset((prevOffset) => prevOffset + url.length);
       setHasMore(url.length === limit);
     } catch (error) {
@@ -78,36 +86,36 @@ export const UploadPage: FC = () => {
     }
   };
 
-  const filteredAndPaginatedFiles = filesUrl?.filter((file) => {
-    if (filter === 'image') {
-      return (
-        file.media?.fullSize?.toLowerCase().endsWith('.jpg') ||
-        file.media?.fullSize?.toLowerCase().endsWith('.jpeg') ||
-        file.media?.fullSize?.toLowerCase().endsWith('.png')
-      );
-    } else if (filter === 'video') {
-      return (
-        file.media?.fullSize?.toLowerCase().endsWith('.mp4') ||
-        file.media?.fullSize?.toLowerCase().endsWith('.webm')
-      );
-    } else {
-      return true;
-    }
-  });
+  // const filteredAndPaginatedFiles = filesUrl?.filter((file) => {
+  //   if (filter === 'image') {
+  //     return (
+  //       file.media?.fullSize?.toLowerCase().endsWith('.jpg') ||
+  //       file.media?.fullSize?.toLowerCase().endsWith('.jpeg') ||
+  //       file.media?.fullSize?.toLowerCase().endsWith('.png')
+  //     );
+  //   } else if (filter === 'video') {
+  //     return (
+  //       file.media?.fullSize?.toLowerCase().endsWith('.mp4') ||
+  //       file.media?.fullSize?.toLowerCase().endsWith('.webm')
+  //     );
+  //   } else {
+  //     return true;
+  //   }
+  // });
 
-  const sortedFiles = React.useMemo(() => {
-    return filteredAndPaginatedFiles.sort((a, b) => {
-      const dateA = new Date(a.createdAt || 0).getTime();
-      const dateB = new Date(b.createdAt || 0).getTime();
+  // const sortedFiles = React.useMemo(() => {
+  //   return filteredAndPaginatedFiles.sort((a, b) => {
+  //     const dateA = new Date(a.createdAt || 0).getTime();
+  //     const dateB = new Date(b.createdAt || 0).getTime();
 
-      // Ascending order (older files first, 'minus')
-      if (order === 'minus') {
-        return dateA - dateB;
-      }
-      // Descending order (newer files first, 'plus')
-      return dateB - dateA;
-    });
-  }, [filteredAndPaginatedFiles, order]);
+  //     // Ascending order (older files first, 'minus')
+  //     if (order === 'minus') {
+  //       return dateA - dateB;
+  //     }
+  //     // Descending order (newer files first, 'plus')
+  //     return dateB - dateA;
+  //   });
+  // }, [filteredAndPaginatedFiles, order]);
 
   return (
     <Layout>
@@ -132,8 +140,8 @@ export const UploadPage: FC = () => {
             </div>
           </div>
           <ul className={styles.media_list}>
-            {sortedFiles?.map((file) => (
-              <li key={file.id || file.media?.fullSize}>
+            {filesUrl?.map((file) => (
+              <li key={file.id}>
                 {file.media?.fullSize?.toLowerCase().endsWith('.mp4') ||
                 file.media?.fullSize?.toLowerCase().endsWith('.webm') ? (
                   <a href={file.media.compressed} rel='noreferrer' target='_blank'>

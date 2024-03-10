@@ -18,9 +18,17 @@ export const InputField: React.FC<InputFieldProps> = ({
   type = 'text',
 }) => {
   const displayValue =
-    typeof value === 'object' && value !== null && value !== undefined
-      ? value.value?.toString() ?? ''
-      : value;
+    value !== undefined ? (typeof value === 'object' ? value.value?.toString() ?? '' : value) : '';
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (type === 'number') {
+      const inputValue = parseFloat(e.target.value);
+      if (inputValue < 0) {
+        return;
+      }
+    }
+    onChange(e);
+  };
 
   return (
     <div className={styles.product_container}>
@@ -31,9 +39,14 @@ export const InputField: React.FC<InputFieldProps> = ({
         type={type}
         name={name}
         value={displayValue}
-        onChange={onChange}
+        onChange={handleInputChange}
         id={name}
         className={styles.product_input}
+        onKeyDown={(e) => {
+          if (e.key === '-' || e.key === 'e') {
+            e.preventDefault();
+          }
+        }}
       />
     </div>
   );

@@ -26,9 +26,22 @@ function sortItems(item: { id?: number }[]) {
 
 export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
   const [selectedMeasurements, setSelectedMeasurements] = useState<SelectedMeasurements>({});
+  const [tempMeasurementValues, setTempMeasurementValues] = useState<{ [key: number]: string }>({});
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
+
+  const handleDeleteMeasurement = (sizeId: number, measurementId: number | undefined) => {
+    setProduct((prevProduct) => {
+      const updatedProduct = { ...prevProduct };
+      if (updatedProduct.sizeMeasurements?.[sizeId]?.measurements) {
+        updatedProduct.sizeMeasurements[sizeId].measurements = updatedProduct.sizeMeasurements[
+          sizeId
+        ].measurements?.filter((m) => m.measurementNameId !== measurementId);
+      }
+      return updatedProduct;
+    });
+  };
 
   const handleMeasurementSelection = (sizeIndex: number | undefined, measurementId: number) => {
     if (typeof sizeIndex === 'undefined') {
@@ -42,38 +55,10 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
     measurementId: number | undefined,
     value: string,
   ) => {
-    if (typeof sizeIndex === 'undefined') {
+    if (typeof sizeIndex === 'undefined' || typeof measurementId === 'undefined') {
       return;
     }
-    setProduct((prevProduct) => {
-      const updatedProduct = JSON.parse(JSON.stringify(prevProduct));
-
-      if (!updatedProduct.sizeMeasurements) {
-        updatedProduct.sizeMeasurements = [];
-      }
-
-      if (!updatedProduct.sizeMeasurements[sizeIndex]) {
-        updatedProduct.sizeMeasurements[sizeIndex] = {
-          productSize: { sizeId: sizeIndex },
-          measurements: [],
-        };
-      }
-
-      const measurementIndex = updatedProduct.sizeMeasurements[sizeIndex].measurements.findIndex(
-        (m: { measurementNameId: number }) => m.measurementNameId === measurementId,
-      );
-      if (measurementIndex === -1) {
-        updatedProduct.sizeMeasurements[sizeIndex].measurements.push({
-          measurementNameId: measurementId,
-          measurementValue: { value },
-        });
-      } else {
-        updatedProduct.sizeMeasurements[sizeIndex].measurements[measurementIndex].measurementValue =
-          { value };
-      }
-
-      return updatedProduct;
-    });
+    setTempMeasurementValues((prev) => ({ ...prev, [sizeIndex]: value }));
   };
 
   const handleSizeChange = (
@@ -101,45 +86,53 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
     });
   };
 
-  const handleAddMeasurement = (
+  const handleConfirmMeasurement = (
     sizeIndex: number | undefined,
     e: React.MouseEvent<HTMLButtonElement, MouseEvent>,
+    measurementId: number | undefined,
   ) => {
-    e.preventDefault(); // Prevent default behavior
-    e.stopPropagation(); // Stop event propagation
-
-    if (typeof sizeIndex === 'undefined') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof sizeIndex === 'undefined' || typeof measurementId === 'undefined') {
       return;
     }
 
-    const selectedMeasurementId = selectedMeasurements[sizeIndex];
-    const measurementValue =
-      (product.sizeMeasurements &&
-        product.sizeMeasurements[sizeIndex] &&
-        product.sizeMeasurements[sizeIndex].productSize?.quantity?.value) ||
-      '0';
-
-    if (selectedMeasurementId !== undefined) {
-      setProduct((prevProduct) => {
-        const updatedProduct = JSON.parse(JSON.stringify(prevProduct));
-        const measurementIndex = updatedProduct.sizeMeasurements[sizeIndex].measurements.findIndex(
-          (m: { measurementNameId: number }) => m.measurementNameId === selectedMeasurementId,
-        );
-
-        if (measurementIndex === -1) {
-          updatedProduct.sizeMeasurements[sizeIndex].measurements.push({
-            measurementNameId: selectedMeasurementId,
-            measurementValue: { value: measurementValue },
-          });
-        } else {
-          updatedProduct.sizeMeasurements[sizeIndex].measurements[
-            measurementIndex
-          ].measurementValue = { value: measurementValue };
-        }
-
-        return updatedProduct;
-      });
+    const measurementValue = tempMeasurementValues[sizeIndex];
+    if (!measurementValue) {
+      return;
     }
+
+    setProduct((prevProduct) => {
+      const updatedProduct = JSON.parse(JSON.stringify(prevProduct));
+
+      if (!updatedProduct.sizeMeasurements) {
+        updatedProduct.sizeMeasurements = [];
+      }
+
+      if (!updatedProduct.sizeMeasurements[sizeIndex]) {
+        updatedProduct.sizeMeasurements[sizeIndex] = {
+          productSize: { sizeId: sizeIndex },
+          measurements: [],
+        };
+      }
+
+      const measurementIndex = updatedProduct.sizeMeasurements[sizeIndex].measurements.findIndex(
+        (m: { measurementNameId: number }) => m.measurementNameId === measurementId,
+      );
+      if (measurementIndex === -1) {
+        updatedProduct.sizeMeasurements[sizeIndex].measurements.push({
+          measurementNameId: measurementId,
+          measurementValue: { value: measurementValue },
+        });
+      } else {
+        updatedProduct.sizeMeasurements[sizeIndex].measurements[measurementIndex].measurementValue =
+          { value: measurementValue };
+      }
+
+      return updatedProduct;
+    });
+
+    setTempMeasurementValues((prev) => ({ ...prev, [sizeIndex]: '' }));
   };
 
   return (
@@ -150,50 +143,96 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
           <li key={size.id} className={styles.product_container_size_item}>
             {size.id !== undefined && (
               <>
-                <div className={styles.define_size_quantity_container}>
-                  <h3>{findInDictionary(dictionary, size.id, 'size')}</h3>
-                  <input
-                    type='number'
-                    name='quantity'
-                    onChange={(e) => handleSizeChange(e, size.id)}
-                  />
-                </div>
-                {product.sizeMeasurements &&
-                  product.sizeMeasurements[size.id] &&
-                  product.sizeMeasurements[size.id].productSize?.quantity?.value &&
-                  parseInt(
-                    product?.sizeMeasurements[size.id]?.productSize?.quantity?.value || '0',
-                    10,
-                  ) > 0 && (
-                    <div className={styles.define_measurement_container}>
-                      <select
-                        onChange={(e) =>
-                          handleMeasurementSelection(size.id, parseInt(e.target.value, 10))
+                <>
+                  <div className={styles.define_size_quantity_container}>
+                    <h3>{findInDictionary(dictionary, size.id, 'size')}</h3>
+                    <input
+                      type='number'
+                      min={0}
+                      name='quantity'
+                      value={
+                        product.sizeMeasurements?.[size.id]?.productSize?.quantity?.value ?? ''
+                      }
+                      onChange={(e) => handleSizeChange(e, size.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === '-' || e.key === 'e') {
+                          e.preventDefault();
                         }
-                      >
-                        <option value=''>measurements</option>
-                        {sortedMeasurements.map((measurement) => (
-                          <option key={measurement.id} value={measurement.id}>
-                            {findInDictionary(dictionary, measurement.id, 'measurement')}
-                          </option>
-                        ))}
-                      </select>
-                      {selectedMeasurements[size.id as number] && (
-                        <input
-                          type='number'
-                          className={styles.measurementInput}
+                      }}
+                    />
+                  </div>
+                  {product.sizeMeasurements &&
+                    product.sizeMeasurements[size.id] &&
+                    product.sizeMeasurements[size.id].productSize?.quantity?.value &&
+                    parseInt(
+                      product?.sizeMeasurements[size.id]?.productSize?.quantity?.value || '0',
+                      10,
+                    ) > 0 && (
+                      <div className={styles.define_measurement_container}>
+                        <select
                           onChange={(e) =>
-                            handleMeasurementValueChange(
-                              size.id,
-                              selectedMeasurements[size.id as number],
-                              e.target.value,
-                            )
+                            handleMeasurementSelection(size.id, parseInt(e.target.value, 10))
                           }
-                        />
-                      )}
-                      <button onClick={(e) => handleAddMeasurement(size.id, e)}>ok</button>
-                    </div>
-                  )}
+                        >
+                          <option value=''>measurements</option>
+                          {sortedMeasurements.map((measurement) => (
+                            <option key={measurement.id} value={measurement.id}>
+                              {findInDictionary(dictionary, measurement.id, 'measurement')}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedMeasurements[size.id as number] && (
+                          <>
+                            <input
+                              type='number'
+                              min={0}
+                              className={styles.measurementInput}
+                              onChange={(e) =>
+                                handleMeasurementValueChange(
+                                  size.id,
+                                  selectedMeasurements[size.id as number],
+                                  e.target.value,
+                                )
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === '-' || e.key === 'e') {
+                                  e.preventDefault();
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={(e) =>
+                                handleConfirmMeasurement(
+                                  size.id,
+                                  e,
+                                  selectedMeasurements[size.id as number],
+                                )
+                              }
+                            >
+                              OK
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                </>
+                {product.sizeMeasurements && product.sizeMeasurements[size.id] && (
+                  <ul className={styles.added_measurements_container}>
+                    {product.sizeMeasurements[size.id].measurements?.map((m) => (
+                      <li key={m.measurementNameId} className={styles.added_measurement}>
+                        <p>{findInDictionary(dictionary, m.measurementNameId, 'measurement')}</p>
+                        <p>{m.measurementValue?.value}</p>
+                        <button
+                          type='button'
+                          onClick={() => handleDeleteMeasurement(size.id!, m.measurementNameId)}
+                          className={styles.delete_measurement}
+                        >
+                          x
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </>
             )}
           </li>

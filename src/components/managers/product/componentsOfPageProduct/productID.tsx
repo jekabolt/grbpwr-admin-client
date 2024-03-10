@@ -28,9 +28,13 @@ import {
 import queryString from 'query-string';
 import styles from 'styles/productID.scss';
 
-export const ProductId: FC = () => {
-  const queryParams = queryString.parse(window.location.search);
-  const productId = queryParams.productId as string;
+interface ProductIdProps {
+  productId: number | undefined;
+}
+
+export const ProductId: FC<ProductIdProps> = ({ productId }) => {
+  // const queryParams = queryString.parse(window.location.search);
+  // const productId = queryParams.productId as string;
   const [state, dispatch] = useReducer(reducer, initialState);
 
   const handleChange = (
