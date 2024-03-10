@@ -47,6 +47,7 @@ export const InputField: React.FC<InputFieldProps> = ({
             e.preventDefault();
           }
         }}
+        required
       />
     </div>
   );

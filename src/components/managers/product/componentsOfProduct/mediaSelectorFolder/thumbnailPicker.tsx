@@ -35,6 +35,10 @@ export const ThumbnailPicker: FC<ThumbnailPickerProps> = ({
       return;
     }
 
+    if (imageUrl && imageUrl.trim() !== '') {
+      setSelectedImage(imageUrl.trim());
+    }
+
     if (!selectedImage) {
       return;
     }
@@ -85,7 +89,7 @@ export const ThumbnailPicker: FC<ThumbnailPickerProps> = ({
         orderFactor: 'ORDER_FACTOR_ASC',
       });
       const newFiles = response.list || [];
-      setFilesUrl(newFiles); // Clearing filesUrl before setting new files
+      setFilesUrl(newFiles);
       setOffset(newFiles.length);
       setHasMore(newFiles.length > 0);
     } catch (error) {

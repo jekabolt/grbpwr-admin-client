@@ -43,14 +43,10 @@ interface AxiosRequestConfig {
 }
 
 export const axiosRequestHandler = async ({ path, method, body }: AxiosRequestConfig) => {
-  try {
-    const response = await axiosInstance({
-      method: method as 'GET' | 'POST' | 'PUT' | 'DELETE',
-      url: path,
-      data: body,
-    });
-    return response.data;
-  } catch (error) {
-    throw error;
-  }
+  const response = await axiosInstance({
+    method: method as 'GET' | 'POST' | 'PUT' | 'DELETE',
+    url: path,
+    data: body,
+  });
+  return response.data;
 };

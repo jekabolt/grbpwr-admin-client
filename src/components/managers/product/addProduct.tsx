@@ -114,10 +114,8 @@ export const AddProducts: FC = () => {
     );
     const isTagsValid = product.tags && product.tags.length > 0;
 
-    // Проверяем медиа
     const isMediaValid = product.media && product.media.length > 0;
 
-    // Проверяем измерения размеров
     const isSizeMeasurementsValid = product.sizeMeasurements && product.sizeMeasurements.length > 0;
     const isValid = isNameFieldsValid && isTagsValid && isMediaValid && isSizeMeasurementsValid;
 
