@@ -1,3 +1,4 @@
+import Button from '@mui/material/Button';
 import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
 import {
@@ -133,9 +134,9 @@ export const Settings: FC = () => {
                   defaultValue={c.price?.value}
                   onChange={(e) => handlePriceChange(c.carrier, e.target.value)}
                 />
-                <button type='button' onClick={() => handleShipmentCarrierPrice(c.carrier)}>
+                <Button variant='contained' onClick={() => handleShipmentCarrierPrice(c.carrier)}>
                   update price
-                </button>
+                </Button>
               </div>
             </div>
           ))}

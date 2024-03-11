@@ -20,9 +20,7 @@ export const LoginBlock: FC = () => {
 
   const handleLoginSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!username || !password) {
-      throw new Error('empty fields');
-    }
+
     const response: LoginResponse = await login({ username: username, password: password });
 
     if (!response.authToken) {

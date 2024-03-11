@@ -1,3 +1,4 @@
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import {
   DefaultGenerics,
   Outlet,
@@ -61,14 +62,35 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.ordersById, element: <OrderId /> },
 ];
 
+const theme = createTheme({
+  palette: {
+    primary: {
+      light: '#9e9e9e',
+      main: '#616161',
+      dark: '#424242',
+      contrastText: '#fff',
+    },
+    secondary: {
+      light: '#ff7961',
+      main: '#f44336',
+      dark: '#ba000d',
+      contrastText: '#000',
+    },
+  },
+});
+
 root.render(
   // <StrictMode>
-  <ContextProvider>
-    <QueryClientProvider client={queryClient}>
-      <Router location={location} routes={routes}>
-        <Outlet />
-      </Router>
-    </QueryClientProvider>
-  </ContextProvider>,
+  <ThemeProvider theme={theme}>
+    <ContextProvider>
+      <QueryClientProvider client={queryClient}>
+        <Router location={location} routes={routes}>
+          <Outlet />
+        </Router>
+      </QueryClientProvider>
+    </ContextProvider>
+    ,
+  </ThemeProvider>,
+
   // </StrictMode>,
 );

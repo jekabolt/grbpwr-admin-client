@@ -6,8 +6,6 @@ on:
   push:
     branches:
       - master # Trigger the workflow on push events to the main branch
-  schedule:
-    - cron: '0 0 * * 1' # Run dependency updates weekly on Monday at 00:00
   workflow_dispatch:
 
 jobs:
@@ -75,6 +73,7 @@ jobs:
 
       # Deploys the built site to GitHub Pages
       - name: Deploy to GitHub Pages
+        id: deploy
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: gh-pages # Specifies the deployment branch
@@ -88,7 +87,9 @@ jobs:
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: Deployment to GitHub Pages succeeded!
+          message: |
+            Deployment to GitHub Pages succeeded!
+            Deployed to: ${{ steps.deploy.outputs.url }}
 
       # Sends a failure notification to Telegram if deployment fails
       - name: Notification for Failure
@@ -97,36 +98,6 @@ jobs:
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: Deployment to GitHub Pages failed. Please check the Actions log.
-
-  # Job for updating dependencies on a schedule
-  update-dependencies:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' # Only runs for scheduled events
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version-file: '.nvmrc'
-
-      - name: Cache Node Modules
-        uses: actions/cache@v2
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-
-      # Updates all dependencies in package.json to their latest versions
-      - name: Update Dependencies
-        run: |
-          npm install -g npm-check-updates
-          ncu -u
-          npm install
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git commit -am "Update dependencies" --allow-empty # Commits changes if there are any
-          git push
+          message: |
+            Deployment to GitHub Pages failed. Please check the Actions log.
+            Deployed to: ${{ steps.deploy.outputs.url }}
