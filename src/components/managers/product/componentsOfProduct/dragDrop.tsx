@@ -32,6 +32,8 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
 
     if (files) {
       processFiles(files);
+    } else {
+      alert('no selected files');
     }
 
     setIsDragging(false);
