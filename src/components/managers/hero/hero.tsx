@@ -12,7 +12,6 @@ export const Hero: FC = () => {
   };
 
   const navigatePagedProduct = () => {
-    console.log('Navigate to LIST PRODUCTS');
     navigate({ to: ROUTES.getHero, replace: true });
   };
   return (

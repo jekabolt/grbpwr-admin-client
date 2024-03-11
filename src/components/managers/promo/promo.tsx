@@ -54,12 +54,7 @@ export const Promo: FC = () => {
       },
     };
 
-    try {
-      const response = await addPromo(promo);
-      console.log('promo added:', response);
-    } catch (error) {
-      console.error(error);
-    }
+    await addPromo(promo);
   };
 
   const navigateGetPromo = () => {

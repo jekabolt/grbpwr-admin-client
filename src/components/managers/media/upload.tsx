@@ -51,38 +51,26 @@ export const UploadPage: FC = () => {
     if (isLoading || !hasMore) return;
     setIsLoading(true);
     const limit = 2;
-    try {
-      const response = await getAllUploadedFiles({
-        limit: limit,
-        offset: offset,
-        orderFactor: 'ORDER_FACTOR_ASC',
-      });
-      const url = response.list || [];
-      const uniqueNewFiles = url.filter(
-        (newFile) =>
-          !filesUrl.some(
-            (existingFile) => existingFile.media?.fullSize === newFile.media?.fullSize,
-          ),
-      );
-      setFilesUrl((prevFiles) => [...prevFiles, ...uniqueNewFiles]);
+    const response = await getAllUploadedFiles({
+      limit: limit,
+      offset: offset,
+      orderFactor: 'ORDER_FACTOR_ASC',
+    });
+    const url = response.list || [];
+    const uniqueNewFiles = url.filter(
+      (newFile) =>
+        !filesUrl.some((existingFile) => existingFile.media?.fullSize === newFile.media?.fullSize),
+    );
+    setFilesUrl((prevFiles) => [...prevFiles, ...uniqueNewFiles]);
 
-      setOffset((prevOffset) => prevOffset + url.length);
-      setHasMore(url.length === limit);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
+    setOffset((prevOffset) => prevOffset + url.length);
+    setHasMore(url.length === limit);
+    setIsLoading(false);
   };
 
   const deleteFile = async (id: number | undefined) => {
-    try {
-      const response = await deleteFiles({ id });
-      console.log(response);
-      setFilesUrl((currentFiles) => currentFiles.filter((file) => file.id !== id));
-    } catch (error) {
-      console.error(error);
-    }
+    await deleteFiles({ id });
+    setFilesUrl((currentFiles) => currentFiles.filter((file) => file.id !== id));
   };
 
   const filteredAndPaginatedFiles = filesUrl?.filter((file) => {

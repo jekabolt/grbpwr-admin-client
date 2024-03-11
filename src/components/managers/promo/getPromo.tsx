@@ -19,15 +19,12 @@ export const GetPromo: FC = () => {
 
   useEffect(() => {
     const listPromo = async () => {
-      try {
-        const response = await getPromo({});
-        setPromos(response.promoCodes);
-      } catch (error) {
-        console.error(error);
-      }
+      const response = await getPromo({});
+      setPromos(response.promoCodes);
     };
     listPromo();
   }, []);
+
   return (
     <Layout>
       <div className={styles.list_promo_main}>

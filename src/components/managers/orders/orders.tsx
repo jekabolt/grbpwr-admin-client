@@ -31,12 +31,8 @@ export const Orders: FC = () => {
 
   useEffect(() => {
     const fetchDictionary = async () => {
-      try {
-        const response = await getDictionary({});
-        setStatus(response.dictionary?.orderStatuses);
-      } catch (error) {
-        console.error(error);
-      }
+      const response = await getDictionary({});
+      setStatus(response.dictionary?.orderStatuses);
     };
     fetchDictionary();
   }, []);
@@ -50,22 +46,17 @@ export const Orders: FC = () => {
     setIsLoading(true);
     const limit = 5;
     if (!email && selectedStatus) {
-      try {
-        const response = await ordersByStatus({
-          limit: limit,
-          offset: offset,
-          orderFactor: 'ORDER_FACTOR_ASC',
-          status: selectedStatus,
-        });
-        const list = response.orders || [];
-        setOrders((prevOrders) => [...(prevOrders || []), ...list]);
-        setOffset((prevOffset) => prevOffset + list.length);
-        setHasMore(list.length === limit);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setIsLoading(false);
-      }
+      const response = await ordersByStatus({
+        limit: limit,
+        offset: offset,
+        orderFactor: 'ORDER_FACTOR_ASC',
+        status: selectedStatus,
+      });
+      const list = response.orders || [];
+      setOrders((prevOrders) => [...(prevOrders || []), ...list]);
+      setOffset((prevOffset) => prevOffset + list.length);
+      setHasMore(list.length === limit);
+      setIsLoading(false);
     } else {
       orderByEmailFunction();
     }
@@ -91,7 +82,6 @@ export const Orders: FC = () => {
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const statusEnum = status?.find((s) => s.id?.toString() === e.target.value)?.name;
     setSelectedStatus(statusEnum);
-    console.log(statusEnum);
     setOrders([]);
     setOffset(0);
     setHasMore(true);
@@ -99,14 +89,11 @@ export const Orders: FC = () => {
   };
 
   const orderByEmailFunction = async () => {
-    try {
-      setOrders([]);
-      const response = await orderByEmail({ email });
-      setOrders(response.orders);
-    } catch (error) {
-      console.error(error);
-    }
+    setOrders([]);
+    const response = await orderByEmail({ email });
+    setOrders(response.orders);
   };
+
   return (
     <Layout>
       <div className={styles.order_main}>

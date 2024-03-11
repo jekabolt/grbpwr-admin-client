@@ -20,26 +20,21 @@ export const LoginBlock: FC = () => {
 
   const handleLoginSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-
-    try {
-      if (!username || !password) {
-        throw new Error('empty fields');
-      }
-      const response: LoginResponse = await login({ username: username, password: password });
-
-      if (!response.authToken) {
-        setErrorMessage('token not received');
-        return;
-      }
-
-      const authToken = response.authToken;
-
-      localStorage.setItem('authToken', authToken);
-
-      navigate({ to: ROUTES.main, replace: true });
-    } catch (error) {
-      setErrorMessage('error occured during login process');
+    if (!username || !password) {
+      throw new Error('empty fields');
     }
+    const response: LoginResponse = await login({ username: username, password: password });
+
+    if (!response.authToken) {
+      setErrorMessage('token not received');
+      return;
+    }
+
+    const authToken = response.authToken;
+
+    localStorage.setItem('authToken', authToken);
+
+    navigate({ to: ROUTES.main, replace: true });
   };
 
   const handlePasswordChange = (e: ChangeEvent<HTMLInputElement>) => {

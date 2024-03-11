@@ -32,8 +32,6 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
 
     if (files) {
       processFiles(files);
-    } else {
-      console.log('no files selected or droped');
     }
 
     setIsDragging(false);
@@ -50,16 +48,12 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
     reader.onload = async (e) => {
       const base64 = e.target?.result;
       if (base64 && typeof base64 === 'string') {
-        try {
-          await uploadContentImage({
-            rawB64Image: base64,
-          });
-          setSelectedFiles([]);
-          setSelectedFileUrl('');
-          await reloadFile();
-        } catch (error) {
-          alert('error uploading file: ' + error);
-        }
+        await uploadContentImage({
+          rawB64Image: base64,
+        });
+        setSelectedFiles([]);
+        setSelectedFileUrl('');
+        await reloadFile();
       }
     };
     reader.readAsDataURL(file);

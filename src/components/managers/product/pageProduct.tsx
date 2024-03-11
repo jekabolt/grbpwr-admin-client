@@ -29,19 +29,15 @@ export const PageProduct: FC = () => {
   }, [currentPage]);
 
   const fetchData = async () => {
-    try {
-      const newLimit = filter.limit || 6;
-      const offset = calculateOffset(currentPage, newLimit);
-      const response: GetProductsPagedResponse = await getProductsPaged({
-        ...filter,
-        limit: newLimit,
-        offset,
-      });
+    const newLimit = filter.limit || 6;
+    const offset = calculateOffset(currentPage, newLimit);
+    const response: GetProductsPagedResponse = await getProductsPaged({
+      ...filter,
+      limit: newLimit,
+      offset,
+    });
 
-      setProducts(response.products ? response.products.slice(0, newLimit) : []);
-    } catch (error) {
-      console.error(error);
-    }
+    setProducts(response.products ? response.products.slice(0, newLimit) : []);
   };
 
   const handleProductClick = (index: number | undefined) => {
@@ -58,14 +54,8 @@ export const PageProduct: FC = () => {
     } else {
       setDeletingProductId(productId);
       setTimeout(async () => {
-        try {
-          await deleteProductByID({ id: productId });
-          setProducts((prevProducts) =>
-            prevProducts?.filter((product) => product.id !== productId),
-          );
-        } catch (error) {
-          console.error('Error deleting product:', error);
-        }
+        await deleteProductByID({ id: productId });
+        setProducts((prevProducts) => prevProducts?.filter((product) => product.id !== productId));
         setDeletingProductId(undefined);
         setTimeout(() => setDeletionMessage(''), 3000);
       }, 3000);

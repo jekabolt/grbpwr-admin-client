@@ -45,19 +45,15 @@ export const HeroPageProduct: FC<HeroProductsProps> = ({ productIds, setProductI
   }, [currentPage]);
 
   const fetchData = async () => {
-    try {
-      const newLimit = filter.limit || 6;
-      const offset = calculateOffset(currentPage, newLimit);
-      const response: GetProductsPagedResponse = await getProductsPaged({
-        ...filter,
-        limit: newLimit,
-        offset,
-      });
+    const newLimit = filter.limit || 6;
+    const offset = calculateOffset(currentPage, newLimit);
+    const response: GetProductsPagedResponse = await getProductsPaged({
+      ...filter,
+      limit: newLimit,
+      offset,
+    });
 
-      setProducts(response.products ? response.products.slice(0, newLimit) : []);
-    } catch (error) {
-      console.error(error);
-    }
+    setProducts(response.products ? response.products.slice(0, newLimit) : []);
   };
 
   const handleProductClick = (index: number | undefined) => {

@@ -36,16 +36,12 @@ export const OrderId: FC = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      try {
-        const [orderResponse, dictionaryResponse] = await Promise.all([
-          orderById({ orderId: Number(orderId) }),
-          getDictionary({}),
-        ]);
-        setOrders(orderResponse.order);
-        setDictionary(dictionaryResponse.dictionary);
-      } catch (error) {
-        console.error(error);
-      }
+      const [orderResponse, dictionaryResponse] = await Promise.all([
+        orderById({ orderId: Number(orderId) }),
+        getDictionary({}),
+      ]);
+      setOrders(orderResponse.order);
+      setDictionary(dictionaryResponse.dictionary);
     };
     fetchData();
   }, [orderId]);

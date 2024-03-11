@@ -99,14 +99,9 @@ export const MediaPicker: FC = () => {
 
   const addNewHero = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      const response = await addHero({ main, ads, productIds });
-      console.log('hero added:', response);
-      setAds([]);
-      setProductIds([]);
-    } catch (error) {
-      console.error(error);
-    }
+    const response = await addHero({ main, ads, productIds });
+    setAds([]);
+    setProductIds([]);
   };
 
   const select = (imageUrl: string | number) => {
@@ -131,26 +126,21 @@ export const MediaPicker: FC = () => {
 
   useEffect(() => {
     const fetchUploadedFiles = async () => {
-      try {
-        const response = await getAllUploadedFiles({
-          limit: 5,
-          offset: 0,
-          orderFactor: 'ORDER_FACTOR_ASC',
-        });
+      const response = await getAllUploadedFiles({
+        limit: 5,
+        offset: 0,
+        orderFactor: 'ORDER_FACTOR_ASC',
+      });
 
-        const filesArray = response.list || [];
-        const urls = filesArray.map((file: common_Media) => file.media?.fullSize || '');
+      const filesArray = response.list || [];
+      const urls = filesArray.map((file: common_Media) => file.media?.fullSize || '');
 
-        setFilesUrl(urls);
-      } catch (error) {
-        console.error('Error fetching uploaded files:', error);
-      }
+      setFilesUrl(urls);
     };
 
     fetchUploadedFiles();
   }, []);
 
-  // remove
   return (
     <Layout>
       <form onSubmit={addNewHero} className={styles.hero}>

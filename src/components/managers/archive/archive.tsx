@@ -38,31 +38,22 @@ export const Archive: FC = () => {
         items: item,
       },
     };
-    try {
-      const response = await addArchive(newArchive);
-      console.log('archive added: ', response.id);
-      setItem([]);
-    } catch (error) {
-      console.error(error);
-    }
+    await addArchive(newArchive);
+    setItem([]);
   };
 
   useEffect(() => {
     const fetchUploadedFiles = async () => {
-      try {
-        const response = await getAllUploadedFiles({
-          limit: 5,
-          offset: 0,
-          orderFactor: 'ORDER_FACTOR_ASC',
-        });
+      const response = await getAllUploadedFiles({
+        limit: 5,
+        offset: 0,
+        orderFactor: 'ORDER_FACTOR_ASC',
+      });
 
-        const filesArray = response.list || [];
-        const urls = filesArray.map((file: common_Media) => file.media?.fullSize || '');
+      const filesArray = response.list || [];
+      const urls = filesArray.map((file: common_Media) => file.media?.fullSize || '');
 
-        setFilesUrl(urls);
-      } catch (error) {
-        console.error('Error fetching uploaded files:', error);
-      }
+      setFilesUrl(urls);
     };
 
     fetchUploadedFiles();

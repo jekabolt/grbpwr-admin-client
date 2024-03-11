@@ -42,17 +42,13 @@ export const GetArchive: FC = () => {
 
   const handleSaveClick = async () => {
     if (editingArchive && editItemId) {
-      try {
-        await updateArchive({
-          id: editItemId,
-          archive: editingArchive,
-        });
-        setEditItemId(undefined);
-        setEditingArchive(null);
-        fetchArchive();
-      } catch (error) {
-        console.error(error);
-      }
+      await updateArchive({
+        id: editItemId,
+        archive: editingArchive,
+      });
+      setEditItemId(undefined);
+      setEditingArchive(null);
+      fetchArchive();
     }
   };
 
@@ -65,16 +61,12 @@ export const GetArchive: FC = () => {
   };
 
   const fetchArchive = async () => {
-    try {
-      const response = await getArchive({
-        limit: 5,
-        offset: 0,
-        orderFactor: 'ORDER_FACTOR_ASC',
-      });
-      setArchive(response.archives);
-    } catch (error) {
-      console.error(error);
-    }
+    const response = await getArchive({
+      limit: 5,
+      offset: 0,
+      orderFactor: 'ORDER_FACTOR_ASC',
+    });
+    setArchive(response.archives);
   };
 
   useEffect(() => {
@@ -83,20 +75,16 @@ export const GetArchive: FC = () => {
 
   useEffect(() => {
     const fetchUploadedFiles = async () => {
-      try {
-        const response = await getAllUploadedFiles({
-          limit: 5,
-          offset: 0,
-          orderFactor: 'ORDER_FACTOR_ASC',
-        });
+      const response = await getAllUploadedFiles({
+        limit: 5,
+        offset: 0,
+        orderFactor: 'ORDER_FACTOR_ASC',
+      });
 
-        const filesArray = response.list || [];
-        const urls = filesArray.map((file: common_Media) => file.media?.fullSize || '');
+      const filesArray = response.list || [];
+      const urls = filesArray.map((file: common_Media) => file.media?.fullSize || '');
 
-        setFilesUrl(urls);
-      } catch (error) {
-        console.error('Error fetching uploaded files:', error);
-      }
+      setFilesUrl(urls);
     };
 
     fetchUploadedFiles();
@@ -114,17 +102,12 @@ export const GetArchive: FC = () => {
   };
 
   const submitNewItem = async (archiveId: number) => {
-    try {
-      const newItem = newItemsByArchiveId[archiveId];
-      const response = await addArchiveItem({
-        archiveId: archiveId,
-        items: [newItem],
-      });
-      console.log(response);
-      fetchArchive();
-    } catch (error) {
-      console.error(error);
-    }
+    const newItem = newItemsByArchiveId[archiveId];
+    await addArchiveItem({
+      archiveId: archiveId,
+      items: [newItem],
+    });
+    fetchArchive();
   };
 
   const handleMediaSelection = (archiveId: number, mediaUrl: string) => {
@@ -135,13 +118,8 @@ export const GetArchive: FC = () => {
   };
 
   const removeArchive = async (id: number | undefined) => {
-    try {
-      const response = await deleteArchive({ id });
-      console.log('archive deleted: ', response);
-      fetchArchive();
-    } catch (error) {
-      console.error;
-    }
+    const response = await deleteArchive({ id });
+    fetchArchive();
   };
 
   return (

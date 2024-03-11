@@ -68,7 +68,6 @@ export const MediaManager: FC = () => {
 
     const selectedFile = selectedFiles[0];
     const fileExtension = (selectedFile.name.split('.').pop() || '').toLowerCase();
-    console.log('File extension:', fileExtension);
 
     if (!fileExtension) {
       alert('Invalid file format.');
@@ -80,33 +79,27 @@ export const MediaManager: FC = () => {
       if (event.target && event.target.result) {
         const baseData64 = event.target.result as string;
 
-        try {
-          const contentType = fileExtensionToContentType[fileExtension];
+        const contentType = fileExtensionToContentType[fileExtension];
 
-          if (!contentType) {
-            alert('Invalid extension');
-            return;
-          }
-
-          if (contentType.startsWith('image')) {
-            const response = await uploadContentImage({
-              rawB64Image: baseData64,
-            });
-            console.log('Uploaded:', response);
-          } else if (contentType.startsWith('video')) {
-            const raw = trimBeforeBase64(baseData64);
-            const response = uploadContentVideo({
-              raw: raw,
-              contentType: contentType,
-            });
-            console.log('Uploaded:', response);
-          }
-
-          setSelectedFiles([]);
-          setSelectedFileUrl(null);
-        } catch (error) {
-          alert('Error uploading file');
+        if (!contentType) {
+          alert('Invalid extension');
+          return;
         }
+
+        if (contentType.startsWith('image')) {
+          await uploadContentImage({
+            rawB64Image: baseData64,
+          });
+        } else if (contentType.startsWith('video')) {
+          const raw = trimBeforeBase64(baseData64);
+          await uploadContentVideo({
+            raw: raw,
+            contentType: contentType,
+          });
+        }
+
+        setSelectedFiles([]);
+        setSelectedFileUrl(null);
       }
     };
 

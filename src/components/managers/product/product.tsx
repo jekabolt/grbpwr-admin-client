@@ -12,7 +12,6 @@ export const Product: FC = () => {
   };
 
   const navigatePagedProduct = () => {
-    console.log('Navigate to LIST PRODUCTS');
     navigate({ to: ROUTES.pagedProduct, replace: true });
   };
   return (

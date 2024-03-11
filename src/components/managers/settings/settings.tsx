@@ -26,19 +26,15 @@ export const Settings: FC = () => {
 
   useEffect(() => {
     const fetchDictionary = async () => {
-      try {
-        const response = await getDictionary({});
-        setPayment(response.dictionary?.paymentMethods || []);
-        const carrierData = (
-          response.dictionary?.shipmentCarriers?.map((carrier) => carrier.shipmentCarrier) || []
-        ).filter((c): c is common_ShipmentCarrierInsert => c !== undefined);
+      const response = await getDictionary({});
+      setPayment(response.dictionary?.paymentMethods || []);
+      const carrierData = (
+        response.dictionary?.shipmentCarriers?.map((carrier) => carrier.shipmentCarrier) || []
+      ).filter((c): c is common_ShipmentCarrierInsert => c !== undefined);
 
-        setCarrier(carrierData);
-        setMaxItems(response.dictionary?.maxOrderItems);
-        setSiteEnabled(response.dictionary?.siteEnabled);
-      } catch (error) {
-        console.error(error);
-      }
+      setCarrier(carrierData);
+      setMaxItems(response.dictionary?.maxOrderItems);
+      setSiteEnabled(response.dictionary?.siteEnabled);
     };
     fetchDictionary();
   }, []);
@@ -54,74 +50,49 @@ export const Settings: FC = () => {
         });
       });
     }
-    try {
-      await setPaymentMethod({
-        paymentMethod: paymentMethod as common_PaymentMethodNameEnum,
-        allow,
-      });
-    } catch (error) {
-      console.error(error);
-    }
+    await setPaymentMethod({
+      paymentMethod: paymentMethod as common_PaymentMethodNameEnum,
+      allow,
+    });
   };
 
   const handleShipmentCarrier = async (carrier: string | undefined, allow: boolean) => {
-    try {
-      const response = await setShipmentCarrier({
-        carrier: carrier,
-        allow,
-      });
-      console.log(response);
-    } catch (error) {
-      console.error(error);
-    }
+    await setShipmentCarrier({
+      carrier: carrier,
+      allow,
+    });
   };
 
   const handleShipmentCarrierPrice = async (carrier: string | undefined) => {
     if (!carrier) {
-      console.log('error');
       return;
     }
     const newPrice = price[carrier];
     if (newPrice) {
-      try {
-        await setShipmentCarrierPrice({
-          carrier: carrier,
-          price: { value: newPrice },
-        });
-      } catch (error) {
-        console.error(error);
-      }
+      await setShipmentCarrierPrice({
+        carrier: carrier,
+        price: { value: newPrice },
+      });
     }
   };
 
   const handlePriceChange = (carrier: string | undefined, price: string) => {
     if (carrier) {
       setPrice((prev) => ({ ...prev, [carrier]: price }));
-    } else {
-      console.log('carrier not founf');
     }
   };
 
   const handlerMaxOrderItems = async (e: string) => {
     const maxOrderItemsParsed = parseInt(e, 10);
     setMaxItems(maxOrderItemsParsed);
-
-    try {
-      await setMaxOrderItems({ maxOrderItems: maxItems });
-    } catch (error) {
-      console.error(error);
-    }
+    await setMaxOrderItems({ maxOrderItems: maxItems });
   };
 
   const handleSiteAvailability = async (available: boolean) => {
     setSiteEnabled(available);
-    try {
-      await setSiteAvailability({
-        available,
-      });
-    } catch (error) {
-      console.error(error);
-    }
+    await setSiteAvailability({
+      available,
+    });
   };
 
   const cutUnusedPartOfPaymentName = (name: string | undefined) => {

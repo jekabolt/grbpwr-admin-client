@@ -52,13 +52,8 @@ export const ArchivePaged: FC<ArchiveList> = ({
   };
 
   const deleteItem = async (id: number | undefined) => {
-    try {
-      const response = await deleteItemFromArchive({ itemId: id });
-      console.log('iteme deleted: ', response);
-      fetchArchive();
-    } catch (error) {
-      console.error(error);
-    }
+    await deleteItemFromArchive({ itemId: id });
+    fetchArchive();
   };
   return (
     <div className={styles.list_archive}>
