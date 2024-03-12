@@ -41,7 +41,7 @@ export const PageProduct: FC = () => {
   };
 
   const handleProductClick = (index: number | undefined) => {
-    navigate({ to: `${ROUTES.singleProduct}?productId=${index}`, replace: true });
+    navigate({ to: `${ROUTES.singleProduct}/${index}`, replace: true });
   };
 
   const handleDeleteClick = async (

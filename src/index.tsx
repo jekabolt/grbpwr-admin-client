@@ -21,6 +21,7 @@ import { UploadPage } from 'components/managers/media/upload';
 import { OrderId } from 'components/managers/orders/orderId';
 import { Orders } from 'components/managers/orders/orders';
 import { AddProducts } from 'components/managers/product/addProduct';
+import { ProductID } from 'components/managers/product/componentsOfPageProduct/productID';
 import { PageProduct } from 'components/managers/product/pageProduct';
 import { Product } from 'components/managers/product/product';
 import { GetPromo } from 'components/managers/promo/getPromo';
@@ -49,6 +50,10 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.product, element: <Product /> },
   { path: ROUTES.addProduct, element: <AddProducts /> },
   { path: ROUTES.pagedProduct, element: <PageProduct /> },
+  {
+    path: `${ROUTES.singleProduct}/:id`,
+    element: ({ params }) => Promise.resolve(<ProductID params={{ id: params.id }} />),
+  },
   { path: ROUTES.hero, element: <Hero /> },
   { path: ROUTES.addHero, element: <MediaPicker /> },
   { path: ROUTES.getHero, element: <GetHero /> },
