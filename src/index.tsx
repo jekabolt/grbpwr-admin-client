@@ -36,10 +36,11 @@ const root = createRoot(container);
 
 const queryClient = new QueryClient();
 
+const isProduction = process.env.NODE_ENV === 'production';
 const memoryHistory = createMemoryHistory({
   initialEntries: ['/'],
 });
-const location = new ReactLocation({ history: memoryHistory });
+const location = new ReactLocation(isProduction ? { history: memoryHistory } : {});
 
 const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.login, element: <LoginBlock /> },
