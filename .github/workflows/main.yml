@@ -68,7 +68,6 @@ jobs:
           REACT_APP_SERVER_URL: ${{ secrets.SERVER_URL }} # Uses a secret for the server URL
         run: |
           echo "REACT_APP_SERVER_URL=${{ secrets.SERVER_URL }}" > .env
-          echo "REACT_APP_NODE_ENV=production" > .env
           yarn install
           yarn build
 
