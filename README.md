@@ -17,7 +17,7 @@
 
 `cd ./proto/ && git pull origin main && cd .. && make init`
 
-4. Create .env file in root folder (copy paste variables from .env.example and add your if needed for local development)
+4. Create .env file in root folder (copy paste variables from .env.example and add yours if needed for local development)
 
 5. To start in dev mode:
 
