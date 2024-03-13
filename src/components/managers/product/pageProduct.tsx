@@ -10,9 +10,9 @@ import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
 import React, { FC, MouseEvent, useEffect, useState } from 'react';
 import styles from 'styles/paged.scss';
-import { Filter } from './componentsOfPageProduct/filterProducts';
-import { initialFilter } from './componentsOfPageProduct/initialFilterStates';
-import { Products } from './componentsOfPageProduct/products';
+import { Filter } from './listProductComponents/filterComponents/filterProducts';
+import { initialFilter } from './listProductComponents/filterComponents/initialFilterStates';
+import { Products } from './listProductComponents/products';
 
 export const PageProduct: FC = () => {
   const [products, setProducts] = useState<common_Product[] | undefined>([]);

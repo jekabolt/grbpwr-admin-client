@@ -7,7 +7,7 @@ import {
 import arrow from 'img/arrow-right.jpg';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
-import { initialFilter } from '../product/componentsOfPageProduct/initialFilterStates';
+import { initialFilter } from '../product/listProductComponents/filterComponents/initialFilterStates';
 import { HeroProducts } from './page/heroProducts';
 
 interface HeroProductsProps {

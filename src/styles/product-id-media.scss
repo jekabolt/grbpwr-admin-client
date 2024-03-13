@@ -1,0 +1,29 @@
+.product_id_container {
+  margin: 50px 0 0 20px;
+  width: 90%;
+  border: 1px solid black;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  justify-content: center;
+  justify-self: center;
+  padding: 5px;
+
+  .product_id_media_information {
+    border: 1px solid green;
+    display: grid;
+    gap: 20px;
+    padding: 5px;
+    width: 60%;
+
+    .product_id_thumbnail_wrapper {
+      border: 1px solid red;
+      display: flex;
+      width: 100%;
+
+      .product_id_thumbnail {
+        object-fit: cover;
+        width: 100%;
+      }
+    }
+  }
+}

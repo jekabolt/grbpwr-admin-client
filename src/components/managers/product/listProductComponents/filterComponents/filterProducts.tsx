@@ -15,7 +15,7 @@ interface FilterProps {
   ) => void;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
 }
-// TODO:is it necessary to add the ability to filter product visibility
+
 export const Filter: FC<FilterProps> = ({ filter, filterChange, onSubmit }) => {
   return (
     <form onSubmit={onSubmit} style={{ display: 'grid' }}>

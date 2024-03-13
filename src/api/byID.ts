@@ -1,39 +1,41 @@
 import { adminService } from './admin';
 import {
-  UpdateProductNameRequest,
-  UpdateProductNameResponse,
-  UpdateProductSKURequest,
-  UpdateProductSKUResponse,
-  UpdateProductPreorderRequest,
-  UpdateProductPreorderResponse,
-  UpdateProductColorAndColorHexRequest,
-  UpdateProductColorAndColorHexResponse,
-  UpdateProductCountryOfOriginRequest,
-  UpdateProductCountryOfOriginResponse,
-  UpdateProductBrandRequest,
-  UpdateProductBrandResponse,
-  UpdateProductTargetGenderRequest,
-  UpdateProductTargetGenderResponse,
-  UpdateProductThumbnailRequest,
-  UpdateProductThumbnailResponse,
-  UpdateProductPriceRequest,
-  UpdateProductPriceResponse,
-  UpdateProductSaleRequest,
-  UpdateProductSaleResponse,
-  UpdateProductCategoryRequest,
-  UpdateProductCategoryResponse,
-  UpdateProductSizeStockRequest,
-  UpdateProductSizeStockResponse,
   AddProductMeasurementRequest,
   AddProductMeasurementResponse,
-  UpdateProductDescriptionRequest,
-  UpdateProductDescriptionResponse,
   AddProductTagRequest,
   AddProductTagResponse,
+  DeleteProductMediaRequest,
+  DeleteProductMediaResponse,
   DeleteProductTagRequest,
   DeleteProductTagResponse,
   HideProductByIDRequest,
   HideProductByIDResponse,
+  UpdateProductBrandRequest,
+  UpdateProductBrandResponse,
+  UpdateProductCategoryRequest,
+  UpdateProductCategoryResponse,
+  UpdateProductColorAndColorHexRequest,
+  UpdateProductColorAndColorHexResponse,
+  UpdateProductCountryOfOriginRequest,
+  UpdateProductCountryOfOriginResponse,
+  UpdateProductDescriptionRequest,
+  UpdateProductDescriptionResponse,
+  UpdateProductNameRequest,
+  UpdateProductNameResponse,
+  UpdateProductPreorderRequest,
+  UpdateProductPreorderResponse,
+  UpdateProductPriceRequest,
+  UpdateProductPriceResponse,
+  UpdateProductSKURequest,
+  UpdateProductSKUResponse,
+  UpdateProductSaleRequest,
+  UpdateProductSaleResponse,
+  UpdateProductSizeStockRequest,
+  UpdateProductSizeStockResponse,
+  UpdateProductTargetGenderRequest,
+  UpdateProductTargetGenderResponse,
+  UpdateProductThumbnailRequest,
+  UpdateProductThumbnailResponse,
 } from './proto-http/admin';
 
 export function updateName(request: UpdateProductNameRequest): Promise<UpdateProductNameResponse> {
@@ -124,4 +126,8 @@ export function deleteTag(request: DeleteProductTagRequest): Promise<DeleteProdu
 
 export function updateHide(request: HideProductByIDRequest): Promise<HideProductByIDResponse> {
   return adminService.HideProductByID(request);
+}
+
+export function deleteMediaById(request: DeleteProductMediaRequest): Promise<DeleteProductMediaResponse> {
+  return adminService.DeleteProductMedia(request)
 }

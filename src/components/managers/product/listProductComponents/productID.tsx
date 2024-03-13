@@ -1,7 +1,9 @@
 import { getProductByID } from 'api/admin';
 import { common_ProductFull } from 'api/proto-http/admin';
-import { FC, useEffect, useState } from 'react';
 import { Layout } from 'components/login/layout';
+import { FC, useEffect, useState } from 'react';
+import styles from 'styles/product-id-media.scss';
+import { MediaWrapper } from './product-id-components/product-id-media/mediaWrapper';
 
 interface ProductIDProps {
   params: {
@@ -24,7 +26,9 @@ export const ProductID: FC<ProductIDProps> = ({ params }) => {
 
   return (
     <Layout>
-      <div></div>
+      <div className={styles.product_id_container}>
+        <MediaWrapper product={product} setProduct={setProduct} />
+      </div>
     </Layout>
   );
 };

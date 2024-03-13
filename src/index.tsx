@@ -21,7 +21,7 @@ import { UploadPage } from 'components/managers/media/upload';
 import { OrderId } from 'components/managers/orders/orderId';
 import { Orders } from 'components/managers/orders/orders';
 import { AddProducts } from 'components/managers/product/addProduct';
-import { ProductID } from 'components/managers/product/componentsOfPageProduct/productID';
+import { ProductID } from 'components/managers/product/listProductComponents/productID';
 import { PageProduct } from 'components/managers/product/pageProduct';
 import { Product } from 'components/managers/product/product';
 import { GetPromo } from 'components/managers/promo/getPromo';
