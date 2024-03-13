@@ -7,18 +7,20 @@
 
 ## Installation and Setup Instructions
 
-#### Example:
+1. Clone down this repository.
 
-Clone down this repository.
+2. Install packages:
 
-Installation:
 `make install` or `yarn install`
 
-Pull and generate proto files:
+3. Pull and generate proto files:
+
 `cd ./proto/ && git pull origin main && cd .. && make init`
 
-To start in dev mode:
+4. To start in dev mode:
+
 `make dev` or `yarn dev`
 
-To Visit App:
+5. To Visit App:
+
 `localhost:4000`
