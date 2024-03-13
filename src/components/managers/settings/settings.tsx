@@ -162,7 +162,7 @@ export const Settings: FC = () => {
               type='number'
               defaultValue={maxItems}
               onChange={(e) => handlerMaxOrderItems(e.target.value)}
-              inputProps={{ min: 1 }}
+              inputProps={{ min: 0 }}
             />
           </div>
         </Grid>
