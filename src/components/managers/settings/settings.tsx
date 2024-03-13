@@ -28,9 +28,12 @@ export const Settings: FC = () => {
   useEffect(() => {
     const fetchDictionary = async () => {
       const response = await getDictionary({});
-      setPayment(response.dictionary?.paymentMethods || []);
+      setPayment(response.dictionary?.paymentMethods?.sort((a, b) => a.id! - b.id!) || []);
+
       const carrierData = (
-        response.dictionary?.shipmentCarriers?.map((carrier) => carrier.shipmentCarrier) || []
+        response.dictionary?.shipmentCarriers
+          ?.sort((a, b) => a.id! - b.id!)
+          .map((carrier) => carrier.shipmentCarrier) || []
       ).filter((c): c is common_ShipmentCarrierInsert => c !== undefined);
 
       setCarrier(carrierData);
