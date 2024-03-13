@@ -1,6 +1,7 @@
 import { getProductByID } from 'api/admin';
 import { common_ProductFull } from 'api/proto-http/admin';
 import { FC, useEffect, useState } from 'react';
+import { Layout } from 'components/login/layout';
 
 interface ProductIDProps {
   params: {
@@ -21,5 +22,9 @@ export const ProductID: FC<ProductIDProps> = ({ params }) => {
     fetchProduct();
   }, [params.id]);
 
-  return <div>{product?.product?.createdAt}</div>;
+  return (
+    <Layout>
+      <div></div>
+    </Layout>
+  );
 };
