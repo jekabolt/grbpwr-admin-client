@@ -5,7 +5,7 @@ import {
   ReactLocation,
   Route,
   Router,
-  createMemoryHistory,
+  createHashHistory,
 } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginBlock } from 'components/login/login';
@@ -37,11 +37,10 @@ const root = createRoot(container);
 
 const queryClient = new QueryClient();
 
-const isProduction = process.env.NODE_ENV === 'production';
-const memoryHistory = createMemoryHistory({
-  initialEntries: ['/'],
+const hashHistory = createHashHistory({
+  window: window,
 });
-const location = new ReactLocation(isProduction ? { history: memoryHistory } : {});
+const location = new ReactLocation({ history: hashHistory });
 
 const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.login, element: <LoginBlock /> },
@@ -86,7 +85,6 @@ const theme = createTheme({
 });
 
 root.render(
-  // <StrictMode>
   <ThemeProvider theme={theme}>
     <ContextProvider>
       <QueryClientProvider client={queryClient}>
@@ -95,8 +93,5 @@ root.render(
         </Router>
       </QueryClientProvider>
     </ContextProvider>
-    ,
-  </ThemeProvider>,
-
-  // </StrictMode>,
+  </ThemeProvider>
 );
