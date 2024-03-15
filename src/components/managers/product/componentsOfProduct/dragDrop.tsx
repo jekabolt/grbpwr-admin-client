@@ -3,7 +3,7 @@ import React, { FC, useState } from 'react';
 import styles from 'styles/dragDrop.scss';
 
 interface DragDropProps {
-  reloadFile: () => void;
+  reloadFile?: () => void;
 }
 
 export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
@@ -55,7 +55,7 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
         });
         setSelectedFiles([]);
         setSelectedFileUrl('');
-        await reloadFile();
+        await reloadFile?.();
       }
     };
     reader.readAsDataURL(file);

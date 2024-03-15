@@ -8,7 +8,7 @@ import { ProductIDProps } from './product-id-components/interfaces-type/type';
 import { MediaWrapper } from './product-id-components/product-id-media/mediaWrapper';
 
 export const ProductID: FC = () => {
-  const [product, setProduct] = useState<common_ProductFull>();
+  const [product, setProduct] = useState<common_ProductFull | undefined>();
   const {
     params: { id: id },
   } = useMatch<ProductIDProps>();

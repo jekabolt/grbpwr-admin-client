@@ -1,11 +1,18 @@
-import { Grid, IconButton } from '@mui/material';
+import { Button, Grid, IconButton } from '@mui/material';
 import { deleteMediaById } from 'api/byID';
 import { common_ProductFull } from 'api/proto-http/admin';
-import { FC } from 'react';
+import { FC, useState } from 'react';
 import styles from 'styles/product-id-media.scss';
 import { ThumbnailProps } from '../../interfaces-type/thumbnailInterface';
+import { MediaPicker } from './components/media-picker';
 
-export const ListedMedia: FC<ThumbnailProps> = ({ product, setProduct }) => {
+export const ListedMedia: FC<ThumbnailProps> = ({ product, setProduct, id }) => {
+  const [mediaPicker, setMediaPicker] = useState(false);
+
+  const handleMediaPickerVisibility = () => {
+    setMediaPicker(!mediaPicker);
+  };
+
   const handleDeleteMedia = async (id: number | undefined) => {
     if (!setProduct) return;
     await deleteMediaById({ productMediaId: id });
@@ -34,6 +41,10 @@ export const ListedMedia: FC<ThumbnailProps> = ({ product, setProduct }) => {
           </IconButton>
         </Grid>
       ))}
+      <Button variant='contained' size='medium' onClick={handleMediaPickerVisibility}>
+        upload new
+      </Button>
+      {mediaPicker && <MediaPicker id={id} />}
     </Grid>
   );
 };

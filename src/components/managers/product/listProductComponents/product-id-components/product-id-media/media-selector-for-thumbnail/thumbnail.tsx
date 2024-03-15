@@ -2,7 +2,7 @@ import { Button } from '@mui/material';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-id-media.scss';
 import { ThumbnailProps } from '../../interfaces-type/thumbnailInterface';
-import { MediaSelector } from './mediaSelector';
+import { MediaSelector } from './components/mediaSelector';
 
 export const Thumbnail: FC<ThumbnailProps> = ({ product, setProduct, id }) => {
   const [showMediaSelector, setShowMediaSelector] = useState(false);
