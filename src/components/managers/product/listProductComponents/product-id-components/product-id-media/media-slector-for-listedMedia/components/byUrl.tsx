@@ -1,7 +1,7 @@
 import { Button, Grid, TextField } from '@mui/material';
 import { addMediaByID } from 'api/admin';
 import { FC, useState } from 'react';
-import { ThumbnailProps } from '../../interfaces-type/thumbnailInterface';
+import { ThumbnailProps } from '../../../interfaces-type/thumbnailInterface';
 
 export const ByUrl: FC<ThumbnailProps> = ({ id }) => {
   const [imageUrl, setImageUrl] = useState<string>('');
