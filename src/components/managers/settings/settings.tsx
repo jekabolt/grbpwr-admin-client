@@ -1,4 +1,4 @@
-import Button from '@mui/material/Button';
+import { Button, Checkbox, Grid, TextField } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
 import {
@@ -28,9 +28,12 @@ export const Settings: FC = () => {
   useEffect(() => {
     const fetchDictionary = async () => {
       const response = await getDictionary({});
-      setPayment(response.dictionary?.paymentMethods || []);
+      setPayment(response.dictionary?.paymentMethods?.sort((a, b) => a.id! - b.id!) || []);
+
       const carrierData = (
-        response.dictionary?.shipmentCarriers?.map((carrier) => carrier.shipmentCarrier) || []
+        response.dictionary?.shipmentCarriers
+          ?.sort((a, b) => a.id! - b.id!)
+          .map((carrier) => carrier.shipmentCarrier) || []
       ).filter((c): c is common_ShipmentCarrierInsert => c !== undefined);
 
       setCarrier(carrierData);
@@ -101,65 +104,79 @@ export const Settings: FC = () => {
   };
   return (
     <Layout>
-      <div className={styles.container}>
-        <div className={styles.payment_methods}>
-          <h2>payment methods</h2>
-          {payment?.map((m, id) => (
-            <div key={id} className={styles.payment_wrapper}>
-              <h3>{cutUnusedPartOfPaymentName(m.name)}</h3>
-              <input
-                type='checkbox'
-                checked={m.allowed}
-                onChange={(e) => handlerPaymentMethod(m.name, e.target.checked)}
-              />
-            </div>
-          ))}
-        </div>
+      <Grid container spacing={8} className={styles.grid} direction='column'>
+        <Grid item xs={12} sm={3}>
+          <div>
+            <h2>Payment Methods</h2>
+            {payment?.map((m, id) => (
+              <Grid container direction='row' alignItems='center' spacing={2} key={id}>
+                <Grid item>
+                  <Checkbox
+                    checked={m.allowed}
+                    onChange={(e) => handlerPaymentMethod(m.name, e.target.checked)}
+                  />
+                </Grid>
+                <Grid item>
+                  <div>{cutUnusedPartOfPaymentName(m.name)}</div>
+                </Grid>
+              </Grid>
+            ))}
+          </div>
+        </Grid>
 
-        <div className={styles.carrier_container}>
-          <h2>shipment carrier</h2>
+        <Grid item xs={12} sm={3}>
+          <h2>Shipment Carrier</h2>
           {carrier.map((c, id) => (
-            <div key={id} className={styles.carrier_wrapper}>
-              <div className={styles.carrier_allowance}>
-                <h3>{c.carrier}</h3>
-                <input
-                  type='checkbox'
-                  checked={c.allowed}
-                  onChange={(e) => handleShipmentCarrier(c.carrier, e.target.checked)}
-                />
-              </div>
-              <div className={styles.carrier_price}>
-                <input
-                  type='number'
-                  defaultValue={c.price?.value}
-                  onChange={(e) => handlePriceChange(c.carrier, e.target.value)}
-                />
-                <Button variant='contained' onClick={() => handleShipmentCarrierPrice(c.carrier)}>
-                  update price
-                </Button>
-              </div>
+            <div>
+              <h3 className={styles.carrier_header}>{c.carrier}</h3>
+              <Grid container spacing={2} key={id} direction='row' alignItems='center'>
+                <Grid item>
+                  <Checkbox
+                    checked={c.allowed}
+                    onChange={(e) => handleShipmentCarrier(c.carrier, e.target.checked)}
+                  />
+                </Grid>
+                <Grid item>
+                  <TextField
+                    size='small'
+                    type='number'
+                    defaultValue={c.price?.value}
+                    onChange={(e) => handlePriceChange(c.carrier, e.target.value)}
+                  />
+                </Grid>
+                <Grid item>
+                  <Button variant='contained' onClick={() => handleShipmentCarrierPrice(c.carrier)}>
+                    Update Price
+                  </Button>
+                </Grid>
+              </Grid>
             </div>
           ))}
-        </div>
+        </Grid>
 
-        <div className={styles.max_items_container}>
-          <h2>max items</h2>
-          <input
-            type='number'
-            defaultValue={maxItems}
-            onChange={(e) => handlerMaxOrderItems(e.target.value)}
-          />
-        </div>
+        <Grid item xs={12} sm={3}>
+          <div>
+            <h2>Max Items</h2>
+            <TextField
+              size='small'
+              type='number'
+              defaultValue={maxItems}
+              onChange={(e) => handlerMaxOrderItems(e.target.value)}
+              inputProps={{ min: 0 }}
+            />
+          </div>
+        </Grid>
 
-        <div className={styles.site}>
-          <h2>site available</h2>
-          <input
-            type='checkbox'
-            checked={siteEnabled}
-            onChange={(e) => handleSiteAvailability(e.target.checked)}
-          />
-        </div>
-      </div>
+        <Grid item xs={12} sm={3}>
+          <div>
+            <h2>Site Availability</h2>
+            <Checkbox
+              checked={siteEnabled}
+              onChange={(e) => handleSiteAvailability(e.target.checked)}
+            />
+          </div>
+        </Grid>
+      </Grid>
     </Layout>
   );
 };

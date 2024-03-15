@@ -1,14 +1,18 @@
+import { Grid } from '@mui/material';
 import { FC } from 'react';
-import styles from 'styles/product-id-media.scss';
-import { ThumbnailProps } from '../interfaces/thumbnailInterface';
+import { ThumbnailProps } from '../interfaces-type/thumbnailInterface';
 import { ListedMedia } from './thumbnail-listedMedia-mediaSelector/listedMedia';
 import { Thumbnail } from './thumbnail-listedMedia-mediaSelector/thumbnail';
 
-export const MediaWrapper: FC<ThumbnailProps> = ({ product, setProduct }) => {
+export const MediaWrapper: FC<ThumbnailProps> = ({ product, setProduct, id }) => {
   return (
-    <div className={styles.product_id_media_information}>
-      <Thumbnail product={product} setProduct={setProduct} />
-      <ListedMedia product={product} setProduct={setProduct} />
-    </div>
+    <Grid container style={{ border: '1px solide black' }} direction='column' spacing={6}>
+      <Grid item xs={4}>
+        <Thumbnail product={product} setProduct={setProduct} id={id} />
+      </Grid>
+      <Grid item xs={8}>
+        <ListedMedia product={product} setProduct={setProduct} />
+      </Grid>
+    </Grid>
   );
 };

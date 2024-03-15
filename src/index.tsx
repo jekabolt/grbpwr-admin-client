@@ -5,7 +5,7 @@ import {
   ReactLocation,
   Route,
   Router,
-  createMemoryHistory,
+  createHashHistory,
 } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginBlock } from 'components/login/login';
@@ -37,10 +37,10 @@ const root = createRoot(container);
 
 const queryClient = new QueryClient();
 
-const memoryHistory = createMemoryHistory({
-  initialEntries: ['/'],
+const hashHistory = createHashHistory({
+  window: window,
 });
-const location = new ReactLocation({ history: memoryHistory });
+const location = new ReactLocation({ history: hashHistory });
 
 const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.login, element: <LoginBlock /> },
@@ -50,10 +50,7 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.product, element: <Product /> },
   { path: ROUTES.addProduct, element: <AddProducts /> },
   { path: ROUTES.pagedProduct, element: <PageProduct /> },
-  {
-    path: `${ROUTES.singleProduct}/:id`,
-    element: ({ params }) => Promise.resolve(<ProductID params={{ id: params.id }} />),
-  },
+  { path: `${ROUTES.singleProduct}/:id`, element: <ProductID /> },
   { path: ROUTES.hero, element: <Hero /> },
   { path: ROUTES.addHero, element: <MediaPicker /> },
   { path: ROUTES.getHero, element: <GetHero /> },

@@ -89,7 +89,7 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
             Deployment to GitHub Pages succeeded!
-            Deployed to: ${{ steps.deploy.outputs.url }}
+            Deployed to: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
 
       # Sends a failure notification to Telegram if deployment fails
       - name: Notification for Failure
@@ -100,4 +100,4 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
             Deployment to GitHub Pages failed. Please check the Actions log.
-            Deployed to: ${{ steps.deploy.outputs.url }}
+            Attempted Deployment URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
