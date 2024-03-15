@@ -82,7 +82,6 @@ const theme = createTheme({
 });
 
 root.render(
-  // <StrictMode>
   <ThemeProvider theme={theme}>
     <ContextProvider>
       <QueryClientProvider client={queryClient}>
@@ -91,8 +90,5 @@ root.render(
         </Router>
       </QueryClientProvider>
     </ContextProvider>
-    ,
-  </ThemeProvider>,
-
-  // </StrictMode>,
+  </ThemeProvider>
 );
