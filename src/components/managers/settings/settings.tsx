@@ -23,6 +23,7 @@ export const Settings: FC = () => {
   const [price, setPrice] = useState<{ [name: string]: string }>({});
   const [maxItems, setMaxItems] = useState<number>();
   const [siteEnabled, setSiteEnabled] = useState<boolean>();
+  const [baseCurrency, setbaseCurrency] = useState<string>();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -39,6 +40,7 @@ export const Settings: FC = () => {
       setCarrier(carrierData);
       setMaxItems(response.dictionary?.maxOrderItems);
       setSiteEnabled(response.dictionary?.siteEnabled);
+      setbaseCurrency(response.dictionary?.baseCurrency);
     };
     fetchDictionary();
   }, []);
@@ -164,6 +166,12 @@ export const Settings: FC = () => {
               onChange={(e) => handlerMaxOrderItems(e.target.value)}
               inputProps={{ min: 0 }}
             />
+          </div>
+        </Grid>
+
+        <Grid item xs={12} sm={3}>
+          <div>
+            <h2>Base currency: {baseCurrency}</h2>
           </div>
         </Grid>
 
