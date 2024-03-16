@@ -28,7 +28,7 @@ export const ProductID: FC = () => {
       <h2>product id = {id}</h2>
       <Grid container spacing={4} style={{ width: '90%', margin: '30px' }}>
         <Grid item xs={5}>
-          <MediaWrapper />
+          <MediaWrapper product={product} setProduct={setProduct} id={id} />
         </Grid>
         <Grid item xs={7}>
           <h2 style={{ border: '1px solid black' }}>name</h2>

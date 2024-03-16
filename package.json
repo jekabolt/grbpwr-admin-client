@@ -74,6 +74,7 @@
     "react-color-palette": "^7.1.0",
     "react-color-selector": "^1.2.3",
     "react-dom": "^18.2.0",
+    "react-dropzone": "^14.2.3",
     "react-infinite-scroll-component": "^6.1.0",
     "react-querystring": "^0.1.0",
     "react-router": "^6.22.3",
