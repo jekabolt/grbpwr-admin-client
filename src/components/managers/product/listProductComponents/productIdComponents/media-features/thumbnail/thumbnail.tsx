@@ -1,16 +1,20 @@
 import { Button } from '@mui/material';
 import { FC, useState } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { ProductIdMediaProps } from '../../utility/interfaces';
+import { MediaComponentProps } from '../../utility/interfaces';
 import { ThumbnailSelector } from './thumbnail-features/thumbnailSelector';
 
-export const Thumbnail: FC<ProductIdMediaProps> = ({
+export const Thumbnail: FC<MediaComponentProps> = ({
   product,
-  setProduct,
-  id,
   reload,
   media,
   setMedia,
+  select,
+  handleImage,
+  selectedThumbnail,
+  url,
+  setUrl,
+  updateNewMediaByUrl,
 }) => {
   const [thumbPicker, setThumbPicker] = useState(false);
 
@@ -34,13 +38,16 @@ export const Thumbnail: FC<ProductIdMediaProps> = ({
       <div>
         {thumbPicker && (
           <ThumbnailSelector
-            product={product}
-            id={id}
-            setProduct={setProduct}
             reload={reload}
             media={media}
             setMedia={setMedia}
             closeThumbnailPicker={handleThumbPickerVisibility}
+            select={select}
+            handleImage={handleImage}
+            selectedThumbnail={selectedThumbnail}
+            url={url}
+            setUrl={setUrl}
+            updateNewMediaByUrl={updateNewMediaByUrl}
           />
         )}
       </div>

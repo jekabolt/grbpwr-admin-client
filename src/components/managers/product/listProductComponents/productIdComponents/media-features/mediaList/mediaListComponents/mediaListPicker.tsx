@@ -1,21 +1,21 @@
 import { Button, Grid } from '@mui/material';
 import { FC, useEffect, useRef } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { MediaPickerComponents } from '../../../utility/interfaces';
-import { ThumbnailMediaPicker } from './thumbnailMediaPicker/thumbnailMediaPicker';
-import { UploadThumbnailByUrl } from './uploadByUrl-uploadByDragDrop/uploadThumbByUrlDragDrop';
+import { MediaListPickerComponents } from '../../../utility/interfaces';
+import { UploadThumbnailByUrl } from '../../thumbnail/thumbnail-features/uploadByUrl-uploadByDragDrop/uploadThumbByUrlDragDrop';
+import { ListImage } from './imageList';
 
-export const ThumbnailSelector: FC<MediaPickerComponents> = ({
+export const MediaListPicker: FC<MediaListPickerComponents> = ({
   reload,
-  media,
-  setMedia,
-  closeThumbnailPicker,
-  select,
-  handleImage,
-  selectedThumbnail,
   url,
   setUrl,
   updateNewMediaByUrl,
+  closeThumbnailPicker,
+  select,
+  handleImage,
+  selectedMedia,
+  setMedia,
+  media,
 }) => {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
@@ -30,7 +30,6 @@ export const ThumbnailSelector: FC<MediaPickerComponents> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [wrapperRef, closeThumbnailPicker]);
-
   return (
     <div className={styles.thumbnail_picker_editor_overlay}>
       <Grid container spacing={2} className={styles.thumbnail_picker} ref={wrapperRef}>
@@ -43,12 +42,12 @@ export const ThumbnailSelector: FC<MediaPickerComponents> = ({
           />
         </Grid>
         <Grid item xs={6}>
-          <ThumbnailMediaPicker
-            media={media}
-            setMedia={setMedia}
+          <ListImage
             select={select}
+            selectedMedia={selectedMedia}
             handleImage={handleImage}
-            selectedThumbnail={selectedThumbnail}
+            setMedia={setMedia}
+            media={media}
           />
         </Grid>
         <Button

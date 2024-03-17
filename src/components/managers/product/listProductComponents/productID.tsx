@@ -14,21 +14,27 @@ export const ProductID: FC = () => {
   } = useMatch<ProductIdProps>();
 
   useEffect(() => {
-    const fetchProduct = async () => {
-      const response = await getProductByID({
-        id: Number(id),
-      });
-      setProduct(response.product);
-    };
     fetchProduct();
   }, [id]);
+
+  const fetchProduct = async () => {
+    const response = await getProductByID({
+      id: Number(id),
+    });
+    setProduct(response.product);
+  };
 
   return (
     <Layout>
       <h2>product id = {id}</h2>
       <Grid container spacing={4} style={{ width: '90%', margin: '30px' }}>
         <Grid item xs={5}>
-          <MediaWrapper product={product} setProduct={setProduct} id={id} />
+          <MediaWrapper
+            product={product}
+            setProduct={setProduct}
+            id={id}
+            fetchProduct={fetchProduct}
+          />
         </Grid>
         <Grid item xs={7}>
           <h2 style={{ border: '1px solid black' }}>name</h2>

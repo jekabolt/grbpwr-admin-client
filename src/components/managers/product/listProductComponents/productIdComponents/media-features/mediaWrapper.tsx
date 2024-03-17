@@ -1,82 +1,169 @@
 import { Grid } from '@mui/material';
-import { getAllUploadedFiles } from 'api/admin';
-import { common_Media } from 'api/proto-http/admin';
+import { addMediaByID } from 'api/admin';
+import { updateThumbnail } from 'api/byID';
 import { FC, useEffect, useState } from 'react';
-import { ProductIdMediaProps } from '../utility/interfaces';
+import useMedia from '../utility/customHook';
+import { MediaWrapperProps } from '../utility/interfaces';
 import { MediaList } from './mediaList/mediaList';
 import { Thumbnail } from './thumbnail/thumbnail';
 
-export const MediaWrapper: FC<ProductIdMediaProps> = ({ product, setProduct, id }) => {
-  const [media, setMedia] = useState<common_Media[]>([]);
-  const [offset, setOffset] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+export const MediaWrapper: FC<MediaWrapperProps> = ({ product, setProduct, id, fetchProduct }) => {
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedMediaProduct, setSelectedMediaProduct] = useState<string[]>([]);
+  const [mediaNumber, setMediaNumber] = useState<number[]>([]);
+  const [url, setUrl] = useState<string>('');
+  const { media, reload, isLoading, hasMore, fetchFiles, setMedia } = useMedia();
+
+  const selectMedia = (imageUrl: string | number | undefined) => {
+    if (typeof imageUrl === 'string') {
+      if (selectedMediaProduct?.includes(imageUrl)) {
+        setSelectedMediaProduct((prevSelectedImage) =>
+          prevSelectedImage?.filter((image) => image !== imageUrl),
+        );
+      } else {
+        setSelectedMediaProduct([...(selectedMediaProduct || []), imageUrl]);
+      }
+    } else if (typeof imageUrl === 'number') {
+      if (mediaNumber.includes(imageUrl)) {
+        setMediaNumber((prevMediaNumber) =>
+          prevMediaNumber.filter((imageIndex) => imageIndex !== imageUrl),
+        );
+      } else {
+        setMediaNumber([...mediaNumber, imageUrl]);
+      }
+    }
+  };
+
+  const handleAddMedia = async () => {
+    if (selectedMediaProduct.length === 0) {
+      console.warn('No images selected.');
+      return;
+    }
+
+    for (const imageUrl of selectedMediaProduct) {
+      const compressedUrl = imageUrl.replace(/-og\.jpg$/, '-compressed.jpg');
+      const response = await addMediaByID({
+        productId: Number(id),
+        fullSize: imageUrl,
+        thumbnail: imageUrl,
+        compressed: compressedUrl,
+      });
+    }
+    fetchProduct();
+  };
+
+  const updateNewMedia = async () => {
+    const compressedUrl = url.replace(/-og\.jpg$/, '-compressed.jpg');
+    await addMediaByID({
+      productId: Number(id),
+      fullSize: url,
+      thumbnail: url,
+      compressed: compressedUrl,
+    });
+    fetchProduct();
+  };
+
+  const updateNewThumbnail = async () => {
+    await updateThumbnail({
+      productId: Number(id),
+      thumbnail: url,
+    });
+    if (product && product.product && product.product.productInsert) {
+      const updatedProductInsert = {
+        ...product.product.productInsert,
+        thumbnail: url,
+      };
+      const updatedProduct = {
+        ...product.product,
+        productInsert: updatedProductInsert,
+      };
+
+      setProduct?.({ ...product, product: updatedProduct });
+    }
+  };
+
+  const selectThumbnail = (imageUrl: string | null) => {
+    setSelectedImage((prevSelectedImage) => (prevSelectedImage === imageUrl ? null : imageUrl));
+  };
+
+  const handleThumbnail = async () => {
+    if (!product?.product) {
+      return;
+    }
+
+    if (!selectedImage) {
+      return;
+    }
+
+    await updateThumbnail({
+      productId: Number(id),
+      thumbnail: selectedImage,
+    });
+
+    if (product && product.product && product.product.productInsert) {
+      const updatedProductInsert = {
+        ...product.product.productInsert,
+        thumbnail: selectedImage,
+      };
+      const updatedProduct = {
+        ...product.product,
+        productInsert: updatedProductInsert,
+      };
+
+      setProduct?.({ ...product, product: updatedProduct });
+    }
+  };
 
   useEffect(() => {
-    fetchUploadedFiles();
     const handleScroll = () => {
       if (
         window.innerHeight + window.scrollY + 300 >= document.documentElement.offsetHeight &&
         !isLoading &&
         hasMore
       ) {
-        fetchUploadedFiles();
+        fetchFiles(5, media.length);
       }
     };
 
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [isLoading, hasMore]);
+  }, [isLoading, hasMore, media.length, fetchFiles]);
 
-  const reloadFiles = async () => {
-    setIsLoading(true);
-    setOffset(0);
-    setHasMore(true);
-    const response = await getAllUploadedFiles({
-      limit: 10,
-      offset: 0,
-      orderFactor: 'ORDER_FACTOR_ASC',
-    });
-    const newFiles = response.list || [];
-    setMedia(newFiles);
-    setOffset(newFiles.length);
-    setHasMore(newFiles.length > 0);
-    setIsLoading(false);
-  };
-
-  const fetchUploadedFiles = async () => {
-    if (isLoading || !hasMore) return;
-    setIsLoading(true);
-    const limit = 5;
-    const response = await getAllUploadedFiles({
-      limit: limit,
-      offset: offset,
-      orderFactor: 'ORDER_FACTOR_ASC',
-    });
-    const newMedias = response.list || [];
-    const uniqueNewMedias = newMedias.filter((newMedia) =>
-      media?.every((existingFile) => existingFile.media?.fullSize !== newMedia.media?.fullSize),
-    );
-    setMedia((prevMedia) => [...prevMedia, ...uniqueNewMedias]);
-    setOffset((prevOffset) => prevOffset + uniqueNewMedias.length);
-    setHasMore(uniqueNewMedias.length === limit);
-    setIsLoading(false);
-  };
+  useEffect(() => {
+    fetchFiles(5, 0);
+  }, [fetchFiles]);
 
   return (
     <Grid container spacing={4} direction='column'>
       <Grid item xs={4}>
         <Thumbnail
           product={product}
-          setProduct={setProduct}
-          id={id}
-          reload={reloadFiles}
+          reload={reload}
           media={media}
           setMedia={setMedia}
+          select={selectThumbnail}
+          handleImage={handleThumbnail}
+          selectedThumbnail={selectedImage}
+          url={url}
+          setUrl={setUrl}
+          updateNewMediaByUrl={updateNewThumbnail}
         />
       </Grid>
       <Grid item xs={8}>
-        <MediaList product={product} />
+        <MediaList
+          product={product}
+          setProduct={setProduct}
+          fetchProduct={fetchProduct}
+          reload={reload}
+          media={media}
+          setMedia={setMedia}
+          select={selectMedia}
+          handleImage={handleAddMedia}
+          selectedMedia={selectedMediaProduct}
+          url={url}
+          setUrl={setUrl}
+          updateNewMediaByUrl={updateNewMedia}
+        />
       </Grid>
     </Grid>
   );

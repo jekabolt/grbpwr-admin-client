@@ -1,14 +1,14 @@
 import { Grid } from '@mui/material';
 import { DragDrop } from 'components/managers/product/componentsOfProduct/dragDrop';
 import { FC } from 'react';
-import { ProductIdMediaProps } from '../../../../utility/interfaces';
+import { MediaPickerByUrlProps } from '../../../../utility/interfaces';
 import { ByUrl } from './byUrl';
 
-export const UploadThumbnailByUrl: FC<ProductIdMediaProps> = ({
-  product,
-  setProduct,
-  id,
+export const UploadThumbnailByUrl: FC<MediaPickerByUrlProps> = ({
   reload,
+  url,
+  setUrl,
+  updateNewMediaByUrl,
 }) => {
   return (
     <Grid
@@ -19,7 +19,7 @@ export const UploadThumbnailByUrl: FC<ProductIdMediaProps> = ({
       justifyContent='center'
     >
       <Grid item xs={2}>
-        <ByUrl product={product} id={id} setProduct={setProduct} />
+        <ByUrl url={url} setUrl={setUrl} updateNewMediaByUrl={updateNewMediaByUrl} />
       </Grid>
       <Grid item xs={2}>
         <DragDrop reloadFile={reload} />

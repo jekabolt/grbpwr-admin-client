@@ -2,14 +2,14 @@ import { Button, Grid, IconButton, ImageList, ImageListItem } from '@mui/materia
 import { deleteFiles } from 'api/admin';
 import { FC } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { MediaPickerSelectProps } from '../../../../utility/interfaces';
+import { MediaListPickerSelectComponetns } from '../../../utility/interfaces';
 
-export const ThumbnailMediaPicker: FC<MediaPickerSelectProps> = ({
+export const ListImage: FC<MediaListPickerSelectComponetns> = ({
   media,
-  setMedia,
   select,
   handleImage,
-  selectedThumbnail,
+  selectedMedia,
+  setMedia,
 }) => {
   const handleDeleteFile = async (id: number | undefined) => {
     await deleteFiles({ id });
@@ -32,13 +32,13 @@ export const ThumbnailMediaPicker: FC<MediaPickerSelectProps> = ({
               <ImageListItem key={m.id} className={styles.thumbnail_picker_item_wrapper}>
                 <input
                   type='checkbox'
-                  checked={selectedThumbnail?.includes(m.media?.fullSize ?? '')}
+                  checked={selectedMedia?.includes(m.media?.fullSize ?? '')}
                   onChange={() => select?.(m.media?.fullSize ?? '')}
                   id={`${m.id}`}
                   style={{ display: 'none' }}
                 />
                 <label htmlFor={`${m.id}`}>
-                  {selectedThumbnail?.includes(m.media?.fullSize ?? '') ? (
+                  {selectedMedia?.includes(m.media?.fullSize ?? '') ? (
                     <span className={styles.media_selector_img_number}>selected</span>
                   ) : null}
                   <img
@@ -46,9 +46,7 @@ export const ThumbnailMediaPicker: FC<MediaPickerSelectProps> = ({
                     src={m.media?.fullSize}
                     alt='video'
                     className={`${
-                      selectedThumbnail?.includes(m.media?.fullSize ?? '')
-                        ? styles.selected_media
-                        : ''
+                      selectedMedia?.includes(m.media?.fullSize ?? '') ? styles.selected_media : ''
                     }`}
                   />
                 </label>
