@@ -95,7 +95,7 @@ export const AddMediaByID: FC = () => {
   };
 
   const handleMediaManager = () => {
-    navigate({ to: ROUTES.media, replace: true });
+    navigate({ to: ROUTES.media });
   };
 
   const handleAddMedia = async () => {

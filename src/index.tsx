@@ -93,5 +93,5 @@ root.render(
         </Router>
       </QueryClientProvider>
     </ContextProvider>
-  </ThemeProvider>
+  </ThemeProvider>,
 );

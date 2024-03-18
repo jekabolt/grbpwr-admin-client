@@ -1,6 +1,8 @@
+import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import { Button } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
-import logo from 'img/tex-text.png';
 import { FC, ReactNode } from 'react';
 import styles from 'styles/layout.scss';
 
@@ -17,18 +19,30 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
   };
 
   const handleLogo = () => {
-    navigate({ to: ROUTES.main, replace: true });
+    navigate({ to: ROUTES.main });
   };
+
   return (
     <div className={styles.layout}>
       <div className={styles.layout_logo}>
-        <img src={logo} alt='LOGO' style={{ width: '40px', height: '40px' }} onClick={handleLogo} />
+        <Button
+          variant='contained'
+          startIcon={<ArrowBackIosIcon />}
+          onClick={() => window.history.back()}
+        >
+          Go Back
+        </Button>
       </div>
       <div className={styles.layout_content}>{children}</div>
       <div className={styles.layout_logout}>
-        <button onClick={handleLogout} className={styles.logout_btn}>
-          LOG OUT
-        </button>
+        <Button
+          variant='outlined'
+          color='secondary' // Choose a color that fits your app's theme
+          startIcon={<ExitToAppIcon />}
+          onClick={handleLogout}
+        >
+          Log Out
+        </Button>
       </div>
     </div>
   );

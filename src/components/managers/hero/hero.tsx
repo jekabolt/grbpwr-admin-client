@@ -8,11 +8,11 @@ export const Hero: FC = () => {
   const navigate = useNavigate();
 
   const navigateAddProduct = () => {
-    navigate({ to: ROUTES.addHero, replace: true });
+    navigate({ to: ROUTES.addHero });
   };
 
   const navigatePagedProduct = () => {
-    navigate({ to: ROUTES.getHero, replace: true });
+    navigate({ to: ROUTES.getHero });
   };
   return (
     <Layout>
