@@ -42,7 +42,7 @@ export const MediaWrapper: FC<MediaWrapperProps> = ({ product, setProduct, id, f
 
     for (const imageUrl of selectedMediaProduct) {
       const compressedUrl = imageUrl.replace(/-og\.jpg$/, '-compressed.jpg');
-      const response = await addMediaByID({
+      await addMediaByID({
         productId: Number(id),
         fullSize: imageUrl,
         thumbnail: imageUrl,
