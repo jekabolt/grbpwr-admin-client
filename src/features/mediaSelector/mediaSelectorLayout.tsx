@@ -26,7 +26,7 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
       <div>
         {mediaSelectorVisibility && (
           <MediaSelector
-            closeMediaSelecor={handleMediaSelectorVisibility}
+            closeMediaSelector={handleMediaSelectorVisibility}
             url={url}
             setUrl={setUrl}
             updateMediaByUrl={updateMediaByUrl}

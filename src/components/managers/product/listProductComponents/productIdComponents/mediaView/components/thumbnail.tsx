@@ -16,18 +16,18 @@ export const Thumbnail: FC<MediaViewComponentsProps> = ({
     <>
       <div className={styles.thumbnail_container}>
         <img src={product?.product?.productInsert?.thumbnail} alt='thumbnail' />
-      </div>
-      <div>
-        <MediaSelectorLayout
-          label='edit'
-          url={url}
-          setUrl={setUrl}
-          updateMediaByUrl={updateMediaByUrl}
-          handleSelectedMedia={handleSelectedMedia}
-          allowMultiple={false}
-          select={select}
-          selectedMedia={selectedMedia}
-        />
+        <div className={styles.media_selector}>
+          <MediaSelectorLayout
+            label='edit'
+            url={url}
+            setUrl={setUrl}
+            updateMediaByUrl={updateMediaByUrl}
+            handleSelectedMedia={handleSelectedMedia}
+            allowMultiple={false}
+            select={select}
+            selectedMedia={selectedMedia}
+          />
+        </div>
       </div>
     </>
   );

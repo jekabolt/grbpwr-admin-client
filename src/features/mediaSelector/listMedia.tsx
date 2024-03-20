@@ -11,10 +11,16 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   allowMultiple,
   select,
   selectedMedia,
+  closeMediaSelector,
 }) => {
   const handleDeleteFile = async (id: number | undefined) => {
     await deleteFiles({ id });
     setMedia?.((currentFiles) => currentFiles?.filter((file) => file.id !== id));
+  };
+
+  const handleAddAndClose = () => {
+    handleSelectedMedia(); // This should process the selection
+    closeMediaSelector(); // This should close the media selector
   };
 
   return (
@@ -71,7 +77,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
       </Grid>
       <Grid item xs={2}>
         <Button
-          onClick={handleSelectedMedia}
+          onClick={handleAddAndClose}
           variant='contained'
           size='medium'
           sx={{ backgroundColor: 'black' }}

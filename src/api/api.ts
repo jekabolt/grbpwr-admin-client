@@ -31,6 +31,7 @@ axiosInstance.interceptors.response.use(
   (error) => {
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('authToken');
+      return Promise.reject((window.location.href = ROUTES.login));
     }
     return Promise.reject(error);
   },

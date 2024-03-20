@@ -8,11 +8,11 @@ export const MainArchive: FC = () => {
   const navigate = useNavigate();
 
   const createArchiveNavigate = () => {
-    navigate({ to: ROUTES.createArchive, replace: true });
+    navigate({ to: ROUTES.createArchive });
   };
 
   const getArchiveNavigate = () => {
-    navigate({ to: ROUTES.getArchive, replace: true });
+    navigate({ to: ROUTES.getArchive });
   };
 
   return (

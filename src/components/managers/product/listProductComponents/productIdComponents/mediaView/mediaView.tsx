@@ -6,7 +6,7 @@ import { ProductIdProps } from '../utility/interfaces';
 import { ProductMedias } from './components/productIdMedias';
 import { Thumbnail } from './components/thumbnail';
 
-export const MediaView: FC<ProductIdProps> = ({ product, setProduct, id, fetchProduct }) => {
+export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [url, setUrl] = useState<string>('');
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
 
@@ -28,8 +28,17 @@ export const MediaView: FC<ProductIdProps> = ({ product, setProduct, id, fetchPr
       console.warn('No images selected.');
       return;
     }
+    const addedMediaUrls = new Set();
+
     for (const imageUrl of selectedMedia) {
       const compressedUrl = imageUrl.replace(/-og\.jpg$/, '-compressed.jpg');
+
+      if (addedMediaUrls.has(imageUrl)) {
+        console.warn(`Image already added: ${imageUrl}`);
+        continue;
+      }
+      addedMediaUrls.add(imageUrl);
+
       await addMediaByID({
         productId: Number(id),
         fullSize: imageUrl,
@@ -38,6 +47,7 @@ export const MediaView: FC<ProductIdProps> = ({ product, setProduct, id, fetchPr
       });
     }
     fetchProduct?.();
+    setSelectedMedia([]);
   };
 
   const updateNewMedia = async () => {

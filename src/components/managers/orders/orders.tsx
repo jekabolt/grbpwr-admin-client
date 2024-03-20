@@ -38,7 +38,7 @@ export const Orders: FC = () => {
   }, []);
 
   const navigateOrderId = (id: number | undefined) => {
-    navigate({ to: `${ROUTES.ordersById}?orderId=${id}`, replace: true });
+    navigate({ to: `${ROUTES.ordersById}?orderId=${id}` });
   };
 
   const defineStatus = useCallback(async () => {

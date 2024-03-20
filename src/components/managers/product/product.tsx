@@ -8,11 +8,11 @@ export const Product: FC = () => {
   const navigate = useNavigate();
 
   const navigateAddProduct = () => {
-    navigate({ to: ROUTES.addProduct, replace: true });
+    navigate({ to: ROUTES.addProduct });
   };
 
   const navigatePagedProduct = () => {
-    navigate({ to: ROUTES.pagedProduct, replace: true });
+    navigate({ to: ROUTES.pagedProduct });
   };
   return (
     <Layout>

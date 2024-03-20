@@ -9,6 +9,7 @@ export const UploadMediaByUrlByDragDrop: FC<MediaSelectorUploadMediaByUrByDragDr
   setUrl,
   updateMediaByUrl,
   reload,
+  closeMediaSelector,
 }) => {
   return (
     <Grid
@@ -19,7 +20,12 @@ export const UploadMediaByUrlByDragDrop: FC<MediaSelectorUploadMediaByUrByDragDr
       justifyContent='center'
     >
       <Grid item xs={2}>
-        <ByUrl url={url} setUrl={setUrl} updateMediaByUrl={updateMediaByUrl} />
+        <ByUrl
+          url={url}
+          setUrl={setUrl}
+          updateMediaByUrl={updateMediaByUrl}
+          closeMediaSelector={closeMediaSelector}
+        />
       </Grid>
       <Grid item xs={2}>
         <DragDrop reloadFile={reload} />

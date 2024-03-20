@@ -18,7 +18,7 @@ type ProductKey =
   | 'description'
   | 'sale';
 
-export const Product: FC<ProductIdProps> = ({ product, setProduct, id, fetchProduct }) => {
+export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const { inputValues, handleInputChange } = useProductForm(getInitialFormData(product));
 
   const fields: { type: ProductKey; initialValue: any }[] = [

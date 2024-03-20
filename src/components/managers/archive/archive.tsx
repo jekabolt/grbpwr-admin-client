@@ -75,7 +75,7 @@ export const Archive: FC = () => {
   };
 
   const navigateGetArchive = () => {
-    navigate({ to: ROUTES.getArchive, replace: true });
+    navigate({ to: ROUTES.getArchive });
   };
 
   return (

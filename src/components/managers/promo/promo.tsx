@@ -58,7 +58,7 @@ export const Promo: FC = () => {
   };
 
   const navigateGetPromo = () => {
-    navigate({ to: ROUTES.getPromo, replace: true });
+    navigate({ to: ROUTES.getPromo });
   };
 
   return (

@@ -8,17 +8,15 @@
     width: 100%;
     height: 300px;
   }
-  .thumb_edit_btn {
+  .media_selector {
     position: absolute;
     top: 0;
     right: 0;
-    color: #fff;
-    background-color: #000;
     display: none;
   }
 
   &:hover {
-    .thumb_edit_btn {
+    .media_selector {
       display: block;
     }
   }

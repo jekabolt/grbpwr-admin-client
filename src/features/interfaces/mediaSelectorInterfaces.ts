@@ -17,7 +17,7 @@ export interface MediaSelectorProps {
     setUrl: React.Dispatch<React.SetStateAction<string>>
     updateMediaByUrl: () => void
     handleSelectedMedia: () => void
-    closeMediaSelecor: () => void
+    closeMediaSelector: () => void
     allowMultiple: boolean
     selectedMedia: string[] | undefined
     select: (imageUrl: string, allowMultiple: boolean) => void
@@ -30,6 +30,7 @@ export interface MediaSelectorMediaListProps {
     allowMultiple: boolean
     selectedMedia: string[] | undefined
     select: (imageUrl: string, allowMultiple: boolean) => void
+    closeMediaSelector: () => void
 }
 
 export interface MediaSelectorUploadMediaByUrByDragDropProps {
@@ -37,10 +38,12 @@ export interface MediaSelectorUploadMediaByUrByDragDropProps {
     reload: () => void
     updateMediaByUrl: () => void
     setUrl: React.Dispatch<React.SetStateAction<string>>
+    closeMediaSelector: () => void
 }
 
 export interface UploadMediaByUrlProps {
     url: string
     updateMediaByUrl: () => void
     setUrl: React.Dispatch<React.SetStateAction<string>>
+    closeMediaSelector: () => void
 }

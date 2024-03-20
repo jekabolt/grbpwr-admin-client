@@ -49,7 +49,7 @@ export const MediaManager: FC = () => {
   };
 
   const handleViewAll = () => {
-    navigate({ to: ROUTES.all, replace: true });
+    navigate({ to: ROUTES.all });
   };
 
   function trimBeforeBase64(input: string): string {

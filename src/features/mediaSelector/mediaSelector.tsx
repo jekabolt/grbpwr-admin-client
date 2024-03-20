@@ -11,7 +11,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   setUrl,
   updateMediaByUrl,
   handleSelectedMedia,
-  closeMediaSelecor,
+  closeMediaSelector,
   allowMultiple,
   select,
   selectedMedia,
@@ -41,14 +41,14 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
-        closeMediaSelecor();
+        closeMediaSelector();
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [wrapperRef, closeMediaSelecor]);
+  }, [wrapperRef, closeMediaSelector]);
   return (
     <div className={styles.thumbnail_picker_editor_overlay}>
       <Grid container spacing={2} className={styles.thumbnail_picker} ref={wrapperRef}>
@@ -58,10 +58,12 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
             url={url}
             setUrl={setUrl}
             updateMediaByUrl={updateMediaByUrl}
+            closeMediaSelector={closeMediaSelector}
           />
         </Grid>
         <Grid item xs={6}>
           <MediaList
+            closeMediaSelector={closeMediaSelector}
             handleSelectedMedia={handleSelectedMedia}
             setMedia={setMedia}
             media={media}
@@ -75,7 +77,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
           variant='contained'
           size='small'
           className={styles.close_thumbnail_picker}
-          onClick={closeMediaSelecor}
+          onClick={closeMediaSelector}
         >
           x
         </Button>

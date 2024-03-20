@@ -47,7 +47,7 @@ export const OrderId: FC = () => {
   }, [orderId]);
 
   const back = () => {
-    navigate({ to: ROUTES.orders, replace: true });
+    navigate({ to: ROUTES.orders });
   };
 
   return (
