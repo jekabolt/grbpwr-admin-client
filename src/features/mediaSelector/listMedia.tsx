@@ -1,3 +1,4 @@
+import ClearIcon from '@mui/icons-material/Clear';
 import { Button, Grid, IconButton, ImageList, ImageListItem } from '@mui/material';
 import { deleteFiles } from 'api/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
@@ -19,8 +20,8 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   };
 
   const handleAddAndClose = () => {
-    handleSelectedMedia(); // This should process the selection
-    closeMediaSelector(); // This should close the media selector
+    handleSelectedMedia();
+    closeMediaSelector();
   };
 
   return (
@@ -68,7 +69,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                   onClick={() => handleDeleteFile(m.id)}
                   className={styles.thumb_picker_delete_btn}
                 >
-                  x
+                  <ClearIcon />
                 </IconButton>
               </ImageListItem>
             ))}

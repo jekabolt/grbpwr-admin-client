@@ -1,3 +1,4 @@
+import ClearIcon from '@mui/icons-material/Clear';
 import { Button, Grid } from '@mui/material';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
@@ -79,7 +80,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
           className={styles.close_thumbnail_picker}
           onClick={closeMediaSelector}
         >
-          x
+          <ClearIcon />
         </Button>
       </Grid>
     </div>

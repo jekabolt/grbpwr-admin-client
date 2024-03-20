@@ -1,3 +1,4 @@
+import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton } from '@mui/material';
 import { deleteMediaById } from 'api/byID';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
@@ -46,7 +47,7 @@ export const ProductMedias: FC<MediaViewComponentsProps> = ({
               onClick={() => handleDeleteMedia(media.id)}
               className={styles.media_btn}
             >
-              x
+              <ClearIcon />
             </IconButton>
           </Grid>
         ))}
