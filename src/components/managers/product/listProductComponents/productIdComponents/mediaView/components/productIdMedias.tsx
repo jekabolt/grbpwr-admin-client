@@ -1,22 +1,19 @@
-import { Button, Grid, IconButton } from '@mui/material';
+import { Grid, IconButton } from '@mui/material';
 import { deleteMediaById } from 'api/byID';
+import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useState } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { MediaListProps } from '../../utility/interfaces';
-import { MediaListPicker } from './mediaListComponents/mediaListPicker';
+import { MediaViewComponentsProps } from '../../utility/interfaces';
 
-export const MediaList: FC<MediaListProps> = ({
+export const ProductMedias: FC<MediaViewComponentsProps> = ({
   product,
-  media,
-  setMedia,
-  reload,
-  select,
-  handleImage,
   url,
   setUrl,
-  updateNewMediaByUrl,
+  updateMediaByUrl,
   selectedMedia,
   fetchProduct,
+  select,
+  handleSelectedMedia,
 }) => {
   const [mediaPicker, setMediaPicker] = useState(false);
 
@@ -26,7 +23,7 @@ export const MediaList: FC<MediaListProps> = ({
 
   const handleDeleteMedia = async (id: number | undefined) => {
     await deleteMediaById({ productMediaId: id });
-    fetchProduct();
+    fetchProduct?.();
   };
 
   return (
@@ -46,32 +43,18 @@ export const MediaList: FC<MediaListProps> = ({
           </Grid>
         ))}
         <Grid item>
-          <Button
-            variant='contained'
-            sx={{ backgroundColor: 'black', cursor: 'pointer' }}
-            onClick={handleMediaPickerVisibility}
-            size='medium'
-          >
-            upload new media
-          </Button>
-        </Grid>
-      </Grid>
-      <div>
-        {mediaPicker && (
-          <MediaListPicker
-            reload={reload}
+          <MediaSelectorLayout
+            label='upload new media'
             url={url}
             setUrl={setUrl}
-            updateNewMediaByUrl={updateNewMediaByUrl}
-            closeThumbnailPicker={handleMediaPickerVisibility}
-            media={media}
-            setMedia={setMedia}
-            handleImage={handleImage}
-            select={select}
+            updateMediaByUrl={updateMediaByUrl}
             selectedMedia={selectedMedia}
+            select={select}
+            allowMultiple={true}
+            handleSelectedMedia={handleSelectedMedia}
           />
-        )}
-      </div>
+        </Grid>
+      </Grid>
     </>
   );
 };

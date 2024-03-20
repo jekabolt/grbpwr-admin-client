@@ -1,15 +1,16 @@
 import { Button, Grid, IconButton, ImageList, ImageListItem } from '@mui/material';
 import { deleteFiles } from 'api/admin';
+import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { FC } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { MediaListPickerSelectComponetns } from '../../../utility/interfaces';
 
-export const ListImage: FC<MediaListPickerSelectComponetns> = ({
+export const MediaList: FC<MediaSelectorMediaListProps> = ({
   media,
-  select,
-  handleImage,
-  selectedMedia,
+  handleSelectedMedia,
   setMedia,
+  allowMultiple,
+  select,
+  selectedMedia,
 }) => {
   const handleDeleteFile = async (id: number | undefined) => {
     await deleteFiles({ id });
@@ -18,22 +19,26 @@ export const ListImage: FC<MediaListPickerSelectComponetns> = ({
 
   return (
     <Grid container spacing={2} justifyContent='center'>
-      <Grid item>
+      <Grid item xs={11}>
         {media && (
           <ImageList
             variant='standard'
-            sx={{ width: 400, height: 400, padding: 2 }}
+            sx={{
+              width: '100%',
+              height: 400,
+              padding: 2,
+            }}
             cols={3}
             gap={8}
             className={styles.thumbnail_picker_list}
-            rowHeight={220}
+            rowHeight={180}
           >
             {media.map((m) => (
               <ImageListItem key={m.id} className={styles.thumbnail_picker_item_wrapper}>
                 <input
                   type='checkbox'
                   checked={selectedMedia?.includes(m.media?.fullSize ?? '')}
-                  onChange={() => select?.(m.media?.fullSize ?? '')}
+                  onChange={() => select(m.media?.fullSize ?? '', allowMultiple)}
                   id={`${m.id}`}
                   style={{ display: 'none' }}
                 />
@@ -64,9 +69,9 @@ export const ListImage: FC<MediaListPickerSelectComponetns> = ({
           </ImageList>
         )}
       </Grid>
-      <Grid item>
+      <Grid item xs={2}>
         <Button
-          onClick={handleImage}
+          onClick={handleSelectedMedia}
           variant='contained'
           size='medium'
           sx={{ backgroundColor: 'black' }}

@@ -4,11 +4,14 @@ import { getProductByID } from 'api/admin';
 import { common_ProductFull } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
-import { MediaWrapper } from './productIdComponents/media-features/mediaWrapper';
+import { MediaView } from './productIdComponents/mediaView/mediaView';
+import { ProductIdInformation } from './productIdComponents/productdInformation/productIdInformation';
+import { productIdInformation } from './productIdComponents/productdInformation/utility/productObject';
 import { ProductIdProps } from './productIdComponents/utility/type';
 
 export const ProductID: FC = () => {
-  const [product, setProduct] = useState<common_ProductFull | undefined>();
+  const [prod, setProd] = useState<common_ProductFull | undefined>();
+  const [prodcutDetails, setProductDetails] = useState({ ...productIdInformation });
   const {
     params: { id: id },
   } = useMatch<ProductIdProps>();
@@ -21,7 +24,7 @@ export const ProductID: FC = () => {
     const response = await getProductByID({
       id: Number(id),
     });
-    setProduct(response.product);
+    setProd(response.product);
   };
 
   return (
@@ -29,15 +32,15 @@ export const ProductID: FC = () => {
       <h2>product id = {id}</h2>
       <Grid container spacing={4} style={{ width: '90%', margin: '30px' }}>
         <Grid item xs={5}>
-          <MediaWrapper
-            product={product}
-            setProduct={setProduct}
+          <MediaView product={prod} setProduct={setProd} id={id} fetchProduct={fetchProduct} />
+        </Grid>
+        <Grid item xs={7}>
+          <ProductIdInformation
+            product={prod}
+            setProduct={setProd}
             id={id}
             fetchProduct={fetchProduct}
           />
-        </Grid>
-        <Grid item xs={7}>
-          <h2 style={{ border: '1px solid black' }}>name</h2>
         </Grid>
       </Grid>
     </Layout>

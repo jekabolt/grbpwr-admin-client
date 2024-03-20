@@ -2,7 +2,7 @@ import { getAllUploadedFiles } from "api/admin";
 import { common_Media } from "api/proto-http/admin";
 import { useCallback, useState } from "react";
 
-const useMedia = (initialIsLoading = false, initialHasMore = true): {
+const useMediaSelector = (initialIsLoading = false, initialHasMore = true): {
     media: common_Media[];
     setMedia: React.Dispatch<React.SetStateAction<common_Media[]>>;
     fetchFiles: (limit: number, startOffset: number) => Promise<void>;
@@ -31,4 +31,4 @@ const useMedia = (initialIsLoading = false, initialHasMore = true): {
     return { media, fetchFiles, reload, isLoading, hasMore, setMedia };
 };
 
-export default useMedia;
+export default useMediaSelector;

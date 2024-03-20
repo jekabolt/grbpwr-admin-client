@@ -6,7 +6,7 @@ export enum ROUTES {
   product = '/product-manager',
   addProduct = '/add-product',
   pagedProduct = '/page-product',
-  singleProduct = '/product-by-id',
+  singleProduct = '/product',
   hero = '/hero',
   addHero = '/add-hero',
   getHero = '/get-hero',
