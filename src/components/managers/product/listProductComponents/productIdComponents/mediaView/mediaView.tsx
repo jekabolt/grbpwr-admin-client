@@ -1,6 +1,5 @@
 import { Grid } from '@mui/material';
 import { addMediaByID } from 'api/admin';
-// import { updateThumbnail } from 'api/byID';
 import { updateProductById } from 'api/byID';
 import { FC, useState } from 'react';
 import { ProductIdProps } from '../utility/interfaces';

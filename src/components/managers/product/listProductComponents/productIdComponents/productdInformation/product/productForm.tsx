@@ -1,29 +1,27 @@
 import { Button, Grid, TextField, Typography } from '@mui/material';
-import { FC } from 'react';
+import { FC, useState } from 'react';
 
-interface ProductFormdProps {
+interface ProductFormProps {
   type: string;
   inputValues: { [key: string]: any };
   handleInputChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  btnClick: string;
-  setBtnClick: (value: string) => void;
   handleUpdateProduct: () => void;
   initialValue: string | undefined;
 }
 
-export const ProductForm: FC<ProductFormdProps> = ({
+export const ProductForm: FC<ProductFormProps> = ({
   type,
   inputValues,
   handleInputChange,
-  btnClick,
-  setBtnClick,
   handleUpdateProduct,
   initialValue,
 }) => {
+  const [isEditing, setIsEditing] = useState(false);
+
   return (
     <Grid item style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
       <Typography variant='h4'>{type}</Typography>
-      {btnClick === 'edit' ? (
+      {!isEditing ? (
         <Typography variant='h4'>{initialValue}</Typography>
       ) : (
         <TextField
@@ -35,14 +33,31 @@ export const ProductForm: FC<ProductFormdProps> = ({
           placeholder={initialValue}
         />
       )}
-      <Button
-        onClick={btnClick === 'edit' ? () => setBtnClick('upload') : handleUpdateProduct}
-        variant='contained'
-        size='large'
-        sx={{ backgroundColor: 'black' }}
-      >
-        {btnClick}
-      </Button>
+      {!isEditing && (
+        <Button
+          onClick={() => setIsEditing(true)}
+          variant='contained'
+          size='large'
+          sx={{ backgroundColor: 'black' }}
+        >
+          Edit
+        </Button>
+      )}
+      {isEditing && (
+        <>
+          <Button
+            onClick={() => {
+              handleUpdateProduct();
+              setIsEditing(false);
+            }}
+            variant='contained'
+            size='large'
+            sx={{ backgroundColor: 'black' }}
+          >
+            update
+          </Button>
+        </>
+      )}
     </Grid>
   );
 };
