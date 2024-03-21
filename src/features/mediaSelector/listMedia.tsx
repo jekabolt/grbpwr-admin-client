@@ -1,27 +1,30 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Button, Grid, IconButton, ImageList, ImageListItem } from '@mui/material';
+import { Grid, IconButton, ImageList, ImageListItem } from '@mui/material';
 import { deleteFiles } from 'api/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { FC } from 'react';
-import styles from 'styles/product-id-media.scss';
-
+import styles from 'styles/media-selector.scss';
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
   media,
-  handleSelectedMedia,
   setMedia,
   allowMultiple,
   select,
   selectedMedia,
-  closeMediaSelector,
 }) => {
   const handleDeleteFile = async (id: number | undefined) => {
     await deleteFiles({ id });
     setMedia?.((currentFiles) => currentFiles?.filter((file) => file.id !== id));
   };
 
-  const handleAddAndClose = () => {
-    handleSelectedMedia();
-    closeMediaSelector();
+  const isVideo = (mediaUrl: string | undefined) => {
+    if (mediaUrl) {
+      return mediaUrl.endsWith('.mp4') || mediaUrl.endsWith('.webm') || mediaUrl.endsWith('.ogg');
+    }
+  };
+
+  const handleSelect = (mediaUrl: string, allowMultiple: boolean, event: any) => {
+    select(mediaUrl, allowMultiple);
+    event.stopPropagation();
   };
 
   return (
@@ -53,14 +56,24 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                   {selectedMedia?.includes(m.media?.fullSize ?? '') ? (
                     <span className={styles.media_selector_img_number}>selected</span>
                   ) : null}
-                  <img
-                    key={m.id}
-                    src={m.media?.fullSize}
-                    alt='video'
-                    className={`${
-                      selectedMedia?.includes(m.media?.fullSize ?? '') ? styles.selected_media : ''
-                    }`}
-                  />
+                  {isVideo(m.media?.fullSize) ? (
+                    <video
+                      key={m.id}
+                      src={m.media?.fullSize}
+                      className={`${selectedMedia?.includes(m.media?.fullSize ?? '') ? styles.selected_media : ''}`}
+                      controls
+                      onClick={(event) =>
+                        handleSelect(m.media?.fullSize ?? '', allowMultiple, event)
+                      }
+                    />
+                  ) : (
+                    <img
+                      key={m.id}
+                      src={m.media?.fullSize}
+                      alt='media'
+                      className={`${selectedMedia?.includes(m.media?.fullSize ?? '') ? styles.selected_media : ''}`}
+                    />
+                  )}
                 </label>
                 <IconButton
                   sx={{ backgroundColor: 'black', color: 'white' }}
@@ -75,16 +88,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             ))}
           </ImageList>
         )}
-      </Grid>
-      <Grid item xs={2}>
-        <Button
-          onClick={handleAddAndClose}
-          variant='contained'
-          size='medium'
-          sx={{ backgroundColor: 'black' }}
-        >
-          add
-        </Button>
       </Grid>
     </Grid>
   );

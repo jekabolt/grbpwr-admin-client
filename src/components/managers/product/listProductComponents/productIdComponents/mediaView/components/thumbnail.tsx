@@ -5,12 +5,8 @@ import { MediaViewComponentsProps } from '../../utility/interfaces';
 
 export const Thumbnail: FC<MediaViewComponentsProps> = ({
   product,
-  url,
-  setUrl,
-  updateMediaByUrl,
   handleSelectedMedia,
-  select,
-  selectedMedia,
+  saveSelectedMedia,
 }) => {
   return (
     <>
@@ -19,13 +15,9 @@ export const Thumbnail: FC<MediaViewComponentsProps> = ({
         <div className={styles.media_selector}>
           <MediaSelectorLayout
             label='edit'
-            url={url}
-            setUrl={setUrl}
-            updateMediaByUrl={updateMediaByUrl}
             handleSelectedMedia={handleSelectedMedia}
+            saveSelectedMedia={saveSelectedMedia}
             allowMultiple={false}
-            select={select}
-            selectedMedia={selectedMedia}
           />
         </div>
       </div>

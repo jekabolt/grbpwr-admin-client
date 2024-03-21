@@ -1,6 +1,11 @@
 .drag_drop_container {
   display: flex;
+  align-items: center;
   gap: 5px;
+
+  input {
+    display: none;
+  }
 
   label,
   p {
@@ -9,11 +14,12 @@
     text-transform: uppercase;
     font-size: 20px;
     cursor: pointer;
+    padding: 7px;
   }
 
   .drag_drop_btn {
     border: 1px solid black;
-    background-color: #fff;
+    background-color: black;
     cursor: pointer;
 
     &:hover {

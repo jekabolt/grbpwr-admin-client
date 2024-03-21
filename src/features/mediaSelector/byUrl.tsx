@@ -3,14 +3,13 @@ import { UploadMediaByUrlProps } from 'features/interfaces/mediaSelectorInterfac
 import { FC } from 'react';
 
 export const ByUrl: FC<UploadMediaByUrlProps> = ({
+  closeMediaSelector,
   url,
   setUrl,
-  updateMediaByUrl,
-  closeMediaSelector,
+  updateContentLink,
 }) => {
   const addAndClose = () => {
-    updateMediaByUrl();
-    closeMediaSelector();
+    updateContentLink();
   };
   return (
     <Grid container spacing={2}>

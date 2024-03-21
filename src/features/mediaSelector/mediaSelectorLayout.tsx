@@ -5,13 +5,9 @@ import { MediaSelector } from './mediaSelector';
 
 export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   label,
-  url,
-  setUrl,
-  updateMediaByUrl,
   handleSelectedMedia,
   allowMultiple,
-  select,
-  selectedMedia,
+  saveSelectedMedia,
 }) => {
   const [mediaSelectorVisibility, setMediaSelectorVisibility] = useState(false);
 
@@ -26,14 +22,10 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
       <div>
         {mediaSelectorVisibility && (
           <MediaSelector
+            saveSelectedMedia={saveSelectedMedia}
             closeMediaSelector={handleMediaSelectorVisibility}
-            url={url}
-            setUrl={setUrl}
-            updateMediaByUrl={updateMediaByUrl}
             handleSelectedMedia={handleSelectedMedia}
             allowMultiple={allowMultiple}
-            select={select}
-            selectedMedia={selectedMedia}
           />
         )}
       </div>

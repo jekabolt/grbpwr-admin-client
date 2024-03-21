@@ -7,20 +7,10 @@ import { ProductMedias } from './components/productIdMedias';
 import { Thumbnail } from './components/thumbnail';
 
 export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
-  const [url, setUrl] = useState<string>('');
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
 
-  const select = (imageUrl: string, allowMultiple: boolean) => {
-    if (allowMultiple) {
-      setSelectedMedia((prevSelected) =>
-        prevSelected.includes(imageUrl)
-          ? prevSelected.filter((id) => id !== imageUrl)
-          : [...prevSelected, imageUrl],
-      );
-    } else {
-      setSelectedMedia([imageUrl]);
-      console.log(selectedMedia);
-    }
+  const saveSelectedMedia = (newSelectedMedia: string[]) => {
+    setSelectedMedia(newSelectedMedia);
   };
 
   const handleAddMedia = async () => {
@@ -50,43 +40,43 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => 
     setSelectedMedia([]);
   };
 
-  const updateNewMedia = async () => {
-    const isImageUrl = /^https:\/\/.*\.(jpg|jpeg|png|gif)$/i.test(url);
+  // const updateNewMedia = async () => {
+  //   const isImageUrl = /^https:\/\/.*\.(jpg|jpeg|png|gif)$/i.test(url);
 
-    if (isImageUrl) {
-      const compressedUrl = url.replace(/-og\.jpg$/, '-compressed.jpg');
-      await addMediaByID({
-        productId: Number(id),
-        fullSize: url,
-        thumbnail: url,
-        compressed: compressedUrl,
-      });
-      fetchProduct?.();
-    } else {
-      setUrl('');
-    }
-  };
+  //   if (isImageUrl) {
+  //     const compressedUrl = url.replace(/-og\.jpg$/, '-compressed.jpg');
+  //     await addMediaByID({
+  //       productId: Number(id),
+  //       fullSize: url,
+  //       thumbnail: url,
+  //       compressed: compressedUrl,
+  //     });
+  //     fetchProduct?.();
+  //   } else {
+  //     setUrl('');
+  //   }
+  // };
 
-  const updateNewThumbnail = async () => {
-    const isImageUrl = /^https:\/\/.*\.(jpg|jpeg|png|gif)$/i.test(url);
-    if (isImageUrl) {
-      const baseProductInsert = product?.product?.productInsert;
+  // const updateNewThumbnail = async () => {
+  //   const isImageUrl = /^https:\/\/.*\.(jpg|jpeg|png|gif)$/i.test(url);
+  //   if (isImageUrl) {
+  //     const baseProductInsert = product?.product?.productInsert;
 
-      if (baseProductInsert) {
-        const updatedProductInsert = {
-          ...baseProductInsert,
-          thumbnail: url,
-        };
-        await updateProductById({
-          id: Number(id),
-          product: updatedProductInsert,
-        });
-      }
-      fetchProduct();
-    } else {
-      setUrl('');
-    }
-  };
+  //     if (baseProductInsert) {
+  //       const updatedProductInsert = {
+  //         ...baseProductInsert,
+  //         thumbnail: url,
+  //       };
+  //       await updateProductById({
+  //         id: Number(id),
+  //         product: updatedProductInsert,
+  //       });
+  //     }
+  //     fetchProduct();
+  //   } else {
+  //     setUrl('');
+  //   }
+  // };
 
   const handleThumbnail = async () => {
     if (!product?.product || !selectedMedia.length) {
@@ -115,24 +105,16 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => 
       <Grid item xs={4}>
         <Thumbnail
           product={product}
-          url={url}
-          setUrl={setUrl}
-          updateMediaByUrl={updateNewThumbnail}
           handleSelectedMedia={handleThumbnail}
-          select={select}
-          selectedMedia={selectedMedia}
+          saveSelectedMedia={saveSelectedMedia}
         />
       </Grid>
       <Grid item xs={8}>
         <ProductMedias
           product={product}
-          url={url}
-          setUrl={setUrl}
-          updateMediaByUrl={updateNewMedia}
           handleSelectedMedia={handleAddMedia}
-          select={select}
-          selectedMedia={selectedMedia}
           fetchProduct={fetchProduct}
+          saveSelectedMedia={saveSelectedMedia}
         />
       </Grid>
     </Grid>

@@ -2,23 +2,44 @@ import ClearIcon from '@mui/icons-material/Clear';
 import { Button, Grid } from '@mui/material';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
-import { FC, useEffect, useRef } from 'react';
-import styles from 'styles/product-id-media.scss';
+import { FC, useEffect, useRef, useState } from 'react';
+import styles from 'styles/media-selector.scss';
 import { MediaList } from './listMedia';
 import { UploadMediaByUrlByDragDrop } from './uploadMediaByUrlByDragDrop';
 
 export const MediaSelector: FC<MediaSelectorProps> = ({
-  url,
-  setUrl,
-  updateMediaByUrl,
-  handleSelectedMedia,
   closeMediaSelector,
   allowMultiple,
-  select,
-  selectedMedia,
+  saveSelectedMedia,
+  handleSelectedMedia,
 }) => {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const { media, reload, isLoading, hasMore, fetchFiles, setMedia } = useMediaSelector();
+  const { media, reload, isLoading, hasMore, fetchFiles, setMedia, url, setUrl, updateLink } =
+    useMediaSelector();
+  const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
+  const [saveAttempted, setSaveAttempted] = useState(false);
+
+  const handleMediaAndCloseSelector = () => {
+    setSaveAttempted(true);
+    if (selectedMedia.length === 0) {
+      return;
+    }
+    handleSelectedMedia();
+    closeMediaSelector();
+  };
+
+  const select = (imageUrl: string, allowMultiple: boolean) => {
+    setSelectedMedia((prevSelected) => {
+      const newSelected = allowMultiple
+        ? prevSelected.includes(imageUrl)
+          ? prevSelected.filter((id) => id !== imageUrl)
+          : [...prevSelected, imageUrl]
+        : [imageUrl];
+
+      saveSelectedMedia(newSelected);
+      return newSelected;
+    });
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -36,7 +57,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   }, [isLoading, hasMore, media.length, fetchFiles]);
 
   useEffect(() => {
-    fetchFiles(5, 0);
+    fetchFiles(7, 0);
   }, [fetchFiles]);
 
   useEffect(() => {
@@ -50,22 +71,28 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [wrapperRef, closeMediaSelector]);
+
   return (
     <div className={styles.thumbnail_picker_editor_overlay}>
-      <Grid container spacing={2} className={styles.thumbnail_picker} ref={wrapperRef}>
+      <Grid
+        container
+        spacing={2}
+        alignItems='center'
+        justifyContent='center'
+        className={styles.thumbnail_picker}
+        ref={wrapperRef}
+      >
         <Grid item xs={6}>
           <UploadMediaByUrlByDragDrop
             reload={reload}
+            closeMediaSelector={closeMediaSelector}
             url={url}
             setUrl={setUrl}
-            updateMediaByUrl={updateMediaByUrl}
-            closeMediaSelector={closeMediaSelector}
+            updateContentLink={updateLink}
           />
         </Grid>
         <Grid item xs={6}>
           <MediaList
-            closeMediaSelector={closeMediaSelector}
-            handleSelectedMedia={handleSelectedMedia}
             setMedia={setMedia}
             media={media}
             allowMultiple={allowMultiple}
@@ -73,8 +100,19 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
             selectedMedia={selectedMedia}
           />
         </Grid>
+        <Grid item xs={12} sx={{ padding: '10px' }} display='flex' justifyContent='center'>
+          <Button
+            onClick={handleMediaAndCloseSelector}
+            variant='contained'
+            size='small'
+            className={styles.media_selector_btn}
+          >
+            save
+          </Button>
+        </Grid>
         <Button
           sx={{ backgroundColor: 'black' }}
+          aria-label='delete'
           variant='contained'
           size='small'
           className={styles.close_thumbnail_picker}
@@ -82,6 +120,13 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
         >
           <ClearIcon />
         </Button>
+        <Grid item>
+          {saveAttempted && selectedMedia.length === 0 && (
+            <h4 className={styles.no_media_message}>
+              No media selected. Please select or upload media.
+            </h4>
+          )}
+        </Grid>
       </Grid>
     </div>
   );

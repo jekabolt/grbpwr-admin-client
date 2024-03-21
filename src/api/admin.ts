@@ -1,26 +1,18 @@
-import { createAdminServiceClient } from './proto-http/admin';
 import { axiosRequestHandler } from './api';
 import {
-  ListObjectsPagedRequest,
-  ListObjectsPagedResponse,
-  UploadContentImageRequest,
-  UploadContentImageResponse,
-  UploadContentVideoRequest,
-  UploadContentVideoResponse,
-  DeleteFromBucketRequest,
-  DeleteFromBucketResponse,
-  AddProductRequest,
-  AddProductResponse,
-  GetProductsPagedRequest,
-  GetProductsPagedResponse,
-  GetProductByIDRequest,
-  GetProductByIDResponse,
   AddProductMediaRequest,
-  AddProductMediaResponse,
-  DeleteProductByIDRequest,
+  AddProductMediaResponse, AddProductRequest,
+  AddProductResponse, DeleteFromBucketRequest,
+  DeleteFromBucketResponse, DeleteProductByIDRequest,
   DeleteProductByIDResponse,
   GetDictionaryRequest,
-  GetDictionaryResponse,
+  GetDictionaryResponse, GetProductByIDRequest,
+  GetProductByIDResponse, GetProductsPagedRequest,
+  GetProductsPagedResponse, ListObjectsPagedRequest,
+  ListObjectsPagedResponse,
+  UploadContentImageRequest,
+  UploadContentImageResponse, UploadContentMediaLinkRequest, UploadContentMediaLinkResponse, UploadContentVideoRequest,
+  UploadContentVideoResponse, createAdminServiceClient
 } from './proto-http/admin';
 
 export const adminService = createAdminServiceClient(axiosRequestHandler);
@@ -29,6 +21,10 @@ export function getAllUploadedFiles(
   request: ListObjectsPagedRequest,
 ): Promise<ListObjectsPagedResponse> {
   return adminService.ListObjectsPaged(request);
+}
+
+export function uploadContentLink(request: UploadContentMediaLinkRequest): Promise<UploadContentMediaLinkResponse> {
+  return adminService.UploadContentMediaLink(request)
 }
 
 export function uploadContentImage(

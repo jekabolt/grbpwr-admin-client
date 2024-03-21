@@ -8,13 +8,9 @@ import { MediaViewComponentsProps } from '../../utility/interfaces';
 
 export const ProductMedias: FC<MediaViewComponentsProps> = ({
   product,
-  url,
-  setUrl,
-  updateMediaByUrl,
-  selectedMedia,
   fetchProduct,
-  select,
   handleSelectedMedia,
+  saveSelectedMedia,
 }) => {
   const handleDeleteMedia = async (id: number | undefined) => {
     await deleteMediaById({ productMediaId: id });
@@ -54,13 +50,9 @@ export const ProductMedias: FC<MediaViewComponentsProps> = ({
         <Grid item>
           <MediaSelectorLayout
             label='upload new media'
-            url={url}
-            setUrl={setUrl}
-            updateMediaByUrl={updateMediaByUrl}
-            selectedMedia={selectedMedia}
-            select={select}
             allowMultiple={true}
             handleSelectedMedia={handleSelectedMedia}
+            saveSelectedMedia={saveSelectedMedia}
           />
         </Grid>
       </Grid>
