@@ -11,6 +11,7 @@ const fileExtensionToContentType: { [key: string]: string } = {
   webm: 'video/webm',
   mp4: 'video/mp4',
   jpeg: 'image/jpeg',
+  webp: 'image/webp',
 };
 
 export const MediaManager: FC = () => {

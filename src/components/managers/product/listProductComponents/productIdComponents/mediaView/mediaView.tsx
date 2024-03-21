@@ -40,44 +40,6 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => 
     setSelectedMedia([]);
   };
 
-  // const updateNewMedia = async () => {
-  //   const isImageUrl = /^https:\/\/.*\.(jpg|jpeg|png|gif)$/i.test(url);
-
-  //   if (isImageUrl) {
-  //     const compressedUrl = url.replace(/-og\.jpg$/, '-compressed.jpg');
-  //     await addMediaByID({
-  //       productId: Number(id),
-  //       fullSize: url,
-  //       thumbnail: url,
-  //       compressed: compressedUrl,
-  //     });
-  //     fetchProduct?.();
-  //   } else {
-  //     setUrl('');
-  //   }
-  // };
-
-  // const updateNewThumbnail = async () => {
-  //   const isImageUrl = /^https:\/\/.*\.(jpg|jpeg|png|gif)$/i.test(url);
-  //   if (isImageUrl) {
-  //     const baseProductInsert = product?.product?.productInsert;
-
-  //     if (baseProductInsert) {
-  //       const updatedProductInsert = {
-  //         ...baseProductInsert,
-  //         thumbnail: url,
-  //       };
-  //       await updateProductById({
-  //         id: Number(id),
-  //         product: updatedProductInsert,
-  //       });
-  //     }
-  //     fetchProduct();
-  //   } else {
-  //     setUrl('');
-  //   }
-  // };
-
   const handleThumbnail = async () => {
     if (!product?.product || !selectedMedia.length) {
       return;
