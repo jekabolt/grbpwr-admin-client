@@ -10,7 +10,7 @@ export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
   return (
     <>
       <div className={styles.thumbnail_container}>
-        <img src={link} alt='thumbnail' />
+        {link ? <img src={link} alt='thumbnail' /> : <h1>No image selected</h1>}
         <div className={styles.media_selector}>
           <MediaSelectorLayout
             label='edit'

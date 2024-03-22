@@ -3,8 +3,9 @@ import { addHero, getHero } from 'api/hero';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
-import { common_HeroInsert } from '../../../api/proto-http/admin';
+import { common_HeroInsert, common_Product } from '../../../api/proto-http/admin';
 import { SingleMediaViewAndSelect } from '../products/detailsProduct/mediaView/components/singleMediaViewAndSelect';
+import { HeroProductTable } from './heroProductsTable';
 
 export const Hero: FC = () => {
   const [mainContentLink, setMainContentLink] = useState<string | undefined>('');
@@ -17,10 +18,11 @@ export const Hero: FC = () => {
   const [secondAdExploreLink, setSecondAdExploreLink] = useState<string | undefined>('');
   const [secondAdExploreText, setSecondAdExploreText] = useState<string | undefined>('');
 
+  const [products, setProducts] = useState<common_Product[]>([]);
+
   useEffect(() => {
     const fetchHero = async () => {
       const response = await getHero({});
-      console.log(response);
       setMainContentLink(response.hero?.main?.contentLink);
       setMainExploreLink(response.hero?.main?.exploreLink);
       setMainExploreText(response.hero?.main?.exploreText);
@@ -37,6 +39,8 @@ export const Hero: FC = () => {
           setSecondAdExploreText(response.hero?.ads[1].exploreText);
         }
       }
+
+      setProducts(response.hero?.productsFeatured ? response.hero?.productsFeatured : []);
     };
     fetchHero();
   }, []);
@@ -65,6 +69,22 @@ export const Hero: FC = () => {
     setSecondAdContentLink(undefined);
   };
 
+  const handleProductsReorder = (newProductsOrder: common_Product[]) => {
+    setProducts(newProductsOrder);
+  };
+
+  const removeFirstAd = () => {
+    setFirstAdContentLink(undefined);
+    setFirstAdExploreLink(undefined);
+    setFirstAdExploreText(undefined);
+  };
+
+  const removeSecondAd = () => {
+    setSecondAdContentLink(undefined);
+    setSecondAdExploreLink(undefined);
+    setSecondAdExploreText(undefined);
+  };
+
   const updateHero = async () => {
     let ads: common_HeroInsert[] = [];
 
@@ -86,17 +106,16 @@ export const Hero: FC = () => {
       });
     }
 
-    if (firstAdContentLink)
-      await addHero({
-        main: {
-          contentLink: mainContentLink,
-          contentType: 'image',
-          exploreLink: mainExploreLink,
-          exploreText: mainExploreText,
-        },
-        ads: ads.length > 0 ? ads : undefined,
-        productIds: [1], //TO-DO add product picker or smth here
-      });
+    await addHero({
+      main: {
+        contentLink: mainContentLink,
+        contentType: 'image',
+        exploreLink: mainExploreLink,
+        exploreText: mainExploreText,
+      },
+      ads: ads.length > 0 ? ads : undefined,
+      productIds: products.map((x) => x.id!), //TO-DO add product picker or smth here
+    });
   };
 
   return (
@@ -116,7 +135,7 @@ export const Hero: FC = () => {
             <TextField
               size='small'
               label='Main explore link'
-              value={mainExploreLink}
+              value={mainExploreLink || ''}
               onChange={(e) => setMainExploreLink(e.target.value)}
             />
           </Grid>
@@ -124,12 +143,19 @@ export const Hero: FC = () => {
             <TextField
               size='small'
               label='Main explore text'
-              value={mainExploreText}
+              value={mainExploreText || ''}
               onChange={(e) => setMainExploreText(e.target.value)}
             />
           </Grid>
           <Grid item xs={6}>
             <h2>First ad</h2>
+          </Grid>
+          <Grid item xs={6}>
+            {firstAdContentLink && (
+              <Button variant='contained' onClick={removeSecondAd}>
+                Remove
+              </Button>
+            )}
           </Grid>
           <Grid item xs={6}>
             <SingleMediaViewAndSelect
@@ -141,7 +167,7 @@ export const Hero: FC = () => {
             <TextField
               size='small'
               label='First ad explore link'
-              value={firstAdExploreLink}
+              value={firstAdExploreLink || ''}
               onChange={(e) => setFirstAdExploreLink(e.target.value)}
             />
           </Grid>
@@ -149,12 +175,19 @@ export const Hero: FC = () => {
             <TextField
               size='small'
               label='First ad explore text'
-              value={firstAdExploreText}
+              value={firstAdExploreText || ''}
               onChange={(e) => setFirstAdExploreText(e.target.value)}
             />
           </Grid>
           <Grid item xs={6}>
             <h2>Second ad</h2>
+          </Grid>
+          <Grid item xs={6}>
+            {secondAdContentLink && (
+              <Button variant='contained' onClick={removeSecondAd}>
+                Remove
+              </Button>
+            )}
           </Grid>
           <Grid item xs={6}>
             <SingleMediaViewAndSelect
@@ -166,7 +199,7 @@ export const Hero: FC = () => {
             <TextField
               size='small'
               label='Second ad explore link'
-              value={secondAdExploreLink}
+              value={secondAdExploreLink || ''}
               onChange={(e) => setSecondAdExploreLink(e.target.value)}
             />
           </Grid>
@@ -174,9 +207,15 @@ export const Hero: FC = () => {
             <TextField
               size='small'
               label='Second ad explore text'
-              value={secondAdExploreText}
+              value={secondAdExploreText || ''}
               onChange={(e) => setSecondAdExploreText(e.target.value)}
             />
+          </Grid>
+          <Grid item xs={6}>
+            <HeroProductTable
+              products={products}
+              onReorder={handleProductsReorder}
+            ></HeroProductTable>
           </Grid>
           <Grid item xs={6}>
             <Button variant='contained' onClick={updateHero}>
