@@ -8,9 +8,10 @@ import { MediaListProps } from '../../utility/interfaces';
 
 export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveSelectedMedia }) => {
   const handleDeleteMedia = async (id: number | undefined) => {
-    // TODO: fetchProduct need to wait till ipdateProduct completed
-    await deleteMediaById({ productMediaId: id });
-    fetchProduct();
+    const response = await deleteMediaById({ productMediaId: id });
+    if (response) {
+      fetchProduct();
+    }
   };
 
   const uniqueMedia = useMemo(() => {

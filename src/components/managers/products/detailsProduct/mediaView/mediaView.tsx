@@ -20,12 +20,13 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => 
         ...baseProductInsert,
         thumbnail: thumbnailUrl,
       };
-      // TODO: fetchProduct need to wait till ipdateProduct completed
-      await updateProductById({
+      const response = await updateProductById({
         id: Number(id),
         product: updatedProductInsert,
       });
-      fetchProduct();
+      if (response) {
+        fetchProduct();
+      }
     }
   };
 
@@ -44,15 +45,17 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => 
         continue;
       }
       addedMediaUrls.add(imageUrl);
-      // TODO: fetchProduct need to wait till ipdateProduct completed
-      await addMediaByID({
+      const response = await addMediaByID({
         productId: Number(id),
         fullSize: imageUrl,
         thumbnail: imageUrl,
         compressed: compressedUrl,
       });
+
+      if (response) {
+        fetchProduct();
+      }
     }
-    fetchProduct();
   };
   return (
     <Grid container spacing={4} direction='column'>
