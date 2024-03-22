@@ -1,54 +1,91 @@
 import { deleteFiles, getAllUploadedFiles } from 'api/admin';
-import { common_Media, common_ProductNew } from 'api/proto-http/admin';
+import { common_Media, common_ProductMediaInsert, common_ProductNew } from 'api/proto-http/admin';
 import React, { FC, useEffect, useState } from 'react';
-import styles from 'styles/thumbnailSelector.scss';
-import { DragDrop } from '../dragDrop';
+import styles from 'styles/mediaSelector.scss';
+import { DragDrop } from '../../../../../features/mediaSelector/dragDrop';
 
-interface ThumbnailPickerProps {
+interface MediaSelectorProps {
   product: common_ProductNew;
-  setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>;
-  closeMediaPicker: () => void;
-  handleAddClick: () => void;
   handleCloseMediaSelector: (e: React.MouseEvent<HTMLDivElement>) => void;
+  closeMediaPicker: () => void;
+  setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>;
+  handleAddClick: () => void;
 }
 
-export const ThumbnailPicker: FC<ThumbnailPickerProps> = ({
-  product,
-  setProduct,
-  closeMediaPicker,
-  handleAddClick,
+export const MediaPicker: FC<MediaSelectorProps> = ({
   handleCloseMediaSelector,
+  closeMediaPicker,
+  setProduct,
+  handleAddClick,
+  product,
 }) => {
   const [filesUrl, setFilesUrl] = useState<common_Media[]>([]);
   const [imageUrl, setImageUrl] = useState<string>('');
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string[]>([]);
+  const [mediaNumber, setMediaNumber] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
 
-  const select = (imageUrl: string | null) => {
-    setSelectedImage((prevSelectedImage) => (prevSelectedImage === imageUrl ? null : imageUrl));
+  const select = (imageUrl: string | number | undefined) => {
+    if (typeof imageUrl === 'string') {
+      if (selectedImage?.includes(imageUrl)) {
+        setSelectedImage((prevSelectedImage) =>
+          prevSelectedImage?.filter((image) => image !== imageUrl),
+        );
+      } else {
+        setSelectedImage([...(selectedImage || []), imageUrl]);
+      }
+    } else if (typeof imageUrl === 'number') {
+      if (mediaNumber.includes(imageUrl)) {
+        setMediaNumber((prevMediaNumber) =>
+          prevMediaNumber.filter((imageIndex) => imageIndex !== imageUrl),
+        );
+      } else {
+        setMediaNumber([...mediaNumber, imageUrl]);
+      }
+    }
   };
 
   const handleImage = () => {
-    if (!product.product) {
-      return;
-    }
+    let updatedMedia: common_ProductMediaInsert[] = [];
 
-    if (imageUrl && imageUrl.trim() !== '') {
-      setSelectedImage(imageUrl.trim());
-    }
+    if (selectedImage && selectedImage.length > 0) {
+      const uniqueSelectedImages = selectedImage.filter(
+        (imageUrl, index) => selectedImage.indexOf(imageUrl) === index,
+      );
 
-    if (!selectedImage) {
-      return;
-    }
+      const uniqueImagesToAdd = uniqueSelectedImages.filter(
+        (imageUrl) => !product.media || !product.media.some((media) => media.fullSize === imageUrl),
+      );
 
-    const updatedProduct: common_ProductNew = { ...product };
+      updatedMedia = uniqueImagesToAdd.map((imageUrl) => ({
+        fullSize: imageUrl,
+        thumbnail: imageUrl,
+        compressed: imageUrl.replace(/-og\.jpg$/, '-compressed.jpg'),
+      }));
+      setSelectedImage([]);
+    } else if (imageUrl.trim() !== '') {
+      const isUnique =
+        !product.media || !product.media.some((media) => media.fullSize === imageUrl);
 
-    if (updatedProduct.product) {
-      updatedProduct.product.thumbnail = selectedImage;
+      if (isUnique) {
+        updatedMedia.push({
+          fullSize: imageUrl,
+          thumbnail: imageUrl,
+          compressed: imageUrl.replace(/-og\.jpg$/, '-compressed.jpg'),
+        });
+        setImageUrl('');
+      } else {
+        alert('This media already exists in the product.');
+        setImageUrl('');
+        return;
+      }
     }
-    setProduct(updatedProduct);
+    setProduct((prevProduct: common_ProductNew) => ({
+      ...prevProduct,
+      media: [...(prevProduct.media || []), ...updatedMedia],
+    }));
     handleAddClick();
   };
 
@@ -158,17 +195,15 @@ export const ThumbnailPicker: FC<ThumbnailPickerProps> = ({
                 />
                 <label htmlFor={`${media.id}`}>
                   {selectedImage?.includes(media.media?.fullSize ?? '') ? (
-                    <span className={styles.media_selector_img_number}>selected</span>
+                    <span className={styles.media_selector_img_number}>
+                      {selectedImage.indexOf(media.media?.fullSize ?? '') + 1}
+                    </span>
                   ) : null}
                   <img
                     key={media.id}
                     src={media.media?.fullSize}
                     alt='video'
-                    className={`${styles.media_selector_img} ${
-                      selectedImage?.includes(media.media?.fullSize ?? '')
-                        ? styles.selected_media
-                        : ''
-                    }`}
+                    className={styles.media_selector_img}
                   />
                 </label>
               </li>

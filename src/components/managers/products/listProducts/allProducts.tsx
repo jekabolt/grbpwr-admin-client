@@ -10,9 +10,9 @@ import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
 import React, { FC, MouseEvent, useEffect, useState } from 'react';
 import styles from 'styles/paged.scss';
-import { Filter } from './listProductComponents/filterComponents/filterProducts';
-import { initialFilter } from './listProductComponents/filterComponents/initialFilterStates';
-import { Products } from './listProductComponents/products';
+import { Filter } from './filterComponents/filterProducts';
+import { initialFilter } from './filterComponents/initialFilterStates';
+import { ListProducts } from './listProducts';
 
 export const PageProduct: FC = () => {
   const [products, setProducts] = useState<common_Product[] | undefined>([]);
@@ -97,7 +97,7 @@ export const PageProduct: FC = () => {
       {deletionMessage && <div>{deletionMessage}</div>}
       <div className={styles.product_container}>
         <div className={styles.product_wrapper}>
-          <Products
+          <ListProducts
             products={products}
             productClick={handleProductClick}
             deleteProduct={handleDeleteClick}

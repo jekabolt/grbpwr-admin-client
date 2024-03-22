@@ -20,10 +20,10 @@ import { MediaManager } from 'components/managers/media/mediaManager';
 import { UploadPage } from 'components/managers/media/upload';
 import { OrderId } from 'components/managers/orders/orderId';
 import { Orders } from 'components/managers/orders/orders';
-import { AddProducts } from 'components/managers/product/addProduct';
-import { ProductID } from 'components/managers/product/listProductComponents/productID';
-import { PageProduct } from 'components/managers/product/pageProduct';
-import { Product } from 'components/managers/product/product';
+import { AddProducts } from 'components/managers/products/addProduct/addProduct';
+import { DetailsProduct } from 'components/managers/products/detailsProduct/detailsProduct';
+import { PageProduct } from 'components/managers/products/listProducts/allProducts';
+import { Product } from 'components/managers/products/products';
 import { GetPromo } from 'components/managers/promo/getPromo';
 import { Promo } from 'components/managers/promo/promo';
 import { Settings } from 'components/managers/settings/settings';
@@ -50,7 +50,7 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.product, element: <Product /> },
   { path: ROUTES.addProduct, element: <AddProducts /> },
   { path: ROUTES.pagedProduct, element: <PageProduct /> },
-  { path: `${ROUTES.singleProduct}/:id`, element: <ProductID /> },
+  { path: `${ROUTES.singleProduct}/:id`, element: <DetailsProduct /> },
   { path: ROUTES.hero, element: <Hero /> },
   { path: ROUTES.addHero, element: <MediaPicker /> },
   { path: ROUTES.getHero, element: <GetHero /> },

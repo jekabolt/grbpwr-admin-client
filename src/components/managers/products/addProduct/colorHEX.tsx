@@ -3,7 +3,7 @@ import update from 'immutability-helper';
 import React, { FC, useEffect, useRef, useState } from 'react';
 import { ChromePicker } from 'react-color';
 import styles from 'styles/addProd.scss';
-import { handleChange } from '../addProduct';
+import { handleChange } from './addProduct';
 
 interface colorHEXProps {
   product: common_ProductNew;

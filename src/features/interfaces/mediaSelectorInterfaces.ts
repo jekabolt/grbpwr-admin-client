@@ -2,14 +2,12 @@ import { common_Media } from "api/proto-http/admin"
 
 export interface MediaSelectorLayoutProps {
     label: string
-    handleSelectedMedia: () => void
     saveSelectedMedia: (newSelectedMedia: string[]) => void
     allowMultiple: boolean
 }
 
 
 export interface MediaSelectorProps {
-    handleSelectedMedia: () => void
     closeMediaSelector: () => void
     saveSelectedMedia: (newSelectedMedia: string[]) => void
     allowMultiple: boolean

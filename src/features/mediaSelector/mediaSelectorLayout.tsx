@@ -5,7 +5,6 @@ import { MediaSelector } from './mediaSelector';
 
 export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   label,
-  handleSelectedMedia,
   allowMultiple,
   saveSelectedMedia,
 }) => {
@@ -24,7 +23,6 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
           <MediaSelector
             saveSelectedMedia={saveSelectedMedia}
             closeMediaSelector={handleMediaSelectorVisibility}
-            handleSelectedMedia={handleSelectedMedia}
             allowMultiple={allowMultiple}
           />
         )}

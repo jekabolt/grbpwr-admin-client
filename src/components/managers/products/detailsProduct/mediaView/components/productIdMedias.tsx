@@ -4,17 +4,13 @@ import { deleteMediaById } from 'api/byID';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useMemo } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { MediaViewComponentsProps } from '../../utility/interfaces';
+import { MediaListProps } from '../../utility/interfaces';
 
-export const ProductMedias: FC<MediaViewComponentsProps> = ({
-  product,
-  fetchProduct,
-  handleSelectedMedia,
-  saveSelectedMedia,
-}) => {
+export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveSelectedMedia }) => {
   const handleDeleteMedia = async (id: number | undefined) => {
+    // TODO: fetchProduct need to wait till ipdateProduct completed
     await deleteMediaById({ productMediaId: id });
-    fetchProduct?.();
+    fetchProduct();
   };
 
   const uniqueMedia = useMemo(() => {
@@ -36,7 +32,7 @@ export const ProductMedias: FC<MediaViewComponentsProps> = ({
       <Grid container gap={5} className={styles.listed_media_container}>
         {uniqueMedia?.map((media) => (
           <Grid item xs={5} key={media.id} className={styles.listed_media_wrapper}>
-            <img src={media.productMediaInsert?.fullSize} alt='media' className={styles.media} />
+            <img src={media.productMediaInsert?.thumbnail} alt='media' className={styles.media} />
             <IconButton
               aria-label='delete'
               size='small'
@@ -51,7 +47,6 @@ export const ProductMedias: FC<MediaViewComponentsProps> = ({
           <MediaSelectorLayout
             label='upload new media'
             allowMultiple={true}
-            handleSelectedMedia={handleSelectedMedia}
             saveSelectedMedia={saveSelectedMedia}
           />
         </Grid>

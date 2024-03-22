@@ -9,13 +9,13 @@ import { Layout } from 'components/login/layout';
 import update from 'immutability-helper';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
-import { Categories } from './componentsOfProduct/categories';
-import { ColorHEX } from './componentsOfProduct/colorHEX';
-import { InputField } from './componentsOfProduct/inputFields';
-import { MediaSelector } from './componentsOfProduct/mediaSelectorFolder/mediaSelector';
-import { Thumbnail } from './componentsOfProduct/mediaSelectorFolder/thumbnail';
-import { Sizes } from './componentsOfProduct/sizes';
-import { Tags } from './componentsOfProduct/tag';
+import { Categories } from './categories';
+import { ColorHEX } from './colorHEX';
+import { InputField } from './inputFields';
+import { MediaSelector } from './mediaSelectorFolder/mediaSelector';
+import { Thumbnail } from './mediaSelectorFolder/thumbnail';
+import { Sizes } from './sizes';
+import { Tags } from './tag';
 
 interface ProductInsert {
   preorder: string | undefined;

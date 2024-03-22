@@ -4,11 +4,11 @@ import { getProductByID } from 'api/admin';
 import { common_ProductFull } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
-import { MediaView } from './productIdComponents/mediaView/mediaView';
-import { ProductIdInformation } from './productIdComponents/productdInformation/productIdInformation';
-import { ProductIdProps } from './productIdComponents/utility/type';
+import { MediaView } from './mediaView/mediaView';
+import { ProductIdInformation } from './productdInformation/productIdInformation';
+import { ProductIdProps } from './utility/type';
 
-export const ProductID: FC = () => {
+export const DetailsProduct: FC = () => {
   const [product, setProduct] = useState<common_ProductFull | undefined>();
   const {
     params: { id: id },

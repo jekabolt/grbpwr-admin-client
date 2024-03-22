@@ -7,8 +7,14 @@ export interface ProductIdProps {
 }
 
 export interface MediaViewComponentsProps {
-    product: common_ProductFull | undefined
-    handleSelectedMedia: () => void
+    link: string | undefined
     saveSelectedMedia: (newSelectedMedia: string[]) => void
-    fetchProduct?: () => void
 }
+
+
+export interface MediaListProps {
+    product: common_ProductFull | undefined
+    saveSelectedMedia: (newSelectedMedia: string[]) => void
+    fetchProduct: () => void
+}
+

@@ -2,7 +2,6 @@ import { getAllUploadedFiles, uploadContentLink } from 'api/admin';
 import { common_Media } from 'api/proto-http/admin';
 import { useCallback, useState } from 'react';
 
-// Define your hook here
 const useMediaSelector = (
     initialIsLoading = false,
     initialHasMore = true
@@ -50,7 +49,7 @@ const useMediaSelector = (
 
     const reload = useCallback(async () => {
         setMedia([]);
-        await fetchFiles(10, 0);
+        await fetchFiles(50, 0);
     }, [fetchFiles]);
 
     return {

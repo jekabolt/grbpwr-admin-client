@@ -11,7 +11,7 @@ interface ProductProps {
   showHidden: boolean | undefined;
 }
 
-export const Products: FC<ProductProps> = ({
+export const ListProducts: FC<ProductProps> = ({
   products,
   productClick,
   deleteProduct,

@@ -60,7 +60,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                     <video
                       key={m.id}
                       src={m.media?.fullSize}
-                      className={`${selectedMedia?.includes(m.media?.fullSize ?? '') ? styles.selected_media : ''}`}
+                      className={`${selectedMedia?.includes(m.media?.thumbnail ?? '') ? styles.selected_media : ''}`}
                       controls
                       onClick={(event) =>
                         handleSelect(m.media?.fullSize ?? '', allowMultiple, event)
@@ -71,7 +71,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                       key={m.id}
                       src={m.media?.fullSize}
                       alt='media'
-                      className={`${selectedMedia?.includes(m.media?.fullSize ?? '') ? styles.selected_media : ''}`}
+                      className={`${selectedMedia?.includes(m.media?.thumbnail ?? '') ? styles.selected_media : ''}`}
                     />
                   )}
                 </label>

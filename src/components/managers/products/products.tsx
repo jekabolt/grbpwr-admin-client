@@ -17,7 +17,7 @@ export const Product: FC = () => {
   return (
     <Layout>
       <div className={styles.product_operation_wrapper}>
-        <button onClick={navigatePagedProduct}>LIST PRODUCTS</button>
+        <button onClick={navigatePagedProduct}>ALL PRODUCTS</button>
         <button onClick={navigateAddProduct}>ADD PRODUCT</button>
       </div>
     </Layout>

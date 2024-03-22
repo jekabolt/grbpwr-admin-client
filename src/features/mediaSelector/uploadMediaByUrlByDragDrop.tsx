@@ -1,6 +1,6 @@
 import { Grid } from '@mui/material';
-import { DragDrop } from 'components/managers/product/componentsOfProduct/dragDrop';
 import { MediaSelectorUploadMediaByUrByDragDropProps } from 'features/interfaces/mediaSelectorInterfaces';
+import { DragDrop } from 'features/mediaSelector/dragDrop';
 import { FC } from 'react';
 import { ByUrl } from './byUrl';
 

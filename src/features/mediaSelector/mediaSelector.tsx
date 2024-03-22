@@ -11,7 +11,6 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   closeMediaSelector,
   allowMultiple,
   saveSelectedMedia,
-  handleSelectedMedia,
 }) => {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const { media, reload, isLoading, hasMore, fetchFiles, setMedia, url, setUrl, updateLink } =
@@ -19,12 +18,13 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
 
-  const handleMediaAndCloseSelector = () => {
+  const handleMediaAndCloseSelector = async () => {
     setSaveAttempted(true);
     if (selectedMedia.length === 0) {
       return;
     }
-    handleSelectedMedia();
+    console.log(selectedMedia);
+    saveSelectedMedia(selectedMedia);
     closeMediaSelector();
   };
 
@@ -35,8 +35,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
           ? prevSelected.filter((id) => id !== imageUrl)
           : [...prevSelected, imageUrl]
         : [imageUrl];
-
-      saveSelectedMedia(newSelected);
+      // saveSelectedMedia(selectedMedia);
       return newSelected;
     });
   };
@@ -48,7 +47,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
         !isLoading &&
         hasMore
       ) {
-        fetchFiles(5, media.length);
+        fetchFiles(50, media.length);
       }
     };
 
@@ -57,7 +56,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   }, [isLoading, hasMore, media.length, fetchFiles]);
 
   useEffect(() => {
-    fetchFiles(7, 0);
+    fetchFiles(50, 0);
   }, [fetchFiles]);
 
   useEffect(() => {
