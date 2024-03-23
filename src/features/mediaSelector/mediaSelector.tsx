@@ -23,7 +23,6 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     if (selectedMedia.length === 0) {
       return;
     }
-    console.log(selectedMedia);
     saveSelectedMedia(selectedMedia);
     closeMediaSelector();
   };
@@ -35,7 +34,6 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
           ? prevSelected.filter((id) => id !== imageUrl)
           : [...prevSelected, imageUrl]
         : [imageUrl];
-      // saveSelectedMedia(selectedMedia);
       return newSelected;
     });
   };

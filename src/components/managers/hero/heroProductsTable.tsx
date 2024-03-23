@@ -1,13 +1,19 @@
-import { Checkbox } from '@mui/material';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { Button, Checkbox } from '@mui/material';
+import IconButton from '@mui/material/IconButton';
+import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
 import { common_Category, common_Product } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
 import {
   MRT_TableContainer,
   useMaterialReactTable,
   type MRT_ColumnDef,
   type MRT_Row,
 } from 'material-react-table';
-import { FC, useEffect, useMemo, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 
 interface HeroProductTableData {
   products: common_Product[];
@@ -17,6 +23,10 @@ export const HeroProductTable: FC<
   HeroProductTableData & { onReorder: (newOrder: common_Product[]) => void }
 > = ({ products, onReorder }) => {
   const [categories, setCategories] = useState<common_Category[]>([]);
+
+  const navigate = useNavigate();
+
+  const [data, setData] = useState(products);
 
   useEffect(() => {
     setData(products);
@@ -30,16 +40,59 @@ export const HeroProductTable: FC<
     fetchDictionary();
   }, []);
 
+  const moveRow = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      if (toIndex >= 0 && toIndex < data.length) {
+        const newData = [...data];
+        const item = newData.splice(fromIndex, 1)[0];
+        newData.splice(toIndex, 0, item);
+        setData(newData);
+        onReorder(newData);
+      }
+    },
+    [data, onReorder],
+  );
+
   const columns = useMemo<MRT_ColumnDef<common_Product>[]>(
     //column definitions...
     () => [
+      {
+        id: 'actions',
+        header: 'Order',
+        Cell: ({ row }) => (
+          <div>
+            <Button
+              onClick={(event) => {
+                event.stopPropagation();
+                moveRow(row.index, row.index - 1);
+              }}
+              disabled={row.index === 0}
+              size='small'
+              variant='outlined'
+            >
+              <ArrowUpwardIcon fontSize='small' />
+            </Button>
+            <Button
+              onClick={(event) => {
+                event.stopPropagation();
+                moveRow(row.index, row.index + 1);
+              }}
+              disabled={row.index === data.length - 1}
+              size='small'
+              variant='outlined'
+            >
+              <ArrowDownwardIcon fontSize='small' />
+            </Button>
+          </div>
+        ),
+      },
       {
         accessorKey: 'id',
         header: 'Id',
       },
       {
         accessorKey: 'productInsert.thumbnail',
-        header: 'Data',
+        header: 'Thumbnail',
         Cell: ({ cell }) => (
           <img
             src={cell.getValue() as string}
@@ -83,11 +136,27 @@ export const HeroProductTable: FC<
           return <span>{category ? category.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>; // return the category name or 'Unknown'
         },
       },
+      {
+        id: 'delete',
+        header: 'Delete',
+        Cell: ({ row }) => (
+          <IconButton
+            onClick={(event) => {
+              event.stopPropagation(); // Prevent row click event
+              const newData = data.filter((_, index) => index !== row.index);
+              setData(newData);
+              onReorder(newData);
+            }}
+            aria-label='delete'
+            size='small'
+          >
+            <DeleteIcon fontSize='small' />
+          </IconButton>
+        ),
+      },
     ],
-    [categories],
+    [categories, moveRow, setData, onReorder],
   );
-
-  const [data, setData] = useState(products);
 
   const table = useMaterialReactTable({
     autoResetPageIndex: false,
@@ -107,6 +176,14 @@ export const HeroProductTable: FC<
           setData([...data]);
           onReorder(data);
         }
+      },
+    }),
+    muiTableBodyRowProps: ({ row }) => ({
+      onClick: () => {
+        navigate({ to: `${ROUTES.singleProduct}/${row.original.id}` });
+      },
+      sx: {
+        cursor: 'pointer',
       },
     }),
   });

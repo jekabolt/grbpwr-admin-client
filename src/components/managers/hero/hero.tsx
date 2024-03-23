@@ -1,5 +1,6 @@
-import { Button, Grid, TextField } from '@mui/material';
+import { Alert, Button, Grid, Snackbar, TextField } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
+import { ProductPickerModal } from 'components/common/productPickerModal';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
@@ -19,6 +20,8 @@ export const Hero: FC = () => {
   const [secondAdExploreText, setSecondAdExploreText] = useState<string | undefined>('');
 
   const [products, setProducts] = useState<common_Product[]>([]);
+
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     const fetchHero = async () => {
@@ -74,9 +77,12 @@ export const Hero: FC = () => {
   };
 
   const removeFirstAd = () => {
-    setFirstAdContentLink(undefined);
-    setFirstAdExploreLink(undefined);
-    setFirstAdExploreText(undefined);
+    setFirstAdContentLink(secondAdContentLink);
+    setFirstAdExploreLink(secondAdExploreLink);
+    setFirstAdExploreText(secondAdExploreText);
+    setSecondAdContentLink(undefined);
+    setSecondAdExploreLink(undefined);
+    setSecondAdExploreText(undefined);
   };
 
   const removeSecondAd = () => {
@@ -106,7 +112,7 @@ export const Hero: FC = () => {
       });
     }
 
-    await addHero({
+    let response = await addHero({
       main: {
         contentLink: mainContentLink,
         contentType: 'image',
@@ -114,8 +120,21 @@ export const Hero: FC = () => {
         exploreText: mainExploreText,
       },
       ads: ads.length > 0 ? ads : undefined,
-      productIds: products.map((x) => x.id!), //TO-DO add product picker or smth here
+      productIds: products.map((x) => x.id!),
     });
+
+    if (response) {
+      setSaveSuccess(true);
+    }
+  };
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleOpenProductSelection = () => setIsModalOpen(true);
+  const handleCloseModal = () => setIsModalOpen(false);
+
+  const handleSaveNewSelection = (newSelection: common_Product[]) => {
+    setProducts(newSelection);
   };
 
   return (
@@ -152,7 +171,7 @@ export const Hero: FC = () => {
           </Grid>
           <Grid item xs={6}>
             {firstAdContentLink && (
-              <Button variant='contained' onClick={removeSecondAd}>
+              <Button variant='contained' onClick={removeFirstAd}>
                 Remove
               </Button>
             )}
@@ -211,17 +230,36 @@ export const Hero: FC = () => {
               onChange={(e) => setSecondAdExploreText(e.target.value)}
             />
           </Grid>
-          <Grid item xs={6}>
+          <Grid item xs={6} sx={{ mt: 4 }}>
             <HeroProductTable
               products={products}
               onReorder={handleProductsReorder}
             ></HeroProductTable>
           </Grid>
           <Grid item xs={6}>
+            <Button variant='contained' onClick={handleOpenProductSelection}>
+              Add Products
+            </Button>
+          </Grid>
+          <ProductPickerModal
+            open={isModalOpen}
+            onClose={handleCloseModal}
+            onSave={handleSaveNewSelection}
+            selectedProductIds={products.map((x) => x.id!)}
+          />
+          <Grid item xs={6} sx={{ mt: 4, textAlign: 'center' }}>
             <Button variant='contained' onClick={updateHero}>
               Save
             </Button>
           </Grid>
+          <Snackbar
+            open={saveSuccess}
+            onClose={() => setSaveSuccess(false)}
+            autoHideDuration={2000}
+            anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <Alert severity='success'>Save successful</Alert>
+          </Snackbar>
         </Grid>
       </div>
     </Layout>
