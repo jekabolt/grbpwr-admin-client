@@ -7,8 +7,7 @@ interface ProductFormProps {
   title: string;
   name: string;
   isEdit: boolean;
-  value: string | undefined;
-  checked?: boolean | undefined;
+  value: string | boolean | undefined;
   onChange: (
     event: React.ChangeEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLInputElement
@@ -73,14 +72,7 @@ export const ProductForm: FC<ProductFormProps> = ({
           </select>
         ) : name === 'hidden' ? (
           <FormControlLabel
-            control={
-              <Checkbox
-                checked={Boolean(!value)}
-                onChange={onChange}
-                name={name}
-                value={value || ''}
-              />
-            }
+            control={<Checkbox checked={Boolean(value)} onChange={onChange} name={name} />}
             label='Hidden'
           />
         ) : (

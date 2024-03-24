@@ -13,8 +13,9 @@ interface UpdatePayload extends Partial<common_ProductInsert> {
 }
 
 export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
-  const { inputValues, handleInputChange, changedFields, resetChangedFields } =
-    useChangeProductDetails(initialProductDetails(product));
+  const { inputValues, handleInputChange, changedFields } = useChangeProductDetails(
+    initialProductDetails(product),
+  );
 
   const [isEdit, setIsEdit] = useState(false);
   const [dict, setDict] = useState<common_Dictionary>();
@@ -186,7 +187,7 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
           isEdit={isEdit}
           name='hidden'
           title='hidden'
-          value={inputValues.hidden?.toString()}
+          value={Boolean(inputValues.hidden)}
           onChange={handleInputChange}
           currentInfo={product?.product?.productInsert?.hidden ? 'true' : 'false'}
         />
