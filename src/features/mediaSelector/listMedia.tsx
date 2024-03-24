@@ -1,6 +1,7 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton, ImageList, ImageListItem } from '@mui/material';
 import { deleteFiles } from 'api/admin';
+import { fileExtensionToContentType } from 'components/managers/media/mediaManager';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { FC } from 'react';
 import styles from 'styles/media-selector.scss';
@@ -18,8 +19,14 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
 
   const isVideo = (mediaUrl: string | undefined) => {
     if (mediaUrl) {
-      return mediaUrl.endsWith('.mp4') || mediaUrl.endsWith('.webm') || mediaUrl.endsWith('.ogg');
+      const extension = mediaUrl.split('.').pop()?.toLowerCase();
+
+      if (extension) {
+        const contentType = fileExtensionToContentType[extension];
+        return contentType?.startsWith('video/');
+      }
     }
+    return false;
   };
 
   const handleSelect = (mediaUrl: string, allowMultiple: boolean, event: any) => {
@@ -47,20 +54,20 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
               <ImageListItem key={m.id} className={styles.thumbnail_picker_item_wrapper}>
                 <input
                   type='checkbox'
-                  checked={selectedMedia?.includes(m.media?.fullSize ?? '')}
+                  checked={selectedMedia?.some((mediaItem) => mediaItem.url === m.media?.fullSize)}
                   onChange={() => select(m.media?.fullSize ?? '', allowMultiple)}
                   id={`${m.id}`}
                   style={{ display: 'none' }}
                 />
                 <label htmlFor={`${m.id}`}>
-                  {selectedMedia?.includes(m.media?.fullSize ?? '') ? (
+                  {selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? (
                     <span className={styles.media_selector_img_number}>selected</span>
                   ) : null}
                   {isVideo(m.media?.fullSize) ? (
                     <video
                       key={m.id}
                       src={m.media?.fullSize}
-                      className={`${selectedMedia?.includes(m.media?.thumbnail ?? '') ? styles.selected_media : ''}`}
+                      className={`${selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? styles.selected_media : ''}`}
                       controls
                       onClick={(event) =>
                         handleSelect(m.media?.fullSize ?? '', allowMultiple, event)
@@ -71,7 +78,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                       key={m.id}
                       src={m.media?.fullSize}
                       alt='media'
-                      className={`${selectedMedia?.includes(m.media?.thumbnail ?? '') ? styles.selected_media : ''}`}
+                      className={`${selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? styles.selected_media : ''}`}
                     />
                   )}
                 </label>

@@ -1,39 +1,53 @@
 import { Button, Grid } from '@mui/material';
 import { updateProductById } from 'api/byID';
-import { common_ProductInsert } from 'api/proto-http/admin';
-import { FC, useState } from 'react';
+import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
+import { findInDictionary } from 'components/managers/orders/utility';
+import { FC, useEffect, useState } from 'react';
 import { ProductIdProps } from '../../utility/interfaces';
 import { useChangeProductDetails } from '../utility/changeProductDetails';
 import { initialProductDetails } from '../utility/initialProductDetails';
 import { ProductForm } from './productForm';
+
+interface UpdatePayload extends Partial<common_ProductInsert> {
+  [key: string]: any;
+}
 
 export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const { inputValues, handleInputChange, changedFields, resetChangedFields } =
     useChangeProductDetails(initialProductDetails(product));
 
   const [isEdit, setIsEdit] = useState(false);
+  const [dict, setDict] = useState<common_Dictionary>();
 
+  useEffect(() => {
+    const data = localStorage.getItem('dictionary');
+    if (data) {
+      setDict(JSON.parse(data));
+    }
+  }, []);
   const handleUpdateProduct = async () => {
     if (changedFields.size === 0) return;
 
-    let updatePayload: Partial<common_ProductInsert> = {};
+    let updatePayload: UpdatePayload = {};
 
-    if (changedFields.has('price')) {
-      updatePayload.price = { value: inputValues['price'] || '' };
-    }
-    if (changedFields.has('name')) {
-      updatePayload.name = inputValues['name'];
-    }
-    if (changedFields.has('description')) {
-      updatePayload.description = inputValues['description'];
-    }
+    changedFields.forEach((field) => {
+      if (field in inputValues) {
+        const value = inputValues[field];
+        if (['price', 'salePercentage'].includes(field)) {
+          updatePayload[field] = { value: value || '' };
+        } else {
+          updatePayload[field] = value;
+        }
+      }
+    });
 
-    await updateProductById({
+    const response = await updateProductById({
       id: Number(id),
       product: { ...product?.product?.productInsert, ...updatePayload } as common_ProductInsert,
     });
-
-    fetchProduct();
+    if (response) {
+      fetchProduct();
+    }
   };
 
   return (
@@ -47,7 +61,8 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
         <ProductForm
           isEdit={isEdit}
           title='name'
-          value={inputValues.name || ''}
+          name='name'
+          value={inputValues.name?.toLocaleString() || ''}
           onChange={handleInputChange}
           currentInfo={product?.product?.productInsert?.name}
         />
@@ -55,20 +70,125 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
       <Grid item>
         <ProductForm
           isEdit={isEdit}
+          title='description'
+          name='description'
+          value={inputValues.description?.toLocaleString() || ''}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.description}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='countryOfOrigin'
+          title='contry'
+          value={inputValues.countryOfOrigin?.toLocaleString()}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.countryOfOrigin}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='preorder'
+          title='preorder'
+          value={inputValues.preorder?.toLocaleString() || ''}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.preorder}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
           title='price'
-          value={inputValues.price}
+          name='price'
+          value={inputValues.price?.toLocaleString()}
           onChange={handleInputChange}
           currentInfo={product?.product?.productInsert?.price?.value}
         />
       </Grid>
-
       <Grid item>
         <ProductForm
           isEdit={isEdit}
-          title='description'
-          value={inputValues.description}
+          name='salePercentage'
+          title='sale'
+          value={inputValues.salePercentage?.toLocaleString()}
           onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.description}
+          currentInfo={product?.product?.productInsert?.salePercentage?.value}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='brand'
+          title='brand'
+          value={inputValues.brand?.toLocaleString()}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.brand}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='color'
+          title='color'
+          value={inputValues.color?.toLocaleString()}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.color}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='colorHex'
+          title='color hex'
+          value={inputValues.colorHex?.toLocaleString()}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.colorHex}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='categoryId'
+          title='category'
+          value={inputValues.categoryId?.toLocaleString()}
+          onChange={handleInputChange}
+          currentInfo={
+            findInDictionary(dict, product?.product?.productInsert?.categoryId, 'category') || ''
+          }
+          dictionary={dict}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='targetGender'
+          title='gender'
+          value={inputValues.targetGender?.toLocaleString()}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.targetGender?.replace('GENDER_ENUM_', '')}
+          dictionary={dict}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='sku'
+          title='vendore code'
+          value={inputValues.sku?.toLocaleString()}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.sku}
+        />
+      </Grid>
+      <Grid item>
+        <ProductForm
+          isEdit={isEdit}
+          name='hidden'
+          title='hidden'
+          value={inputValues.hidden?.toString()}
+          onChange={handleInputChange}
+          currentInfo={product?.product?.productInsert?.hidden ? 'true' : 'false'}
         />
       </Grid>
 

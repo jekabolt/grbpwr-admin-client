@@ -8,9 +8,10 @@ type Pattern = {
 const pattern: Pattern = {
   size: /SIZE_ENUM_/,
   measurement: /MEASUREMENT_NAME_ENUM_/,
+  category: /CATEGORY_ENUM_/
 };
 
-type dictionaryTypes = 'size' | 'order' | 'carrier' | 'status' | 'gender' | 'measurement';
+type dictionaryTypes = 'size' | 'order' | 'carrier' | 'status' | 'gender' | 'measurement' | 'category';
 
 export const findInDictionary = (
   dictionary: common_Dictionary | undefined,
@@ -21,6 +22,9 @@ export const findInDictionary = (
 
   let data;
   switch (type) {
+    case 'category':
+      data = dictionary.categories?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
+      break
     case 'size':
       data = dictionary.sizes?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
       break;
@@ -35,12 +39,6 @@ export const findInDictionary = (
       break;
     case 'status':
       data = dictionary.orderStatuses?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
-      break;
-    case 'gender':
-      // common_SizeEnum in dictionary === 'string'
-      data = dictionary.genders
-        ?.find((s) => s.id !== undefined && parseInt(s.id) === id)
-        ?.name?.replace(pattern[type], '');
       break;
 
     default:
