@@ -56,7 +56,7 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
       container
       direction='column'
       spacing={1}
-      style={{ border: '1px solid black', width: '100%' }}
+      style={{ border: '1px solid black', width: '90%' }}
     >
       <Grid item>
         <ProductForm
