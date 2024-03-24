@@ -1,24 +1,266 @@
-import { useNavigate } from '@tanstack/react-location';
+import { Alert, Button, Grid, Snackbar, TextField } from '@mui/material';
+import { addHero, getHero } from 'api/hero';
+import { ProductPickerModal } from 'components/common/productPickerModal';
 import { Layout } from 'components/login/layout';
-import { ROUTES } from 'constants/routes';
-import { FC } from 'react';
-import styles from 'styles/product.scss';
+import { FC, useEffect, useState } from 'react';
+import styles from 'styles/hero.scss';
+import { common_HeroInsert, common_Product } from '../../../api/proto-http/admin';
+import { SingleMediaViewAndSelect } from '../products/detailsProduct/mediaView/components/singleMediaViewAndSelect';
+import { HeroProductTable } from './heroProductsTable';
 
 export const Hero: FC = () => {
-  const navigate = useNavigate();
+  const [mainContentLink, setMainContentLink] = useState<string | undefined>('');
+  const [mainExploreLink, setMainExploreLink] = useState<string | undefined>('');
+  const [mainExploreText, setMainExploreText] = useState<string | undefined>('');
+  const [firstAdContentLink, setFirstAdContentLink] = useState<string | undefined>('');
+  const [firstAdExploreLink, setFirstAdExploreLink] = useState<string | undefined>('');
+  const [firstAdExploreText, setFirstAdExploreText] = useState<string | undefined>('');
+  const [secondAdContentLink, setSecondAdContentLink] = useState<string | undefined>('');
+  const [secondAdExploreLink, setSecondAdExploreLink] = useState<string | undefined>('');
+  const [secondAdExploreText, setSecondAdExploreText] = useState<string | undefined>('');
 
-  const navigateAddProduct = () => {
-    navigate({ to: ROUTES.addHero });
+  const [products, setProducts] = useState<common_Product[]>([]);
+
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    const fetchHero = async () => {
+      const response = await getHero({});
+      setMainContentLink(response.hero?.main?.contentLink);
+      setMainExploreLink(response.hero?.main?.exploreLink);
+      setMainExploreText(response.hero?.main?.exploreText);
+
+      if (response.hero?.ads) {
+        if (response.hero.ads[0]) {
+          setFirstAdContentLink(response.hero?.ads[0].contentLink);
+          setFirstAdExploreLink(response.hero?.ads[0].exploreLink);
+          setFirstAdExploreText(response.hero?.ads[0].exploreText);
+        }
+        if (response.hero.ads[1]) {
+          setSecondAdContentLink(response.hero?.ads[1].contentLink);
+          setSecondAdExploreLink(response.hero?.ads[1].exploreLink);
+          setSecondAdExploreText(response.hero?.ads[1].exploreText);
+        }
+      }
+
+      setProducts(response.hero?.productsFeatured ? response.hero?.productsFeatured : []);
+    };
+    fetchHero();
+  }, []);
+
+  const saveMainContentLink = (mediaLink: string[]) => {
+    if (mediaLink[0]) {
+      setMainContentLink(mediaLink[0]);
+      return;
+    }
+    setMainContentLink(undefined);
   };
 
-  const navigatePagedProduct = () => {
-    navigate({ to: ROUTES.getHero });
+  const saveFirstAdContentLink = (mediaLink: string[]) => {
+    if (mediaLink[0]) {
+      setFirstAdContentLink(mediaLink[0]);
+      return;
+    }
+    setFirstAdContentLink(undefined);
   };
+
+  const saveSecondAdContentLink = (mediaLink: string[]) => {
+    if (mediaLink[0]) {
+      setSecondAdContentLink(mediaLink[0]);
+      return;
+    }
+    setSecondAdContentLink(undefined);
+  };
+
+  const handleProductsReorder = (newProductsOrder: common_Product[]) => {
+    setProducts(newProductsOrder);
+  };
+
+  const removeFirstAd = () => {
+    setFirstAdContentLink(secondAdContentLink);
+    setFirstAdExploreLink(secondAdExploreLink);
+    setFirstAdExploreText(secondAdExploreText);
+    setSecondAdContentLink(undefined);
+    setSecondAdExploreLink(undefined);
+    setSecondAdExploreText(undefined);
+  };
+
+  const removeSecondAd = () => {
+    setSecondAdContentLink(undefined);
+    setSecondAdExploreLink(undefined);
+    setSecondAdExploreText(undefined);
+  };
+
+  const updateHero = async () => {
+    let ads: common_HeroInsert[] = [];
+
+    if (firstAdContentLink !== undefined) {
+      ads.push({
+        contentLink: firstAdContentLink,
+        contentType: 'image',
+        exploreLink: firstAdExploreLink,
+        exploreText: firstAdExploreText,
+      });
+    }
+
+    if (secondAdContentLink !== undefined) {
+      ads.push({
+        contentLink: secondAdContentLink,
+        contentType: 'image',
+        exploreLink: secondAdExploreLink,
+        exploreText: secondAdExploreText,
+      });
+    }
+
+    let response = await addHero({
+      main: {
+        contentLink: mainContentLink,
+        contentType: 'image',
+        exploreLink: mainExploreLink,
+        exploreText: mainExploreText,
+      },
+      ads: ads.length > 0 ? ads : undefined,
+      productIds: products.map((x) => x.id!),
+    });
+
+    if (response) {
+      setSaveSuccess(true);
+    }
+  };
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleOpenProductSelection = () => setIsModalOpen(true);
+  const handleCloseModal = () => setIsModalOpen(false);
+
+  const handleSaveNewSelection = (newSelection: common_Product[]) => {
+    setProducts(newSelection);
+  };
+
   return (
     <Layout>
-      <div className={styles.product_operation_wrapper}>
-        <button onClick={navigatePagedProduct}>LIST HERO</button>
-        <button onClick={navigateAddProduct}>ADD HERO</button>
+      <div className={styles.hero}>
+        <Grid container spacing={2} direction='column'>
+          <Grid item xs={6}>
+            <h2>Main</h2>
+          </Grid>
+          <Grid item xs={6}>
+            <SingleMediaViewAndSelect
+              link={mainContentLink}
+              saveSelectedMedia={saveMainContentLink}
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <TextField
+              size='small'
+              label='Main explore link'
+              value={mainExploreLink || ''}
+              onChange={(e) => setMainExploreLink(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <TextField
+              size='small'
+              label='Main explore text'
+              value={mainExploreText || ''}
+              onChange={(e) => setMainExploreText(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <h2>First ad</h2>
+          </Grid>
+          <Grid item xs={6}>
+            {firstAdContentLink && (
+              <Button variant='contained' onClick={removeFirstAd}>
+                Remove
+              </Button>
+            )}
+          </Grid>
+          <Grid item xs={6}>
+            <SingleMediaViewAndSelect
+              link={firstAdContentLink}
+              saveSelectedMedia={saveFirstAdContentLink}
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <TextField
+              size='small'
+              label='First ad explore link'
+              value={firstAdExploreLink || ''}
+              onChange={(e) => setFirstAdExploreLink(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <TextField
+              size='small'
+              label='First ad explore text'
+              value={firstAdExploreText || ''}
+              onChange={(e) => setFirstAdExploreText(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <h2>Second ad</h2>
+          </Grid>
+          <Grid item xs={6}>
+            {secondAdContentLink && (
+              <Button variant='contained' onClick={removeSecondAd}>
+                Remove
+              </Button>
+            )}
+          </Grid>
+          <Grid item xs={6}>
+            <SingleMediaViewAndSelect
+              link={secondAdContentLink}
+              saveSelectedMedia={saveSecondAdContentLink}
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <TextField
+              size='small'
+              label='Second ad explore link'
+              value={secondAdExploreLink || ''}
+              onChange={(e) => setSecondAdExploreLink(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <TextField
+              size='small'
+              label='Second ad explore text'
+              value={secondAdExploreText || ''}
+              onChange={(e) => setSecondAdExploreText(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={6} sx={{ mt: 4 }}>
+            <HeroProductTable
+              products={products}
+              onReorder={handleProductsReorder}
+            ></HeroProductTable>
+          </Grid>
+          <Grid item xs={6}>
+            <Button variant='contained' onClick={handleOpenProductSelection}>
+              Add Products
+            </Button>
+          </Grid>
+          <ProductPickerModal
+            open={isModalOpen}
+            onClose={handleCloseModal}
+            onSave={handleSaveNewSelection}
+            selectedProductIds={products.map((x) => x.id!)}
+          />
+          <Grid item xs={6} sx={{ mt: 4, textAlign: 'center' }}>
+            <Button variant='contained' onClick={updateHero}>
+              Save
+            </Button>
+          </Grid>
+          <Snackbar
+            open={saveSuccess}
+            onClose={() => setSaveSuccess(false)}
+            autoHideDuration={2000}
+            anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <Alert severity='success'>Save successful</Alert>
+          </Snackbar>
+        </Grid>
       </div>
     </Layout>
   );

@@ -13,9 +13,7 @@ import { Main } from 'components/managers/MainContent';
 import { Archive } from 'components/managers/archive/archive';
 import { GetArchive } from 'components/managers/archive/getArchive';
 import { MainArchive } from 'components/managers/archive/mainArchive';
-import { GetHero } from 'components/managers/hero/getHero';
 import { Hero } from 'components/managers/hero/hero';
-import { MediaPicker } from 'components/managers/hero/mediaPicker';
 import { MediaManager } from 'components/managers/media/mediaManager';
 import { UploadPage } from 'components/managers/media/upload';
 import { OrderId } from 'components/managers/orders/orderId';
@@ -52,8 +50,7 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.pagedProduct, element: <PageProduct /> },
   { path: `${ROUTES.singleProduct}/:id`, element: <DetailsProduct /> },
   { path: ROUTES.hero, element: <Hero /> },
-  { path: ROUTES.addHero, element: <MediaPicker /> },
-  { path: ROUTES.getHero, element: <GetHero /> },
+
   { path: ROUTES.promo, element: <Promo /> },
   { path: ROUTES.getPromo, element: <GetPromo /> },
   { path: ROUTES.archive, element: <MainArchive /> },
