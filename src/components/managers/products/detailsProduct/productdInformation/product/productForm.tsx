@@ -2,6 +2,7 @@ import { Checkbox, FormControlLabel, Grid, TextField, Typography } from '@mui/ma
 import { common_Dictionary } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
 import React, { FC } from 'react';
+import styles from 'styles/product-details.scss';
 
 interface ProductFormProps {
   title: string;
@@ -15,6 +16,7 @@ interface ProductFormProps {
   ) => void;
   currentInfo: string | undefined;
   dictionary?: common_Dictionary;
+  type?: 'text' | 'number' | 'color';
 }
 
 export const ProductForm: FC<ProductFormProps> = ({
@@ -25,11 +27,14 @@ export const ProductForm: FC<ProductFormProps> = ({
   currentInfo,
   name,
   dictionary,
+  type = 'text',
 }) => {
   return (
-    <Grid container spacing={2} alignItems='flex-start'>
+    <Grid container spacing={3} alignItems='flex-start'>
       <Grid item xs={4}>
-        <Typography variant='h4'>{title}</Typography>
+        <Typography variant='h4' className={styles.title}>
+          {title}
+        </Typography>
       </Grid>
       <Grid item xs={4}>
         {!isEdit ? (
@@ -41,11 +46,13 @@ export const ProductForm: FC<ProductFormProps> = ({
               value={currentInfo ? String(currentInfo) : ''}
             ></textarea>
           ) : (
-            <Typography variant='h4'>{currentInfo}</Typography>
+            <Typography variant='h4' className={styles.current_info}>
+              {currentInfo}
+            </Typography>
           )
         ) : name === 'colorHex' ? (
           <TextField
-            type='color'
+            type={type}
             name={name}
             value={value || ''}
             onChange={onChange}
@@ -54,7 +61,7 @@ export const ProductForm: FC<ProductFormProps> = ({
           />
         ) : name === 'categoryId' ? (
           <select onChange={onChange} name={name} value={String(value || '')} id=''>
-            <option value=''>Select category</option>
+            <option value=''>{currentInfo}</option>
             {dictionary?.categories?.map((category) => (
               <option value={category.id} key={category.id}>
                 {findInDictionary(dictionary, category.id, 'category')}
@@ -63,7 +70,7 @@ export const ProductForm: FC<ProductFormProps> = ({
           </select>
         ) : name === 'targetGender' ? (
           <select name={name} value={String(value || '')} onChange={onChange} id=''>
-            <option value=''>select gender</option>
+            <option value=''>{currentInfo}</option>
             {dictionary?.genders?.map((gender) => (
               <option key={gender.id} value={gender.id}>
                 {gender.name?.replace('GENDER_ENUM_', '')}
@@ -77,7 +84,7 @@ export const ProductForm: FC<ProductFormProps> = ({
           />
         ) : (
           <TextField
-            type='text'
+            type={type}
             name={name}
             value={value || ''}
             onChange={onChange}
@@ -85,6 +92,8 @@ export const ProductForm: FC<ProductFormProps> = ({
             multiline={title === 'description'}
             rows={title === 'description' ? 4 : 1}
             fullWidth
+            placeholder={currentInfo}
+            inputProps={{ min: 0 }}
           />
         )}
       </Grid>

@@ -1,17 +1,17 @@
 import { adminService } from './admin';
 import {
-  AddProductMeasurementRequest,
-  AddProductMeasurementResponse,
   AddProductTagRequest,
   AddProductTagResponse,
   DeleteProductMediaRequest,
   DeleteProductMediaResponse,
   DeleteProductTagRequest,
   DeleteProductTagResponse,
+  UpdateProductMeasurementsRequest,
+  UpdateProductMeasurementsResponse,
   UpdateProductRequest,
   UpdateProductResponse,
   UpdateProductSizeStockRequest,
-  UpdateProductSizeStockResponse,
+  UpdateProductSizeStockResponse
 } from './proto-http/admin';
 
 
@@ -26,10 +26,11 @@ export function updateSize(
 }
 
 export function updateMeasurement(
-  request: AddProductMeasurementRequest,
-): Promise<AddProductMeasurementResponse> {
-  return adminService.AddProductMeasurement(request);
+  request: UpdateProductMeasurementsRequest,
+): Promise<UpdateProductMeasurementsResponse> {
+  return adminService.UpdateProductMeasurements(request);
 }
+
 
 export function updateTag(request: AddProductTagRequest): Promise<AddProductTagResponse> {
   return adminService.AddProductTag(request);

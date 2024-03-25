@@ -3,6 +3,7 @@ import { updateProductById } from 'api/byID';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
 import { FC, useEffect, useState } from 'react';
+import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../../utility/interfaces';
 import { useChangeProductDetails } from '../utility/changeProductDetails';
 import { initialProductDetails } from '../utility/initialProductDetails';
@@ -52,12 +53,7 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   };
 
   return (
-    <Grid
-      container
-      direction='column'
-      spacing={1}
-      style={{ border: '1px solid black', width: '90%' }}
-    >
+    <Grid container direction='column' spacing={1} className={styles.product_details_container}>
       <Grid item>
         <ProductForm
           isEdit={isEdit}
@@ -106,6 +102,7 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
           value={inputValues.price?.toLocaleString()}
           onChange={handleInputChange}
           currentInfo={product?.product?.productInsert?.price?.value}
+          type='number'
         />
       </Grid>
       <Grid item>
@@ -116,6 +113,7 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
           value={inputValues.salePercentage?.toLocaleString()}
           onChange={handleInputChange}
           currentInfo={product?.product?.productInsert?.salePercentage?.value}
+          type='number'
         />
       </Grid>
       <Grid item>
@@ -146,6 +144,7 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
           value={inputValues.colorHex?.toLocaleString()}
           onChange={handleInputChange}
           currentInfo={product?.product?.productInsert?.colorHex}
+          type='color'
         />
       </Grid>
       <Grid item>
@@ -194,12 +193,18 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
       </Grid>
 
       {!isEdit && (
-        <Button onClick={() => setIsEdit(true)} size='medium' variant='contained'>
+        <Button
+          className={styles.btn}
+          onClick={() => setIsEdit(true)}
+          size='medium'
+          variant='contained'
+        >
           Edit
         </Button>
       )}
       {isEdit && (
         <Button
+          className={styles.btn}
           size='medium'
           variant='contained'
           onClick={() => {

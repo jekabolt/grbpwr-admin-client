@@ -1,0 +1,28 @@
+.product_details_container {
+  position: relative;
+  width: 80%;
+
+  .btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 100px;
+    background-color: #000;
+  }
+
+  .title {
+    background-color: #000;
+    color: #fff;
+    text-transform: uppercase;
+  }
+
+  .current_info {
+    text-transform: uppercase;
+  }
+}
+
+.size_measurement_table {
+  width: 80%;
+  height: 400px;
+  border: 1px solid #000;
+}
