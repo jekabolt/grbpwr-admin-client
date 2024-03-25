@@ -18,7 +18,7 @@ import { findInDictionary } from 'components/managers/orders/utility';
 import { sortItems } from 'components/managers/products/addProduct/sizes';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
-import { ProductIdProps } from '../../utility/interfaces';
+import { ProductIdProps } from '../utility/interfaces';
 
 export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [dictionary, setDictionary] = useState<common_Dictionary>();
@@ -82,42 +82,13 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
     }
   };
 
-  const handleUpdateMeasurement = async (
-    productSizeId: number | undefined,
-    measurementId: number | undefined,
-  ) => {
-    if (typeof productSizeId === 'number' && typeof measurementId === 'number') {
-      const key = `${productSizeId}-${measurementId}`;
-      const newValue = measurementUpdates[key];
-
-      // Constructing the request object for the batch update, even though we're updating only one measurement here
-      const request = {
-        productId: Number(id), // assuming 'id' is your product ID
-        measurements: [
-          {
-            sizeId: productSizeId,
-            measurementNameId: measurementId,
-            measurementValue: { value: newValue }, // Make sure this matches the expected structure in your backend
-          },
-        ],
-      };
-
-      try {
-        await updateMeasurement(request);
-        console.log('Measurement updated successfully');
-      } catch (error) {
-        console.error('Failed to update measurement', error);
-      }
-    }
-  };
-
   const handleBatchUpdateMeasurements = async () => {
     const measurementUpdatesArray = Object.entries(measurementUpdates).map(([key, value]) => {
       const [productSizeId, measurementNameId] = key.split('-').map(Number);
       return {
         sizeId: productSizeId,
         measurementNameId: measurementNameId,
-        measurementValue: { value }, // Make sure this format matches what your API expects
+        measurementValue: { value },
       };
     });
 
@@ -149,7 +120,6 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
                 {findInDictionary(dictionary, measurement.id, 'measurement')}
               </TableCell>
             ))}
-            <TableCell align='center'>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -206,15 +176,6 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
                     </TableCell>
                   );
                 })}
-                <TableCell align='center'>
-                  <Button
-                    variant='contained'
-                    color='primary'
-                    onClick={() => sizeId !== null && handleUpdateSize(sizeId)}
-                  >
-                    Update Size
-                  </Button>
-                </TableCell>
               </TableRow>
             );
           })}
@@ -224,7 +185,7 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
         variant='contained'
         color='primary'
         onClick={handleBatchUpdateMeasurements}
-        style={{ margin: '20px' }} // Adjust styling as needed
+        style={{ margin: '20px' }}
       >
         Update All Measurements
       </Button>
