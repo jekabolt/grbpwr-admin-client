@@ -1,56 +1,21 @@
 import { useNavigate } from '@tanstack/react-location';
-import { deleteProductByID, getProductsPaged } from 'api/admin';
-import {
-  GetProductsPagedRequest,
-  GetProductsPagedResponse,
-  common_FilterConditions,
-  common_Product,
-} from 'api/proto-http/admin';
+import { deleteProductByID } from 'api/admin';
+import { GetProductsPagedRequest, common_FilterConditions } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
-import React, { FC, MouseEvent, useCallback, useEffect, useState } from 'react';
+import React, { FC, MouseEvent, useEffect, useState } from 'react';
 import styles from 'styles/paged.scss';
 import { Filter } from './filterComponents/filterProducts';
-import { initialFilter } from './filterComponents/initialFilterStates';
 import { ListProducts } from './listProducts';
+import useListProduct from './useListProduct/useListProduct';
 
 export const PageProduct: FC = () => {
-  const [products, setProducts] = useState<common_Product[] | undefined>([]);
-  const [filter, setFilter] = useState<GetProductsPagedRequest>(initialFilter);
-  const [currentPage, setCurrentPage] = useState(1);
+  const { products, setProducts, filter, setFilter, isLoading, hasMore, fetchProducts } =
+    useListProduct();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const [deletionMessage, setDeletionMessage] = useState('');
   const [deletingProductId, setDeletingProductId] = useState<number | undefined>(undefined);
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-
-  const fetchData = useCallback(async () => {
-    if (loading) return;
-    setLoading(true);
-    const response: GetProductsPagedResponse = await getProductsPaged({
-      ...filter,
-    });
-    setProducts((prevProducts) => [...(prevProducts || []), ...(response.products || [])]);
-    setLoading(false);
-  }, [filter, currentPage, loading]);
-
-  const isScrollingNearBottom = useCallback(() => {
-    return window.innerHeight + window.scrollY >= document.body.offsetHeight;
-  }, []);
-
-  useEffect(() => {
-    const onScroll = () => {
-      if (isScrollingNearBottom() && !loading) {
-        setCurrentPage((currentPage) => currentPage + 1);
-      }
-    };
-
-    window.addEventListener('scroll', onScroll);
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [loading, isScrollingNearBottom]);
-  useEffect(() => {
-    fetchData();
-  }, [currentPage, fetchData]);
 
   const handleProductClick = (index: number | undefined) => {
     navigate({ to: `${ROUTES.singleProduct}/${index}` });
@@ -74,6 +39,25 @@ export const PageProduct: FC = () => {
       setConfirmDelete(undefined);
     }
   };
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (
+        window.innerHeight + window.scrollY + 300 >= document.documentElement.offsetHeight &&
+        !isLoading &&
+        hasMore
+      ) {
+        fetchProducts(50, products.length, filter);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [isLoading, hasMore, products.length, fetchProducts]);
+
+  useEffect(() => {
+    fetchProducts(50, 0, filter);
+  }, [fetchProducts]);
 
   const handleFilterChange = <
     K extends keyof GetProductsPagedRequest | keyof common_FilterConditions,
@@ -101,7 +85,7 @@ export const PageProduct: FC = () => {
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    fetchData();
+    fetchProducts(50, 0, filter);
   };
 
   return (

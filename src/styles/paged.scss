@@ -1,18 +1,15 @@
 .product_container {
   position: relative;
   display: flex;
-  justify-content: flex-start;
-  margin-top: 60px;
+  justify-content: center;
+  margin: 60px 0 0 0;
   gap: 200px;
 
   .product_wrapper {
-    display: grid;
-    gap: 70px;
-
     .product_list {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      grid-template-rows: repeat(2, 1fr);
+      margin-right: 150px;
+      grid-template-columns: repeat(3, 1fr);
       gap: 52px;
 
       li {
@@ -25,30 +22,16 @@
         border: 2px solid black;
 
         &.hidden_product {
-          opacity: 0.5; // Уменьшает прозрачность, создавая эффект затемнения
-          background-color: rgba(0, 0, 0, 0.1); // Необязательно: добавляет слегка темный фон
+          opacity: 0.5;
+          background-color: rgba(0, 0, 0, 0.1);
         }
 
-        img {
+        img,
+        video {
           width: 200px;
           height: 255px;
           object-fit: scale-down;
         }
-
-        // button {
-        //   position: absolute;
-        //   right: 0;
-        //   top: 0;
-        //   border: none;
-        //   display: none;
-        //   width: 30px;
-        //   background-color: black;
-        //   color: #fff;
-        //   font-size: 25px;
-        //   font-style: normal;
-        //   font-weight: 600;
-        //   line-height: normal;
-        // }
 
         h5 {
           justify-self: center;
@@ -61,9 +44,21 @@
           text-transform: uppercase;
         }
 
-        // &:hover button {
-        //   display: block;
-        // }
+        .delete_btn {
+          position: absolute;
+          top: 0;
+          right: 0;
+          background-color: #fff;
+          border-radius: 0%;
+          color: #000;
+          display: none;
+        }
+
+        &:hover {
+          .delete_btn {
+            display: block;
+          }
+        }
       }
     }
 

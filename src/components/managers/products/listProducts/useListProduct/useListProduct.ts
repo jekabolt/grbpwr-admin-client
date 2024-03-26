@@ -11,21 +11,24 @@ const useListProduct = (
     setProducts: React.Dispatch<React.SetStateAction<common_Product[]>>;
     hasMore: boolean,
     isLoading: boolean,
+    fetchProducts: (limit: number, offset: number, currentFilter: GetProductsPagedRequest) => Promise<void>;
+    filter: GetProductsPagedRequest;
+    setFilter: React.Dispatch<React.SetStateAction<GetProductsPagedRequest>>;
 } => {
     const [products, setProducts] = useState<common_Product[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialLoading);
     const [hasMore, setHasMore] = useState<boolean>(initialHasMore)
     const [filter, setFilter] = useState<GetProductsPagedRequest>(initialFilter)
 
-    const fetchProducts = useCallback(async (limit: number, offset: number) => {
+    const fetchProducts = useCallback(async (limit: number, offset: number, currentFilter: GetProductsPagedRequest) => {
         setIsLoading(true)
         const response = await getProductsPaged({
             limit,
             offset,
-            sortFactors: filter.sortFactors,
-            orderFactor: filter.orderFactor,
-            filterConditions: filter.filterConditions,
-            showHidden: filter.showHidden
+            sortFactors: currentFilter.sortFactors,
+            orderFactor: currentFilter.orderFactor,
+            filterConditions: currentFilter.filterConditions,
+            showHidden: currentFilter.showHidden
         })
         const fetchedProducts = response.products || []
         setProducts(prev => offset === 0 ? fetchedProducts : [...prev, ...fetchedProducts])
@@ -34,7 +37,7 @@ const useListProduct = (
     }, [])
 
 
-    return { products, setProducts, isLoading, hasMore };
+    return { products, setProducts, isLoading, hasMore, fetchProducts, filter, setFilter };
 };
 
 export default useListProduct;

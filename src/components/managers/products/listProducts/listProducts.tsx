@@ -1,4 +1,8 @@
+import CheckIcon from '@mui/icons-material/Check';
+import CloseIcon from '@mui/icons-material/Close';
+import { IconButton } from '@mui/material';
 import { common_Product } from 'api/proto-http/admin';
+import { fileExtensionToContentType } from 'components/managers/media/mediaManager';
 import React, { FC, useState } from 'react';
 import styles from 'styles/paged.scss';
 
@@ -21,6 +25,18 @@ export const ListProducts: FC<ProductProps> = ({
 }) => {
   const [hoveredProductId, setHoveredProductId] = useState<number | undefined>(undefined);
 
+  const isVideo = (mediaUrl: string | undefined) => {
+    if (mediaUrl) {
+      const extension = mediaUrl.split('.').pop()?.toLowerCase();
+
+      if (extension) {
+        const contentType = fileExtensionToContentType[extension];
+        return contentType?.startsWith('video/');
+      }
+    }
+    return false;
+  };
+
   return (
     <ul className={styles.product_list}>
       {products?.map((product) => (
@@ -32,18 +48,20 @@ export const ListProducts: FC<ProductProps> = ({
           className={`${product.productInsert?.hidden && showHidden ? styles.hidden_product : ''}`}
         >
           {hoveredProductId === product.id && (
-            <button
+            <IconButton
               onClick={(e) => {
                 e.stopPropagation();
                 deleteProduct(e, product.id);
               }}
-              style={{ backgroundColor: confirmDeleteProductId === product.id ? 'red' : 'initial' }}
+              className={styles.delete_btn}
             >
-              {confirmDeleteProductId === product.id ? 'Sure?' : 'X'}
-            </button>
+              {confirmDeleteProductId === product.id ? <CheckIcon /> : <CloseIcon />}
+            </IconButton>
           )}
           {deletingProductId === product.id ? (
             <div>OK</div>
+          ) : isVideo(product.productInsert?.thumbnail) ? (
+            <video src={product.productInsert?.thumbnail} controls />
           ) : (
             <img src={product.productInsert?.thumbnail} alt='Product Image' />
           )}
