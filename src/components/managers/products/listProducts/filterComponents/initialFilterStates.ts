@@ -1,7 +1,7 @@
 import { GetProductsPagedRequest } from 'api/proto-http/admin';
 
 export const initialFilter: GetProductsPagedRequest = {
-  limit: 8,
+  limit: 50,
   offset: 0,
   sortFactors: undefined,
   orderFactor: undefined,

@@ -8,7 +8,7 @@ import {
 } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
-import React, { FC, MouseEvent, useEffect, useState } from 'react';
+import React, { FC, MouseEvent, useCallback, useEffect, useState } from 'react';
 import styles from 'styles/paged.scss';
 import { Filter } from './filterComponents/filterProducts';
 import { initialFilter } from './filterComponents/initialFilterStates';
@@ -21,24 +21,36 @@ export const PageProduct: FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const [deletionMessage, setDeletionMessage] = useState('');
   const [deletingProductId, setDeletingProductId] = useState<number | undefined>(undefined);
-  const calculateOffset = (page: number, limit: number) => (page - 1) * limit;
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, [currentPage]);
-
-  const fetchData = async () => {
-    const newLimit = filter.limit || 6;
-    const offset = calculateOffset(currentPage, newLimit);
+  const fetchData = useCallback(async () => {
+    if (loading) return;
+    setLoading(true);
     const response: GetProductsPagedResponse = await getProductsPaged({
       ...filter,
-      limit: newLimit,
-      offset,
     });
+    setProducts((prevProducts) => [...(prevProducts || []), ...(response.products || [])]);
+    setLoading(false);
+  }, [filter, currentPage, loading]);
 
-    setProducts(response.products ? response.products.slice(0, newLimit) : []);
-  };
+  const isScrollingNearBottom = useCallback(() => {
+    return window.innerHeight + window.scrollY >= document.body.offsetHeight;
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => {
+      if (isScrollingNearBottom() && !loading) {
+        setCurrentPage((currentPage) => currentPage + 1);
+      }
+    };
+
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [loading, isScrollingNearBottom]);
+  useEffect(() => {
+    fetchData();
+  }, [currentPage, fetchData]);
 
   const handleProductClick = (index: number | undefined) => {
     navigate({ to: `${ROUTES.singleProduct}/${index}` });
@@ -105,12 +117,6 @@ export const PageProduct: FC = () => {
             deletingProductId={deletingProductId}
             showHidden={filter.showHidden}
           />
-          <div className={styles.product_pagination}>
-            <button onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage <= 1}>
-              Prev
-            </button>
-            <button onClick={() => setCurrentPage(currentPage + 1)}>Next</button>
-          </div>
         </div>
         <Filter filter={filter} filterChange={handleFilterChange} onSubmit={handleSubmit} />
       </div>
