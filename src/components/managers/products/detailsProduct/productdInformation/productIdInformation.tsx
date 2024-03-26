@@ -7,13 +7,10 @@ import { Tag } from './tag/tag';
 export const ProductIdInformation: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   return (
     <Grid container spacing={2}>
-      <Grid item xs={8}>
+      <Grid item xs={10}>
         <Product product={product} id={id} fetchProduct={fetchProduct} />
       </Grid>
-      {/* <Grid item xs={10}>
-        <SizesAndMeasurements product={product} id={id} fetchProduct={fetchProduct} />
-      </Grid> */}
-      <Grid item xs={8}>
+      <Grid item xs={10}>
         <Tag product={product} id={id} fetchProduct={fetchProduct} />
       </Grid>
     </Grid>

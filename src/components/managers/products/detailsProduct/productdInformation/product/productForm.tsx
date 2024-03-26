@@ -31,8 +31,8 @@ export const ProductForm: FC<ProductFormProps> = ({
 }) => {
   return (
     <Grid container spacing={3} alignItems='flex-start'>
-      <Grid item xs={5}>
-        <Typography variant='h5' className={styles.title}>
+      <Grid item xs={4}>
+        <Typography variant='h6' className={styles.title}>
           {title}
         </Typography>
       </Grid>
@@ -46,7 +46,7 @@ export const ProductForm: FC<ProductFormProps> = ({
               value={currentInfo ? String(currentInfo) : ''}
             ></textarea>
           ) : (
-            <Typography variant='h5' className={styles.current_info}>
+            <Typography variant='h6' className={styles.current_info}>
               {currentInfo}
             </Typography>
           )

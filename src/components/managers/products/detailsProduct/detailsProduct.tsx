@@ -29,8 +29,14 @@ export const DetailsProduct: FC = () => {
   return (
     <Layout>
       <h2>product id = {id}</h2>
-      <Grid container spacing={1} justifyContent='center' style={{ width: '90%', margin: '30px' }}>
-        <Grid item xs={4}>
+      <Grid
+        container
+        spacing={2}
+        alignItems='center'
+        justifyContent='center'
+        style={{ width: '80%', margin: '30px 30px 30px 65px' }}
+      >
+        <Grid item xs={6}>
           <MediaView product={product} id={id} fetchProduct={fetchProduct} />
         </Grid>
         <Grid item xs={6}>

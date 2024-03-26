@@ -62,11 +62,9 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
         sizeId: sizeId,
         quantity: sizeUpdates[sizeId],
       };
-      try {
-        await updateSize(request);
-        console.log('Size updated successfully');
-      } catch (error) {
-        console.error('Failed to update size', error);
+      const response = await updateSize(request);
+      if (response) {
+        fetchProduct();
       }
     }
   };
@@ -96,15 +94,10 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
       productId: Number(id),
       measurements: measurementUpdatesArray,
     };
-
-    try {
-      await updateMeasurement(request);
-      console.log('All measurements updated successfully');
+    const response = await updateMeasurement(request);
+    if (response) {
       setMeasurementUpdates({});
-
       fetchProduct();
-    } catch (error) {
-      console.error('Failed to update measurements', error);
     }
   };
 

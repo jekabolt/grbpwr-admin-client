@@ -1,36 +1,76 @@
-import { Button, Grid, List, ListItem, TextField, Typography } from '@mui/material';
-import { updateTag } from 'api/byID';
+import CloseIcon from '@mui/icons-material/Close';
+import {
+  Box,
+  Button,
+  Grid,
+  IconButton,
+  List,
+  ListItem,
+  TextField,
+  Typography,
+} from '@mui/material';
+import { deleteTag, updateTag } from 'api/byID';
 import { FC, useState } from 'react';
+import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../../utility/interfaces';
 
 export const Tag: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [tag, setTag] = useState('');
 
+  const deleteTagFromList = async (removeTag: string | undefined) => {
+    const response = await deleteTag({ productId: Number(id), tag: removeTag });
+    if (response) {
+      fetchProduct();
+    }
+  };
+
   const addNewTag = async () => {
-    await updateTag({ productId: Number(id), tag: tag });
+    const response = await updateTag({ productId: Number(id), tag: tag });
+    if (response) {
+      fetchProduct();
+    }
   };
   return (
-    <Grid container>
+    <Grid container spacing={2} alignItems='flex-start' justifyContent='flex-start'>
       <Grid item>
-        <Typography variant='h4'>Tags</Typography>
+        <Typography variant='h6' className={styles.title}>
+          tags
+        </Typography>
       </Grid>
-      <Grid item>
+      <Grid item xs={6}>
         <List
+          className={styles.tags_list}
           sx={{
-            width: '100%',
-            maxWidth: 360,
-            position: 'relative',
-            overflow: 'auto',
-            maxHeight: 100,
-            border: '1px solid black',
+            maxWidth: 560,
+            maxHeight: 50,
           }}
         >
-          {product?.tags?.map((tag) => <ListItem>{tag.productTagInsert?.tag}</ListItem>)}
+          {product?.tags?.map((tag) => (
+            <ListItem className={styles.list_item}>
+              <Typography variant='body1'>{tag.productTagInsert?.tag}</Typography>
+              <IconButton
+                onClick={() => deleteTagFromList(tag.productTagInsert?.tag)}
+                className={styles.btn}
+              >
+                <CloseIcon />
+              </IconButton>
+            </ListItem>
+          ))}
         </List>
       </Grid>
-      <Grid item>
-        <TextField type='text' value={tag} onChange={(e) => setTag(e.target.value)} />
-        <Button onClick={addNewTag}>upload</Button>
+      <Grid item xs={6}>
+        <Box display='flex' alignItems='center' gap='5px'>
+          <TextField
+            type='text'
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+            placeholder='upload new tag'
+            size='small'
+          />
+          <Button sx={{ backgroundColor: '#000' }} variant='contained' onClick={addNewTag}>
+            upload
+          </Button>
+        </Box>
       </Grid>
     </Grid>
   );
