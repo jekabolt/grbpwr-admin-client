@@ -1,3 +1,5 @@
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import {
   GetProductsPagedRequest,
   common_FilterConditions,
@@ -77,11 +79,16 @@ export const Filter: FC<FilterProps> = ({ filter, filterChange, onSubmit }) => {
         placeholder='size id'
       />
 
-      <input
-        type='checkbox'
-        checked={filter.showHidden || false}
-        onChange={(e) => filterChange('showHidden', e.target.checked)}
-        placeholder='show hidden'
+      <FormControlLabel
+        control={
+          <Checkbox
+            size='large'
+            checked={filter.showHidden || false}
+            onChange={(e) => filterChange('showHidden', e.target.checked)}
+            color='default'
+          />
+        }
+        label='SHOW HIDDEN'
       />
 
       <button type='submit'>Apply</button>

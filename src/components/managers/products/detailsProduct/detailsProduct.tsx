@@ -32,7 +32,7 @@ export const DetailsProduct: FC = () => {
       <Grid
         container
         spacing={2}
-        alignItems='center'
+        alignItems='flex-start'
         justifyContent='center'
         style={{ width: '80%', margin: '30px 30px 30px 65px' }}
       >
