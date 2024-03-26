@@ -28,7 +28,6 @@ export const DetailsProduct: FC = () => {
 
   return (
     <Layout>
-      <h2>product id = {id}</h2>
       <Grid
         container
         spacing={2}

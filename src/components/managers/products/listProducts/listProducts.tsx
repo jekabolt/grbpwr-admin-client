@@ -1,6 +1,6 @@
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
-import { IconButton } from '@mui/material';
+import { IconButton, Typography } from '@mui/material';
 import { common_Product } from 'api/proto-http/admin';
 import { fileExtensionToContentType } from 'components/managers/media/mediaManager';
 import React, { FC, useState } from 'react';
@@ -59,7 +59,7 @@ export const ListProducts: FC<ProductProps> = ({
             </IconButton>
           )}
           {deletingProductId === product.id ? (
-            <div>OK</div>
+            <Typography variant='h4'>product removed</Typography>
           ) : isVideo(product.productInsert?.thumbnail) ? (
             <video src={product.productInsert?.thumbnail} controls />
           ) : (
