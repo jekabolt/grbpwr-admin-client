@@ -11,12 +11,15 @@ import { HeroProductTable } from './heroProductsTable';
 export const Hero: FC = () => {
   const [mainContentLink, setMainContentLink] = useState<string | undefined>('');
   const [mainExploreLink, setMainExploreLink] = useState<string | undefined>('');
+  const [mainExploreLinkError, setMainExploreLinkError] = useState<boolean>(false);
   const [mainExploreText, setMainExploreText] = useState<string | undefined>('');
   const [firstAdContentLink, setFirstAdContentLink] = useState<string | undefined>('');
   const [firstAdExploreLink, setFirstAdExploreLink] = useState<string | undefined>('');
+  const [firstAdExploreLinkError, setFirstAdExploreLinkError] = useState<boolean>(false);
   const [firstAdExploreText, setFirstAdExploreText] = useState<string | undefined>('');
   const [secondAdContentLink, setSecondAdContentLink] = useState<string | undefined>('');
   const [secondAdExploreLink, setSecondAdExploreLink] = useState<string | undefined>('');
+  const [secondAdExploreLinkError, setSecondAdExploreLinkError] = useState<boolean>(false);
   const [secondAdExploreText, setSecondAdExploreText] = useState<string | undefined>('');
 
   const [products, setProducts] = useState<common_Product[]>([]);
@@ -47,6 +50,18 @@ export const Hero: FC = () => {
     };
     fetchHero();
   }, []);
+
+  useEffect(() => {
+    // Function to validate all links
+    const validateAllLinks = () => {
+      // Assuming you have state setters like setMainExploreLinkError for validation states
+      setMainExploreLinkError(mainExploreLink ? !isValidUrl(mainExploreLink) : true);
+      setFirstAdExploreLinkError(firstAdExploreLink ? !isValidUrl(firstAdExploreLink) : true);
+      setSecondAdExploreLinkError(secondAdExploreLink ? !isValidUrl(secondAdExploreLink) : true);
+    };
+
+    validateAllLinks();
+  }, [mainExploreLink, firstAdExploreLink, secondAdExploreLink]);
 
   const saveMainContentLink = (mediaLink: string[]) => {
     if (mediaLink[0]) {
@@ -137,6 +152,11 @@ export const Hero: FC = () => {
     setProducts(newSelection);
   };
 
+  const isValidUrl = (url: string) => {
+    const pattern = new RegExp('https?://(?:[w-]+.)?grbpwr.com(?:/[^s]*)?'); // fragment locator
+    return !!pattern.test(url);
+  };
+
   return (
     <Layout>
       <div className={styles.hero}>
@@ -152,10 +172,20 @@ export const Hero: FC = () => {
           </Grid>
           <Grid item xs={6}>
             <TextField
+              error={mainExploreLinkError}
+              helperText={mainExploreLinkError ? 'Please enter a valid URL.' : ''}
               size='small'
               label='Main explore link'
               value={mainExploreLink || ''}
-              onChange={(e) => setMainExploreLink(e.target.value)}
+              onChange={(e) => {
+                const { value } = e.target;
+                setMainExploreLink(value);
+                if (!isValidUrl(value)) {
+                  setMainExploreLinkError(true);
+                } else {
+                  setMainExploreLinkError(false);
+                }
+              }}
             />
           </Grid>
           <Grid item xs={6}>
@@ -184,10 +214,20 @@ export const Hero: FC = () => {
           </Grid>
           <Grid item xs={6}>
             <TextField
+              error={firstAdExploreLinkError}
+              helperText={firstAdExploreLinkError ? 'Please enter a valid URL.' : ''}
               size='small'
               label='First ad explore link'
               value={firstAdExploreLink || ''}
-              onChange={(e) => setFirstAdExploreLink(e.target.value)}
+              onChange={(e) => {
+                const { value } = e.target;
+                setFirstAdExploreLink(value);
+                if (!isValidUrl(value)) {
+                  setFirstAdExploreLinkError(true);
+                } else {
+                  setFirstAdExploreLinkError(false);
+                }
+              }}
             />
           </Grid>
           <Grid item xs={6}>
@@ -216,10 +256,20 @@ export const Hero: FC = () => {
           </Grid>
           <Grid item xs={6}>
             <TextField
+              error={secondAdExploreLinkError}
+              helperText={secondAdExploreLinkError ? 'Please enter a valid URL.' : ''}
               size='small'
               label='Second ad explore link'
               value={secondAdExploreLink || ''}
-              onChange={(e) => setSecondAdExploreLink(e.target.value)}
+              onChange={(e) => {
+                const { value } = e.target;
+                setSecondAdExploreLink(value);
+                if (!isValidUrl(value)) {
+                  setSecondAdExploreLinkError(true);
+                } else {
+                  setSecondAdExploreLinkError(false);
+                }
+              }}
             />
           </Grid>
           <Grid item xs={6}>
@@ -248,7 +298,11 @@ export const Hero: FC = () => {
             selectedProductIds={products.map((x) => x.id!)}
           />
           <Grid item xs={6} sx={{ mt: 4, textAlign: 'center' }}>
-            <Button variant='contained' onClick={updateHero}>
+            <Button
+              variant='contained'
+              onClick={updateHero}
+              disabled={mainExploreLinkError || firstAdExploreLinkError || secondAdExploreLinkError}
+            >
               Save
             </Button>
           </Grid>

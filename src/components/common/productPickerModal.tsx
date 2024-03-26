@@ -4,7 +4,7 @@ import { getDictionary, getProductsPaged } from 'api/admin';
 import { GetProductsPagedRequest, common_Category, common_Product } from 'api/proto-http/admin';
 import { initialFilter } from 'components/managers/products/listProducts/filterComponents/initialFilterStates';
 import {
-  MRT_TableContainer,
+  MaterialReactTable,
   useMaterialReactTable,
   type MRT_ColumnDef,
 } from 'material-react-table';
@@ -32,7 +32,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
 
   const [currentPage, setCurrentPage] = useState(1);
   const [filter, setFilter] = useState<GetProductsPagedRequest>(initialFilter);
-  const newLimit = filter.limit || 6;
+  const newLimit = 50;
   const offset = calculateOffset(currentPage, newLimit);
 
   useEffect(() => {
@@ -41,9 +41,20 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         const response = await getProductsPaged({
           ...filter,
           limit: newLimit,
-          offset,
+          offset: offset,
         });
-        setAllProducts(response.products ? response.products : []);
+        if (Array.isArray(response.products)) {
+          setAllProducts((prevProducts) => {
+            const combinedProducts = [...prevProducts, ...(response.products || [])];
+            const uniqueProducts = combinedProducts.reduce<common_Product[]>((acc, current) => {
+              if (!acc.find((product) => product.id === current.id)) {
+                acc.push(current);
+              }
+              return acc;
+            }, []);
+            return uniqueProducts;
+          });
+        }
       };
       fetchProducts();
     }
@@ -82,6 +93,10 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
     }
   };
 
+  const loadMore = () => {
+    setCurrentPage((prevCurrentPage) => prevCurrentPage + 1);
+  };
+
   const columns = useMemo<MRT_ColumnDef<common_Product>[]>(
     //column definitions...
     () => [
@@ -112,6 +127,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
             style={{ width: '100px', height: 'auto' }}
           />
         ),
+        enableGlobalFilter: false,
       },
       {
         accessorKey: 'productInsert.name',
@@ -156,15 +172,25 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
     autoResetPageIndex: false,
     columns,
     data,
-    enableRowOrdering: false,
-    enableSorting: false,
+    initialState: {
+      pagination: {
+        pageSize: 50,
+        pageIndex: 1,
+      },
+    },
+    muiPaginationProps: {
+      rowsPerPageOptions: [50, 100, 200],
+      showFirstButton: false,
+      showLastButton: false,
+    },
   });
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth='xl' fullWidth sx={{ width: 'auto' }}>
       <DialogTitle>Select Products</DialogTitle>
       <DialogContent>
-        <MRT_TableContainer table={table} />
+        <MaterialReactTable table={table} />
+        <Button onClick={loadMore}>Load more</Button>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
