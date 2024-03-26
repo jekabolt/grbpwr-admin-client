@@ -1,18 +1,14 @@
 import { Button, Checkbox, Grid, TextField } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
-import {
-  common_PaymentMethod,
-  common_PaymentMethodNameEnum,
-  common_ShipmentCarrierInsert,
-} from 'api/proto-http/admin';
-import {
-  setMaxOrderItems,
-  setPaymentMethod,
-  setShipmentCarrier,
-  setShipmentCarrierPrice,
-  setSiteAvailability,
-} from 'api/settings';
+import { common_PaymentMethod, common_ShipmentCarrierInsert } from 'api/proto-http/admin';
+// import {
+//   setMaxOrderItems,
+//   setPaymentMethod,
+//   setShipmentCarrier,
+//   setShipmentCarrierPrice,
+//   setSiteAvailability,
+// } from 'api/settings';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/settings.scss';
@@ -46,27 +42,27 @@ export const Settings: FC = () => {
   }, []);
 
   const handlerPaymentMethod = async (paymentMethod: string | undefined, allow: boolean) => {
-    if (paymentMethod) {
-      setPayment((prevPayment) => {
-        return prevPayment?.map((method) => {
-          if (method.name === paymentMethod) {
-            return { ...method, allowed: allow };
-          }
-          return method;
-        });
-      });
-    }
-    await setPaymentMethod({
-      paymentMethod: paymentMethod as common_PaymentMethodNameEnum,
-      allow,
-    });
+    // if (paymentMethod) {
+    //   setPayment((prevPayment) => {
+    //     return prevPayment?.map((method) => {
+    //       if (method.name === paymentMethod) {
+    //         return { ...method, allowed: allow };
+    //       }
+    //       return method;
+    //     });
+    //   });
+    // }
+    // await setPaymentMethod({
+    //   paymentMethod: paymentMethod as common_PaymentMethodNameEnum,
+    //   allow,
+    // });
   };
 
   const handleShipmentCarrier = async (carrier: string | undefined, allow: boolean) => {
-    await setShipmentCarrier({
-      carrier: carrier,
-      allow,
-    });
+    // await setShipmentCarrier({
+    //   carrier: carrier,
+    //   allow,
+    // });
   };
 
   const handleShipmentCarrierPrice = async (carrier: string | undefined) => {
@@ -74,12 +70,12 @@ export const Settings: FC = () => {
       return;
     }
     const newPrice = price[carrier];
-    if (newPrice) {
-      await setShipmentCarrierPrice({
-        carrier: carrier,
-        price: { value: newPrice },
-      });
-    }
+    // if (newPrice) {
+    //   await setShipmentCarrierPrice({
+    //     carrier: carrier,
+    //     price: { value: newPrice },
+    //   });
+    // }
   };
 
   const handlePriceChange = (carrier: string | undefined, price: string) => {
@@ -89,16 +85,16 @@ export const Settings: FC = () => {
   };
 
   const handlerMaxOrderItems = async (e: string) => {
-    const maxOrderItemsParsed = parseInt(e, 10);
-    setMaxItems(maxOrderItemsParsed);
-    await setMaxOrderItems({ maxOrderItems: maxItems });
+    // const maxOrderItemsParsed = parseInt(e, 10);
+    // setMaxItems(maxOrderItemsParsed);
+    // await setMaxOrderItems({ maxOrderItems: maxItems });
   };
 
   const handleSiteAvailability = async (available: boolean) => {
-    setSiteEnabled(available);
-    await setSiteAvailability({
-      available,
-    });
+    // setSiteEnabled(available);
+    // await setSiteAvailability({
+    //   available,
+    // });
   };
 
   const cutUnusedPartOfPaymentName = (name: string | undefined) => {

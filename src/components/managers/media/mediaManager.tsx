@@ -5,7 +5,7 @@ import { ROUTES } from 'constants/routes';
 import { FC, useState } from 'react';
 import styles from 'styles/media-manager.scss';
 
-const fileExtensionToContentType: { [key: string]: string } = {
+export const fileExtensionToContentType: { [key: string]: string } = {
   jpg: 'image/jpg',
   png: 'image/png',
   webm: 'video/webm',

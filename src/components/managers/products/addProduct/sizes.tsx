@@ -13,7 +13,7 @@ interface SelectedMeasurements {
   [sizeIndex: number]: number | undefined;
 }
 
-function sortItems(item: { id?: number }[]) {
+export function sortItems(item: { id?: number }[]) {
   return [...(item || [])]
     .filter((item) => item !== undefined)
     .sort((a, b) => {

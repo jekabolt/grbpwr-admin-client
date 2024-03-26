@@ -1,0 +1,53 @@
+.product_details_container {
+  position: relative;
+  width: 80%;
+
+  .btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 100px;
+    background-color: #000;
+  }
+  .current_info {
+    text-transform: uppercase;
+  }
+}
+
+.size_measurement_table {
+  width: 80%;
+  height: 400px;
+  border: 1px solid #000;
+}
+
+.title {
+  background-color: #000;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+.tags_list {
+  width: 100%;
+  border: 1px solid black;
+  position: relative;
+  overflow: auto;
+  display: grid;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+
+  .list_item {
+    border: 1px solid black;
+    padding: 2px;
+    position: relative;
+    width: 220px;
+    display: flex;
+    flex-wrap: wrap;
+
+    .btn {
+      position: absolute;
+      right: 0;
+      border-radius: 0;
+    }
+  }
+}

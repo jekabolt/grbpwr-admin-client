@@ -6,6 +6,7 @@ import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import { MediaView } from './mediaView/mediaView';
 import { ProductIdInformation } from './productdInformation/productIdInformation';
+import { SizesAndMeasurements } from './sizes&measurements/sizesAndMeasurements';
 import { ProductIdProps } from './utility/type';
 
 export const DetailsProduct: FC = () => {
@@ -27,13 +28,21 @@ export const DetailsProduct: FC = () => {
 
   return (
     <Layout>
-      <h2>product id = {id}</h2>
-      <Grid container spacing={4} style={{ width: '90%', margin: '30px' }}>
-        <Grid item xs={5}>
+      <Grid
+        container
+        spacing={2}
+        alignItems='flex-start'
+        justifyContent='center'
+        style={{ width: '80%', margin: '30px 30px 30px 65px' }}
+      >
+        <Grid item xs={6}>
           <MediaView product={product} id={id} fetchProduct={fetchProduct} />
         </Grid>
-        <Grid item xs={7}>
+        <Grid item xs={6}>
           <ProductIdInformation product={product} id={id} fetchProduct={fetchProduct} />
+        </Grid>
+        <Grid item xs={12}>
+          <SizesAndMeasurements product={product} fetchProduct={fetchProduct} id={id} />
         </Grid>
       </Grid>
     </Layout>

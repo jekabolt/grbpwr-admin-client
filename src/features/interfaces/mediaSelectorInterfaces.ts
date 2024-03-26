@@ -17,7 +17,7 @@ export interface MediaSelectorMediaListProps {
     media: common_Media[] | undefined
     setMedia: React.Dispatch<React.SetStateAction<common_Media[]>>
     allowMultiple: boolean
-    selectedMedia: string[] | undefined
+    selectedMedia: Array<{ url: string, type: string }> | undefined;
     select: (imageUrl: string, allowMultiple: boolean) => void
 }
 

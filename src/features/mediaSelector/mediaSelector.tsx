@@ -1,5 +1,6 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Button, Grid } from '@mui/material';
+import { fileExtensionToContentType } from 'components/managers/media/mediaManager';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useRef, useState } from 'react';
@@ -15,7 +16,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const { media, reload, isLoading, hasMore, fetchFiles, setMedia, url, setUrl, updateLink } =
     useMediaSelector();
-  const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
+  const [selectedMedia, setSelectedMedia] = useState<Array<{ url: string; type: string }>>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
 
   const handleMediaAndCloseSelector = async () => {
@@ -23,19 +24,32 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     if (selectedMedia.length === 0) {
       return;
     }
-    saveSelectedMedia(selectedMedia);
+    console.log(selectedMedia);
+    saveSelectedMedia(selectedMedia.map((item) => item.url));
     closeMediaSelector();
   };
 
-  const select = (imageUrl: string, allowMultiple: boolean) => {
-    setSelectedMedia((prevSelected) => {
-      const newSelected = allowMultiple
-        ? prevSelected.includes(imageUrl)
-          ? prevSelected.filter((id) => id !== imageUrl)
-          : [...prevSelected, imageUrl]
-        : [imageUrl];
-      return newSelected;
-    });
+  const select = (mediaUrl: string, allowMultiple: boolean) => {
+    const extension = mediaUrl.split('.').pop()?.toLowerCase();
+
+    if (extension) {
+      const contentType = fileExtensionToContentType[extension] || 'undefined';
+
+      const mediaType = contentType.startsWith('image')
+        ? 'image'
+        : contentType.startsWith('video')
+          ? 'video'
+          : 'undefined';
+
+      setSelectedMedia((prevSelected) => {
+        const newMedia = { url: mediaUrl, type: mediaType };
+        return allowMultiple
+          ? prevSelected.some((media) => media.url === mediaUrl)
+            ? prevSelected.filter((media) => media.url !== mediaUrl)
+            : [...prevSelected, newMedia]
+          : [newMedia];
+      });
+    }
   };
 
   useEffect(() => {

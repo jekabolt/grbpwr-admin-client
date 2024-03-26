@@ -13,7 +13,7 @@ export const Categories: FC<categoriesProps> = ({ product, setProduct, dictionar
   const [categoriesEnum, setCategoriesEnum] = useState<common_Category[] | undefined>();
 
   const handleCategorySelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedCategoryId = parseInt(e.target.value, 10); // Parse the selected value to a number
+    const selectedCategoryId = parseInt(e.target.value, 10);
     setProduct((prevProduct) => {
       return update(prevProduct, {
         product: {
