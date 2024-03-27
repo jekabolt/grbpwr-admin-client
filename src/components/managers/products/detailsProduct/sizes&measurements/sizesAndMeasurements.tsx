@@ -22,8 +22,8 @@ import { ProductIdProps } from '../utility/interfaces';
 
 export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [dictionary, setDictionary] = useState<common_Dictionary>();
-  const [sizeUpdates, setSizeUpdates] = useState<{ [sizeId: number]: number }>({});
-  const [measurementUpdates, setMeasurementUpdates] = useState<{ [key: string]: string }>({});
+  const [sizeQuantity, setSizeQuantity] = useState<{ [sizeId: number]: number }>({});
+  const [measurementQuantity, setMeasurementQuantity] = useState<{ [key: string]: string }>({});
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
@@ -46,12 +46,12 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
       },
       {} as { [sizeId: number]: number },
     );
-    setSizeUpdates(initialSizeUpdates);
+    setSizeQuantity(initialSizeUpdates);
   }, [product]);
 
   const handleQuantityChange = (sizeId: number | undefined, newValue: number) => {
     if (typeof sizeId === 'number') {
-      setSizeUpdates({ ...sizeUpdates, [sizeId]: newValue });
+      setSizeQuantity({ ...sizeQuantity, [sizeId]: newValue });
     }
   };
 
@@ -63,7 +63,7 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
         const request: UpdateProductSizeStockRequest = {
           productId: Number(id),
           sizeId: sizeId,
-          quantity: sizeUpdates[sizeId],
+          quantity: sizeQuantity[sizeId],
         };
         const response = await updateSize(request);
         if (response) {
@@ -80,12 +80,12 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
   ) => {
     if (typeof productSizeId === 'number' && typeof measurementId === 'number') {
       const key = `${productSizeId}-${measurementId}`;
-      setMeasurementUpdates({ ...measurementUpdates, [key]: newValue });
+      setMeasurementQuantity({ ...measurementQuantity, [key]: newValue });
     }
   };
 
   const handleBatchUpdateMeasurements = async () => {
-    const measurementUpdatesArray = Object.entries(measurementUpdates).map(([key, value]) => {
+    const measurementQuantityArray = Object.entries(measurementQuantity).map(([key, value]) => {
       const [productSizeId, measurementNameId] = key.split('-').map(Number);
       return {
         sizeId: productSizeId,
@@ -96,11 +96,11 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
 
     const request = {
       productId: Number(id),
-      measurements: measurementUpdatesArray,
+      measurements: measurementQuantityArray,
     };
     const response = await updateMeasurement(request);
     if (response) {
-      setMeasurementUpdates({});
+      setMeasurementQuantity({});
       fetchProduct();
     }
   };
@@ -122,7 +122,7 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
         <TableBody>
           {sortedSizes.map((size) => {
             const sizeId = typeof size.id === 'number' ? size.id : null;
-            const sizeUpdateValue = sizeId !== null ? sizeUpdates[sizeId] || 0 : 0;
+            const sizeUpdateValue = sizeId !== null ? sizeQuantity[sizeId] || 0 : 0;
 
             return (
               <TableRow key={size.id}>
@@ -156,7 +156,7 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
                     (m) => m.productSizeId === sizeId && m.measurementNameId === measurementDict.id,
                   );
                   const measurementValue =
-                    measurementUpdates[measurementKey] ??
+                    measurementQuantity[measurementKey] ??
                     currentMeasurement?.measurementValue?.value ??
                     '';
 
