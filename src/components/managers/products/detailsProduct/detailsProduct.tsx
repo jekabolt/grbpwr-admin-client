@@ -33,15 +33,15 @@ export const DetailsProduct: FC = () => {
         spacing={2}
         alignItems='flex-start'
         justifyContent='center'
-        style={{ width: '80%', margin: '30px 30px 30px 65px' }}
+        style={{ width: '90%', margin: '3%' }}
       >
-        <Grid item xs={6}>
+        <Grid item xs={5}>
           <MediaView product={product} id={id} fetchProduct={fetchProduct} />
         </Grid>
         <Grid item xs={6}>
           <ProductIdInformation product={product} id={id} fetchProduct={fetchProduct} />
         </Grid>
-        <Grid item xs={12}>
+        <Grid item xs={11}>
           <SizesAndMeasurements product={product} fetchProduct={fetchProduct} id={id} />
         </Grid>
       </Grid>

@@ -28,17 +28,12 @@
 
 .tags_list {
   width: 100%;
-  border: 1px solid black;
-  position: relative;
-  overflow: auto;
+  gap: 10px;
   display: grid;
-  justify-content: center;
-  align-items: center;
-  gap: 5px;
+  grid-template-columns: repeat(2, 1fr);
 
   .list_item {
     border: 1px solid black;
-    padding: 2px;
     position: relative;
     width: 220px;
     display: flex;

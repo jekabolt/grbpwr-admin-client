@@ -57,14 +57,18 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
 
   const handleUpdateSize = async (sizeId: number | undefined) => {
     if (typeof sizeId === 'number') {
-      const request: UpdateProductSizeStockRequest = {
-        productId: Number(id),
-        sizeId: sizeId,
-        quantity: sizeUpdates[sizeId],
-      };
-      const response = await updateSize(request);
-      if (response) {
-        fetchProduct();
+      const isConfirmed = window.confirm('Are you sure you want to update the size?');
+
+      if (isConfirmed) {
+        const request: UpdateProductSizeStockRequest = {
+          productId: Number(id),
+          sizeId: sizeId,
+          quantity: sizeUpdates[sizeId],
+        };
+        const response = await updateSize(request);
+        if (response) {
+          fetchProduct();
+        }
       }
     }
   };
@@ -165,6 +169,7 @@ export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchPro
                           handleMeasurementChange(size.id, measurementDict.id, e.target.value)
                         }
                         style={{ width: '80px' }}
+                        inputProps={{ min: 0 }}
                       />
                     </TableCell>
                   );

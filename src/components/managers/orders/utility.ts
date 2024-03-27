@@ -11,7 +11,7 @@ const pattern: Pattern = {
   category: /CATEGORY_ENUM_/
 };
 
-type dictionaryTypes = 'size' | 'order' | 'carrier' | 'status' | 'gender' | 'measurement' | 'category';
+type dictionaryTypes = 'size' | 'order' | 'carrier' | 'status' | 'measurement' | 'category';
 
 export const findInDictionary = (
   dictionary: common_Dictionary | undefined,

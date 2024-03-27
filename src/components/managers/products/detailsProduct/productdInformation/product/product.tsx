@@ -1,23 +1,29 @@
-import { Button, Grid } from '@mui/material';
+import {
+  Box,
+  Button,
+  Checkbox,
+  FormControl,
+  Grid,
+  InputLabel,
+  MenuItem,
+  Select,
+  SelectChangeEvent,
+  TextField,
+  Typography,
+} from '@mui/material';
 import { updateProductById } from 'api/byID';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
-import { FC, useEffect, useState } from 'react';
+import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../../utility/interfaces';
-import { useChangeProductDetails } from '../utility/changeProductDetails';
-import { initialProductDetails } from '../utility/initialProductDetails';
-import { ProductForm } from './productForm';
 
-interface UpdatePayload extends Partial<common_ProductInsert> {
-  [key: string]: any;
-}
+type UpdateProductPayload = Partial<common_ProductInsert>;
 
 export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
-  const { inputValues, handleInputChange, changedFields } = useChangeProductDetails(
-    initialProductDetails(product),
-  );
-
+  const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
+    hidden: product?.product?.productInsert?.hidden ?? false,
+  });
   const [isEdit, setIsEdit] = useState(false);
   const [dict, setDict] = useState<common_Dictionary>();
 
@@ -27,194 +33,249 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
       setDict(JSON.parse(data));
     }
   }, []);
-  const handleUpdateProduct = async () => {
-    if (changedFields.size === 0) return;
 
-    let updatePayload: UpdatePayload = {};
-
-    changedFields.forEach((field) => {
-      if (field in inputValues) {
-        const value = inputValues[field];
-        if (['price', 'salePercentage'].includes(field)) {
-          updatePayload[field] = { value: value || '' };
-        } else {
-          updatePayload[field] = value;
-        }
-      }
-    });
-
-    const response = await updateProductById({
-      id: Number(id),
-      product: { ...product?.product?.productInsert, ...updatePayload } as common_ProductInsert,
-    });
-    if (response) {
-      fetchProduct();
-    }
+  const enableEditMode = () => {
+    setIsEdit(!isEdit);
   };
 
+  const handleChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
+  ) => {
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement;
+    const name = target.name;
+    const isCheckbox = target instanceof HTMLInputElement && target.type === 'checkbox';
+    const value = isCheckbox ? target.checked : target.value;
+
+    setUpdatePayload((prev) => {
+      if (name === 'price' || name === 'salePercentage') {
+        return { ...prev, [name]: { ...prev[name], value } };
+      }
+      return { ...prev, [name]: value };
+    });
+  };
+
+  const updateProduct = async () => {
+    if (
+      Object.entries(updatePayload).some(([key, value]) => {
+        return key !== 'hidden' && !value; // This skips the 'hidden' field from being checked for 'falsy' values
+      })
+    ) {
+      alert('Please fill out all required fields.');
+      return;
+    }
+    const updatedDetails = { ...product?.product?.productInsert, ...updatePayload };
+    const response = await updateProductById({
+      id: Number(id),
+      product: updatedDetails as common_ProductInsert,
+    });
+
+    setUpdatePayload(updatedDetails);
+  };
+
+  const updateProductAndToggleEditMode = () => {
+    if (isEdit) {
+      updateProduct();
+    }
+    enableEditMode();
+  };
+
+  useEffect(() => {
+    setUpdatePayload((prevState) => ({
+      ...prevState,
+      hidden: product?.product?.productInsert?.hidden ?? false,
+    }));
+  }, [product?.product?.productInsert?.hidden]);
   return (
-    <Grid container direction='column' spacing={1} className={styles.product_details_container}>
+    <Grid container direction='column' spacing={2} className={styles.product_details_container}>
       <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          title='name'
+        <TextField
           name='name'
-          value={inputValues.name?.toLocaleString() || ''}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.name}
+          onChange={handleChange}
+          value={updatePayload.name || ''}
+          variant='outlined'
+          label='name'
+          placeholder={product?.product?.productInsert?.name}
+          InputLabelProps={{ shrink: true }}
+          disabled={!isEdit}
         />
       </Grid>
       <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          title='description'
-          name='description'
-          value={inputValues.description?.toLocaleString() || ''}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.description}
-        />
-      </Grid>
-      <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          name='countryOfOrigin'
-          title='contry'
-          value={inputValues.countryOfOrigin?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.countryOfOrigin}
-        />
-      </Grid>
-      <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          name='preorder'
-          title='preorder'
-          value={inputValues.preorder?.toLocaleString() || ''}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.preorder}
-        />
-      </Grid>
-      <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          title='price'
+        <TextField
+          type='number'
           name='price'
-          value={inputValues.price?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.price?.value}
-          type='number'
+          onChange={handleChange}
+          value={updatePayload.price?.value || ''}
+          variant='outlined'
+          label='price'
+          placeholder={product?.product?.productInsert?.price?.value}
+          InputLabelProps={{ shrink: true }}
+          inputProps={{ min: 0 }}
+          disabled={!isEdit}
         />
       </Grid>
       <Grid item>
-        <ProductForm
-          isEdit={isEdit}
+        <TextField
+          type='number'
           name='salePercentage'
-          title='sale'
-          value={inputValues.salePercentage?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.salePercentage?.value}
-          type='number'
+          onChange={handleChange}
+          value={updatePayload.salePercentage?.value || ''}
+          variant='outlined'
+          label='sale'
+          placeholder={product?.product?.productInsert?.salePercentage?.value}
+          InputLabelProps={{ shrink: true }}
+          inputProps={{ min: 0 }}
+          disabled={!isEdit}
         />
       </Grid>
       <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          name='brand'
-          title='brand'
-          value={inputValues.brand?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.brand}
-        />
-      </Grid>
-      <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          name='color'
-          title='color'
-          value={inputValues.color?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.color}
-        />
-      </Grid>
-      <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          name='colorHex'
-          title='color hex'
-          value={inputValues.colorHex?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.colorHex}
-          type='color'
-        />
-      </Grid>
-      <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          name='categoryId'
-          title='category'
-          value={inputValues.categoryId?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={
-            findInDictionary(dict, product?.product?.productInsert?.categoryId, 'category') || ''
-          }
-          dictionary={dict}
-        />
-      </Grid>
-      <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          name='targetGender'
-          title='gender'
-          value={inputValues.targetGender?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.targetGender?.replace('GENDER_ENUM_', '')}
-          dictionary={dict}
-        />
-      </Grid>
-      <Grid item>
-        <ProductForm
-          isEdit={isEdit}
+        <TextField
           name='sku'
-          title='vendore code'
-          value={inputValues.sku?.toLocaleString()}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.sku}
+          onChange={handleChange}
+          value={updatePayload.sku}
+          variant='outlined'
+          label='sku'
+          placeholder={product?.product?.productInsert?.sku}
+          InputLabelProps={{ shrink: true }}
+          disabled={!isEdit}
         />
       </Grid>
       <Grid item>
-        <ProductForm
-          isEdit={isEdit}
-          name='hidden'
-          title='hidden'
-          value={Boolean(inputValues.hidden)}
-          onChange={handleInputChange}
-          currentInfo={product?.product?.productInsert?.hidden ? 'true' : 'false'}
+        <TextField
+          name='color'
+          onChange={handleChange}
+          value={updatePayload.color}
+          variant='outlined'
+          label='color'
+          placeholder={product?.product?.productInsert?.color}
+          InputLabelProps={{ shrink: true }}
+          disabled={!isEdit}
         />
+      </Grid>
+      <Grid item>
+        <TextField
+          name='preorder'
+          onChange={handleChange}
+          value={updatePayload.preorder}
+          variant='outlined'
+          label='preorder'
+          placeholder={product?.product?.productInsert?.preorder}
+          InputLabelProps={{ shrink: true }}
+          disabled={!isEdit}
+        />
+      </Grid>
+      <Grid item>
+        <TextField
+          name='brand'
+          onChange={handleChange}
+          value={updatePayload.brand}
+          variant='outlined'
+          label='brand'
+          placeholder={product?.product?.productInsert?.brand}
+          InputLabelProps={{ shrink: true }}
+          disabled={!isEdit}
+        />
+      </Grid>
+      <Grid item>
+        <TextField
+          name='countryOfOrigin'
+          onChange={handleChange}
+          value={updatePayload.countryOfOrigin}
+          variant='outlined'
+          label='country'
+          placeholder={product?.product?.productInsert?.countryOfOrigin}
+          InputLabelProps={{ shrink: true }}
+          disabled={!isEdit}
+        />
+      </Grid>
+      <Grid item>
+        <TextField
+          name='colorHex'
+          onChange={handleChange}
+          value={updatePayload.colorHex || product?.product?.productInsert?.colorHex}
+          variant='outlined'
+          label='colorHEX'
+          InputLabelProps={{ shrink: true }}
+          type='color'
+          fullWidth
+          disabled={!isEdit}
+        />
+      </Grid>
+      <Grid item>
+        <FormControl fullWidth>
+          <InputLabel shrink>gender</InputLabel>
+          <Select
+            name='targetGender'
+            value={updatePayload.targetGender || ''}
+            onChange={handleChange}
+            displayEmpty
+            label='gender'
+            disabled={!isEdit}
+          >
+            <MenuItem value='' disabled>
+              {product?.product?.productInsert?.targetGender?.replace('GENDER_ENUM_', '')}
+            </MenuItem>
+            {dict?.genders?.map((gender) => (
+              <MenuItem key={gender.id} value={gender.id?.toString()}>
+                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Grid>
+      <Grid item>
+        <FormControl fullWidth>
+          <InputLabel shrink>category</InputLabel>
+          <Select
+            name='categoryId'
+            value={updatePayload.categoryId?.toString() || ''}
+            onChange={handleChange}
+            displayEmpty
+            label='category'
+            disabled={!isEdit}
+          >
+            <MenuItem value='' disabled>
+              {findInDictionary(dict, product?.product?.productInsert?.categoryId, 'category')}
+            </MenuItem>
+            {dict?.categories?.map((category) => (
+              <MenuItem key={category.id} value={category.id?.toString()}>
+                {findInDictionary(dict, category.id, 'category')}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Grid>
+      <Grid item>
+        <TextField
+          name='description'
+          onChange={handleChange}
+          value={updatePayload.description || ''}
+          variant='outlined'
+          label='description'
+          placeholder={product?.product?.productInsert?.description}
+          InputLabelProps={{ shrink: true }}
+          multiline
+          rows={4}
+          fullWidth
+          disabled={!isEdit}
+        />
+      </Grid>
+      <Grid item>
+        <Box display='flex' alignItems='center'>
+          <Typography variant='h6'>hide</Typography>
+          <Checkbox
+            name='hidden'
+            checked={!!updatePayload.hidden}
+            onChange={handleChange}
+            disabled={!isEdit}
+          />
+        </Box>
       </Grid>
 
-      {!isEdit && (
-        <Button
-          className={styles.btn}
-          onClick={() => setIsEdit(true)}
-          size='medium'
-          variant='contained'
-        >
-          Edit
+      <Grid item>
+        <Button onClick={updateProductAndToggleEditMode} variant='contained' className={styles.btn}>
+          {isEdit ? 'upload' : 'edit'}
         </Button>
-      )}
-      {isEdit && (
-        <Button
-          className={styles.btn}
-          size='medium'
-          variant='contained'
-          onClick={() => {
-            handleUpdateProduct();
-            setIsEdit(false);
-          }}
-        >
-          Update Product
-        </Button>
-      )}
+      </Grid>
     </Grid>
   );
 };

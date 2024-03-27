@@ -31,20 +31,28 @@ export const Tag: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
     }
   };
   return (
-    <Grid container spacing={2} alignItems='flex-start' justifyContent='flex-start'>
+    <Grid container spacing={2}>
       <Grid item>
-        <Typography variant='h6' className={styles.title}>
-          tags
-        </Typography>
+        <Box display='flex' alignItems='center' gap='15px'>
+          <Typography variant='h6' className={styles.title}>
+            tags
+          </Typography>
+          <Box display='flex' alignItems='center' gap='5px'>
+            <TextField
+              type='text'
+              value={tag}
+              onChange={(e) => setTag(e.target.value)}
+              placeholder='upload new tag'
+              size='small'
+            />
+            <Button sx={{ backgroundColor: '#000' }} variant='contained' onClick={addNewTag}>
+              upload
+            </Button>
+          </Box>
+        </Box>
       </Grid>
-      <Grid item xs={6}>
-        <List
-          className={styles.tags_list}
-          sx={{
-            maxWidth: 560,
-            maxHeight: 50,
-          }}
-        >
+      <Grid item>
+        <List className={styles.tags_list}>
           {product?.tags?.map((tag) => (
             <ListItem className={styles.list_item}>
               <Typography variant='body1'>{tag.productTagInsert?.tag}</Typography>
@@ -57,20 +65,6 @@ export const Tag: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
             </ListItem>
           ))}
         </List>
-      </Grid>
-      <Grid item xs={6}>
-        <Box display='flex' alignItems='center' gap='5px'>
-          <TextField
-            type='text'
-            value={tag}
-            onChange={(e) => setTag(e.target.value)}
-            placeholder='upload new tag'
-            size='small'
-          />
-          <Button sx={{ backgroundColor: '#000' }} variant='contained' onClick={addNewTag}>
-            upload
-          </Button>
-        </Box>
       </Grid>
     </Grid>
   );
