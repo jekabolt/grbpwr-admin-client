@@ -57,7 +57,7 @@ export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const updateProduct = async () => {
     if (
       Object.entries(updatePayload).some(([key, value]) => {
-        return key !== 'hidden' && !value; // This skips the 'hidden' field from being checked for 'falsy' values
+        return key !== 'hidden' && !value;
       })
     ) {
       alert('Please fill out all required fields.');
