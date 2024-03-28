@@ -16,7 +16,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const { media, reload, isLoading, hasMore, fetchFiles, setMedia, url, setUrl, updateLink } =
     useMediaSelector();
-  const [selectedMedia, setSelectedMedia] = useState<Array<{ url: string; type: string }>>([]);
+  const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
 
   const handleMediaAndCloseSelector = async () => {
@@ -25,7 +25,8 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
       return;
     }
     console.log(selectedMedia);
-    saveSelectedMedia(selectedMedia.map((item) => item.url));
+    const url = selectedMedia.map((item) => item.url);
+    saveSelectedMedia(url);
     closeMediaSelector();
   };
 
