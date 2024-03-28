@@ -2,9 +2,9 @@ import { Grid } from '@mui/material';
 import { addMediaByID } from 'api/admin';
 import { updateProductById } from 'api/byID';
 import { FC } from 'react';
+import { SingleMediaViewAndSelect } from '../../../../common/singleMediaViewAndSelect';
 import { ProductIdProps } from '../utility/interfaces';
 import { ProductMedias } from './components/productIdMedias';
-import { SingleMediaViewAndSelect } from './components/singleMediaViewAndSelect';
 
 export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const saveThumbnail = async (newSelectedMedia: string[]) => {

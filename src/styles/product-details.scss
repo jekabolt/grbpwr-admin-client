@@ -6,8 +6,6 @@
     position: absolute;
     top: 0;
     right: 0;
-    width: 100px;
-    background-color: #000;
   }
   .current_info {
     text-transform: uppercase;
@@ -26,23 +24,10 @@
   text-transform: uppercase;
 }
 
-.tags_list {
-  width: 100%;
+.tag {
+  border: 1px solid black;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 10px;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-
-  .list_item {
-    border: 1px solid black;
-    position: relative;
-    width: 220px;
-    display: flex;
-    flex-wrap: wrap;
-
-    .btn {
-      position: absolute;
-      right: 0;
-      border-radius: 0;
-    }
-  }
 }

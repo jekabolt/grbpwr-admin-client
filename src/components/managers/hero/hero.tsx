@@ -5,7 +5,7 @@ import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
 import { common_HeroInsert, common_Product } from '../../../api/proto-http/admin';
-import { SingleMediaViewAndSelect } from '../products/detailsProduct/mediaView/components/singleMediaViewAndSelect';
+import { SingleMediaViewAndSelect } from '../../common/singleMediaViewAndSelect';
 import { HeroProductTable } from './heroProductsTable';
 
 export const Hero: FC = () => {

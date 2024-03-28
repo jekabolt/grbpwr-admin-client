@@ -19,7 +19,7 @@ import { UploadPage } from 'components/managers/media/upload';
 import { OrderId } from 'components/managers/orders/orderId';
 import { Orders } from 'components/managers/orders/orders';
 import { AddProducts } from 'components/managers/products/addProduct/addProduct';
-import { DetailsProduct } from 'components/managers/products/detailsProduct/detailsProduct';
+import { Details } from 'components/managers/products/details/details';
 import { PageProduct } from 'components/managers/products/listProducts/allProducts';
 import { Product } from 'components/managers/products/products';
 import { GetPromo } from 'components/managers/promo/getPromo';
@@ -48,7 +48,7 @@ const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.product, element: <Product /> },
   { path: ROUTES.addProduct, element: <AddProducts /> },
   { path: ROUTES.pagedProduct, element: <PageProduct /> },
-  { path: `${ROUTES.singleProduct}/:id`, element: <DetailsProduct /> },
+  { path: `${ROUTES.singleProduct}/:id`, element: <Details /> },
   { path: ROUTES.hero, element: <Hero /> },
 
   { path: ROUTES.promo, element: <Promo /> },

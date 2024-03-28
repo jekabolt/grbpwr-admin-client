@@ -34,13 +34,9 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
     e.preventDefault();
 
     let files: FileList | null = null;
-
-    // Check if the event is from dragging files
     if (e.type === 'drop' && 'dataTransfer' in e) {
       files = e.dataTransfer.files;
-    }
-    // Check if the event is from file input
-    else if (e.type === 'change' && e.target instanceof HTMLInputElement && e.target.files) {
+    } else if (e.type === 'change' && e.target instanceof HTMLInputElement && e.target.files) {
       files = e.target.files;
     }
 
@@ -49,8 +45,6 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
     } else {
       alert('No selected files.');
     }
-
-    // Assuming setIsDragging is relevant for drag events only
     if ('dataTransfer' in e) {
       setIsDragging(false);
     }

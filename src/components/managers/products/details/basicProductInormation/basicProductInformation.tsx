@@ -16,11 +16,11 @@ import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
-import { ProductIdProps } from '../../utility/interfaces';
+import { ProductIdProps } from '../utility/interfaces';
 
 type UpdateProductPayload = Partial<common_ProductInsert>;
 
-export const Product: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
+export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
     hidden: product?.product?.productInsert?.hidden ?? false,
   });

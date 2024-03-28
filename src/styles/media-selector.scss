@@ -12,10 +12,14 @@
 
   .thumbnail_picker {
     position: relative;
-    width: 65%;
-    height: 65%;
+    width: 85%;
+    height: 85%;
     background: white;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+
+    .media_picker_top {
+      margin-top: 30px;
+    }
 
     .close_thumbnail_picker {
       position: absolute;
@@ -29,7 +33,6 @@
   }
 
   .thumbnail_picker_list {
-    border: 1px solid black;
     .thumbnail_picker_item_wrapper {
       border: 1px solid black;
       position: relative;
@@ -37,7 +40,6 @@
       align-items: center;
 
       label {
-        position: absolute;
         height: 100%;
         span {
           position: absolute;

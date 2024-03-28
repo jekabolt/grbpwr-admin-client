@@ -2,17 +2,9 @@ import { useNavigate } from '@tanstack/react-location';
 import { uploadContentImage, uploadContentVideo } from 'api/admin';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
+import { fileExtensionToContentType } from 'features/utilitty/filterExtentions';
 import { FC, useState } from 'react';
 import styles from 'styles/media-manager.scss';
-
-export const fileExtensionToContentType: { [key: string]: string } = {
-  jpg: 'image/jpg',
-  png: 'image/png',
-  webm: 'video/webm',
-  mp4: 'video/mp4',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-};
 
 export const MediaManager: FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);

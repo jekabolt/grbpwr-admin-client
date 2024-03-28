@@ -2,7 +2,7 @@ import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import { IconButton, Typography } from '@mui/material';
 import { common_Product } from 'api/proto-http/admin';
-import { fileExtensionToContentType } from 'components/managers/media/mediaManager';
+import { isVideo } from 'features/utilitty/filterContentType';
 import React, { FC, useState } from 'react';
 import styles from 'styles/paged.scss';
 
@@ -24,18 +24,6 @@ export const ListProducts: FC<ProductProps> = ({
   showHidden,
 }) => {
   const [hoveredProductId, setHoveredProductId] = useState<number | undefined>(undefined);
-
-  const isVideo = (mediaUrl: string | undefined) => {
-    if (mediaUrl) {
-      const extension = mediaUrl.split('.').pop()?.toLowerCase();
-
-      if (extension) {
-        const contentType = fileExtensionToContentType[extension];
-        return contentType?.startsWith('video/');
-      }
-    }
-    return false;
-  };
 
   return (
     <ul className={styles.product_list}>

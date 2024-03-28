@@ -12,15 +12,8 @@ export const UploadMediaByUrlByDragDrop: FC<MediaSelectorUploadMediaByUrByDragDr
   updateContentLink,
 }) => {
   return (
-    <Grid
-      container
-      direction='column'
-      style={{ height: '100%' }}
-      alignItems='center'
-      justifyContent='center'
-      spacing={4}
-    >
-      <Grid item xs={2}>
+    <Grid container style={{ marginTop: '5%' }}>
+      <Grid item xs={5}>
         <ByUrl
           closeMediaSelector={closeMediaSelector}
           url={url}
@@ -28,7 +21,7 @@ export const UploadMediaByUrlByDragDrop: FC<MediaSelectorUploadMediaByUrByDragDr
           updateContentLink={updateContentLink}
         />
       </Grid>
-      <Grid item xs={2}>
+      <Grid item xs={7}>
         <DragDrop reloadFile={reload} />
       </Grid>
     </Grid>

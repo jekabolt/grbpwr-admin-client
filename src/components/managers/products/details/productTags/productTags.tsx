@@ -1,20 +1,11 @@
 import CloseIcon from '@mui/icons-material/Close';
-import {
-  Box,
-  Button,
-  Grid,
-  IconButton,
-  List,
-  ListItem,
-  TextField,
-  Typography,
-} from '@mui/material';
+import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
 import { deleteTag, updateTag } from 'api/byID';
 import { FC, useState } from 'react';
 import styles from 'styles/product-details.scss';
-import { ProductIdProps } from '../../utility/interfaces';
+import { ProductIdProps } from '../utility/interfaces';
 
-export const Tag: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
+export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [tag, setTag] = useState('');
 
   const deleteTagFromList = async (removeTag: string | undefined) => {
@@ -52,19 +43,21 @@ export const Tag: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
         </Box>
       </Grid>
       <Grid item>
-        <List className={styles.tags_list}>
+        <Grid container spacing={3}>
           {product?.tags?.map((tag) => (
-            <ListItem className={styles.list_item}>
-              <Typography variant='body1'>{tag.productTagInsert?.tag}</Typography>
-              <IconButton
-                onClick={() => deleteTagFromList(tag.productTagInsert?.tag)}
-                className={styles.btn}
-              >
-                <CloseIcon />
-              </IconButton>
-            </ListItem>
+            <Grid item xs={6}>
+              <Box className={styles.tag}>
+                <Typography variant='body1'>{tag.productTagInsert?.tag}</Typography>
+                <IconButton
+                  onClick={() => deleteTagFromList(tag.productTagInsert?.tag)}
+                  className={styles.btn}
+                >
+                  <CloseIcon />
+                </IconButton>
+              </Box>
+            </Grid>
           ))}
-        </List>
+        </Grid>
       </Grid>
     </Grid>
   );

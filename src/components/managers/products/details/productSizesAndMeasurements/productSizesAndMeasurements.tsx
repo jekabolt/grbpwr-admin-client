@@ -20,7 +20,7 @@ import { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';
 
-export const SizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
+export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [dictionary, setDictionary] = useState<common_Dictionary>();
   const [sizeQuantity, setSizeQuantity] = useState<{ [sizeId: number]: number }>({});
   const [measurementQuantity, setMeasurementQuantity] = useState<{ [key: string]: string }>({});

@@ -1,24 +1,13 @@
-import { fileExtensionToContentType } from 'components/managers/media/mediaManager';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
+import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { MediaViewComponentsProps } from '../../utility/interfaces';
+import { MediaViewComponentsProps } from '../managers/products/details/utility/interfaces';
 
 export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
   link,
   saveSelectedMedia,
 }) => {
-  const isVideo = (mediaUrl: string | undefined) => {
-    if (mediaUrl) {
-      const extension = mediaUrl.split('.').pop()?.toLowerCase();
-
-      if (extension) {
-        const contentType = fileExtensionToContentType[extension];
-        return contentType?.startsWith('video/');
-      }
-    }
-    return false;
-  };
   return (
     <>
       <div className={styles.thumbnail_container}>

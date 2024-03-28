@@ -1,8 +1,8 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Grid, IconButton, ImageList, ImageListItem } from '@mui/material';
+import { Checkbox, Grid, IconButton, ImageList, ImageListItem, InputLabel } from '@mui/material';
 import { deleteFiles } from 'api/admin';
-import { fileExtensionToContentType } from 'components/managers/media/mediaManager';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
+import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
 import styles from 'styles/media-selector.scss';
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
@@ -15,18 +15,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const handleDeleteFile = async (id: number | undefined) => {
     await deleteFiles({ id });
     setMedia?.((currentFiles) => currentFiles?.filter((file) => file.id !== id));
-  };
-
-  const isVideo = (mediaUrl: string | undefined) => {
-    if (mediaUrl) {
-      const extension = mediaUrl.split('.').pop()?.toLowerCase();
-
-      if (extension) {
-        const contentType = fileExtensionToContentType[extension];
-        return contentType?.startsWith('video/');
-      }
-    }
-    return false;
   };
 
   const handleSelect = (mediaUrl: string, allowMultiple: boolean, event: any) => {
@@ -42,24 +30,23 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             variant='standard'
             sx={{
               width: '100%',
-              height: 400,
+              height: 500,
               padding: 2,
             }}
-            cols={3}
+            cols={4}
             gap={8}
             className={styles.thumbnail_picker_list}
             rowHeight={180}
           >
             {media.map((m) => (
               <ImageListItem key={m.id} className={styles.thumbnail_picker_item_wrapper}>
-                <input
-                  type='checkbox'
+                <Checkbox
                   checked={selectedMedia?.some((mediaItem) => mediaItem.url === m.media?.fullSize)}
                   onChange={() => select(m.media?.fullSize ?? '', allowMultiple)}
                   id={`${m.id}`}
                   style={{ display: 'none' }}
                 />
-                <label htmlFor={`${m.id}`}>
+                <InputLabel htmlFor={`${m.id}`}>
                   {selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? (
                     <span className={styles.media_selector_img_number}>selected</span>
                   ) : null}
@@ -81,7 +68,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                       className={`${selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? styles.selected_media : ''}`}
                     />
                   )}
-                </label>
+                </InputLabel>
                 <IconButton
                   sx={{ backgroundColor: 'black', color: 'white' }}
                   aria-label='delete'

@@ -4,12 +4,12 @@ import { getProductByID } from 'api/admin';
 import { common_ProductFull } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
-import { MediaView } from './mediaView/mediaView';
+import { MediaView } from './productMedia/mediaView';
+import { ProductSizesAndMeasurements } from './productSizesAndMeasurements/productSizesAndMeasurements';
 import { ProductIdInformation } from './productdInformation/productIdInformation';
-import { SizesAndMeasurements } from './sizes&measurements/sizesAndMeasurements';
 import { ProductIdProps } from './utility/type';
 
-export const DetailsProduct: FC = () => {
+export const Details: FC = () => {
   const [product, setProduct] = useState<common_ProductFull | undefined>();
   const {
     params: { id: id },
@@ -42,7 +42,7 @@ export const DetailsProduct: FC = () => {
           <ProductIdInformation product={product} id={id} fetchProduct={fetchProduct} />
         </Grid>
         <Grid item xs={11}>
-          <SizesAndMeasurements product={product} fetchProduct={fetchProduct} id={id} />
+          <ProductSizesAndMeasurements product={product} fetchProduct={fetchProduct} id={id} />
         </Grid>
       </Grid>
     </Layout>

@@ -1,7 +1,7 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Button, Grid } from '@mui/material';
-import { fileExtensionToContentType } from 'components/managers/media/mediaManager';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
+import { fileExtensionToContentType } from 'features/utilitty/filterExtentions';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useRef, useState } from 'react';
 import styles from 'styles/media-selector.scss';
@@ -24,7 +24,6 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     if (selectedMedia.length === 0) {
       return;
     }
-    console.log(selectedMedia);
     const url = selectedMedia.map((item) => item.url);
     saveSelectedMedia(url);
     closeMediaSelector();
@@ -88,13 +87,12 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     <div className={styles.thumbnail_picker_editor_overlay}>
       <Grid
         container
-        spacing={2}
-        alignItems='center'
+        spacing={1}
         justifyContent='center'
         className={styles.thumbnail_picker}
         ref={wrapperRef}
       >
-        <Grid item xs={6}>
+        <Grid item xs={7}>
           <UploadMediaByUrlByDragDrop
             reload={reload}
             closeMediaSelector={closeMediaSelector}
@@ -103,7 +101,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
             updateContentLink={updateLink}
           />
         </Grid>
-        <Grid item xs={6}>
+        <Grid item xs={12}>
           <MediaList
             setMedia={setMedia}
             media={media}
