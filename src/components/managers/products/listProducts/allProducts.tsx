@@ -88,7 +88,7 @@ export const AllProducts: FC = () => {
   };
 
   return (
-    <>
+    <div>
       {deletionMessage && <div>{deletionMessage}</div>}
       <div className={styles.product_container}>
         <div className={styles.product_wrapper}>
@@ -103,6 +103,6 @@ export const AllProducts: FC = () => {
         </div>
         <Filter filter={filter} filterChange={handleFilterChange} onSubmit={handleSubmit} />
       </div>
-    </>
+    </div>
   );
 };

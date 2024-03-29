@@ -1,5 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Checkbox, Grid, IconButton, ImageList, ImageListItem, InputLabel } from '@mui/material';
+import { Grid, IconButton, ImageList, ImageListItem, InputLabel } from '@mui/material';
 import { deleteFiles } from 'api/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
@@ -37,13 +37,11 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             rowHeight={200}
           >
             {media.map((m) => (
-              <ImageListItem className={styles.list_media_item} key={m.id}>
-                <Checkbox
-                  className={styles.checkbox}
-                  checked={selectedMedia?.some((mediaItem) => mediaItem.url === m.media?.fullSize)}
-                  onChange={() => select(m.media?.fullSize ?? '', allowMultiple)}
-                  id={`${m.id}`}
-                />
+              <ImageListItem
+                onClick={(event) => handleSelect(m.media?.fullSize ?? '', allowMultiple, event)}
+                className={styles.list_media_item}
+                key={m.id}
+              >
                 <InputLabel htmlFor={`${m.id}`}>
                   {selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? (
                     <span className={styles.selected_flag}>selected</span>
@@ -54,9 +52,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                       src={m.media?.fullSize}
                       className={`${selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? styles.selected_media : ''}`}
                       controls
-                      onClick={(event) =>
-                        handleSelect(m.media?.fullSize ?? '', allowMultiple, event)
-                      }
                     />
                   ) : (
                     <img
