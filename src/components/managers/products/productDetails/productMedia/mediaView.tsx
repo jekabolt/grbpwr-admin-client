@@ -1,6 +1,6 @@
 import { Grid } from '@mui/material';
 import { addMediaByID } from 'api/admin';
-import { updateProductById } from 'api/byID';
+import { updateProductById } from 'api/updateProductsById';
 import { FC } from 'react';
 import { SingleMediaViewAndSelect } from '../../../../common/singleMediaViewAndSelect';
 import { ProductIdProps } from '../utility/interfaces';

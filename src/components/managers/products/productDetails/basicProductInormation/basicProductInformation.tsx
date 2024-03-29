@@ -11,8 +11,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { updateProductById } from 'api/byID';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
+import { updateProductById } from 'api/updateProductsById';
 import { findInDictionary } from 'components/managers/orders/utility';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';

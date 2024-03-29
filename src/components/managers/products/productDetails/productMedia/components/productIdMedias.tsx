@@ -1,6 +1,6 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton } from '@mui/material';
-import { deleteMediaById } from 'api/byID';
+import { deleteMediaById } from 'api/updateProductsById';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useMemo } from 'react';
 import styles from 'styles/product-id-media.scss';

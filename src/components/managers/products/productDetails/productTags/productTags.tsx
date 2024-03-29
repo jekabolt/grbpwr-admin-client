@@ -1,6 +1,6 @@
 import CloseIcon from '@mui/icons-material/Close';
 import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
-import { deleteTag, updateTag } from 'api/byID';
+import { deleteTag, updateTag } from 'api/updateProductsById';
 import { FC, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';

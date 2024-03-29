@@ -12,8 +12,8 @@ import {
   TableRow,
   TextField,
 } from '@mui/material';
-import { updateMeasurement, updateSize } from 'api/byID';
 import { UpdateProductSizeStockRequest, common_Dictionary } from 'api/proto-http/admin';
+import { updateMeasurement, updateSize } from 'api/updateProductsById';
 import { findInDictionary } from 'components/managers/orders/utility';
 import { sortItems } from 'components/managers/products/addProduct/sizes';
 import { FC, useEffect, useState } from 'react';

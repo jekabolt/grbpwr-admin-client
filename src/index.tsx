@@ -20,7 +20,6 @@ import { OrderId } from 'components/managers/orders/orderId';
 import { Orders } from 'components/managers/orders/orders';
 import { AddProducts } from 'components/managers/products/addProduct/addProduct';
 import { ProductDetails } from 'components/managers/products/productDetails/productDetails';
-// import { PageProduct } from 'components/managers/products/listProducts/allProducts';
 import { Product } from 'components/managers/products/products';
 import { GetPromo } from 'components/managers/promo/getPromo';
 import { Promo } from 'components/managers/promo/promo';

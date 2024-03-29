@@ -40,7 +40,7 @@ const useMediaSelector = (
 
     const fetchFiles = useCallback(async (limit: number, startOffset: number) => {
         setIsLoading(true);
-        const response = await getAllUploadedFiles({ limit, offset: startOffset, orderFactor: 'ORDER_FACTOR_ASC' });
+        const response = await getAllUploadedFiles({ limit, offset: startOffset, orderFactor: 'ORDER_FACTOR_DESC' });
         const fetchedFiles: common_Media[] = response.list || [];
         setMedia(prev => startOffset === 0 ? fetchedFiles : [...prev, ...fetchedFiles]);
         setIsLoading(false);
