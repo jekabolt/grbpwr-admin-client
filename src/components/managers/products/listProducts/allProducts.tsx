@@ -1,7 +1,6 @@
 import { useNavigate } from '@tanstack/react-location';
 import { deleteProductByID } from 'api/admin';
 import { GetProductsPagedRequest, common_FilterConditions } from 'api/proto-http/admin';
-import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
 import React, { FC, MouseEvent, useEffect, useState } from 'react';
 import styles from 'styles/paged.scss';
@@ -9,7 +8,7 @@ import { Filter } from './filterComponents/filterProducts';
 import { ListProducts } from './listProducts';
 import useListProduct from './useListProduct/useListProduct';
 
-export const PageProduct: FC = () => {
+export const AllProducts: FC = () => {
   const { products, setProducts, filter, setFilter, isLoading, hasMore, fetchProducts } =
     useListProduct();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
@@ -89,7 +88,7 @@ export const PageProduct: FC = () => {
   };
 
   return (
-    <Layout>
+    <>
       {deletionMessage && <div>{deletionMessage}</div>}
       <div className={styles.product_container}>
         <div className={styles.product_wrapper}>
@@ -104,6 +103,6 @@ export const PageProduct: FC = () => {
         </div>
         <Filter filter={filter} filterChange={handleFilterChange} onSubmit={handleSubmit} />
       </div>
-    </Layout>
+    </>
   );
 };

@@ -1,9 +1,9 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Button, Grid } from '@mui/material';
+import { Button, Dialog, Grid, IconButton } from '@mui/material';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { fileExtensionToContentType } from 'features/utilitty/filterExtentions';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
-import { FC, useEffect, useRef, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 import styles from 'styles/media-selector.scss';
 import { MediaList } from './listMedia';
 import { UploadMediaByUrlByDragDrop } from './uploadMediaByUrlByDragDrop';
@@ -13,89 +13,70 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   allowMultiple,
   saveSelectedMedia,
 }) => {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const { media, reload, isLoading, hasMore, fetchFiles, setMedia, url, setUrl, updateLink } =
     useMediaSelector();
   const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
+  const [open, setOpen] = useState(true); // Dialog open state
 
   const handleMediaAndCloseSelector = async () => {
     setSaveAttempted(true);
     if (selectedMedia.length === 0) {
       return;
     }
-    const url = selectedMedia.map((item) => item.url);
-    saveSelectedMedia(url);
-    closeMediaSelector();
+    const urls = selectedMedia.map((item) => item.url);
+    saveSelectedMedia(urls);
+    handleClose();
   };
 
   const select = (mediaUrl: string, allowMultiple: boolean) => {
     const extension = mediaUrl.split('.').pop()?.toLowerCase();
 
     if (extension) {
-      const contentType = fileExtensionToContentType[extension] || 'undefined';
+      const contentType = fileExtensionToContentType[extension] || undefined;
 
-      const mediaType = contentType.startsWith('image')
+      const mediaType = contentType?.startsWith('image')
         ? 'image'
-        : contentType.startsWith('video')
+        : contentType?.startsWith('video')
           ? 'video'
-          : 'undefined';
+          : undefined;
 
-      setSelectedMedia((prevSelected) => {
-        const newMedia = { url: mediaUrl, type: mediaType };
-        return allowMultiple
-          ? prevSelected.some((media) => media.url === mediaUrl)
-            ? prevSelected.filter((media) => media.url !== mediaUrl)
-            : [...prevSelected, newMedia]
-          : [newMedia];
-      });
+      if (mediaType) {
+        setSelectedMedia((prevSelected) => {
+          const newMedia = { url: mediaUrl, type: mediaType };
+          return allowMultiple
+            ? prevSelected.some((media) => media.url === mediaUrl)
+              ? prevSelected.filter((media) => media.url !== mediaUrl)
+              : [...prevSelected, newMedia]
+            : [newMedia];
+        });
+      }
     }
   };
-
-  useEffect(() => {
-    const handleScroll = () => {
-      if (
-        window.innerHeight + window.scrollY + 300 >= document.documentElement.offsetHeight &&
-        !isLoading &&
-        hasMore
-      ) {
-        fetchFiles(50, media.length);
-      }
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [isLoading, hasMore, media.length, fetchFiles]);
 
   useEffect(() => {
     fetchFiles(50, 0);
   }, [fetchFiles]);
 
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
-        closeMediaSelector();
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [wrapperRef, closeMediaSelector]);
+  const handleClose = () => {
+    setOpen(false);
+    closeMediaSelector();
+  };
 
   return (
-    <div className={styles.thumbnail_picker_editor_overlay}>
-      <Grid
-        container
-        spacing={1}
-        justifyContent='center'
-        className={styles.thumbnail_picker}
-        ref={wrapperRef}
-      >
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      aria-labelledby='media-selector-dialog-title'
+      fullWidth={true}
+      maxWidth='xl'
+      className={styles.modal}
+    >
+      <Grid container spacing={1} justifyContent='center'>
         <Grid item xs={7}>
           <UploadMediaByUrlByDragDrop
             reload={reload}
-            closeMediaSelector={closeMediaSelector}
+            closeMediaSelector={handleClose}
             url={url}
             setUrl={setUrl}
             updateContentLink={updateLink}
@@ -110,34 +91,27 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
             selectedMedia={selectedMedia}
           />
         </Grid>
-        <Grid item xs={12} sx={{ padding: '10px' }} display='flex' justifyContent='center'>
-          <Button
-            onClick={handleMediaAndCloseSelector}
-            variant='contained'
-            size='small'
-            className={styles.media_selector_btn}
-          >
-            save
+        <Grid item xs={12} display='flex' justifyContent='center'>
+          <Button onClick={handleMediaAndCloseSelector} variant='contained' size='small'>
+            Save
           </Button>
         </Grid>
-        <Button
-          sx={{ backgroundColor: 'black' }}
-          aria-label='delete'
-          variant='contained'
+        <IconButton
+          className={styles.close_modal}
           size='small'
-          className={styles.close_thumbnail_picker}
-          onClick={closeMediaSelector}
+          aria-label='close'
+          onClick={handleClose}
         >
           <ClearIcon />
-        </Button>
-        <Grid item>
-          {saveAttempted && selectedMedia.length === 0 && (
+        </IconButton>
+        {saveAttempted && selectedMedia.length === 0 && (
+          <Grid item xs={12}>
             <h4 className={styles.no_media_message}>
               No media selected. Please select or upload media.
             </h4>
-          )}
-        </Grid>
+          </Grid>
+        )}
       </Grid>
-    </div>
+    </Dialog>
   );
 };

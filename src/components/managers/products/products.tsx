@@ -1,8 +1,9 @@
+import { Button, Grid } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
-import styles from 'styles/product.scss';
+import { AllProducts } from './listProducts/allProducts';
 
 export const Product: FC = () => {
   const navigate = useNavigate();
@@ -11,15 +12,18 @@ export const Product: FC = () => {
     navigate({ to: ROUTES.addProduct });
   };
 
-  const navigatePagedProduct = () => {
-    navigate({ to: ROUTES.pagedProduct });
-  };
   return (
     <Layout>
-      <div className={styles.product_operation_wrapper}>
-        <button onClick={navigatePagedProduct}>ALL PRODUCTS</button>
-        <button onClick={navigateAddProduct}>ADD PRODUCT</button>
-      </div>
+      <Grid container justifyContent='center'>
+        <Grid item>
+          <Button onClick={navigateAddProduct} size='large' variant='contained'>
+            ADD PRODUCT
+          </Button>
+        </Grid>
+        <Grid item xs={12}>
+          <AllProducts />
+        </Grid>
+      </Grid>
     </Layout>
   );
 };

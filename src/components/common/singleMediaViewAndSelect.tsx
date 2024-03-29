@@ -2,7 +2,7 @@ import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout'
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { MediaViewComponentsProps } from '../managers/products/details/utility/interfaces';
+import { MediaViewComponentsProps } from '../managers/products/productDetails/utility/interfaces';
 
 export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
   link,

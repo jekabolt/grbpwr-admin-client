@@ -6,10 +6,18 @@ import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import { MediaView } from './productMedia/mediaView';
 import { ProductSizesAndMeasurements } from './productSizesAndMeasurements/productSizesAndMeasurements';
-import { ProductIdInformation } from './productdInformation/productIdInformation';
-import { ProductIdProps } from './utility/type';
 
-export const Details: FC = () => {
+import { MakeGenerics } from '@tanstack/react-location';
+import { BasicProductIformation } from './basicProductInormation/basicProductInformation';
+import { ProductTags } from './productTags/productTags';
+
+export type ProductIdProps = MakeGenerics<{
+  Params: {
+    id: string;
+  };
+}>;
+
+export const ProductDetails: FC = () => {
   const [product, setProduct] = useState<common_ProductFull | undefined>();
   const {
     params: { id: id },
@@ -39,7 +47,14 @@ export const Details: FC = () => {
           <MediaView product={product} id={id} fetchProduct={fetchProduct} />
         </Grid>
         <Grid item xs={6}>
-          <ProductIdInformation product={product} id={id} fetchProduct={fetchProduct} />
+          <Grid container spacing={2}>
+            <Grid item xs={10}>
+              <BasicProductIformation product={product} id={id} fetchProduct={fetchProduct} />
+            </Grid>
+            <Grid item xs={10}>
+              <ProductTags product={product} id={id} fetchProduct={fetchProduct} />
+            </Grid>
+          </Grid>
         </Grid>
         <Grid item xs={11}>
           <ProductSizesAndMeasurements product={product} fetchProduct={fetchProduct} id={id} />

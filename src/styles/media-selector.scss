@@ -1,81 +1,51 @@
-.thumbnail_picker_editor_overlay {
-  z-index: 600;
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.modal {
+  position: relative;
 
-  .thumbnail_picker {
-    position: relative;
-    width: 85%;
-    height: 85%;
-    background: white;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-
-    .media_picker_top {
-      margin-top: 30px;
-    }
-
-    .close_thumbnail_picker {
-      position: absolute;
-      left: 0;
-      top: 0;
-    }
-
-    h4 {
-      text-transform: uppercase;
-    }
+  .close_modal {
+    position: absolute;
+    left: 0;
+    top: 0;
+    border-radius: 0;
   }
 
-  .thumbnail_picker_list {
-    .thumbnail_picker_item_wrapper {
-      border: 1px solid black;
-      position: relative;
-      display: flex;
-      align-items: center;
+  .list_media_item {
+    border: 1px solid black;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
 
-      label {
-        height: 100%;
-        span {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          color: #fff;
-          background-color: #000;
-          padding: 2px;
-          font-size: 15px;
-          text-transform: uppercase;
-        }
-        img,
-        video {
-          object-fit: scale-down;
-          width: 100%;
-          height: 100%;
-        }
+    .checkbox {
+      display: none;
+    }
 
-        .selected_media {
-          opacity: 0.5;
-        }
-      }
+    .selected_flag {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: large;
+      text-transform: uppercase;
+      background-color: #000;
+      color: #fff;
+    }
 
-      .thumb_picker_delete_btn {
-        display: none;
-        position: absolute;
-        top: 0;
-        right: 0;
-        border-radius: 0%;
-      }
+    video,
+    img {
+      width: 100%;
+      height: 100%;
+    }
 
-      &:hover {
-        .thumb_picker_delete_btn {
-          display: block;
-        }
+    .delete_btn {
+      display: none;
+      position: absolute;
+      top: 0;
+      right: 0;
+    }
+
+    &:hover {
+      .delete_btn {
+        display: block;
       }
     }
   }

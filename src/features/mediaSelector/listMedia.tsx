@@ -30,25 +30,23 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             variant='standard'
             sx={{
               width: '100%',
-              height: 500,
-              padding: 2,
+              height: 480,
             }}
-            cols={4}
+            cols={5}
             gap={8}
-            className={styles.thumbnail_picker_list}
-            rowHeight={180}
+            rowHeight={200}
           >
             {media.map((m) => (
-              <ImageListItem key={m.id} className={styles.thumbnail_picker_item_wrapper}>
+              <ImageListItem className={styles.list_media_item} key={m.id}>
                 <Checkbox
+                  className={styles.checkbox}
                   checked={selectedMedia?.some((mediaItem) => mediaItem.url === m.media?.fullSize)}
                   onChange={() => select(m.media?.fullSize ?? '', allowMultiple)}
                   id={`${m.id}`}
-                  style={{ display: 'none' }}
                 />
                 <InputLabel htmlFor={`${m.id}`}>
                   {selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? (
-                    <span className={styles.media_selector_img_number}>selected</span>
+                    <span className={styles.selected_flag}>selected</span>
                   ) : null}
                   {isVideo(m.media?.fullSize) ? (
                     <video
@@ -70,11 +68,10 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                   )}
                 </InputLabel>
                 <IconButton
-                  sx={{ backgroundColor: 'black', color: 'white' }}
                   aria-label='delete'
                   size='small'
                   onClick={() => handleDeleteFile(m.id)}
-                  className={styles.thumb_picker_delete_btn}
+                  className={styles.delete_btn}
                 >
                   <ClearIcon />
                 </IconButton>

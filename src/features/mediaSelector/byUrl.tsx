@@ -14,7 +14,6 @@ export const ByUrl: FC<UploadMediaByUrlProps> = ({ url, setUrl, updateContentLin
           label='upload new'
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          sx={{ width: '150px' }}
         />
       </Grid>
       <Grid item xs={6}>
