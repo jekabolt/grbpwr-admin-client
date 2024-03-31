@@ -1,4 +1,13 @@
-import { Alert, Button, Grid, Snackbar, TextField } from '@mui/material';
+import {
+  Alert,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogTitle,
+  Grid,
+  Snackbar,
+  TextField,
+} from '@mui/material';
 import { addHero, getHero } from 'api/hero';
 import { ProductPickerModal } from 'components/common/productPickerModal';
 import { Layout } from 'components/login/layout';
@@ -25,6 +34,8 @@ export const Hero: FC = () => {
   const [products, setProducts] = useState<common_Product[]>([]);
 
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     const fetchHero = async () => {
@@ -55,13 +66,15 @@ export const Hero: FC = () => {
     // Function to validate all links
     const validateAllLinks = () => {
       // Assuming you have state setters like setMainExploreLinkError for validation states
-      setMainExploreLinkError(mainExploreLink ? !isValidUrl(mainExploreLink) : true);
-      setFirstAdExploreLinkError(firstAdExploreLink ? !isValidUrl(firstAdExploreLink) : true);
-      setSecondAdExploreLinkError(secondAdExploreLink ? !isValidUrl(secondAdExploreLink) : true);
+      setMainExploreLinkError(mainContentLink ? !isValidUrl(mainExploreLink) : false);
+      setFirstAdExploreLinkError(firstAdContentLink ? !isValidUrl(firstAdExploreLink) : false);
+      setSecondAdExploreLinkError(secondAdContentLink ? !isValidUrl(secondAdExploreLink) : false);
     };
 
     validateAllLinks();
-  }, [mainExploreLink, firstAdExploreLink, secondAdExploreLink]);
+  }, [mainContentLink, firstAdContentLink, secondAdContentLink]);
+
+  const hasError = mainExploreLinkError || firstAdExploreLinkError || secondAdExploreLinkError;
 
   const saveMainContentLink = (mediaLink: string[]) => {
     if (mediaLink[0]) {
@@ -152,9 +165,25 @@ export const Hero: FC = () => {
     setProducts(newSelection);
   };
 
-  const isValidUrl = (url: string) => {
+  const isValidUrl = (url: string | undefined) => {
+    if (url === undefined) {
+      return false;
+    }
     const pattern = new RegExp('https?://(?:[w-]+.)?grbpwr.com(?:/[^s]*)?'); // fragment locator
     return !!pattern.test(url);
+  };
+
+  const handleSaveClick = () => {
+    if (hasError) {
+      setDialogOpen(true);
+    } else {
+      updateHero();
+    }
+  };
+
+  const handleConfirmSave = () => {
+    setDialogOpen(false);
+    updateHero();
   };
 
   return (
@@ -173,7 +202,7 @@ export const Hero: FC = () => {
           <Grid item xs={6}>
             <TextField
               error={mainExploreLinkError}
-              helperText={mainExploreLinkError ? 'Please enter a valid URL.' : ''}
+              helperText={mainExploreLinkError ? 'Not valid url.' : ''}
               size='small'
               label='Main explore link'
               value={mainExploreLink || ''}
@@ -215,7 +244,7 @@ export const Hero: FC = () => {
           <Grid item xs={6}>
             <TextField
               error={firstAdExploreLinkError}
-              helperText={firstAdExploreLinkError ? 'Please enter a valid URL.' : ''}
+              helperText={firstAdExploreLinkError ? 'Not valid url.' : ''}
               size='small'
               label='First ad explore link'
               value={firstAdExploreLink || ''}
@@ -257,7 +286,7 @@ export const Hero: FC = () => {
           <Grid item xs={6}>
             <TextField
               error={secondAdExploreLinkError}
-              helperText={secondAdExploreLinkError ? 'Please enter a valid URL.' : ''}
+              helperText={secondAdExploreLinkError ? 'Not valid url.' : ''}
               size='small'
               label='Second ad explore link'
               value={secondAdExploreLink || ''}
@@ -298,14 +327,25 @@ export const Hero: FC = () => {
             selectedProductIds={products.map((x) => x.id!)}
           />
           <Grid item xs={6} sx={{ mt: 4, textAlign: 'center' }}>
-            <Button
-              variant='contained'
-              onClick={updateHero}
-              disabled={mainExploreLinkError || firstAdExploreLinkError || secondAdExploreLinkError}
-            >
+            <Button variant='contained' onClick={handleSaveClick}>
               Save
             </Button>
           </Grid>
+          <Dialog
+            open={dialogOpen}
+            onClose={() => setDialogOpen(false)}
+            aria-labelledby='alert-dialog-title'
+          >
+            <DialogTitle id='alert-dialog-title'>
+              {'There are errors. Are you sure you want to save?'}
+            </DialogTitle>
+            <DialogActions>
+              <Button onClick={() => setDialogOpen(false)}>No</Button>
+              <Button onClick={handleConfirmSave} autoFocus>
+                Yes
+              </Button>
+            </DialogActions>
+          </Dialog>
           <Snackbar
             open={saveSuccess}
             onClose={() => setSaveSuccess(false)}
