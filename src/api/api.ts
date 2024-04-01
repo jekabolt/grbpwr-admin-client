@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { ROUTES } from 'constants/routes';
 
 const BASE_URL = process.env.REACT_APP_SERVER_URL;
 
@@ -31,7 +30,7 @@ axiosInstance.interceptors.response.use(
   (error) => {
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('authToken');
-      return Promise.resolve((window.location.href = ROUTES.login));
+      return Promise.resolve((window.location.href = '/grbpwr-admin-client/'));
     }
     return Promise.reject(error);
   },
