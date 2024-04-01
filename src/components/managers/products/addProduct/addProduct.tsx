@@ -1,37 +1,24 @@
-import { addProduct, getDictionary } from 'api/admin';
 import {
-  AddProductRequest,
-  common_Dictionary,
-  common_ProductNew,
-  googletype_Decimal,
-} from 'api/proto-http/admin';
+  Button,
+  FormControl,
+  Grid,
+  InputLabel,
+  MenuItem,
+  Select,
+  SelectChangeEvent,
+  TextField,
+} from '@mui/material';
+import { addProduct, getDictionary } from 'api/admin';
+import { AddProductRequest, common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
+import { findInDictionary } from 'components/managers/orders/utility';
 import update from 'immutability-helper';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
-import { Categories } from './categories';
-import { ColorHEX } from './colorHEX';
 import { InputField } from './inputFields';
 import { MediaSelector } from './mediaSelectorFolder/mediaSelector';
 import { Thumbnail } from './mediaSelectorFolder/thumbnail';
 import { Sizes } from './sizes';
-import { Tags } from './tag';
-
-interface ProductInsert {
-  preorder: string | undefined;
-  name: string | undefined;
-  brand: string | undefined;
-  sku: string | undefined;
-  color: string | undefined;
-  colorHex: string | undefined;
-  countryOfOrigin: string | undefined;
-  thumbnail: string | undefined;
-  price: googletype_Decimal | undefined;
-  salePercentage: googletype_Decimal | undefined;
-  categoryId: number | undefined;
-  description: string | undefined;
-  targetGender: string | undefined;
-}
 
 export const initialProductState: common_ProductNew = {
   media: [],
@@ -56,11 +43,10 @@ export const initialProductState: common_ProductNew = {
 };
 
 export const handleChange = (
-  e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+  e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
   setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>,
 ) => {
   const { name, value } = e.target;
-
   setProduct((prevProduct) => {
     return update(prevProduct, {
       product: {
@@ -77,54 +63,12 @@ export const AddProducts: FC = () => {
     ...initialProductState,
   });
   const [dictionary, setDictionary] = useState<common_Dictionary>();
-  const [isFormValid, setIsFormValid] = useState<boolean | undefined>(false);
 
   const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
   ) => {
     handleChange(e, setProduct);
   };
-
-  // TODO:
-  const checkFormValidity = () => {
-    if (!product || !product.product) {
-      setIsFormValid(false);
-      return;
-    }
-
-    const productData = product.product as ProductInsert;
-
-    const nameFields: (keyof ProductInsert)[] = [
-      'name',
-      'countryOfOrigin',
-      'brand',
-      'price',
-      'preorder',
-      'sku',
-      'color',
-      'colorHex',
-      'categoryId',
-      'description',
-      'salePercentage',
-      'thumbnail',
-      'targetGender',
-    ];
-    const isNameFieldsValid = nameFields.every(
-      (field: keyof ProductInsert) => !!productData[field],
-    );
-    const isTagsValid = product.tags && product.tags.length > 0;
-
-    const isMediaValid = product.media && product.media.length > 0;
-
-    const isSizeMeasurementsValid = product.sizeMeasurements && product.sizeMeasurements.length > 0;
-    const isValid = isNameFieldsValid && isTagsValid && isMediaValid && isSizeMeasurementsValid;
-
-    setIsFormValid(isValid);
-  };
-
-  useEffect(() => {
-    checkFormValidity();
-  }, [product]);
 
   useEffect(() => {
     const storedDictionary = localStorage.getItem('dictionary');
@@ -157,7 +101,7 @@ export const AddProducts: FC = () => {
         },
       };
 
-      const response = await addProduct(productToDisplayInJSON);
+      await addProduct(productToDisplayInJSON);
       setProduct(initialProductState);
     } catch (error) {
       setProduct(initialProductState);
@@ -166,120 +110,136 @@ export const AddProducts: FC = () => {
 
   return (
     <Layout>
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <InputField
-          label='NAME'
-          name='name'
-          value={product?.product?.name || ''}
-          onChange={handleInputChange}
-        />
+      <Grid container justifyContent='center'>
+        <Grid item>
+          <form onSubmit={handleSubmit} className={styles.form}>
+            <InputField
+              label='NAME'
+              name='name'
+              value={product?.product?.name || ''}
+              onChange={handleInputChange}
+            />
 
-        <InputField
-          label='COUNTRY'
-          name='countryOfOrigin'
-          value={product?.product?.countryOfOrigin || ''}
-          onChange={handleInputChange}
-        />
+            <InputField
+              label='COUNTRY'
+              name='countryOfOrigin'
+              value={product?.product?.countryOfOrigin || ''}
+              onChange={handleInputChange}
+            />
 
-        <InputField
-          label='BRAND'
-          name='brand'
-          value={product?.product?.brand || ''}
-          onChange={handleInputChange}
-        />
+            <InputField
+              label='BRAND'
+              name='brand'
+              value={product?.product?.brand || ''}
+              onChange={handleInputChange}
+            />
 
-        <InputField
-          label='PRICE'
-          name='price'
-          value={product?.product?.price || ''}
-          onChange={handleInputChange}
-          type='number'
-        />
+            <InputField
+              label='PRICE'
+              name='price'
+              value={product?.product?.price || ''}
+              onChange={handleInputChange}
+              type='number'
+            />
 
-        <InputField
-          label='SALES'
-          name='salePercentage'
-          value={product?.product?.salePercentage || ''}
-          onChange={handleInputChange}
-          type='number'
-        />
+            <InputField
+              label='SALES'
+              name='salePercentage'
+              value={product?.product?.salePercentage || ''}
+              onChange={handleInputChange}
+              type='number'
+            />
 
-        <InputField
-          label='PREORDER'
-          name='preorder'
-          value={product?.product?.preorder || ''}
-          onChange={handleInputChange}
-        />
+            <InputField
+              label='PREORDER'
+              name='preorder'
+              value={product?.product?.preorder || ''}
+              onChange={handleInputChange}
+            />
 
-        <div className={styles?.product_container}>
-          <label htmlFor='gender' className={styles.title}>
-            GENDER
-          </label>
-          <select
-            name='targetGender'
-            id='gender'
-            value={product?.product?.targetGender || ''}
-            onChange={handleInputChange}
-            className={styles.product_input}
-          >
-            <option value=''>select gender</option>
-            {dictionary?.genders?.map((gender, id) => (
-              <option value={gender.id} key={id}>
-                {gender.name?.replace('GENDER_ENUM_', '')}
-              </option>
-            ))}
-          </select>
-        </div>
+            <FormControl required>
+              <InputLabel shrink>GENDER</InputLabel>
+              <Select
+                name='targetGender'
+                value={product?.product?.targetGender || ''}
+                onChange={handleInputChange}
+                displayEmpty
+                label='GENDER'
+              >
+                {dictionary?.genders?.map((gender) => (
+                  <MenuItem key={gender.id} value={gender.id?.toString()}>
+                    {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
-        <div className={styles.product_container}>
-          <label htmlFor='descrip' className={styles.title}>
-            DESCRIPTION
-          </label>
-          <textarea
-            name='description'
-            id='descrip'
-            value={product?.product?.description || ''}
-            cols={1}
-            rows={2}
-            style={{ width: '150px' }}
-            onChange={handleInputChange}
-          ></textarea>
-        </div>
+            <TextField
+              label='DESCRIPTION'
+              name='description'
+              value={product.product?.description}
+              InputLabelProps={{ shrink: true }}
+              onChange={handleInputChange}
+              multiline
+            />
 
-        <InputField
-          label='VENDORE CODE'
-          name='sku'
-          value={product?.product?.sku || ''}
-          onChange={handleInputChange}
-        />
+            <InputField
+              label='VENDORE CODE'
+              name='sku'
+              value={product?.product?.sku || ''}
+              onChange={handleInputChange}
+            />
 
-        <InputField
-          label='COLOR'
-          name='color'
-          value={product?.product?.color || ''}
-          onChange={handleInputChange}
-        />
+            <InputField
+              label='COLOR'
+              name='color'
+              value={product?.product?.color || ''}
+              onChange={handleInputChange}
+            />
 
-        <ColorHEX product={product} setProduct={setProduct} />
+            <TextField
+              type='color'
+              label='COLOR HEX'
+              name='colorHex'
+              value={product.product?.colorHex}
+              onChange={handleInputChange}
+              InputLabelProps={{ shrink: true }}
+            />
 
-        <Thumbnail product={product} setProduct={setProduct} />
+            <FormControl required>
+              <InputLabel shrink>CATEGORY</InputLabel>
+              <Select
+                name='categoryId'
+                value={product.product?.categoryId?.toString() || ''}
+                onChange={handleInputChange}
+                label='CATEGORY'
+                displayEmpty
+              >
+                <MenuItem value='' disabled>
+                  select category
+                </MenuItem>
+                {dictionary?.categories?.map((category) => (
+                  <MenuItem value={category.id} key={category.id}>
+                    {findInDictionary(dictionary, category.id, 'category')}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
-        <MediaSelector product={product} setProduct={setProduct} />
+            <Thumbnail product={product} setProduct={setProduct} />
 
-        <Categories product={product} setProduct={setProduct} dictionary={dictionary} />
+            <MediaSelector product={product} setProduct={setProduct} />
 
-        <Sizes setProduct={setProduct} dictionary={dictionary} product={product} />
+            <Sizes setProduct={setProduct} dictionary={dictionary} product={product} />
 
-        <Tags setProduct={setProduct} product={product} />
+            {/* <Tags setProduct={setProduct} product={product} /> */}
 
-        <button
-          type='submit'
-          className={`${isFormValid ? styles.submit : styles.disabled}`}
-          disabled={!isFormValid}
-        >
-          SUBMIT
-        </button>
-      </form>
+            <Button type='submit' variant='contained' size='large'>
+              submit
+            </Button>
+          </form>
+        </Grid>
+      </Grid>
     </Layout>
   );
 };

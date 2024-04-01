@@ -2,7 +2,6 @@ import {
   Box,
   Button,
   Checkbox,
-  FormControl,
   Grid,
   InputLabel,
   MenuItem,
@@ -201,48 +200,44 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         />
       </Grid>
       <Grid item>
-        <FormControl fullWidth>
-          <InputLabel shrink>gender</InputLabel>
-          <Select
-            name='targetGender'
-            value={updatePayload.targetGender || ''}
-            onChange={handleChange}
-            displayEmpty
-            label='gender'
-            disabled={!isEdit}
-          >
-            <MenuItem value='' disabled>
-              {product?.product?.productInsert?.targetGender?.replace('GENDER_ENUM_', '')}
+        <InputLabel shrink>gender</InputLabel>
+        <Select
+          name='targetGender'
+          value={updatePayload.targetGender || ''}
+          onChange={handleChange}
+          displayEmpty
+          label='gender'
+          disabled={!isEdit}
+        >
+          <MenuItem value='' disabled>
+            {product?.product?.productInsert?.targetGender?.replace('GENDER_ENUM_', '')}
+          </MenuItem>
+          {dict?.genders?.map((gender) => (
+            <MenuItem key={gender.id} value={gender.id?.toString()}>
+              {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
             </MenuItem>
-            {dict?.genders?.map((gender) => (
-              <MenuItem key={gender.id} value={gender.id?.toString()}>
-                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+          ))}
+        </Select>
       </Grid>
       <Grid item>
-        <FormControl fullWidth>
-          <InputLabel shrink>category</InputLabel>
-          <Select
-            name='categoryId'
-            value={updatePayload.categoryId?.toString() || ''}
-            onChange={handleChange}
-            displayEmpty
-            label='category'
-            disabled={!isEdit}
-          >
-            <MenuItem value='' disabled>
-              {findInDictionary(dict, product?.product?.productInsert?.categoryId, 'category')}
+        <InputLabel shrink>category</InputLabel>
+        <Select
+          name='categoryId'
+          value={updatePayload.categoryId?.toString() || ''}
+          onChange={handleChange}
+          displayEmpty
+          label='category'
+          disabled={!isEdit}
+        >
+          <MenuItem value='' disabled>
+            {findInDictionary(dict, product?.product?.productInsert?.categoryId, 'category')}
+          </MenuItem>
+          {dict?.categories?.map((category) => (
+            <MenuItem key={category.id} value={category.id?.toString()}>
+              {findInDictionary(dict, category.id, 'category')}
             </MenuItem>
-            {dict?.categories?.map((category) => (
-              <MenuItem key={category.id} value={category.id?.toString()}>
-                {findInDictionary(dict, category.id, 'category')}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+          ))}
+        </Select>
       </Grid>
       <Grid item>
         <TextField

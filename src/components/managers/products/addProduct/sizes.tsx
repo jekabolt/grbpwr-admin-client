@@ -1,7 +1,17 @@
+import {
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+} from '@mui/material';
 import { common_Dictionary, common_ProductNew, googletype_Decimal } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
 import React, { FC, useState } from 'react';
-import styles from 'styles/addProd.scss';
 
 interface sizeProps {
   product: common_ProductNew;
@@ -62,7 +72,7 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
   };
 
   const handleSizeChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     sizeIndex: number | undefined,
   ) => {
     if (typeof sizeIndex === 'undefined') {
@@ -136,108 +146,51 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
   };
 
   return (
-    <div className={styles.product_container}>
-      <label className={styles.title}>Sizes</label>
-      <ul className={styles.product_container_size_list}>
-        {sortedSizes.map((size) => (
-          <li key={size.id} className={styles.product_container_size_item}>
-            {size.id !== undefined && (
-              <>
-                <>
-                  <div className={styles.define_size_quantity_container}>
-                    <h3>{findInDictionary(dictionary, size.id, 'size')}</h3>
-                    <input
+    <TableContainer component={Paper}>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Size Name</TableCell>
+            <TableCell>Quantity</TableCell>
+            {sortedMeasurements.map((m) => (
+              <TableCell>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {sortedSizes.map((size) => {
+            if (typeof size.id !== 'number') return null; // Skip if size.id is not a number
+
+            const sizeId = size.id;
+            const sizeMeasurementsForCurrentSize = product.sizeMeasurements?.filter(
+              (sm) => sm.productSize?.sizeId === sizeId,
+            );
+
+            return (
+              <TableRow key={size.id}>
+                <TableCell component='th' scope='row'>
+                  {findInDictionary(dictionary, size.id, 'size')}
+                </TableCell>
+                <TableCell align='center'>
+                  <Box>
+                    <TextField
                       type='number'
-                      min={0}
                       name='quantity'
                       value={
-                        product.sizeMeasurements?.[size.id]?.productSize?.quantity?.value ?? ''
+                        product.sizeMeasurements?.find((sm) => sm.productSize?.sizeId === sizeId)
+                          ?.productSize?.quantity?.value ?? ''
                       }
-                      onChange={(e) => handleSizeChange(e, size.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === '-' || e.key === 'e') {
-                          e.preventDefault();
-                        }
-                      }}
+                      onChange={(e) => handleSizeChange(e, sizeId)}
+                      inputProps={{ min: 0 }}
+                      style={{ width: '80px' }}
                     />
-                  </div>
-                  {product.sizeMeasurements &&
-                    product.sizeMeasurements[size.id] &&
-                    product.sizeMeasurements[size.id].productSize?.quantity?.value &&
-                    parseInt(
-                      product?.sizeMeasurements[size.id]?.productSize?.quantity?.value || '0',
-                      10,
-                    ) > 0 && (
-                      <div className={styles.define_measurement_container}>
-                        <select
-                          onChange={(e) =>
-                            handleMeasurementSelection(size.id, parseInt(e.target.value, 10))
-                          }
-                        >
-                          <option value=''>measurements</option>
-                          {sortedMeasurements.map((measurement) => (
-                            <option key={measurement.id} value={measurement.id}>
-                              {findInDictionary(dictionary, measurement.id, 'measurement')}
-                            </option>
-                          ))}
-                        </select>
-                        {selectedMeasurements[size.id as number] && (
-                          <>
-                            <input
-                              type='number'
-                              min={0}
-                              className={styles.measurementInput}
-                              onChange={(e) =>
-                                handleMeasurementValueChange(
-                                  size.id,
-                                  selectedMeasurements[size.id as number],
-                                  e.target.value,
-                                )
-                              }
-                              onKeyDown={(e) => {
-                                if (e.key === '-' || e.key === 'e') {
-                                  e.preventDefault();
-                                }
-                              }}
-                            />
-                            <button
-                              onClick={(e) =>
-                                handleConfirmMeasurement(
-                                  size.id,
-                                  e,
-                                  selectedMeasurements[size.id as number],
-                                )
-                              }
-                            >
-                              OK
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                </>
-                {product.sizeMeasurements && product.sizeMeasurements[size.id] && (
-                  <ul className={styles.added_measurements_container}>
-                    {product.sizeMeasurements[size.id].measurements?.map((m) => (
-                      <li key={m.measurementNameId} className={styles.added_measurement}>
-                        <p>{findInDictionary(dictionary, m.measurementNameId, 'measurement')}</p>
-                        <p>{m.measurementValue?.value}</p>
-                        <button
-                          type='button'
-                          onClick={() => handleDeleteMeasurement(size.id!, m.measurementNameId)}
-                          className={styles.delete_measurement}
-                        >
-                          x
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 };

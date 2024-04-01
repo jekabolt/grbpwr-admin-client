@@ -1,6 +1,6 @@
+import { Grid, TextField } from '@mui/material';
 import { googletype_Decimal } from 'api/proto-http/admin';
 import React from 'react';
-import styles from 'styles/addProd.scss';
 
 interface InputFieldProps {
   label: string;
@@ -31,24 +31,25 @@ export const InputField: React.FC<InputFieldProps> = ({
   };
 
   return (
-    <div className={styles.product_container}>
-      <label htmlFor={name} className={styles.title}>
-        {label}
-      </label>
-      <input
-        type={type}
-        name={name}
-        value={displayValue}
-        onChange={handleInputChange}
-        id={name}
-        className={styles.product_input}
-        onKeyDown={(e) => {
-          if (e.key === '-') {
-            e.preventDefault();
-          }
-        }}
-        required
-      />
-    </div>
+    <Grid container>
+      <Grid item>
+        <TextField
+          variant='outlined'
+          label={label}
+          type={type}
+          name={name}
+          value={displayValue}
+          onChange={handleInputChange}
+          id={name}
+          onKeyDown={(e) => {
+            if (e.key === '-') {
+              e.preventDefault();
+            }
+          }}
+          required
+          InputLabelProps={{ shrink: true }}
+        />
+      </Grid>
+    </Grid>
   );
 };
