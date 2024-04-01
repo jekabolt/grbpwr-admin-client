@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginBlock } from 'components/login/login';
+import ProtectedRoute from 'components/login/protectedRoute';
 import { Main } from 'components/managers/MainContent';
 import { Archive } from 'components/managers/archive/archive';
 import { GetArchive } from 'components/managers/archive/getArchive';
@@ -41,22 +42,127 @@ const location = new ReactLocation({ history: hashHistory });
 
 const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.login, element: <LoginBlock /> },
-  { path: ROUTES.main, element: <Main /> },
-  { path: ROUTES.media, element: <MediaManager /> },
-  { path: ROUTES.all, element: <UploadPage /> },
-  { path: ROUTES.product, element: <Product /> },
-  { path: ROUTES.addProduct, element: <AddProducts /> },
-  { path: `${ROUTES.singleProduct}/:id`, element: <ProductDetails /> },
-  { path: ROUTES.hero, element: <Hero /> },
+  {
+    path: ROUTES.main,
+    element: (
+      <ProtectedRoute>
+        <Main />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.media,
+    element: (
+      <ProtectedRoute>
+        <MediaManager />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.all,
+    element: (
+      <ProtectedRoute>
+        <UploadPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.product,
+    element: (
+      <ProtectedRoute>
+        <Product />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.addProduct,
+    element: (
+      <ProtectedRoute>
+        <AddProducts />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: `${ROUTES.singleProduct}/:id`,
+    element: (
+      <ProtectedRoute>
+        <ProductDetails />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.hero,
+    element: (
+      <ProtectedRoute>
+        <Hero />
+      </ProtectedRoute>
+    ),
+  },
 
-  { path: ROUTES.promo, element: <Promo /> },
-  { path: ROUTES.getPromo, element: <GetPromo /> },
-  { path: ROUTES.archive, element: <MainArchive /> },
-  { path: ROUTES.createArchive, element: <Archive /> },
-  { path: ROUTES.getArchive, element: <GetArchive /> },
-  { path: ROUTES.settings, element: <Settings /> },
-  { path: ROUTES.orders, element: <Orders /> },
-  { path: ROUTES.ordersById, element: <OrderId /> },
+  {
+    path: ROUTES.promo,
+    element: (
+      <ProtectedRoute>
+        <Promo />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.getPromo,
+    element: (
+      <ProtectedRoute>
+        <GetPromo />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.archive,
+    element: (
+      <ProtectedRoute>
+        <MainArchive />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.createArchive,
+    element: (
+      <ProtectedRoute>
+        <Archive />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.getArchive,
+    element: (
+      <ProtectedRoute>
+        <GetArchive />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.settings,
+    element: (
+      <ProtectedRoute>
+        <Settings />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.orders,
+    element: (
+      <ProtectedRoute>
+        <Orders />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.ordersById,
+    element: (
+      <ProtectedRoute>
+        <OrderId />
+      </ProtectedRoute>
+    ),
+  },
 ];
 
 const theme = createTheme({
