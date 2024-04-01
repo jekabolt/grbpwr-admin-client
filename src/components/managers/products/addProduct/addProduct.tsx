@@ -12,13 +12,14 @@ import { addProduct, getDictionary } from 'api/admin';
 import { AddProductRequest, common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { findInDictionary } from 'components/managers/orders/utility';
+import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import update from 'immutability-helper';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
 import { InputField } from './inputFields';
 import { MediaSelector } from './mediaSelectorFolder/mediaSelector';
-import { Thumbnail } from './mediaSelectorFolder/thumbnail';
 import { Sizes } from './sizes';
+import { Tags } from './tag';
 
 export const initialProductState: common_ProductNew = {
   media: [],
@@ -106,6 +107,22 @@ export const AddProducts: FC = () => {
     } catch (error) {
       setProduct(initialProductState);
     }
+  };
+
+  const handleImage = (newSelectedMedia: string[]) => {
+    if (!product.product || !newSelectedMedia.length) {
+      return;
+    }
+
+    const thumbnailUrl = newSelectedMedia[0];
+
+    setProduct((prevProduct) => {
+      return update(prevProduct, {
+        product: {
+          thumbnail: { $set: thumbnailUrl },
+        },
+      });
+    });
   };
 
   return (
@@ -226,13 +243,19 @@ export const AddProducts: FC = () => {
               </Select>
             </FormControl>
 
-            <Thumbnail product={product} setProduct={setProduct} />
+            {/* <Thumbnail product={product} setProduct={setProduct} /> */}
+
+            <MediaSelectorLayout
+              allowMultiple={false}
+              label='select thumbnail'
+              saveSelectedMedia={handleImage}
+            />
 
             <MediaSelector product={product} setProduct={setProduct} />
 
             <Sizes setProduct={setProduct} dictionary={dictionary} product={product} />
 
-            {/* <Tags setProduct={setProduct} product={product} /> */}
+            <Tags setProduct={setProduct} product={product} />
 
             <Button type='submit' variant='contained' size='large'>
               submit

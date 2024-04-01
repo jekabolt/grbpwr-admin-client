@@ -9,18 +9,14 @@ import {
   TableRow,
   TextField,
 } from '@mui/material';
-import { common_Dictionary, common_ProductNew, googletype_Decimal } from 'api/proto-http/admin';
+import { common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
-import React, { FC, useState } from 'react';
+import React, { FC } from 'react';
 
 interface sizeProps {
   product: common_ProductNew;
   setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>;
   dictionary: common_Dictionary | undefined;
-}
-
-interface SelectedMeasurements {
-  [sizeIndex: number]: number | undefined;
 }
 
 export function sortItems(item: { id?: number }[]) {
@@ -35,41 +31,9 @@ export function sortItems(item: { id?: number }[]) {
 }
 
 export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
-  const [selectedMeasurements, setSelectedMeasurements] = useState<SelectedMeasurements>({});
-  const [tempMeasurementValues, setTempMeasurementValues] = useState<{ [key: number]: string }>({});
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
-
-  const handleDeleteMeasurement = (sizeId: number, measurementId: number | undefined) => {
-    setProduct((prevProduct) => {
-      const updatedProduct = { ...prevProduct };
-      if (updatedProduct.sizeMeasurements?.[sizeId]?.measurements) {
-        updatedProduct.sizeMeasurements[sizeId].measurements = updatedProduct.sizeMeasurements[
-          sizeId
-        ].measurements?.filter((m) => m.measurementNameId !== measurementId);
-      }
-      return updatedProduct;
-    });
-  };
-
-  const handleMeasurementSelection = (sizeIndex: number | undefined, measurementId: number) => {
-    if (typeof sizeIndex === 'undefined') {
-      return;
-    }
-    setSelectedMeasurements((prev) => ({ ...prev, [sizeIndex]: measurementId }));
-  };
-
-  const handleMeasurementValueChange = (
-    sizeIndex: number | undefined,
-    measurementId: number | undefined,
-    value: string,
-  ) => {
-    if (typeof sizeIndex === 'undefined' || typeof measurementId === 'undefined') {
-      return;
-    }
-    setTempMeasurementValues((prev) => ({ ...prev, [sizeIndex]: value }));
-  };
 
   const handleSizeChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -82,7 +46,7 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
     const { value } = e.target;
     setProduct((prevProduct) => {
       const updatedSizeMeasurements = [...(prevProduct.sizeMeasurements || [])];
-      const sizeQuantity: googletype_Decimal = { value };
+      const sizeQuantity = { value };
 
       updatedSizeMeasurements[sizeIndex] = {
         productSize: {
@@ -96,53 +60,41 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
     });
   };
 
-  const handleConfirmMeasurement = (
+  const handleMeasurementChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     sizeIndex: number | undefined,
-    e: React.MouseEvent<HTMLButtonElement, MouseEvent>,
-    measurementId: number | undefined,
+    measurementIndex: number,
   ) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (typeof sizeIndex === 'undefined' || typeof measurementId === 'undefined') {
+    if (typeof sizeIndex === 'undefined') {
       return;
     }
-
-    const measurementValue = tempMeasurementValues[sizeIndex];
-    if (!measurementValue) {
-      return;
-    }
+    const measurementValue = e.target.value;
 
     setProduct((prevProduct) => {
       const updatedProduct = JSON.parse(JSON.stringify(prevProduct));
-
-      if (!updatedProduct.sizeMeasurements) {
-        updatedProduct.sizeMeasurements = [];
-      }
-
       if (!updatedProduct.sizeMeasurements[sizeIndex]) {
         updatedProduct.sizeMeasurements[sizeIndex] = {
-          productSize: { sizeId: sizeIndex },
+          productSize: { sizeId: sizeIndex, quantity: {} },
           measurements: [],
         };
       }
-
-      const measurementIndex = updatedProduct.sizeMeasurements[sizeIndex].measurements.findIndex(
-        (m: { measurementNameId: number }) => m.measurementNameId === measurementId,
-      );
-      if (measurementIndex === -1) {
-        updatedProduct.sizeMeasurements[sizeIndex].measurements.push({
-          measurementNameId: measurementId,
-          measurementValue: { value: measurementValue },
-        });
+      const existingMeasurementIndex = updatedProduct.sizeMeasurements[
+        sizeIndex
+      ].measurements.findIndex((m: any) => m.measurementId === measurementIndex);
+      if (existingMeasurementIndex !== -1) {
+        updatedProduct.sizeMeasurements[sizeIndex].measurements[existingMeasurementIndex] = {
+          measurementId: measurementIndex,
+          value: measurementValue,
+        };
       } else {
-        updatedProduct.sizeMeasurements[sizeIndex].measurements[measurementIndex].measurementValue =
-          { value: measurementValue };
+        updatedProduct.sizeMeasurements[sizeIndex].measurements.push({
+          measurementId: measurementIndex,
+          value: measurementValue,
+        });
       }
 
       return updatedProduct;
     });
-
-    setTempMeasurementValues((prev) => ({ ...prev, [sizeIndex]: '' }));
   };
 
   return (
@@ -158,37 +110,33 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
           </TableRow>
         </TableHead>
         <TableBody>
-          {sortedSizes.map((size) => {
-            if (typeof size.id !== 'number') return null; // Skip if size.id is not a number
-
-            const sizeId = size.id;
-            const sizeMeasurementsForCurrentSize = product.sizeMeasurements?.filter(
-              (sm) => sm.productSize?.sizeId === sizeId,
-            );
-
-            return (
-              <TableRow key={size.id}>
-                <TableCell component='th' scope='row'>
-                  {findInDictionary(dictionary, size.id, 'size')}
+          {sortedSizes.map((size) => (
+            <TableRow key={size.id}>
+              <TableCell component='th' scope='row'>
+                {findInDictionary(dictionary, size.id, 'size')}
+              </TableCell>
+              <TableCell align='center'>
+                <Box display='flex' alignItems='center'>
+                  <TextField
+                    type='number'
+                    onChange={(e) => handleSizeChange(e, size.id)}
+                    inputProps={{ min: 0 }}
+                    style={{ width: '80px' }}
+                  />
+                </Box>
+              </TableCell>
+              {sortedMeasurements.map((measurement, measurementIndex) => (
+                <TableCell key={measurement.id}>
+                  <TextField
+                    type='number'
+                    onChange={(e) => handleMeasurementChange(e, size.id, measurement.id!)}
+                    inputProps={{ min: 0 }}
+                    style={{ width: '80px' }}
+                  />
                 </TableCell>
-                <TableCell align='center'>
-                  <Box>
-                    <TextField
-                      type='number'
-                      name='quantity'
-                      value={
-                        product.sizeMeasurements?.find((sm) => sm.productSize?.sizeId === sizeId)
-                          ?.productSize?.quantity?.value ?? ''
-                      }
-                      onChange={(e) => handleSizeChange(e, sizeId)}
-                      inputProps={{ min: 0 }}
-                      style={{ width: '80px' }}
-                    />
-                  </Box>
-                </TableCell>
-              </TableRow>
-            );
-          })}
+              ))}
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </TableContainer>
