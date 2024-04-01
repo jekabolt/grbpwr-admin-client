@@ -43,7 +43,7 @@ export const InputField: React.FC<InputFieldProps> = ({
         id={name}
         className={styles.product_input}
         onKeyDown={(e) => {
-          if (e.key === '-' || e.key === 'e') {
+          if (e.key === '-') {
             e.preventDefault();
           }
         }}
