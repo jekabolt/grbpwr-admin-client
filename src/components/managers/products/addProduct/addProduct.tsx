@@ -17,7 +17,6 @@ import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout'
 import update from 'immutability-helper';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
-import { InputField } from './inputFields';
 import { Sizes } from './sizes';
 import { Tags } from './tag';
 
@@ -158,137 +157,194 @@ export const AddProducts: FC = () => {
       <Grid container justifyContent='center'>
         <Grid item>
           <form onSubmit={handleSubmit} className={styles.form}>
-            <InputField
-              label='NAME'
-              name='name'
-              value={product?.product?.name || ''}
-              onChange={handleInputChange}
-            />
+            <Grid container direction='column' alignItems='center' spacing={2}>
+              <Grid item>
+                <TextField
+                  variant='outlined'
+                  label='NAME'
+                  name='name'
+                  value={product.product?.name || ''}
+                  onChange={handleInputChange}
+                  required
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
 
-            <InputField
-              label='COUNTRY'
-              name='countryOfOrigin'
-              value={product?.product?.countryOfOrigin || ''}
-              onChange={handleInputChange}
-            />
+              <Grid item>
+                <TextField
+                  variant='outlined'
+                  label='COUNTRY'
+                  name='countryOfOrigin'
+                  value={product?.product?.countryOfOrigin || ''}
+                  onChange={handleInputChange}
+                  required
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
 
-            <InputField
-              label='BRAND'
-              name='brand'
-              value={product?.product?.brand || ''}
-              onChange={handleInputChange}
-            />
+              <Grid item>
+                <TextField
+                  variant='outlined'
+                  label='BRAND'
+                  name='brand'
+                  value={product?.product?.brand || ''}
+                  onChange={handleInputChange}
+                  required
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
 
-            <InputField
-              label='PRICE'
-              name='price'
-              value={product?.product?.price || ''}
-              onChange={handleInputChange}
-              type='number'
-            />
+              <Grid item>
+                <TextField
+                  variant='outlined'
+                  label='PRICE'
+                  name='price'
+                  value={product?.product?.price?.value || ''}
+                  onChange={handleInputChange}
+                  type='number'
+                  inputProps={{ min: 0 }}
+                  required
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
 
-            <InputField
-              label='SALES'
-              name='salePercentage'
-              value={product?.product?.salePercentage || ''}
-              onChange={handleInputChange}
-              type='number'
-            />
+              <Grid item>
+                <TextField
+                  label='SALES'
+                  name='salePercentage'
+                  value={product?.product?.salePercentage?.value || ''}
+                  onChange={handleInputChange}
+                  type='number'
+                  inputProps={{ min: 0 }}
+                  required
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
 
-            <InputField
-              label='PREORDER'
-              name='preorder'
-              value={product?.product?.preorder || ''}
-              onChange={handleInputChange}
-            />
+              <Grid item>
+                <TextField
+                  label='PREORDER'
+                  name='preorder'
+                  value={product?.product?.preorder || ''}
+                  onChange={handleInputChange}
+                  required
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
 
-            <FormControl required>
-              <InputLabel shrink>GENDER</InputLabel>
-              <Select
-                name='targetGender'
-                value={product?.product?.targetGender || ''}
-                onChange={handleInputChange}
-                displayEmpty
-                label='GENDER'
-              >
-                {dictionary?.genders?.map((gender) => (
-                  <MenuItem key={gender.id} value={gender.id?.toString()}>
-                    {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+              <Grid item>
+                <FormControl sx={{ width: 193 }} required>
+                  <InputLabel shrink>GENDER</InputLabel>
+                  <Select
+                    value={product.product?.targetGender}
+                    onChange={handleInputChange}
+                    autoWidth
+                    label='GENDER'
+                    displayEmpty
+                    name='targetGender'
+                  >
+                    {dictionary?.genders?.map((gender) => (
+                      <MenuItem key={gender.id} value={gender.id}>
+                        {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
 
-            <TextField
-              label='DESCRIPTION'
-              name='description'
-              value={product.product?.description}
-              InputLabelProps={{ shrink: true }}
-              onChange={handleInputChange}
-              multiline
-            />
+              <Grid item>
+                <TextField
+                  label='DESCRIPTION'
+                  name='description'
+                  value={product.product?.description}
+                  InputLabelProps={{ shrink: true }}
+                  onChange={handleInputChange}
+                  multiline
+                  required
+                />
+              </Grid>
 
-            <InputField
-              label='VENDORE CODE'
-              name='sku'
-              value={product?.product?.sku || ''}
-              onChange={handleInputChange}
-            />
+              <Grid item>
+                <TextField
+                  label='VENDORE CODE'
+                  name='sku'
+                  value={product?.product?.sku || ''}
+                  onChange={handleInputChange}
+                  InputLabelProps={{ shrink: true }}
+                  required
+                />
+              </Grid>
 
-            <InputField
-              label='COLOR'
-              name='color'
-              value={product?.product?.color || ''}
-              onChange={handleInputChange}
-            />
+              <Grid item>
+                <TextField
+                  label='COLOR'
+                  name='color'
+                  value={product?.product?.color || ''}
+                  onChange={handleInputChange}
+                  InputLabelProps={{ shrink: true }}
+                  required
+                />
+              </Grid>
 
-            <TextField
-              type='color'
-              label='COLOR HEX'
-              name='colorHex'
-              value={product.product?.colorHex}
-              onChange={handleInputChange}
-              InputLabelProps={{ shrink: true }}
-            />
+              <Grid item>
+                <TextField
+                  type='color'
+                  label='COLOR HEX'
+                  name='colorHex'
+                  value={product.product?.colorHex}
+                  onChange={handleInputChange}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ width: 193 }}
+                  required
+                />
+              </Grid>
 
-            <FormControl required>
-              <InputLabel shrink>CATEGORY</InputLabel>
-              <Select
-                name='categoryId'
-                value={product.product?.categoryId?.toString() || ''}
-                onChange={handleInputChange}
-                label='CATEGORY'
-                displayEmpty
-              >
-                <MenuItem value='' disabled>
-                  select category
-                </MenuItem>
-                {dictionary?.categories?.map((category) => (
-                  <MenuItem value={category.id} key={category.id}>
-                    {findInDictionary(dictionary, category.id, 'category')}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+              <Grid item>
+                <FormControl required sx={{ width: 193 }}>
+                  <InputLabel shrink>CATEGORY</InputLabel>
+                  <Select
+                    name='categoryId'
+                    value={product.product?.categoryId?.toString() || ''}
+                    onChange={handleInputChange}
+                    label='CATEGORY'
+                    displayEmpty
+                  >
+                    {dictionary?.categories?.map((category) => (
+                      <MenuItem value={category.id} key={category.id}>
+                        {findInDictionary(dictionary, category.id, 'category')}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
 
-            <SingleMediaViewAndSelect
-              link={imagePreviewUrl}
-              saveSelectedMedia={uploadThumbnailInProduct}
-            />
+              <Grid item>
+                <SingleMediaViewAndSelect
+                  link={imagePreviewUrl}
+                  saveSelectedMedia={uploadThumbnailInProduct}
+                />
+              </Grid>
 
-            <MediaSelectorLayout
-              allowMultiple={true}
-              saveSelectedMedia={uploadMediasInProduct}
-              label='media selector'
-            />
+              <Grid item>
+                <MediaSelectorLayout
+                  allowMultiple={true}
+                  saveSelectedMedia={uploadMediasInProduct}
+                  label='media selector'
+                />
+              </Grid>
 
-            <Sizes setProduct={setProduct} dictionary={dictionary} product={product} />
+              <Grid item>
+                <Tags setProduct={setProduct} product={product} />
+              </Grid>
 
-            <Tags setProduct={setProduct} product={product} />
+              <Sizes setProduct={setProduct} dictionary={dictionary} product={product} />
 
-            <Button type='submit' variant='contained' size='large'>
-              submit
-            </Button>
+              <Grid item>
+                <Button type='submit' variant='contained' size='large'>
+                  submit
+                </Button>
+              </Grid>
+            </Grid>
           </form>
         </Grid>
       </Grid>

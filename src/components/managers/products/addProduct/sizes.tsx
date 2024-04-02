@@ -8,6 +8,8 @@ import {
   TableHead,
   TableRow,
   TextField,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import { common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
@@ -34,6 +36,9 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
+
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
 
   const handleSizeChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -98,47 +103,49 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
   };
 
   return (
-    <TableContainer component={Paper}>
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell>Size Name</TableCell>
-            <TableCell>Quantity</TableCell>
-            {sortedMeasurements.map((m) => (
-              <TableCell>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
-            ))}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {sortedSizes.map((size) => (
-            <TableRow key={size.id}>
-              <TableCell component='th' scope='row'>
-                {findInDictionary(dictionary, size.id, 'size')}
-              </TableCell>
-              <TableCell align='center'>
-                <Box display='flex' alignItems='center'>
-                  <TextField
-                    type='number'
-                    onChange={(e) => handleSizeChange(e, size.id)}
-                    inputProps={{ min: 0 }}
-                    style={{ width: '80px' }}
-                  />
-                </Box>
-              </TableCell>
-              {sortedMeasurements.map((measurement, measurementIndex) => (
-                <TableCell key={measurement.id}>
-                  <TextField
-                    type='number'
-                    onChange={(e) => handleMeasurementChange(e, size.id, measurement.id!)}
-                    inputProps={{ min: 0 }}
-                    style={{ width: '80px' }}
-                  />
-                </TableCell>
+    <Box maxWidth='80%' overflow='auto'>
+      <TableContainer component={Paper} sx={{ border: '1px solid black' }}>
+        <Table size={matches ? 'small' : 'medium'}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Size Name</TableCell>
+              <TableCell>Quantity</TableCell>
+              {sortedMeasurements.map((m) => (
+                <TableCell>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
               ))}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+          </TableHead>
+          <TableBody>
+            {sortedSizes.map((size) => (
+              <TableRow key={size.id}>
+                <TableCell component='th' scope='row'>
+                  {findInDictionary(dictionary, size.id, 'size')}
+                </TableCell>
+                <TableCell align='center'>
+                  <Box display='flex' alignItems='center'>
+                    <TextField
+                      type='number'
+                      onChange={(e) => handleSizeChange(e, size.id)}
+                      inputProps={{ min: 0 }}
+                      style={{ width: '80px' }}
+                    />
+                  </Box>
+                </TableCell>
+                {sortedMeasurements.map((measurement, measurementIndex) => (
+                  <TableCell key={measurement.id}>
+                    <TextField
+                      type='number'
+                      onChange={(e) => handleMeasurementChange(e, size.id, measurement.id!)}
+                      inputProps={{ min: 0 }}
+                      style={{ width: '80px' }}
+                    />
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
   );
 };
