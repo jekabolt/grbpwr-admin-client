@@ -10,6 +10,7 @@ import {
 } from '@mui/material';
 import { addProduct, getDictionary } from 'api/admin';
 import { AddProductRequest, common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
+import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { Layout } from 'components/login/layout';
 import { findInDictionary } from 'components/managers/orders/utility';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
@@ -17,7 +18,6 @@ import update from 'immutability-helper';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
 import { InputField } from './inputFields';
-import { MediaSelector } from './mediaSelectorFolder/mediaSelector';
 import { Sizes } from './sizes';
 import { Tags } from './tag';
 
@@ -64,6 +64,7 @@ export const AddProducts: FC = () => {
     ...initialProductState,
   });
   const [dictionary, setDictionary] = useState<common_Dictionary>();
+  const [imagePreviewUrl, setImagePreviewUrl] = useState('');
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
@@ -109,12 +110,13 @@ export const AddProducts: FC = () => {
     }
   };
 
-  const handleImage = (newSelectedMedia: string[]) => {
+  const uploadThumbnailInProduct = (newSelectedMedia: string[]) => {
     if (!product.product || !newSelectedMedia.length) {
       return;
     }
 
     const thumbnailUrl = newSelectedMedia[0];
+    setImagePreviewUrl(thumbnailUrl);
 
     setProduct((prevProduct) => {
       return update(prevProduct, {
@@ -123,6 +125,32 @@ export const AddProducts: FC = () => {
         },
       });
     });
+  };
+
+  const uploadMediasInProduct = (newSelectedMedia: string[]) => {
+    if (newSelectedMedia.length === 0) {
+      alert('no selected media');
+    }
+
+    for (const imageUrl of newSelectedMedia) {
+      const compressed = imageUrl.replace(/-og\.jpg$/, '-compressed.jpg');
+    }
+
+    const newMedia = newSelectedMedia.map((imageUrl) => {
+      const compressed = imageUrl.replace(/-og\.jpg$/, '-compressed.jpg');
+      const thumbnail = imageUrl.replace(/-og\.jpg$/, '-thumbnail.jpg');
+
+      return {
+        fullSize: imageUrl,
+        thumbnail: thumbnail,
+        compressed: compressed,
+      };
+    });
+
+    setProduct((prevProduct) => ({
+      ...prevProduct,
+      media: [...(prevProduct.media || []), ...newMedia],
+    }));
   };
 
   return (
@@ -243,15 +271,16 @@ export const AddProducts: FC = () => {
               </Select>
             </FormControl>
 
-            {/* <Thumbnail product={product} setProduct={setProduct} /> */}
-
-            <MediaSelectorLayout
-              allowMultiple={false}
-              label='select thumbnail'
-              saveSelectedMedia={handleImage}
+            <SingleMediaViewAndSelect
+              link={imagePreviewUrl}
+              saveSelectedMedia={uploadThumbnailInProduct}
             />
 
-            <MediaSelector product={product} setProduct={setProduct} />
+            <MediaSelectorLayout
+              allowMultiple={true}
+              saveSelectedMedia={uploadMediasInProduct}
+              label='media selector'
+            />
 
             <Sizes setProduct={setProduct} dictionary={dictionary} product={product} />
 
