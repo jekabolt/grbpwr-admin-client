@@ -103,49 +103,47 @@ export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
   };
 
   return (
-    <Box maxWidth='80%' overflow='auto'>
-      <TableContainer component={Paper} sx={{ border: '1px solid black' }}>
-        <Table size={matches ? 'small' : 'medium'}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Size Name</TableCell>
-              <TableCell>Quantity</TableCell>
-              {sortedMeasurements.map((m) => (
-                <TableCell>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
+    <TableContainer component={Paper} sx={{ border: '1px solid black' }}>
+      <Table size={matches ? 'small' : 'medium'}>
+        <TableHead>
+          <TableRow>
+            <TableCell>Size Name</TableCell>
+            <TableCell sx={{ bgcolor: '#f0f0f0' }}>Quantity</TableCell>
+            {sortedMeasurements.map((m) => (
+              <TableCell>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {sortedSizes.map((size) => (
+            <TableRow key={size.id}>
+              <TableCell component='th' scope='row'>
+                {findInDictionary(dictionary, size.id, 'size')}
+              </TableCell>
+              <TableCell align='center' sx={{ bgcolor: '#f0f0f0' }}>
+                <Box display='flex' alignItems='center'>
+                  <TextField
+                    type='number'
+                    onChange={(e) => handleSizeChange(e, size.id)}
+                    inputProps={{ min: 0 }}
+                    style={{ width: '80px' }}
+                  />
+                </Box>
+              </TableCell>
+              {sortedMeasurements.map((measurement, measurementIndex) => (
+                <TableCell key={measurement.id}>
+                  <TextField
+                    type='number'
+                    onChange={(e) => handleMeasurementChange(e, size.id, measurement.id!)}
+                    inputProps={{ min: 0 }}
+                    style={{ width: '80px' }}
+                  />
+                </TableCell>
               ))}
             </TableRow>
-          </TableHead>
-          <TableBody>
-            {sortedSizes.map((size) => (
-              <TableRow key={size.id}>
-                <TableCell component='th' scope='row'>
-                  {findInDictionary(dictionary, size.id, 'size')}
-                </TableCell>
-                <TableCell align='center'>
-                  <Box display='flex' alignItems='center'>
-                    <TextField
-                      type='number'
-                      onChange={(e) => handleSizeChange(e, size.id)}
-                      inputProps={{ min: 0 }}
-                      style={{ width: '80px' }}
-                    />
-                  </Box>
-                </TableCell>
-                {sortedMeasurements.map((measurement, measurementIndex) => (
-                  <TableCell key={measurement.id}>
-                    <TextField
-                      type='number'
-                      onChange={(e) => handleMeasurementChange(e, size.id, measurement.id!)}
-                      inputProps={{ min: 0 }}
-                      style={{ width: '80px' }}
-                    />
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Box>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 };

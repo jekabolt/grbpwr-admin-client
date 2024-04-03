@@ -15,7 +15,7 @@ import {
 import { UpdateProductSizeStockRequest, common_Dictionary } from 'api/proto-http/admin';
 import { updateMeasurement, updateSize } from 'api/updateProductsById';
 import { findInDictionary } from 'components/managers/orders/utility';
-import { sortItems } from 'components/managers/products/addProduct/sizes';
+import { sortItems } from 'components/managers/products/addProduct/sizes/sizes';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';

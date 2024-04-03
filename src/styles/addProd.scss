@@ -1,4 +1,23 @@
-.form {
-  display: grid;
-  gap: 20px;
+.media_item {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  border: 1px solid #000;
+  width: 220px;
+  height: 220px;
+
+  .delete_btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: none;
+  }
+
+  &:hover {
+    .delete_btn {
+      display: block;
+      cursor: pointer;
+    }
+  }
 }

@@ -24,7 +24,7 @@ export const Tags: FC<TagProps> = ({ product, setProduct }) => {
       ...prevProduct,
       tags: selectedTags.map((tag) => ({ tag })),
     }));
-  }, [selectedTags]);
+  }, [selectedTags, tags, setProduct]);
 
   const uploadNewTag = () => {
     if (newTag.trim() === '') return;
@@ -78,7 +78,7 @@ export const Tags: FC<TagProps> = ({ product, setProduct }) => {
           Upload
         </Button>
       </Box>
-      <Box display='flex' gap='5px' flexWrap='wrap'>
+      <Box display='grid' gridTemplateColumns='repeat(2, 1fr)' gap='5px' flexWrap='wrap'>
         {tags.map((tag, index) => (
           <Chip
             label={tag}
