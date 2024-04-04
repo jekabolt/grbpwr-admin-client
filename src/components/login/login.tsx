@@ -4,6 +4,7 @@ import { LoginResponse } from 'api/proto-http/auth';
 import { ROUTES } from 'constants/routes';
 import { ChangeEvent, FC, FormEvent, useEffect, useState } from 'react';
 import styles from 'styles/login-block.module.scss';
+import { isTokenExpired } from './protectedRoute';
 
 export const LoginBlock: FC = () => {
   const [password, setPassword] = useState('');
@@ -13,7 +14,7 @@ export const LoginBlock: FC = () => {
 
   useEffect(() => {
     const authToken = localStorage.getItem('authToken');
-    if (authToken) {
+    if (!isTokenExpired(authToken)) {
       navigate({ to: ROUTES.main, replace: true });
     }
   }, [navigate]);

@@ -59,17 +59,11 @@ export const AddProducts: FC = () => {
   };
 
   useEffect(() => {
-    const storedDictionary = localStorage.getItem('dictionary');
-    if (storedDictionary) {
-      setDictionary(JSON.parse(storedDictionary));
-    } else {
-      const fetchDictionary = async () => {
-        const response = await getDictionary({});
-        setDictionary(response.dictionary);
-        localStorage.setItem('dictionary', JSON.stringify(response.dictionary));
-      };
-      fetchDictionary();
-    }
+    const fetchDictionary = async () => {
+      const response = await getDictionary({});
+      setDictionary(response.dictionary);
+    };
+    fetchDictionary();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

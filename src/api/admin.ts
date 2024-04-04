@@ -1,18 +1,28 @@
 import { axiosRequestHandler } from './api';
 import {
   AddProductMediaRequest,
-  AddProductMediaResponse, AddProductRequest,
-  AddProductResponse, DeleteFromBucketRequest,
-  DeleteFromBucketResponse, DeleteProductByIDRequest,
+  AddProductMediaResponse,
+  AddProductRequest,
+  AddProductResponse,
+  DeleteFromBucketRequest,
+  DeleteFromBucketResponse,
+  DeleteProductByIDRequest,
   DeleteProductByIDResponse,
   GetDictionaryRequest,
-  GetDictionaryResponse, GetProductByIDRequest,
-  GetProductByIDResponse, GetProductsPagedRequest,
-  GetProductsPagedResponse, ListObjectsPagedRequest,
+  GetDictionaryResponse,
+  GetProductByIDRequest,
+  GetProductByIDResponse,
+  GetProductsPagedRequest,
+  GetProductsPagedResponse,
+  ListObjectsPagedRequest,
   ListObjectsPagedResponse,
   UploadContentImageRequest,
-  UploadContentImageResponse, UploadContentMediaLinkRequest, UploadContentMediaLinkResponse, UploadContentVideoRequest,
-  UploadContentVideoResponse, createAdminServiceClient
+  UploadContentImageResponse,
+  UploadContentMediaLinkRequest,
+  UploadContentMediaLinkResponse,
+  UploadContentVideoRequest,
+  UploadContentVideoResponse,
+  createAdminServiceClient,
 } from './proto-http/admin';
 
 export const adminService = createAdminServiceClient(axiosRequestHandler);
@@ -23,8 +33,10 @@ export function getAllUploadedFiles(
   return adminService.ListObjectsPaged(request);
 }
 
-export function uploadContentLink(request: UploadContentMediaLinkRequest): Promise<UploadContentMediaLinkResponse> {
-  return adminService.UploadContentMediaLink(request)
+export function uploadContentLink(
+  request: UploadContentMediaLinkRequest,
+): Promise<UploadContentMediaLinkResponse> {
+  return adminService.UploadContentMediaLink(request);
 }
 
 export function uploadContentImage(
@@ -68,5 +80,13 @@ export function deleteProductByID(
 }
 
 export function getDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse> {
-  return adminService.GetDictionary(request);
+  const storedData = localStorage.getItem('dictionary');
+  if (storedData) {
+    return Promise.resolve().then(() => JSON.parse(storedData));
+  } else {
+    return adminService.GetDictionary(request).then((response) => {
+      localStorage.setItem('dictionary', JSON.stringify(response));
+      return response;
+    });
+  }
 }
