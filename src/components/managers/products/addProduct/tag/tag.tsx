@@ -1,66 +1,45 @@
 import { Box, Button, Chip, TextField } from '@mui/material';
-import { common_ProductNew } from 'api/proto-http/admin';
-import React, { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
+import { AddProductTagInterface } from '../interface/interface';
 
-interface TagProps {
-  product: common_ProductNew;
-  setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>;
-}
-
-export const Tags: FC<TagProps> = ({ product, setProduct }) => {
+export const Tags: FC<AddProductTagInterface> = ({ setProduct }) => {
   const [newTag, setNewTag] = useState('');
   const [tags, setTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
     return storedTags ? JSON.parse(storedTags) : [];
   });
-  const [selectedTags, setSelectedTags] = useState<string[]>(() => {
-    const productTags =
-      product.tags?.map((t) => t.tag).filter((tag): tag is string => tag !== undefined) || [];
-    return productTags;
-  });
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   useEffect(() => {
+    localStorage.setItem('productTags', JSON.stringify(tags));
     setProduct((prevProduct) => ({
       ...prevProduct,
       tags: selectedTags.map((tag) => ({ tag })),
     }));
-  }, [selectedTags, tags, setProduct]);
+  }, [tags, selectedTags, setProduct]);
 
   const uploadNewTag = () => {
-    if (newTag.trim() === '') return;
-
     const trimmedTag = newTag.trim();
+    if (!trimmedTag || tags.includes(trimmedTag)) return;
     const updatedTags = [...tags, trimmedTag];
-
     setTags(updatedTags);
-    localStorage.setItem('productTags', JSON.stringify(updatedTags));
-
-    setSelectedTags((prevSelectedTags) => [...prevSelectedTags, trimmedTag]);
-
-    setProduct((prevProduct) => ({
-      ...prevProduct,
-      tags: [...(prevProduct.tags || []), { tag: trimmedTag }],
-    }));
-
+    if (!selectedTags.includes(trimmedTag)) {
+      setSelectedTags([...selectedTags, trimmedTag]);
+    }
     setNewTag('');
   };
-
   const handleDeleteTag = (tagToDelete: string) => {
     const updatedTags = tags.filter((tag) => tag !== tagToDelete);
     setTags(updatedTags);
-    localStorage.setItem('productTags', JSON.stringify(updatedTags));
-
-    if (selectedTags.includes(tagToDelete)) {
-      setSelectedTags(selectedTags.filter((tag) => tag !== tagToDelete));
-    }
+    setSelectedTags(selectedTags.filter((tag) => tag !== tagToDelete));
   };
 
   const handleTagClick = (tag: string) => {
-    if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter((t) => t !== tag));
-    } else {
-      setSelectedTags([...selectedTags, tag]);
-    }
+    setSelectedTags((prevSelectedTags) =>
+      prevSelectedTags.includes(tag)
+        ? prevSelectedTags.filter((t) => t !== tag)
+        : [...prevSelectedTags, tag],
+    );
   };
 
   return (
@@ -78,11 +57,11 @@ export const Tags: FC<TagProps> = ({ product, setProduct }) => {
           Upload
         </Button>
       </Box>
-      <Box display='grid' gridTemplateColumns='repeat(2, 1fr)' gap='5px' flexWrap='wrap'>
-        {tags.map((tag, index) => (
+      <Box display='grid' gridTemplateColumns='repeat(2, 1fr)' gap='5px'>
+        {tags.map((tag) => (
           <Chip
             label={tag}
-            key={index}
+            key={tag}
             onClick={() => handleTagClick(tag)}
             onDelete={() => handleDeleteTag(tag)}
             color={selectedTags.includes(tag) ? 'primary' : 'default'}

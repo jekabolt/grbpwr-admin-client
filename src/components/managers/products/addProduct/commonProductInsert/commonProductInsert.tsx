@@ -173,7 +173,7 @@ export const CommonProductInsert: FC<CommonProductInsertInterface> = ({
         </FormControl>
       </Grid>
       <Grid item>
-        <Tags setProduct={setProduct} product={product} />
+        <Tags setProduct={setProduct} />
       </Grid>
     </Grid>
   );

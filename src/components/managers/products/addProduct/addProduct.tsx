@@ -112,7 +112,7 @@ export const AddProducts: FC = () => {
             />
           </Grid>
           <Grid item xs={11}>
-            <Sizes setProduct={setProduct} dictionary={dictionary} product={product} />
+            <Sizes setProduct={setProduct} dictionary={dictionary} />
           </Grid>
           <Grid item>
             <Button type='submit' variant='contained' size='large'>

@@ -15,3 +15,12 @@ export interface AddProductMediaInterface {
     product: common_ProductNew;
     setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>
 }
+
+export interface AddproductSizesInterface {
+    setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>
+    dictionary: common_Dictionary | undefined
+}
+
+export interface AddProductTagInterface {
+    setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>
+}

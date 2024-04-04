@@ -11,15 +11,9 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
 import React, { FC } from 'react';
-
-interface sizeProps {
-  product: common_ProductNew;
-  setProduct: React.Dispatch<React.SetStateAction<common_ProductNew>>;
-  dictionary: common_Dictionary | undefined;
-}
+import { AddproductSizesInterface } from '../interface/interface';
 
 export function sortItems(item: { id?: number }[]) {
   return [...(item || [])]
@@ -32,7 +26,7 @@ export function sortItems(item: { id?: number }[]) {
     });
 }
 
-export const Sizes: FC<sizeProps> = ({ setProduct, dictionary, product }) => {
+export const Sizes: FC<AddproductSizesInterface> = ({ setProduct, dictionary }) => {
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
