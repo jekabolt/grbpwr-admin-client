@@ -50,7 +50,7 @@ export const Media: FC = () => {
 
   return (
     <Grid container display='grid' spacing={2}>
-      <Grid item xs={10} width={500}>
+      <Grid item xs={11}>
         <SingleMediaViewAndSelect
           link={imagePreviewUrl}
           saveSelectedMedia={uploadThumbnailInProduct}
