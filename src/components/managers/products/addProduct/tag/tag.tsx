@@ -1,28 +1,28 @@
 import { Box, Button, Chip, TextField } from '@mui/material';
-import { common_ProductTagInsert } from 'api/proto-http/admin';
-import { useField } from 'formik';
-import { FC, useEffect, useState } from 'react';
+import { common_ProductNew } from 'api/proto-http/admin';
+import { useFormikContext } from 'formik';
+import { useEffect, useState } from 'react';
 
-export const Tags: FC<{ name: string }> = ({ name }) => {
-  const [field, , helpers] = useField<common_ProductTagInsert[]>(name);
+export const Tags = () => {
+  const { values, setFieldValue } = useFormikContext<common_ProductNew>(); // Using any for simplicity, replace with your form values type
   const [newTag, setNewTag] = useState('');
   const [tags, setTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
     return storedTags ? JSON.parse(storedTags) : [];
   });
-  const initialSelectedTags = Array.isArray(field.value)
-    ? field.value.map((tag) => tag.tag || '')
-    : [];
 
-  const [selectedTags, setSelectedTags] = useState<string[]>(initialSelectedTags);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   useEffect(() => {
     localStorage.setItem('productTags', JSON.stringify(tags));
   }, [tags]);
 
   useEffect(() => {
-    helpers.setValue(selectedTags.map((tag) => ({ tag })));
-  }, [selectedTags, helpers]);
+    setFieldValue(
+      'tags',
+      selectedTags.map((tag) => ({ tag })),
+    );
+  }, [selectedTags, setFieldValue]);
 
   const uploadNewTag = () => {
     const trimmedTag = newTag.trim();
