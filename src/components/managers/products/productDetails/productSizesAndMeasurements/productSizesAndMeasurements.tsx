@@ -12,10 +12,11 @@ import {
   TableRow,
   TextField,
 } from '@mui/material';
+import { getDictionary } from 'api/admin';
 import { UpdateProductSizeStockRequest, common_Dictionary } from 'api/proto-http/admin';
 import { updateMeasurement, updateSize } from 'api/updateProductsById';
 import { findInDictionary } from 'components/managers/orders/utility';
-import { sortItems } from 'components/managers/products/addProduct/sizes/sizes';
+import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';
@@ -29,11 +30,12 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({ product, id, f
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
 
   useEffect(() => {
-    const data = localStorage.getItem('dictionary');
-    if (data) {
-      setDictionary(JSON.parse(data));
-    }
-  });
+    const fetchDictionary = async () => {
+      const response = await getDictionary({});
+      setDictionary(response.dictionary);
+    };
+    fetchDictionary();
+  }, []);
 
   useEffect(() => {
     const initialSizeUpdates = (product?.sizes || []).reduce(

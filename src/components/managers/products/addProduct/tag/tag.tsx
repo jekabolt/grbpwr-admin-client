@@ -1,45 +1,47 @@
 import { Box, Button, Chip, TextField } from '@mui/material';
+import { common_ProductTagInsert } from 'api/proto-http/admin';
+import { useField } from 'formik';
 import { FC, useEffect, useState } from 'react';
-import { AddProductTagInterface } from '../interface/interface';
 
-export const Tags: FC<AddProductTagInterface> = ({ setProduct }) => {
+export const Tags: FC<{ name: string }> = ({ name }) => {
+  const [field, , helpers] = useField<common_ProductTagInsert[]>(name);
   const [newTag, setNewTag] = useState('');
   const [tags, setTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
     return storedTags ? JSON.parse(storedTags) : [];
   });
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const initialSelectedTags = Array.isArray(field.value)
+    ? field.value.map((tag) => tag.tag || '')
+    : [];
+
+  const [selectedTags, setSelectedTags] = useState<string[]>(initialSelectedTags);
 
   useEffect(() => {
     localStorage.setItem('productTags', JSON.stringify(tags));
-    setProduct((prevProduct) => ({
-      ...prevProduct,
-      tags: selectedTags.map((tag) => ({ tag })),
-    }));
-  }, [tags, selectedTags, setProduct]);
+  }, [tags]);
+
+  useEffect(() => {
+    helpers.setValue(selectedTags.map((tag) => ({ tag })));
+  }, [selectedTags, helpers]);
 
   const uploadNewTag = () => {
     const trimmedTag = newTag.trim();
     if (!trimmedTag || tags.includes(trimmedTag)) return;
-    const updatedTags = [...tags, trimmedTag];
-    setTags(updatedTags);
-    if (!selectedTags.includes(trimmedTag)) {
-      setSelectedTags([...selectedTags, trimmedTag]);
-    }
+    setTags([...tags, trimmedTag]);
     setNewTag('');
   };
+
   const handleDeleteTag = (tagToDelete: string) => {
-    const updatedTags = tags.filter((tag) => tag !== tagToDelete);
-    setTags(updatedTags);
+    setTags(tags.filter((tag) => tag !== tagToDelete));
     setSelectedTags(selectedTags.filter((tag) => tag !== tagToDelete));
   };
 
   const handleTagClick = (tag: string) => {
-    setSelectedTags((prevSelectedTags) =>
-      prevSelectedTags.includes(tag)
-        ? prevSelectedTags.filter((t) => t !== tag)
-        : [...prevSelectedTags, tag],
-    );
+    if (selectedTags.includes(tag)) {
+      setSelectedTags(selectedTags.filter((t) => t !== tag));
+    } else {
+      setSelectedTags([...selectedTags, tag]);
+    }
   };
 
   return (

@@ -11,6 +11,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import { getDictionary } from 'api/admin';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
 import { updateProductById } from 'api/updateProductsById';
 import { findInDictionary } from 'components/managers/orders/utility';
@@ -28,10 +29,11 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
   const [dict, setDict] = useState<common_Dictionary>();
 
   useEffect(() => {
-    const data = localStorage.getItem('dictionary');
-    if (data) {
-      setDict(JSON.parse(data));
-    }
+    const fetchDictionary = async () => {
+      const response = await getDictionary({});
+      setDict(response.dictionary);
+    };
+    fetchDictionary();
   }, []);
 
   const enableEditMode = () => {
@@ -196,12 +198,12 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
           label='colorHEX'
           InputLabelProps={{ shrink: true }}
           type='color'
-          sx={{ width: 193 }}
+          fullWidth
           disabled={!isEdit}
         />
       </Grid>
       <Grid item>
-        <FormControl>
+        <FormControl fullWidth>
           <InputLabel shrink>gender</InputLabel>
           <Select
             name='targetGender'
@@ -223,7 +225,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         </FormControl>
       </Grid>
       <Grid item>
-        <FormControl>
+        <FormControl fullWidth>
           <InputLabel shrink>category</InputLabel>
           <Select
             name='categoryId'

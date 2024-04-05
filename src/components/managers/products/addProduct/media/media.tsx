@@ -1,70 +1,53 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton, ImageList, ImageListItem } from '@mui/material';
+import { common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
+import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
 import styles from 'styles/addProd.scss';
-import { AddProductMediaInterface } from '../interface/interface';
 
-export const Media: FC<AddProductMediaInterface> = ({ product, setProduct }) => {
+export const Media: FC = () => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [mediaPreview, setMediaPreview] = useState<string[]>([]);
+  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
 
   const uploadThumbnailInProduct = (newSelectedMedia: string[]) => {
-    if (!product.product || !newSelectedMedia.length) {
+    if (!newSelectedMedia.length) {
       return;
     }
-
     const thumbnailUrl = newSelectedMedia[0];
     setImagePreviewUrl(thumbnailUrl);
 
-    setProduct((prevProduct) => {
-      const updatedProduct = { ...prevProduct };
-      if (updatedProduct.product) {
-        updatedProduct.product = {
-          ...updatedProduct.product,
-          thumbnail: thumbnailUrl,
-        };
-      }
-
-      return updatedProduct;
-    });
+    setFieldValue('product.thumbnail', thumbnailUrl);
   };
 
   const uploadMediasInProduct = (newSelectedMedia: string[]) => {
     if (newSelectedMedia.length === 0) {
-      alert('no selected media');
+      alert('No selected media');
+      return;
     }
 
-    const newMedia = newSelectedMedia.map((imageUrl) => {
-      const compressed = imageUrl.replace(/-og\.jpg$/, '-compressed.jpg');
-      const thumbnail = imageUrl.replace(/-og\.jpg$/, '-thumbnail.jpg');
-
-      return {
-        fullSize: imageUrl,
-        thumbnail: thumbnail,
-        compressed: compressed,
-      };
-    });
+    const newMedia = newSelectedMedia.map((imageUrl) => ({
+      fullSize: imageUrl,
+      thumbnail: imageUrl.replace(/-og\.jpg$/, '-thumbnail.jpg'),
+      compressed: imageUrl.replace(/-og\.jpg$/, '-compressed.jpg'),
+    }));
 
     setMediaPreview((prevPreview) => [...prevPreview, ...newSelectedMedia]);
 
-    setProduct((prevProduct) => ({
-      ...prevProduct,
-      media: [...(prevProduct.media || []), ...newMedia],
-    }));
+    const updatedMediaList = [...(values.media || []), ...newMedia];
+    setFieldValue('media', updatedMediaList);
   };
 
   const removeSelectedMedia = (mediaUrlToRemove: string) => {
     setMediaPreview((currentMedia) => currentMedia.filter((url) => url !== mediaUrlToRemove));
 
-    setProduct((currentProduct) => {
-      const updatedMedia = currentProduct.media?.filter(
-        (media) => media.fullSize !== mediaUrlToRemove,
-      );
-      return { ...currentProduct, media: updatedMedia };
-    });
+    const updatedMedia = values.media?.filter((media) => media.fullSize !== mediaUrlToRemove);
+
+    setFieldValue('media', updatedMedia || []);
   };
+
   return (
     <Grid container display='grid' spacing={2}>
       <Grid item xs={10} width={500}>
@@ -90,14 +73,11 @@ export const Media: FC<AddProductMediaInterface> = ({ product, setProduct }) => 
               height: 'auto',
             }}
             rowHeight={220}
+            className={styles.media_list}
           >
             {mediaPreview.map((media, id) => (
               <ImageListItem key={id} className={styles.media_item}>
-                <img
-                  src={media}
-                  alt=''
-                  style={{ width: '100%', height: '220px', objectFit: 'scale-down' }}
-                />
+                <img src={media} alt='' className={styles.media} />
                 <IconButton
                   onClick={() => removeSelectedMedia(media)}
                   className={styles.delete_btn}

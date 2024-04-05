@@ -1,102 +1,99 @@
 import { FormControl, Grid, InputLabel, MenuItem, Select, TextField } from '@mui/material';
+import { common_ProductNew } from 'api/proto-http/admin';
 import { findInDictionary } from 'components/managers/orders/utility';
-import { FC } from 'react';
-import { CommonProductInsertInterface } from '../interface/interface';
-import { Tags } from '../tag/tag';
+import { Field, useFormikContext } from 'formik';
+import React, { FC } from 'react';
+import { AddProductInterface } from '../addProductInterface/addProductInterface';
 
-export const CommonProductInsert: FC<CommonProductInsertInterface> = ({
-  product,
-  setProduct,
-  handleInputChange,
-  dictionary,
-}) => {
+export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => {
+  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+
+  const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFieldValue(name, value.toString());
+  };
   return (
-    <Grid container display='grid' spacing={2} style={{ width: '80%' }}>
+    <Grid container display='grid' spacing={2}>
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           variant='outlined'
           label='NAME'
-          name='name'
-          value={product.product?.name || ''}
-          onChange={handleInputChange}
+          name='product.name'
           required
           InputLabelProps={{ shrink: true }}
         />
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           variant='outlined'
           label='COUNTRY'
-          name='countryOfOrigin'
-          value={product?.product?.countryOfOrigin || ''}
-          onChange={handleInputChange}
+          name='product.countryOfOrigin'
           required
           InputLabelProps={{ shrink: true }}
         />
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           variant='outlined'
           label='BRAND'
-          name='brand'
-          value={product?.product?.brand || ''}
-          onChange={handleInputChange}
+          name='product.brand'
           required
           InputLabelProps={{ shrink: true }}
         />
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           variant='outlined'
           label='PRICE'
-          name='price'
-          value={product?.product?.price?.value || ''}
-          onChange={handleInputChange}
+          name='product.price.value'
           type='number'
           inputProps={{ min: 0 }}
           required
           InputLabelProps={{ shrink: true }}
+          onChange={handlePriceChange}
         />
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           label='SALES'
-          name='salePercentage'
-          value={product?.product?.salePercentage?.value || ''}
-          onChange={handleInputChange}
-          sx={{ width: 193 }}
+          name='product.salePercentage.value'
+          onChange={handlePriceChange}
           type='number'
           inputProps={{ min: 0, max: 99 }}
           required
           InputLabelProps={{ shrink: true }}
+          fullWidth
         />
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           label='PREORDER'
-          name='preorder'
-          value={product?.product?.preorder || ''}
-          onChange={handleInputChange}
+          name='product.preorder'
           required
           InputLabelProps={{ shrink: true }}
         />
       </Grid>
 
       <Grid item>
-        <FormControl sx={{ width: 193 }} required>
+        <FormControl fullWidth required>
           <InputLabel shrink>GENDER</InputLabel>
           <Select
-            value={product.product?.targetGender}
-            onChange={handleInputChange}
-            autoWidth
+            value={values.product?.targetGender || ''}
+            onChange={(e) => setFieldValue('product.targetGender', e.target.value)}
             label='GENDER'
             displayEmpty
-            name='targetGender'
+            name='product.targetGender'
           >
             {dictionary?.genders?.map((gender) => (
               <MenuItem key={gender.id} value={gender.id}>
@@ -108,59 +105,55 @@ export const CommonProductInsert: FC<CommonProductInsertInterface> = ({
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           label='DESCRIPTION'
-          name='description'
-          value={product.product?.description}
+          name='product.description'
           InputLabelProps={{ shrink: true }}
-          onChange={handleInputChange}
           multiline
           required
         />
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           label='VENDORE CODE'
-          name='sku'
-          value={product?.product?.sku || ''}
-          onChange={handleInputChange}
+          name='product.sku'
           InputLabelProps={{ shrink: true }}
           required
         />
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           label='COLOR'
-          name='color'
-          value={product?.product?.color || ''}
-          onChange={handleInputChange}
+          name='product.color'
           InputLabelProps={{ shrink: true }}
           required
         />
       </Grid>
 
       <Grid item>
-        <TextField
+        <Field
+          as={TextField}
           type='color'
           label='COLOR HEX'
-          name='colorHex'
-          value={product.product?.colorHex}
-          onChange={handleInputChange}
+          name='product.colorHex'
           InputLabelProps={{ shrink: true }}
-          sx={{ width: 193 }}
           required
+          fullWidth
         />
       </Grid>
 
       <Grid item>
-        <FormControl required sx={{ width: 193 }}>
+        <FormControl required fullWidth>
           <InputLabel shrink>CATEGORY</InputLabel>
           <Select
-            name='categoryId'
-            value={product.product?.categoryId?.toString() || ''}
-            onChange={handleInputChange}
+            name='prodcut.categoryId'
+            onChange={(e) => setFieldValue('product.categoryId', e.target.value)}
+            value={values.product?.categoryId}
             label='CATEGORY'
             displayEmpty
           >
@@ -171,9 +164,6 @@ export const CommonProductInsert: FC<CommonProductInsertInterface> = ({
             ))}
           </Select>
         </FormControl>
-      </Grid>
-      <Grid item>
-        <Tags setProduct={setProduct} />
       </Grid>
     </Grid>
   );
