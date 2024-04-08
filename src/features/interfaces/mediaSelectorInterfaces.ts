@@ -19,6 +19,7 @@ export interface MediaSelectorMediaListProps {
     allowMultiple: boolean
     selectedMedia: { url: string, type: string }[] | undefined;
     select: (imageUrl: string, allowMultiple: boolean) => void
+    height?: string | number
 }
 
 export interface MediaSelectorUploadMediaByUrByDragDropProps {

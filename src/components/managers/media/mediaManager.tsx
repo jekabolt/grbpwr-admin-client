@@ -138,13 +138,14 @@ export const MediaManager: FC = () => {
             </div>
           </div>
         </div> */}
-        <Grid item xs={12}>
+        <Grid item xs={10}>
           <MediaList
             media={media}
             setMedia={setMedia}
             allowMultiple={false}
             selectedMedia={[]}
             select={() => {}}
+            height='auto'
           />
         </Grid>
       </Grid>
