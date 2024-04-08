@@ -16,7 +16,6 @@ import { GetArchive } from 'components/managers/archive/getArchive';
 import { MainArchive } from 'components/managers/archive/mainArchive';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
-import { UploadPage } from 'components/managers/media/upload';
 import { OrderId } from 'components/managers/orders/orderId';
 import { Orders } from 'components/managers/orders/orders';
 import { AddProducts } from 'components/managers/products/addProduct/addProduct';
@@ -55,14 +54,6 @@ const routes: Route<DefaultGenerics>[] = [
     element: (
       <ProtectedRoute>
         <MediaManager />
-      </ProtectedRoute>
-    ),
-  },
-  {
-    path: ROUTES.all,
-    element: (
-      <ProtectedRoute>
-        <UploadPage />
       </ProtectedRoute>
     ),
   },

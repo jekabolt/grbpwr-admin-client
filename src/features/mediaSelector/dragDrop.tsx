@@ -1,10 +1,9 @@
-import { Button } from '@mui/material';
+import { Box, Button, CircularProgress, Grid, Paper, Snackbar, Typography } from '@mui/material';
 import { uploadContentImage, uploadContentVideo } from 'api/admin';
 import React, { FC, useState } from 'react';
-import styles from 'styles/dragDrop.scss';
 
 interface DragDropProps {
-  reloadFile?: () => void;
+  reload: () => void;
 }
 
 const fileExtensionToContentType: { [key: string]: string } = {
@@ -15,10 +14,22 @@ const fileExtensionToContentType: { [key: string]: string } = {
   jpeg: 'image/jpeg',
 };
 
-export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
+export const DragDrop: FC<DragDropProps> = ({ reload }) => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
+  const [snackbarMessage, setSnackbarMessage] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const handleSnackbarClose = () => {
+    setSnackbarOpen(false);
+  };
+
+  const showMessage = (message: string) => {
+    setSnackbarMessage(message);
+    setSnackbarOpen(true);
+  };
 
   const processFiles = (files: FileList) => {
     if (files && files.length > 0) {
@@ -66,15 +77,18 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
 
   const handleUpload = async () => {
     if (selectedFiles.length === 0) {
-      alert('Please select a file to upload.');
+      showMessage('NO SELECTED FILE');
       return;
     }
+
+    setLoading(true);
 
     const selectedFile = selectedFiles[0];
     const fileExtension = (selectedFile.name.split('.').pop() || '').toLowerCase();
 
     if (!fileExtension) {
-      alert('Invalid file format.');
+      showMessage('INVALID FILE FORMAT');
+      setLoading(false);
       return;
     }
 
@@ -82,29 +96,30 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
     reader.onload = async (event) => {
       if (event.target && event.target.result) {
         const baseData64 = event.target.result as string;
-
         const contentType = fileExtensionToContentType[fileExtension];
 
-        if (!contentType) {
-          alert('Invalid extension');
-          return;
-        }
+        try {
+          if (contentType.startsWith('image')) {
+            await uploadContentImage({
+              rawB64Image: baseData64,
+            });
+          } else if (contentType.startsWith('video')) {
+            const raw = trimBeforeBase64(baseData64);
+            await uploadContentVideo({
+              raw: raw,
+              contentType: contentType,
+            });
+          }
 
-        if (contentType.startsWith('image')) {
-          await uploadContentImage({
-            rawB64Image: baseData64,
-          });
-        } else if (contentType.startsWith('video')) {
-          const raw = trimBeforeBase64(baseData64);
-          await uploadContentVideo({
-            raw: raw,
-            contentType: contentType,
-          });
+          showMessage('MEDIA IS UPLOADED');
+        } catch (error) {
+          showMessage('UPLOAD HAS FAILED. TRY AGAIN');
+        } finally {
+          setLoading(false);
+          setSelectedFiles([]);
+          setSelectedFileUrl(null);
+          reload();
         }
-
-        setSelectedFiles([]);
-        setSelectedFileUrl(null);
-        reloadFile?.();
       }
     };
 
@@ -112,21 +127,39 @@ export const DragDrop: FC<DragDropProps> = ({ reloadFile }) => {
   };
 
   return (
-    <>
-      <div
-        onDragOver={(e) => handleDrag(e, true)}
-        onDragEnter={(e) => handleDrag(e, true)}
-        onDragLeave={(e) => handleDrag(e, false)}
-        onDrop={handleFileChange}
-        className={`${styles.drag_drop_container} ${isDragging ? styles.drag_drop_label : ''}`}
-      >
-        {!selectedFileUrl && <label htmlFor='files'>DRAG AND DROP FILES HERE</label>}
-        <input id='files' type='file' accept='image/*, video/*' onChange={handleFileChange} />
-        {selectedFileUrl && <p className={styles.drag_drop_img_selected}>media is selected</p>}
-        <Button variant='contained' onClick={handleUpload} className={styles.drag_drop_btn}>
-          UPLOAD
-        </Button>
-      </div>
-    </>
+    <Grid container>
+      <Grid item>
+        <Box
+          onDragOver={(e) => handleDrag(e, true)}
+          onDragEnter={(e) => handleDrag(e, true)}
+          onDragLeave={(e) => handleDrag(e, false)}
+          onDrop={handleFileChange}
+          display='flex'
+          alignItems='center'
+        >
+          <Paper sx={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {!selectedFiles.length && <label htmlFor='files'>DRAG AND DROP HERE</label>}
+            <input
+              id='files'
+              type='file'
+              accept='image/*, video/*'
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+            />
+            {selectedFiles.length > 0 && <Typography>Media is selected</Typography>}
+            <Button variant='contained' size='small' onClick={handleUpload}>
+              UPLOAD
+            </Button>
+            {loading && <CircularProgress />}
+          </Paper>
+        </Box>
+        <Snackbar
+          open={snackbarOpen}
+          message={snackbarMessage}
+          autoHideDuration={6000}
+          onClose={handleSnackbarClose}
+        />
+      </Grid>
+    </Grid>
   );
 };

@@ -9,12 +9,16 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import { deleteFiles } from 'api/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useMemo, useState } from 'react';
 import styles from 'styles/media-selector.scss';
+import { ByUrl } from './byUrl';
+import { DragDrop } from './dragDrop';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
   media,
@@ -22,10 +26,16 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   allowMultiple,
   select,
   selectedMedia,
+  reload,
   height = 480,
+  url,
+  setUrl,
+  updateContentLink,
 }) => {
   const [filterByType, setFilterByType] = useState('');
   const [sortByDate, setSortByDate] = useState('desc');
+  const theme = useTheme();
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
   const sortedAndFilteredMedia = useMemo(() => {
     return media
@@ -55,35 +65,61 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   };
 
   return (
-    <Grid container spacing={2} justifyContent='center'>
+    <Grid container marginTop={4} justifyContent='center'>
       <Grid item xs={11}>
-        <Box display='flex' gap='5px' justifyContent='flex-end'>
-          <FormControl>
-            <InputLabel shrink>TYPE</InputLabel>
-            <Select
-              value={filterByType}
-              displayEmpty
-              onChange={(e) => setFilterByType(e.target.value)}
-              label='TYPE'
-              size='small'
-            >
-              <MenuItem value=''>ALL</MenuItem>
-              <MenuItem value='image'>IMAGE</MenuItem>
-              <MenuItem value='video'>VIDEO</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl>
-            <InputLabel>ORDER</InputLabel>
-            <Select
-              value={sortByDate}
-              onChange={(e) => setSortByDate(e.target.value)}
-              label='ORDER'
-              size='small'
-            >
-              <MenuItem value='desc'>DESCENDING</MenuItem>
-              <MenuItem value='asc'>ASCENDING</MenuItem>
-            </Select>
-          </FormControl>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '15px',
+            flexWrap: isSmallScreen ? 'wrap' : 'nowrap',
+          }}
+        >
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: isSmallScreen ? 'wrap' : 'nowrap',
+              gap: '55px',
+            }}
+          >
+            <ByUrl url={url} setUrl={setUrl} updateContentLink={updateContentLink} />
+            <DragDrop reload={reload} />
+          </Box>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: isSmallScreen ? 'wrap' : 'nowrap',
+              gap: '15px',
+            }}
+          >
+            <FormControl size='small'>
+              <InputLabel shrink>TYPE</InputLabel>
+              <Select
+                value={filterByType}
+                displayEmpty
+                onChange={(e) => setFilterByType(e.target.value)}
+                label='TYPE'
+              >
+                <MenuItem value=''>ALL</MenuItem>
+                <MenuItem value='image'>IMAGE</MenuItem>
+                <MenuItem value='video'>VIDEO</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size='small'>
+              <InputLabel>ORDER</InputLabel>
+              <Select
+                value={sortByDate}
+                onChange={(e) => setSortByDate(e.target.value)}
+                label='ORDER'
+              >
+                <MenuItem value='desc'>DESCENDING</MenuItem>
+                <MenuItem value='asc'>ASCENDING</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
         </Box>
       </Grid>
       <Grid item xs={11}>
@@ -94,7 +130,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
               width: '100%',
               height: height,
             }}
-            cols={5}
+            cols={isSmallScreen ? 1 : 5}
             gap={8}
             rowHeight={200}
           >

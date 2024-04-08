@@ -6,15 +6,13 @@ import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/media-selector.scss';
 import { MediaList } from './listMedia';
-import { UploadMediaByUrlByDragDrop } from './uploadMediaByUrlByDragDrop';
 
 export const MediaSelector: FC<MediaSelectorProps> = ({
   closeMediaSelector,
   allowMultiple,
   saveSelectedMedia,
 }) => {
-  const { media, reload, isLoading, hasMore, fetchFiles, setMedia, url, setUrl, updateLink } =
-    useMediaSelector();
+  const { media, reload, fetchFiles, setMedia, url, setUrl, updateLink } = useMediaSelector();
   const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const [open, setOpen] = useState(true);
@@ -72,16 +70,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
       maxWidth='xl'
       className={styles.modal}
     >
-      <Grid container spacing={1} justifyContent='center'>
-        <Grid item xs={7}>
-          <UploadMediaByUrlByDragDrop
-            reload={reload}
-            closeMediaSelector={handleClose}
-            url={url}
-            setUrl={setUrl}
-            updateContentLink={updateLink}
-          />
-        </Grid>
+      <Grid container spacing={2} justifyContent='center'>
         <Grid item xs={12}>
           <MediaList
             setMedia={setMedia}
@@ -89,6 +78,10 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
             allowMultiple={allowMultiple}
             select={select}
             selectedMedia={selectedMedia}
+            reload={reload}
+            url={url}
+            setUrl={setUrl}
+            updateContentLink={updateLink}
           />
         </Grid>
         <Grid item xs={12} display='flex' justifyContent='center'>
