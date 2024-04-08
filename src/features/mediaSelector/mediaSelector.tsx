@@ -17,7 +17,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     useMediaSelector();
   const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
-  const [open, setOpen] = useState(true); // Dialog open state
+  const [open, setOpen] = useState(true);
 
   const handleMediaAndCloseSelector = async () => {
     setSaveAttempted(true);

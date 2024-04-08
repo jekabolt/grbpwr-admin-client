@@ -5,6 +5,7 @@ import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorIn
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
 import styles from 'styles/media-selector.scss';
+
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
   media,
   setMedia,
@@ -14,11 +15,11 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
 }) => {
   const handleDeleteFile = async (id: number | undefined) => {
     await deleteFiles({ id });
-    setMedia?.((currentFiles) => currentFiles?.filter((file) => file.id !== id));
+    setMedia((currentFiles) => currentFiles?.filter((file) => file.id !== id));
   };
 
   const handleSelect = (mediaUrl: string, allowMultiple: boolean, event: any) => {
-    select(mediaUrl, allowMultiple);
+    select?.(mediaUrl, allowMultiple);
     event.stopPropagation();
   };
 

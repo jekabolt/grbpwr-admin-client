@@ -1,16 +1,22 @@
+import { Grid } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { uploadContentImage, uploadContentVideo } from 'api/admin';
 import { Layout } from 'components/login/layout';
-import { ROUTES } from 'constants/routes';
+import { MediaList } from 'features/mediaSelector/listMedia';
 import { fileExtensionToContentType } from 'features/utilitty/filterExtentions';
-import { FC, useState } from 'react';
-import styles from 'styles/media-manager.scss';
+import useMediaSelector from 'features/utilitty/useMediaSelector';
+import { FC, useEffect, useState } from 'react';
 
 export const MediaManager: FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState<boolean>(false); // Added state for dragging
+  const { media, setMedia, fetchFiles } = useMediaSelector();
+  const [isDragging, setIsDragging] = useState<boolean>(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchFiles(50, 0);
+  }, [fetchFiles]);
 
   const handleFileChange = (
     event: React.ChangeEvent<HTMLInputElement> | React.DragEvent<HTMLDivElement>,
@@ -38,10 +44,6 @@ export const MediaManager: FC = () => {
     event.preventDefault();
     event.stopPropagation();
     setIsDragging(dragging);
-  };
-
-  const handleViewAll = () => {
-    navigate({ to: ROUTES.all });
   };
 
   function trimBeforeBase64(input: string): string {
@@ -100,11 +102,9 @@ export const MediaManager: FC = () => {
 
   return (
     <Layout>
-      <div className={styles.media_wrapper}>
-        <div className={styles.media_container}>
-          <h2 className={styles.media_title}>MEDIA MANAGER</h2>
+      <Grid container justifyContent='center'>
+        {/* <div className={styles.media_container}>
           <div
-            className={`${styles.drop_container} ${isDragging ? styles.dragging : ''}`}
             onDragOver={(e) => handleDrag(e, true)}
             onDragEnter={(e) => handleDrag(e, true)}
             onDragLeave={(e) => handleDrag(e, false)}
@@ -137,13 +137,17 @@ export const MediaManager: FC = () => {
               </button>
             </div>
           </div>
-        </div>
-        <div className={styles.view_all}>
-          <h3 className={styles.view_all_btn} onClick={handleViewAll}>
-            VIEW ALL
-          </h3>
-        </div>
-      </div>
+        </div> */}
+        <Grid item xs={12}>
+          <MediaList
+            media={media}
+            setMedia={setMedia}
+            allowMultiple={false}
+            selectedMedia={[]}
+            select={() => {}}
+          />
+        </Grid>
+      </Grid>
     </Layout>
   );
 };
