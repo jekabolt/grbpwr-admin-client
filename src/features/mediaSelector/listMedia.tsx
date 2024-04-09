@@ -1,24 +1,18 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import {
-  Box,
-  FormControl,
   Grid,
   IconButton,
   ImageList,
   ImageListItem,
   InputLabel,
-  MenuItem,
-  Select,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
 import { deleteFiles } from 'api/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
-import { FC, useMemo, useState } from 'react';
+import { FC } from 'react';
 import styles from 'styles/media-selector.scss';
-import { ByUrl } from './byUrl';
-import { DragDrop } from './dragDrop';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
   media,
@@ -26,34 +20,11 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   allowMultiple,
   select,
   selectedMedia,
-  reload,
   height = 480,
-  url,
-  setUrl,
-  updateContentLink,
-  isLoading,
+  sortedAndFilteredMedia,
 }) => {
-  const [filterByType, setFilterByType] = useState('');
-  const [sortByDate, setSortByDate] = useState('desc');
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
-
-  const sortedAndFilteredMedia = useMemo(() => {
-    return media
-      ?.filter((m) => {
-        const matchesType =
-          filterByType === '' ||
-          (filterByType === 'video' && isVideo(m.media?.fullSize)) ||
-          (filterByType === 'image' && !isVideo(m.media?.fullSize));
-
-        return matchesType;
-      })
-      .sort((a, b) => {
-        const dateA = new Date(a.createdAt || 0).getTime();
-        const dateB = new Date(b.createdAt || 0).getTime();
-        return sortByDate === 'asc' ? dateA - dateB : dateB - dateA;
-      });
-  }, [media, filterByType, sortByDate]);
 
   const handleDeleteFile = async (id: number | undefined) => {
     await deleteFiles({ id });
@@ -66,46 +37,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   };
 
   return (
-    <Grid container marginTop={4} justifyContent='center'>
-      <Grid item xs={11}>
-        <Box component='div' className={styles.box}>
-          <Box component='div' className={styles.box_1}>
-            <DragDrop reload={reload} />
-            <ByUrl
-              url={url}
-              setUrl={setUrl}
-              updateContentLink={updateContentLink}
-              isLoading={isLoading}
-            />
-          </Box>
-          <Box component='div' className={styles.box_1}>
-            <FormControl size='small'>
-              <InputLabel shrink>TYPE</InputLabel>
-              <Select
-                value={filterByType}
-                displayEmpty
-                onChange={(e) => setFilterByType(e.target.value)}
-                label='TYPE'
-              >
-                <MenuItem value=''>ALL</MenuItem>
-                <MenuItem value='image'>IMAGE</MenuItem>
-                <MenuItem value='video'>VIDEO</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size='small'>
-              <InputLabel>ORDER</InputLabel>
-              <Select
-                value={sortByDate}
-                onChange={(e) => setSortByDate(e.target.value)}
-                label='ORDER'
-              >
-                <MenuItem value='desc'>DESCENDING</MenuItem>
-                <MenuItem value='asc'>ASCENDING</MenuItem>
-              </Select>
-            </FormControl>
-          </Box>
-        </Box>
-      </Grid>
+    <Grid container justifyContent='center'>
       <Grid item xs={11}>
         {sortedAndFilteredMedia && (
           <ImageList
@@ -118,7 +50,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             gap={8}
             rowHeight={200}
           >
-            {sortedAndFilteredMedia.map((m) => (
+            {sortedAndFilteredMedia().map((m) => (
               <ImageListItem
                 onClick={(event) => handleSelect(m.media?.fullSize ?? '', allowMultiple, event)}
                 className={styles.list_media_item}

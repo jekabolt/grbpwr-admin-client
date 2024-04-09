@@ -1,10 +1,11 @@
 import { getAllUploadedFiles, uploadContentLink } from 'api/admin';
 import { common_Media } from 'api/proto-http/admin';
 import { useCallback, useState } from 'react';
+import { isVideo } from './filterContentType';
 
 const useMediaSelector = (
     initialIsLoading = false,
-    initialHasMore = true
+    initialHasMore = true,
 ): {
     media: common_Media[];
     setMedia: React.Dispatch<React.SetStateAction<common_Media[]>>;
@@ -13,14 +14,36 @@ const useMediaSelector = (
     updateLink: () => Promise<void>;
     fetchFiles: (limit: number, startOffset: number) => Promise<void>;
     reload: () => Promise<void>;
-    isLoading: boolean;
-    hasMore: boolean;
+    filterByType: string;
+    sortByDate: string;
+    setFilterByType: React.Dispatch<React.SetStateAction<string>>;
+    setSortByDate: React.Dispatch<React.SetStateAction<string>>;
+    sortedAndFilteredMedia: () => common_Media[];
+    isLoading: boolean
 } => {
     const [media, setMedia] = useState<common_Media[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialIsLoading);
     const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
     const [url, setUrl] = useState<string>('');
+    const [filterByType, setFilterByType] = useState('');
+    const [sortByDate, setSortByDate] = useState('desc');
 
+    const sortedAndFilteredMedia = useCallback(() => {
+        return media
+            ?.filter((m) => {
+                const matchesType =
+                    filterByType === '' ||
+                    (filterByType === 'video' && isVideo(m.media?.fullSize)) ||
+                    (filterByType === 'image' && !isVideo(m.media?.fullSize));
+
+                return matchesType;
+            })
+            .sort((a, b) => {
+                const dateA = new Date(a.createdAt || 0).getTime();
+                const dateB = new Date(b.createdAt || 0).getTime();
+                return sortByDate === 'asc' ? dateA - dateB : dateB - dateA;
+            });
+    }, [media, filterByType, sortByDate]);
 
     const isHttpsMediaLink = (url: string) => {
         const lowerCaseUrl = url.toLowerCase();
@@ -28,21 +51,15 @@ const useMediaSelector = (
         return pattern.test(lowerCaseUrl);
     };
 
-    const updateLink = useCallback(async () => {
-        if (isHttpsMediaLink(url)) {
-            await uploadContentLink({ url: url });
-            reload();
-            setUrl('');
-        } else {
-            setUrl('')
-        }
-    }, [url]);
-
     const fetchFiles = useCallback(async (limit: number, startOffset: number) => {
         setIsLoading(true);
-        const response = await getAllUploadedFiles({ limit, offset: startOffset, orderFactor: 'ORDER_FACTOR_DESC' });
+        const response = await getAllUploadedFiles({
+            limit,
+            offset: startOffset,
+            orderFactor: 'ORDER_FACTOR_DESC',
+        });
         const fetchedFiles: common_Media[] = response.list || [];
-        setMedia(prev => startOffset === 0 ? fetchedFiles : [...prev, ...fetchedFiles]);
+        setMedia((prev) => (startOffset === 0 ? fetchedFiles : [...prev, ...fetchedFiles]));
         setIsLoading(false);
         setHasMore(fetchedFiles.length === limit);
     }, []);
@@ -52,8 +69,37 @@ const useMediaSelector = (
         await fetchFiles(50, 0);
     }, [fetchFiles]);
 
+    const updateLink = useCallback(async () => {
+        if (isHttpsMediaLink(url)) {
+            setIsLoading(true);
+            try {
+                await uploadContentLink({ url: url });
+                reload();
+            } catch (error) {
+                console.error("Error updating link:", error);
+            } finally {
+                setIsLoading(false);
+            }
+            setUrl('');
+        } else {
+            setUrl('');
+        }
+    }, [url, reload]);
+
     return {
-        media, fetchFiles, reload, isLoading, hasMore, setMedia, url, setUrl, updateLink
+        media,
+        fetchFiles,
+        reload,
+        setMedia,
+        url,
+        setUrl,
+        updateLink,
+        filterByType,
+        setFilterByType,
+        sortByDate,
+        setSortByDate,
+        sortedAndFilteredMedia,
+        isLoading
     };
 };
 

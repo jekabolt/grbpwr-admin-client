@@ -20,11 +20,7 @@ export interface MediaSelectorMediaListProps {
     selectedMedia: { url: string, type: string }[] | undefined;
     select: (imageUrl: string, allowMultiple: boolean) => void
     height?: string | number
-    reload: () => void
-    url: string
-    setUrl: React.Dispatch<React.SetStateAction<string>>
-    updateContentLink: () => void
-    isLoading: boolean
+    sortedAndFilteredMedia: () => common_Media[]
 }
 
 
@@ -33,4 +29,11 @@ export interface UploadMediaByUrlProps {
     setUrl: React.Dispatch<React.SetStateAction<string>>
     updateContentLink: () => void
     isLoading: boolean
+}
+
+export interface FilterMediasInterface {
+    filterByType: string;
+    sortByDate: string;
+    setFilterByType: React.Dispatch<React.SetStateAction<string>>;
+    setSortByDate: React.Dispatch<React.SetStateAction<string>>;
 }

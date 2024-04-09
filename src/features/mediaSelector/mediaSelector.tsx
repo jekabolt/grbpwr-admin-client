@@ -1,10 +1,13 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Button, Dialog, Grid, IconButton } from '@mui/material';
+import { Box, Button, Dialog, Grid, IconButton } from '@mui/material';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { fileExtensionToContentType } from 'features/utilitty/filterExtentions';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/media-selector.scss';
+import { ByUrl } from './byUrl';
+import { DragDrop } from './dragDrop';
+import { FilterMedias } from './filterMedias';
 import { MediaList } from './listMedia';
 
 export const MediaSelector: FC<MediaSelectorProps> = ({
@@ -12,8 +15,21 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   allowMultiple,
   saveSelectedMedia,
 }) => {
-  const { media, reload, fetchFiles, setMedia, url, setUrl, updateLink, isLoading } =
-    useMediaSelector();
+  const {
+    media,
+    reload,
+    fetchFiles,
+    setMedia,
+    url,
+    setUrl,
+    updateLink,
+    sortedAndFilteredMedia,
+    filterByType,
+    setFilterByType,
+    sortByDate,
+    setSortByDate,
+    isLoading,
+  } = useMediaSelector();
   const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const [open, setOpen] = useState(true);
@@ -72,6 +88,18 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
       className={styles.modal}
     >
       <Grid container spacing={2} justifyContent='center'>
+        <Grid item xs={11} className={styles.filter_upload_boxes}>
+          <Box component='div' className={styles.box}>
+            <ByUrl url={url} setUrl={setUrl} updateContentLink={updateLink} isLoading={isLoading} />
+            <DragDrop reload={reload} />
+            <FilterMedias
+              filterByType={filterByType}
+              setFilterByType={setFilterByType}
+              sortByDate={sortByDate}
+              setSortByDate={setSortByDate}
+            />
+          </Box>
+        </Grid>
         <Grid item xs={12}>
           <MediaList
             setMedia={setMedia}
@@ -79,11 +107,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
             allowMultiple={allowMultiple}
             select={select}
             selectedMedia={selectedMedia}
-            reload={reload}
-            url={url}
-            setUrl={setUrl}
-            updateContentLink={updateLink}
-            isLoading={isLoading}
+            sortedAndFilteredMedia={sortedAndFilteredMedia}
           />
         </Grid>
         <Grid item xs={12} display='flex' justifyContent='center'>

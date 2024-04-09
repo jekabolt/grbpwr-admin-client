@@ -1,8 +1,8 @@
-import { Box, Button, Grid, TextField } from '@mui/material';
+import { Box, Button, CircularProgress, Grid, TextField } from '@mui/material';
 import { UploadMediaByUrlProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { FC } from 'react';
 
-export const ByUrl: FC<UploadMediaByUrlProps> = ({ url, setUrl, updateContentLink }) => {
+export const ByUrl: FC<UploadMediaByUrlProps> = ({ url, setUrl, updateContentLink, isLoading }) => {
   return (
     <Grid container>
       <Grid item>
@@ -16,6 +16,7 @@ export const ByUrl: FC<UploadMediaByUrlProps> = ({ url, setUrl, updateContentLin
           <Button variant='contained' size='small' onClick={updateContentLink}>
             upload
           </Button>
+          {isLoading && <CircularProgress />}
         </Box>
       </Grid>
     </Grid>
