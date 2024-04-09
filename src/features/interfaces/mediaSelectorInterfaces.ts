@@ -24,17 +24,13 @@ export interface MediaSelectorMediaListProps {
     url: string
     setUrl: React.Dispatch<React.SetStateAction<string>>
     updateContentLink: () => void
+    isLoading: boolean
 }
 
-export interface MediaSelectorUploadMediaByUrByDragDropProps {
-    url: string
-    setUrl: React.Dispatch<React.SetStateAction<string>>
-    updateContentLink: () => void
-    closeMediaSelector: () => void
-}
 
 export interface UploadMediaByUrlProps {
     url: string
     setUrl: React.Dispatch<React.SetStateAction<string>>
     updateContentLink: () => void
+    isLoading: boolean
 }

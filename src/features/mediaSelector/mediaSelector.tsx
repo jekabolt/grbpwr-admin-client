@@ -12,7 +12,8 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   allowMultiple,
   saveSelectedMedia,
 }) => {
-  const { media, reload, fetchFiles, setMedia, url, setUrl, updateLink } = useMediaSelector();
+  const { media, reload, fetchFiles, setMedia, url, setUrl, updateLink, isLoading } =
+    useMediaSelector();
   const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const [open, setOpen] = useState(true);
@@ -82,6 +83,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
             url={url}
             setUrl={setUrl}
             updateContentLink={updateLink}
+            isLoading={isLoading}
           />
         </Grid>
         <Grid item xs={12} display='flex' justifyContent='center'>

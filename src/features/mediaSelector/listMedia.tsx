@@ -31,6 +31,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   url,
   setUrl,
   updateContentLink,
+  isLoading,
 }) => {
   const [filterByType, setFilterByType] = useState('');
   const [sortByDate, setSortByDate] = useState('desc');
@@ -67,34 +68,17 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   return (
     <Grid container marginTop={4} justifyContent='center'>
       <Grid item xs={11}>
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '15px',
-            flexWrap: isSmallScreen ? 'wrap' : 'nowrap',
-          }}
-        >
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              flexWrap: isSmallScreen ? 'wrap' : 'nowrap',
-              gap: '55px',
-            }}
-          >
-            <ByUrl url={url} setUrl={setUrl} updateContentLink={updateContentLink} />
+        <Box component='div' className={styles.box}>
+          <Box component='div' className={styles.box_1}>
             <DragDrop reload={reload} />
+            <ByUrl
+              url={url}
+              setUrl={setUrl}
+              updateContentLink={updateContentLink}
+              isLoading={isLoading}
+            />
           </Box>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              flexWrap: isSmallScreen ? 'wrap' : 'nowrap',
-              gap: '15px',
-            }}
-          >
+          <Box component='div' className={styles.box_1}>
             <FormControl size='small'>
               <InputLabel shrink>TYPE</InputLabel>
               <Select

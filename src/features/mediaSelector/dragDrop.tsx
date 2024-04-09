@@ -150,7 +150,6 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
             <Button variant='contained' size='small' onClick={handleUpload}>
               UPLOAD
             </Button>
-            {loading && <CircularProgress />}
           </Paper>
         </Box>
         <Snackbar
@@ -160,6 +159,7 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
           onClose={handleSnackbarClose}
         />
       </Grid>
+      {loading && <CircularProgress />}
     </Grid>
   );
 };

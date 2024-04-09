@@ -5,7 +5,8 @@ import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect } from 'react';
 
 export const MediaManager: FC = () => {
-  const { media, setMedia, fetchFiles, reload, url, setUrl, updateLink } = useMediaSelector();
+  const { media, setMedia, fetchFiles, reload, url, setUrl, updateLink, isLoading } =
+    useMediaSelector();
 
   useEffect(() => {
     fetchFiles(50, 0);
@@ -26,6 +27,7 @@ export const MediaManager: FC = () => {
             url={url}
             setUrl={setUrl}
             updateContentLink={updateLink}
+            isLoading={isLoading}
           />
         </Grid>
       </Grid>

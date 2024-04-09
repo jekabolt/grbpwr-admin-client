@@ -47,3 +47,24 @@
     }
   }
 }
+
+.box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+
+  .box_1 {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+
+    @media (max-width: 600px) {
+      flex-wrap: wrap;
+    }
+  }
+
+  @media (max-width: 600px) {
+    flex-wrap: wrap;
+  }
+}
