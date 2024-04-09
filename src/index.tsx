@@ -146,14 +146,14 @@ const routes: Route<DefaultGenerics>[] = [
       </ProtectedRoute>
     ),
   },
-  {
-    path: ROUTES.ordersById,
-    element: (
-      <ProtectedRoute>
-        <OrderId />
-      </ProtectedRoute>
-    ),
-  },
+  // {
+  //   path: ROUTES.ordersById,
+  //   element: (
+  //     <ProtectedRoute>
+  //       <OrderId />
+  //     </ProtectedRoute>
+  //   ),
+  // },
 ];
 
 const theme = createTheme({

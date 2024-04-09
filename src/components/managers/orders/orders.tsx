@@ -1,157 +1,302 @@
-import { useNavigate } from '@tanstack/react-location';
+import SearchIcon from '@mui/icons-material/Search';
+import { Button, FormControl, Grid, InputLabel, MenuItem, Select, TextField } from '@mui/material';
+import { DataGrid } from '@mui/x-data-grid';
 import { getDictionary } from 'api/admin';
-import { orderByEmail, ordersByStatus } from 'api/orders';
-import { common_OrderFull, common_OrderStatus, common_OrderStatusEnum } from 'api/proto-http/admin';
+import { getOrdersList } from 'api/orders';
+import {
+  common_Dictionary,
+  common_Order,
+  common_OrderStatusEnum,
+  common_PaymentMethodNameEnum,
+} from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
-import { ROUTES } from 'constants/routes';
-import React, { FC, useCallback, useEffect, useState } from 'react';
-import styles from 'styles/order.scss';
+import { FC, useEffect, useState } from 'react';
 
-function formatDate(dateString: string | number | Date | undefined) {
-  if (!dateString) {
-    return '';
-  }
-
-  const options = { year: 'numeric', month: 'short', day: 'numeric' };
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', options as Intl.DateTimeFormatOptions);
+interface SearchFilters {
+  status: common_OrderStatusEnum | undefined;
+  paymentMethod: common_PaymentMethodNameEnum | undefined;
+  email: string | undefined;
 }
 
 export const Orders: FC = () => {
-  const [status, setStatus] = useState<common_OrderStatus[] | undefined>([]);
-  const [selectedStatus, setSelectedStatus] = useState<common_OrderStatusEnum | undefined>(
-    'ORDER_STATUS_ENUM_PLACED',
-  );
-  const [orders, setOrders] = useState<common_OrderFull[] | undefined>([]);
-  const [email, setEmail] = useState<string | undefined>('');
-  const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+  const [rows, setRows] = useState<common_Order[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [loadMoreVisible, setLoadMoreVisible] = useState(true);
+
+  const [dictionary, setDictionary] = useState<common_Dictionary>();
+
+  const [statusOptions, setStatusOptions] = useState<string[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState('');
+
+  const [paymentOptions, setPaymentOptions] = useState<string[]>([]);
+  const [selectedPayment, setSelectedPayment] = useState('');
+
+  const [email, setEmail] = useState('');
+
+  const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+    status: undefined,
+    paymentMethod: undefined,
+    email: undefined,
+  });
+
+  const newSearch = async (filters: SearchFilters) => {
+    setPage(1);
+    setLoading(true);
+    try {
+      const response = await getOrdersList({
+        offset: 0,
+        limit: pageSize,
+        status: filters.status,
+        email: filters.email,
+        paymentMethod: filters.paymentMethod,
+        orderFactor: 'ORDER_FACTOR_DESC',
+      });
+      if (!response.orders || response.orders.length === 0) {
+        setLoadMoreVisible(false);
+        setRows([]);
+      } else {
+        setRows(response.orders!);
+      }
+    } catch (error) {
+      console.error('Failed to fetch data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    const offset = page * pageSize;
+    setLoading(true);
+    try {
+      const response = await getOrdersList({
+        offset: offset,
+        limit: pageSize,
+        status: searchFilters.status,
+        email: searchFilters.email,
+        paymentMethod: searchFilters.paymentMethod,
+        orderFactor: 'ORDER_FACTOR_DESC',
+      });
+      if (!response.orders || response.orders.length === 0) {
+        setLoadMoreVisible(false);
+      } else {
+        setRows((currentRows) => [...currentRows, ...response.orders!]);
+        setPage((currentPage) => currentPage + 1);
+      }
+    } catch (error) {
+      console.error('Failed to fetch data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initSearchFilters = () => {
+    const filters = {
+      status: !!selectedStatus ? (selectedStatus as common_OrderStatusEnum) : undefined,
+      paymentMethod: !!selectedPayment
+        ? (selectedPayment as common_PaymentMethodNameEnum)
+        : undefined,
+      email: !!email ? email : undefined,
+    };
+    setSearchFilters(filters);
+    setLoadMoreVisible(true);
+    newSearch(filters);
+  };
+
+  const fetchDictionary = async () => {
+    const response = await getDictionary({});
+    setDictionary(response.dictionary);
+  };
 
   useEffect(() => {
-    const fetchDictionary = async () => {
-      const response = await getDictionary({});
-      setStatus(response.dictionary?.orderStatuses);
-    };
+    newSearch(searchFilters);
     fetchDictionary();
   }, []);
 
-  const navigateOrderId = (id: number | undefined) => {
-    navigate({ to: `${ROUTES.ordersById}?orderId=${id}` });
-  };
-
-  const defineStatus = useCallback(async () => {
-    if (isLoading || !hasMore) return;
-    setIsLoading(true);
-    const limit = 5;
-    if (!email && selectedStatus) {
-      const response = await ordersByStatus({
-        limit: limit,
-        offset: offset,
-        orderFactor: 'ORDER_FACTOR_ASC',
-        status: selectedStatus,
-      });
-      const list = response.orders || [];
-      setOrders((prevOrders) => [...(prevOrders || []), ...list]);
-      setOffset((prevOffset) => prevOffset + list.length);
-      setHasMore(list.length === limit);
-      setIsLoading(false);
-    } else {
-      orderByEmailFunction();
-    }
-  }, [isLoading, hasMore, email, selectedStatus, offset]);
-
   useEffect(() => {
-    defineStatus();
-    const handleScroll = () => {
-      if (
-        window.innerHeight + document.documentElement.scrollTop + 300 >=
-          document.documentElement.offsetHeight &&
-        !isLoading &&
-        hasMore
-      ) {
-        defineStatus();
-      }
+    const setDataFromDictionary = () => {
+      setStatusOptions(
+        dictionary?.orderStatuses?.map((x) => (x.name ? x.name.toString() : '')) || [],
+      );
+
+      setPaymentOptions(
+        dictionary?.paymentMethods?.map((x) => (x.name ? x.name.toString() : '')) || [],
+      );
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [isLoading, hasMore, defineStatus]);
+    setDataFromDictionary();
+  }, [dictionary]);
 
-  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const statusEnum = status?.find((s) => s.id?.toString() === e.target.value)?.name;
-    setSelectedStatus(statusEnum);
-    setOrders([]);
-    setOffset(0);
-    setHasMore(true);
-    setIsLoading(false);
+  function getStatusColor(status: string | undefined) {
+    switch (status) {
+      case 'PLACED':
+        return '#ffffff';
+      case 'AWAITING PAYMENT':
+        return '#73eaff80';
+      case 'CONFIRMED':
+        return '#0800ff80';
+      case 'SHIPPED':
+        return '#00ffa280';
+      case 'DELIVERED':
+        return '#008f0080';
+      case 'CANCELLED':
+        return '#fc000080';
+      case 'REFUNDED':
+        return '#29292980';
+      default:
+        return '#ffffff'; // Default color if status doesn't match
+    }
+  }
+
+  const columns = [
+    { field: 'id', headerName: 'Order ID', width: 300 },
+    {
+      field: 'placed',
+      headerName: 'Placed',
+      width: 400,
+      renderCell: (params: any) => {
+        const date = new Date(params.value);
+        const formattedDate = date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        });
+        const formattedTime = date.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+        return `${formattedDate}, ${formattedTime}`;
+      },
+    },
+    {
+      field: 'modified',
+      headerName: 'Modified',
+      width: 400,
+      renderCell: (params: any) => {
+        const date = new Date(params.value);
+        const formattedDate = date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        });
+        const formattedTime = date.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+        return `${formattedDate}, ${formattedTime}`;
+      },
+    },
+    {
+      field: 'orderStatusId',
+      headerName: 'Order status',
+      width: 300,
+      renderCell: (params: any) => {
+        let status = dictionary?.orderStatuses
+          ?.find((x) => x.id === params.value)
+          ?.name?.replace('ORDER_STATUS_ENUM_', '')
+          .replace('_', ' ');
+        return (
+          <div style={{ backgroundColor: getStatusColor(status), width: '100%', height: '100%' }}>
+            {status}
+          </div>
+        );
+      },
+    },
+    {
+      field: 'totalPrice',
+      headerName: 'Total',
+      width: 300,
+      valueGetter: (params: any) => `${params.value} ${dictionary?.baseCurrency}`,
+    },
+  ];
+
+  const handleStatusChange = (event: any) => {
+    setSelectedStatus(event.target.value);
   };
 
-  const orderByEmailFunction = async () => {
-    setOrders([]);
-    const response = await orderByEmail({ email });
-    setOrders(response.orders);
+  const handlePaymentChange = (event: any) => {
+    setSelectedPayment(event.target.value);
+  };
+
+  const handleEmailChange = (event: any) => {
+    setEmail(event.target.value);
   };
 
   return (
     <Layout>
-      <div className={styles.order_main}>
-        <div className={styles.order_by}>
-          <div className={styles.filter_status}>
-            <h3>filter by status</h3>
-            <select onChange={handleStatusChange}>
-              <option value=''>select</option>
-              {status?.map((s) => (
-                <option value={s.id} key={s.id}>
-                  {s.name?.replace('ORDER_STATUS_ENUM_', '')}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filter_email}>
-            <input type='text' value={email} onChange={(e) => setEmail(e.target.value)} />
-            <button type='button' onClick={orderByEmailFunction}>
-              ok
-            </button>
-          </div>
-        </div>
+      <div style={{ margin: '5% 5%' }}>
+        <Grid container spacing={2} sx={{ mb: 4 }}>
+          <Grid item xs={3}>
+            <FormControl fullWidth>
+              <InputLabel>Status</InputLabel>
+              <Select value={selectedStatus} label='Status' onChange={handleStatusChange}>
+                <MenuItem value=''>ANY</MenuItem>
+                {statusOptions.map((option) => (
+                  <MenuItem key={option} value={option}>
+                    {option.replace('ORDER_STATUS_ENUM_', '').replace('_', ' ')}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={3}>
+            <FormControl fullWidth>
+              <InputLabel>Payment</InputLabel>
+              <Select value={selectedPayment} label='Payment' onChange={handlePaymentChange}>
+                <MenuItem value=''>ANY</MenuItem>
+                {paymentOptions.map((option) => (
+                  <MenuItem key={option} value={option}>
+                    {option.replace('PAYMENT_METHOD_NAME_ENUM_', '').replace('_', ' ')}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={3}>
+            <FormControl fullWidth>
+              <TextField
+                label='Email'
+                variant='outlined'
+                value={email}
+                onChange={handleEmailChange}
+              />
+            </FormControl>
+          </Grid>
+          <Grid item xs={3}>
+            <Button
+              variant='contained'
+              disabled={loading}
+              onClick={initSearchFilters}
+              sx={{ height: '100%' }}
+              startIcon={<SearchIcon />}
+            >
+              Search
+            </Button>
+          </Grid>
+        </Grid>
 
-        <div className={styles.table_container}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Order ID</th>
-                <th>Order Date</th>
-                <th>Payment Received</th>
-                <th>Payment Method</th>
-                <th>Total Price</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders?.flatMap((order, orderIndex) =>
-                order.orderItems?.map((item, itemIndex) => (
-                  <tr
-                    key={`${item.orderId}-${orderIndex}-${itemIndex}`}
-                    onClick={() => navigateOrderId(item.orderId)}
-                  >
-                    <td>{order.order?.id}</td>
-                    <td>{formatDate(order.order?.modified)}</td>
-                    <td>{formatDate(order.payment?.modifiedAt)}</td>
-                    <td>
-                      {order.payment?.paymentInsert?.paymentMethod?.replace(
-                        'PAYMENT_METHOD_NAME_ENUM_',
-                        '',
-                      )}
-                    </td>
-                    <td>{order.order?.totalPrice?.value}</td>
-                  </tr>
-                )),
-              )}
-            </tbody>
-          </table>
-          {isLoading && <div>Loading more items...</div>}
-        </div>
+        <DataGrid
+          rows={rows}
+          columns={columns}
+          autoHeight
+          loading={loading}
+          rowSelection={false}
+          pageSizeOptions={[]}
+        />
+
+        {loadMoreVisible && (
+          <Button
+            variant='contained'
+            onClick={loadMore}
+            disabled={loading}
+            style={{ marginTop: '20px' }}
+          >
+            Load More
+          </Button>
+        )}
       </div>
     </Layout>
   );

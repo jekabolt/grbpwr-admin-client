@@ -1,23 +1,15 @@
 import { adminService } from './admin';
 import {
-  GetOrdersByStatusRequest,
-  GetOrdersByStatusResponse,
   GetOrderByIdRequest,
   GetOrderByIdResponse,
-  GetOrdersByEmailRequest,
-  GetOrdersByEmailResponse,
+  ListOrdersRequest,
+  ListOrdersResponse,
 } from './proto-http/admin';
 
-export function ordersByStatus(
-  request: GetOrdersByStatusRequest,
-): Promise<GetOrdersByStatusResponse> {
-  return adminService.GetOrdersByStatus(request);
+export function getOrdersList(request: ListOrdersRequest): Promise<ListOrdersResponse> {
+  return adminService.ListOrders(request);
 }
 
 export function orderById(request: GetOrderByIdRequest): Promise<GetOrderByIdResponse> {
   return adminService.GetOrderById(request);
-}
-
-export function orderByEmail(request: GetOrdersByEmailRequest): Promise<GetOrdersByEmailResponse> {
-  return adminService.GetOrdersByEmail(request);
 }
