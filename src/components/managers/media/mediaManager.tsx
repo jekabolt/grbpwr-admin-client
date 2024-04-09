@@ -33,7 +33,7 @@ export const MediaManager: FC = () => {
     <Layout>
       <Grid container spacing={2} marginTop={4} justifyContent='center'>
         <Grid item xs={9}>
-          <Box component='div' className={styles.box}>
+          <Box component='div' className={styles.filter_upload_media_container}>
             <ByUrl url={url} setUrl={setUrl} updateContentLink={updateLink} isLoading={isLoading} />
             <DragDrop reload={reload} />
             <FilterMedias

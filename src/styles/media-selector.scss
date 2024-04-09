@@ -51,14 +51,14 @@
   }
 }
 
-.box {
+.filter_upload_media_container {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 15px;
   width: 100%;
 
-  .box_1 {
+  .filter_media_container {
     display: flex;
     align-items: center;
     justify-self: flex-end;

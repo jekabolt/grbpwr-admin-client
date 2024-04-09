@@ -89,7 +89,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     >
       <Grid container spacing={2} justifyContent='center'>
         <Grid item xs={11} className={styles.filter_upload_boxes}>
-          <Box component='div' className={styles.box}>
+          <Box component='div' className={styles.filter_upload_media_container}>
             <ByUrl url={url} setUrl={setUrl} updateContentLink={updateLink} isLoading={isLoading} />
             <DragDrop reload={reload} />
             <FilterMedias

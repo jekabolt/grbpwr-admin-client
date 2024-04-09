@@ -12,7 +12,7 @@ export const FilterMedias: FC<FilterMediasInterface> = ({
   return (
     <Grid container>
       <Grid item>
-        <Box component='div' className={styles.box_1}>
+        <Box component='div' className={styles.filter_media_container}>
           <FormControl size='small'>
             <InputLabel shrink>TYPE</InputLabel>
             <Select
