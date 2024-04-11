@@ -1,6 +1,6 @@
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
-import { IconButton, Typography } from '@mui/material';
+import { Grid, IconButton, Typography } from '@mui/material';
 import { common_Product } from 'api/proto-http/admin';
 import { isVideo } from 'features/utilitty/filterContentType';
 import React, { FC, useState } from 'react';
@@ -26,14 +26,19 @@ export const ListProducts: FC<ProductProps> = ({
   const [hoveredProductId, setHoveredProductId] = useState<number | undefined>(undefined);
 
   return (
-    <ul className={styles.product_list}>
+    <Grid container gap={2} justifyContent='center'>
       {products?.map((product) => (
-        <li
+        <Grid
+          item
           key={product.id}
           onMouseEnter={() => setHoveredProductId(product.id)}
           onMouseLeave={() => setHoveredProductId(undefined)}
           onClick={() => productClick(product.id)}
-          className={`${product.productInsert?.hidden && showHidden ? styles.hidden_product : ''}`}
+          className={`${styles.product} ${product.productInsert?.hidden && showHidden ? styles.hidden_product : ''}`}
+          xs={12}
+          sm={6}
+          md={4}
+          lg={3}
         >
           {hoveredProductId === product.id && (
             <IconButton
@@ -53,11 +58,11 @@ export const ListProducts: FC<ProductProps> = ({
           ) : (
             <img src={product.productInsert?.thumbnail} alt='Product Image' />
           )}
-          <h5>
+          <Typography variant='h5'>
             {product.productInsert?.name} - {product.id}
-          </h5>
-        </li>
+          </Typography>
+        </Grid>
       ))}
-    </ul>
+    </Grid>
   );
 };

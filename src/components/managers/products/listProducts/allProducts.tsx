@@ -1,10 +1,10 @@
+import { Grid } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { deleteProductByID } from 'api/admin';
-import { GetProductsPagedRequest, common_FilterConditions } from 'api/proto-http/admin';
+import { GetProductsPagedRequest } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import React, { FC, MouseEvent, useEffect, useState } from 'react';
-import styles from 'styles/paged.scss';
-import { Filter } from './filterComponents/filterProducts';
+import { FC, MouseEvent, useEffect, useState } from 'react';
+import { Filter } from './filterProdcuts/filterProducts';
 import { ListProducts } from './listProducts';
 import useListProduct from './useListProduct/useListProduct';
 
@@ -58,51 +58,26 @@ export const AllProducts: FC = () => {
     fetchProducts(50, 0, filter);
   }, [fetchProducts]);
 
-  const handleFilterChange = <
-    K extends keyof GetProductsPagedRequest | keyof common_FilterConditions,
-  >(
-    key: K,
-    value:
-      | (K extends keyof GetProductsPagedRequest ? GetProductsPagedRequest[K] : never)
-      | (K extends keyof common_FilterConditions ? common_FilterConditions[K] : never),
-  ) => {
-    setFilter(
-      (prevFilter) =>
-        ({
-          ...prevFilter,
-          ...(key in prevFilter
-            ? { [key]: value }
-            : {
-                filterConditions: {
-                  ...(prevFilter.filterConditions || {}),
-                  [key]: value,
-                },
-              }),
-        }) as GetProductsPagedRequest,
-    );
-  };
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    fetchProducts(50, 0, filter);
+  const handleSubmit = (values: GetProductsPagedRequest) => {
+    fetchProducts(50, 0, values);
   };
 
   return (
-    <div>
+    <Grid container spacing={1} justifyContent='center'>
       {deletionMessage && <div>{deletionMessage}</div>}
-      <div className={styles.product_container}>
-        <div className={styles.product_wrapper}>
-          <ListProducts
-            products={products}
-            productClick={handleProductClick}
-            deleteProduct={handleDeleteClick}
-            confirmDeleteProductId={confirmDelete}
-            deletingProductId={deletingProductId}
-            showHidden={filter.showHidden}
-          />
-        </div>
-        <Filter filter={filter} filterChange={handleFilterChange} onSubmit={handleSubmit} />
-      </div>
-    </div>
+      <Grid item xs={10}>
+        <Filter filter={filter} onSubmit={handleSubmit} />
+      </Grid>
+      <Grid item xs={12}>
+        <ListProducts
+          products={products}
+          productClick={handleProductClick}
+          deleteProduct={handleDeleteClick}
+          confirmDeleteProductId={confirmDelete}
+          deletingProductId={deletingProductId}
+          showHidden={filter.showHidden}
+        />
+      </Grid>
+    </Grid>
   );
 };

@@ -2,7 +2,7 @@ import { Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle } f
 import { getDictionary, getProductsPaged } from 'api/admin';
 
 import { GetProductsPagedRequest, common_Category, common_Product } from 'api/proto-http/admin';
-import { initialFilter } from 'components/managers/products/listProducts/filterComponents/initialFilterStates';
+import { initialFilter } from 'components/managers/products/listProducts/filterProdcuts/initialFilterStates';
 import {
   MaterialReactTable,
   useMaterialReactTable,

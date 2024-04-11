@@ -14,13 +14,13 @@ export const Product: FC = () => {
 
   return (
     <Layout>
-      <Grid container justifyContent='center'>
-        <Grid item>
+      <Grid container spacing={2} marginTop={4} justifyContent='center'>
+        <Grid item xs={6} sm={3} md={3}>
           <Button onClick={navigateAddProduct} size='large' variant='contained'>
             ADD PRODUCT
           </Button>
         </Grid>
-        <Grid item xs={12}>
+        <Grid item xs={10}>
           <AllProducts />
         </Grid>
       </Grid>
