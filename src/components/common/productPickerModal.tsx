@@ -2,7 +2,7 @@ import { Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle } f
 import { getDictionary, getProductsPaged } from 'api/admin';
 
 import { GetProductsPagedRequest, common_Category, common_Product } from 'api/proto-http/admin';
-import { initialFilter } from 'components/managers/products/listProducts/filterProdcuts/initialFilterStates';
+import { defaultProductFilterSettings } from 'constants/initialFilterStates';
 import {
   MaterialReactTable,
   useMaterialReactTable,
@@ -31,7 +31,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   const [categories, setCategories] = useState<common_Category[]>([]);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [filter, setFilter] = useState<GetProductsPagedRequest>(initialFilter);
+  const [filter, setFilter] = useState<GetProductsPagedRequest>(defaultProductFilterSettings);
   const newLimit = 50;
   const offset = calculateOffset(currentPage, newLimit);
 

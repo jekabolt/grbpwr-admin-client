@@ -4,7 +4,7 @@ import { deleteProductByID } from 'api/admin';
 import { GetProductsPagedRequest } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { FC, MouseEvent, useEffect, useState } from 'react';
-import { Filter } from './filterProdcuts/filterProducts';
+import { Filter } from './filterProducts/filterProducts';
 import { ListProducts } from './listProducts';
 import useListProduct from './useListProduct/useListProduct';
 

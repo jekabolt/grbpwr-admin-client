@@ -1,7 +1,7 @@
 import { getProductsPaged } from 'api/admin';
 import { GetProductsPagedRequest, common_Product } from 'api/proto-http/admin';
 import React, { useCallback, useState } from 'react';
-import { initialFilter } from '../filterProdcuts/initialFilterStates';
+import { defaultProductFilterSettings } from '../../../../../constants/initialFilterStates';
 
 const useListProduct = (
     initialLoading = false,
@@ -22,7 +22,7 @@ const useListProduct = (
     const [products, setProducts] = useState<common_Product[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialLoading);
     const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
-    const [filter, setFilter] = useState<GetProductsPagedRequest>(initialFilter);
+    const [filter, setFilter] = useState<GetProductsPagedRequest>(defaultProductFilterSettings);
 
     const fetchProducts = useCallback(
         async (limit: number, offset: number, currentFilter: GetProductsPagedRequest) => {
