@@ -2,13 +2,7 @@ import { Button, Checkbox, Grid, TextField } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
 import { common_PaymentMethod, common_ShipmentCarrierInsert } from 'api/proto-http/admin';
-// import {
-//   setMaxOrderItems,
-//   setPaymentMethod,
-//   setShipmentCarrier,
-//   setShipmentCarrierPrice,
-//   setSiteAvailability,
-// } from 'api/settings';
+import { updateSettings } from 'api/settings';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/settings.scss';

@@ -133,7 +133,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         <TextField
           name='sku'
           onChange={handleChange}
-          value={updatePayload.sku}
+          value={updatePayload.sku || ''}
           variant='outlined'
           label='sku'
           placeholder={product?.product?.productInsert?.sku}
@@ -145,7 +145,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         <TextField
           name='color'
           onChange={handleChange}
-          value={updatePayload.color}
+          value={updatePayload.color || ''}
           variant='outlined'
           label='color'
           placeholder={product?.product?.productInsert?.color}
@@ -157,7 +157,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         <TextField
           name='preorder'
           onChange={handleChange}
-          value={updatePayload.preorder}
+          value={updatePayload.preorder || ''}
           variant='outlined'
           label='preorder'
           placeholder={product?.product?.productInsert?.preorder}
@@ -169,7 +169,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         <TextField
           name='brand'
           onChange={handleChange}
-          value={updatePayload.brand}
+          value={updatePayload.brand || ''}
           variant='outlined'
           label='brand'
           placeholder={product?.product?.productInsert?.brand}
@@ -181,7 +181,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         <TextField
           name='countryOfOrigin'
           onChange={handleChange}
-          value={updatePayload.countryOfOrigin}
+          value={updatePayload.countryOfOrigin || ''}
           variant='outlined'
           label='country'
           placeholder={product?.product?.productInsert?.countryOfOrigin}
@@ -193,7 +193,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         <TextField
           name='colorHex'
           onChange={handleChange}
-          value={updatePayload.colorHex || product?.product?.productInsert?.colorHex}
+          value={updatePayload.colorHex || product?.product?.productInsert?.colorHex || ''}
           variant='outlined'
           label='colorHEX'
           InputLabelProps={{ shrink: true }}

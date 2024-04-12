@@ -75,7 +75,7 @@ export const Sizes: FC<AddProductInterface> = ({ dictionary }) => {
             <TableCell>Size Name</TableCell>
             <TableCell className={styles.table_cell}>Quantity</TableCell>
             {sortedMeasurements.map((m) => (
-              <TableCell>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
+              <TableCell key={m.id}>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
             ))}
           </TableRow>
         </TableHead>

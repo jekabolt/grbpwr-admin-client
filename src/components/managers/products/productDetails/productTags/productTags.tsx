@@ -45,7 +45,7 @@ export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct }) =
       <Grid item>
         <Grid container spacing={3}>
           {product?.tags?.map((tag) => (
-            <Grid item xs={6}>
+            <Grid key={tag.id} item xs={6}>
               <Box className={styles.tag}>
                 <Typography variant='body1'>{tag.productTagInsert?.tag}</Typography>
                 <IconButton
