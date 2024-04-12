@@ -14,7 +14,7 @@ import {
 import { getDictionary } from 'api/admin';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
 import { updateProductById } from 'api/updateProductsById';
-import { findInDictionary } from 'components/managers/orders/utility';
+import { findInDictionary } from 'features/utilitty/findInDictionary';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';

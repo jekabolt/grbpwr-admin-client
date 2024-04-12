@@ -11,7 +11,7 @@ import {
 } from '@mui/material';
 import { getDictionary } from 'api/admin';
 import { GetProductsPagedRequest, common_Dictionary } from 'api/proto-http/admin';
-import { findInDictionary } from 'components/managers/orders/utility';
+import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { Field, FieldProps, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
 

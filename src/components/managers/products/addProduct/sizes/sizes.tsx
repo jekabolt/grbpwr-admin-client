@@ -12,8 +12,8 @@ import {
   useTheme,
 } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
-import { findInDictionary } from 'components/managers/orders/utility';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
+import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { useFormikContext } from 'formik';
 import React, { FC } from 'react';
 import styles from 'styles/addProd.scss';

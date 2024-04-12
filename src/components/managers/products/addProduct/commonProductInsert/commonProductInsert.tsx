@@ -1,6 +1,6 @@
 import { FormControl, Grid, InputLabel, MenuItem, Select, TextField } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
-import { findInDictionary } from 'components/managers/orders/utility';
+import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { Field, useFormikContext } from 'formik';
 import React, { FC } from 'react';
 import { AddProductInterface } from '../addProductInterface/addProductInterface';
