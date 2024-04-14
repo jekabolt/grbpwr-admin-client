@@ -79,9 +79,9 @@ export function deleteProductByID(
   return adminService.DeleteProductByID(request);
 }
 
-export function getDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse> {
+export function getDictionary(request: GetDictionaryRequest, bypassCache = false): Promise<GetDictionaryResponse> {
   const storedData = localStorage.getItem('dictionary');
-  if (storedData) {
+  if (storedData && !bypassCache) {
     return Promise.resolve().then(() => JSON.parse(storedData));
   } else {
     return adminService.GetDictionary(request).then((response) => {
