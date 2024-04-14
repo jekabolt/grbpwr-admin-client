@@ -16,6 +16,7 @@ import { GetArchive } from 'components/managers/archive/getArchive';
 import { MainArchive } from 'components/managers/archive/mainArchive';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
+import { OrderDetails } from 'components/managers/orders/orderDetails';
 import { Orders } from 'components/managers/orders/orders';
 import { AddProducts } from 'components/managers/products/addProduct/addProduct';
 import { ProductDetails } from 'components/managers/products/productDetails/productDetails';
@@ -138,6 +139,14 @@ const routes: Route<DefaultGenerics>[] = [
     ),
   },
   {
+    path: ROUTES.orderDetails,
+    element: (
+      <ProtectedRoute>
+        <OrderDetails />
+      </ProtectedRoute>
+    ),
+  },
+  {
     path: ROUTES.orders,
     element: (
       <ProtectedRoute>
@@ -145,14 +154,6 @@ const routes: Route<DefaultGenerics>[] = [
       </ProtectedRoute>
     ),
   },
-  // {
-  //   path: ROUTES.ordersById,
-  //   element: (
-  //     <ProtectedRoute>
-  //       <OrderId />
-  //     </ProtectedRoute>
-  //   ),
-  // },
 ];
 
 const theme = createTheme({

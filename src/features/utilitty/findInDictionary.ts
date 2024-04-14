@@ -10,10 +10,16 @@ const pattern: Pattern = {
   measurement: /MEASUREMENT_NAME_ENUM_/,
   category: /CATEGORY_ENUM_/,
   sortFactors: /SORT_FACTOR_/,
-
 };
 
-type dictionaryTypes = 'size' | 'order' | 'carrier' | 'status' | 'measurement' | 'category' | 'sortFactors';
+type dictionaryTypes =
+  | 'size'
+  | 'order'
+  | 'carrier'
+  | 'status'
+  | 'measurement'
+  | 'category'
+  | 'sortFactors';
 
 export const findInDictionary = (
   dictionary: common_Dictionary | undefined,
@@ -26,7 +32,7 @@ export const findInDictionary = (
   switch (type) {
     case 'category':
       data = dictionary.categories?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
-      break
+      break;
     case 'size':
       data = dictionary.sizes?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
       break;
@@ -43,7 +49,10 @@ export const findInDictionary = (
       data = dictionary.orderStatuses?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
       break;
     case 'sortFactors':
-      data = dictionary.sortFactors?.find((s) => s.id === id)?.name?.replace(pattern[type], '').replace(/_/g, ' ');
+      data = dictionary.sortFactors
+        ?.find((s) => s.id === id)
+        ?.name?.replace(pattern[type], '')
+        .replace(/_/g, ' ');
       break;
 
     default:
