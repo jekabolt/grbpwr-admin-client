@@ -130,7 +130,7 @@ export const Settings: FC = () => {
                 <Typography variant='body1'>BASE CURRENCY: {dictionary?.baseCurrency}</Typography>
               </Grid>
               <Grid item xs={12}>
-                <Button variant='contained' type='submit' disabled={isSubmitting}>
+                <Button variant='contained' size='small' type='submit' disabled={isSubmitting}>
                   Save Settings
                 </Button>
               </Grid>
