@@ -1,16 +1,43 @@
-import { FormControl, Grid, InputLabel, MenuItem, Select, TextField } from '@mui/material';
+import {
+  FormControl,
+  Grid,
+  InputLabel,
+  MenuItem,
+  Select,
+  SelectChangeEvent,
+  TextField,
+} from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
+import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { Field, useFormikContext } from 'formik';
-import React, { FC } from 'react';
+import React, { FC, useMemo } from 'react';
+import CountryList from 'react-select-country-list';
 import { AddProductInterface } from '../addProductInterface/addProductInterface';
+
+interface Country {
+  value: string;
+  label: string;
+}
 
 export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const countries = useMemo(() => CountryList().getData() as Country[], []);
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFieldValue(name, value.toString());
+  };
+
+  const updateColorAndColorHex = (event: SelectChangeEvent<string>) => {
+    const colorName = event.target.value as string;
+    const selectedColor = colors.find((color) => color.name === colorName);
+    setFieldValue('product.color', colorName);
+    if (selectedColor) {
+      setFieldValue('product.colorHex', selectedColor.hex);
+    } else {
+      setFieldValue('product.colorHex', '#000000');
+    }
   };
   return (
     <Grid container display='grid' spacing={2}>
@@ -26,14 +53,22 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
       </Grid>
 
       <Grid item>
-        <Field
-          as={TextField}
-          variant='outlined'
-          label='COUNTRY'
-          name='product.countryOfOrigin'
-          required
-          InputLabelProps={{ shrink: true }}
-        />
+        <FormControl fullWidth required>
+          <InputLabel shrink>COUNTRY</InputLabel>
+          <Select
+            name='product.countryOfOrigin'
+            value={values.product?.countryOfOrigin || ''}
+            onChange={(e) => setFieldValue('product.countryOfOrigin', e.target.value)}
+            label='COUNTRY'
+            displayEmpty
+          >
+            {countries.map((country) => (
+              <MenuItem key={country.value} value={country.label}>
+                {country.label},{country.value}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Grid>
 
       <Grid item>
@@ -105,6 +140,37 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
       </Grid>
 
       <Grid item>
+        <FormControl fullWidth required>
+          <InputLabel shrink>COLOR</InputLabel>
+          <Select
+            value={values.product?.color || ''}
+            onChange={updateColorAndColorHex}
+            label='COLOR'
+            displayEmpty
+            name='product.color'
+          >
+            {colors.map((color, id) => (
+              <MenuItem key={id} value={color.name}>
+                {color.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Grid>
+
+      <Grid item>
+        <Field
+          as={TextField}
+          type='color'
+          label='COLOR HEX'
+          name='product.colorHex'
+          InputLabelProps={{ shrink: true }}
+          required
+          fullWidth
+        />
+      </Grid>
+
+      <Grid item>
         <Field
           as={TextField}
           label='DESCRIPTION'
@@ -124,29 +190,6 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           required
         />
       </Grid>
-
-      <Grid item>
-        <Field
-          as={TextField}
-          label='COLOR'
-          name='product.color'
-          InputLabelProps={{ shrink: true }}
-          required
-        />
-      </Grid>
-
-      <Grid item>
-        <Field
-          as={TextField}
-          type='color'
-          label='COLOR HEX'
-          name='product.colorHex'
-          InputLabelProps={{ shrink: true }}
-          required
-          fullWidth
-        />
-      </Grid>
-
       <Grid item>
         <FormControl required fullWidth>
           <InputLabel shrink>CATEGORY</InputLabel>

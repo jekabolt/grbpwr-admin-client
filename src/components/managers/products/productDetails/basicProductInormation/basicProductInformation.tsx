@@ -14,12 +14,19 @@ import {
 import { getDictionary } from 'api/admin';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
 import { updateProductById } from 'api/updateProductsById';
+import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useEffect, useMemo, useState } from 'react';
+import CountryList from 'react-select-country-list';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';
 
 type UpdateProductPayload = Partial<common_ProductInsert>;
+
+interface Country {
+  value: string;
+  label: string;
+}
 
 export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
@@ -27,6 +34,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
   });
   const [isEdit, setIsEdit] = useState(false);
   const [dict, setDict] = useState<common_Dictionary>();
+  const countries = useMemo(() => CountryList().getData() as Country[], []);
 
   useEffect(() => {
     const fetchDictionary = async () => {
@@ -48,12 +56,21 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
     const isCheckbox = target instanceof HTMLInputElement && target.type === 'checkbox';
     const value = isCheckbox ? target.checked : target.value;
 
-    setUpdatePayload((prev) => {
-      if (name === 'price' || name === 'salePercentage') {
-        return { ...prev, [name]: { ...prev[name], value } };
-      }
-      return { ...prev, [name]: value };
-    });
+    if (name === 'color' && typeof value === 'string') {
+      const selectedColor = colors.find((color) => color.name === value);
+      setUpdatePayload((prev) => ({
+        ...prev,
+        color: value,
+        colorHex: selectedColor ? selectedColor.hex : '#FFFFFF',
+      }));
+    } else {
+      setUpdatePayload((prev) => {
+        if (name === 'price' || name === 'salePercentage') {
+          return { ...prev, [name]: { ...prev[name], value } };
+        }
+        return { ...prev, [name]: value };
+      });
+    }
   };
 
   const updateProduct = async () => {
@@ -143,18 +160,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
       </Grid>
       <Grid item>
         <TextField
-          name='color'
-          onChange={handleChange}
-          value={updatePayload.color || ''}
-          variant='outlined'
-          label='color'
-          placeholder={product?.product?.productInsert?.color}
-          InputLabelProps={{ shrink: true }}
-          disabled={!isEdit}
-        />
-      </Grid>
-      <Grid item>
-        <TextField
           name='preorder'
           onChange={handleChange}
           value={updatePayload.preorder || ''}
@@ -178,16 +183,48 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         />
       </Grid>
       <Grid item>
-        <TextField
-          name='countryOfOrigin'
-          onChange={handleChange}
-          value={updatePayload.countryOfOrigin || ''}
-          variant='outlined'
-          label='country'
-          placeholder={product?.product?.productInsert?.countryOfOrigin}
-          InputLabelProps={{ shrink: true }}
-          disabled={!isEdit}
-        />
+        <FormControl fullWidth>
+          <InputLabel shrink>COUNTRY</InputLabel>
+          <Select
+            name='countryOfOrigin'
+            value={updatePayload.countryOfOrigin || ''}
+            onChange={handleChange}
+            displayEmpty
+            label='COUNTRY'
+            disabled={!isEdit}
+          >
+            <MenuItem value='' disabled>
+              {product?.product?.productInsert?.countryOfOrigin}
+            </MenuItem>
+            {countries.map((country) => (
+              <MenuItem key={country.value} value={country.label}>
+                {country.label}, {country.value}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Grid>
+      <Grid item>
+        <FormControl fullWidth>
+          <InputLabel shrink>COLOR</InputLabel>
+          <Select
+            name='color'
+            value={updatePayload.color || ''}
+            onChange={handleChange}
+            displayEmpty
+            label='COLOR'
+            disabled={!isEdit}
+          >
+            <MenuItem value='' disabled>
+              {product?.product?.productInsert?.color}
+            </MenuItem>
+            {colors.map((color, id) => (
+              <MenuItem key={id} value={color.name}>
+                {color.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Grid>
       <Grid item>
         <TextField
