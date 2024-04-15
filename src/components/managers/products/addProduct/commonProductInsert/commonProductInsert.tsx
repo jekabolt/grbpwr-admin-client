@@ -11,7 +11,7 @@ import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { Field, useFormikContext } from 'formik';
-import React, { FC, useMemo } from 'react';
+import React, { FC, useCallback, useMemo } from 'react';
 import CountryList from 'react-select-country-list';
 import { AddProductInterface } from '../addProductInterface/addProductInterface';
 
@@ -29,16 +29,50 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
     setFieldValue(name, value.toString());
   };
 
-  const updateColorAndColorHex = (event: SelectChangeEvent<string>) => {
-    const colorName = event.target.value as string;
-    const selectedColor = colors.find((color) => color.name === colorName);
-    setFieldValue('product.color', colorName);
-    if (selectedColor) {
-      setFieldValue('product.colorHex', selectedColor.hex);
+  const getCurrentSeasonCode = () => {
+    const date = new Date();
+    const month = date.getMonth();
+    const year = date.getFullYear().toString().slice(-2);
+    if (month >= 2 && month <= 8) {
+      return `SS${year}`;
     } else {
-      setFieldValue('product.colorHex', '#000000');
+      return `FW${year}`;
     }
   };
+
+  const generateSKU = (brand = '', categoryId = 0, color = '', country = '') => {
+    const formattedBrand = brand.length > 6 ? brand.substring(0, 6) : brand;
+    const colorCode = color.substring(0, 2);
+    const date = getCurrentSeasonCode();
+    return `${formattedBrand}${categoryId}${colorCode}${country}${date}`.toUpperCase();
+  };
+
+  const handleFieldChange = useCallback(
+    (
+      e: SelectChangeEvent<string | number> | React.ChangeEvent<HTMLInputElement>,
+      field: string,
+    ) => {
+      const newValue = e.target.value;
+      setFieldValue(`product.${field}`, newValue);
+      if (field === 'color') {
+        const selectedColor = colors.find((color) => color.name === newValue);
+        setFieldValue('product.colorHex', selectedColor ? selectedColor.hex : '#000000', false);
+      }
+      const updatedValues = {
+        ...values.product,
+        [field]: newValue,
+      };
+      const newSKU = generateSKU(
+        updatedValues.brand,
+        updatedValues.categoryId,
+        updatedValues.color,
+        updatedValues.countryOfOrigin,
+      );
+      setFieldValue('product.sku', newSKU);
+    },
+    [values.product, setFieldValue],
+  );
+
   return (
     <Grid container display='grid' spacing={2}>
       <Grid item>
@@ -58,12 +92,12 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           <Select
             name='product.countryOfOrigin'
             value={values.product?.countryOfOrigin || ''}
-            onChange={(e) => setFieldValue('product.countryOfOrigin', e.target.value)}
+            onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
             label='COUNTRY'
             displayEmpty
           >
             {countries.map((country) => (
-              <MenuItem key={country.value} value={country.label}>
+              <MenuItem key={country.value} value={country.value}>
                 {country.label},{country.value}
               </MenuItem>
             ))}
@@ -79,6 +113,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           name='product.brand'
           required
           InputLabelProps={{ shrink: true }}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
         />
       </Grid>
 
@@ -144,7 +179,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           <InputLabel shrink>COLOR</InputLabel>
           <Select
             value={values.product?.color || ''}
-            onChange={updateColorAndColorHex}
+            onChange={(e) => handleFieldChange(e, 'color')}
             label='COLOR'
             displayEmpty
             name='product.color'
@@ -195,7 +230,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           <InputLabel shrink>CATEGORY</InputLabel>
           <Select
             name='prodcut.categoryId'
-            onChange={(e) => setFieldValue('product.categoryId', e.target.value)}
+            onChange={(e) => handleFieldChange(e, 'categoryId')}
             value={values.product?.categoryId}
             label='CATEGORY'
             displayEmpty
