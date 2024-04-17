@@ -17,6 +17,7 @@ import { UpdateProductSizeStockRequest, common_Dictionary } from 'api/proto-http
 import { updateMeasurement, updateSize } from 'api/updateProductsById';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
+import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';
@@ -141,6 +142,7 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({ product, id, f
                         handleQuantityChange(sizeId, parseInt(e.target.value, 10))
                       }
                       inputProps={{ min: 0 }}
+                      onKeyDown={removePossibilityToUseSigns}
                       style={{ width: '80px' }}
                     />
                     <IconButton
@@ -172,6 +174,7 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({ product, id, f
                         }
                         style={{ width: '80px' }}
                         inputProps={{ min: 0 }}
+                        onKeyDown={removePossibilityToUseSigns}
                       />
                     </TableCell>
                   );

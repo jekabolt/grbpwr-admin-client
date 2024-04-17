@@ -18,6 +18,7 @@ import { colors } from 'constants/colors';
 import { generateSKU } from 'features/utilitty/dinamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { formatDate } from 'features/utilitty/formateDate';
+import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import styles from 'styles/product-details.scss';
@@ -264,8 +265,9 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
           label='PRICE'
           placeholder={product?.product?.productInsert?.price?.value}
           InputLabelProps={{ shrink: true }}
-          inputProps={{ min: 0 }}
+          inputProps={{ min: 0, pattern: '[0-9]*' }}
           disabled={!isEdit}
+          onKeyDown={removePossibilityToUseSigns}
         />
       </Grid>
       <Grid item xs={12}>
@@ -280,6 +282,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
           InputLabelProps={{ shrink: true }}
           inputProps={{ min: 0 }}
           disabled={!isEdit}
+          onKeyDown={removePossibilityToUseSigns}
         />
       </Grid>
       <Grid item xs={12}>

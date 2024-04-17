@@ -11,6 +11,7 @@ import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { generateSKU } from 'features/utilitty/dinamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
+import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, useFormikContext } from 'formik';
 import React, { FC, useCallback, useMemo } from 'react';
 import CountryList from 'react-select-country-list';
@@ -155,6 +156,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           required
           InputLabelProps={{ shrink: true }}
           onChange={handlePriceChange}
+          onKeyDown={removePossibilityToUseSigns}
         />
       </Grid>
 
@@ -168,6 +170,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           inputProps={{ min: 0, max: 99 }}
           required
           InputLabelProps={{ shrink: true }}
+          onKeyDown={removePossibilityToUseSigns}
           fullWidth
         />
       </Grid>

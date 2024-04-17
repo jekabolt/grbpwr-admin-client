@@ -12,6 +12,7 @@ import {
 import { getDictionary } from 'api/admin';
 import { GetProductsPagedRequest, common_Dictionary } from 'api/proto-http/admin';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
+import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, FieldProps, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
 
@@ -155,6 +156,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                     onChange={(e) => setFieldValue('filterConditions.from', e.target.value)}
                     value={filter.filterConditions?.from}
                     inputProps={{ min: 0 }}
+                    onKeyDown={removePossibilityToUseSigns}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
@@ -164,6 +166,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                     onChange={(e) => setFieldValue('filterConditions.to', e.target.value)}
                     value={filter.filterConditions?.to}
                     inputProps={{ min: 0 }}
+                    onKeyDown={removePossibilityToUseSigns}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
