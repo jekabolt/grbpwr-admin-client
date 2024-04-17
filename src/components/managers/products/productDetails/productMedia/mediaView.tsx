@@ -1,4 +1,4 @@
-import { Box, Grid, Typography } from '@mui/material';
+import { Grid } from '@mui/material';
 import { addMediaByID } from 'api/admin';
 import { updateProductById } from 'api/updateProductsById';
 import { FC } from 'react';
@@ -58,35 +58,15 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => 
     }
   };
 
-  const formatDate = (dateString: string): string => {
-    const options: Intl.DateTimeFormatOptions = {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    };
-    return new Date(dateString).toLocaleString('en-US', options);
-  };
-
   return (
-    <Grid container spacing={4} direction='column'>
-      <Grid item xs={4}>
-        <Box display='grid'>
-          <Typography variant='body2'>PRODUCT ID: {product?.product?.id}</Typography>
-          <Typography variant='body2'>
-            CREATED AT: {product?.product?.createdAt ? formatDate(product?.product?.createdAt) : ''}
-          </Typography>
-          <Typography variant='body2'>
-            UPDATED AT: {product?.product?.updatedAt ? formatDate(product?.product?.updatedAt) : ''}
-          </Typography>
-        </Box>
+    <Grid container spacing={4}>
+      <Grid item xs={12}>
         <SingleMediaViewAndSelect
           link={product?.product?.productInsert?.thumbnail}
           saveSelectedMedia={saveThumbnail}
         />
       </Grid>
-      <Grid item xs={8}>
+      <Grid item xs={12}>
         <ProductMedias
           product={product}
           fetchProduct={fetchProduct}

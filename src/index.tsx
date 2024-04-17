@@ -8,6 +8,7 @@ import {
   createHashHistory,
 } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ErrorPage } from 'components/common/errorPage';
 import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
 import { Main } from 'components/managers/MainContent';
@@ -41,6 +42,14 @@ const location = new ReactLocation({ history: hashHistory });
 
 const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.login, element: <LoginBlock /> },
+  {
+    path: ROUTES.error,
+    element: (
+      <ProtectedRoute>
+        <ErrorPage />
+      </ProtectedRoute>
+    ),
+  },
   {
     path: ROUTES.main,
     element: (
