@@ -11,7 +11,8 @@ const getCurrentSeasonCode = () => {
 
 export const generateSKU = (brand: string | undefined, categoryId: number | undefined, color: string | undefined, country: string | undefined) => {
     if (brand) {
-        const formattedBrand = brand.length > 6 ? brand.substring(0, 6) : brand;
+        const removeSpaces = brand.replace(/\s/g, '');
+        const formattedBrand = removeSpaces.length > 6 ? removeSpaces.substring(0, 6) : removeSpaces;
         const colorCode = color?.substring(0, 2);
         const date = getCurrentSeasonCode();
         return `${formattedBrand}${categoryId}${colorCode}${country}${date}`.toUpperCase();
