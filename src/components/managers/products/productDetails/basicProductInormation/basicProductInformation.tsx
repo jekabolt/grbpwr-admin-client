@@ -120,6 +120,12 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
     enableEditMode();
   };
 
+  const getCountryLabel = (countryValue: string | undefined) => {
+    if (!countryValue || !countries) return '';
+    const matchingCountry = countries.find((country) => country.value === countryValue);
+    return matchingCountry ? matchingCountry.label : '';
+  };
+
   useEffect(() => {
     setUpdatePayload((prevState) => ({
       ...prevState,
@@ -245,7 +251,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
             disabled={!isEdit}
           >
             <MenuItem value='' disabled>
-              {product?.product?.productInsert?.countryOfOrigin}
+              {getCountryLabel(product?.product?.productInsert?.countryOfOrigin)}
             </MenuItem>
             {countries.map((country) => (
               <MenuItem key={country.value} value={country.value}>
