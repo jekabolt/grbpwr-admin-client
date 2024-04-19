@@ -57,15 +57,16 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => 
       }
     }
   };
+
   return (
-    <Grid container spacing={4} direction='column'>
-      <Grid item xs={4}>
+    <Grid container spacing={4}>
+      <Grid item xs={12}>
         <SingleMediaViewAndSelect
           link={product?.product?.productInsert?.thumbnail}
           saveSelectedMedia={saveThumbnail}
         />
       </Grid>
-      <Grid item xs={8}>
+      <Grid item xs={12}>
         <ProductMedias
           product={product}
           fetchProduct={fetchProduct}

@@ -14,6 +14,7 @@ import {
 import { common_ProductNew } from 'api/proto-http/admin';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
+import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { useFormikContext } from 'formik';
 import React, { FC } from 'react';
 import styles from 'styles/addProd.scss';
@@ -94,6 +95,7 @@ export const Sizes: FC<AddProductInterface> = ({ dictionary }) => {
                     onChange={(e) => handleSizeChange(e, sizeIndex, size.id)}
                     inputProps={{ min: 0 }}
                     style={{ width: '80px' }}
+                    onKeyDown={removePossibilityToUseSigns}
                   />
                 </Box>
               </TableCell>
@@ -103,6 +105,7 @@ export const Sizes: FC<AddProductInterface> = ({ dictionary }) => {
                     type='number'
                     onChange={(e) => handleMeasurementChange(e, sizeIndex, measurement.id!)}
                     inputProps={{ min: 0 }}
+                    onKeyDown={removePossibilityToUseSigns}
                     style={{ width: '80px' }}
                   />
                 </TableCell>

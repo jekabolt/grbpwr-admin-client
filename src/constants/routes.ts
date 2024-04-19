@@ -1,10 +1,10 @@
 export enum ROUTES {
   login = '/',
+  error = '/error',
   main = '/main',
   media = '/media-manager',
   product = '/product-manager',
   addProduct = '/add-product',
-  pagedProduct = '/page-product',
   singleProduct = '/product',
   hero = '/hero',
   addHero = '/add-hero',
