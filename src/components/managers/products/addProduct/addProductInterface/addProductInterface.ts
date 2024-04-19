@@ -4,3 +4,7 @@ export interface AddProductInterface {
     dictionary: common_Dictionary | undefined
 }
 
+export interface Country {
+    value: string;
+    label: string;
+}

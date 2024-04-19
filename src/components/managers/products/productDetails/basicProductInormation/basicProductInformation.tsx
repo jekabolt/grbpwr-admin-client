@@ -15,21 +15,17 @@ import { getDictionary } from 'api/admin';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
 import { updateProductById } from 'api/updateProductsById';
 import { colors } from 'constants/colors';
-import { generateSKU } from 'features/utilitty/dinamicGenerationOfSku';
+import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { formatDate } from 'features/utilitty/formateDate';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import styles from 'styles/product-details.scss';
+import { Country } from '../../addProduct/addProductInterface/addProductInterface';
 import { ProductIdProps } from '../utility/interfaces';
 
 type UpdateProductPayload = Partial<common_ProductInsert>;
-
-interface Country {
-  value: string;
-  label: string;
-}
 
 export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
   const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({

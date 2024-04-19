@@ -9,18 +9,13 @@ import {
 } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
-import { generateSKU } from 'features/utilitty/dinamicGenerationOfSku';
+import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, useFormikContext } from 'formik';
 import React, { FC, useCallback, useMemo } from 'react';
 import CountryList from 'react-select-country-list';
-import { AddProductInterface } from '../addProductInterface/addProductInterface';
-
-interface Country {
-  value: string;
-  label: string;
-}
+import { AddProductInterface, Country } from '../addProductInterface/addProductInterface';
 
 export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
