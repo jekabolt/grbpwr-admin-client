@@ -53,6 +53,7 @@ export const MediaManager: FC = () => {
             select={() => {}}
             height='auto'
             sortedAndFilteredMedia={sortedAndFilteredMedia}
+            enableModal={true}
           />
         </Grid>
       </Grid>
