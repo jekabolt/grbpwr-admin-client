@@ -9,10 +9,12 @@ import {
   useTheme,
 } from '@mui/material';
 import { deleteFiles } from 'api/admin';
+import { common_MediaInsert } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
-import { FC } from 'react';
+import { FC, useState } from 'react';
 import styles from 'styles/media-selector.scss';
+import { FullSizeMediaModal } from './fullSizeMediaModal';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
   media,
@@ -22,7 +24,10 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   selectedMedia,
   height = 480,
   sortedAndFilteredMedia,
+  enableModal = false,
 }) => {
+  const [openModal, setOpenModal] = useState(false);
+  const [clickedMedia, setClickedMedia] = useState<common_MediaInsert>();
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -31,9 +36,24 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
     setMedia((currentFiles) => currentFiles?.filter((file) => file.id !== id));
   };
 
-  const handleSelect = (mediaUrl: string, allowMultiple: boolean, event: any) => {
-    select?.(mediaUrl, allowMultiple);
+  const handleSelect = (
+    mediaUrl: common_MediaInsert | undefined,
+    allowMultiple: boolean,
+    event: any,
+  ) => {
     event.stopPropagation();
+    if (enableModal) {
+      setOpenModal(true);
+      setClickedMedia(mediaUrl);
+    } else {
+      if (mediaUrl?.thumbnail) {
+        select(mediaUrl.thumbnail, allowMultiple);
+      }
+    }
+  };
+
+  const handleCloseModal = () => {
+    setOpenModal(false);
   };
 
   return (
@@ -52,19 +72,19 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
           >
             {sortedAndFilteredMedia().map((m) => (
               <ImageListItem
-                onClick={(event) => handleSelect(m.media?.fullSize ?? '', allowMultiple, event)}
+                onClick={(event) => handleSelect(m.media, allowMultiple, event)}
                 className={styles.list_media_item}
                 key={m.id}
               >
                 <InputLabel htmlFor={`${m.id}`}>
-                  {selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? (
+                  {selectedMedia?.some((item) => item.url === (m.media?.thumbnail ?? '')) ? (
                     <span className={styles.selected_flag}>selected</span>
                   ) : null}
-                  {isVideo(m.media?.fullSize) ? (
+                  {isVideo(m.media?.thumbnail) ? (
                     <video
                       key={m.id}
                       src={m.media?.thumbnail}
-                      className={`${selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? styles.selected_media : ''}`}
+                      className={`${selectedMedia?.some((item) => item.url === (m.media?.thumbnail ?? '')) ? styles.selected_media : ''}`}
                       controls
                     />
                   ) : (
@@ -72,7 +92,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                       key={m.id}
                       src={m.media?.thumbnail}
                       alt='media'
-                      className={`${selectedMedia?.some((item) => item.url === (m.media?.fullSize ?? '')) ? styles.selected_media : ''}`}
+                      className={`${selectedMedia?.some((item) => item.url === (m.media?.thumbnail ?? '')) ? styles.selected_media : ''}`}
                     />
                   )}
                 </InputLabel>
@@ -89,6 +109,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
           </ImageList>
         )}
       </Grid>
+      <FullSizeMediaModal open={openModal} close={handleCloseModal} clickedMedia={clickedMedia} />
     </Grid>
   );
 };
