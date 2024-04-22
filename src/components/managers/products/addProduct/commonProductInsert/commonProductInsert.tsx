@@ -214,6 +214,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           as={TextField}
           label='SKU'
           name='product.sku'
+          InputProps={{ readOnly: true }}
           InputLabelProps={{ shrink: true }}
           required
         />

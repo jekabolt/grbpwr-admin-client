@@ -343,6 +343,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
           variant='outlined'
           label='SKU'
           placeholder={product?.product?.productInsert?.sku}
+          InputProps={{ readOnly: true }}
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
         />
