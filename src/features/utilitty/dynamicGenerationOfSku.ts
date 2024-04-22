@@ -9,12 +9,23 @@ const getCurrentSeasonCode = () => {
     }
 };
 
+
+const generateNumbers = () => {
+    const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+    return uuid.slice(0, 4);
+}
+
 export const generateSKU = (brand: string | undefined, categoryId: number | undefined, color: string | undefined, country: string | undefined) => {
     if (brand) {
         const removeSpaces = brand.replace(/\s/g, '');
         const formattedBrand = removeSpaces.length > 6 ? removeSpaces.substring(0, 6) : removeSpaces;
         const colorCode = color?.substring(0, 2);
         const date = getCurrentSeasonCode();
-        return `${formattedBrand}${categoryId}${colorCode}${country}${date}`.toUpperCase();
+        const randomNumbers = generateNumbers()
+        return `${formattedBrand}${categoryId}${colorCode}${country}${date}${randomNumbers}`.toUpperCase();
     }
 };
