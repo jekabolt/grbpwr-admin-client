@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { ROUTES } from 'constants/routes';
+import { location } from 'index';
 
 const BASE_URL = process.env.REACT_APP_SERVER_URL;
 
@@ -32,6 +33,11 @@ axiosInstance.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('authToken');
       return Promise.reject((window.location.href = ROUTES.login));
+    } else if (error.response && error.response.status === 500) {
+      sessionStorage.setItem('errorCode', error.response.data.message)
+      location.history.push(ROUTES.error)
+    } else if (error.response && error.response.status === 400) {
+      sessionStorage.setItem('errorCode', error.response.data.message)
     }
     return Promise.reject(error);
   },

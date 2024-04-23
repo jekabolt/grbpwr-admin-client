@@ -20,6 +20,10 @@ const useMediaSelector = (
     setSortByDate: React.Dispatch<React.SetStateAction<string>>;
     sortedAndFilteredMedia: () => common_Media[];
     isLoading: boolean
+    snackBarMessage: string
+    showMessage: (message: string) => void
+    closeSnackBar: () => void
+    isSnackBarOpen: boolean
 } => {
     const [media, setMedia] = useState<common_Media[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialIsLoading);
@@ -27,6 +31,17 @@ const useMediaSelector = (
     const [url, setUrl] = useState<string>('');
     const [filterByType, setFilterByType] = useState('');
     const [sortByDate, setSortByDate] = useState('desc');
+    const [snackBarMessage, setSnackBarMessage] = useState<string>('')
+    const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false)
+
+    const showMessage = (message: string) => {
+        setSnackBarMessage(message);
+        setIsSnackBarOpen(!isSnackBarOpen)
+    }
+
+    const closeSnackBar = () => {
+        setIsSnackBarOpen(!isSnackBarOpen)
+    }
 
     const sortedAndFilteredMedia = useCallback(() => {
         return media
@@ -75,13 +90,15 @@ const useMediaSelector = (
             try {
                 await uploadContentLink({ url: url });
                 reload();
+                showMessage('MEDIA UPLOADED')
             } catch (error) {
-                console.error("Error updating link:", error);
+                showMessage('ERROR UPDATING LINK')
             } finally {
                 setIsLoading(false);
             }
             setUrl('');
         } else {
+            showMessage('INCORRECT URL')
             setUrl('');
         }
     }, [url, reload]);
@@ -99,7 +116,11 @@ const useMediaSelector = (
         sortByDate,
         setSortByDate,
         sortedAndFilteredMedia,
-        isLoading
+        isLoading,
+        snackBarMessage,
+        showMessage,
+        closeSnackBar,
+        isSnackBarOpen
     };
 };
 

@@ -27,7 +27,7 @@ import { ProductIdProps } from '../utility/interfaces';
 
 type UpdateProductPayload = Partial<common_ProductInsert>;
 
-export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
+export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMessage }) => {
   const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
     hidden: product?.product?.productInsert?.hidden ?? false,
   });
@@ -97,16 +97,21 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, fetchP
         return key !== 'hidden' && !value;
       })
     ) {
-      alert('Please fill out all required fields.');
+      showMessage('PLEASE FILL OUT ALL REQUIRED FIELDS');
       return;
     }
-    const updatedDetails = { ...product?.product?.productInsert, ...updatePayload };
-    const response = await updateProductById({
-      id: Number(id),
-      product: updatedDetails as common_ProductInsert,
-    });
-
-    setUpdatePayload(updatedDetails);
+    try {
+      const updatedDetails = { ...product?.product?.productInsert, ...updatePayload };
+      await updateProductById({
+        id: Number(id),
+        product: updatedDetails as common_ProductInsert,
+      });
+      showMessage('PRODUCT HAS BEEN UPLOADED');
+      setUpdatePayload(updatedDetails);
+    } catch (error) {
+      const message = sessionStorage.getItem('errorcode');
+      message ? showMessage(message) : showMessage('PRICE MUST BE GREATER THAN 0');
+    }
   };
 
   const updateProductAndToggleEditMode = () => {

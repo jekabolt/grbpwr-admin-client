@@ -54,7 +54,7 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
     if (files && files.length > 0) {
       processFiles(files);
     } else {
-      alert('No selected files.');
+      showMessage('No selected files.');
     }
     if ('dataTransfer' in e) {
       setIsDragging(false);

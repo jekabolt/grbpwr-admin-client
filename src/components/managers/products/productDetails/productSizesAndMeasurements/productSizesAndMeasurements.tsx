@@ -22,7 +22,12 @@ import { FC, useEffect, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';
 
-export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
+export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
+  product,
+  id,
+  fetchProduct,
+  showMessage,
+}) => {
   const [dictionary, setDictionary] = useState<common_Dictionary>();
   const [sizeQuantity, setSizeQuantity] = useState<{ [sizeId: number]: number }>({});
   const [measurementQuantity, setMeasurementQuantity] = useState<{ [key: string]: string }>({});
@@ -62,16 +67,21 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({ product, id, f
     if (typeof sizeId === 'number') {
       const isConfirmed = window.confirm('Are you sure you want to update the size?');
 
-      if (isConfirmed) {
-        const request: UpdateProductSizeStockRequest = {
-          productId: Number(id),
-          sizeId: sizeId,
-          quantity: sizeQuantity[sizeId],
-        };
-        const response = await updateSize(request);
-        if (response) {
-          fetchProduct();
+      try {
+        if (isConfirmed) {
+          const request: UpdateProductSizeStockRequest = {
+            productId: Number(id),
+            sizeId: sizeId,
+            quantity: sizeQuantity[sizeId],
+          };
+          const response = await updateSize(request);
+          showMessage('PRODUCT HAS BEEN UPLOADED');
+          if (response) {
+            fetchProduct();
+          }
         }
+      } catch (error) {
+        showMessage('SIZES CANNOT BE UPDATED');
       }
     }
   };
@@ -97,14 +107,19 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({ product, id, f
       };
     });
 
-    const request = {
-      productId: Number(id),
-      measurements: measurementQuantityArray,
-    };
-    const response = await updateMeasurement(request);
-    if (response) {
-      setMeasurementQuantity({});
-      fetchProduct();
+    try {
+      const request = {
+        productId: Number(id),
+        measurements: measurementQuantityArray,
+      };
+      const response = await updateMeasurement(request);
+      showMessage('PRODUCT HAS BEEN UPLOADED');
+      if (response) {
+        setMeasurementQuantity({});
+        fetchProduct();
+      }
+    } catch (error) {
+      showMessage('MEASUREMENTS CANNOT BE UPDATED');
     }
   };
 

@@ -1,4 +1,4 @@
-import { Grid } from '@mui/material';
+import { Alert, Grid, Snackbar } from '@mui/material';
 import { useMatch } from '@tanstack/react-location';
 import { getProductByID } from 'api/admin';
 import { common_ProductFull } from 'api/proto-http/admin';
@@ -7,8 +7,7 @@ import { FC, useEffect, useState } from 'react';
 import { MediaView } from './productMedia/mediaView';
 import { ProductSizesAndMeasurements } from './productSizesAndMeasurements/productSizesAndMeasurements';
 
-import { MakeGenerics, useNavigate } from '@tanstack/react-location';
-import { ROUTES } from 'constants/routes';
+import { MakeGenerics } from '@tanstack/react-location';
 import { BasicProductIformation } from './basicProductInormation/basicProductInformation';
 import { ProductTags } from './productTags/productTags';
 
@@ -23,29 +22,22 @@ export const ProductDetails: FC = () => {
   const {
     params: { id: id },
   } = useMatch<ProductIdProps>();
-  const navigate = useNavigate();
-
   useEffect(() => {
     fetchProduct();
   }, [id]);
+  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
+  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
+
+  const showMessage = (message: string) => {
+    setSnackBarMessage(message);
+    setIsSnackBarOpen(!isSnackBarOpen);
+  };
 
   const fetchProduct = async () => {
-    try {
-      const response = await getProductByID({
-        id: Number(id),
-      });
-      setProduct(response.product);
-    } catch (error) {
-      if (error instanceof Error) {
-        if (error) {
-          sessionStorage.setItem('errorCode', error.message);
-        }
-        navigate({
-          to: ROUTES.error,
-          replace: true,
-        });
-      }
-    }
+    const response = await getProductByID({
+      id: Number(id),
+    });
+    setProduct(response.product);
   };
 
   return (
@@ -54,24 +46,52 @@ export const ProductDetails: FC = () => {
         <Grid item xs={9}>
           <Grid container spacing={2}>
             <Grid item xs={6}>
-              <MediaView product={product} id={id} fetchProduct={fetchProduct} />
+              <MediaView
+                product={product}
+                id={id}
+                fetchProduct={fetchProduct}
+                showMessage={showMessage}
+              />
             </Grid>
             <Grid item xs={6}>
               <Grid container spacing={2}>
                 <Grid item xs={7}>
-                  <BasicProductIformation product={product} id={id} fetchProduct={fetchProduct} />
+                  <BasicProductIformation
+                    product={product}
+                    id={id}
+                    fetchProduct={fetchProduct}
+                    showMessage={showMessage}
+                  />
                 </Grid>
                 <Grid item>
-                  <ProductTags product={product} id={id} fetchProduct={fetchProduct} />
+                  <ProductTags
+                    product={product}
+                    id={id}
+                    fetchProduct={fetchProduct}
+                    showMessage={showMessage}
+                  />
                 </Grid>
               </Grid>
             </Grid>
           </Grid>
         </Grid>
         <Grid item xs={9.5}>
-          <ProductSizesAndMeasurements product={product} fetchProduct={fetchProduct} id={id} />
+          <ProductSizesAndMeasurements
+            product={product}
+            fetchProduct={fetchProduct}
+            id={id}
+            showMessage={showMessage}
+          />
         </Grid>
       </Grid>
+      <Snackbar
+        open={isSnackBarOpen}
+        message={snackBarMessage}
+        autoHideDuration={6000}
+        onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
+      >
+        <Alert severity='success'>Save successful</Alert>
+      </Snackbar>
     </Layout>
   );
 };

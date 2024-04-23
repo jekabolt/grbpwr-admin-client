@@ -4,6 +4,7 @@ export interface ProductIdProps {
     id: string
     product: common_ProductFull | undefined
     fetchProduct: () => void
+    showMessage: (message: string) => void
 }
 
 export interface MediaViewComponentsProps {

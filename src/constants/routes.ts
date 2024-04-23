@@ -1,6 +1,6 @@
 export enum ROUTES {
   login = '/',
-  error = '/error',
+  error = '/errorPage',
   main = '/main',
   media = '/media-manager',
   product = '/product-manager',

@@ -5,6 +5,7 @@ import {
   ImageList,
   ImageListItem,
   InputLabel,
+  Snackbar,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
@@ -12,6 +13,7 @@ import { deleteFiles } from 'api/admin';
 import { common_MediaInsert } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
+import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useState } from 'react';
 import styles from 'styles/media-selector.scss';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
@@ -26,20 +28,23 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   sortedAndFilteredMedia,
   enableModal = false,
 }) => {
+  const { showMessage, isSnackBarOpen, closeSnackBar, snackBarMessage } = useMediaSelector();
   const [openModal, setOpenModal] = useState(false);
   const [clickedMedia, setClickedMedia] = useState<common_MediaInsert>();
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const handleDeleteFile = async (id: number | undefined) => {
+  const handleDeleteFile = async (id: number | undefined, e: React.MouseEvent) => {
+    e.stopPropagation();
     await deleteFiles({ id });
+    showMessage('MEDIA WAS SUCCESSFULLY DELETED');
     setMedia((currentFiles) => currentFiles?.filter((file) => file.id !== id));
   };
 
   const handleSelect = (
     mediaUrl: common_MediaInsert | undefined,
     allowMultiple: boolean,
-    event: any,
+    event: React.MouseEvent,
   ) => {
     event.stopPropagation();
     if (enableModal) {
@@ -99,7 +104,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                 <IconButton
                   aria-label='delete'
                   size='small'
-                  onClick={() => handleDeleteFile(m.id)}
+                  onClick={(e) => handleDeleteFile(m.id, e)}
                   className={styles.delete_btn}
                 >
                   <ClearIcon />
@@ -110,6 +115,12 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
         )}
       </Grid>
       <FullSizeMediaModal open={openModal} close={handleCloseModal} clickedMedia={clickedMedia} />
+      <Snackbar
+        open={isSnackBarOpen}
+        message={snackBarMessage}
+        autoHideDuration={3000}
+        onClose={closeSnackBar}
+      />
     </Grid>
   );
 };
