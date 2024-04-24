@@ -65,7 +65,7 @@ const useMediaSelector = (
 
     const isHttpsMediaLink = (url: string) => {
         const lowerCaseUrl = url.toLowerCase();
-        const pattern = /^https:\/\/.*\.(jpg|jpeg|png|gif|bmp|svg|mp4|avi|mov|wmv)$/i;
+        const pattern = /^https:\/\/.*\.(jpg|jpeg|png|gif|bmp|svg|mp4|avi|mov|wmv|webp)$/i;
         return pattern.test(lowerCaseUrl);
     };
 

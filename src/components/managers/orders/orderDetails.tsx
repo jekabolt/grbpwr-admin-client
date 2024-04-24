@@ -81,6 +81,11 @@ export const OrderDetails = () => {
       width: 300,
     },
     {
+      field: 'sku',
+      headerName: 'SKU',
+      width: 300,
+    },
+    {
       field: 'quantity',
       headerName: 'QUANTITY',
       width: 200,
