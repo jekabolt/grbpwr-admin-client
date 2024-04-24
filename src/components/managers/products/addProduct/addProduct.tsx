@@ -75,6 +75,7 @@ export const AddProducts: FC = () => {
       };
 
       await addProduct(productToSubmit);
+      showMessage('PRODUCT UPLOADED', 'success');
       resetForm();
     } catch (error) {
       const message = sessionStorage.getItem('errorCode');
