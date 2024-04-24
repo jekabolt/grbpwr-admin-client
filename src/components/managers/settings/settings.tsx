@@ -1,4 +1,13 @@
-import { Button, Checkbox, FormControlLabel, Grid, TextField, Typography } from '@mui/material';
+import {
+  Alert,
+  Button,
+  Checkbox,
+  FormControlLabel,
+  Grid,
+  Snackbar,
+  TextField,
+  Typography,
+} from '@mui/material';
 import { getDictionary } from 'api/admin';
 import { UpdateSettingsRequest, common_Dictionary } from 'api/proto-http/admin';
 import { updateSettings } from 'api/settings';
@@ -11,6 +20,15 @@ import { mapPaymentMethods, mapShipmentCarriers } from './mappingFunctions';
 export const Settings: FC = () => {
   const [settings, setSettings] = useState<UpdateSettingsRequest>(defaultSettingsStates);
   const [dictionary, setDictionary] = useState<common_Dictionary>();
+  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
+  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
+  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+
+  const showMessage = (message: string, severity: 'success' | 'error') => {
+    setSnackBarMessage(message);
+    setSnackBarSeverity(severity);
+    setIsSnackBarOpen(true);
+  };
 
   useEffect(() => {
     const fetchDictionary = async () => {
@@ -33,8 +51,14 @@ export const Settings: FC = () => {
         initialValues={settings}
         enableReinitialize={true}
         onSubmit={async (values, actions) => {
-          await updateSettings(values);
-          actions.setSubmitting(false);
+          try {
+            await updateSettings(values);
+            showMessage('Settings updated successfully.', 'success');
+            actions.setSubmitting(false);
+          } catch (error) {
+            showMessage('Failed to update settings.', 'error');
+            actions.setSubmitting(false);
+          }
         }}
       >
         {({ values, setFieldValue, isSubmitting }) => (
@@ -57,7 +81,7 @@ export const Settings: FC = () => {
                             }}
                           />
                         }
-                        label={payment.paymentMethod}
+                        label={payment.paymentMethod?.replace('PAYMENT_METHOD_NAME_ENUM_', '')}
                       />
                     )}
                   </Field>
@@ -138,6 +162,13 @@ export const Settings: FC = () => {
           </Form>
         )}
       </Formik>
+      <Snackbar
+        open={isSnackBarOpen}
+        autoHideDuration={6000}
+        onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
+      >
+        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+      </Snackbar>
     </Layout>
   );
 };

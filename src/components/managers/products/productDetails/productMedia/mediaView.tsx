@@ -6,14 +6,11 @@ import { SingleMediaViewAndSelect } from '../../../../common/singleMediaViewAndS
 import { ProductIdProps } from '../utility/interfaces';
 import { ProductMedias } from './components/productIdMedias';
 
-export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
+export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct, showMessage }) => {
   const saveThumbnail = async (newSelectedMedia: string[]) => {
-    if (!product?.product || !newSelectedMedia.length) {
-      return;
-    }
     const thumbnailUrl = newSelectedMedia[0];
 
-    const baseProductInsert = product.product.productInsert;
+    const baseProductInsert = product?.product?.productInsert;
 
     if (baseProductInsert) {
       const updatedProductInsert = {
@@ -31,29 +28,29 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct }) => 
   };
 
   const saveMedia = async (newSelectedMedia: string[]) => {
-    if (newSelectedMedia.length === 0) {
-      console.warn('No images selected.');
-      return;
-    }
     const addedMediaUrls = new Set();
 
     for (const imageUrl of newSelectedMedia) {
       const compressedUrl = imageUrl.replace(/-og\.jpg$/, '-compressed.jpg');
-
       if (addedMediaUrls.has(imageUrl)) {
-        console.warn(`Image already added: ${imageUrl}`);
-        continue;
+        return;
       }
       addedMediaUrls.add(imageUrl);
-      const response = await addMediaByID({
-        productId: Number(id),
-        fullSize: imageUrl,
-        thumbnail: imageUrl,
-        compressed: compressedUrl,
-      });
+      try {
+        const response = await addMediaByID({
+          productId: Number(id),
+          fullSize: imageUrl,
+          thumbnail: imageUrl,
+          compressed: compressedUrl,
+        });
 
-      if (response) {
-        fetchProduct();
+        showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
+
+        if (response) {
+          fetchProduct();
+        }
+      } catch (error) {
+        showMessage('FAILED TO UPLOAD PROUCT WITH NEW MEDIAS', 'error');
       }
     }
   };

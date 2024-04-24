@@ -5,11 +5,12 @@ import { FC, useState } from 'react';
 import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';
 
-export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct }) => {
+export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, showMessage }) => {
   const [tag, setTag] = useState('');
 
   const deleteTagFromList = async (removeTag: string | undefined) => {
     const response = await deleteTag({ productId: Number(id), tag: removeTag });
+    showMessage('TAG REMOVED', 'success');
     if (response) {
       fetchProduct();
     }
@@ -17,9 +18,11 @@ export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct }) =
 
   const addNewTag = async () => {
     const response = await updateTag({ productId: Number(id), tag: tag });
+    showMessage('TAG ADDED', 'success');
     if (response) {
       fetchProduct();
     }
+    setTag('');
   };
   return (
     <Grid container spacing={2}>

@@ -20,6 +20,11 @@ const useMediaSelector = (
     setSortByDate: React.Dispatch<React.SetStateAction<string>>;
     sortedAndFilteredMedia: () => common_Media[];
     isLoading: boolean
+    snackBarMessage: string
+    showMessage: (message: string, severity: 'success' | 'error') => void
+    snackBarSeverity: 'success' | 'error'
+    closeSnackBar: () => void
+    isSnackBarOpen: boolean
 } => {
     const [media, setMedia] = useState<common_Media[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialIsLoading);
@@ -27,6 +32,19 @@ const useMediaSelector = (
     const [url, setUrl] = useState<string>('');
     const [filterByType, setFilterByType] = useState('');
     const [sortByDate, setSortByDate] = useState('desc');
+    const [snackBarMessage, setSnackBarMessage] = useState<string>('')
+    const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false)
+    const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+
+    const showMessage = (message: string, severity: 'success' | 'error') => {
+        setSnackBarMessage(message);
+        setSnackBarSeverity(severity)
+        setIsSnackBarOpen(!isSnackBarOpen)
+    }
+
+    const closeSnackBar = () => {
+        setIsSnackBarOpen(!isSnackBarOpen)
+    }
 
     const sortedAndFilteredMedia = useCallback(() => {
         return media
@@ -75,13 +93,15 @@ const useMediaSelector = (
             try {
                 await uploadContentLink({ url: url });
                 reload();
+                showMessage('MEDIA UPLOADED', 'success')
             } catch (error) {
-                console.error("Error updating link:", error);
+                showMessage('ERROR UPDATING MEDIA', 'error')
             } finally {
                 setIsLoading(false);
             }
             setUrl('');
         } else {
+            showMessage('INCORRECT URL', 'error')
             setUrl('');
         }
     }, [url, reload]);
@@ -99,7 +119,12 @@ const useMediaSelector = (
         sortByDate,
         setSortByDate,
         sortedAndFilteredMedia,
-        isLoading
+        isLoading,
+        snackBarMessage,
+        showMessage,
+        closeSnackBar,
+        isSnackBarOpen,
+        snackBarSeverity
     };
 };
 

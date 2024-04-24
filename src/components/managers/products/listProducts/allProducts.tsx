@@ -17,11 +17,8 @@ export const AllProducts: FC = () => {
   const [snackbarMessage, setSnackbarMessage] = useState<string>('');
   const navigate = useNavigate();
 
-  const handleProductClick = (index: number | undefined) => {
-    if (deletingProductId === index) {
-      return;
-    }
-    navigate({ to: `${ROUTES.singleProduct}/${index}` });
+  const handleProductClick = (id: number | undefined) => {
+    navigate({ to: `${ROUTES.singleProduct}/${id}` });
   };
 
   const handleDeleteClick = async (

@@ -1,13 +1,5 @@
 import { ContentCopy } from '@mui/icons-material';
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  Snackbar,
-  Typography,
-  useMediaQuery,
-  useTheme,
-} from '@mui/material';
+import { Button, Dialog, DialogContent, Snackbar, Typography } from '@mui/material';
 import { common_MediaInsert } from 'api/proto-http/admin';
 import { FullSizeMediaModalInterface } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
@@ -28,8 +20,6 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   });
   const [snackBarOpen, setSnackbarOpen] = useState(false);
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-  const theme = useTheme();
-  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
   const showMessage = (message: string) => {
     setSnackBarMessage(message);

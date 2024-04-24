@@ -38,18 +38,10 @@ const queryClient = new QueryClient();
 const hashHistory = createHashHistory({
   window: window,
 });
-const location = new ReactLocation({ history: hashHistory });
+export const location = new ReactLocation({ history: hashHistory });
 
 const routes: Route<DefaultGenerics>[] = [
   { path: ROUTES.login, element: <LoginBlock /> },
-  {
-    path: ROUTES.error,
-    element: (
-      <ProtectedRoute>
-        <ErrorPage />
-      </ProtectedRoute>
-    ),
-  },
   {
     path: ROUTES.main,
     element: (
@@ -160,6 +152,14 @@ const routes: Route<DefaultGenerics>[] = [
     element: (
       <ProtectedRoute>
         <Orders />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: ROUTES.error,
+    element: (
+      <ProtectedRoute>
+        <ErrorPage />
       </ProtectedRoute>
     ),
   },

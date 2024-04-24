@@ -1,4 +1,4 @@
-import { Box, Grid } from '@mui/material';
+import { Box, Grid, Snackbar } from '@mui/material';
 import { Layout } from 'components/login/layout';
 import { ByUrl } from 'features/mediaSelector/byUrl';
 import { DragDrop } from 'features/mediaSelector/dragDrop';
@@ -23,6 +23,9 @@ export const MediaManager: FC = () => {
     setFilterByType,
     sortByDate,
     setSortByDate,
+    snackBarMessage,
+    closeSnackBar,
+    isSnackBarOpen,
   } = useMediaSelector();
 
   useEffect(() => {
@@ -56,6 +59,12 @@ export const MediaManager: FC = () => {
             enableModal={true}
           />
         </Grid>
+        <Snackbar
+          open={isSnackBarOpen}
+          message={snackBarMessage}
+          autoHideDuration={3000}
+          onClose={closeSnackBar}
+        />
       </Grid>
     </Layout>
   );

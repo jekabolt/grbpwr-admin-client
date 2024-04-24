@@ -1,4 +1,4 @@
-import { Button, Grid } from '@mui/material';
+import { Alert, Button, Grid, Snackbar } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 import { addProduct, getDictionary } from 'api/admin';
 import { AddProductRequest, common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
@@ -34,6 +34,15 @@ export const initialProductState: common_ProductNew = {
 
 export const AddProducts: FC = () => {
   const [dictionary, setDictionary] = useState<common_Dictionary | undefined>();
+  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
+  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
+  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+
+  const showMessage = (message: string, severity: 'success' | 'error') => {
+    setSnackBarMessage(message);
+    setSnackBarSeverity(severity);
+    setIsSnackBarOpen(!isSnackBarOpen);
+  };
 
   useEffect(() => {
     const fetchDictionary = async () => {
@@ -68,6 +77,8 @@ export const AddProducts: FC = () => {
       await addProduct(productToSubmit);
       resetForm();
     } catch (error) {
+      const message = sessionStorage.getItem('errorCode');
+      message ? showMessage(message, 'error') : '';
     } finally {
       setSubmitting(false);
     }
@@ -109,6 +120,13 @@ export const AddProducts: FC = () => {
           </Form>
         )}
       </Formik>
+      <Snackbar
+        open={isSnackBarOpen}
+        autoHideDuration={6000}
+        onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
+      >
+        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+      </Snackbar>
     </Layout>
   );
 };

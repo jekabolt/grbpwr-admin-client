@@ -1,4 +1,13 @@
-import { Box, Button, CircularProgress, Grid, Paper, Snackbar, Typography } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  Grid,
+  Paper,
+  Snackbar,
+  Typography,
+} from '@mui/material';
 import { uploadContentImage, uploadContentVideo } from 'api/admin';
 import React, { FC, useState } from 'react';
 
@@ -20,14 +29,16 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
   const [snackbarMessage, setSnackbarMessage] = useState<string>('');
+  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
   const [loading, setLoading] = useState<boolean>(false);
 
   const handleSnackbarClose = () => {
     setSnackbarOpen(false);
   };
 
-  const showMessage = (message: string) => {
+  const showMessage = (message: string, severity: 'success' | 'error') => {
     setSnackbarMessage(message);
+    setSnackBarSeverity(severity);
     setSnackbarOpen(true);
   };
 
@@ -54,7 +65,7 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
     if (files && files.length > 0) {
       processFiles(files);
     } else {
-      alert('No selected files.');
+      showMessage('NO SELECTED FILES', 'error');
     }
     if ('dataTransfer' in e) {
       setIsDragging(false);
@@ -77,7 +88,7 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
 
   const handleUpload = async () => {
     if (selectedFiles.length === 0) {
-      showMessage('NO SELECTED FILE');
+      showMessage('NO SELECTED FILE', 'error');
       return;
     }
 
@@ -87,7 +98,7 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
     const fileExtension = (selectedFile.name.split('.').pop() || '').toLowerCase();
 
     if (!fileExtension) {
-      showMessage('INVALID FILE FORMAT');
+      showMessage('INVALID FILE FORMAT', 'error');
       setLoading(false);
       return;
     }
@@ -111,9 +122,9 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
             });
           }
 
-          showMessage('MEDIA IS UPLOADED');
+          showMessage('MEDIA IS UPLOADED', 'success');
         } catch (error) {
-          showMessage('UPLOAD HAS FAILED. TRY AGAIN');
+          showMessage('UPLOAD HAS FAILED. TRY AGAIN', 'success');
         } finally {
           setLoading(false);
           setSelectedFiles([]);
@@ -153,12 +164,9 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
           </Paper>
           {loading && <CircularProgress />}
         </Box>
-        <Snackbar
-          open={snackbarOpen}
-          message={snackbarMessage}
-          autoHideDuration={6000}
-          onClose={handleSnackbarClose}
-        />
+        <Snackbar open={snackbarOpen} autoHideDuration={6000} onClose={handleSnackbarClose}>
+          <Alert severity={snackBarSeverity}>{snackbarMessage}</Alert>
+        </Snackbar>
       </Grid>
     </Grid>
   );

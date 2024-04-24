@@ -1,5 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Box, Button, Dialog, Grid, IconButton } from '@mui/material';
+import { Alert, Box, Button, Dialog, Grid, IconButton, Snackbar } from '@mui/material';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { fileExtensionToContentType } from 'features/utilitty/filterExtentions';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
@@ -29,14 +29,18 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     sortByDate,
     setSortByDate,
     isLoading,
+    snackBarMessage,
+    closeSnackBar,
+    isSnackBarOpen,
+    showMessage,
+    snackBarSeverity,
   } = useMediaSelector();
   const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
-  const [saveAttempted, setSaveAttempted] = useState(false);
   const [open, setOpen] = useState(true);
 
   const handleMediaAndCloseSelector = async () => {
-    setSaveAttempted(true);
     if (selectedMedia.length === 0) {
+      showMessage('NO SELECTED MEDIA', 'error');
       return;
     }
     const urls = selectedMedia.map((item) => item.url);
@@ -79,58 +83,61 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
   };
 
   return (
-    <Dialog
-      open={open}
-      onClose={handleClose}
-      aria-labelledby='media-selector-dialog-title'
-      fullWidth={true}
-      maxWidth='xl'
-      className={styles.modal}
-    >
-      <Grid container spacing={2} justifyContent='center'>
-        <Grid item xs={11} className={styles.filter_upload_boxes}>
-          <Box component='div' className={styles.filter_upload_media_container}>
-            <ByUrl url={url} setUrl={setUrl} updateContentLink={updateLink} isLoading={isLoading} />
-            <DragDrop reload={reload} />
-            <FilterMedias
-              filterByType={filterByType}
-              setFilterByType={setFilterByType}
-              sortByDate={sortByDate}
-              setSortByDate={setSortByDate}
-            />
-          </Box>
-        </Grid>
-        <Grid item xs={12}>
-          <MediaList
-            setMedia={setMedia}
-            media={media}
-            allowMultiple={allowMultiple}
-            select={select}
-            selectedMedia={selectedMedia}
-            sortedAndFilteredMedia={sortedAndFilteredMedia}
-          />
-        </Grid>
-        <Grid item xs={12} display='flex' justifyContent='center'>
-          <Button onClick={handleMediaAndCloseSelector} variant='contained' size='small'>
-            Save
-          </Button>
-        </Grid>
-        <IconButton
-          className={styles.close_modal}
-          size='small'
-          aria-label='close'
-          onClick={handleClose}
-        >
-          <ClearIcon />
-        </IconButton>
-        {saveAttempted && selectedMedia.length === 0 && (
-          <Grid item xs={12}>
-            <h4 className={styles.no_media_message}>
-              No media selected. Please select or upload media.
-            </h4>
+    <>
+      <Dialog
+        open={open}
+        onClose={handleClose}
+        aria-labelledby='media-selector-dialog-title'
+        fullWidth={true}
+        maxWidth='xl'
+        className={styles.modal}
+      >
+        <Grid container spacing={2} justifyContent='center'>
+          <Grid item xs={11} className={styles.filter_upload_boxes}>
+            <Box component='div' className={styles.filter_upload_media_container}>
+              <ByUrl
+                url={url}
+                setUrl={setUrl}
+                updateContentLink={updateLink}
+                isLoading={isLoading}
+              />
+              <DragDrop reload={reload} />
+              <FilterMedias
+                filterByType={filterByType}
+                setFilterByType={setFilterByType}
+                sortByDate={sortByDate}
+                setSortByDate={setSortByDate}
+              />
+            </Box>
           </Grid>
-        )}
-      </Grid>
-    </Dialog>
+          <Grid item xs={12}>
+            <MediaList
+              setMedia={setMedia}
+              media={media}
+              allowMultiple={allowMultiple}
+              select={select}
+              selectedMedia={selectedMedia}
+              sortedAndFilteredMedia={sortedAndFilteredMedia}
+            />
+          </Grid>
+          <Grid item xs={12} display='flex' justifyContent='center'>
+            <Button onClick={handleMediaAndCloseSelector} variant='contained' size='small'>
+              Save
+            </Button>
+          </Grid>
+          <IconButton
+            className={styles.close_modal}
+            size='small'
+            aria-label='close'
+            onClick={handleClose}
+          >
+            <ClearIcon />
+          </IconButton>
+        </Grid>
+        <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
+          <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+        </Snackbar>
+      </Dialog>
+    </>
   );
 };
