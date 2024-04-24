@@ -1,4 +1,4 @@
-import { Grid } from '@mui/material';
+import { Grid, Typography } from '@mui/material';
 import { addMediaByID } from 'api/admin';
 import { updateProductById } from 'api/updateProductsById';
 import { FC } from 'react';
@@ -58,12 +58,18 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct, showM
   return (
     <Grid container spacing={4}>
       <Grid item xs={12}>
+        <Typography variant='h4' textTransform='uppercase'>
+          thumbnail
+        </Typography>
         <SingleMediaViewAndSelect
           link={product?.product?.productInsert?.thumbnail}
           saveSelectedMedia={saveThumbnail}
         />
       </Grid>
       <Grid item xs={12}>
+        <Typography variant='h4' textTransform='uppercase'>
+          product medias
+        </Typography>
         <ProductMedias
           product={product}
           fetchProduct={fetchProduct}

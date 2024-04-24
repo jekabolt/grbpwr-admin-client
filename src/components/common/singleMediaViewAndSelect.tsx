@@ -1,3 +1,4 @@
+import { Grid } from '@mui/material';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
@@ -9,8 +10,8 @@ export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
   saveSelectedMedia,
 }) => {
   return (
-    <>
-      <div className={styles.thumbnail_container}>
+    <Grid container>
+      <Grid item xs={10} className={styles.thumbnail_container}>
         {link ? (
           isVideo(link) ? (
             <video src={link} controls></video>
@@ -18,16 +19,16 @@ export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
             <img src={link} alt='thumbnail' />
           )
         ) : (
-          <h1>No image selected</h1>
+          ''
         )}
-        <div className={styles.media_selector}>
+        <Grid item className={link ? styles.media_selector : styles.empty_media_selctor}>
           <MediaSelectorLayout
-            label='edit'
+            label={link ? 'edit' : 'select media'}
             saveSelectedMedia={saveSelectedMedia}
             allowMultiple={false}
           />
-        </div>
-      </div>
-    </>
+        </Grid>
+      </Grid>
+    </Grid>
   );
 };
