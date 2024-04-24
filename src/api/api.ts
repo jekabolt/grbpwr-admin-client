@@ -38,6 +38,9 @@ axiosInstance.interceptors.response.use(
       location.history.push(ROUTES.error)
     } else if (error.response && error.response.status === 400) {
       sessionStorage.setItem('errorCode', error.response.data.message)
+    } else if (error.response && error.response.status === 404) {
+      sessionStorage.setItem('errorCode', error.response.data.message)
+      location.history.push(ROUTES.error)
     }
     return Promise.reject(error);
   },
