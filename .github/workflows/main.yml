@@ -49,14 +49,27 @@ jobs:
       # Install Go and protoc-gen-typescript-http
       - name: Install Go and protoc-gen-typescript-http
         run: |
+          # Add the Golang backport PPA
           sudo add-apt-repository ppa:longsleep/golang-backports -y
           sudo apt-get update
+
+          # Install Go
           sudo apt-get install golang-go -y
+
+          # Configure environment variables for Go
           export GOPATH=$HOME/go
           export PATH=$PATH:$GOPATH/bin
+
+          # Install protoc-gen-typescript-http tool
           go install go.einride.tech/protoc-gen-typescript-http@latest
+
+          # Append Go path to the GitHub Environment
           echo "GOPATH=$GOPATH" >> $GITHUB_ENV
           echo "PATH=$PATH:$GOPATH/bin" >> $GITHUB_ENV
+
+          # Optionally comment out the following lines to disable Microsoft repository if issues persist
+          # sudo sed -i 's/^deb/# deb/' /etc/apt/sources.list.d/microsoft-prod.list
+          # sudo apt-get update
 
       # Custom step to prepare your code for the build process
       - name: Prepare the Code for Build
