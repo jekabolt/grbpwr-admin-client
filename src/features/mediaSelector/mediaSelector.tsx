@@ -1,5 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Box, Button, Dialog, Grid, IconButton, Snackbar } from '@mui/material';
+import { Alert, Box, Button, Dialog, Grid, IconButton, Snackbar } from '@mui/material';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { fileExtensionToContentType } from 'features/utilitty/filterExtentions';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
@@ -33,13 +33,14 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     closeSnackBar,
     isSnackBarOpen,
     showMessage,
+    snackBarSeverity,
   } = useMediaSelector();
   const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
   const [open, setOpen] = useState(true);
 
   const handleMediaAndCloseSelector = async () => {
     if (selectedMedia.length === 0) {
-      showMessage('NO SELECTED MEDIA');
+      showMessage('NO SELECTED MEDIA', 'error');
       return;
     }
     const urls = selectedMedia.map((item) => item.url);
@@ -133,12 +134,9 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
             <ClearIcon />
           </IconButton>
         </Grid>
-        <Snackbar
-          open={isSnackBarOpen}
-          message={snackBarMessage}
-          autoHideDuration={3000}
-          onClose={closeSnackBar}
-        />
+        <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
+          <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+        </Snackbar>
       </Dialog>
     </>
   );

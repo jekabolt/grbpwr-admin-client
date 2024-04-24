@@ -36,9 +36,11 @@ export const AddProducts: FC = () => {
   const [dictionary, setDictionary] = useState<common_Dictionary | undefined>();
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
+  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
 
-  const showMessage = (message: string) => {
+  const showMessage = (message: string, severity: 'success' | 'error') => {
     setSnackBarMessage(message);
+    setSnackBarSeverity(severity);
     setIsSnackBarOpen(!isSnackBarOpen);
   };
 
@@ -76,7 +78,7 @@ export const AddProducts: FC = () => {
       resetForm();
     } catch (error) {
       const message = sessionStorage.getItem('errorCode');
-      message ? showMessage(message) : 'UNDEFINED ERROR';
+      message ? showMessage(message, 'error') : '';
     } finally {
       setSubmitting(false);
     }
@@ -120,11 +122,10 @@ export const AddProducts: FC = () => {
       </Formik>
       <Snackbar
         open={isSnackBarOpen}
-        message={snackBarMessage}
         autoHideDuration={6000}
         onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
       >
-        <Alert severity='success'>Save successful</Alert>
+        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
       </Snackbar>
     </Layout>
   );

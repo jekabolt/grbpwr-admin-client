@@ -1,5 +1,6 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import {
+  Alert,
   Grid,
   IconButton,
   ImageList,
@@ -28,7 +29,8 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   sortedAndFilteredMedia,
   enableModal = false,
 }) => {
-  const { showMessage, isSnackBarOpen, closeSnackBar, snackBarMessage } = useMediaSelector();
+  const { showMessage, isSnackBarOpen, closeSnackBar, snackBarMessage, snackBarSeverity } =
+    useMediaSelector();
   const [openModal, setOpenModal] = useState(false);
   const [clickedMedia, setClickedMedia] = useState<common_MediaInsert>();
   const theme = useTheme();
@@ -37,7 +39,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const handleDeleteFile = async (id: number | undefined, e: React.MouseEvent) => {
     e.stopPropagation();
     await deleteFiles({ id });
-    showMessage('MEDIA WAS SUCCESSFULLY DELETED');
+    showMessage('MEDIA WAS SUCCESSFULLY DELETED', 'success');
     setMedia((currentFiles) => currentFiles?.filter((file) => file.id !== id));
   };
 
@@ -115,12 +117,9 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
         )}
       </Grid>
       <FullSizeMediaModal open={openModal} close={handleCloseModal} clickedMedia={clickedMedia} />
-      <Snackbar
-        open={isSnackBarOpen}
-        message={snackBarMessage}
-        autoHideDuration={3000}
-        onClose={closeSnackBar}
-      />
+      <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
+        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+      </Snackbar>
     </Grid>
   );
 };

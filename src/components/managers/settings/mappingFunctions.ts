@@ -1,4 +1,4 @@
-import { PaymentMethodAllowance, ShipmentCarrierAllowancePrice, common_PaymentMethod, common_PaymentMethodNameEnum, common_ShipmentCarrier } from "api/proto-http/admin";
+import { PaymentMethodAllowance, ShipmentCarrierAllowancePrice, common_PaymentMethod, common_ShipmentCarrier } from "api/proto-http/admin";
 
 export function mapShipmentCarriers(
     carriers: common_ShipmentCarrier[] | undefined,
@@ -18,9 +18,7 @@ export function mapPaymentMethods(
     payments: common_PaymentMethod[] | undefined,
 ): PaymentMethodAllowance[] | undefined {
     return payments?.map((payment) => ({
-        paymentMethod: payment.name
-            ?.replace(/^PAYMENT_METHOD_NAME_ENUM_/, '')
-            .replace(/^USDT_/, '') as common_PaymentMethodNameEnum,
+        paymentMethod: payment.name,
         allow: payment.allowed,
     }));
 }

@@ -21,7 +21,8 @@ const useMediaSelector = (
     sortedAndFilteredMedia: () => common_Media[];
     isLoading: boolean
     snackBarMessage: string
-    showMessage: (message: string) => void
+    showMessage: (message: string, severity: 'success' | 'error') => void
+    snackBarSeverity: 'success' | 'error'
     closeSnackBar: () => void
     isSnackBarOpen: boolean
 } => {
@@ -33,9 +34,11 @@ const useMediaSelector = (
     const [sortByDate, setSortByDate] = useState('desc');
     const [snackBarMessage, setSnackBarMessage] = useState<string>('')
     const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false)
+    const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
 
-    const showMessage = (message: string) => {
+    const showMessage = (message: string, severity: 'success' | 'error') => {
         setSnackBarMessage(message);
+        setSnackBarSeverity(severity)
         setIsSnackBarOpen(!isSnackBarOpen)
     }
 
@@ -90,15 +93,15 @@ const useMediaSelector = (
             try {
                 await uploadContentLink({ url: url });
                 reload();
-                showMessage('MEDIA UPLOADED')
+                showMessage('MEDIA UPLOADED', 'success')
             } catch (error) {
-                showMessage('ERROR UPDATING LINK')
+                showMessage('ERROR UPDATING MEDIA', 'error')
             } finally {
                 setIsLoading(false);
             }
             setUrl('');
         } else {
-            showMessage('INCORRECT URL')
+            showMessage('INCORRECT URL', 'error')
             setUrl('');
         }
     }, [url, reload]);
@@ -120,7 +123,8 @@ const useMediaSelector = (
         snackBarMessage,
         showMessage,
         closeSnackBar,
-        isSnackBarOpen
+        isSnackBarOpen,
+        snackBarSeverity
     };
 };
 

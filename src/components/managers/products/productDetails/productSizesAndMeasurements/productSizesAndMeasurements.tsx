@@ -75,13 +75,13 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
             quantity: sizeQuantity[sizeId],
           };
           const response = await updateSize(request);
-          showMessage('PRODUCT HAS BEEN UPLOADED');
+          showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
           if (response) {
             fetchProduct();
           }
         }
       } catch (error) {
-        showMessage('SIZES CANNOT BE UPDATED');
+        showMessage('SIZES CANNOT BE UPDATED', 'error');
       }
     }
   };
@@ -113,13 +113,13 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
         measurements: measurementQuantityArray,
       };
       const response = await updateMeasurement(request);
-      showMessage('PRODUCT HAS BEEN UPLOADED');
+      showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
       if (response) {
         setMeasurementQuantity({});
         fetchProduct();
       }
     } catch (error) {
-      showMessage('MEASUREMENTS CANNOT BE UPDATED');
+      showMessage('MEASUREMENTS CANNOT BE UPDATED', 'error');
     }
   };
 

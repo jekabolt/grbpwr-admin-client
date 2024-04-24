@@ -10,7 +10,7 @@ export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, sho
 
   const deleteTagFromList = async (removeTag: string | undefined) => {
     const response = await deleteTag({ productId: Number(id), tag: removeTag });
-    showMessage('TAG REMOVED');
+    showMessage('TAG REMOVED', 'success');
     if (response) {
       fetchProduct();
     }
@@ -18,7 +18,7 @@ export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, sho
 
   const addNewTag = async () => {
     const response = await updateTag({ productId: Number(id), tag: tag });
-    showMessage('TAG ADDED');
+    showMessage('TAG ADDED', 'success');
     if (response) {
       fetchProduct();
     }

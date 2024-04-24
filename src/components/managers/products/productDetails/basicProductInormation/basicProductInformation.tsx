@@ -97,7 +97,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         return key !== 'hidden' && !value;
       })
     ) {
-      showMessage('PLEASE FILL OUT ALL REQUIRED FIELDS');
+      showMessage('PLEASE FILL OUT ALL REQUIRED FIELDS', 'error');
       return;
     }
     try {
@@ -106,11 +106,11 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         id: Number(id),
         product: updatedDetails as common_ProductInsert,
       });
-      showMessage('PRODUCT HAS BEEN UPLOADED');
+      showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
       setUpdatePayload(updatedDetails);
     } catch (error) {
       const message = sessionStorage.getItem('errorcode');
-      message ? showMessage(message) : showMessage('PRICE MUST BE GREATER THAN 0');
+      message ? showMessage(message, 'error') : showMessage('PRODUCT CANNOT BE UPDATED', 'error');
     }
   };
 

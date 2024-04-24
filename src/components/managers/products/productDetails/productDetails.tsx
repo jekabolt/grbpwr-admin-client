@@ -1,14 +1,12 @@
 import { Alert, Grid, Snackbar } from '@mui/material';
-import { useMatch } from '@tanstack/react-location';
+import { MakeGenerics, useMatch } from '@tanstack/react-location';
 import { getProductByID } from 'api/admin';
 import { common_ProductFull } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
+import { BasicProductIformation } from './basicProductInormation/basicProductInformation';
 import { MediaView } from './productMedia/mediaView';
 import { ProductSizesAndMeasurements } from './productSizesAndMeasurements/productSizesAndMeasurements';
-
-import { MakeGenerics } from '@tanstack/react-location';
-import { BasicProductIformation } from './basicProductInormation/basicProductInformation';
 import { ProductTags } from './productTags/productTags';
 
 export type ProductIdProps = MakeGenerics<{
@@ -18,27 +16,35 @@ export type ProductIdProps = MakeGenerics<{
 }>;
 
 export const ProductDetails: FC = () => {
-  const [product, setProduct] = useState<common_ProductFull | undefined>();
   const {
-    params: { id: id },
+    params: { id },
   } = useMatch<ProductIdProps>();
-  useEffect(() => {
-    fetchProduct();
-  }, [id]);
+
+  const [product, setProduct] = useState<common_ProductFull | undefined>();
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
+  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
 
-  const showMessage = (message: string) => {
+  const showMessage = (message: string, severity: 'success' | 'error') => {
     setSnackBarMessage(message);
+    setSnackBarSeverity(severity);
     setIsSnackBarOpen(!isSnackBarOpen);
   };
 
   const fetchProduct = async () => {
-    const response = await getProductByID({
-      id: Number(id),
-    });
-    setProduct(response.product);
+    try {
+      const response = await getProductByID({
+        id: parseInt(id),
+      });
+      setProduct(response.product);
+    } catch (error) {
+      console.error(error);
+    }
   };
+
+  useEffect(() => {
+    fetchProduct();
+  }, [id]);
 
   return (
     <Layout>
@@ -86,11 +92,10 @@ export const ProductDetails: FC = () => {
       </Grid>
       <Snackbar
         open={isSnackBarOpen}
-        message={snackBarMessage}
         autoHideDuration={6000}
         onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
       >
-        <Alert severity='success'>Save successful</Alert>
+        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
       </Snackbar>
     </Layout>
   );

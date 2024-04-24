@@ -44,13 +44,13 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct, showM
           compressed: compressedUrl,
         });
 
-        showMessage('PRODUCT HAS BEEN UPLOADED');
+        showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
 
         if (response) {
           fetchProduct();
         }
       } catch (error) {
-        showMessage('FAILED TO UPLOAD PROUCT WITH NEW MEDIAS');
+        showMessage('FAILED TO UPLOAD PROUCT WITH NEW MEDIAS', 'error');
       }
     }
   };

@@ -1,3 +1,4 @@
+import { Alert, Snackbar } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { addPromo } from 'api/promo';
 import { AddPromoRequest } from 'api/proto-http/admin';
@@ -27,10 +28,18 @@ export const Promo: FC = () => {
 
   const { code, freeShipping, discount, expiration, allowed, voucher } = promoState;
   const navigate = useNavigate();
+  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
+  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
+  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+
+  const showMessage = (message: string, severity: 'success' | 'error') => {
+    setSnackBarMessage(message);
+    setSnackBarSeverity(severity);
+    setIsSnackBarOpen(true);
+  };
 
   const handleChange = (key: keyof PromoState, value: string | boolean | number) => {
     if (key === 'discount' && typeof value === 'number') {
-      // Ensure discount value is within the range of 0 to 99
       if (value < 0) {
         value = 0;
       } else if (value > 99) {
@@ -41,20 +50,23 @@ export const Promo: FC = () => {
   };
 
   const createPromo = async () => {
-    const formattedExpiration = expiration.endsWith('Z') ? expiration : expiration + ':00Z';
-
-    const promo: AddPromoRequest = {
-      promo: {
-        code: code,
-        discount: { value: discount.toString() },
-        expiration: formattedExpiration,
-        freeShipping,
-        allowed,
-        voucher,
-      },
-    };
-
-    await addPromo(promo);
+    try {
+      const formattedExpiration = expiration.endsWith('Z') ? expiration : expiration + ':00Z';
+      const promo: AddPromoRequest = {
+        promo: {
+          code: code,
+          discount: { value: discount.toString() },
+          expiration: formattedExpiration,
+          freeShipping,
+          allowed,
+          voucher,
+        },
+      };
+      await addPromo(promo);
+      showMessage('PROMO ADDED', 'success');
+    } catch (error) {
+      showMessage('PROMO CANNOT BE CREATED', 'error');
+    }
   };
 
   const navigateGetPromo = () => {
@@ -120,6 +132,13 @@ export const Promo: FC = () => {
           </button>
         </div>
       </div>
+      <Snackbar
+        open={isSnackBarOpen}
+        onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
+        autoHideDuration={3000}
+      >
+        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+      </Snackbar>
     </Layout>
   );
 };
