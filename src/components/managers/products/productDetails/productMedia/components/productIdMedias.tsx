@@ -2,6 +2,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton } from '@mui/material';
 import { deleteMediaById } from 'api/updateProductsById';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
+import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useMemo } from 'react';
 import styles from 'styles/product-id-media.scss';
 import { MediaListProps } from '../../utility/interfaces';
@@ -29,29 +30,43 @@ export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveS
   }, [product]);
 
   return (
-    <>
-      <Grid container gap={5} className={styles.listed_media_container}>
-        {uniqueMedia?.map((media) => (
-          <Grid item xs={5} key={media.id} className={styles.listed_media_wrapper}>
+    <Grid container gap={2} className={styles.listed_media_container}>
+      {uniqueMedia?.map((media) => (
+        <Grid
+          item
+          xs={12}
+          sm={6}
+          md={4}
+          lg={3}
+          key={media.id}
+          className={styles.listed_media_wrapper}
+        >
+          {isVideo(media.productMediaInsert?.thumbnail) ? (
+            <video
+              src={media.productMediaInsert?.thumbnail}
+              controls
+              className={styles.media}
+            ></video>
+          ) : (
             <img src={media.productMediaInsert?.thumbnail} alt='media' className={styles.media} />
-            <IconButton
-              aria-label='delete'
-              size='small'
-              onClick={() => handleDeleteMedia(media.id)}
-              className={styles.media_btn}
-            >
-              <ClearIcon />
-            </IconButton>
-          </Grid>
-        ))}
-        <Grid item>
-          <MediaSelectorLayout
-            label='upload new media'
-            allowMultiple={true}
-            saveSelectedMedia={saveSelectedMedia}
-          />
+          )}
+          <IconButton
+            aria-label='delete'
+            size='small'
+            onClick={() => handleDeleteMedia(media.id)}
+            className={styles.media_btn}
+          >
+            <ClearIcon />
+          </IconButton>
         </Grid>
+      ))}
+      <Grid item xs={12} sm={6} md={4} lg={3} className={styles.listed_media_wrapper}>
+        <MediaSelectorLayout
+          label='select media'
+          allowMultiple={true}
+          saveSelectedMedia={saveSelectedMedia}
+        />
       </Grid>
-    </>
+    </Grid>
   );
 };

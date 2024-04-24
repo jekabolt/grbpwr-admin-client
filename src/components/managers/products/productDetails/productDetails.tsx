@@ -51,7 +51,7 @@ export const ProductDetails: FC = () => {
       <Grid container spacing={2} marginTop={4} justifyContent='center'>
         <Grid item xs={9}>
           <Grid container spacing={2}>
-            <Grid item xs={6}>
+            <Grid item xs={7}>
               <MediaView
                 product={product}
                 id={id}
@@ -59,9 +59,9 @@ export const ProductDetails: FC = () => {
                 showMessage={showMessage}
               />
             </Grid>
-            <Grid item xs={6}>
+            <Grid item xs={5}>
               <Grid container spacing={2}>
-                <Grid item xs={7}>
+                <Grid item xs={9}>
                   <BasicProductIformation
                     product={product}
                     id={id}
