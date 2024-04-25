@@ -29,6 +29,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           variant='contained'
           startIcon={<ArrowBackIosIcon />}
           onClick={() => window.history.back()}
+          className={styles.hide_btn}
         >
           Go Back
         </Button>
@@ -40,6 +41,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           color='secondary' // Choose a color that fits your app's theme
           startIcon={<ExitToAppIcon />}
           onClick={handleLogout}
+          className={styles.hide_btn}
         >
           Log Out
         </Button>

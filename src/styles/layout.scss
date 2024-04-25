@@ -7,7 +7,6 @@
     'logout content';
   grid-template-columns: 40px 1fr;
   grid-template-rows: 1fr auto;
-  //   height: 200vh;
 
   .layout_logo {
     grid-area: logo;
@@ -24,12 +23,13 @@
     bottom: 20px;
     right: 20px;
     text-align: right;
-
+  }
+  @media print {
+    .hide_btn {
+      display: none;
+    }
     .logout_btn {
-      background-color: black;
-      color: white;
-      border: none;
-      font-size: 25px;
+      display: none;
     }
   }
 }

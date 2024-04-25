@@ -15,7 +15,9 @@ import { common_Dictionary, common_OrderFull } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
+import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
+import styles from 'styles/order.scss';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 
 // Define the expected params structure
@@ -39,6 +41,28 @@ export const OrderDetails = () => {
   const [showBilling, setShowBilling] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState('');
   const [orderStatus, setOrderStatus] = useState<string | undefined>('');
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [columnVisibility, setColumnVisibility] = useState({
+    thumbnail: true,
+    productLink: true,
+    size: true,
+  });
+  useEffect(() => {
+    setColumnVisibility({ thumbnail: !isPrinting, productLink: !isPrinting, size: !isPrinting });
+  }, [isPrinting]);
+
+  useEffect(() => {
+    const handleBeforePrint = () => setIsPrinting(true);
+    const handleAfterPrint = () => setIsPrinting(false);
+
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
 
   const fetchDictionary = async () => {
     const response = await getDictionary({});
@@ -70,25 +94,25 @@ export const OrderDetails = () => {
     {
       field: 'thumbnail',
       headerName: '',
-      width: 300,
+      width: 200,
       renderCell: (params: any) => (
         <img src={params.value} alt='product' style={{ height: '100px', width: 'auto' }} />
       ),
     },
     {
       field: 'productName',
-      headerName: 'PRODUCT NAME',
-      width: 300,
+      headerName: isPrinting ? 'name' : 'PRODUCT NAME',
+      width: isPrinting ? 250 : 200,
     },
     {
       field: 'sku',
       headerName: 'SKU',
-      width: 300,
+      width: isPrinting ? 250 : 300,
     },
     {
       field: 'quantity',
       headerName: 'QUANTITY',
-      width: 200,
+      width: isPrinting ? 250 : 200,
       valueGetter: (_params: any, row: any) => {
         return row.orderItem.quantity;
       },
@@ -97,6 +121,7 @@ export const OrderDetails = () => {
       field: 'size',
       headerName: 'SIZE',
       width: 200,
+      cellClassName: styles.hide_cell,
       valueGetter: (_params: any, row: any) => {
         return dictionary?.sizes
           ?.find((x) => x.id === row.orderItem.sizeId)
@@ -106,7 +131,7 @@ export const OrderDetails = () => {
     {
       field: 'productPrice',
       headerName: 'PRICE',
-      width: 200,
+      width: isPrinting ? 250 : 200,
       valueGetter: (params: any, row: any) =>
         `${params * row.orderItem.quantity} ${dictionary?.baseCurrency}`,
     },
@@ -114,6 +139,7 @@ export const OrderDetails = () => {
       field: 'productLink',
       headerName: 'LINK',
       width: 100,
+      cellClassName: styles.hide_cell,
       valueGetter: (_params: any, row: any) => {
         return row.orderItem.productId;
       },
@@ -262,13 +288,15 @@ export const OrderDetails = () => {
                 {buyer?.email && (
                   <div style={{ display: 'flex' }}>
                     EMAIL:&nbsp;
-                    <CopyToClipboard text={buyer.email} />
+                    <div className={styles.hide_cell}>
+                      <CopyToClipboard text={buyer.email} />
+                    </div>
                   </div>
                 )}
                 {buyer?.firstName && <div>FIRST NAME: {buyer.firstName}</div>}
                 {buyer?.lastName && <div>LAST NAME: {buyer.lastName}</div>}
                 {buyer?.phone && <div>PHONE: {buyer.phone}</div>}
-                <div style={{ display: 'flex' }}>
+                <div className={isPrinting ? styles.hide_cell : styles.non_print_state}>
                   RECIEVE PROMO EMAILS:&nbsp;
                   {buyer?.receivePromoEmails ? (
                     <div style={{ backgroundColor: '#008f0080' }}>YES</div>
@@ -378,18 +406,19 @@ export const OrderDetails = () => {
 
   return (
     <Layout>
+      <img src={logo} className={styles.img_print} alt='logo' />
       <div style={{ margin: '5% 5%' }}>
         <Grid container spacing={2}>
-          <Grid item xs={3}>
+          <Grid item xs={3} className={styles.hide_cell}>
             ORDER ID: {orderDetails?.order?.id}
           </Grid>
-          <Grid item xs={3} style={{ display: 'flex' }}>
+          <Grid item xs={3} className={isPrinting ? styles.hide_cell : styles.non_print_state}>
             STATUS:&nbsp;{orderStatusColored}
           </Grid>
           <Grid item xs={3}>
             PLACED: {formatDateTime(orderDetails?.order?.placed)}
           </Grid>
-          <Grid item xs={3}>
+          <Grid item className={styles.hide_cell} xs={3}>
             MODIFIED: {formatDateTime(orderDetails?.order?.modified)}
           </Grid>
         </Grid>
@@ -397,20 +426,35 @@ export const OrderDetails = () => {
         <DataGrid
           rows={orderDetails?.orderItems || []}
           columns={orderItemsColumns}
+          columnVisibilityModel={columnVisibility}
           rowSelection={false}
-          paginationModel={{ page: page, pageSize: pageSize }}
+          paginationModel={
+            isPrinting
+              ? { page: page, pageSize: orderDetails?.orderItems?.length || pageSize }
+              : { page: page, pageSize: pageSize }
+          }
           onPaginationModelChange={onPaginationChange}
           pageSizeOptions={[5, 10, 20]}
-          sx={{ marginTop: '2rem' }}
+          sx={{ marginTop: '2rem', width: '90%' }}
           rowHeight={100}
+          hideFooterPagination={isPrinting}
         />
-        <div style={{ marginTop: '2rem' }}>{promoApplied}</div>
-        <div style={{ marginTop: '2rem' }}>{payment}</div>
+        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+          {promoApplied}
+        </div>
+        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+          {payment}
+        </div>
         <div style={{ marginTop: '2rem' }}>{shipping}</div>
-        <div style={{ marginTop: '2rem' }}>{billing}</div>
+        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+          {billing}
+        </div>
         <div style={{ marginTop: '2rem' }}>{trackingNumberSection}</div>
         <div style={{ marginTop: '2rem' }}>{markAsDeliveredSection}</div>
         <div style={{ marginTop: '2rem' }}>{refundOrderSection}</div>
+        <div className={styles.total}>
+          Total: {orderDetails?.order?.totalPrice?.value}&nbsp;{dictionary?.baseCurrency}
+        </div>
       </div>
     </Layout>
   );
