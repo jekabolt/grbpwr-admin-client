@@ -13,6 +13,11 @@
   margin-right: 12%;
 }
 
+.support {
+  margin-top: 2rem;
+  display: none;
+}
+
 @media print {
   .img_print {
     display: block;
@@ -20,5 +25,9 @@
 
   .hide_cell {
     display: none;
+  }
+
+  .support {
+    display: block;
   }
 }

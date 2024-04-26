@@ -100,14 +100,14 @@ export const OrderDetails = () => {
       ),
     },
     {
-      field: 'productName',
-      headerName: isPrinting ? 'name' : 'PRODUCT NAME',
-      width: isPrinting ? 250 : 200,
-    },
-    {
       field: 'sku',
       headerName: 'SKU',
       width: isPrinting ? 250 : 300,
+    },
+    {
+      field: 'productName',
+      headerName: isPrinting ? 'name' : 'PRODUCT NAME',
+      width: isPrinting ? 250 : 200,
     },
     {
       field: 'quantity',
@@ -415,6 +415,12 @@ export const OrderDetails = () => {
           <Grid item xs={3} className={isPrinting ? styles.hide_cell : styles.non_print_state}>
             STATUS:&nbsp;{orderStatusColored}
           </Grid>
+          <Grid item xs={3} className={styles.support}>
+            COMPANY ADRESS: ADRESS ADRESS ADRESS
+          </Grid>
+          <Grid item xs={3} className={styles.support}>
+            COMPANY VAT ID: ID
+          </Grid>
           <Grid item xs={3}>
             PLACED: {formatDateTime(orderDetails?.order?.placed)}
           </Grid>
@@ -438,6 +444,7 @@ export const OrderDetails = () => {
           sx={{ marginTop: '2rem', width: '90%' }}
           rowHeight={100}
           hideFooterPagination={isPrinting}
+          hideFooter={isPrinting}
         />
         <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
           {promoApplied}
@@ -454,6 +461,9 @@ export const OrderDetails = () => {
         <div style={{ marginTop: '2rem' }}>{refundOrderSection}</div>
         <div className={styles.total}>
           Total: {orderDetails?.order?.totalPrice?.value}&nbsp;{dictionary?.baseCurrency}
+        </div>
+        <div className={styles.support}>
+          If you have any questions, please send an email to customercare@grbpwr.com
         </div>
       </div>
     </Layout>
