@@ -169,6 +169,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           placeholder={product?.product?.productInsert?.name}
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
+          required={isEdit}
         />
       </Grid>
       <Grid item xs={12}>
@@ -181,11 +182,12 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           placeholder={product?.product?.productInsert?.brand}
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
+          required={isEdit}
         />
       </Grid>
       <Grid item xs={8.5}>
-        <FormControl fullWidth>
-          <InputLabel shrink>category</InputLabel>
+        <FormControl fullWidth required={isEdit}>
+          <InputLabel shrink>CATEGORY</InputLabel>
           <Select
             name='categoryId'
             value={updatePayload.categoryId?.toString() || ''}
@@ -206,7 +208,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         </FormControl>
       </Grid>
       <Grid item xs={8.5}>
-        <FormControl fullWidth>
+        <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>COLOR</InputLabel>
           <Select
             name='color'
@@ -238,10 +240,11 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           type='color'
           fullWidth
           disabled={!isEdit}
+          required={isEdit}
         />
       </Grid>
       <Grid item xs={8.5}>
-        <FormControl fullWidth>
+        <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>COUNTRY</InputLabel>
           <Select
             name='countryOfOrigin'
@@ -274,6 +277,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           InputLabelProps={{ shrink: true }}
           inputProps={{ min: 0, pattern: '[0-9]*' }}
           disabled={!isEdit}
+          required={isEdit}
           onKeyDown={removePossibilityToUseSigns}
         />
       </Grid>
@@ -289,6 +293,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           InputLabelProps={{ shrink: true }}
           inputProps={{ min: 0 }}
           disabled={!isEdit}
+          required={isEdit}
           onKeyDown={removePossibilityToUseSigns}
         />
       </Grid>
@@ -304,8 +309,8 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         />
       </Grid>
       <Grid item xs={8.5}>
-        <FormControl fullWidth>
-          <InputLabel shrink>gender</InputLabel>
+        <FormControl fullWidth required={isEdit}>
+          <InputLabel shrink>GENDER</InputLabel>
           <Select
             name='targetGender'
             value={updatePayload.targetGender || ''}
@@ -337,6 +342,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           multiline
           fullWidth
           disabled={!isEdit}
+          required={isEdit}
         />
       </Grid>
       <Grid item>
