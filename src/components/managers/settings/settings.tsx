@@ -115,6 +115,12 @@ export const Settings: FC = () => {
                     type='number'
                     size='small'
                     inputProps={{ step: '0.01', min: 0 }}
+                    onChange={(e: any) =>
+                      setFieldValue(
+                        `shipmentCarriers[${index}].price.value`,
+                        e.target.value.toString(),
+                      )
+                    }
                   />
                 </Grid>
               ))}
