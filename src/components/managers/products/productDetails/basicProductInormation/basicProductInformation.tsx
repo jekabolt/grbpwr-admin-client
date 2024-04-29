@@ -94,7 +94,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
   const updateProduct = async () => {
     if (
       Object.entries(updatePayload).some(([key, value]) => {
-        return key !== 'hidden' && !value;
+        return key !== 'hidden' && key !== 'preorder' && !value;
       })
     ) {
       showMessage('PLEASE FILL OUT ALL REQUIRED FIELDS', 'error');
@@ -140,7 +140,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           label='PRODUCT ID'
           InputLabelProps={{ shrink: true }}
           InputProps={{ readOnly: true }}
-          value={product?.product?.id}
+          value={product?.product?.id || ''}
         />
       </Grid>
       <Grid item xs={12}>
@@ -296,10 +296,9 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         <TextField
           name='preorder'
           onChange={handleChange}
-          value={updatePayload.preorder || ''}
+          value={updatePayload.preorder || product?.product?.productInsert?.preorder || ''}
           variant='outlined'
           label='PREORDER'
-          placeholder={product?.product?.productInsert?.preorder}
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
         />
@@ -358,7 +357,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           <Typography variant='h6'>hide</Typography>
           <Checkbox
             name='hidden'
-            checked={!!updatePayload.hidden}
+            checked={!!updatePayload.hidden || false}
             onChange={handleChange}
             disabled={!isEdit}
           />
