@@ -1,8 +1,6 @@
-import CloseIcon from '@mui/icons-material/Close';
-import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
+import { Box, Button, Chip, TextField } from '@mui/material';
 import { deleteTag, updateTag } from 'api/updateProductsById';
 import { FC, useState } from 'react';
-import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';
 
 export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, showMessage }) => {
@@ -17,38 +15,49 @@ export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, sho
   };
 
   const addNewTag = async () => {
-    const response = await updateTag({ productId: Number(id), tag: tag });
-    showMessage('TAG ADDED', 'success');
-    if (response) {
-      fetchProduct();
+    if (tag.trim()) {
+      const response = await updateTag({ productId: Number(id), tag: tag });
+      showMessage('TAG ADDED', 'success');
+      if (response) {
+        fetchProduct();
+      }
+      setTag('');
+    } else {
+      showMessage('PLEASE FILL TAG TO UPLOAD', 'error');
     }
-    setTag('');
   };
   return (
-    <Grid container spacing={2}>
-      <Grid item>
-        <Box display='flex' alignItems='center' gap='15px'>
-          <Typography variant='h6' className={styles.title}>
-            tags
-          </Typography>
-          <Box display='flex' alignItems='center' gap='5px'>
-            <TextField
-              type='text'
-              value={tag}
-              onChange={(e) => setTag(e.target.value)}
-              placeholder='upload new tag'
-              size='small'
-            />
-            <Button sx={{ backgroundColor: '#000' }} variant='contained' onClick={addNewTag}>
-              upload
-            </Button>
-          </Box>
-        </Box>
-      </Grid>
-      <Grid item>
-        <Grid container spacing={3}>
-          {product?.tags?.map((tag) => (
-            <Grid key={tag.id} item xs={6}>
+    <Box display='grid' alignItems='center' gap='10px'>
+      <Box display='flex' alignItems='center' gap='5px'>
+        <TextField
+          type='text'
+          value={tag}
+          onChange={(e) => setTag(e.target.value)}
+          placeholder='upload new tag'
+          size='small'
+          label='TAG'
+          InputLabelProps={{ shrink: true }}
+        />
+        <Button variant='contained' onClick={addNewTag}>
+          upload
+        </Button>
+      </Box>
+      <Box display='grid' gridTemplateColumns='repeat(2, 1fr)' gap='5px'>
+        {product?.tags?.map((tag) => (
+          <Chip
+            key={tag.id}
+            label={tag.productTagInsert?.tag}
+            onDelete={() => deleteTagFromList(tag.productTagInsert?.tag)}
+            color='default'
+          />
+        ))}
+      </Box>
+    </Box>
+  );
+};
+
+{
+  /* <Grid key={tag.id} item xs={6}>
               <Box className={styles.tag}>
                 <Typography variant='body1'>{tag.productTagInsert?.tag}</Typography>
                 <IconButton
@@ -58,10 +67,5 @@ export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, sho
                   <CloseIcon />
                 </IconButton>
               </Box>
-            </Grid>
-          ))}
-        </Grid>
-      </Grid>
-    </Grid>
-  );
-};
+            </Grid> */
+}
