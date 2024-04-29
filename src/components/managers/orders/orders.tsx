@@ -119,10 +119,6 @@ export const Orders: FC = () => {
 
   useEffect(() => {
     const setDataFromDictionary = () => {
-      setStatusOptions(
-        dictionary?.orderStatuses?.map((x) => getOrderStatusName(dictionary, x.id)!) || [],
-      );
-
       setPaymentOptions(
         dictionary?.paymentMethods?.map((x) => (x.name ? x.name.toString() : '')) || [],
       );
@@ -197,9 +193,9 @@ export const Orders: FC = () => {
               <InputLabel>Status</InputLabel>
               <Select value={selectedStatus} label='Status' onChange={handleStatusChange}>
                 <MenuItem value=''>ANY</MenuItem>
-                {statusOptions.map((option) => (
-                  <MenuItem key={option} value={option}>
-                    {option}
+                {dictionary?.orderStatuses?.map((status) => (
+                  <MenuItem key={status.id} value={status.id}>
+                    {status.name?.replace('ORDER_STATUS_ENUM_', '').replace('_', ' ')}
                   </MenuItem>
                 ))}
               </Select>
