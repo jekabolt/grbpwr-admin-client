@@ -58,7 +58,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <Field name='sortFactors'>
                     {({ field, form }: FieldProps) => (
                       <FormControl fullWidth>
-                        <InputLabel id='sortFactors-label'>Sort Factors</InputLabel>
+                        <InputLabel id='sortFactors-label'>SORT FACTORS</InputLabel>
                         <Select
                           labelId='sortFactors-label'
                           {...field}
@@ -66,6 +66,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                             form.setFieldValue(field.name, [e.target.value]);
                           }}
                           value={field.value || ''}
+                          label='SORT FACTORS'
                         >
                           {dictionary?.sortFactors?.map((s) => (
                             <MenuItem key={s.id} value={s.id}>
@@ -81,13 +82,14 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <Field name='orderFactor'>
                     {({ field, form }: FieldProps) => (
                       <FormControl fullWidth>
-                        <InputLabel id='orderFactor-label'>order</InputLabel>
+                        <InputLabel id='orderFactor-label'>ORDER</InputLabel>
                         <Select
                           {...field}
                           onChange={(event) => {
                             form.setFieldValue(field.name, event.target.value);
                           }}
                           value={field.value || ''}
+                          label='ORDER'
                         >
                           {dictionary?.orderFactors?.map((s) => (
                             <MenuItem key={s.id} value={s.id}>
@@ -103,13 +105,14 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <Field name='filterConditions.categoryId'>
                     {({ field, form }: FieldProps) => (
                       <FormControl fullWidth>
-                        <InputLabel>category</InputLabel>
+                        <InputLabel>CATEGORY</InputLabel>
                         <Select
                           {...field}
                           onChange={(event) => {
                             form.setFieldValue(field.name, event.target.value);
                           }}
                           value={field.value}
+                          label='CATEGORY'
                         >
                           {dictionary?.categories?.map((s) => (
                             <MenuItem key={s.id} value={s.id}>
@@ -125,7 +128,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <Field name='filterConditions.sizesIds'>
                     {({ field, form }: FieldProps) => (
                       <FormControl fullWidth>
-                        <InputLabel>sizes</InputLabel>
+                        <InputLabel>SIZES</InputLabel>
                         <Select
                           {...field}
                           onChange={(event) => {
@@ -133,6 +136,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                             form.setFieldValue(field.name, selectedSizes);
                           }}
                           value={field.value || []}
+                          label='SIZES'
                           multiple
                         >
                           {dictionary?.sizes?.map((s) => (
@@ -151,7 +155,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
               <Grid container spacing={2}>
                 <Grid item xs={12} sm={6} md={3}>
                   <TextField
-                    label='From'
+                    label='FROM'
                     type='number'
                     onChange={(e) => setFieldValue('filterConditions.from', e.target.value)}
                     value={filter.filterConditions?.from}
@@ -161,7 +165,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <TextField
-                    label='to'
+                    label='TO'
                     type='number'
                     onChange={(e) => setFieldValue('filterConditions.to', e.target.value)}
                     value={filter.filterConditions?.to}
@@ -171,7 +175,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <TextField
-                    label='color'
+                    label='COLOR'
                     type='string'
                     value={filter.filterConditions?.color}
                     onChange={(e) => setFieldValue('filterConditions.color', e.target.value)}
@@ -179,7 +183,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <TextField
-                    label='tag'
+                    label='TAG'
                     type='string'
                     value={filter.filterConditions?.byTag}
                     onChange={(e) => setFieldValue('filterConditions.byTag', e.target.value)}
@@ -194,7 +198,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <Field name='filterConditions.onSale'>
                     {({ form, field }: FieldProps) => (
                       <FormControlLabel
-                        label='sale'
+                        label='SALE'
                         control={
                           <Checkbox
                             {...field}
@@ -212,7 +216,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <Field name='filterConditions.preorder'>
                     {({ form, field }: FieldProps) => (
                       <FormControlLabel
-                        label='preorder'
+                        label='PREORDER'
                         control={
                           <Checkbox
                             {...field}
@@ -230,7 +234,7 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <Field name='showHidden'>
                     {({ form, field }: FieldProps) => (
                       <FormControlLabel
-                        label='hidden'
+                        label='HIDDEN'
                         control={
                           <Checkbox
                             {...field}
