@@ -26,7 +26,7 @@ export const findInDictionary = (
   id: number | string | undefined,
   type: dictionaryTypes,
 ) => {
-  if (!dictionary || id === undefined) return null;
+  if (!dictionary || id === undefined) return undefined;
 
   let data;
   switch (type) {
@@ -45,9 +45,6 @@ export const findInDictionary = (
     case 'carrier':
       data = dictionary.shipmentCarriers?.find((s) => s.id === id)?.shipmentCarrier?.carrier;
       break;
-    case 'status':
-      data = dictionary.orderStatuses?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
-      break;
     case 'sortFactors':
       data = dictionary.sortFactors
         ?.find((s) => s.id === id)
@@ -56,7 +53,7 @@ export const findInDictionary = (
       break;
 
     default:
-      data = null;
+      return undefined;
   }
 
   return data;
