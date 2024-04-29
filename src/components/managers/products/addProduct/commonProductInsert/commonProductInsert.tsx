@@ -175,7 +175,6 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           as={TextField}
           label='PREORDER'
           name='product.preorder'
-          required
           InputLabelProps={{ shrink: true }}
         />
       </Grid>
