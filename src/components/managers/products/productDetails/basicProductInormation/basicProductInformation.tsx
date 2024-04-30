@@ -56,7 +56,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     const value = isCheckbox ? target.checked : target.value;
 
     setUpdatePayload((prev) => {
-      let updatedPayload: UpdateProductPayload = { ...prev };
+      let updatedPayload: UpdateProductPayload = { ...prev, [name]: value };
 
       if (name === 'color' && typeof value === 'string') {
         const selectedColor = colors.find((color) => color.name === value);
@@ -65,29 +65,33 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           color: value,
           colorHex: selectedColor ? selectedColor.hex : '#000000',
         };
+      } else if (name === 'price' || name === 'salePercentage') {
+        updatedPayload = {
+          ...updatedPayload,
+          [name]: { ...prev[name], value },
+        };
       } else {
-        if (name === 'price' || name === 'salePercentage') {
-          updatedPayload = {
-            ...updatedPayload,
-            [name]: { ...prev[name], value },
-          };
-        } else {
-          updatedPayload = {
-            ...updatedPayload,
-            [name]: value,
-          };
-        }
+        updatedPayload = {
+          ...updatedPayload,
+          [name]: value,
+        };
       }
-      const newSKU = generateSKU(
-        updatedPayload.brand || product?.product?.productInsert?.brand,
-        updatedPayload.categoryId || product?.product?.productInsert?.categoryId,
-        updatedPayload.color || product?.product?.productInsert?.color,
-        updatedPayload.countryOfOrigin || product?.product?.productInsert?.color?.substring(0, 2),
-      );
-      return {
-        ...updatedPayload,
-        sku: newSKU,
-      };
+      if (
+        name === 'brand' ||
+        name === 'categoryId' ||
+        name === 'color' ||
+        name === 'countryOfOrigin'
+      ) {
+        const newSKU = generateSKU(
+          updatedPayload.brand || product?.product?.productInsert?.brand,
+          updatedPayload.categoryId || product?.product?.productInsert?.categoryId,
+          updatedPayload.color || product?.product?.productInsert?.color,
+          updatedPayload.countryOfOrigin || product?.product?.productInsert?.color?.substring(0, 2),
+        );
+        updatedPayload.sku = newSKU;
+      }
+
+      return updatedPayload;
     });
   };
 
@@ -133,6 +137,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
       hidden: product?.product?.productInsert?.hidden ?? false,
     }));
   }, [product?.product?.productInsert?.hidden]);
+
   return (
     <Grid container spacing={2} className={styles.product_details_container}>
       <Grid item xs={12}>
@@ -301,7 +306,11 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         <TextField
           name='preorder'
           onChange={handleChange}
-          value={updatePayload.preorder || product?.product?.productInsert?.preorder || ''}
+          value={
+            (updatePayload.preorder !== undefined
+              ? updatePayload.preorder
+              : product?.product?.productInsert?.preorder) || ''
+          }
           variant='outlined'
           label='PREORDER'
           InputLabelProps={{ shrink: true }}
