@@ -56,7 +56,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     const value = isCheckbox ? target.checked : target.value;
 
     setUpdatePayload((prev) => {
-      let updatedPayload: UpdateProductPayload = { ...prev, [name]: value };
+      let updatedPayload: UpdateProductPayload = { ...prev };
 
       if (name === 'color' && typeof value === 'string') {
         const selectedColor = colors.find((color) => color.name === value);
