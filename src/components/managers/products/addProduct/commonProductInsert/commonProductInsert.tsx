@@ -11,19 +11,26 @@ import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
+import { formatPreorderDate } from 'features/utilitty/formatPreorderDate';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, useFormikContext } from 'formik';
-import React, { FC, useCallback, useMemo } from 'react';
+import React, { FC, useCallback, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { AddProductInterface, Country } from '../addProductInterface/addProductInterface';
 
 export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
+  const [preorder, setPreorder] = useState<string>();
+  const [showPreorder, setShowPreorder] = useState(true);
+  const [showSales, setShowSales] = useState(true);
 
-  const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
     const { name, value } = e.target;
     setFieldValue(name, value.toString());
+    if (flag) {
+      setShowPreorder(!value);
+    }
   };
 
   const handleFieldChange = useCallback(
@@ -51,6 +58,13 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
     },
     [values.product, setFieldValue],
   );
+
+  const handlePreorderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newDate = e.target.value;
+    setFieldValue('product.preorder', newDate);
+    setShowSales(!newDate);
+    setPreorder(formatPreorderDate(newDate));
+  };
 
   return (
     <Grid container display='grid' spacing={2}>
@@ -155,29 +169,37 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
         />
       </Grid>
 
-      <Grid item>
-        <Field
-          as={TextField}
-          label='SALES'
-          name='product.salePercentage.value'
-          onChange={handlePriceChange}
-          type='number'
-          inputProps={{ min: 0, max: 99 }}
-          required
-          InputLabelProps={{ shrink: true }}
-          onKeyDown={removePossibilityToUseSigns}
-          fullWidth
-        />
-      </Grid>
+      {showSales && (
+        <Grid item>
+          <Field
+            as={TextField}
+            label='SALE PERCENTAGE'
+            name='product.salePercentage.value'
+            onChange={(e: any) => handlePriceChange(e, true)}
+            type='number'
+            inputProps={{ min: 0, max: 99 }}
+            required
+            InputLabelProps={{ shrink: true }}
+            onKeyDown={removePossibilityToUseSigns}
+            fullWidth
+          />
+        </Grid>
+      )}
 
-      <Grid item>
-        <Field
-          as={TextField}
-          label='PREORDER'
-          name='product.preorder'
-          InputLabelProps={{ shrink: true }}
-        />
-      </Grid>
+      {showPreorder && (
+        <Grid item>
+          <Field
+            as={TextField}
+            label='PREORDER'
+            type='date'
+            name='product.preorder'
+            onChange={handlePreorderChange}
+            helperText={preorder}
+            InputLabelProps={{ shrink: true }}
+            fullWidth
+          />
+        </Grid>
+      )}
 
       <Grid item>
         <FormControl fullWidth required>
