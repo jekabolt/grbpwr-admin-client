@@ -456,9 +456,15 @@ export const OrderDetails = () => {
         <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
           {billing}
         </div>
-        <div style={{ marginTop: '2rem' }}>{trackingNumberSection}</div>
-        <div style={{ marginTop: '2rem' }}>{markAsDeliveredSection}</div>
-        <div style={{ marginTop: '2rem' }}>{refundOrderSection}</div>
+        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+          {trackingNumberSection}
+        </div>
+        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+          {markAsDeliveredSection}
+        </div>
+        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+          {refundOrderSection}
+        </div>
         <div className={styles.total}>
           Total: {orderDetails?.order?.totalPrice?.value}&nbsp;{dictionary?.baseCurrency}
         </div>
