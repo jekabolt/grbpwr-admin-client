@@ -31,13 +31,17 @@ type UpdateProductPayload = Partial<common_ProductInsert>;
 export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMessage }) => {
   const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
     hidden: product?.product?.productInsert?.hidden ?? false,
+    preorder: product?.product?.productInsert?.preorder,
   });
   const [isEdit, setIsEdit] = useState(false);
   const [dict, setDict] = useState<common_Dictionary>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
-  const [preorderHelperText, setPreorderHelperText] = useState('');
+  const [preorderDate, setPreorderDate] = useState({
+    initial: product?.product?.productInsert?.preorder || '',
+    formated: formatPreorderDate(product?.product?.productInsert?.preorder) || '',
+  });
 
   useEffect(() => {
     const fetchDictionary = async () => {
@@ -62,12 +66,16 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
       setShowSales(saleValue !== '0');
       setShowPreorder(preorderValue !== '');
     }
+  }, [product]);
 
-    const storedPreorderText = localStorage.getItem(`preorderHelperText_${id}`);
-    if (storedPreorderText) {
-      setPreorderHelperText(storedPreorderText);
-    }
-  }, [product, id]);
+  // useEffect(() => {
+  //   if (product?.product?.productInsert?.preorder) {
+  //     setUpdatePayload((prevState) => ({
+  //       ...prevState,
+  //       preorder: formatPreorderDate(product?.product?.productInsert?.preorder),
+  //     }));
+  //   }
+  // }, [product?.product?.productInsert?.preorder]);
 
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
@@ -79,16 +87,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
 
     setUpdatePayload((prev) => {
       let updatedPayload: UpdateProductPayload = { ...prev };
-
-      if (name === 'preorder' && typeof value === 'string') {
-        updatedPayload.preorder = value;
-        const formattedDate = formatPreorderDate(value);
-        setPreorderHelperText(formattedDate);
-        localStorage.setItem(`preorderHelperText_${id}`, formattedDate);
-      } else if (name === 'preorder' && value === '') {
-        setPreorderHelperText('');
-        localStorage.removeItem(`preorderHelperText_${id}`);
-      }
 
       if (name === 'salePercentage' || name === 'preorder') {
         const updatedSaleValue =
@@ -116,6 +114,11 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           ...updatedPayload,
           [name]: { ...prev[name], value },
         };
+      } else if (name === 'preorder' && typeof value === 'string') {
+        setPreorderDate({
+          initial: value,
+          formated: formatPreorderDate(value),
+        });
       } else {
         updatedPayload = {
           ...updatedPayload,
@@ -151,7 +154,13 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
       return;
     }
     try {
-      const updatedDetails = { ...product?.product?.productInsert, ...updatePayload };
+      const formattedPreorder = preorderDate.formated;
+
+      const updatedDetails = {
+        ...product?.product?.productInsert,
+        ...updatePayload,
+        preorder: formattedPreorder,
+      };
       await updateProductById({
         id: Number(id),
         product: updatedDetails as common_ProductInsert,
@@ -178,11 +187,13 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
   };
 
   useEffect(() => {
-    setUpdatePayload((prevState) => ({
-      ...prevState,
-      hidden: product?.product?.productInsert?.hidden ?? false,
-    }));
-  }, [product?.product?.productInsert?.hidden]);
+    if (product?.product?.productInsert?.preorder) {
+      setPreorderDate({
+        initial: product.product.productInsert.preorder,
+        formated: formatPreorderDate(product.product.productInsert.preorder),
+      });
+    }
+  }, [product?.product?.productInsert?.preorder]);
 
   return (
     <Grid container spacing={2} className={styles.product_details_container}>
@@ -357,20 +368,16 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         <Grid item xs={8.5}>
           <TextField
             name='preorder'
-            type='date'
+            type={isEdit ? 'date' : 'text'}
             onChange={handleChange}
-            value={
-              (updatePayload.preorder !== undefined
-                ? updatePayload.preorder
-                : product?.product?.productInsert?.preorder) || ''
-            }
+            value={isEdit ? preorderDate.initial : preorderDate.formated}
             variant='outlined'
             label='PREORDER'
             InputLabelProps={{ shrink: true }}
             disabled={!isEdit}
-            helperText={preorderHelperText}
             fullWidth
           />
+          {/* <p>{product?.product?.productInsert?.preorder}</p> */}
         </Grid>
       )}
       <Grid item xs={8.5}>
