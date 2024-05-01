@@ -1,6 +1,6 @@
 import { days } from "constants/dayNumbers";
 
-export function formatPreorderDate(newDate: string) {
+export function formatPreorderDate(newDate: string | undefined) {
     if (!newDate) return ''
     const date = new Date(newDate);
     const day = date.getDate();
