@@ -29,7 +29,13 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
     const { name, value } = e.target;
     setFieldValue(name, value.toString());
     if (flag) {
-      setShowPreorder(!value);
+      const saleValue = value.trim();
+      if (saleValue === '') {
+        setShowPreorder(true);
+      } else {
+        const saleNumber = parseFloat(saleValue);
+        setShowPreorder(saleNumber <= 0);
+      }
     }
   };
 

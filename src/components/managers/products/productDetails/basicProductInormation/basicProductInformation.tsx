@@ -62,7 +62,12 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
       setShowSales(saleValue !== '0');
       setShowPreorder(preorderValue !== '');
     }
-  }, [product]);
+
+    const storedPreorderText = localStorage.getItem(`preorderHelperText_${id}`);
+    if (storedPreorderText) {
+      setPreorderHelperText(storedPreorderText);
+    }
+  }, [product, id]);
 
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
@@ -77,7 +82,12 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
 
       if (name === 'preorder' && typeof value === 'string') {
         updatedPayload.preorder = value;
-        setPreorderHelperText(formatPreorderDate(value));
+        const formattedDate = formatPreorderDate(value);
+        setPreorderHelperText(formattedDate);
+        localStorage.setItem(`preorderHelperText_${id}`, formattedDate);
+      } else if (name === 'preorder' && value === '') {
+        setPreorderHelperText('');
+        localStorage.removeItem(`preorderHelperText_${id}`);
       }
 
       if (name === 'salePercentage' || name === 'preorder') {
@@ -344,7 +354,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         </Grid>
       )}
       {showPreorder && (
-        <Grid item xs={12}>
+        <Grid item xs={8.5}>
           <TextField
             name='preorder'
             type='date'
@@ -357,8 +367,9 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
             variant='outlined'
             label='PREORDER'
             InputLabelProps={{ shrink: true }}
-            helperText={preorderHelperText}
             disabled={!isEdit}
+            helperText={preorderHelperText}
+            fullWidth
           />
         </Grid>
       )}
