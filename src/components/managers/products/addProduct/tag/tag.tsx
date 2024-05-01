@@ -54,6 +54,7 @@ export const Tags = () => {
           variant='outlined'
           InputLabelProps={{ shrink: true }}
           size='small'
+          placeholder='upload new tag'
         />
         <Button variant='contained' onClick={uploadNewTag}>
           Upload
