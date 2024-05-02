@@ -24,6 +24,10 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
   const [preorder, setPreorder] = useState<string>();
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
+  const [preorderDate, setPreorderDate] = useState({
+    initial: values.product?.preorder || '',
+    formatted: formatPreorderDate(values.product?.preorder) || '',
+  });
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
     const { name, value } = e.target;
@@ -66,10 +70,23 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
   );
 
   const handlePreorderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newDate = e.target.value;
-    setFieldValue('product.preorder', formatPreorderDate(newDate));
-    setShowSales(!newDate);
-    setPreorder(formatPreorderDate(newDate));
+    const rawDate = e.target.value;
+    if (rawDate !== '') {
+      const formattedDate = formatPreorderDate(rawDate);
+      setPreorderDate({
+        initial: rawDate,
+        formatted: formattedDate,
+      });
+      setFieldValue('product.preorder', formattedDate);
+      setShowSales(false);
+    } else {
+      setPreorderDate({
+        initial: '',
+        formatted: '',
+      });
+      setFieldValue('product.preorder', '');
+      setShowSales(true);
+    }
   };
 
   return (
@@ -199,8 +216,9 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             label='PREORDER'
             type='date'
             name='product.preorder'
+            value={preorderDate.initial}
             onChange={handlePreorderChange}
-            helperText={preorder}
+            helperText={preorderDate.formatted}
             InputLabelProps={{ shrink: true }}
             fullWidth
           />

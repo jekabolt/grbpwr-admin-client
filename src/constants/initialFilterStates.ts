@@ -1,8 +1,10 @@
-export const defaultProductFilterSettings = {
+import { GetProductsPagedRequest } from "api/proto-http/admin";
+
+export const defaultProductFilterSettings: GetProductsPagedRequest = {
     limit: undefined,
     offset: undefined,
-    sortFactors: undefined,
-    orderFactor: undefined,
+    sortFactors: ['SORT_FACTOR_CREATED_AT'],
+    orderFactor: 'ORDER_FACTOR_DESC',
     filterConditions: {
         from: undefined,
         to: undefined,
