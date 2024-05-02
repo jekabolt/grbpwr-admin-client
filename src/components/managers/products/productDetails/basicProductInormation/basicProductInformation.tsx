@@ -15,6 +15,7 @@ import { getDictionary } from 'api/admin';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
 import { updateProductById } from 'api/updateProductsById';
 import { colors } from 'constants/colors';
+import { format } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { formatPreorderDate } from 'features/utilitty/formatPreorderDate';
@@ -31,7 +32,9 @@ type UpdateProductPayload = Partial<common_ProductInsert>;
 export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMessage }) => {
   const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
     hidden: product?.product?.productInsert?.hidden ?? false,
-    preorder: product?.product?.productInsert?.preorder,
+    salePercentage: {
+      value: product?.product?.productInsert?.salePercentage?.value ?? '',
+    },
   });
   const [isEdit, setIsEdit] = useState(false);
   const [dict, setDict] = useState<common_Dictionary>();
@@ -40,7 +43,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
   const [showSales, setShowSales] = useState(true);
   const [preorderDate, setPreorderDate] = useState({
     initial: product?.product?.productInsert?.preorder || '',
-    formated: formatPreorderDate(product?.product?.productInsert?.preorder) || '',
+    formatted: formatPreorderDate(product?.product?.productInsert?.preorder) || '',
   });
 
   useEffect(() => {
@@ -55,28 +58,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     setIsEdit(!isEdit);
   };
 
-  useEffect(() => {
-    const saleValue = product?.product?.productInsert?.salePercentage?.value || '';
-    const preorderValue = product?.product?.productInsert?.preorder || '';
-
-    if (saleValue === '0' && preorderValue === '') {
-      setShowSales(true);
-      setShowPreorder(true);
-    } else {
-      setShowSales(saleValue !== '0');
-      setShowPreorder(preorderValue !== '');
-    }
-  }, [product]);
-
-  // useEffect(() => {
-  //   if (product?.product?.productInsert?.preorder) {
-  //     setUpdatePayload((prevState) => ({
-  //       ...prevState,
-  //       preorder: formatPreorderDate(product?.product?.productInsert?.preorder),
-  //     }));
-  //   }
-  // }, [product?.product?.productInsert?.preorder]);
-
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
   ) => {
@@ -87,20 +68,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
 
     setUpdatePayload((prev) => {
       let updatedPayload: UpdateProductPayload = { ...prev };
-
-      if (name === 'salePercentage' || name === 'preorder') {
-        const updatedSaleValue =
-          name === 'salePercentage' ? value : prev.salePercentage?.value || '';
-        const updatedPreorderValue = name === 'preorder' ? value : prev.preorder || '';
-
-        if ((updatedSaleValue === '0' || updatedSaleValue === '') && updatedPreorderValue === '') {
-          setShowSales(true);
-          setShowPreorder(true);
-        } else {
-          setShowSales(updatedSaleValue !== '0');
-          setShowPreorder(updatedPreorderValue !== '');
-        }
-      }
 
       if (name === 'color' && typeof value === 'string') {
         const selectedColor = colors.find((color) => color.name === value);
@@ -115,10 +82,26 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           [name]: { ...prev[name], value },
         };
       } else if (name === 'preorder' && typeof value === 'string') {
-        setPreorderDate({
-          initial: value,
-          formated: formatPreorderDate(value),
-        });
+        console.log(preorderDate);
+        if (
+          updatedPayload.salePercentage?.value === '0' ||
+          updatedPayload.salePercentage?.value === ''
+        ) {
+          const formattedDate = formatPreorderDate(value);
+          setPreorderDate({
+            initial: value,
+            formatted: formattedDate,
+          });
+        }
+      } else if (name === 'salePercentage' && typeof value === 'string') {
+        const numValue = parseFloat(value) || 0; // Convert input value to number, defaulting to 0 if empty
+        updatedPayload = {
+          ...updatedPayload,
+          salePercentage: { value: value.trim() },
+        };
+        if (numValue > 0) {
+          setPreorderDate({ initial: '', formatted: '' }); // Reset preorder date
+        }
       } else {
         updatedPayload = {
           ...updatedPayload,
@@ -154,13 +137,18 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
       return;
     }
     try {
-      const formattedPreorder = preorderDate.formated;
-
+      const formattedPreorder = preorderDate.formatted;
       const updatedDetails = {
         ...product?.product?.productInsert,
         ...updatePayload,
         preorder: formattedPreorder,
       };
+      // if (updatedDetails.preorder.includes('invalid')) {
+      //   updatedDetails.preorder = '';
+      // }
+      if (updatedDetails.preorder !== '' && updatedDetails.salePercentage?.value) {
+        updatedDetails.salePercentage.value = '0';
+      }
       await updateProductById({
         id: Number(id),
         product: updatedDetails as common_ProductInsert,
@@ -186,14 +174,13 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     return matchingCountry ? matchingCountry.label : '';
   };
 
-  useEffect(() => {
-    if (product?.product?.productInsert?.preorder) {
-      setPreorderDate({
-        initial: product.product.productInsert.preorder,
-        formated: formatPreorderDate(product.product.productInsert.preorder),
-      });
-    }
-  }, [product?.product?.productInsert?.preorder]);
+  const getCurrentDate = () => {
+    const today = new Date();
+    return format(today, 'yyyy-MM-dd');
+  };
+
+  console.log('Initial Preorder Date:', preorderDate.initial);
+  console.log('Formatted Preorder Date:', preorderDate.formatted);
 
   return (
     <Grid container spacing={2} className={styles.product_details_container}>
@@ -343,16 +330,16 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           onKeyDown={removePossibilityToUseSigns}
         />
       </Grid>
-      {showSales && (
+      {!preorderDate.formatted && (
         <Grid item xs={12}>
           <TextField
             type='number'
             name='salePercentage'
             onChange={handleChange}
             value={
-              (updatePayload.salePercentage?.value !== undefined
-                ? updatePayload.salePercentage.value
-                : product?.product?.productInsert?.salePercentage?.value) || ''
+              updatePayload.salePercentage?.value !== undefined
+                ? updatePayload.salePercentage?.value
+                : product?.product?.productInsert?.salePercentage?.value || ''
             }
             variant='outlined'
             label='SALE PERCENTAGE'
@@ -364,20 +351,27 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           />
         </Grid>
       )}
-      {showPreorder && (
+      {(updatePayload.salePercentage?.value === '0' ||
+        updatePayload.salePercentage?.value === '') && (
         <Grid item xs={8.5}>
           <TextField
             name='preorder'
             type={isEdit ? 'date' : 'text'}
             onChange={handleChange}
-            value={isEdit ? preorderDate.initial : preorderDate.formated}
+            value={
+              isEdit
+                ? preorderDate.initial
+                : updatePayload.preorder || product?.product?.productInsert?.preorder || ''
+            }
             variant='outlined'
             label='PREORDER'
             InputLabelProps={{ shrink: true }}
+            inputProps={{
+              min: isEdit ? getCurrentDate() : undefined,
+            }}
             disabled={!isEdit}
             fullWidth
           />
-          {/* <p>{product?.product?.productInsert?.preorder}</p> */}
         </Grid>
       )}
       <Grid item xs={8.5}>
