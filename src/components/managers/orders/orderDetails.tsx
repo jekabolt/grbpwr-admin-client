@@ -238,15 +238,28 @@ export const OrderDetails = () => {
             </div>
           )}
           {payment.paymentInsert?.payer && (
-            <div style={{ display: 'flex' }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
               PAYER:&nbsp;
               <CopyToClipboard text={payment.paymentInsert?.payer} />
             </div>
           )}
           {payment.paymentInsert?.payee && (
-            <div style={{ display: 'flex' }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
               PAYEE:&nbsp;
               <CopyToClipboard text={payment.paymentInsert?.payee} />
+            </div>
+          )}
+          {payment.paymentInsert?.isTransactionDone && (
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              TXID:&nbsp;
+              <CopyToClipboard
+                text={payment?.paymentInsert?.transactionId || ''}
+                displayText={
+                  payment?.paymentInsert?.transactionId
+                    ? `${payment?.paymentInsert?.transactionId.slice(0, 4)}...${payment?.paymentInsert?.transactionId.slice(-4)}`
+                    : ''
+                }
+              />
             </div>
           )}
         </div>
@@ -408,11 +421,22 @@ export const OrderDetails = () => {
     <Layout>
       <img src={logo} className={styles.img_print} alt='logo' />
       <div style={{ margin: '5% 5%' }}>
-        <Grid container spacing={2}>
-          <Grid item xs={3} className={styles.hide_cell}>
+        <Grid container spacing={2} style={{ alignItems: 'center' }}>
+          <Grid item xs={2} className={styles.hide_cell}>
             ORDER ID: {orderDetails?.order?.id}
           </Grid>
-          <Grid item xs={3} className={isPrinting ? styles.hide_cell : styles.non_print_state}>
+          <Grid item xs={2} style={{ display: 'flex', alignItems: 'center' }}>
+            UUID:&nbsp;
+            <CopyToClipboard
+              text={orderDetails?.order?.uuid || ''}
+              displayText={
+                orderDetails?.order?.uuid
+                  ? `${orderDetails.order.uuid?.slice(0, 4)}...${orderDetails.order.uuid?.slice(-4)}`
+                  : 'NO UUID'
+              }
+            />
+          </Grid>
+          <Grid item xs={2} className={isPrinting ? styles.hide_cell : styles.non_print_state}>
             STATUS:&nbsp;{orderStatusColored}
           </Grid>
           <Grid item xs={3} className={styles.support}>
@@ -421,7 +445,7 @@ export const OrderDetails = () => {
           <Grid item xs={3} className={styles.support}>
             COMPANY VAT ID: ID
           </Grid>
-          <Grid item xs={3}>
+          <Grid item xs={2}>
             PLACED: {formatDateTime(orderDetails?.order?.placed)}
           </Grid>
           <Grid item className={styles.hide_cell} xs={3}>
