@@ -219,9 +219,9 @@ export const OrderDetails = () => {
           <div style={{ display: 'flex' }}>
             STATUS:&nbsp;
             {payment.paymentInsert?.isTransactionDone ? (
-              <div style={{ backgroundColor: '#008f0080' }}>PAYED</div>
+              <div style={{ backgroundColor: '#008f0080' }}>PAID</div>
             ) : (
-              <div style={{ backgroundColor: '#fc000080' }}>UNPAYED</div>
+              <div style={{ backgroundColor: '#fc000080' }}>UNPAID</div>
             )}
           </div>
           {payment.modifiedAt && <div>MADE AT: {formatDateTime(payment.modifiedAt)}</div>}

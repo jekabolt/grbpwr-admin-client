@@ -67,7 +67,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
 
   const handlePreorderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newDate = e.target.value;
-    setFieldValue('product.preorder', newDate);
+    setFieldValue('product.preorder', formatPreorderDate(newDate));
     setShowSales(!newDate);
     setPreorder(formatPreorderDate(newDate));
   };
