@@ -6,9 +6,10 @@ import { FC, useState } from 'react';
 
 interface CopyToClipboardProps {
   text: string;
+  displayText?: string;
 }
 
-export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text }) => {
+export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, displayText }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -22,8 +23,8 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text }) => {
   };
 
   return (
-    <div style={{ display: 'flex' }}>
-      <div>{text}</div>
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      <div>{displayText || text}</div>
       <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
         <IconButton
           onClick={handleCopy}
