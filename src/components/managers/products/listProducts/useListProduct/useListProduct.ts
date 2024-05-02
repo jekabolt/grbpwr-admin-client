@@ -3,6 +3,7 @@ import { GetProductsPagedRequest, common_Product } from 'api/proto-http/admin';
 import React, { useCallback, useState } from 'react';
 import { defaultProductFilterSettings } from '../../../../../constants/initialFilterStates';
 
+
 const useListProduct = (
     initialLoading = false,
     initialHasMore = true,
@@ -27,11 +28,10 @@ const useListProduct = (
     const fetchProducts = useCallback(
         async (limit: number, offset: number, currentFilter: GetProductsPagedRequest) => {
             setIsLoading(true);
-            const sortFactors = Array.isArray(currentFilter.sortFactors) ? currentFilter.sortFactors : undefined;
             const response = await getProductsPaged({
                 limit,
                 offset,
-                sortFactors: sortFactors,
+                sortFactors: currentFilter.sortFactors,
                 orderFactor: currentFilter?.orderFactor,
                 filterConditions: currentFilter?.filterConditions,
                 showHidden: currentFilter?.showHidden,
