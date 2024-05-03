@@ -26,42 +26,45 @@ export const ListProducts: FC<ProductProps> = ({
   const [hoveredProductId, setHoveredProductId] = useState<number | undefined>(undefined);
 
   return (
-    <Grid container gap={2} justifyContent='center'>
+    <Grid container gap={3} justifyContent='center'>
       {products?.map((product) => (
-        <Grid
-          item
-          key={product.id}
-          onMouseEnter={() => setHoveredProductId(product.id)}
-          onMouseLeave={() => setHoveredProductId(undefined)}
-          onClick={() => productClick(product.id)}
-          className={`${styles.product} ${product.productInsert?.hidden && showHidden ? styles.hidden_product : ''}`}
-          xs={12}
-          sm={6}
-          md={4}
-          lg={3}
-        >
-          {hoveredProductId === product.id && (
-            <IconButton
-              onClick={(e) => {
-                e.stopPropagation();
-                deleteProduct(e, product.id);
-              }}
-              className={styles.delete_btn}
-            >
-              {confirmDeleteProductId === product.id ? <CheckIcon /> : <CloseIcon />}
-            </IconButton>
-          )}
-          {deletingProductId === product.id ? (
-            <Typography variant='h4'>product removed</Typography>
-          ) : isVideo(product.productInsert?.thumbnail) ? (
-            <video src={product.productInsert?.thumbnail} controls />
-          ) : (
-            <img src={product.productInsert?.thumbnail} alt='Product Image' />
-          )}
-          <Typography variant='h5'>
-            {product.productInsert?.name} - {product.id}
-          </Typography>
-        </Grid>
+        <>
+          <Grid
+            item
+            key={product.id}
+            onMouseEnter={() => setHoveredProductId(product.id)}
+            onMouseLeave={() => setHoveredProductId(undefined)}
+            onClick={() => productClick(product.id)}
+            className={`${styles.product} ${product.productInsert?.hidden && showHidden ? styles.hidden_product : ''}`}
+            xs={12}
+            sm={6}
+            md={4}
+            lg={3}
+          >
+            {hoveredProductId === product.id && (
+              <IconButton
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteProduct(e, product.id);
+                }}
+                className={styles.delete_btn}
+              >
+                {confirmDeleteProductId === product.id ? <CheckIcon /> : <CloseIcon />}
+              </IconButton>
+            )}
+            {deletingProductId === product.id ? (
+              <Typography variant='h4'>product removed</Typography>
+            ) : isVideo(product.productInsert?.thumbnail) ? (
+              <video src={product.productInsert?.thumbnail} controls />
+            ) : (
+              <img src={product.productInsert?.thumbnail} alt='Product Image' />
+            )}
+            <Typography
+              variant='overline'
+              className={styles.info}
+            >{`[${product.id}] ${product.productInsert?.brand} ${product.productInsert?.name}`}</Typography>
+          </Grid>
+        </>
       ))}
     </Grid>
   );
