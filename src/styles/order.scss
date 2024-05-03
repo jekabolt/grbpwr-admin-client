@@ -5,6 +5,7 @@
 
 .non_print_state {
   display: flex;
+  align-items: center;
 }
 
 .total {
@@ -14,7 +15,6 @@
 }
 
 .support {
-  margin-top: 2rem;
   display: none;
 }
 

@@ -1,3 +1,4 @@
+import EditIcon from '@mui/icons-material/Edit';
 import LaunchIcon from '@mui/icons-material/Launch';
 import { Button, Grid, TextField } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -47,6 +48,17 @@ export const OrderDetails = () => {
     productLink: true,
     size: true,
   });
+  const [isEdit, setIsEdit] = useState(false);
+
+  const toggleEditTrackingNumber = () => {
+    if (!isPrinting) {
+      setIsEdit(!isEdit);
+      if (isEdit) {
+        setTrackingNumber(orderDetails?.shipment?.trackingCode || '');
+      }
+    }
+  };
+
   useEffect(() => {
     setColumnVisibility({ thumbnail: !isPrinting, productLink: !isPrinting, size: !isPrinting });
   }, [isPrinting]);
@@ -170,12 +182,17 @@ export const OrderDetails = () => {
   };
 
   const saveTrackingNumber = async () => {
+    if (!trackingNumber.trim()) {
+      setIsEdit(false);
+      return;
+    }
     const response = await setTrackingNumberUpdate({
       orderId: orderDetails?.order?.id,
       trackingCode: trackingNumber,
     });
     if (response) {
       fetchOrderDetails();
+      setIsEdit(false);
     }
   };
 
@@ -273,13 +290,41 @@ export const OrderDetails = () => {
     return (
       <div>
         <div>SHIPPING:</div>
-        {orderDetails?.shipment?.trackingCode && (
-          <div>TRACKING NUMBER: {orderDetails?.shipment?.trackingCode}</div>
-        )}
-        <Grid container spacing={2}>
+        <Grid container spacing={2} alignItems='flex-start'>
           {' '}
-          {/* Adds spacing between items */}
           <Grid item xs={3}>
+            {orderDetails?.shipment?.trackingCode && (
+              <div>
+                {isEdit && !isPrinting ? (
+                  <>
+                    <TextField
+                      id='tracking-number-input'
+                      label='Tracking number'
+                      variant='outlined'
+                      value={trackingNumber}
+                      onChange={handleTrackingNumberChange}
+                      size='small'
+                    />
+                    <Button
+                      onClick={saveTrackingNumber}
+                      variant='contained'
+                      style={{ marginLeft: '1rem' }}
+                    >
+                      SAVE
+                    </Button>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <div>TRACKING NUMBER: {orderDetails?.shipment?.trackingCode}</div>
+                    {!isPrinting && (
+                      <IconButton onClick={toggleEditTrackingNumber} size='small'>
+                        <EditIcon style={{ fontSize: '15px' }} />
+                      </IconButton>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {shipping && (
               <div>
                 {shipping.street && shipping.houseNumber && (
@@ -299,9 +344,9 @@ export const OrderDetails = () => {
             {buyer && (
               <div>
                 {buyer?.email && (
-                  <div style={{ display: 'flex' }}>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
                     EMAIL:&nbsp;
-                    <div className={styles.hide_cell}>
+                    <div>
                       <CopyToClipboard text={buyer.email} />
                     </div>
                   </div>
@@ -421,11 +466,11 @@ export const OrderDetails = () => {
     <Layout>
       <img src={logo} className={styles.img_print} alt='logo' />
       <div style={{ margin: '5% 5%' }}>
-        <Grid container spacing={2} style={{ alignItems: 'center' }}>
+        <Grid container spacing={1} style={{ alignItems: 'center' }}>
           <Grid item xs={2} className={styles.hide_cell}>
             ORDER ID: {orderDetails?.order?.id}
           </Grid>
-          <Grid item xs={2} style={{ display: 'flex', alignItems: 'center' }}>
+          <Grid item xs={2} className={isPrinting ? styles.hide_cell : styles.non_print_state}>
             UUID:&nbsp;
             <CopyToClipboard
               text={orderDetails?.order?.uuid || ''}
@@ -445,7 +490,7 @@ export const OrderDetails = () => {
           <Grid item xs={3} className={styles.support}>
             COMPANY VAT ID: ID
           </Grid>
-          <Grid item xs={2}>
+          <Grid item xs={isPrinting ? 4 : 2}>
             PLACED: {formatDateTime(orderDetails?.order?.placed)}
           </Grid>
           <Grid item className={styles.hide_cell} xs={3}>

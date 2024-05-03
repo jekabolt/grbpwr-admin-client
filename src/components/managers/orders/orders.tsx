@@ -128,11 +128,13 @@ export const Orders: FC = () => {
   }, [dictionary]);
 
   const columns = [
-    { field: 'id', headerName: 'Order ID', width: 300 },
+    { field: 'id', headerName: 'Order ID', width: 120 },
     {
       field: 'placed',
       headerName: 'Placed',
-      width: 400,
+      flex: 1,
+      minWidth: 180,
+      width: 250,
       renderCell: (params: any) => {
         return formatDateTime(params.value);
       },
@@ -140,7 +142,9 @@ export const Orders: FC = () => {
     {
       field: 'modified',
       headerName: 'Modified',
-      width: 400,
+      flex: 1,
+      minWidth: 180,
+      width: 300,
       renderCell: (params: any) => {
         return formatDateTime(params.value);
       },
@@ -148,11 +152,17 @@ export const Orders: FC = () => {
     {
       field: 'orderStatusId',
       headerName: 'Order status',
-      width: 300,
+      width: 180,
       renderCell: (params: any) => {
         let status = getOrderStatusName(dictionary, params.value);
         return (
-          <div style={{ backgroundColor: getStatusColor(status), width: '100%', height: '100%' }}>
+          <div
+            style={{
+              backgroundColor: getStatusColor(status),
+              width: '100%',
+              height: '100%',
+            }}
+          >
             {status}
           </div>
         );
@@ -161,7 +171,9 @@ export const Orders: FC = () => {
     {
       field: 'totalPrice',
       headerName: 'Total',
-      width: 300,
+      width: 180,
+      flex: 0.5, // Smaller flex grow
+      minWidth: 100, // Minimum width
       valueGetter: (params: any) => `${params.value} ${dictionary?.baseCurrency}`,
     },
   ];
@@ -186,7 +198,7 @@ export const Orders: FC = () => {
 
   return (
     <Layout>
-      <div style={{ margin: '5% 5%' }}>
+      <div style={{ margin: '5% 10%' }}>
         <Grid container spacing={2} sx={{ mb: 4 }}>
           <Grid item xs={3}>
             <FormControl fullWidth>
