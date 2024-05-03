@@ -1,5 +1,6 @@
 import {
   Alert,
+  Box,
   Button,
   Checkbox,
   FormControlLabel,
@@ -92,36 +93,42 @@ export const Settings: FC = () => {
               </Grid>
               {values.shipmentCarriers?.map((carrier, index) => (
                 <Grid item key={index} xs={12}>
-                  <Field name={`shipmentCarriers[${index}].allow`}>
-                    {({ field }: FieldProps) => (
-                      <FormControlLabel
-                        control={
-                          <Checkbox
-                            {...field}
-                            checked={field.value ?? false}
-                            onChange={(e) => {
-                              field.onChange(e);
-                            }}
-                          />
-                        }
-                        label={carrier.carrier}
-                      />
-                    )}
-                  </Field>
-                  <Field
-                    as={TextField}
-                    name={`shipmentCarriers[${index}].price.value`}
-                    label='Price'
-                    type='number'
-                    size='small'
-                    inputProps={{ step: '0.01', min: 0 }}
-                    onChange={(e: any) =>
-                      setFieldValue(
-                        `shipmentCarriers[${index}].price.value`,
-                        e.target.value.toString(),
-                      )
-                    }
-                  />
+                  <Box display='flex'>
+                    <Field name={`shipmentCarriers[${index}].allow`}>
+                      {({ field }: FieldProps) => (
+                        <FormControlLabel
+                          control={
+                            <Checkbox
+                              {...field}
+                              checked={field.value ?? false}
+                              onChange={(e) => {
+                                field.onChange(e);
+                              }}
+                            />
+                          }
+                          label={carrier.carrier}
+                        />
+                      )}
+                    </Field>
+                    <Field
+                      as={TextField}
+                      name={`shipmentCarriers[${index}].price.value`}
+                      label='Price'
+                      type='number'
+                      size='small'
+                      inputProps={{ step: '0.01', min: 0 }}
+                      onChange={(e: any) =>
+                        setFieldValue(
+                          `shipmentCarriers[${index}].price.value`,
+                          e.target.value.toString(),
+                        )
+                      }
+                    />
+                  </Box>
+                  <Typography variant='body2' color='textSecondary'>
+                    {dictionary?.shipmentCarriers?.find((c) => c.id === index + 1)?.shipmentCarrier
+                      ?.description || 'No description available'}
+                  </Typography>
                 </Grid>
               ))}
               <Grid item xs={12}>

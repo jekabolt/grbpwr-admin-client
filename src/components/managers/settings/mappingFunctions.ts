@@ -10,6 +10,7 @@ export function mapShipmentCarriers(
             price: carrier.shipmentCarrier?.price
                 ? { value: carrier.shipmentCarrier.price.value }
                 : undefined,
+            description: carrier.shipmentCarrier?.description
         })) || []
     );
 }
