@@ -2,7 +2,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import { FC, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 
 interface CopyToClipboardProps {
   text: string;
@@ -11,6 +11,7 @@ interface CopyToClipboardProps {
 
 export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, displayText }) => {
   const [copied, setCopied] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const handleCopy = () => {
     navigator.clipboard
@@ -22,6 +23,19 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, displayText })
       .catch((err) => console.error('Failed to copy: ', err));
   };
 
+  useEffect(() => {
+    const handleBeforePrint = () => setIsPrinting(true);
+    const handleAfterPrint = () => setIsPrinting(false);
+
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
+
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
       <div>{displayText || text}</div>
@@ -30,7 +44,7 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, displayText })
           onClick={handleCopy}
           color='primary'
           size='small'
-          style={{ padding: 0, paddingLeft: '5px' }}
+          style={{ padding: 0, paddingLeft: '5px', visibility: isPrinting ? 'hidden' : 'visible' }}
         >
           {copied ? <CheckCircleOutlineIcon /> : <ContentCopyIcon />}
         </IconButton>
