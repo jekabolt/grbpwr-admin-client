@@ -191,7 +191,7 @@ export const Orders: FC = () => {
   const navigate = useNavigate();
 
   const handleRowClick = (params: any) => {
-    navigate({ to: `${ROUTES.orders}/${params.id}` });
+    navigate({ to: `${ROUTES.orders}/${params.row.uuid}` });
   };
 
   return (
