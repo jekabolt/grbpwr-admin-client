@@ -18,6 +18,7 @@ import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 interface SearchFilters {
   status: common_OrderStatusEnum | undefined;
   paymentMethod: common_PaymentMethodNameEnum | undefined;
+  orderId: string | undefined;
   email: string | undefined;
 }
 
@@ -38,9 +39,12 @@ export const Orders: FC = () => {
 
   const [email, setEmail] = useState('');
 
+  const [orderId, setOrderId] = useState('');
+
   const [searchFilters, setSearchFilters] = useState<SearchFilters>({
     status: undefined,
     paymentMethod: undefined,
+    orderId: undefined,
     email: undefined,
   });
 
@@ -52,6 +56,7 @@ export const Orders: FC = () => {
         offset: 0,
         limit: pageSize,
         status: filters.status,
+        orderId: Number(filters.orderId) || undefined,
         email: filters.email,
         paymentMethod: filters.paymentMethod,
         orderFactor: 'ORDER_FACTOR_DESC',
@@ -77,6 +82,7 @@ export const Orders: FC = () => {
         offset: offset,
         limit: pageSize,
         status: searchFilters.status,
+        orderId: Number(searchFilters.orderId) || undefined,
         email: searchFilters.email,
         paymentMethod: searchFilters.paymentMethod,
         orderFactor: 'ORDER_FACTOR_DESC',
@@ -98,6 +104,7 @@ export const Orders: FC = () => {
     const filters = {
       status: selectedStatus as common_OrderStatusEnum || undefined,
       paymentMethod: selectedPayment as common_PaymentMethodNameEnum || undefined,
+      orderId: orderId || undefined,
       email: email || undefined,
     };
     setSearchFilters(filters);
@@ -188,6 +195,10 @@ export const Orders: FC = () => {
     setEmail(event.target.value);
   };
 
+  const handleOrderIdChange = (event: any) => {
+    setOrderId(event.target.value);
+  };
+
   const navigate = useNavigate();
 
   const handleRowClick = (params: any) => {
@@ -231,6 +242,16 @@ export const Orders: FC = () => {
                 variant='outlined'
                 value={email}
                 onChange={handleEmailChange}
+              />
+            </FormControl>
+          </Grid>
+          <Grid item xs={3}>
+            <FormControl fullWidth>
+              <TextField
+                label='Order id'
+                variant='outlined'
+                value={orderId}
+                onChange={handleOrderIdChange}
               />
             </FormControl>
           </Grid>
