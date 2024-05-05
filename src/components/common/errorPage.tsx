@@ -1,12 +1,11 @@
 import { Button, Grid, Typography } from '@mui/material';
-import { useNavigate, useRouter } from '@tanstack/react-location';
+import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
 import { FC, useEffect, useState } from 'react';
 
 export const ErrorPage: FC = () => {
   const [errorName, setErrorName] = useState<string | null>(null);
   const navigate = useNavigate();
-  const router = useRouter();
 
   useEffect(() => {
     const storedErrorName = sessionStorage.getItem('errorCode');

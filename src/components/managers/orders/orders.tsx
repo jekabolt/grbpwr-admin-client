@@ -96,11 +96,9 @@ export const Orders: FC = () => {
 
   const initSearchFilters = () => {
     const filters = {
-      status: !!selectedStatus ? (selectedStatus as common_OrderStatusEnum) : undefined,
-      paymentMethod: !!selectedPayment
-        ? (selectedPayment as common_PaymentMethodNameEnum)
-        : undefined,
-      email: !!email ? email : undefined,
+      status: selectedStatus as common_OrderStatusEnum || undefined,
+      paymentMethod: selectedPayment as common_PaymentMethodNameEnum || undefined,
+      email: email || undefined,
     };
     setSearchFilters(filters);
     setLoadMoreVisible(true);
@@ -154,7 +152,7 @@ export const Orders: FC = () => {
       headerName: 'Order status',
       width: 180,
       renderCell: (params: any) => {
-        let status = getOrderStatusName(dictionary, params.value);
+        const status = getOrderStatusName(dictionary, params.value);
         return (
           <div
             style={{

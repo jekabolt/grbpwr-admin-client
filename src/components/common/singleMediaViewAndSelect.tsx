@@ -21,7 +21,7 @@ export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
         ) : (
           ''
         )}
-        <Grid item className={link ? styles.media_selector : styles.empty_media_selctor}>
+        <Grid item className={link ? styles.media_selector : styles.empty_media_selector}>
           <MediaSelectorLayout
             label={link ? 'edit' : 'select media'}
             saveSelectedMedia={saveSelectedMedia}

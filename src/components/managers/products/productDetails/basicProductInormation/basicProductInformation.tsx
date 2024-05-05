@@ -93,15 +93,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
             formatted: formattedDate,
           });
         }
-      } else if (name === 'salePercentage' && typeof value === 'string') {
-        const numValue = parseFloat(value) || 0; // Convert input value to number, defaulting to 0 if empty
-        updatedPayload = {
-          ...updatedPayload,
-          salePercentage: { value: value.trim() },
-        };
-        if (numValue > 0) {
-          setPreorderDate({ initial: '', formatted: '' }); // Reset preorder date
-        }
       } else {
         updatedPayload = {
           ...updatedPayload,
