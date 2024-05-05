@@ -118,7 +118,7 @@ export const GetArchive: FC = () => {
   };
 
   const removeArchive = async (id: number | undefined) => {
-    const response = await deleteArchive({ id });
+    await deleteArchive({ id });
     fetchArchive();
   };
 

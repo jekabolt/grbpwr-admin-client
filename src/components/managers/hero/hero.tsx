@@ -120,7 +120,7 @@ export const Hero: FC = () => {
   };
 
   const updateHero = async () => {
-    let ads: common_HeroInsert[] = [];
+    const ads: common_HeroInsert[] = [];
 
     if (firstAdContentLink !== undefined) {
       ads.push({
@@ -140,7 +140,7 @@ export const Hero: FC = () => {
       });
     }
 
-    let response = await addHero({
+    const response = await addHero({
       main: {
         contentLink: mainContentLink,
         contentType: 'image',
