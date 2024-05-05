@@ -16,5 +16,5 @@ export enum ROUTES {
   getArchive = '/get-archive',
   settings = '/settings',
   orders = '/orders',
-  orderDetails = '/orders/:id',
+  orderDetails = '/orders/:uuid',
 }
