@@ -1,0 +1,72 @@
+.media_item {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  border: 1px solid #000;
+  width: 396px;
+  height: 243px;
+  flex: 0 0 auto;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: scale-down;
+  }
+
+  .description {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 70%;
+    height: 100%;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow: hidden;
+    overflow: auto;
+  }
+
+  .delete_item {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+}
+
+.media_item_add {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  border: 1px solid #000;
+  width: 396px;
+  height: 243px;
+  flex: 0 0 auto;
+
+  .description {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 70%;
+    height: 100%;
+    overflow: auto;
+  }
+
+  .add_item {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+  }
+
+  .exit_edit_mode {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: scale-down;
+  }
+}
