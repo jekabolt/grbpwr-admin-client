@@ -2,8 +2,8 @@ import { adminService } from './admin';
 import {
   DeliveredOrderRequest,
   DeliveredOrderResponse,
-  GetOrderByIdRequest,
-  GetOrderByIdResponse,
+  GetOrderByUUIDRequest,
+  GetOrderByUUIDResponse,
   ListOrdersRequest,
   ListOrdersResponse,
   RefundOrderRequest,
@@ -16,8 +16,8 @@ export function getOrdersList(request: ListOrdersRequest): Promise<ListOrdersRes
   return adminService.ListOrders(request);
 }
 
-export function getOrderById(request: GetOrderByIdRequest): Promise<GetOrderByIdResponse> {
-  return adminService.GetOrderById(request);
+export function getOrderByUUID(request: GetOrderByUUIDRequest): Promise<GetOrderByUUIDResponse> {
+  return adminService.GetOrderByUUID(request);
 }
 
 export function setTrackingNumberUpdate(

@@ -14,5 +14,5 @@ export enum ROUTES {
   archive = '/archive',
   settings = '/settings',
   orders = '/orders',
-  orderDetails = '/orders/:id',
+  orderDetails = '/orders/:uuid',
 }

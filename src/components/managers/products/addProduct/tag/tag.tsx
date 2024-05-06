@@ -4,7 +4,7 @@ import { useFormikContext } from 'formik';
 import { useEffect, useState } from 'react';
 
 export const Tags = () => {
-  const { values, setFieldValue } = useFormikContext<common_ProductNew>(); // Using any for simplicity, replace with your form values type
+  const { setFieldValue } = useFormikContext<common_ProductNew>(); // Using any for simplicity, replace with your form values type
   const [newTag, setNewTag] = useState('');
   const [tags, setTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');

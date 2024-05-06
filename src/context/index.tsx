@@ -1,6 +1,6 @@
 import { Dispatch, FC, ReactNode, createContext, useReducer } from 'react';
 
-const initialContexValue = {};
+const initialContextValue = {};
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 interface IState {}
@@ -19,12 +19,12 @@ interface IContextValue {
   dispatch: Dispatch<{ type: ActionsType; payload: string }>;
 }
 export const Context = createContext<IContextValue>({
-  state: initialContexValue,
+  state: initialContextValue,
   dispatch: () => null,
 });
 
 export const ContextProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(reducer, initialContexValue);
+  const [state, dispatch] = useReducer(reducer, initialContextValue);
 
   return <Context.Provider value={{ state, dispatch }}>{children}</Context.Provider>;
 };
