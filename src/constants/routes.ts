@@ -12,9 +12,7 @@ export enum ROUTES {
   promo = '/promo',
   getPromo = '/get-promo',
   archive = '/archive',
-  createArchive = '/create-archive',
-  getArchive = '/get-archive',
   settings = '/settings',
   orders = '/orders',
-  orderDetails = '/orders/:id',
+  orderDetails = '/orders/:uuid',
 }

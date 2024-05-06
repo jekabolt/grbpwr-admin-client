@@ -3,12 +3,12 @@ import LaunchIcon from '@mui/icons-material/Launch';
 import { Button, Grid, TextField } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
-import { DataGrid, GridCallbackDetails, GridPaginationModel } from '@mui/x-data-grid';
+import { DataGrid, GridPaginationModel } from '@mui/x-data-grid';
 import { MakeGenerics, useMatch, useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
 import {
   deliveredOrderUpdate,
-  getOrderById,
+  getOrderByUUID,
   refundOrderUpdate,
   setTrackingNumberUpdate,
 } from 'api/orders';
@@ -24,13 +24,13 @@ import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 // Define the expected params structure
 export type OrderDetailsPathProps = MakeGenerics<{
   Params: {
-    id: string;
+    uuid: string;
   };
 }>;
 
 export const OrderDetails = () => {
   const {
-    params: { id },
+    params: { uuid },
   } = useMatch<OrderDetailsPathProps>();
 
   const [orderDetails, setOrderDetails] = useState<common_OrderFull | undefined>();
@@ -84,7 +84,7 @@ export const OrderDetails = () => {
   const fetchOrderDetails = async () => {
     setIsLoading(true);
     try {
-      const response = await getOrderById({ orderId: parseInt(id) });
+      const response = await getOrderByUUID({ orderUuid: uuid });
       setOrderDetails(response.order);
     } finally {
       setIsLoading(false);
@@ -94,7 +94,7 @@ export const OrderDetails = () => {
   useEffect(() => {
     fetchOrderDetails();
     fetchDictionary();
-  }, [id]);
+  }, [uuid]);
 
   useEffect(() => {
     setOrderStatus(getOrderStatusName(dictionary, orderDetails?.order?.orderStatusId));
@@ -168,7 +168,7 @@ export const OrderDetails = () => {
     },
   ];
 
-  const onPaginationChange = (model: GridPaginationModel, details: GridCallbackDetails) => {
+  const onPaginationChange = (model: GridPaginationModel) => {
     setPage(model.page);
     setPageSize(model.pageSize);
   };
@@ -187,7 +187,7 @@ export const OrderDetails = () => {
       return;
     }
     const response = await setTrackingNumberUpdate({
-      orderId: orderDetails?.order?.id,
+      orderUuid: orderDetails?.order?.uuid,
       trackingCode: trackingNumber,
     });
     if (response) {
@@ -198,7 +198,7 @@ export const OrderDetails = () => {
 
   const markAsDelivered = async () => {
     const response = await deliveredOrderUpdate({
-      orderId: orderDetails?.order?.id,
+      orderUuid: orderDetails?.order?.uuid,
     });
     if (response) {
       fetchOrderDetails();
@@ -207,14 +207,14 @@ export const OrderDetails = () => {
 
   const refundOrder = async () => {
     const response = await refundOrderUpdate({
-      orderId: orderDetails?.order?.id,
+      orderUuid: orderDetails?.order?.uuid,
     });
     if (response) {
       fetchOrderDetails();
     }
   };
 
-  let promoApplied = (() => {
+  const promoApplied = (() => {
     const promoCode = orderDetails?.promoCode?.promoCodeInsert;
     return (
       promoCode && (
@@ -227,7 +227,7 @@ export const OrderDetails = () => {
     );
   })();
 
-  let payment = (() => {
+  const payment = (() => {
     const payment = orderDetails?.payment;
     return (
       payment && (
@@ -284,7 +284,7 @@ export const OrderDetails = () => {
     );
   })();
 
-  let shipping = (() => {
+  const shipping = (() => {
     const shipping = orderDetails?.shipping?.addressInsert;
     const buyer = orderDetails?.buyer?.buyerInsert;
     return (
@@ -355,7 +355,7 @@ export const OrderDetails = () => {
                 {buyer?.lastName && <div>LAST NAME: {buyer.lastName}</div>}
                 {buyer?.phone && <div>PHONE: {buyer.phone}</div>}
                 <div className={isPrinting ? styles.hide_cell : styles.non_print_state}>
-                  RECIEVE PROMO EMAILS:&nbsp;
+                  RECEIVE PROMO EMAILS:&nbsp;
                   {buyer?.receivePromoEmails ? (
                     <div style={{ backgroundColor: '#008f0080' }}>YES</div>
                   ) : (
@@ -370,7 +370,7 @@ export const OrderDetails = () => {
     );
   })();
 
-  let billing = (() => {
+  const billing = (() => {
     const billing = orderDetails?.billing?.addressInsert;
     return (
       billing && (
@@ -399,7 +399,7 @@ export const OrderDetails = () => {
     );
   })();
 
-  let trackingNumberSection = (() => {
+  const trackingNumberSection = (() => {
     return (
       orderStatus === 'CONFIRMED' &&
       !orderDetails?.shipment?.trackingCode && (
@@ -424,7 +424,7 @@ export const OrderDetails = () => {
     );
   })();
 
-  let markAsDeliveredSection = (() => {
+  const markAsDeliveredSection = (() => {
     return (
       orderStatus === 'SHIPPED' && (
         <Button onClick={markAsDelivered} variant='contained'>
@@ -434,7 +434,7 @@ export const OrderDetails = () => {
     );
   })();
 
-  let refundOrderSection = (() => {
+  const refundOrderSection = (() => {
     const criteriaMet = orderStatus === 'CONFIRMED' || orderStatus === 'DELIVERED';
     return (
       criteriaMet && (
@@ -445,7 +445,7 @@ export const OrderDetails = () => {
     );
   })();
 
-  let orderStatusColored = (() => {
+  const orderStatusColored = (() => {
     return (
       <div style={{ backgroundColor: getStatusColor(orderStatus), height: 'fit-content' }}>
         {orderStatus}

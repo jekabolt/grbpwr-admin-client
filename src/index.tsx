@@ -13,8 +13,6 @@ import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
 import { Main } from 'components/managers/MainContent';
 import { Archive } from 'components/managers/archive/archive';
-import { GetArchive } from 'components/managers/archive/getArchive';
-import { MainArchive } from 'components/managers/archive/mainArchive';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
 import { OrderDetails } from 'components/managers/orders/orderDetails';
@@ -111,23 +109,7 @@ const routes: Route<DefaultGenerics>[] = [
     path: ROUTES.archive,
     element: (
       <ProtectedRoute>
-        <MainArchive />
-      </ProtectedRoute>
-    ),
-  },
-  {
-    path: ROUTES.createArchive,
-    element: (
-      <ProtectedRoute>
         <Archive />
-      </ProtectedRoute>
-    ),
-  },
-  {
-    path: ROUTES.getArchive,
-    element: (
-      <ProtectedRoute>
-        <GetArchive />
       </ProtectedRoute>
     ),
   },

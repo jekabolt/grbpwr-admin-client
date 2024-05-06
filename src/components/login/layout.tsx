@@ -18,10 +18,6 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
     navigate({ to: ROUTES.login, replace: true });
   };
 
-  const handleLogo = () => {
-    navigate({ to: ROUTES.main });
-  };
-
   return (
     <div className={styles.layout}>
       <div className={styles.layout_logo}>
