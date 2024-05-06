@@ -1,7 +1,8 @@
+
 import { common_Media, common_MediaInsert } from 'api/proto-http/admin';
 
 export interface MediaSelectorLayoutProps {
-    label: string;
+    label: string
     saveSelectedMedia: (newSelectedMedia: string[]) => void;
     allowMultiple: boolean;
 }
