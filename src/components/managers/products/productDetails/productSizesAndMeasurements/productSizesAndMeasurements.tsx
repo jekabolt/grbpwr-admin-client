@@ -103,7 +103,7 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
       return {
         sizeId: productSizeId,
         measurementNameId: measurementNameId,
-        measurementValue: { value },
+        measurementValue: { value: value },
       };
     });
 

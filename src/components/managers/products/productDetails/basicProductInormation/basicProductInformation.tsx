@@ -18,7 +18,10 @@ import { colors } from 'constants/colors';
 import { format } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import { formatPreorderDate } from 'features/utilitty/formatPreorderDate';
+import {
+  convertFormattedStringToDate,
+  formatPreorderDate,
+} from 'features/utilitty/formatPreorderDate';
 import { formatDate } from 'features/utilitty/formateDate';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import React, { FC, useEffect, useMemo, useState } from 'react';
@@ -35,16 +38,34 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     salePercentage: {
       value: product?.product?.productInsert?.salePercentage?.value ?? '',
     },
+    preorder: product?.product?.productInsert?.preorder ?? '',
   });
   const [isEdit, setIsEdit] = useState(false);
   const [dict, setDict] = useState<common_Dictionary>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
-  const [showPreorder, setShowPreorder] = useState(true);
-  const [showSales, setShowSales] = useState(true);
+  const extractDate = convertFormattedStringToDate(product?.product?.productInsert?.preorder);
   const [preorderDate, setPreorderDate] = useState({
     initial: product?.product?.productInsert?.preorder || '',
     formatted: formatPreorderDate(product?.product?.productInsert?.preorder) || '',
   });
+  const initialShowSales =
+    updatePayload.salePercentage?.value !== '' && updatePayload.salePercentage?.value !== '0';
+  const initialShowPreorder = updatePayload.preorder !== '';
+
+  const [showSales, setShowSales] = useState(initialShowSales);
+  const [showPreorder, setShowPreorder] = useState(initialShowPreorder);
+
+  useEffect(() => {
+    const showSalesField =
+      updatePayload.salePercentage?.value !== '' && updatePayload.salePercentage?.value !== '0';
+    const showPreorderField = updatePayload.preorder !== '';
+    const bothEmpty =
+      updatePayload.salePercentage?.value === '0' ||
+      (updatePayload.salePercentage?.value === '' && updatePayload.preorder === '');
+
+    setShowSales(showSalesField || bothEmpty);
+    setShowPreorder(showPreorderField || bothEmpty);
+  }, [updatePayload.salePercentage?.value, updatePayload.preorder]);
 
   useEffect(() => {
     const fetchDictionary = async () => {
@@ -76,22 +97,27 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           color: value,
           colorHex: selectedColor ? selectedColor.hex : '#000000',
         };
-      } else if (name === 'price' || name === 'salePercentage') {
+      } else if (name === 'price' || (name === 'salePercentage' && typeof value === 'string')) {
         updatedPayload = {
           ...updatedPayload,
           [name]: { ...prev[name], value },
         };
+        if (!value) {
+          if (product?.product?.productInsert && product.product.productInsert.salePercentage) {
+            product.product.productInsert.salePercentage.value = '';
+          }
+        }
       } else if (name === 'preorder' && typeof value === 'string') {
-        console.log(preorderDate);
-        if (
-          updatedPayload.salePercentage?.value === '0' ||
-          updatedPayload.salePercentage?.value === ''
-        ) {
-          const formattedDate = formatPreorderDate(value);
-          setPreorderDate({
-            initial: value,
-            formatted: formattedDate,
-          });
+        const formattedDate = value ? formatPreorderDate(value) : '';
+        setPreorderDate({
+          initial: value,
+          formatted: formattedDate,
+        });
+        updatedPayload.preorder = formattedDate;
+        if (!value) {
+          if (product?.product?.productInsert) {
+            product.product.productInsert.preorder = '';
+          }
         }
       } else {
         updatedPayload = {
@@ -99,20 +125,14 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           [name]: value,
         };
       }
-      if (
-        name === 'brand' ||
-        name === 'categoryId' ||
-        name === 'color' ||
-        name === 'countryOfOrigin'
-      ) {
-        const newSKU = generateSKU(
-          updatedPayload.brand || product?.product?.productInsert?.brand,
-          updatedPayload.categoryId || product?.product?.productInsert?.categoryId,
-          updatedPayload.color || product?.product?.productInsert?.color,
-          updatedPayload.countryOfOrigin || product?.product?.productInsert?.color?.substring(0, 2),
-        );
-        updatedPayload.sku = newSKU;
-      }
+
+      const newSKU = generateSKU(
+        updatedPayload.brand || product?.product?.productInsert?.brand,
+        updatedPayload.categoryId || product?.product?.productInsert?.categoryId,
+        updatedPayload.color || product?.product?.productInsert?.color,
+        updatedPayload.countryOfOrigin || product?.product?.productInsert?.color?.substring(0, 2),
+      );
+      updatedPayload.sku = newSKU;
 
       return updatedPayload;
     });
@@ -128,15 +148,10 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
       return;
     }
     try {
-      const formattedPreorder = preorderDate.formatted;
       const updatedDetails = {
         ...product?.product?.productInsert,
         ...updatePayload,
-        preorder: formattedPreorder,
       };
-      // if (updatedDetails.preorder.includes('invalid')) {
-      //   updatedDetails.preorder = '';
-      // }
       if (updatedDetails.preorder !== '' && updatedDetails.salePercentage?.value) {
         updatedDetails.salePercentage.value = '0';
       }
@@ -321,37 +336,37 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           onKeyDown={removePossibilityToUseSigns}
         />
       </Grid>
-      {!preorderDate.formatted && (
+      {showSales && (
         <Grid item xs={12}>
           <TextField
             type='number'
             name='salePercentage'
             onChange={handleChange}
             value={
-              updatePayload.salePercentage?.value !== undefined
-                ? updatePayload.salePercentage?.value
-                : product?.product?.productInsert?.salePercentage?.value || ''
+              updatePayload.salePercentage?.value ||
+              product?.product?.productInsert?.salePercentage?.value ||
+              ''
             }
             variant='outlined'
             label='SALE PERCENTAGE'
             InputLabelProps={{ shrink: true }}
             inputProps={{ min: 0 }}
             disabled={!isEdit}
-            required={isEdit}
             onKeyDown={removePossibilityToUseSigns}
           />
         </Grid>
       )}
-      {(updatePayload.salePercentage?.value === '0' ||
-        updatePayload.salePercentage?.value === '') && (
+
+      {showPreorder && (
         <Grid item xs={8.5}>
           <TextField
+            key={preorderDate.initial}
             name='preorder'
             type={isEdit ? 'date' : 'text'}
             onChange={handleChange}
             value={
               isEdit
-                ? preorderDate.initial
+                ? preorderDate.initial || extractDate || ''
                 : updatePayload.preorder || product?.product?.productInsert?.preorder || ''
             }
             variant='outlined'
@@ -365,6 +380,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           />
         </Grid>
       )}
+
       <Grid item xs={8.5}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>GENDER</InputLabel>
