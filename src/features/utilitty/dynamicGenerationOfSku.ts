@@ -19,11 +19,17 @@ const generateNumbers = () => {
     return uuid.slice(0, 4);
 }
 
+const getColorCode = (color: string | undefined) => {
+    if (!color) return
+    const words = color?.split('_');
+    return words.length >= 2 ? words[0][0] + words[1][0] : color?.substring(0, 2);
+};
+
 export const generateSKU = (brand: string | undefined, categoryId: number | undefined, color: string | undefined, country: string | undefined) => {
     if (brand) {
         const removeSpaces = brand.replace(/\s/g, '');
         const formattedBrand = removeSpaces.length > 6 ? removeSpaces.substring(0, 6) : removeSpaces;
-        const colorCode = color?.substring(0, 2);
+        const colorCode = getColorCode(color)
         const date = getCurrentSeasonCode();
         const randomNumbers = generateNumbers()
         return `${formattedBrand}${categoryId}${colorCode}${country}${date}${randomNumbers}`.toUpperCase();
