@@ -21,7 +21,6 @@ import { AddProductInterface, Country } from '../addProductInterface/addProductI
 export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
-  const [preorder, setPreorder] = useState<string>();
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
   const [preorderDate, setPreorderDate] = useState({
@@ -48,16 +47,29 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
       e: SelectChangeEvent<string | number> | React.ChangeEvent<HTMLInputElement>,
       field: string,
     ) => {
-      const newValue = e.target.value;
-      setFieldValue(`product.${field}`, newValue);
-      if (field === 'color') {
-        const selectedColor = colors.find((color) => color.name === newValue);
+      let newValue = e.target.value;
+      if (field === 'color' && typeof newValue === 'string') {
+        newValue = newValue.toLowerCase().replace(/\s/g, '_');
+        const selectedColor = colors.find(
+          (color) => color.name.toLowerCase().replace(/\s/g, '_') === newValue,
+        );
         setFieldValue('product.colorHex', selectedColor ? selectedColor.hex : '#000000', false);
       }
+      setFieldValue(`product.${field}`, newValue);
+
       const updatedValues = {
         ...values.product,
         [field]: newValue,
       };
+
+      // const words = updatedValues.color?.split('_');
+      // let colorModifier = '';
+      // if (words) {
+      //   if (words.length >= 2) {
+      //     colorModifier = words[0][0] + words[1][0];
+      //   }
+      // }
+
       const newSKU = generateSKU(
         updatedValues.brand,
         updatedValues.categoryId,
@@ -141,8 +153,8 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             name='product.color'
           >
             {colors.map((color, id) => (
-              <MenuItem key={id} value={color.name}>
-                {color.name}
+              <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
+                {color.name.toLowerCase().replace(/\s/g, '_')}
               </MenuItem>
             ))}
           </Select>
