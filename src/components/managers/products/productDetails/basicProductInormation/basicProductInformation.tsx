@@ -35,10 +35,6 @@ type UpdateProductPayload = Partial<common_ProductInsert>;
 export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMessage }) => {
   const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
     hidden: product?.product?.productInsert?.hidden ?? false,
-    salePercentage: {
-      value: product?.product?.productInsert?.salePercentage?.value ?? '',
-    },
-    preorder: product?.product?.productInsert?.preorder ?? '',
   });
   const [isEdit, setIsEdit] = useState(false);
   const [dict, setDict] = useState<common_Dictionary>();
@@ -48,20 +44,21 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     initial: product?.product?.productInsert?.preorder || '',
     formatted: formatPreorderDate(product?.product?.productInsert?.preorder) || '',
   });
-  const initialShowSales =
-    updatePayload.salePercentage?.value !== '' && updatePayload.salePercentage?.value !== '0';
-  const initialShowPreorder = updatePayload.preorder !== '';
-
-  const [showSales, setShowSales] = useState(initialShowSales);
-  const [showPreorder, setShowPreorder] = useState(initialShowPreorder);
+  const initialSaleValue =
+    product?.product?.productInsert?.salePercentage?.value !== '' &&
+    product?.product?.productInsert?.salePercentage?.value !== '0';
+  const initialPreorderValue = product?.product?.productInsert?.preorder !== '';
+  const [showSales, setShowSales] = useState(initialSaleValue);
+  const [showPreorder, setShowPreorder] = useState(initialPreorderValue);
 
   useEffect(() => {
     const showSalesField =
       updatePayload.salePercentage?.value !== '' && updatePayload.salePercentage?.value !== '0';
     const showPreorderField = updatePayload.preorder !== '';
+
     const bothEmpty =
-      updatePayload.salePercentage?.value === '0' ||
-      (updatePayload.salePercentage?.value === '' && updatePayload.preorder === '');
+      (updatePayload.salePercentage?.value === '' || updatePayload.salePercentage?.value === '0') &&
+      !updatePayload.preorder;
 
     setShowSales(showSalesField || bothEmpty);
     setShowPreorder(showPreorderField || bothEmpty);
@@ -90,8 +87,23 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     setUpdatePayload((prev) => {
       let updatedPayload: UpdateProductPayload = { ...prev };
 
+      const saleVisible =
+        updatedPayload.salePercentage?.value !== '' && updatedPayload.salePercentage?.value !== '0';
+      const preorderVisible = updatedPayload.preorder !== '';
+
+      // Check if both are empty or zero
+      const bothEmpty =
+        (updatedPayload.salePercentage?.value === '' ||
+          updatedPayload.salePercentage?.value === '0') &&
+        !updatedPayload.preorder;
+
+      setShowSales(saleVisible || bothEmpty);
+      setShowPreorder(preorderVisible || bothEmpty);
+
       if (name === 'color' && typeof value === 'string') {
-        const selectedColor = colors.find((color) => color.name === value);
+        const selectedColor = colors.find(
+          (color) => color.name.toLowerCase().replace(/\s/g, '_') === value,
+        );
         updatedPayload = {
           ...updatedPayload,
           color: value,
@@ -106,6 +118,8 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           if (product?.product?.productInsert && product.product.productInsert.salePercentage) {
             product.product.productInsert.salePercentage.value = '';
           }
+        } else if (value !== '0' && value !== '') {
+          updatePayload.preorder = '';
         }
       } else if (name === 'preorder' && typeof value === 'string') {
         const formattedDate = value ? formatPreorderDate(value) : '';
@@ -118,6 +132,8 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           if (product?.product?.productInsert) {
             product.product.productInsert.preorder = '';
           }
+        } else if (value.trim() !== '') {
+          updatedPayload.salePercentage = { ...prev.salePercentage, value: '0' };
         }
       } else {
         updatedPayload = {
@@ -277,8 +293,8 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
               {product?.product?.productInsert?.color}
             </MenuItem>
             {colors.map((color, id) => (
-              <MenuItem key={id} value={color.name}>
-                {color.name}
+              <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
+                {color.name.toLowerCase().replace(/\s/g, '_')}
               </MenuItem>
             ))}
           </Select>
