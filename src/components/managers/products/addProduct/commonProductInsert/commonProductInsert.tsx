@@ -201,7 +201,6 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             onChange={(e: any) => handlePriceChange(e, true)}
             type='number'
             inputProps={{ min: 0, max: 99 }}
-            required
             InputLabelProps={{ shrink: true }}
             onKeyDown={removePossibilityToUseSigns}
             fullWidth
