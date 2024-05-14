@@ -91,7 +91,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         updatedPayload.salePercentage?.value !== '' && updatedPayload.salePercentage?.value !== '0';
       const preorderVisible = updatedPayload.preorder !== '';
 
-      // Check if both are empty or zero
       const bothEmpty =
         (updatedPayload.salePercentage?.value === '' ||
           updatedPayload.salePercentage?.value === '0') &&

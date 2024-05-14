@@ -1,4 +1,3 @@
-import AddIcon from '@mui/icons-material/Add';
 import ClearIcon from '@mui/icons-material/Clear';
 import { Alert, Button, Grid, IconButton, Snackbar, TextField, Typography } from '@mui/material';
 import { addArchive } from 'api/archive';
@@ -7,7 +6,11 @@ import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout'
 import { FC, useState } from 'react';
 import styles from 'styles/archive.scss';
 
-export const CreateArchive: FC = () => {
+interface Archives {
+  fetchArchive: (limit: number, offset: number) => void;
+}
+
+export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
   const initialArchiveState: common_ArchiveNew = {
     archive: {
       heading: '',
@@ -15,7 +18,6 @@ export const CreateArchive: FC = () => {
     },
     items: [],
   };
-
   const [archive, setArchive] = useState<common_ArchiveNew>(initialArchiveState);
   const [title, setTitle] = useState<string>('');
   const [mediaItem, setMediaItem] = useState<string[]>([]);
@@ -32,10 +34,15 @@ export const CreateArchive: FC = () => {
 
   const createArchive = async () => {
     try {
-      await addArchive({ archiveNew: archive });
-      setArchive(initialArchiveState);
-      setMediaItem([]);
-      showMessage('ARCHIVE CREATED', 'success');
+      if (mediaItem.length > 0) {
+        await addArchive({ archiveNew: archive });
+        setArchive(initialArchiveState);
+        fetchArchive(50, 0);
+        setMediaItem([]);
+        showMessage('ARCHIVE CREATED', 'success');
+      } else {
+        showMessage('ADD ITEM TO THE ARCHIVE', 'error');
+      }
     } catch (error) {
       showMessage('ARCHIVE COULD NOT BE CREATED ', 'success');
     }
@@ -104,64 +111,54 @@ export const CreateArchive: FC = () => {
   };
 
   return (
-    <Grid container spacing={2} marginTop={3} alignItems='center'>
+    <Grid container spacing={2} marginLeft={10} marginTop={4} alignItems='center'>
       <Grid item xs={10}>
-        <div style={{ width: '1100px', marginBottom: '3%' }}>
-          <Grid
-            container
-            sx={{
-              width: '100%',
-              display: 'flex',
-              overflowX: 'scroll',
-              flexWrap: 'nowrap',
-              gap: '10px',
-            }}
-          >
-            <Grid item className={styles.media_item_add}>
-              {media ? (
-                <>
-                  <img src={media} />
-                  <TextField
-                    name='title'
-                    value={title}
-                    onChange={(e: any) => setTitle(e.target.value)}
-                    className={styles.description}
-                    label='DESCRIPTION'
-                    variant='standard'
-                    multiline
-                  />
-                  <Button size='small' className={styles.add_item} onClick={() => addNewItem()}>
-                    add
-                  </Button>
-                  <IconButton
-                    size='small'
-                    className={styles.exit_edit_mode}
-                    onClick={() => exitEditMode()}
-                  >
-                    <ClearIcon fontSize='medium' />
-                  </IconButton>
-                </>
-              ) : (
-                <MediaSelectorLayout
-                  label='add media'
-                  allowMultiple={false}
-                  saveSelectedMedia={mediaPreview}
-                />
-              )}
-            </Grid>
-            {mediaItem.map((media, id) => (
-              <Grid item key={id} className={styles.media_item}>
+        <Grid container className={styles.scroll_container} wrap='nowrap'>
+          <Grid item className={styles.media_item_add}>
+            {media ? (
+              <>
                 <img src={media} />
-                <Typography noWrap={false} variant='overline' className={styles.description}>
-                  {archive.items?.[id].title}
-                </Typography>
-                <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
-                  <ClearIcon fontSize='small' />
+                <TextField
+                  name='title'
+                  value={title}
+                  onChange={(e: any) => setTitle(e.target.value)}
+                  className={styles.description}
+                  label='DESCRIPTION'
+                  variant='standard'
+                  multiline
+                />
+                <Button size='small' className={styles.add_item} onClick={() => addNewItem()}>
+                  add
+                </Button>
+                <IconButton
+                  size='small'
+                  className={styles.exit_edit_mode}
+                  onClick={() => exitEditMode()}
+                >
+                  <ClearIcon fontSize='medium' />
                 </IconButton>
-              </Grid>
-            ))}
+              </>
+            ) : (
+              <MediaSelectorLayout
+                label='add media'
+                allowMultiple={false}
+                saveSelectedMedia={mediaPreview}
+              />
+            )}
           </Grid>
-        </div>
+          {mediaItem.map((media, id) => (
+            <Grid item key={id} className={styles.media_item}>
+              <img src={media} />
+              <Typography noWrap={false} variant='overline' className={styles.description}>
+                {archive.items?.[id].title}
+              </Typography>
+              <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
+                <ClearIcon fontSize='small' />
+              </IconButton>
+            </Grid>
+          ))}
+        </Grid>
+
         <Grid container spacing={2}>
           <Grid item xs={12}>
             <TextField
@@ -174,7 +171,7 @@ export const CreateArchive: FC = () => {
               size='small'
             />
           </Grid>
-          <Grid item xs={6}>
+          <Grid item xs={4}>
             <TextField
               type='text'
               name='description'
@@ -190,9 +187,13 @@ export const CreateArchive: FC = () => {
         </Grid>
       </Grid>
       <Grid item xs={3}>
-        <IconButton onClick={createArchive}>
-          <AddIcon fontSize='large' />
-        </IconButton>
+        <Button
+          onClick={() => createArchive()}
+          variant='contained'
+          disabled={mediaItem.length === 0 ? true : false}
+        >
+          submit
+        </Button>
       </Grid>
       <Snackbar
         open={isSnackBarOpen}
@@ -204,6 +205,3 @@ export const CreateArchive: FC = () => {
     </Grid>
   );
 };
-
-{
-}

@@ -1,5 +1,6 @@
 
-export const formatDate = (dateString: string): string => {
+export const formatDate = (dateString: string | undefined): string | undefined => {
+    if (!dateString) return
     const options: Intl.DateTimeFormatOptions = {
         year: 'numeric',
         month: 'long',
