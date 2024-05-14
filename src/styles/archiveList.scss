@@ -1,9 +1,8 @@
-.scroll_container {
+.items_container {
   max-width: 1400px;
   overflow-x: scroll;
-  margin-bottom: 2%;
   gap: 10px;
-  .media_item {
+  .item {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -17,8 +16,8 @@
       width: 100%;
       height: 100%;
       object-fit: scale-down;
+      //   aspect-ratio: 16/9;
     }
-
     .description {
       position: absolute;
       top: 0;
@@ -38,7 +37,8 @@
     }
   }
 
-  .media_item_add {
+  .add_preview_new_item {
+    border: 1px solid #000;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -47,6 +47,12 @@
     width: 396px;
     height: 243px;
     flex: 0 0 auto;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: scale-down;
+    }
 
     .description {
       position: absolute;
@@ -67,12 +73,6 @@
       position: absolute;
       top: 0;
       right: 0;
-    }
-
-    img {
-      width: 100%;
-      height: 100%;
-      object-fit: scale-down;
     }
   }
 }
