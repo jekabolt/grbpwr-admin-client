@@ -300,7 +300,7 @@ export const OrderDetails = () => {
                     <TextField
                       id='tracking-number-input'
                       label='Tracking number'
-                      variant='outlined'
+                      variant='filled'
                       value={trackingNumber}
                       onChange={handleTrackingNumberChange}
                       size='small'

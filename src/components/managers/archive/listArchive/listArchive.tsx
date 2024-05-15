@@ -37,7 +37,7 @@ export const ListArchive: FC<Archive> = ({
   const [archivePayloads, setArchivePayloads] = useState<ArchivePayloads>({});
   const [media, setMedia] = useState('');
   const [title, setTitle] = useState('');
-  const [isEdit, setIsEdit] = useState(false);
+  const [isEdit, setIsEdit] = useState<{ [key: number]: boolean }>({});
   const [selectedArchiveId, setSelectedArchiveId] = useState<number | undefined>();
 
   useEffect(() => {
@@ -77,19 +77,24 @@ export const ListArchive: FC<Archive> = ({
     });
   };
 
-  const editModeToggler = () => {
-    setIsEdit(!isEdit);
+  const editModeToggler = (id: number | undefined) => {
+    if (id === undefined) return;
+    setIsEdit((prevIsEdit) => ({
+      ...prevIsEdit,
+      [id]: !prevIsEdit[id],
+    }));
+    setSelectedArchiveId(id);
   };
 
   const updateAndDisableEditMode = (id: number | undefined) => {
     if (id === undefined) return;
-    if (isEdit) {
+    if (isEdit[id]) {
       const payload = archivePayloads[id];
       if (payload) {
         updateArchiveInformation(id, payload.heading, payload.description);
       }
     }
-    editModeToggler();
+    editModeToggler(id);
   };
 
   const createMediaPreviewHandler = (archiveId: number | undefined) => {
@@ -114,14 +119,14 @@ export const ListArchive: FC<Archive> = ({
     setTitle('');
   };
   return (
-    <Grid container spacing={2} marginLeft={10}>
+    <Grid container spacing={2}>
       {archive.map(
         (a) =>
           a.archive?.id && (
             <React.Fragment key={`archive-${a.archive.id}`}>
               <Grid item xs={10}>
                 <Grid container className={styles.items_container} wrap='nowrap'>
-                  {isEdit && (
+                  {isEdit[a.archive.id] && (
                     <Grid item className={styles.add_preview_new_item}>
                       {media && selectedArchiveId === a.archive.id ? (
                         <>
@@ -171,7 +176,7 @@ export const ListArchive: FC<Archive> = ({
                   ))}
                 </Grid>
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} style={{ marginBottom: '2%' }}>
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
                     <TextField
@@ -181,8 +186,9 @@ export const ListArchive: FC<Archive> = ({
                         a.archive.archiveInsert?.heading ??
                         ''
                       }
-                      inputProps={{ readOnly: !isEdit }}
+                      inputProps={{ readOnly: !isEdit[a.archive.id] }}
                       onChange={(e) => updateArchivePayload(a.archive?.id, e)}
+                      size='small'
                     />
                   </Grid>
                   <Grid item xs={7}>
@@ -195,13 +201,14 @@ export const ListArchive: FC<Archive> = ({
                       }
                       fullWidth
                       multiline
-                      inputProps={{ readOnly: !isEdit }}
+                      inputProps={{ readOnly: !isEdit[a.archive.id] }}
                       onChange={(e) => updateArchivePayload(a.archive?.id, e)}
+                      size='small'
                     />
                   </Grid>
                   <Grid item xs={4}>
                     <Button onClick={() => updateAndDisableEditMode(a.archive?.id)}>
-                      {isEdit ? 'update' : 'edit'}
+                      {isEdit[a.archive.id] ? 'update' : 'edit'}
                     </Button>
                     <Button color='error' onClick={() => deleteArchive(a.archive?.id)}>
                       delete archive

@@ -111,7 +111,7 @@ export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
   };
 
   return (
-    <Grid container spacing={2} marginLeft={10} marginTop={4} alignItems='center'>
+    <Grid container spacing={2} marginTop={4} alignItems='center'>
       <Grid item xs={10}>
         <Grid container className={styles.scroll_container} wrap='nowrap'>
           <Grid item className={styles.media_item_add}>
