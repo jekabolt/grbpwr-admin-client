@@ -51,7 +51,7 @@ export const OrderDetails = () => {
   const [isEdit, setIsEdit] = useState(false);
 
   const toggleEditTrackingNumber = () => {
-    if (!isPrinting) {
+    if (!isPrinting && orderStatus === 'SHIPPED') {
       setIsEdit(!isEdit);
       if (isEdit) {
         setTrackingNumber(orderDetails?.shipment?.trackingCode || '');
@@ -315,11 +315,15 @@ export const OrderDetails = () => {
                   </>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <div>TRACKING NUMBER: {orderDetails?.shipment?.trackingCode}</div>
                     {!isPrinting && (
-                      <IconButton onClick={toggleEditTrackingNumber} size='small'>
-                        <EditIcon style={{ fontSize: '15px' }} />
-                      </IconButton>
+                      <>
+                        <div>TRACKING NUMBER: {orderDetails?.shipment?.trackingCode}</div>
+                        {orderStatus === 'SHIPPED' && (
+                          <IconButton onClick={toggleEditTrackingNumber} size='small'>
+                            <EditIcon style={{ fontSize: '15px' }} />
+                          </IconButton>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
