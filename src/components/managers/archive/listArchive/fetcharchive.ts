@@ -63,7 +63,6 @@ export const fetchArchives = (
             return;
         }
 
-        // Find the archive that contains the item
         const archiveContainingItem = archive.find((archive) =>
             archive.items?.some((item) => item.id === id)
         );
@@ -77,9 +76,6 @@ export const fetchArchives = (
         let confirmed;
         if (isLastItem) {
             confirmed = window.confirm('This is the last item in the archive. Are you sure you want to delete it?');
-            if (confirmed) {
-                deleteArchiveFromList(archiveContainingItem.archive?.id)
-            }
         } else {
             confirmed = window.confirm('Are you sure you want to delete this item?');
         }
