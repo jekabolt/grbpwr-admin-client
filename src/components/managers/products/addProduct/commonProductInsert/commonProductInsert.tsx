@@ -62,14 +62,6 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
         [field]: newValue,
       };
 
-      // const words = updatedValues.color?.split('_');
-      // let colorModifier = '';
-      // if (words) {
-      //   if (words.length >= 2) {
-      //     colorModifier = words[0][0] + words[1][0];
-      //   }
-      // }
-
       const newSKU = generateSKU(
         updatedValues.brand,
         updatedValues.categoryId,

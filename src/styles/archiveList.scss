@@ -1,7 +1,26 @@
 .items_container {
-  max-width: 1400px;
+  width: auto;
+  max-width: 1300px;
   overflow-x: scroll;
+  overflow-y: hidden;
   gap: 10px;
+  padding-bottom: 12px;
+
+  &::-webkit-scrollbar {
+    height: 12px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: #ccc;
+    border-radius: 10px;
+    border: 2px solid transparent;
+  }
+
+  &::-webkit-scrollbar-track {
+    background-color: #f1f1f1;
+    border-radius: 10px;
+  }
+
   .item {
     display: flex;
     justify-content: center;

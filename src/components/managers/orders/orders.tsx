@@ -12,6 +12,7 @@ import {
 } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
+import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { FC, useEffect, useState } from 'react';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 
@@ -102,8 +103,8 @@ export const Orders: FC = () => {
 
   const initSearchFilters = () => {
     const filters = {
-      status: selectedStatus as common_OrderStatusEnum || undefined,
-      paymentMethod: selectedPayment as common_PaymentMethodNameEnum || undefined,
+      status: (selectedStatus as common_OrderStatusEnum) || undefined,
+      paymentMethod: (selectedPayment as common_PaymentMethodNameEnum) || undefined,
       orderId: orderId || undefined,
       email: email || undefined,
     };
@@ -248,10 +249,13 @@ export const Orders: FC = () => {
           <Grid item xs={3}>
             <FormControl fullWidth>
               <TextField
+                type='number'
                 label='Order id'
                 variant='outlined'
                 value={orderId}
                 onChange={handleOrderIdChange}
+                inputProps={{ min: 0 }}
+                onKeyDown={removePossibilityToUseSigns}
               />
             </FormControl>
           </Grid>

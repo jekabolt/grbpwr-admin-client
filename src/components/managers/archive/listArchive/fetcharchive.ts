@@ -58,9 +58,31 @@ export const fetchArchives = (
     }, []);
 
     const deleteArchiveItem = async (id: number | undefined) => {
-        if (!id) showMessage('ITEM NOT EXIST', 'error');
+        if (!id) {
+            showMessage('ITEM NOT EXIST', 'error');
+            return;
+        }
 
-        const confirmed = window.confirm('Are you sure you wnat to delete archive the item ?');
+        // Find the archive that contains the item
+        const archiveContainingItem = archive.find((archive) =>
+            archive.items?.some((item) => item.id === id)
+        );
+
+        if (!archiveContainingItem) {
+            showMessage('ITEM NOT FOUND IN ARCHIVE', 'error');
+            return;
+        }
+        const isLastItem = archiveContainingItem.items?.length === 1;
+
+        let confirmed;
+        if (isLastItem) {
+            confirmed = window.confirm('This is the last item in the archive. Are you sure you want to delete it?');
+            if (confirmed) {
+                deleteArchiveFromList(archiveContainingItem.archive?.id)
+            }
+        } else {
+            confirmed = window.confirm('Are you sure you want to delete this item?');
+        }
 
         try {
             if (confirmed) {
