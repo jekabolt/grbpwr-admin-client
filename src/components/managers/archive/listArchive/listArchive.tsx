@@ -1,44 +1,52 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Button, Grid, IconButton, TextField, Typography } from '@mui/material';
-import {
-  common_ArchiveFull,
-  common_ArchiveInsert,
-  common_ArchiveItemInsert,
-} from 'api/proto-http/admin';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
+import { common_ArchiveInsert, common_ArchiveItemInsert } from 'api/proto-http/admin';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/archiveList.scss';
+import { ArchiveModal } from '../archiveModal/archiveModal';
+import { listArchive } from '../interfaces/interfaces';
 
 type UpdateArchivePayload = Partial<common_ArchiveInsert>;
 type ArchivePayloads = {
   [key: number]: UpdateArchivePayload;
 };
+type EditModes = {
+  [key: number]: boolean;
+};
 
-interface Archive {
-  archive: common_ArchiveFull[];
-  deleteArchive: (id: number | undefined) => void;
-  deleteItem: (id: number | undefined) => void;
-  newItemToArchive: (id: number | undefined, newItem: common_ArchiveItemInsert[]) => void;
-  showMessage: (message: string, severity: 'success' | 'error') => void;
-  updateArchiveInformation: (
-    id: number | undefined,
-    heading: string | undefined,
-    description: string | undefined,
-  ) => void;
-}
-
-export const ListArchive: FC<Archive> = ({
+export const ListArchive: FC<listArchive> = ({
   archive,
   deleteArchive,
   deleteItem,
   newItemToArchive,
   updateArchiveInformation,
+  showMessage,
 }) => {
   const [archivePayloads, setArchivePayloads] = useState<ArchivePayloads>({});
   const [media, setMedia] = useState('');
   const [title, setTitle] = useState('');
-  const [isEdit, setIsEdit] = useState<{ [key: number]: boolean }>({});
+  const [url, setUrl] = useState('');
+  const [isEdit, setIsEdit] = useState<EditModes>({});
   const [selectedArchiveId, setSelectedArchiveId] = useState<number | undefined>();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [expandedItemId, setExpandedItemId] = useState<number | undefined>();
+
+  const toggleTextExpansion = (id: number | undefined) => {
+    setExpandedItemId((prevId) => (prevId === id ? undefined : id));
+  };
+
+  const isDescriptionShort = (title: string | undefined) => {
+    if (!title) return;
+    const maxLineLength = 60;
+    return title.length <= maxLineLength;
+  };
+
+  const toggleModal = () => {
+    setIsModalOpen(!isModalOpen);
+  };
 
   useEffect(() => {
     const initialPayloads: ArchivePayloads = {};
@@ -79,10 +87,16 @@ export const ListArchive: FC<Archive> = ({
 
   const editModeToggler = (id: number | undefined) => {
     if (id === undefined) return;
-    setIsEdit((prevIsEdit) => ({
-      ...prevIsEdit,
-      [id]: !prevIsEdit[id],
-    }));
+
+    setIsEdit((prevIsEdit) => {
+      const newEditStates: EditModes = {};
+      Object.keys(prevIsEdit).forEach((key) => {
+        newEditStates[Number(key)] = false;
+      });
+      newEditStates[id] = !prevIsEdit[id];
+      return newEditStates;
+    });
+
     setSelectedArchiveId(id);
   };
 
@@ -102,22 +116,40 @@ export const ListArchive: FC<Archive> = ({
       if (newSelectedMedia.length > 0) {
         setMedia(newSelectedMedia[0]);
         setSelectedArchiveId(archiveId);
+        setIsModalOpen(true);
       }
     };
+  };
+  const isValidUrl = (url: string) => {
+    try {
+      new URL(url);
+      return true;
+    } catch (e) {
+      return false;
+    }
   };
 
   const handleSubmitNewItem = (id: number | undefined) => {
     if (!id) return;
 
+    if (url && !isValidUrl(url)) {
+      showMessage('INVALID URL ', 'error');
+      setUrl('');
+      return;
+    }
+
     const newItem: common_ArchiveItemInsert = {
       media: media,
       title: title,
-      url: media,
+      url: url,
     };
     newItemToArchive(id, [newItem]);
+    toggleModal();
     setMedia('');
     setTitle('');
+    setUrl('');
   };
+
   return (
     <Grid container spacing={2}>
       {archive.map(
@@ -127,52 +159,67 @@ export const ListArchive: FC<Archive> = ({
               <Grid item xs={10}>
                 <Grid container className={styles.items_container} wrap='nowrap'>
                   {isEdit[a.archive.id] && (
-                    <Grid item className={styles.add_preview_new_item}>
-                      {media && selectedArchiveId === a.archive.id ? (
-                        <>
-                          <img src={media} />
-                          <TextField
-                            name='title'
-                            value={title}
-                            onChange={(e: any) => setTitle(e.target.value)}
-                            className={styles.description}
-                            label='DESCRIPTION'
-                            variant='standard'
-                            multiline
+                    <>
+                      <Grid item className={styles.add_preview_new_item}>
+                        {selectedArchiveId === a.archive.id && (
+                          <MediaSelectorLayout
+                            label='add media'
+                            allowMultiple={false}
+                            saveSelectedMedia={createMediaPreviewHandler(a.archive.id)}
                           />
-                          <Button
-                            size='small'
-                            className={styles.add_item}
-                            onClick={() => handleSubmitNewItem(a.archive?.id)}
-                          >
-                            add
-                          </Button>
-                          <IconButton size='small' className={styles.exit_edit_mode}>
-                            <ClearIcon fontSize='medium' />
-                          </IconButton>
-                        </>
-                      ) : (
-                        <MediaSelectorLayout
-                          label='add media'
-                          allowMultiple={false}
-                          saveSelectedMedia={createMediaPreviewHandler(a.archive.id)}
-                        />
-                      )}
-                    </Grid>
+                        )}
+                      </Grid>
+                      <ArchiveModal
+                        title={title}
+                        setTitle={setTitle}
+                        id={selectedArchiveId}
+                        addNewItem={handleSubmitNewItem}
+                        url={url}
+                        setUrl={setUrl}
+                        media={media}
+                        open={isModalOpen}
+                        close={toggleModal}
+                      />
+                    </>
                   )}
                   {a.items?.map((item) => (
-                    <Grid item key={`item-${item.archiveId}`} className={styles.item}>
-                      <img src={item.archiveItemInsert?.media} alt='' />
-                      <Typography noWrap={false} variant='overline' className={styles.description}>
-                        {item.archiveItemInsert?.title}
-                      </Typography>
-                      <IconButton
-                        onClick={() => deleteItem(item.id)}
-                        className={styles.delete_item}
-                      >
-                        <ClearIcon />
-                      </IconButton>
-                    </Grid>
+                    <Box>
+                      <Grid item key={`item-${item.archiveId}`} className={styles.item}>
+                        <img src={item.archiveItemInsert?.media} alt='' />
+                        <IconButton
+                          onClick={() => deleteItem(item.id)}
+                          className={styles.delete_item}
+                        >
+                          <ClearIcon />
+                        </IconButton>
+                      </Grid>
+                      <Box width='396px' display='flex' alignItems='flex-start'>
+                        <Typography
+                          noWrap={false}
+                          variant='overline'
+                          className={
+                            expandedItemId === item.id
+                              ? styles.description
+                              : styles.hidden_description
+                          }
+                        >
+                          {item.archiveItemInsert?.title}
+                        </Typography>
+                        {item.archiveItemInsert?.title &&
+                          !isDescriptionShort(item.archiveItemInsert.title) && (
+                            <IconButton onClick={() => toggleTextExpansion(item.id)}>
+                              {expandedItemId === item.id ? (
+                                <ExpandLessIcon fontSize='small' />
+                              ) : (
+                                <ExpandMoreIcon fontSize='small' />
+                              )}
+                            </IconButton>
+                          )}
+                      </Box>
+                      {item.archiveItemInsert?.url && isValidUrl(item.archiveItemInsert.url) && (
+                        <a href={item.archiveItemInsert.url}>go to link</a>
+                      )}
+                    </Box>
                   ))}
                 </Grid>
               </Grid>
@@ -180,6 +227,7 @@ export const ListArchive: FC<Archive> = ({
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
                     <TextField
+                      label='HEADING'
                       name='heading'
                       value={
                         archivePayloads[a.archive?.id]?.heading ??
@@ -189,10 +237,12 @@ export const ListArchive: FC<Archive> = ({
                       inputProps={{ readOnly: !isEdit[a.archive.id] }}
                       onChange={(e) => updateArchivePayload(a.archive?.id, e)}
                       size='small'
+                      required
                     />
                   </Grid>
                   <Grid item xs={7}>
                     <TextField
+                      label='DESCRIPTION'
                       name='description'
                       value={
                         archivePayloads[a.archive?.id]?.description ??
@@ -207,7 +257,10 @@ export const ListArchive: FC<Archive> = ({
                     />
                   </Grid>
                   <Grid item xs={4}>
-                    <Button onClick={() => updateAndDisableEditMode(a.archive?.id)}>
+                    <Button
+                      disabled={archivePayloads[a.archive?.id]?.heading?.trim() === ''}
+                      onClick={() => updateAndDisableEditMode(a.archive?.id)}
+                    >
                       {isEdit[a.archive.id] ? 'update' : 'edit'}
                     </Button>
                     <Button color='error' onClick={() => deleteArchive(a.archive?.id)}>

@@ -26,7 +26,7 @@ export const fetchArchives = (
     addNewItemsToArchive: (id: number | undefined, newItems: common_ArchiveItemInsert[]) => void;
     snackBarMessage: string;
     snackBarSeverity: 'success' | 'error';
-    isSnackBarOpen: boolean,
+    isSnackBarOpen: boolean;
     setIsSnackBarOpen: (value: boolean) => void;
     showMessage: (message: string, severity: 'success' | 'error') => void;
 } => {
@@ -54,7 +54,7 @@ export const fetchArchives = (
         setArchive((prev) => (offset === 0 ? fetchedArchives : [...prev, ...fetchedArchives]));
         setIsLoading(false);
         setHasMore(fetchedArchives.length === limit);
-        console.log(archive)
+        console.log(archive);
     }, []);
 
     const deleteArchiveItem = async (id: number | undefined) => {
@@ -64,7 +64,7 @@ export const fetchArchives = (
         }
 
         const archiveContainingItem = archive.find((archive) =>
-            archive.items?.some((item) => item.id === id)
+            archive.items?.some((item) => item.id === id),
         );
 
         if (!archiveContainingItem) {
@@ -75,7 +75,9 @@ export const fetchArchives = (
 
         let confirmed;
         if (isLastItem) {
-            confirmed = window.confirm('This is the last item in the archive. Are you sure you want to delete it?');
+            confirmed = window.confirm(
+                'This is the last item in the archive. If you delete it, the entire archive will be deleted. Are you sure you want to delete it?',
+            );
         } else {
             confirmed = window.confirm('Are you sure you want to delete this item?');
         }
@@ -89,7 +91,8 @@ export const fetchArchives = (
                         return { ...archive, items: updatedItems };
                     }),
                 );
-                showMessage('ITEM IS REMOVED', 'success');
+                fetchArchive(50, 0)
+                showMessage('ARCHIVE UPDATED', 'success');
             }
         } catch (error) {
             showMessage('ITEM CANNOT BE DELETED', 'error');
@@ -162,15 +165,17 @@ export const fetchArchives = (
         setArchive((prevArchives) =>
             prevArchives.map((archive) => {
                 if (archive.archive?.id === id) {
-                    const existingMediaSet = new Set(archive.items?.map(item => item.archiveItemInsert?.media));
-                    const filteredItems = newItems.filter(item => !existingMediaSet.has(item.media));
+                    const existingMediaSet = new Set(
+                        archive.items?.map((item) => item.archiveItemInsert?.media),
+                    );
+                    const filteredItems = newItems.filter((item) => !existingMediaSet.has(item.media));
                     filteredNewItems = [...filteredItems];
 
                     return {
                         ...archive,
                         items: [
                             ...(archive.items || []),
-                            ...filteredItems.map(item => ({
+                            ...filteredItems.map((item) => ({
                                 archiveItemInsert: {
                                     media: item.media,
                                     title: item.title,
@@ -190,15 +195,15 @@ export const fetchArchives = (
                     archiveId: id,
                     items: filteredNewItems,
                 });
+                fetchArchive(50, 0);
                 showMessage('NEW ITEM ADDED TO THE ARCHIVE', 'success');
             } catch (error) {
                 showMessage('ITEM CANNOT BE ADDED TO THE ARCHIVE', 'error');
             }
         } else {
-            showMessage('NO NEW ITEMS ADDED: DUPLICATES NOT ALLOWED', 'error');
+            showMessage('THIS MEDIA HAS ALREADY BEEN ADDED', 'error');
         }
     };
-
 
     return {
         archive,
@@ -213,6 +218,6 @@ export const fetchArchives = (
         snackBarSeverity,
         showMessage,
         isSnackBarOpen,
-        setIsSnackBarOpen
+        setIsSnackBarOpen,
     };
 };
