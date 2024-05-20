@@ -2,7 +2,7 @@ import { Alert, Divider, Grid, Snackbar } from '@mui/material';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect } from 'react';
 import { CreateArchive } from './createArchive/createArchive';
-import { fetchArchives } from './listArchive/fetcharchive';
+import { fetchArchives } from './fetcharchive';
 import { ListArchive } from './listArchive/listArchive';
 
 export const Archive: FC = () => {
@@ -45,7 +45,7 @@ export const Archive: FC = () => {
     <Layout>
       <Grid container spacing={4} justifyContent='center'>
         <Grid item xs={10}>
-          <CreateArchive fetchArchive={fetchArchive} />
+          <CreateArchive fetchArchive={fetchArchive} showMessage={showMessage} />
         </Grid>
         <Grid item xs={10}>
           <Divider />

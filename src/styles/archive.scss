@@ -36,24 +36,26 @@
       height: 100%;
       object-fit: scale-down;
     }
-
-    .description {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 70%;
-      height: 100%;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      overflow: hidden;
-      overflow: auto;
-    }
-
     .delete_item {
       position: absolute;
       top: 0;
       right: 0;
     }
+  }
+
+  .description {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow: hidden;
+    overflow: auto;
+  }
+
+  .hidden_description {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .media_item_add {
@@ -65,27 +67,6 @@
     width: 396px;
     height: 243px;
     flex: 0 0 auto;
-
-    .description {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 70%;
-      height: 100%;
-      overflow: auto;
-    }
-
-    .add_item {
-      position: absolute;
-      right: 0;
-      bottom: 0;
-    }
-
-    .exit_edit_mode {
-      position: absolute;
-      top: 0;
-      right: 0;
-    }
 
     img {
       width: 100%;

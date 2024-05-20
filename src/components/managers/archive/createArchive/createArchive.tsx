@@ -1,16 +1,16 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Alert, Button, Grid, IconButton, Snackbar, TextField, Typography } from '@mui/material';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
 import { addArchive } from 'api/archive';
 import { common_ArchiveNew } from 'api/proto-http/admin';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useState } from 'react';
 import styles from 'styles/archive.scss';
+import { ArchiveModal } from '../archiveModal/archiveModal';
+import { createArchives } from '../interfaces/interfaces';
 
-interface Archives {
-  fetchArchive: (limit: number, offset: number) => void;
-}
-
-export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
+export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage }) => {
   const initialArchiveState: common_ArchiveNew = {
     archive: {
       heading: '',
@@ -20,16 +20,21 @@ export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
   };
   const [archive, setArchive] = useState<common_ArchiveNew>(initialArchiveState);
   const [title, setTitle] = useState<string>('');
+  const [url, setUrl] = useState<string>('');
   const [mediaItem, setMediaItem] = useState<string[]>([]);
   const [media, setMedia] = useState<string>('');
-  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
-  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [expandedItemId, setExpandedItemId] = useState<number | undefined>();
 
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    setSnackBarMessage(message);
-    setSnackBarSeverity(severity);
-    setIsSnackBarOpen(!isSnackBarOpen);
+  const toggleTextExpansion = (id: number | undefined) => {
+    setExpandedItemId((prevId) => (prevId === id ? undefined : id));
+  };
+
+  const toggleModal = () => {
+    if (isModalOpen) {
+      setTitle('');
+    }
+    setIsModalOpen(!isModalOpen);
   };
 
   const createArchive = async () => {
@@ -55,17 +60,34 @@ export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
 
     if (newSelectedMedia.length > 0) {
       setMedia(newSelectedMedia[0]);
+      setIsModalOpen(true);
+    }
+  };
+
+  const isValidUrl = (url: string | undefined) => {
+    if (!url) return;
+    try {
+      new URL(url);
+      return true;
+    } catch (e) {
+      return false;
     }
   };
 
   const addNewItem = () => {
-    if (mediaItem.includes(media)) {
-      showMessage('THIS MEDIA HAS ALREADY BEEN ADDED', 'error');
+    if (url && !isValidUrl(url)) {
+      showMessage('INVALID URL', 'error');
       return;
     }
+    if (mediaItem.includes(media)) {
+      showMessage('THIS MEDIA HAS ALREADY BEEN ADDED', 'error');
+      toggleModal();
+      return;
+    }
+
     const newItem = {
       media: media,
-      url: '',
+      url: url,
       title: title,
     };
     setArchive((prev) => ({
@@ -74,12 +96,10 @@ export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
     }));
     setMedia('');
     setTitle('');
+    setUrl('');
     setMediaItem([...mediaItem, media]);
+    toggleModal();
     showMessage('ITEM ADDED', 'success');
-  };
-
-  const exitEditMode = () => {
-    setMedia('');
   };
 
   const handleTextFieldChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,52 +130,53 @@ export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
     }));
   };
 
+  const isDescriptionShort = (title: string | undefined) => {
+    if (!title) return;
+    const maxLineLength = 60;
+    return title.length <= maxLineLength;
+  };
+
   return (
     <Grid container spacing={2} marginTop={4} alignItems='center'>
       <Grid item xs={10}>
         <Grid container className={styles.scroll_container} wrap='nowrap'>
           <Grid item className={styles.media_item_add}>
-            {media ? (
-              <>
-                <img src={media} />
-                <TextField
-                  name='title'
-                  value={title}
-                  onChange={(e: any) => setTitle(e.target.value)}
-                  className={styles.description}
-                  label='DESCRIPTION'
-                  variant='standard'
-                  multiline
-                />
-                <Button size='small' className={styles.add_item} onClick={() => addNewItem()}>
-                  add
-                </Button>
-                <IconButton
-                  size='small'
-                  className={styles.exit_edit_mode}
-                  onClick={() => exitEditMode()}
-                >
-                  <ClearIcon fontSize='medium' />
-                </IconButton>
-              </>
-            ) : (
-              <MediaSelectorLayout
-                label='add media'
-                allowMultiple={false}
-                saveSelectedMedia={mediaPreview}
-              />
-            )}
+            <MediaSelectorLayout
+              label='create new item'
+              allowMultiple={false}
+              saveSelectedMedia={mediaPreview}
+            />
           </Grid>
           {mediaItem.map((media, id) => (
-            <Grid item key={id} className={styles.media_item}>
-              <img src={media} />
-              <Typography noWrap={false} variant='overline' className={styles.description}>
-                {archive.items?.[id].title}
-              </Typography>
-              <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
-                <ClearIcon fontSize='small' />
-              </IconButton>
-            </Grid>
+            <Box width='396px'>
+              <Grid item key={id} className={styles.media_item}>
+                <img src={media} />
+                <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
+                  <ClearIcon fontSize='small' />
+                </IconButton>
+              </Grid>
+              <Box display='flex' alignItems='flex-start'>
+                <Typography
+                  variant='overline'
+                  className={expandedItemId === id ? styles.description : styles.hidden_description}
+                >
+                  {archive.items?.[id].title}
+                </Typography>
+
+                {archive.items?.[id].title && !isDescriptionShort(archive.items?.[id].title) && (
+                  <IconButton onClick={() => toggleTextExpansion(id)}>
+                    {expandedItemId === id ? (
+                      <ExpandLessIcon fontSize='small' />
+                    ) : (
+                      <ExpandMoreIcon fontSize='small' />
+                    )}
+                  </IconButton>
+                )}
+              </Box>
+              {archive.items?.[id].url && isValidUrl(archive.items?.[id].url) && (
+                <a href={archive.items?.[id].url}>go to link</a>
+              )}
+            </Box>
           ))}
         </Grid>
 
@@ -169,6 +190,7 @@ export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
               label='HEADING'
               InputLabelProps={{ shrink: true }}
               size='small'
+              required
             />
           </Grid>
           <Grid item xs={4}>
@@ -190,18 +212,22 @@ export const CreateArchive: FC<Archives> = ({ fetchArchive }) => {
         <Button
           onClick={() => createArchive()}
           variant='contained'
-          disabled={mediaItem.length === 0 ? true : false}
+          disabled={mediaItem.length === 0 || archive.archive?.heading?.trim() === ''}
         >
           submit
         </Button>
       </Grid>
-      <Snackbar
-        open={isSnackBarOpen}
-        autoHideDuration={6000}
-        onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
-      >
-        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
-      </Snackbar>
+
+      <ArchiveModal
+        open={isModalOpen}
+        close={toggleModal}
+        media={media}
+        title={title}
+        setTitle={setTitle}
+        url={url}
+        setUrl={setUrl}
+        addNewItem={addNewItem}
+      />
     </Grid>
   );
 };
