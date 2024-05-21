@@ -1,5 +1,5 @@
 import { getAllUploadedFiles, uploadContentLink } from 'api/admin';
-import { common_Media } from 'api/proto-http/admin';
+import { common_MediaFull } from 'api/proto-http/admin';
 import { useCallback, useState } from 'react';
 import { isVideo } from './filterContentType';
 
@@ -7,8 +7,8 @@ const useMediaSelector = (
     initialIsLoading = false,
     initialHasMore = true,
 ): {
-    media: common_Media[];
-    setMedia: React.Dispatch<React.SetStateAction<common_Media[]>>;
+    media: common_MediaFull[];
+    setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
     url: string;
     setUrl: React.Dispatch<React.SetStateAction<string>>;
     updateLink: () => Promise<void>;
@@ -18,7 +18,7 @@ const useMediaSelector = (
     sortByDate: string;
     setFilterByType: React.Dispatch<React.SetStateAction<string>>;
     setSortByDate: React.Dispatch<React.SetStateAction<string>>;
-    sortedAndFilteredMedia: () => common_Media[];
+    sortedAndFilteredMedia: () => common_MediaFull[];
     isLoading: boolean
     snackBarMessage: string
     showMessage: (message: string, severity: 'success' | 'error') => void
@@ -26,7 +26,7 @@ const useMediaSelector = (
     closeSnackBar: () => void
     isSnackBarOpen: boolean
 } => {
-    const [media, setMedia] = useState<common_Media[]>([]);
+    const [media, setMedia] = useState<common_MediaFull[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialIsLoading);
     const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
     const [url, setUrl] = useState<string>('');
@@ -51,8 +51,8 @@ const useMediaSelector = (
             ?.filter((m) => {
                 const matchesType =
                     filterByType === '' ||
-                    (filterByType === 'video' && isVideo(m.media?.fullSize)) ||
-                    (filterByType === 'image' && !isVideo(m.media?.fullSize));
+                    (filterByType === 'video' && isVideo(m.media?.fullSize?.mediaUrl)) ||
+                    (filterByType === 'image' && !isVideo(m.media?.fullSize?.mediaUrl));
 
                 return matchesType;
             })
@@ -76,7 +76,7 @@ const useMediaSelector = (
             offset: startOffset,
             orderFactor: 'ORDER_FACTOR_DESC',
         });
-        const fetchedFiles: common_Media[] = response.list || [];
+        const fetchedFiles: common_MediaFull[] = response.list || [];
         setMedia((prev) => (startOffset === 0 ? fetchedFiles : [...prev, ...fetchedFiles]));
         setIsLoading(false);
         setHasMore(fetchedFiles.length === limit);

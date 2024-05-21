@@ -11,7 +11,7 @@ import {
   useTheme,
 } from '@mui/material';
 import { deleteFiles } from 'api/admin';
-import { common_MediaInsert } from 'api/proto-http/admin';
+import { common_MediaFull, common_MediaInsert } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
@@ -20,7 +20,6 @@ import styles from 'styles/media-selector.scss';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
-  media,
   setMedia,
   allowMultiple,
   select,
@@ -32,7 +31,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const { showMessage, isSnackBarOpen, closeSnackBar, snackBarMessage, snackBarSeverity } =
     useMediaSelector();
   const [openModal, setOpenModal] = useState(false);
-  const [clickedMedia, setClickedMedia] = useState<common_MediaInsert>();
+  const [clickedMedia, setClickedMedia] = useState<common_MediaInsert | undefined>();
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -44,17 +43,17 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   };
 
   const handleSelect = (
-    mediaUrl: common_MediaInsert | undefined,
+    media: common_MediaFull | undefined,
     allowMultiple: boolean,
     event: React.MouseEvent,
   ) => {
     event.stopPropagation();
     if (enableModal) {
       setOpenModal(true);
-      setClickedMedia(mediaUrl);
+      setClickedMedia(media?.media);
     } else {
-      if (mediaUrl?.thumbnail) {
-        select(mediaUrl.thumbnail, allowMultiple);
+      if (media) {
+        select(media, allowMultiple);
       }
     }
   };
@@ -79,27 +78,27 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
           >
             {sortedAndFilteredMedia().map((m) => (
               <ImageListItem
-                onClick={(event) => handleSelect(m.media, allowMultiple, event)}
+                onClick={(event) => handleSelect(m, allowMultiple, event)}
                 className={styles.list_media_item}
                 key={m.id}
               >
                 <InputLabel htmlFor={`${m.id}`}>
-                  {selectedMedia?.some((item) => item.url === (m.media?.thumbnail ?? '')) ? (
+                  {selectedMedia?.some((item) => item.id === m.id) ? (
                     <span className={styles.selected_flag}>selected</span>
                   ) : null}
-                  {isVideo(m.media?.thumbnail) ? (
+                  {isVideo(m.media?.thumbnail?.mediaUrl) ? (
                     <video
                       key={m.id}
-                      src={m.media?.thumbnail}
-                      className={`${selectedMedia?.some((item) => item.url === (m.media?.thumbnail ?? '')) ? styles.selected_media : ''}`}
+                      src={m.media?.thumbnail?.mediaUrl}
+                      className={`${selectedMedia?.some((item) => item.id === m.id) ? styles.selected_media : ''}`}
                       controls
                     />
                   ) : (
                     <img
                       key={m.id}
-                      src={m.media?.thumbnail}
+                      src={m.media?.thumbnail?.mediaUrl}
                       alt='media'
-                      className={`${selectedMedia?.some((item) => item.url === (m.media?.thumbnail ?? '')) ? styles.selected_media : ''}`}
+                      className={`${selectedMedia?.some((item) => item.id === m.id) ? styles.selected_media : ''}`}
                     />
                   )}
                 </InputLabel>

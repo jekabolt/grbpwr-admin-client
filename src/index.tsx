@@ -20,7 +20,6 @@ import { Orders } from 'components/managers/orders/orders';
 import { AddProducts } from 'components/managers/products/addProduct/addProduct';
 import { ProductDetails } from 'components/managers/products/productDetails/productDetails';
 import { Product } from 'components/managers/products/products';
-import { GetPromo } from 'components/managers/promo/getPromo';
 import { Promo } from 'components/managers/promo/promo';
 import { Settings } from 'components/managers/settings/settings';
 import { ROUTES } from 'constants/routes';
@@ -94,14 +93,6 @@ const routes: Route<DefaultGenerics>[] = [
     element: (
       <ProtectedRoute>
         <Promo />
-      </ProtectedRoute>
-    ),
-  },
-  {
-    path: ROUTES.getPromo,
-    element: (
-      <ProtectedRoute>
-        <GetPromo />
       </ProtectedRoute>
     ),
   },

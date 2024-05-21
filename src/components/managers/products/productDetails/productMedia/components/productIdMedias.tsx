@@ -9,7 +9,11 @@ import { MediaListProps } from '../../utility/interfaces';
 
 export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveSelectedMedia }) => {
   const handleDeleteMedia = async (id: number | undefined) => {
-    const response = await deleteMediaById({ productMediaId: id });
+    if (!id) {
+      alert('no id');
+      return;
+    }
+    const response = await deleteMediaById({ productId: product?.product?.id, mediaId: id });
     if (response) {
       fetchProduct();
     }
@@ -19,7 +23,7 @@ export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveS
     const uniqueUrls = new Set();
     return (
       product?.media?.filter((media) => {
-        const fullSizeUrl = media.productMediaInsert?.fullSize;
+        const fullSizeUrl = media.media?.fullSize?.mediaUrl;
         if (fullSizeUrl && !uniqueUrls.has(fullSizeUrl)) {
           uniqueUrls.add(fullSizeUrl);
           return true;
@@ -41,14 +45,10 @@ export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveS
           key={media.id}
           className={styles.listed_media_wrapper}
         >
-          {isVideo(media.productMediaInsert?.thumbnail) ? (
-            <video
-              src={media.productMediaInsert?.thumbnail}
-              controls
-              className={styles.media}
-            ></video>
+          {isVideo(media.media?.thumbnail?.mediaUrl) ? (
+            <video src={media.media?.thumbnail?.mediaUrl} controls className={styles.media}></video>
           ) : (
-            <img src={media.productMediaInsert?.thumbnail} alt='media' className={styles.media} />
+            <img src={media.media?.thumbnail?.mediaUrl} alt='media' className={styles.media} />
           )}
           <IconButton
             aria-label='delete'

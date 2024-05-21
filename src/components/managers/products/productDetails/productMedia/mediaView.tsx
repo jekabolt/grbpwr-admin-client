@@ -1,5 +1,6 @@
 import { Grid, Typography } from '@mui/material';
 import { addMediaByID } from 'api/admin';
+import { common_MediaFull } from 'api/proto-http/admin';
 import { updateProductById } from 'api/updateProductsById';
 import { FC } from 'react';
 import { SingleMediaViewAndSelect } from '../../../../common/singleMediaViewAndSelect';
@@ -7,8 +8,8 @@ import { ProductIdProps } from '../utility/interfaces';
 import { ProductMedias } from './components/productIdMedias';
 
 export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct, showMessage }) => {
-  const saveThumbnail = async (newSelectedMedia: string[]) => {
-    const thumbnailUrl = newSelectedMedia[0];
+  const saveThumbnail = async (newSelectedMedia: common_MediaFull[]) => {
+    const thumbnailUrl = newSelectedMedia[0].media?.thumbnail?.mediaUrl ?? '';
 
     const baseProductInsert = product?.product?.productInsert;
 
@@ -27,31 +28,29 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct, showM
     }
   };
 
-  const saveMedia = async (newSelectedMedia: string[]) => {
-    const addedMediaUrls = new Set();
+  const saveMedia = async (newSelectedMedia: common_MediaFull[]) => {
+    const mediaIds = newSelectedMedia
+      .map((media) => media.id)
+      .filter((id) => id !== undefined) as number[];
 
-    for (const imageUrl of newSelectedMedia) {
-      const compressedUrl = imageUrl.replace(/-og\.jpg$/, '-compressed.jpg');
-      if (addedMediaUrls.has(imageUrl)) {
-        return;
+    if (mediaIds.length === 0) {
+      showMessage('NO MEDIAS SELECTED FOR UPLOAD', 'error');
+      return;
+    }
+
+    try {
+      const response = await addMediaByID({
+        productId: Number(id),
+        mediaIds,
+      });
+
+      showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
+
+      if (response) {
+        fetchProduct();
       }
-      addedMediaUrls.add(imageUrl);
-      try {
-        const response = await addMediaByID({
-          productId: Number(id),
-          fullSize: imageUrl,
-          thumbnail: imageUrl,
-          compressed: compressedUrl,
-        });
-
-        showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
-
-        if (response) {
-          fetchProduct();
-        }
-      } catch (error) {
-        showMessage('FAILED TO UPLOAD PROUCT WITH NEW MEDIAS', 'error');
-      }
+    } catch (error) {
+      showMessage('FAILED TO UPLOAD PRODUCT WITH NEW MEDIAS', 'error');
     }
   };
 

@@ -3,7 +3,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
 import { addArchive } from 'api/archive';
-import { common_ArchiveNew } from 'api/proto-http/admin';
+import { common_ArchiveNew, common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useState } from 'react';
 import styles from 'styles/archive.scss';
@@ -53,13 +53,13 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
     }
   };
 
-  const mediaPreview = (newSelectedMedia: string[]) => {
+  const mediaPreview = (newSelectedMedia: common_MediaFull[]) => {
     if (newSelectedMedia.length === 0) {
       return;
     }
 
     if (newSelectedMedia.length > 0) {
-      setMedia(newSelectedMedia[0]);
+      setMedia(newSelectedMedia[0].media?.thumbnail?.mediaUrl ?? '');
       setIsModalOpen(true);
     }
   };
