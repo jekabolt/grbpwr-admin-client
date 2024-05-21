@@ -1,6 +1,6 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton, Typography } from '@mui/material';
-import { common_ProductNew } from 'api/proto-http/admin';
+import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
@@ -10,43 +10,38 @@ import styles from 'styles/addProd.scss';
 
 export const Media: FC = () => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
-  const [mediaPreview, setMediaPreview] = useState<string[]>([]);
+  const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
 
-  const uploadThumbnailInProduct = (newSelectedMedia: string[]) => {
+  const uploadThumbnailInProduct = (newSelectedMedia: common_MediaFull[]) => {
     if (!newSelectedMedia.length) {
       return;
     }
-    const thumbnailUrl = newSelectedMedia[0];
+    const thumbnail = newSelectedMedia[0];
+    const thumbnailUrl = thumbnail.media?.fullSize?.mediaUrl ?? '';
     setImagePreviewUrl(thumbnailUrl);
 
     setFieldValue('product.thumbnail', thumbnailUrl);
   };
-
-  const uploadMediasInProduct = (newSelectedMedia: string[]) => {
+  const uploadMediasInProduct = (newSelectedMedia: common_MediaFull[]) => {
     if (newSelectedMedia.length === 0) {
       alert('No selected media');
       return;
     }
 
-    const newMedia = newSelectedMedia.map((imageUrl) => ({
-      fullSize: imageUrl,
-      thumbnail: imageUrl.replace(/-og\.jpg$/, '-thumbnail.jpg'),
-      compressed: imageUrl.replace(/-og\.jpg$/, '-compressed.jpg'),
-    }));
-
     setMediaPreview((prevPreview) => [...prevPreview, ...newSelectedMedia]);
 
-    const updatedMediaList = [...(values.media || []), ...newMedia];
-    setFieldValue('media', updatedMediaList);
+    const updatedMediaIds = [
+      ...(values.mediaIds || []),
+      ...newSelectedMedia.map((media) => media.id),
+    ];
+    setFieldValue('mediaIds', updatedMediaIds);
   };
 
-  const removeSelectedMedia = (mediaUrlToRemove: string) => {
-    setMediaPreview((currentMedia) => currentMedia.filter((url) => url !== mediaUrlToRemove));
-
-    const updatedMedia = values.media?.filter((media) => media.fullSize !== mediaUrlToRemove);
-
-    setFieldValue('media', updatedMedia || []);
+  const removeSelectedMedia = (mediaId: number) => {
+    setMediaPreview((prevMedia) => prevMedia.filter((media) => media.id !== mediaId));
+    const updatedMediaIds = values.mediaIds?.filter((id) => id !== mediaId);
+    setFieldValue('mediaIds', updatedMediaIds);
   };
 
   return (
@@ -66,21 +61,24 @@ export const Media: FC = () => {
         </Typography>
         {mediaPreview && (
           <Grid container className={styles.media_list} gap={2}>
-            {mediaPreview.map((media, id) => (
-              <Grid item key={id} className={styles.media_item} xs={12} sm={6} md={4} lg={3}>
-                {isVideo(media) ? (
-                  <video src={media} controls className={styles.media}></video>
-                ) : (
-                  <img src={media} alt='' className={styles.media} />
-                )}
-                <IconButton
-                  onClick={() => removeSelectedMedia(media)}
-                  className={styles.delete_btn}
-                >
-                  <ClearIcon />
-                </IconButton>
-              </Grid>
-            ))}
+            {mediaPreview.map((media, id) => {
+              const mediaUrl = media.media?.fullSize?.mediaUrl ?? '';
+              return (
+                <Grid item key={id} className={styles.media_item} xs={12} sm={6} md={4} lg={3}>
+                  {isVideo(mediaUrl) ? (
+                    <video src={mediaUrl} controls className={styles.media}></video>
+                  ) : (
+                    <img src={mediaUrl} alt='' className={styles.media} />
+                  )}
+                  <IconButton
+                    onClick={() => removeSelectedMedia(media.id ?? 0)}
+                    className={styles.delete_btn}
+                  >
+                    <ClearIcon />
+                  </IconButton>
+                </Grid>
+              );
+            })}
             <Grid item xs={12} sm={6} md={4} lg={3} className={styles.media_item}>
               <MediaSelectorLayout
                 allowMultiple={true}

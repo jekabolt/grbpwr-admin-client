@@ -85,19 +85,19 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
       <Dialog open={open} onClose={close} scroll='paper' fullScreen>
         <DialogContent>
           {clickedMedia &&
-            (isVideo(clickedMedia.thumbnail) ? (
-              <video src={clickedMedia.thumbnail} className={styles.video} controls />
+            (isVideo(clickedMedia.thumbnail?.mediaUrl) ? (
+              <video src={clickedMedia.thumbnail?.mediaUrl} className={styles.video} controls />
             ) : (
-              <img src={clickedMedia.thumbnail} alt='Media' className={styles.image} />
+              <img src={clickedMedia.thumbnail?.mediaUrl} alt='Media' className={styles.image} />
             ))}
           {['fullSize', 'compressed', 'thumbnail'].map((type) => (
             <Typography variant='body1' key={type}>
-              {`${type.charAt(0).toUpperCase() + type.slice(1)}: ${trimUrl(clickedMedia?.[type as MediaKey])}`}
+              {`${type.charAt(0).toUpperCase() + type.slice(1)}: ${trimUrl(clickedMedia?.[type as MediaKey]?.mediaUrl)}`}
               <Button
                 size='small'
                 onClick={() =>
                   clickedMedia?.[type as MediaKey] &&
-                  handleCopyToClipboard(clickedMedia?.[type as MediaKey])
+                  handleCopyToClipboard(clickedMedia?.[type as MediaKey]?.mediaUrl)
                 }
               >
                 <ContentCopy />

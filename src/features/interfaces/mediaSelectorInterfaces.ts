@@ -1,26 +1,26 @@
 
-import { common_Media, common_MediaInsert } from 'api/proto-http/admin';
+import { common_MediaFull, common_MediaInsert } from 'api/proto-http/admin';
 
 export interface MediaSelectorLayoutProps {
     label: string
-    saveSelectedMedia: (newSelectedMedia: string[]) => void;
+    saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
     allowMultiple: boolean;
 }
 
 export interface MediaSelectorProps {
     closeMediaSelector: () => void;
-    saveSelectedMedia: (newSelectedMedia: string[]) => void;
+    saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
     allowMultiple: boolean;
 }
 
 export interface MediaSelectorMediaListProps {
-    media: common_Media[] | undefined;
-    setMedia: React.Dispatch<React.SetStateAction<common_Media[]>>;
+    media: common_MediaFull[] | undefined;
+    setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
     allowMultiple: boolean;
-    selectedMedia: { url: string; type: string }[] | undefined;
-    select: (imageUrl: string, allowMultiple: boolean) => void;
+    selectedMedia: common_MediaFull[] | undefined;
+    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
     height?: string | number;
-    sortedAndFilteredMedia: () => common_Media[];
+    sortedAndFilteredMedia: () => common_MediaFull[];
     enableModal?: boolean;
 }
 

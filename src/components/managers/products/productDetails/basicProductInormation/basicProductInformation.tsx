@@ -140,18 +140,39 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           [name]: value,
         };
       }
-
-      const newSKU = generateSKU(
-        updatedPayload.brand || product?.product?.productInsert?.brand,
-        updatedPayload.categoryId || product?.product?.productInsert?.categoryId,
-        updatedPayload.color || product?.product?.productInsert?.color,
-        updatedPayload.countryOfOrigin || product?.product?.productInsert?.color?.substring(0, 2),
-      );
-      updatedPayload.sku = newSKU;
-
       return updatedPayload;
     });
   };
+
+  const getCategoryNameById = (categoryId: number | undefined) => {
+    return dict?.categories?.find((category) => category.id?.toString() === categoryId)?.name || '';
+  };
+
+  useEffect(() => {
+    const category = getCategoryNameById(
+      updatePayload.categoryId || product?.product?.productInsert?.categoryId,
+    );
+    const newSKU = generateSKU(
+      updatePayload.brand || product?.product?.productInsert?.brand,
+      updatePayload.targetGender || product?.product?.productInsert?.targetGender,
+      category,
+      updatePayload.color || product?.product?.productInsert?.color,
+      updatePayload.countryOfOrigin ||
+        product?.product?.productInsert?.countryOfOrigin?.substring(0, 2),
+    );
+    if (newSKU !== updatePayload.sku) {
+      setUpdatePayload((prev) => ({
+        ...prev,
+        sku: newSKU,
+      }));
+    }
+  }, [
+    updatePayload.brand,
+    updatePayload.targetGender,
+    updatePayload.categoryId,
+    updatePayload.color,
+    updatePayload.countryOfOrigin,
+  ]);
 
   const updateProduct = async () => {
     if (
@@ -254,6 +275,29 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           disabled={!isEdit}
           required={isEdit}
         />
+      </Grid>
+      <Grid item xs={8.5}>
+        <FormControl fullWidth required={isEdit}>
+          <InputLabel shrink>GENDER</InputLabel>
+          <Select
+            name='targetGender'
+            value={
+              updatePayload.targetGender ||
+              product?.product?.productInsert?.targetGender ||
+              'GENDER_ENUM_MALE'
+            }
+            onChange={handleChange}
+            displayEmpty
+            label='GENDER'
+            disabled={!isEdit}
+          >
+            {dict?.genders?.map((gender) => (
+              <MenuItem key={gender.id} value={gender.id}>
+                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Grid>
       <Grid item xs={8.5}>
         <FormControl fullWidth required={isEdit}>
@@ -395,29 +439,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           />
         </Grid>
       )}
-
-      <Grid item xs={8.5}>
-        <FormControl fullWidth required={isEdit}>
-          <InputLabel shrink>GENDER</InputLabel>
-          <Select
-            name='targetGender'
-            value={updatePayload.targetGender || ''}
-            onChange={handleChange}
-            displayEmpty
-            label='GENDER'
-            disabled={!isEdit}
-          >
-            <MenuItem value='' disabled>
-              {product?.product?.productInsert?.targetGender?.replace('GENDER_ENUM_', '')}
-            </MenuItem>
-            {dict?.genders?.map((gender) => (
-              <MenuItem key={gender.id} value={gender.id?.toString()}>
-                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
       <Grid item xs={8.5}>
         <TextField
           name='description'
@@ -444,6 +465,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           InputProps={{ readOnly: true }}
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
+          fullWidth
         />
       </Grid>
       <Grid item xs={12}>

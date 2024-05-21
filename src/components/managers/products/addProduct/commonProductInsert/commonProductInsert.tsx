@@ -62,9 +62,23 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
         [field]: newValue,
       };
 
+      let categoryName = '';
+      if (field === 'categoryId') {
+        const selectedCategory = dictionary?.categories?.find(
+          (category) => category.id === newValue,
+        );
+        categoryName = selectedCategory?.name ?? '';
+      } else {
+        const selectedCategory = dictionary?.categories?.find(
+          (category) => category.id === updatedValues.categoryId,
+        );
+        categoryName = selectedCategory?.name ?? '';
+      }
+
       const newSKU = generateSKU(
         updatedValues.brand,
-        updatedValues.categoryId,
+        updatedValues.targetGender,
+        categoryName,
         updatedValues.color,
         updatedValues.countryOfOrigin,
       );
@@ -115,6 +129,28 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           InputLabelProps={{ shrink: true }}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
         />
+      </Grid>
+      <Grid item>
+        <FormControl fullWidth required>
+          <InputLabel shrink>GENDER</InputLabel>
+          <Select
+            value={values.product?.targetGender || 'M'}
+            onChange={(e) => {
+              const gender = e.target.value;
+              setFieldValue('product.targetGender', gender);
+              handleFieldChange(e, 'targetGender');
+            }}
+            label='GENDER'
+            displayEmpty
+            name='product.targetGender'
+          >
+            {dictionary?.genders?.map((gender) => (
+              <MenuItem key={gender.id} value={gender.id}>
+                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Grid>
       <Grid item>
         <FormControl required fullWidth>
@@ -227,25 +263,6 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           />
         </Grid>
       )}
-
-      <Grid item>
-        <FormControl fullWidth required>
-          <InputLabel shrink>GENDER</InputLabel>
-          <Select
-            value={values.product?.targetGender || ''}
-            onChange={(e) => setFieldValue('product.targetGender', e.target.value)}
-            label='GENDER'
-            displayEmpty
-            name='product.targetGender'
-          >
-            {dictionary?.genders?.map((gender) => (
-              <MenuItem key={gender.id} value={gender.id}>
-                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
       <Grid item>
         <Field
           as={TextField}
@@ -265,6 +282,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           InputProps={{ readOnly: true }}
           InputLabelProps={{ shrink: true }}
           required
+          fullWidth
         />
       </Grid>
     </Grid>

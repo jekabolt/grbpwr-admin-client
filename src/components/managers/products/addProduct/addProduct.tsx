@@ -11,7 +11,6 @@ import { Sizes } from './sizes/sizes';
 import { Tags } from './tag/tag';
 
 export const initialProductState: common_ProductNew = {
-  media: [],
   product: {
     preorder: '',
     name: '',
@@ -29,6 +28,7 @@ export const initialProductState: common_ProductNew = {
     targetGender: 'GENDER_ENUM_UNKNOWN',
   },
   sizeMeasurements: [],
+  mediaIds: [],
   tags: [],
 };
 
@@ -97,7 +97,7 @@ export const AddProducts: FC = () => {
               spacing={2}
             >
               <Grid item xs={7}>
-                <Field component={Media} name='media' />
+                <Field component={Media} name='mediaIds' />
               </Grid>
               <Grid item xs={4}>
                 <Grid container spacing={2}>

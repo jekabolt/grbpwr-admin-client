@@ -1,7 +1,7 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Alert, Box, Button, Dialog, Grid, IconButton, Snackbar } from '@mui/material';
+import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelectorProps } from 'features/interfaces/mediaSelectorInterfaces';
-import { fileExtensionToContentType } from 'features/utilitty/filterExtentions';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/media-selector.scss';
@@ -35,7 +35,7 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
     showMessage,
     snackBarSeverity,
   } = useMediaSelector();
-  const [selectedMedia, setSelectedMedia] = useState<{ url: string; type: string }[]>([]);
+  const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [open, setOpen] = useState(true);
 
   const handleMediaAndCloseSelector = async () => {
@@ -43,34 +43,43 @@ export const MediaSelector: FC<MediaSelectorProps> = ({
       showMessage('NO SELECTED MEDIA', 'error');
       return;
     }
-    const urls = selectedMedia.map((item) => item.url);
-    saveSelectedMedia(urls);
+    saveSelectedMedia(selectedMedia);
     handleClose();
   };
 
-  const select = (mediaUrl: string, allowMultiple: boolean) => {
-    const extension = mediaUrl.split('.').pop()?.toLowerCase();
+  // const select = (mediaUrl: string, allowMultiple: boolean) => {
+  //   const extension = mediaUrl.split('.').pop()?.toLowerCase();
 
-    if (extension) {
-      const contentType = fileExtensionToContentType[extension] || undefined;
+  //   if (extension) {
+  //     const contentType = fileExtensionToContentType[extension] || undefined;
 
-      const mediaType = contentType?.startsWith('image')
-        ? 'image'
-        : contentType?.startsWith('video')
-          ? 'video'
-          : undefined;
+  //     const mediaType = contentType?.startsWith('image')
+  //       ? 'image'
+  //       : contentType?.startsWith('video')
+  //         ? 'video'
+  //         : undefined;
 
-      if (mediaType) {
-        setSelectedMedia((prevSelected) => {
-          const newMedia = { url: mediaUrl, type: mediaType };
-          return allowMultiple
-            ? prevSelected.some((media) => media.url === mediaUrl)
-              ? prevSelected.filter((media) => media.url !== mediaUrl)
-              : [...prevSelected, newMedia]
-            : [newMedia];
-        });
-      }
-    }
+  //     if (mediaType) {
+  //       setSelectedMedia((prevSelected) => {
+  //         const newMedia = { url: mediaUrl, type: mediaType };
+  //         return allowMultiple
+  //           ? prevSelected.some((media) => media.url === mediaUrl)
+  //             ? prevSelected.filter((media) => media.url !== mediaUrl)
+  //             : [...prevSelected, newMedia]
+  //           : [newMedia];
+  //       });
+  //     }
+  //   }
+  // };
+
+  const select = (media: common_MediaFull, allowMultiple: boolean) => {
+    setSelectedMedia((prevSelected) => {
+      return allowMultiple
+        ? prevSelected.some((item) => item.id === media.id)
+          ? prevSelected.filter((item) => item.id !== media.id)
+          : [...prevSelected, media]
+        : [media];
+    });
   };
 
   useEffect(() => {

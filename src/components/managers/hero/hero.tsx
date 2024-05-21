@@ -9,6 +9,7 @@ import {
   TextField,
 } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
+import { common_MediaFull } from 'api/proto-http/frontend';
 import { ProductPickerModal } from 'components/common/productPickerModal';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
@@ -76,25 +77,25 @@ export const Hero: FC = () => {
 
   const hasError = mainExploreLinkError || firstAdExploreLinkError || secondAdExploreLinkError;
 
-  const saveMainContentLink = (mediaLink: string[]) => {
+  const saveMainContentLink = (mediaLink: common_MediaFull[]) => {
     if (mediaLink[0]) {
-      setMainContentLink(mediaLink[0]);
+      setMainContentLink(mediaLink[0].media?.thumbnail?.mediaUrl);
       return;
     }
     setMainContentLink(undefined);
   };
 
-  const saveFirstAdContentLink = (mediaLink: string[]) => {
+  const saveFirstAdContentLink = (mediaLink: common_MediaFull[]) => {
     if (mediaLink[0]) {
-      setFirstAdContentLink(mediaLink[0]);
+      setFirstAdContentLink(mediaLink[0].media?.thumbnail?.mediaUrl);
       return;
     }
     setFirstAdContentLink(undefined);
   };
 
-  const saveSecondAdContentLink = (mediaLink: string[]) => {
+  const saveSecondAdContentLink = (mediaLink: common_MediaFull[]) => {
     if (mediaLink[0]) {
-      setSecondAdContentLink(mediaLink[0]);
+      setSecondAdContentLink(mediaLink[0].media?.thumbnail?.mediaUrl);
       return;
     }
     setSecondAdContentLink(undefined);

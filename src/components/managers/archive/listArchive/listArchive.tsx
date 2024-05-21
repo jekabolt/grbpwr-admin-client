@@ -2,7 +2,11 @@ import ClearIcon from '@mui/icons-material/Clear';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
-import { common_ArchiveInsert, common_ArchiveItemInsert } from 'api/proto-http/admin';
+import {
+  common_ArchiveInsert,
+  common_ArchiveItemInsert,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import React, { FC, useEffect, useState } from 'react';
 import styles from 'styles/archiveList.scss';
@@ -112,9 +116,9 @@ export const ListArchive: FC<listArchive> = ({
   };
 
   const createMediaPreviewHandler = (archiveId: number | undefined) => {
-    return (newSelectedMedia: string[]) => {
+    return (newSelectedMedia: common_MediaFull[]) => {
       if (newSelectedMedia.length > 0) {
-        setMedia(newSelectedMedia[0]);
+        setMedia(newSelectedMedia[0].media?.thumbnail?.mediaUrl ?? '');
         setSelectedArchiveId(archiveId);
         setIsModalOpen(true);
       }

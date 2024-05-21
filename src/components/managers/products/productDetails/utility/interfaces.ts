@@ -1,4 +1,4 @@
-import { common_ProductFull } from "api/proto-http/admin";
+import { common_MediaFull, common_ProductFull } from "api/proto-http/admin";
 
 export interface ProductIdProps {
     id: string
@@ -9,13 +9,13 @@ export interface ProductIdProps {
 
 export interface MediaViewComponentsProps {
     link: string | undefined
-    saveSelectedMedia: (newSelectedMedia: string[]) => void
+    saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void
 }
 
 
 export interface MediaListProps {
     product: common_ProductFull | undefined
-    saveSelectedMedia: (newSelectedMedia: string[]) => void
+    saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void
     fetchProduct: () => void
 }
 
