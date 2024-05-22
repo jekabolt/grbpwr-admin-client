@@ -62,23 +62,23 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
         [field]: newValue,
       };
 
-      let categoryName = '';
-      if (field === 'categoryId') {
-        const selectedCategory = dictionary?.categories?.find(
-          (category) => category.id === newValue,
-        );
-        categoryName = selectedCategory?.name ?? '';
-      } else {
-        const selectedCategory = dictionary?.categories?.find(
-          (category) => category.id === updatedValues.categoryId,
-        );
-        categoryName = selectedCategory?.name ?? '';
-      }
+      // let categoryName = '';
+      // if (field === 'categoryId') {
+      //   const selectedCategory = dictionary?.categories?.find(
+      //     (category) => category.id === newValue,
+      //   );
+      //   categoryName = selectedCategory?.name ?? '';
+      // } else {
+      //   const selectedCategory = dictionary?.categories?.find(
+      //     (category) => category.id === updatedValues.categoryId,
+      //   );
+      //   categoryName = selectedCategory?.name ?? '';
+      // }
 
       const newSKU = generateSKU(
         updatedValues.brand,
         updatedValues.targetGender,
-        categoryName,
+        findInDictionary(dictionary, updatedValues.categoryId, 'category'),
         updatedValues.color,
         updatedValues.countryOfOrigin,
       );
