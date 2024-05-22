@@ -87,18 +87,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     setUpdatePayload((prev) => {
       let updatedPayload: UpdateProductPayload = { ...prev };
 
-      const saleVisible =
-        updatedPayload.salePercentage?.value !== '' && updatedPayload.salePercentage?.value !== '0';
-      const preorderVisible = updatedPayload.preorder !== '';
-
-      const bothEmpty =
-        (updatedPayload.salePercentage?.value === '' ||
-          updatedPayload.salePercentage?.value === '0') &&
-        !updatedPayload.preorder;
-
-      setShowSales(saleVisible || bothEmpty);
-      setShowPreorder(preorderVisible || bothEmpty);
-
       if (name === 'color' && typeof value === 'string') {
         const selectedColor = colors.find(
           (color) => color.name.toLowerCase().replace(/\s/g, '_') === value,
@@ -113,13 +101,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           ...updatedPayload,
           [name]: { ...prev[name], value },
         };
-        if (!value) {
-          if (product?.product?.productInsert && product.product.productInsert.salePercentage) {
-            product.product.productInsert.salePercentage.value = '';
-          }
-        } else if (value !== '0' && value !== '') {
-          updatePayload.preorder = '';
-        }
       } else if (name === 'preorder' && typeof value === 'string') {
         const formattedDate = value ? formatPreorderDate(value) : '';
         setPreorderDate({
@@ -127,52 +108,31 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           formatted: formattedDate,
         });
         updatedPayload.preorder = formattedDate;
-        if (!value) {
-          if (product?.product?.productInsert) {
-            product.product.productInsert.preorder = '';
-          }
-        } else if (value.trim() !== '') {
-          updatedPayload.salePercentage = { ...prev.salePercentage, value: '0' };
-        }
+      } else if (name === 'categoryId' && typeof value === 'string') {
+        updatedPayload = {
+          ...updatedPayload,
+          categoryId: Number(value),
+        };
       } else {
         updatedPayload = {
           ...updatedPayload,
           [name]: value,
         };
       }
+
+      updatedPayload.sku = generateSKU(
+        updatedPayload.brand || product?.product?.productInsert?.brand,
+        updatedPayload.targetGender || product?.product?.productInsert?.targetGender,
+        findInDictionary(dict, updatedPayload.categoryId, 'category') ||
+          findInDictionary(dict, product?.product?.productInsert?.categoryId, 'category'),
+        updatedPayload.color || product?.product?.productInsert?.color,
+        updatedPayload.countryOfOrigin ||
+          product?.product?.productInsert?.countryOfOrigin?.substring(0, 2),
+      );
+
       return updatedPayload;
     });
   };
-
-  const getCategoryNameById = (categoryId: number | undefined) => {
-    return dict?.categories?.find((category) => category.id?.toString() === categoryId)?.name || '';
-  };
-
-  useEffect(() => {
-    const category = getCategoryNameById(
-      updatePayload.categoryId || product?.product?.productInsert?.categoryId,
-    );
-    const newSKU = generateSKU(
-      updatePayload.brand || product?.product?.productInsert?.brand,
-      updatePayload.targetGender || product?.product?.productInsert?.targetGender,
-      category,
-      updatePayload.color || product?.product?.productInsert?.color,
-      updatePayload.countryOfOrigin ||
-        product?.product?.productInsert?.countryOfOrigin?.substring(0, 2),
-    );
-    if (newSKU !== updatePayload.sku) {
-      setUpdatePayload((prev) => ({
-        ...prev,
-        sku: newSKU,
-      }));
-    }
-  }, [
-    updatePayload.brand,
-    updatePayload.targetGender,
-    updatePayload.categoryId,
-    updatePayload.color,
-    updatePayload.countryOfOrigin,
-  ]);
 
   const updateProduct = async () => {
     if (
