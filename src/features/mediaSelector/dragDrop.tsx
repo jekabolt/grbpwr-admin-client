@@ -10,9 +10,12 @@ import {
 } from '@mui/material';
 import { uploadContentImage, uploadContentVideo } from 'api/admin';
 import React, { FC, useState } from 'react';
+import { MediaCropper } from './cropper'; // Import the MediaCropper component
 
 interface DragDropProps {
   reload: () => void;
+  selectedFileUrl: string | null;
+  setSelectedFileUrl: (url: string | null) => void;
 }
 
 const fileExtensionToContentType: { [key: string]: string } = {
@@ -23,14 +26,15 @@ const fileExtensionToContentType: { [key: string]: string } = {
   jpeg: 'image/jpeg',
 };
 
-export const DragDrop: FC<DragDropProps> = ({ reload }) => {
+export const DragDrop: FC<DragDropProps> = ({ reload, selectedFileUrl, setSelectedFileUrl }) => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
   const [snackbarMessage, setSnackbarMessage] = useState<string>('');
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
   const [loading, setLoading] = useState<boolean>(false);
+  const [croppedImage, setCroppedImage] = useState<string | null>(null);
+  const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
 
   const handleSnackbarClose = () => {
     setSnackbarOpen(false);
@@ -47,6 +51,7 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
       const file = files[0];
       setSelectedFiles([file]);
       setSelectedFileUrl(URL.createObjectURL(file));
+      setIsCropperOpen(true); // Open the cropper when a file is selected
     }
   };
 
@@ -168,6 +173,17 @@ export const DragDrop: FC<DragDropProps> = ({ reload }) => {
           <Alert severity={snackBarSeverity}>{snackbarMessage}</Alert>
         </Snackbar>
       </Grid>
+      {selectedFileUrl && (
+        <MediaCropper
+          selectedFile={selectedFileUrl}
+          open={isCropperOpen}
+          close={() => setIsCropperOpen(false)}
+          saveCroppedImage={(croppedImageUrl: string) => {
+            setCroppedImage(croppedImageUrl);
+            setIsCropperOpen(false);
+          }}
+        />
+      )}
     </Grid>
   );
 };

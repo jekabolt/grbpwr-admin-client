@@ -7,10 +7,16 @@ export interface MediaSelectorLayoutProps {
     allowMultiple: boolean;
 }
 
-export interface MediaSelectorProps {
+export interface MediaSelectorModalProps {
     closeMediaSelector: () => void;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
     allowMultiple: boolean;
+}
+
+export interface MediaSelectorInterface {
+    allowMultiple: boolean;
+    selectedMedia: common_MediaFull[] | undefined;
+    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
 }
 
 export interface MediaSelectorMediaListProps {

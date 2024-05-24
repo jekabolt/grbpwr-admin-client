@@ -1,7 +1,7 @@
 import { Button } from '@mui/material';
 import { MediaSelectorLayoutProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { FC, useState } from 'react';
-import { MediaSelector } from './mediaSelector';
+import { MediaSelectorModal } from './mediaSelectorModal';
 
 export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   label,
@@ -20,7 +20,7 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
       </Button>
       <div>
         {mediaSelectorVisibility && (
-          <MediaSelector
+          <MediaSelectorModal
             saveSelectedMedia={saveSelectedMedia}
             closeMediaSelector={handleMediaSelectorVisibility}
             allowMultiple={allowMultiple}
