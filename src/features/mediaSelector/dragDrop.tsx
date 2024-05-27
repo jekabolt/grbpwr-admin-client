@@ -1,40 +1,34 @@
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Grid,
-  Paper,
-  Snackbar,
-  Typography,
-} from '@mui/material';
-import { uploadContentImage, uploadContentVideo } from 'api/admin';
-import React, { FC, useState } from 'react';
-import { MediaCropper } from './cropper'; // Import the MediaCropper component
+import { Alert, Box, CircularProgress, Grid, Paper, Snackbar, Typography } from '@mui/material';
+import React, { Dispatch, FC, SetStateAction, useState } from 'react';
+import { MediaCropper } from './cropper';
 
 interface DragDropProps {
-  reload: () => void;
-  selectedFileUrl: string | null;
-  setSelectedFileUrl: (url: string | null) => void;
+  selectedFileUrl: string;
+  setSelectedFileUrl: (url: string) => void;
+  selectedFiles: File[];
+  setSelectedFiles: Dispatch<SetStateAction<File[]>>;
+  setCroppedImage: (img: string | null) => void;
+  loading: boolean;
+  isCropperOpen: boolean;
+  setIsCropperOpen: Dispatch<SetStateAction<boolean>>;
+  setMime: (str: string) => void;
 }
 
-const fileExtensionToContentType: { [key: string]: string } = {
-  jpg: 'image/jpg',
-  png: 'image/png',
-  webm: 'video/webm',
-  mp4: 'video/mp4',
-  jpeg: 'image/jpeg',
-};
-
-export const DragDrop: FC<DragDropProps> = ({ reload, selectedFileUrl, setSelectedFileUrl }) => {
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+export const DragDrop: FC<DragDropProps> = ({
+  selectedFileUrl,
+  setSelectedFileUrl,
+  selectedFiles,
+  setSelectedFiles,
+  setCroppedImage,
+  loading,
+  isCropperOpen,
+  setIsCropperOpen,
+  setMime,
+}) => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
   const [snackbarMessage, setSnackbarMessage] = useState<string>('');
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [croppedImage, setCroppedImage] = useState<string | null>(null);
-  const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
 
   const handleSnackbarClose = () => {
     setSnackbarOpen(false);
@@ -51,7 +45,7 @@ export const DragDrop: FC<DragDropProps> = ({ reload, selectedFileUrl, setSelect
       const file = files[0];
       setSelectedFiles([file]);
       setSelectedFileUrl(URL.createObjectURL(file));
-      setIsCropperOpen(true); // Open the cropper when a file is selected
+      setMime(file.type);
     }
   };
 
@@ -83,65 +77,6 @@ export const DragDrop: FC<DragDropProps> = ({ reload, selectedFileUrl, setSelect
     setIsDragging(dragging);
   };
 
-  function trimBeforeBase64(input: string): string {
-    const parts = input.split('base64,');
-    if (parts.length > 1) {
-      return parts[1];
-    }
-    return input;
-  }
-
-  const handleUpload = async () => {
-    if (selectedFiles.length === 0) {
-      showMessage('NO SELECTED FILE', 'error');
-      return;
-    }
-
-    setLoading(true);
-
-    const selectedFile = selectedFiles[0];
-    const fileExtension = (selectedFile.name.split('.').pop() || '').toLowerCase();
-
-    if (!fileExtension) {
-      showMessage('INVALID FILE FORMAT', 'error');
-      setLoading(false);
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      if (event.target && event.target.result) {
-        const baseData64 = event.target.result as string;
-        const contentType = fileExtensionToContentType[fileExtension];
-
-        try {
-          if (contentType.startsWith('image')) {
-            await uploadContentImage({
-              rawB64Image: baseData64,
-            });
-          } else if (contentType.startsWith('video')) {
-            const raw = trimBeforeBase64(baseData64);
-            await uploadContentVideo({
-              raw: raw,
-              contentType: contentType,
-            });
-          }
-
-          showMessage('MEDIA IS UPLOADED', 'success');
-        } catch (error) {
-          showMessage('UPLOAD HAS FAILED. TRY AGAIN', 'success');
-        } finally {
-          setLoading(false);
-          setSelectedFiles([]);
-          setSelectedFileUrl(null);
-          reload();
-        }
-      }
-    };
-
-    reader.readAsDataURL(selectedFile);
-  };
-
   return (
     <Grid container>
       <Grid item>
@@ -163,9 +98,6 @@ export const DragDrop: FC<DragDropProps> = ({ reload, selectedFileUrl, setSelect
               style={{ display: 'none' }}
             />
             {selectedFiles.length > 0 && <Typography>Media is selected</Typography>}
-            <Button variant='contained' size='small' onClick={handleUpload}>
-              UPLOAD
-            </Button>
           </Paper>
           {loading && <CircularProgress />}
         </Box>

@@ -63,7 +63,7 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
             select={select}
             selectedMedia={selectedMedia}
           />
-          <Grid item xs={12} display='flex' justifyContent='center'>
+          <Grid item xs={2} className={styles.save_btn}>
             <Button onClick={handleMediaAndCloseSelector} variant='contained' size='small'>
               Save
             </Button>

@@ -16,7 +16,9 @@ export interface MediaSelectorModalProps {
 export interface MediaSelectorInterface {
     allowMultiple: boolean;
     selectedMedia: common_MediaFull[] | undefined;
-    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
+    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void
+    enableModal?: boolean
+
 }
 
 export interface MediaSelectorMediaListProps {
@@ -47,5 +49,5 @@ export interface FilterMediasInterface {
 export interface FullSizeMediaModalInterface {
     open: boolean;
     close: () => void;
-    clickedMedia: common_MediaInsert | undefined;
+    clickedMedia: common_MediaInsert | undefined
 }
