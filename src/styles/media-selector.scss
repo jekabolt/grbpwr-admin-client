@@ -108,14 +108,18 @@
     justify-self: center;
     justify-content: center;
     align-items: center;
-    width: 396px;
-    height: 243px;
+    width: 696px;
+    height: 543px;
 
-    img,
-    video {
+    a {
       width: 100%;
       height: 100%;
-      object-fit: scale-down;
+      img,
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
     }
   }
 }
