@@ -6,12 +6,14 @@ import {
   DialogActions,
   DialogContent,
   IconButton,
+  Slider,
   Typography,
 } from '@mui/material';
 import getCroppedImg from 'features/utilitty/getCropped';
 import { FC, useCallback, useState } from 'react';
 import Cropper, { Area } from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
+import { Point } from 'react-easy-crop/types';
 
 interface CropperInterface {
   selectedFile: string | null;
@@ -26,7 +28,7 @@ export const MediaCropper: FC<CropperInterface> = ({
   close,
   saveCroppedImage,
 }) => {
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [aspect, setAspect] = useState<number | undefined>(4 / 5);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
@@ -58,25 +60,39 @@ export const MediaCropper: FC<CropperInterface> = ({
 
   return (
     <Dialog open={selectedFile ? open : false} onClose={close} fullWidth maxWidth='md'>
-      <Box display='flex' position='relative'>
+      <Box display='flex' justifyContent='center' gap='50px' position='relative'>
         <IconButton onClick={close} style={{ position: 'absolute', right: '0' }}>
           <CloseIcon fontSize='medium' />
         </IconButton>
-        <DialogContent
-          style={{
-            height: '400px',
-            minWidth: '300px',
-            position: 'relative',
-          }}
-        >
-          <Cropper
-            onCropChange={setCrop}
-            image={selectedFile || undefined}
-            crop={crop}
-            aspect={aspect}
-            onCropComplete={onCropComplete}
-          />
-        </DialogContent>
+        <Box display='grid'>
+          <DialogContent
+            style={{
+              height: '500px',
+              width: '400px',
+              position: 'relative',
+            }}
+          >
+            <Cropper
+              onCropChange={setCrop}
+              image={selectedFile || undefined}
+              zoom={zoom}
+              crop={crop}
+              aspect={aspect}
+              onCropComplete={onCropComplete}
+              onZoomChange={setZoom}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Slider
+              value={zoom}
+              min={1}
+              max={3}
+              step={0.1}
+              aria-labelledby='Zoom'
+              onChange={(e, zoom) => setZoom(Number(zoom))}
+            />
+          </DialogActions>
+        </Box>
         <DialogActions>
           <Box>
             <Typography variant='h6'>Select Aspect Ratio</Typography>
@@ -91,9 +107,9 @@ export const MediaCropper: FC<CropperInterface> = ({
                   {ratio.label}
                 </Button>
               ))}
+              <Button onClick={handleSave}>Save Crop</Button>
             </Box>
           </Box>
-          <Button onClick={handleSave}>Save Crop</Button>
         </DialogActions>
       </Box>
     </Dialog>

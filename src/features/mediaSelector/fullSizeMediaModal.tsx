@@ -78,15 +78,19 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
 
   return (
     <>
-      <Dialog open={open} onClose={close} scroll='paper' maxWidth='md'>
+      <Dialog open={open} onClose={close} scroll='paper' maxWidth='lg'>
         <Box position='relative'>
           <DialogContent className={styles.dialog}>
             <Box component='div' className={styles.full_size_modal_media_container}>
               {clickedMedia &&
                 (isVideo(clickedMedia.thumbnail?.mediaUrl) ? (
-                  <video src={clickedMedia.thumbnail?.mediaUrl}></video>
+                  <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
+                    <video src={clickedMedia.thumbnail?.mediaUrl}></video>
+                  </a>
                 ) : (
-                  <img src={clickedMedia.thumbnail?.mediaUrl} alt='' />
+                  <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
+                    <img src={clickedMedia.thumbnail?.mediaUrl} alt='' />
+                  </a>
                 ))}
             </Box>
             {['fullSize', 'compressed', 'thumbnail'].map((type) => (
