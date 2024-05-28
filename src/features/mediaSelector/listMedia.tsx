@@ -97,7 +97,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
       '5:4': '#3d85c6',
       '9:16': '#674ea7',
     };
-    return colorMap[aspectRatio as keyof typeof colorMap] || '#000';
+    return colorMap[aspectRatio as keyof typeof colorMap] || '#808080';
   };
 
   return (
@@ -153,7 +153,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                 <Typography
                   variant='overline'
                   style={{
-                    color:
+                    backgroundColor:
                       isVideo(m.media?.thumbnail?.mediaUrl) && videoSizes[m.id ?? 0]
                         ? aspectRatioColor(
                             calculateAspectRatio(
