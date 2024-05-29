@@ -69,6 +69,9 @@ export const DragDrop: FC<DragDropProps> = ({
     if ('dataTransfer' in e) {
       setIsDragging(false);
     }
+    if (e.target instanceof HTMLInputElement) {
+      e.target.value = '';
+    }
   };
 
   const handleDrag = (event: React.DragEvent<HTMLDivElement>, dragging: boolean) => {

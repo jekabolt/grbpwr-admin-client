@@ -10,7 +10,7 @@ import {
   Typography,
 } from '@mui/material';
 import getCroppedImg from 'features/utilitty/getCropped';
-import { FC, useCallback, useState } from 'react';
+import { FC, useCallback, useEffect, useState } from 'react';
 import Cropper, { Area } from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
 import { Point } from 'react-easy-crop/types';
@@ -32,6 +32,7 @@ export const MediaCropper: FC<CropperInterface> = ({
   const [zoom, setZoom] = useState(1);
   const [aspect, setAspect] = useState<number | undefined>(4 / 5);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [freeAspectRatio, setFreeAspectRatio] = useState<number | undefined>(undefined);
 
   const aspectRatios = [
     { label: '16:9', value: 1.7778, color: '#cc0000' },
@@ -41,8 +42,19 @@ export const MediaCropper: FC<CropperInterface> = ({
     { label: '3:4', value: 0.75, color: '#45818e' },
     { label: '5:4', value: 1.25, color: '#3d85c6' },
     { label: '9:16', value: 0.5625, color: '#674ea7' },
-    { label: 'free', value: undefined },
+    ...(freeAspectRatio ? [{ label: 'free', value: freeAspectRatio, color: '#808080' }] : []),
   ];
+
+  useEffect(() => {
+    if (selectedFile) {
+      const img = new Image();
+      img.onload = () => {
+        const freeAspect = img.width / img.height;
+        setFreeAspectRatio(freeAspect);
+      };
+      img.src = selectedFile;
+    }
+  }, [selectedFile]);
 
   const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
     console.log(croppedArea, croppedAreaPixels);
