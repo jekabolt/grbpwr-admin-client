@@ -1,68 +1,58 @@
 import { Box, Button, Grid } from '@mui/material';
-import { Dispatch, FC, SetStateAction } from 'react';
+import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
+import { isBase64Video } from 'features/utilitty/filterContentType';
+import { getBase64ImageFromUrl } from 'features/utilitty/getBase64';
+import { Dispatch, FC, SetStateAction, useEffect } from 'react';
 import styles from 'styles/media-selector.scss';
+import { MediaCropper } from './cropper';
 
 interface PreviewMediaForUploadInterface {
+  b64Media: string;
   croppedImage: string | null;
-  selectedFileUrl: string;
-  handleUpload: () => void;
+  isCropperOpen: boolean;
+  handleUploadMedia: () => Promise<void>;
+  setCroppedImage: (img: string | null) => void;
   setIsCropperOpen: Dispatch<SetStateAction<boolean>>;
-  url: string;
-  updateContentLink: () => Promise<void>;
   clear: () => void;
-  mime: string;
 }
 
 export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
+  b64Media,
   croppedImage,
-  selectedFileUrl,
-  handleUpload,
+  isCropperOpen,
+  handleUploadMedia,
+  setCroppedImage,
   setIsCropperOpen,
-  url,
-  updateContentLink,
   clear,
-  mime,
 }) => {
-  const isHttpsMediaLink = (url: string) => {
-    const lowerCaseUrl = url.toLowerCase();
-    const pattern = /^https:\/\/.*\.(jpg|jpeg|png|gif|bmp|svg|mp4|avi|mov|wmv|webp|webm)$/i;
-    return pattern.test(lowerCaseUrl);
-  };
-
-  const isVideo = (mimeType: string) => {
-    return mimeType.startsWith('video/');
-  };
+  useEffect(() => {
+    if (checkIsHttpHttpsMediaLink(b64Media)) {
+      getBase64ImageFromUrl(b64Media);
+    }
+  }, [b64Media]);
 
   return (
     <Grid container justifyContent='center' alignItems='center' gap={1}>
-      {(croppedImage || selectedFileUrl || (url && isHttpsMediaLink(url))) && (
+      {b64Media && (
         <>
           <Grid item xs={8} className={styles.preview_media_to_upload}>
-            {isVideo(mime) ? (
-              <video src={selectedFileUrl}></video>
+            {isBase64Video(b64Media) ? (
+              <video src={b64Media} controls></video>
             ) : (
-              <img
-                src={croppedImage || selectedFileUrl || (isHttpsMediaLink(url) ? url : undefined)}
-                alt=''
-              />
+              <img src={croppedImage || b64Media} alt='' />
             )}
           </Grid>
           <Grid item xs={3}>
-            {isHttpsMediaLink(url) && (
-              <Button variant='contained' size='small' onClick={updateContentLink}>
-                Upload
-              </Button>
-            )}
-            {selectedFileUrl && (
+            {b64Media && (
               <Box display='grid' gap='10px'>
-                {!isVideo(mime) && (
-                  <Button variant='contained' size='small' onClick={() => setIsCropperOpen(true)}>
-                    Crop
-                  </Button>
-                )}
-                <Button variant='contained' size='small' onClick={handleUpload}>
+                <Button variant='contained' size='small' onClick={() => setIsCropperOpen(true)}>
+                  Crop
+                </Button>
+
+                <Button variant='contained' size='small' onClick={handleUploadMedia}>
                   Upload
                 </Button>
+
                 <Button variant='contained' size='small' onClick={clear}>
                   clear
                 </Button>
@@ -71,6 +61,16 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
           </Grid>
         </>
       )}
+
+      <MediaCropper
+        selectedFile={b64Media}
+        open={isCropperOpen}
+        close={() => setIsCropperOpen(false)}
+        saveCroppedImage={(croppedImageUrl: string) => {
+          setCroppedImage(croppedImageUrl);
+          setIsCropperOpen(false);
+        }}
+      />
     </Grid>
   );
 };

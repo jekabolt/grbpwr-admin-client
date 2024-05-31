@@ -58,7 +58,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
     setMedia((currentFiles) => currentFiles?.filter((file) => file.id !== id));
   };
 
-  const handleSelect = (
+  const handleSelect = async (
     media: common_MediaFull | undefined,
     allowMultiple: boolean,
     event: React.MouseEvent,
@@ -114,77 +114,79 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             rowHeight={200}
           >
             {sortedAndFilteredMedia().map((m) => (
-              <Box>
-                <ImageListItem
-                  onClick={(event) => handleSelect(m, allowMultiple, event)}
-                  className={styles.list_media_item}
-                  key={m.id}
-                >
-                  <InputLabel htmlFor={`${m.id}`}>
-                    {selectedMedia?.some((item) => item.id === m.id) ? (
-                      <span className={styles.selected_flag}>selected</span>
-                    ) : null}
-                    {isVideo(m.media?.thumbnail?.mediaUrl) ? (
-                      <video
-                        key={m.id}
-                        src={m.media?.thumbnail?.mediaUrl}
-                        className={`${selectedMedia?.some((item) => item.id === m.id) ? styles.selected_media : ''}`}
-                        controls
-                        onLoadedMetadata={(e) => handleVideoLoadedMetadata(e, m.id)}
-                      />
-                    ) : (
-                      <img
-                        key={m.id}
-                        src={m.media?.thumbnail?.mediaUrl}
-                        alt='media'
-                        className={`${selectedMedia?.some((item) => item.id === m.id) ? styles.selected_media : ''}`}
-                      />
-                    )}
-                  </InputLabel>
-                  <IconButton
-                    aria-label='delete'
-                    size='small'
-                    onClick={(e) => handleDeleteFile(m.id, e)}
-                    className={styles.delete_btn}
+              <>
+                <Box>
+                  <ImageListItem
+                    onClick={(event) => handleSelect(m, allowMultiple, event)}
+                    className={styles.list_media_item}
+                    key={m.id}
                   >
-                    <ClearIcon />
-                  </IconButton>
-                </ImageListItem>
-                <Typography
-                  variant='overline'
-                  style={{
-                    backgroundColor:
-                      isVideo(m.media?.thumbnail?.mediaUrl) && videoSizes[m.id ?? 0]
-                        ? aspectRatioColor(
-                            calculateAspectRatio(
-                              videoSizes[m.id ?? 0].width,
-                              videoSizes[m.id ?? 0].height,
-                            ),
-                          )
-                        : aspectRatioColor(
-                            calculateAspectRatio(
-                              m.media?.fullSize?.width,
-                              m.media?.fullSize?.height,
-                            ),
-                          ),
-                  }}
-                >
-                  {isVideo(m.media?.thumbnail?.mediaUrl) && videoSizes[m.id ?? 0] ? (
-                    <>
-                      ASPECT RATIO:{' '}
-                      {calculateAspectRatio(
-                        videoSizes[m.id ?? 0].width,
-                        videoSizes[m.id ?? 0].height,
+                    <InputLabel htmlFor={`${m.id}`}>
+                      {selectedMedia?.some((item) => item.id === m.id) ? (
+                        <span className={styles.selected_flag}>selected</span>
+                      ) : null}
+                      {isVideo(m.media?.thumbnail?.mediaUrl) ? (
+                        <video
+                          key={m.id}
+                          src={m.media?.thumbnail?.mediaUrl}
+                          className={`${selectedMedia?.some((item) => item.id === m.id) ? styles.selected_media : ''}`}
+                          controls
+                          onLoadedMetadata={(e) => handleVideoLoadedMetadata(e, m.id)}
+                        />
+                      ) : (
+                        <img
+                          key={m.id}
+                          src={m.media?.thumbnail?.mediaUrl}
+                          alt='media'
+                          className={`${selectedMedia?.some((item) => item.id === m.id) ? styles.selected_media : ''}`}
+                        />
                       )}
-                    </>
-                  ) : (
-                    <>
-                      ASPECT RATIO:{' '}
-                      {calculateAspectRatio(m.media?.fullSize?.width, m.media?.fullSize?.height)}
-                    </>
-                  )}
-                </Typography>
-              </Box>
+                    </InputLabel>
+                    <IconButton
+                      aria-label='delete'
+                      size='small'
+                      onClick={(e) => handleDeleteFile(m.id, e)}
+                      className={styles.delete_btn}
+                    >
+                      <ClearIcon />
+                    </IconButton>
+                  </ImageListItem>
+                  <Typography
+                    variant='overline'
+                    style={{
+                      backgroundColor:
+                        isVideo(m.media?.thumbnail?.mediaUrl) && videoSizes[m.id ?? 0]
+                          ? aspectRatioColor(
+                              calculateAspectRatio(
+                                videoSizes[m.id ?? 0].width,
+                                videoSizes[m.id ?? 0].height,
+                              ),
+                            )
+                          : aspectRatioColor(
+                              calculateAspectRatio(
+                                m.media?.fullSize?.width,
+                                m.media?.fullSize?.height,
+                              ),
+                            ),
+                    }}
+                  >
+                    {isVideo(m.media?.thumbnail?.mediaUrl) && videoSizes[m.id ?? 0] ? (
+                      <>
+                        ASPECT RATIO:{' '}
+                        {calculateAspectRatio(
+                          videoSizes[m.id ?? 0].width,
+                          videoSizes[m.id ?? 0].height,
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        ASPECT RATIO:{' '}
+                        {calculateAspectRatio(m.media?.fullSize?.width, m.media?.fullSize?.height)}
+                      </>
+                    )}
+                  </Typography>
+                </Box>
+              </>
             ))}
           </ImageList>
         )}

@@ -35,7 +35,6 @@ export interface MediaSelectorMediaListProps {
 export interface UploadMediaByUrlProps {
     url: string;
     setUrl: React.Dispatch<React.SetStateAction<string>>;
-    updateContentLink: () => void;
     isLoading: boolean;
 }
 

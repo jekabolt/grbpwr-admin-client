@@ -1,17 +1,13 @@
 import { Alert, Box, CircularProgress, Grid, Paper, Snackbar, Typography } from '@mui/material';
+import { getBase64File } from 'features/utilitty/getBase64';
 import React, { Dispatch, FC, SetStateAction, useState } from 'react';
-import { MediaCropper } from './cropper';
 
 interface DragDropProps {
   selectedFileUrl: string;
   setSelectedFileUrl: (url: string) => void;
   selectedFiles: File[];
   setSelectedFiles: Dispatch<SetStateAction<File[]>>;
-  setCroppedImage: (img: string | null) => void;
   loading: boolean;
-  isCropperOpen: boolean;
-  setIsCropperOpen: Dispatch<SetStateAction<boolean>>;
-  setMime: (str: string) => void;
 }
 
 export const DragDrop: FC<DragDropProps> = ({
@@ -19,11 +15,7 @@ export const DragDrop: FC<DragDropProps> = ({
   setSelectedFileUrl,
   selectedFiles,
   setSelectedFiles,
-  setCroppedImage,
   loading,
-  isCropperOpen,
-  setIsCropperOpen,
-  setMime,
 }) => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
@@ -40,12 +32,13 @@ export const DragDrop: FC<DragDropProps> = ({
     setSnackbarOpen(true);
   };
 
-  const processFiles = (files: FileList) => {
+  const processFiles = async (files: FileList) => {
     if (files && files.length > 0) {
       const file = files[0];
       setSelectedFiles([file]);
-      setSelectedFileUrl(URL.createObjectURL(file));
-      setMime(file.type);
+      const b64 = await getBase64File(file);
+      setSelectedFileUrl(b64);
+      console.log(selectedFileUrl);
     }
   };
 
@@ -79,7 +72,6 @@ export const DragDrop: FC<DragDropProps> = ({
     event.stopPropagation();
     setIsDragging(dragging);
   };
-
   return (
     <Grid container>
       <Grid item>
@@ -108,17 +100,6 @@ export const DragDrop: FC<DragDropProps> = ({
           <Alert severity={snackBarSeverity}>{snackbarMessage}</Alert>
         </Snackbar>
       </Grid>
-      {selectedFileUrl && (
-        <MediaCropper
-          selectedFile={selectedFileUrl}
-          open={isCropperOpen}
-          close={() => setIsCropperOpen(false)}
-          saveCroppedImage={(croppedImageUrl: string) => {
-            setCroppedImage(croppedImageUrl);
-            setIsCropperOpen(false);
-          }}
-        />
-      )}
     </Grid>
   );
 };
