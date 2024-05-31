@@ -1,4 +1,4 @@
-export const fileExtensionToContentType: { [key: string]: string | undefined } = {
+export const filterExtensionToContentType: { [key: string]: string } = {
     jpg: 'image/jpg',
     png: 'image/png',
     webm: 'video/webm',

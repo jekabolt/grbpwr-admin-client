@@ -16,7 +16,7 @@ import 'react-easy-crop/react-easy-crop.css';
 import { Point } from 'react-easy-crop/types';
 
 interface CropperInterface {
-  selectedFile: string | null;
+  selectedFile: string | undefined;
   open: boolean;
   close: () => void;
   saveCroppedImage: (croppedImage: string) => void;
@@ -63,6 +63,7 @@ export const MediaCropper: FC<CropperInterface> = ({
 
   const handleSave = async () => {
     if (selectedFile && croppedAreaPixels) {
+      // TODO: add png and other
       const format = selectedFile.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
       const croppedImage = await getCroppedImg(selectedFile, croppedAreaPixels, aspect, format);
       saveCroppedImage(croppedImage);
@@ -86,7 +87,7 @@ export const MediaCropper: FC<CropperInterface> = ({
           >
             <Cropper
               onCropChange={setCrop}
-              image={selectedFile || undefined}
+              image={selectedFile || ''}
               zoom={zoom}
               crop={crop}
               aspect={aspect}

@@ -22,6 +22,7 @@ function findBestCrop(width: number, height: number, targetRatio: number) {
 
 export default async function getCroppedImg(imageSrc: string, crop: Area, aspect: number = 4 / 5, format: string = 'image/jpeg') {
     const image = new Image();
+    image.crossOrigin = 'Anonymous'
     image.src = imageSrc;
 
     await new Promise((resolve) => {
