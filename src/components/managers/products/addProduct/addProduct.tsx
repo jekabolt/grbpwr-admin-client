@@ -1,7 +1,12 @@
 import { Alert, Button, Grid, Snackbar } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 import { addProduct, getDictionary } from 'api/admin';
-import { AddProductRequest, common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
+import {
+  AddProductRequest,
+  common_Dictionary,
+  common_GenderEnum,
+  common_ProductNew,
+} from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { Field, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
@@ -25,7 +30,7 @@ export const initialProductState: common_ProductNew = {
     categoryId: 0,
     description: '',
     hidden: false,
-    targetGender: 'GENDER_ENUM_UNKNOWN',
+    targetGender: '' as common_GenderEnum,
   },
   sizeMeasurements: [],
   mediaIds: [],
@@ -37,6 +42,7 @@ export const AddProducts: FC = () => {
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+  const [clearMediaPreview, setClearMediaPreview] = useState(false);
 
   const showMessage = (message: string, severity: 'success' | 'error') => {
     setSnackBarMessage(message);
@@ -57,7 +63,10 @@ export const AddProducts: FC = () => {
     {
       setSubmitting,
       resetForm,
-    }: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
+    }: {
+      setSubmitting: (isSubmitting: boolean) => void;
+      resetForm: () => void;
+    },
   ) => {
     try {
       const nonEmptySizeMeasurements = values.sizeMeasurements?.filter(
@@ -66,7 +75,6 @@ export const AddProducts: FC = () => {
           sizeMeasurement.productSize &&
           sizeMeasurement.productSize.quantity !== null,
       );
-
       const productToSubmit: AddProductRequest = {
         product: {
           ...values,
@@ -74,12 +82,18 @@ export const AddProducts: FC = () => {
         },
       };
 
+      if (parseFloat(values.product?.price?.value || '') <= 0) {
+        showMessage('PRICE CANNOT BE ZERO', 'error');
+        setSubmitting(false);
+        return;
+      }
+
       await addProduct(productToSubmit);
+      setClearMediaPreview(true);
       showMessage('PRODUCT UPLOADED', 'success');
       resetForm();
     } catch (error) {
-      const message = sessionStorage.getItem('errorCode');
-      message ? showMessage(message, 'error') : '';
+      showMessage("PRODUCT CAN'T BE UPLOADED", 'error');
     } finally {
       setSubmitting(false);
     }
@@ -97,7 +111,7 @@ export const AddProducts: FC = () => {
               spacing={2}
             >
               <Grid item xs={7}>
-                <Field component={Media} name='mediaIds' />
+                <Field component={Media} name='mediaIds' clearMediaPreview={clearMediaPreview} />
               </Grid>
               <Grid item xs={4}>
                 <Grid container spacing={2}>
