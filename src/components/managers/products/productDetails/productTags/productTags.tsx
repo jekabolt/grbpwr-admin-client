@@ -7,10 +7,14 @@ export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, sho
   const [tag, setTag] = useState('');
 
   const deleteTagFromList = async (removeTag: string | undefined) => {
-    const response = await deleteTag({ productId: Number(id), tag: removeTag });
-    showMessage('TAG REMOVED', 'success');
-    if (response) {
-      fetchProduct();
+    if (product?.tags && product.tags.length > 1) {
+      const response = await deleteTag({ productId: Number(id), tag: removeTag });
+      showMessage('TAG REMOVED', 'success');
+      if (response) {
+        fetchProduct();
+      }
+    } else {
+      showMessage('PRODUCT SHOULD CONTAIN AT LEAST 1 TAG', 'error');
     }
   };
 
@@ -55,17 +59,3 @@ export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, sho
     </Box>
   );
 };
-
-{
-  /* <Grid key={tag.id} item xs={6}>
-              <Box className={styles.tag}>
-                <Typography variant='body1'>{tag.productTagInsert?.tag}</Typography>
-                <IconButton
-                  onClick={() => deleteTagFromList(tag.productTagInsert?.tag)}
-                  className={styles.btn}
-                >
-                  <CloseIcon />
-                </IconButton>
-              </Box>
-            </Grid> */
-}

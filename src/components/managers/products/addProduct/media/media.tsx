@@ -5,13 +5,20 @@ import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSe
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { useFormikContext } from 'formik';
-import { FC, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
 
-export const Media: FC = () => {
+export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview }) => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+
+  useEffect(() => {
+    if (clearMediaPreview) {
+      setImagePreviewUrl('');
+      setMediaPreview([]);
+    }
+  }, [clearMediaPreview]);
 
   const uploadThumbnailInProduct = (newSelectedMedia: common_MediaFull[]) => {
     if (!newSelectedMedia.length) {
@@ -20,7 +27,6 @@ export const Media: FC = () => {
     const thumbnail = newSelectedMedia[0];
     const thumbnailUrl = thumbnail.media?.fullSize?.mediaUrl ?? '';
     setImagePreviewUrl(thumbnailUrl);
-
     setFieldValue('product.thumbnail', thumbnailUrl);
   };
   const uploadMediasInProduct = (newSelectedMedia: common_MediaFull[]) => {
@@ -54,6 +60,11 @@ export const Media: FC = () => {
           link={imagePreviewUrl}
           saveSelectedMedia={uploadThumbnailInProduct}
         />
+        {!values.product?.thumbnail && (
+          <Typography color='error' variant='overline'>
+            THUMBNAIL MUST BE SELECTED
+          </Typography>
+        )}
       </Grid>
       <Grid item xs={11}>
         <Typography variant='h4' textTransform='uppercase'>
@@ -87,6 +98,11 @@ export const Media: FC = () => {
               />
             </Grid>
           </Grid>
+        )}
+        {values.mediaIds && values.mediaIds.length < 1 && (
+          <Typography color='error' variant='overline'>
+            AT LEAST ONE MEDIA MUST BE ADDED TO THE PRODUCT
+          </Typography>
         )}
       </Grid>
     </Grid>

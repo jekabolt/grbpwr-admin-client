@@ -1,10 +1,10 @@
-import { Box, Button, Chip, TextField } from '@mui/material';
+import { Box, Button, Chip, TextField, Typography } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { useEffect, useState } from 'react';
 
 export const Tags = () => {
-  const { setFieldValue } = useFormikContext<common_ProductNew>(); // Using any for simplicity, replace with your form values type
+  const { setFieldValue } = useFormikContext<common_ProductNew>();
   const [newTag, setNewTag] = useState('');
   const [tags, setTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
@@ -71,6 +71,11 @@ export const Tags = () => {
           />
         ))}
       </Box>
+      {selectedTags.length === 0 && (
+        <Typography color='error' variant='overline'>
+          No tag selected. Please select a tag.
+        </Typography>
+      )}
     </Box>
   );
 };

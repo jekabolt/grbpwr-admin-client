@@ -16,7 +16,7 @@ import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { useFormikContext } from 'formik';
-import React, { FC } from 'react';
+import React, { FC, useState } from 'react';
 import styles from 'styles/addProd.scss';
 import { AddProductInterface } from '../addProductInterface/addProductInterface';
 
@@ -28,6 +28,7 @@ export const Sizes: FC<AddProductInterface> = ({ dictionary }) => {
 
   const theme = useTheme();
   const matches = useMediaQuery(theme.breakpoints.down('sm'));
+  const [isSizeFilled, setIsSizeFilled] = useState(false);
 
   const handleSizeChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -39,6 +40,7 @@ export const Sizes: FC<AddProductInterface> = ({ dictionary }) => {
     setFieldValue(quantityPath, value);
     const sizeIdPath = `sizeMeasurements[${sizeIndex}].productSize.sizeId`;
     setFieldValue(sizeIdPath, sizeId);
+    if (value) setIsSizeFilled(true);
   };
 
   const handleMeasurementChange = (
@@ -96,6 +98,7 @@ export const Sizes: FC<AddProductInterface> = ({ dictionary }) => {
                     inputProps={{ min: 0 }}
                     style={{ width: '80px' }}
                     onKeyDown={removePossibilityToUseSigns}
+                    required={!isSizeFilled}
                   />
                 </Box>
               </TableCell>

@@ -1,5 +1,6 @@
 import {
   FormControl,
+  FormHelperText,
   Grid,
   InputLabel,
   MenuItem,
@@ -19,7 +20,7 @@ import CountryList from 'react-select-country-list';
 import { AddProductInterface, Country } from '../addProductInterface/addProductInterface';
 
 export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => {
-  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, setFieldError } = useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
@@ -118,13 +119,11 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
         />
       </Grid>
       <Grid item>
-        <FormControl fullWidth required>
+        <FormControl required fullWidth>
           <InputLabel shrink>GENDER</InputLabel>
           <Select
-            value={values.product?.targetGender || 'M'}
+            value={values.product?.targetGender || ''}
             onChange={(e) => {
-              const gender = e.target.value;
-              setFieldValue('product.targetGender', gender);
               handleFieldChange(e, 'targetGender');
             }}
             label='GENDER'
@@ -145,7 +144,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           <Select
             name='prodcut.categoryId'
             onChange={(e) => handleFieldChange(e, 'categoryId')}
-            value={values.product?.categoryId}
+            value={values.product?.categoryId || ''}
             label='CATEGORY'
             displayEmpty
           >
