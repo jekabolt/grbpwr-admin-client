@@ -1,9 +1,17 @@
-import { Grid } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { Grid, IconButton } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
+import { deletePromo } from 'api/promo';
 import { common_PromoCode } from 'api/proto-http/admin';
-import { FC } from 'react';
+import { FC, useCallback } from 'react';
 
-export const ListPromo: FC<{ promos: common_PromoCode[] }> = ({ promos }) => {
+interface ListPromosInterface {
+  promos: common_PromoCode[];
+  fetchPromos: (limit: number, offset: number) => void;
+  showMessage: (message: string, severity: 'success' | 'error') => void;
+}
+
+export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMessage }) => {
   const transformPromoForDataGrid = promos.map((promo) => ({
     id: promo.id,
     code: promo.promoCodeInsert?.code,
@@ -20,18 +28,39 @@ export const ListPromo: FC<{ promos: common_PromoCode[] }> = ({ promos }) => {
     voucher: promo.promoCodeInsert?.voucher,
   }));
 
+  const deletePromoFromList = useCallback(async (code: string | undefined) => {
+    if (!code) return;
+    try {
+      await deletePromo({ code });
+      showMessage('PROMO REMOVED FROM LIST', 'success');
+      fetchPromos(50, 0);
+    } catch {
+      showMessage("PROMO CAN'T BE REMOVED FROM LIST", 'error');
+    }
+  }, []);
+
   const columns = [
     { field: 'id', headerName: 'ID', width: 30 },
     { field: 'code', headerName: 'CODE', width: 200 },
+    { field: 'expiration', headerName: 'EXPIRATION', width: 180 },
     { field: 'discount', headerName: 'DISCOUNT', width: 150 },
-    { field: 'expiration', headerName: 'EXPIRATION', width: 220 },
     { field: 'freeShipping', headerName: 'SHIPPING', width: 150 },
     { field: 'allowed', headerName: 'ALLOWED', width: 150 },
     { field: 'voucher', headerName: 'VOUCHER', width: 150 },
+    {
+      field: 'delete',
+      headerName: 'DELETE',
+      width: 150,
+      renderCell: (params: any) => (
+        <IconButton onClick={() => deletePromoFromList(params.row.code)}>
+          <DeleteIcon fontSize='medium' />
+        </IconButton>
+      ),
+    },
   ];
 
   return (
-    <Grid container justifyContent='center'>
+    <Grid container justifyContent='flex-start'>
       <Grid item xs={12}>
         <DataGrid
           rows={transformPromoForDataGrid}

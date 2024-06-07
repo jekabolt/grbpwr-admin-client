@@ -1,6 +1,5 @@
 import {
   FormControl,
-  FormHelperText,
   Grid,
   InputLabel,
   MenuItem,
@@ -20,7 +19,7 @@ import CountryList from 'react-select-country-list';
 import { AddProductInterface, Country } from '../addProductInterface/addProductInterface';
 
 export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => {
-  const { values, setFieldValue, setFieldError } = useFormikContext<common_ProductNew>();
+  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);

@@ -6,9 +6,12 @@ import { common_PromoCodeInsert } from 'api/proto-http/admin';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { FC, useState } from 'react';
 
-export const CreatePromo: FC<{ fetchPromos: (limit: number, offset: number) => void }> = ({
-  fetchPromos,
-}) => {
+interface CreatePromoInterface {
+  fetchPromos: (limit: number, offset: number) => void;
+  showMessage: (message: string, severity: 'success' | 'error') => void;
+}
+
+export const CreatePromo: FC<CreatePromoInterface> = ({ fetchPromos, showMessage }) => {
   const initialPromoStates: common_PromoCodeInsert = {
     code: '',
     freeShipping: false,
@@ -19,18 +22,15 @@ export const CreatePromo: FC<{ fetchPromos: (limit: number, offset: number) => v
   };
 
   const [promo, setPromo] = useState<common_PromoCodeInsert>(initialPromoStates);
-  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
-  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
-
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    setSnackBarMessage(message);
-    setSnackBarSeverity(severity);
-    setIsSnackBarOpen(true);
-  };
+  const [error, setError] = useState('');
 
   const handlePromoFieldsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
+    if (name === 'discount' && parseInt(value, 10) > 100) {
+      setError('discount cannot exceed 100%');
+    } else {
+      setError('');
+    }
     setPromo((prevPromo: common_PromoCodeInsert): common_PromoCodeInsert => {
       if (type === 'checkbox') {
         return {
@@ -57,15 +57,23 @@ export const CreatePromo: FC<{ fetchPromos: (limit: number, offset: number) => v
       target: {
         name: 'expiration',
         value: newValue ? newValue.toISOString() : '',
-        // type: 'date',
       },
     } as React.ChangeEvent<HTMLInputElement>);
   };
 
   const createNewPromo = async () => {
-    await addPromo({ promo });
-    setPromo(initialPromoStates);
-    fetchPromos(50, 0);
+    try {
+      if (parseFloat(promo.discount?.value || '') > 100) {
+        showMessage("PRODUCT CAN'T BE CREATED", 'error');
+      } else {
+        await addPromo({ promo });
+        setPromo(initialPromoStates);
+        showMessage('PROMO CREATED', 'success');
+        fetchPromos(50, 0);
+      }
+    } catch {
+      showMessage('smth', 'error');
+    }
   };
 
   return (
@@ -79,13 +87,14 @@ export const CreatePromo: FC<{ fetchPromos: (limit: number, offset: number) => v
                 value={promo.code}
                 variant='outlined'
                 label='PROMO CODE'
-                size='medium'
-                fullWidth
+                size='small'
                 onChange={handlePromoFieldsChange}
               />
             </Grid>
             <Grid item xs={12} sm={4}>
               <TextField
+                error={!!error}
+                helperText={error}
                 name='discount'
                 value={promo.discount?.value}
                 type='number'
@@ -93,9 +102,9 @@ export const CreatePromo: FC<{ fetchPromos: (limit: number, offset: number) => v
                 onKeyDown={removePossibilityToUseSigns}
                 variant='outlined'
                 label='DISCOUNT'
-                size='medium'
-                fullWidth
+                size='small'
                 onChange={handlePromoFieldsChange}
+                style={{ width: '195px' }}
               />
             </Grid>
             <Grid item xs={12} sm={4}>
@@ -104,6 +113,7 @@ export const CreatePromo: FC<{ fetchPromos: (limit: number, offset: number) => v
                 onChange={handleDateTimeChange}
                 minDate={new Date()}
                 label='EXPIRATION DATE'
+                slotProps={{ textField: { size: 'small' } }}
               />
             </Grid>
           </Grid>
