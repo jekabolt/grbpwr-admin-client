@@ -1,11 +1,10 @@
 import {
-    addArchiveItem,
     deleteArchive,
-    deleteItemFromArchive,
     getArchive,
-    updateArchive,
+    updateArchive
 } from 'api/archive';
-import { common_ArchiveFull, common_ArchiveItemInsert } from 'api/proto-http/admin';
+import { common_ArchiveItemInsert, common_ArchiveNew } from 'api/proto-http/admin';
+import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { useCallback, useState } from 'react';
 
 export const fetchArchives = (
@@ -13,22 +12,16 @@ export const fetchArchives = (
     initialHasMore = true,
 ): {
     archive: common_ArchiveFull[];
+    setArchive: React.Dispatch<React.SetStateAction<common_ArchiveFull[]>>;
     isLoading: boolean;
     hasMore: boolean;
     fetchArchive: (limit: number, offset: number) => Promise<void>;
-    deleteArchiveItem: (id: number | undefined) => void;
-    updateArchiveInformation: (
-        id: number | undefined,
-        heading: string | undefined,
-        description: string | undefined,
-    ) => void;
-    deleteArchiveFromList: (id: number | undefined) => void;
-    addNewItemsToArchive: (id: number | undefined, newItems: common_ArchiveItemInsert[]) => void;
     snackBarMessage: string;
     snackBarSeverity: 'success' | 'error';
     isSnackBarOpen: boolean;
     setIsSnackBarOpen: (value: boolean) => void;
     showMessage: (message: string, severity: 'success' | 'error') => void;
+    deleteArchiveFromList: (id: number | undefined) => void
 } => {
     const [archive, setArchive] = useState<common_ArchiveFull[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialLoading);
@@ -57,167 +50,61 @@ export const fetchArchives = (
         console.log(archive);
     }, []);
 
-    const deleteArchiveItem = async (id: number | undefined) => {
-        if (!id) {
-            showMessage('ITEM NOT EXIST', 'error');
-            return;
-        }
-
-        const archiveContainingItem = archive.find((archive) =>
-            archive.items?.some((item) => item.id === id),
-        );
-
-        if (!archiveContainingItem) {
-            showMessage('ITEM NOT FOUND IN ARCHIVE', 'error');
-            return;
-        }
-        const isLastItem = archiveContainingItem.items?.length === 1;
-
-        let confirmed;
-        if (isLastItem) {
-            confirmed = window.confirm(
-                'This is the last item in the archive. If you delete it, the entire archive will be deleted. Are you sure you want to delete it?',
-            );
-        } else {
-            confirmed = window.confirm('Are you sure you want to delete this item?');
-        }
-
-        try {
-            if (confirmed) {
-                await deleteItemFromArchive({ itemId: id });
-                setArchive((prevArchive) =>
-                    prevArchive.map((archive) => {
-                        const updatedItems = archive.items?.filter((item) => item.id !== id);
-                        return { ...archive, items: updatedItems };
-                    }),
-                );
-                fetchArchive(50, 0)
-                showMessage('ARCHIVE UPDATED', 'success');
-            }
-        } catch (error) {
-            showMessage('ITEM CANNOT BE DELETED', 'error');
-        }
-    };
-
     const deleteArchiveFromList = async (id: number | undefined) => {
-        if (!id) {
-            showMessage('ARCHIVE NOT FOUND', 'error');
-        }
-        const confirmed = window.confirm('Are you sure you wnat to delete the archive ?');
+        if (!id) return
 
         try {
-            if (confirmed) {
-                await deleteArchive({ id: id });
-                setArchive((prevArchives) => prevArchives.filter((archive) => archive.archive?.id !== id));
-                showMessage('ARCHIVE IS REMOVED', 'success');
-            }
-        } catch (error) {
-            showMessage('ARCHIVE CANNOT BE DELETED', 'error');
+            await deleteArchive({ id })
+            showMessage('ARCHIVE REMOVED', 'success')
+        } catch {
+            showMessage('ARCHIVE CANNOT BE REMOVED', 'error')
         }
-    };
+    }
 
     const updateArchiveInformation = async (
-        id: number | undefined,
-        heading: string | undefined,
-        description: string | undefined,
+        archiveId: number | undefined,
+        newItems: common_ArchiveNew,
+        currentItems: common_ArchiveItemInsert[],
     ) => {
-        if (id === undefined) {
-            showMessage('ARCHIVE NOT FOUND', 'error');
-        }
         try {
-            await updateArchive({
-                id: id,
-                archive: {
-                    heading: heading,
-                    description: description,
-                },
-            });
-            setArchive((prevArchives) => {
-                return prevArchives.map((a) => {
-                    if (a.archive?.id === id) {
-                        return {
-                            ...a,
-                            archive: {
-                                ...a.archive,
-                                archiveInsert: {
-                                    ...a.archive?.archiveInsert,
-                                    heading: heading ?? a.archive?.archiveInsert?.heading,
-                                    description: description ?? a.archive?.archiveInsert?.description,
-                                },
-                            },
-                        } as common_ArchiveFull;
-                    }
-                    return a;
-                });
-            });
-            showMessage('ARCHIVE INFORMATION UPDATED', 'success');
-        } catch (error) {
-            showMessage('ARCHIVE CANNOT BE UPDATED', 'error');
-        }
-    };
-
-    const addNewItemsToArchive = async (
-        id: number | undefined,
-        newItems: common_ArchiveItemInsert[],
-    ) => {
-        let filteredNewItems: common_ArchiveItemInsert[] = [];
-
-        setArchive((prevArchives) =>
-            prevArchives.map((archive) => {
-                if (archive.archive?.id === id) {
-                    const existingMediaSet = new Set(
-                        archive.items?.map((item) => item.archiveItemInsert?.media),
-                    );
-                    const filteredItems = newItems.filter((item) => !existingMediaSet.has(item.media));
-                    filteredNewItems = [...filteredItems];
-
-                    return {
-                        ...archive,
-                        items: [
-                            ...(archive.items || []),
-                            ...filteredItems.map((item) => ({
-                                archiveItemInsert: {
-                                    media: item.media,
-                                    title: item.title,
-                                    url: item.url,
-                                },
-                            })),
-                        ],
-                    } as common_ArchiveFull;
-                }
-                return archive;
-            }),
-        );
-
-        if (filteredNewItems.length > 0) {
-            try {
-                await addArchiveItem({
-                    archiveId: id,
-                    items: filteredNewItems,
-                });
-                fetchArchive(50, 0);
-                showMessage('NEW ITEM ADDED TO THE ARCHIVE', 'success');
-            } catch (error) {
-                showMessage('ITEM CANNOT BE ADDED TO THE ARCHIVE', 'error');
+            if (!archiveId) {
+                throw new Error('Invalid archive ID');
             }
-        } else {
-            showMessage('THIS MEDIA HAS ALREADY BEEN ADDED', 'error');
+            const existingMediaIds = new Set(currentItems.map(item => item.mediaId));
+
+            if (newItems.itemsInsert) {
+                for (const item of newItems.itemsInsert) {
+                    if (item.mediaId && existingMediaIds.has(item.mediaId)) {
+                        showMessage(`Media with ID ${item.mediaId} already exists in the archive`, 'error');
+                        return
+                    }
+                }
+            }
+
+            await updateArchive({
+                id: archiveId,
+                archiveUpdate: newItems,
+            });
+            showMessage('ARCHIVE UPDATED', 'success');
+        } catch (error) {
+            showMessage(`ARCHIVE CANNOT BE UPDATED`, 'error');
         }
     };
+
+
+
 
     return {
         archive,
+        setArchive,
         isLoading,
         hasMore,
         fetchArchive,
-        deleteArchiveItem,
-        updateArchiveInformation,
-        deleteArchiveFromList,
-        addNewItemsToArchive,
         snackBarMessage,
         snackBarSeverity,
         showMessage,
         isSnackBarOpen,
         setIsSnackBarOpen,
+        deleteArchiveFromList
     };
 };

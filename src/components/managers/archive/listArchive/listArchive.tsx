@@ -1,281 +1,125 @@
-import ClearIcon from '@mui/icons-material/Clear';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
-import {
-  common_ArchiveInsert,
-  common_ArchiveItemInsert,
-  common_MediaFull,
-} from 'api/proto-http/admin';
-import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
-import React, { FC, useEffect, useState } from 'react';
-import styles from 'styles/archiveList.scss';
-import { ArchiveModal } from '../archiveModal/archiveModal';
+import { Grid, IconButton } from '@mui/material';
+import { common_ArchiveItemFull } from 'api/proto-http/frontend';
+import { MRT_ColumnDef, MRT_Row, MaterialReactTable } from 'material-react-table';
+import { FC, useEffect, useState } from 'react';
 import { listArchive } from '../interfaces/interfaces';
 
-type UpdateArchivePayload = Partial<common_ArchiveInsert>;
-type ArchivePayloads = {
-  [key: number]: UpdateArchivePayload;
-};
-type EditModes = {
-  [key: number]: boolean;
+type ArchiveItemDisplay = {
+  media: string | undefined;
+  title: string | undefined;
+  url: string | undefined;
 };
 
-export const ListArchive: FC<listArchive> = ({
-  archive,
-  deleteArchive,
-  deleteItem,
-  newItemToArchive,
-  updateArchiveInformation,
-  showMessage,
-}) => {
-  const [archivePayloads, setArchivePayloads] = useState<ArchivePayloads>({});
-  const [media, setMedia] = useState('');
-  const [title, setTitle] = useState('');
-  const [url, setUrl] = useState('');
-  const [isEdit, setIsEdit] = useState<EditModes>({});
-  const [selectedArchiveId, setSelectedArchiveId] = useState<number | undefined>();
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [expandedItemId, setExpandedItemId] = useState<number | undefined>();
+export const ListArchive: FC<listArchive> = ({ archive, setArchive, deleteArchiveFromList }) => {
+  const columns: MRT_ColumnDef<ArchiveItemDisplay>[] = [
+    {
+      accessorKey: 'media',
+      header: 'Media',
+      Cell: ({ cell }) => (
+        <img
+          src={cell.getValue() as string}
+          alt='Archive item'
+          style={{ width: '100%', height: 'auto', objectFit: 'scale-down' }}
+        />
+      ),
+    },
+    {
+      accessorKey: 'title',
+      header: 'Title',
+      size: 200,
+    },
+    {
+      accessorKey: 'url',
+      header: 'URL',
+      Cell: ({ cell }) => (
+        <a href={cell.getValue() as string} target='_blank' rel='noopener noreferrer'>
+          Link
+        </a>
+      ),
+    },
+  ];
 
-  const toggleTextExpansion = (id: number | undefined) => {
-    setExpandedItemId((prevId) => (prevId === id ? undefined : id));
-  };
-
-  const isDescriptionShort = (title: string | undefined) => {
-    if (!title) return;
-    const maxLineLength = 60;
-    return title.length <= maxLineLength;
-  };
-
-  const toggleModal = () => {
-    setIsModalOpen(!isModalOpen);
-  };
-
-  useEffect(() => {
-    const initialPayloads: ArchivePayloads = {};
-    archive.forEach((a) => {
-      if (a.archive?.id) {
-        initialPayloads[a.archive.id] = {
-          heading: a.archive.archiveInsert?.heading || '',
-          description: a.archive.archiveInsert?.description || '',
-        };
-      }
-    });
-    setArchivePayloads(initialPayloads);
-  }, [archive]);
-
-  const updateArchivePayload = (
-    id: number | undefined,
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  const handleSaveOrder = (
+    updatedItems: common_ArchiveItemFull[],
+    archiveId: number | undefined,
   ) => {
-    if (id === undefined) return;
-
-    const target = e.target as HTMLInputElement | HTMLTextAreaElement;
-    const name = target.name;
-    const value = target.value;
-
-    setArchivePayloads((prev) => {
-      let updatedPayload: UpdateArchivePayload = { ...prev[id] };
-
-      updatedPayload = {
-        ...updatedPayload,
-        [id]: {
-          ...prev[id],
-          [name]: value,
-        },
-      };
-      return updatedPayload;
-    });
-  };
-
-  const editModeToggler = (id: number | undefined) => {
-    if (id === undefined) return;
-
-    setIsEdit((prevIsEdit) => {
-      const newEditStates: EditModes = {};
-      Object.keys(prevIsEdit).forEach((key) => {
-        newEditStates[Number(key)] = false;
+    // Update the archive with the new order of items
+    setArchive((prevArchive) => {
+      return prevArchive.map((archiveEntry) => {
+        if (archiveEntry.archive?.id === archiveId) {
+          return {
+            ...archiveEntry,
+            items: updatedItems,
+          };
+        }
+        return archiveEntry;
       });
-      newEditStates[id] = !prevIsEdit[id];
-      return newEditStates;
     });
 
-    setSelectedArchiveId(id);
-  };
-
-  const updateAndDisableEditMode = (id: number | undefined) => {
-    if (id === undefined) return;
-    if (isEdit[id]) {
-      const payload = archivePayloads[id];
-      if (payload) {
-        updateArchiveInformation(id, payload.heading, payload.description);
-      }
-    }
-    editModeToggler(id);
-  };
-
-  const createMediaPreviewHandler = (archiveId: number | undefined) => {
-    return (newSelectedMedia: common_MediaFull[]) => {
-      if (newSelectedMedia.length > 0) {
-        setMedia(newSelectedMedia[0].media?.thumbnail?.mediaUrl ?? '');
-        setSelectedArchiveId(archiveId);
-        setIsModalOpen(true);
-      }
-    };
-  };
-  const isValidUrl = (url: string) => {
-    try {
-      new URL(url);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  };
-
-  const handleSubmitNewItem = (id: number | undefined) => {
-    if (!id) return;
-
-    if (url && !isValidUrl(url)) {
-      showMessage('INVALID URL ', 'error');
-      setUrl('');
-      return;
-    }
-
-    const newItem: common_ArchiveItemInsert = {
-      media: media,
-      title: title,
-      url: url,
-    };
-    newItemToArchive(id, [newItem]);
-    toggleModal();
-    setMedia('');
-    setTitle('');
-    setUrl('');
+    // Here, you can add your logic to save the updated archive to your backend
+    // saveUpdatedArchive({ archiveId, updatedItems });
   };
 
   return (
     <Grid container spacing={2}>
-      {archive.map(
-        (a) =>
-          a.archive?.id && (
-            <React.Fragment key={`archive-${a.archive.id}`}>
-              <Grid item xs={10}>
-                <Grid container className={styles.items_container} wrap='nowrap'>
-                  {isEdit[a.archive.id] && (
-                    <>
-                      <Grid item className={styles.add_preview_new_item}>
-                        {selectedArchiveId === a.archive.id && (
-                          <MediaSelectorLayout
-                            label='add media'
-                            allowMultiple={false}
-                            saveSelectedMedia={createMediaPreviewHandler(a.archive.id)}
-                          />
-                        )}
-                      </Grid>
-                      <ArchiveModal
-                        title={title}
-                        setTitle={setTitle}
-                        id={selectedArchiveId}
-                        addNewItem={handleSubmitNewItem}
-                        url={url}
-                        setUrl={setUrl}
-                        media={media}
-                        open={isModalOpen}
-                        close={toggleModal}
-                      />
-                    </>
-                  )}
-                  {a.items?.map((item) => (
-                    <Box>
-                      <Grid item key={`item-${item.archiveId}`} className={styles.item}>
-                        <img src={item.archiveItemInsert?.media} alt='' />
-                        <IconButton
-                          onClick={() => deleteItem(item.id)}
-                          className={styles.delete_item}
-                        >
-                          <ClearIcon />
-                        </IconButton>
-                      </Grid>
-                      <Box width='396px' display='flex' alignItems='flex-start'>
-                        <Typography
-                          noWrap={false}
-                          variant='overline'
-                          className={
-                            expandedItemId === item.id
-                              ? styles.description
-                              : styles.hidden_description
-                          }
-                        >
-                          {item.archiveItemInsert?.title}
-                        </Typography>
-                        {item.archiveItemInsert?.title &&
-                          !isDescriptionShort(item.archiveItemInsert.title) && (
-                            <IconButton onClick={() => toggleTextExpansion(item.id)}>
-                              {expandedItemId === item.id ? (
-                                <ExpandLessIcon fontSize='small' />
-                              ) : (
-                                <ExpandMoreIcon fontSize='small' />
-                              )}
-                            </IconButton>
-                          )}
-                      </Box>
-                      {item.archiveItemInsert?.url && isValidUrl(item.archiveItemInsert.url) && (
-                        <a href={item.archiveItemInsert.url}>go to link</a>
-                      )}
-                    </Box>
-                  ))}
-                </Grid>
-              </Grid>
-              <Grid item xs={12} style={{ marginBottom: '2%' }}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <TextField
-                      label='HEADING'
-                      name='heading'
-                      value={
-                        archivePayloads[a.archive?.id]?.heading ??
-                        a.archive.archiveInsert?.heading ??
-                        ''
-                      }
-                      inputProps={{ readOnly: !isEdit[a.archive.id] }}
-                      onChange={(e) => updateArchivePayload(a.archive?.id, e)}
-                      size='small'
-                      required
-                    />
-                  </Grid>
-                  <Grid item xs={7}>
-                    <TextField
-                      label='DESCRIPTION'
-                      name='description'
-                      value={
-                        archivePayloads[a.archive?.id]?.description ??
-                        a.archive.archiveInsert?.description ??
-                        ''
-                      }
-                      fullWidth
-                      multiline
-                      inputProps={{ readOnly: !isEdit[a.archive.id] }}
-                      onChange={(e) => updateArchivePayload(a.archive?.id, e)}
-                      size='small'
-                    />
-                  </Grid>
-                  <Grid item xs={4}>
-                    <Button
-                      disabled={archivePayloads[a.archive?.id]?.heading?.trim() === ''}
-                      onClick={() => updateAndDisableEditMode(a.archive?.id)}
-                    >
-                      {isEdit[a.archive.id] ? 'update' : 'edit'}
-                    </Button>
-                    <Button color='error' onClick={() => deleteArchive(a.archive?.id)}>
-                      delete archive
-                    </Button>
-                  </Grid>
-                </Grid>
-              </Grid>
-            </React.Fragment>
-          ),
-      )}
+      {archive.map((archiveEntry, index) => {
+        const initialData = archiveEntry.items
+          ? archiveEntry.items.map((item) => ({
+              media: item.archiveItem?.media?.media?.thumbnail?.mediaUrl,
+              title: item.archiveItem?.title,
+              url: item.archiveItem?.url,
+            }))
+          : [];
+
+        const [data, setData] = useState<ArchiveItemDisplay[]>(initialData);
+
+        const moveRow = (fromIndex: number, toIndex: number) => {
+          const updatedData = [...data];
+          const item = updatedData.splice(fromIndex, 1)[0];
+          updatedData.splice(toIndex, 0, item);
+          setData(updatedData);
+          const updatedItems: common_ArchiveItemFull[] = [...archiveEntry.items!];
+          const movedItem = updatedItems.splice(fromIndex, 1)[0];
+          updatedItems.splice(toIndex, 0, movedItem);
+
+          handleSaveOrder(updatedItems, archiveEntry.archive?.id);
+        };
+
+        useEffect(() => {
+          setData(initialData);
+        }, [archiveEntry.items]);
+
+        return (
+          <>
+            <Grid item xs={12} key={index}>
+              <MaterialReactTable
+                columns={columns}
+                data={data}
+                enableRowActions
+                enableRowSelection
+                enableSorting={false}
+                enableRowOrdering
+                muiRowDragHandleProps={({ table }) => ({
+                  onDragEnd: () => {
+                    const { draggingRow, hoveredRow } = table.getState();
+                    if (hoveredRow && draggingRow) {
+                      moveRow(draggingRow.index, (hoveredRow as MRT_Row<ArchiveItemDisplay>).index);
+                    }
+                  },
+                })}
+                initialState={{
+                  density: 'compact',
+                }}
+              />
+            </Grid>
+            <Grid item>
+              <IconButton onClick={() => deleteArchiveFromList(archiveEntry.archive?.id)}>
+                Delete Archive
+              </IconButton>
+            </Grid>
+          </>
+        );
+      })}
     </Grid>
   );
 };

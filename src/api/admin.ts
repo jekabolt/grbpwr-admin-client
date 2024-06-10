@@ -18,14 +18,14 @@ import {
   ListObjectsPagedResponse,
   UploadContentImageRequest,
   UploadContentImageResponse,
-  UploadContentMediaLinkRequest,
-  UploadContentMediaLinkResponse,
   UploadContentVideoRequest,
   UploadContentVideoResponse,
-  createAdminServiceClient,
+  createAdminServiceClient
 } from './proto-http/admin';
+import { createFrontendServiceClient } from './proto-http/frontend';
 
 export const adminService = createAdminServiceClient(axiosRequestHandler);
+export const frontService = createFrontendServiceClient(axiosRequestHandler)
 
 export function getAllUploadedFiles(
   request: ListObjectsPagedRequest,
@@ -33,11 +33,6 @@ export function getAllUploadedFiles(
   return adminService.ListObjectsPaged(request);
 }
 
-export function uploadContentLink(
-  request: UploadContentMediaLinkRequest,
-): Promise<UploadContentMediaLinkResponse> {
-  return adminService.UploadContentMediaLink(request);
-}
 
 export function uploadContentImage(
   request: UploadContentImageRequest,

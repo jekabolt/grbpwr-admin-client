@@ -12,7 +12,8 @@ import {
   refundOrderUpdate,
   setTrackingNumberUpdate,
 } from 'api/orders';
-import { common_Dictionary, common_OrderFull } from 'api/proto-http/admin';
+import { common_Dictionary } from 'api/proto-http/admin';
+import { common_OrderFull } from 'api/proto-http/frontend';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';

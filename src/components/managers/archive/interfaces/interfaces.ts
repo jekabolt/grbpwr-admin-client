@@ -1,4 +1,4 @@
-import { common_ArchiveFull, common_ArchiveItemInsert } from "api/proto-http/admin";
+import { common_ArchiveFull } from "api/proto-http/frontend";
 
 export interface ArchiveModalInterface {
     open: boolean;
@@ -19,13 +19,6 @@ export interface createArchives {
 
 export interface listArchive {
     archive: common_ArchiveFull[];
-    deleteArchive: (id: number | undefined) => void;
-    deleteItem: (id: number | undefined) => void;
-    newItemToArchive: (id: number | undefined, newItem: common_ArchiveItemInsert[]) => void;
-    showMessage: (message: string, severity: 'success' | 'error') => void;
-    updateArchiveInformation: (
-        id: number | undefined,
-        heading: string | undefined,
-        description: string | undefined,
-    ) => void;
+    setArchive: React.Dispatch<React.SetStateAction<common_ArchiveFull[]>>;
+    deleteArchiveFromList: (id: number | undefined) => void
 }

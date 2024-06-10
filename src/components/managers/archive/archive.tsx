@@ -11,15 +11,13 @@ export const Archive: FC = () => {
     isLoading,
     hasMore,
     fetchArchive,
-    deleteArchiveFromList,
-    deleteArchiveItem,
-    addNewItemsToArchive,
     showMessage,
     snackBarMessage,
     snackBarSeverity,
     isSnackBarOpen,
     setIsSnackBarOpen,
-    updateArchiveInformation,
+    deleteArchiveFromList,
+    setArchive,
   } = fetchArchives();
 
   useEffect(() => {
@@ -53,11 +51,8 @@ export const Archive: FC = () => {
         <Grid item xs={10}>
           <ListArchive
             archive={archive}
-            deleteArchive={deleteArchiveFromList}
-            deleteItem={deleteArchiveItem}
-            newItemToArchive={addNewItemsToArchive}
-            showMessage={showMessage}
-            updateArchiveInformation={updateArchiveInformation}
+            setArchive={setArchive}
+            deleteArchiveFromList={deleteArchiveFromList}
           />
         </Grid>
         <Snackbar
