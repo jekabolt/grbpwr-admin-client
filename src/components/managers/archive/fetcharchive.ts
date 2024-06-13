@@ -3,7 +3,7 @@ import {
     getArchive,
     updateArchive
 } from 'api/archive';
-import { common_ArchiveItemInsert, common_ArchiveNew } from 'api/proto-http/admin';
+import { common_ArchiveNew } from 'api/proto-http/admin';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { useCallback, useState } from 'react';
 
@@ -22,6 +22,7 @@ export const fetchArchives = (
     setIsSnackBarOpen: (value: boolean) => void;
     showMessage: (message: string, severity: 'success' | 'error') => void;
     deleteArchiveFromList: (id: number | undefined) => void
+    updateArchiveInformation: (archiveId: number | undefined, items: common_ArchiveNew) => void
 } => {
     const [archive, setArchive] = useState<common_ArchiveFull[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialLoading);
@@ -55,6 +56,7 @@ export const fetchArchives = (
 
         try {
             await deleteArchive({ id })
+            fetchArchive(50, 0)
             showMessage('ARCHIVE REMOVED', 'success')
         } catch {
             showMessage('ARCHIVE CANNOT BE REMOVED', 'error')
@@ -63,36 +65,17 @@ export const fetchArchives = (
 
     const updateArchiveInformation = async (
         archiveId: number | undefined,
-        newItems: common_ArchiveNew,
-        currentItems: common_ArchiveItemInsert[],
+        items: common_ArchiveNew,
     ) => {
         try {
-            if (!archiveId) {
-                throw new Error('Invalid archive ID');
-            }
-            const existingMediaIds = new Set(currentItems.map(item => item.mediaId));
-
-            if (newItems.itemsInsert) {
-                for (const item of newItems.itemsInsert) {
-                    if (item.mediaId && existingMediaIds.has(item.mediaId)) {
-                        showMessage(`Media with ID ${item.mediaId} already exists in the archive`, 'error');
-                        return
-                    }
-                }
-            }
-
             await updateArchive({
                 id: archiveId,
-                archiveUpdate: newItems,
+                archiveUpdate: items,
             });
-            showMessage('ARCHIVE UPDATED', 'success');
         } catch (error) {
             showMessage(`ARCHIVE CANNOT BE UPDATED`, 'error');
         }
     };
-
-
-
 
     return {
         archive,
@@ -105,6 +88,7 @@ export const fetchArchives = (
         showMessage,
         isSnackBarOpen,
         setIsSnackBarOpen,
-        deleteArchiveFromList
+        deleteArchiveFromList,
+        updateArchiveInformation
     };
 };

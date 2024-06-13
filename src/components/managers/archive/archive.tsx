@@ -18,6 +18,7 @@ export const Archive: FC = () => {
     setIsSnackBarOpen,
     deleteArchiveFromList,
     setArchive,
+    updateArchiveInformation,
   } = fetchArchives();
 
   useEffect(() => {
@@ -53,6 +54,8 @@ export const Archive: FC = () => {
             archive={archive}
             setArchive={setArchive}
             deleteArchiveFromList={deleteArchiveFromList}
+            updateArchiveInformation={updateArchiveInformation}
+            showMessage={showMessage}
           />
         </Grid>
         <Snackbar

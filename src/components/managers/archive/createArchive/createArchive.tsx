@@ -56,7 +56,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
   const mediaPreview = (newSelectedMedia: common_MediaFull[]) => {
     if (newSelectedMedia.length === 0) return;
     const selectedMedia = newSelectedMedia[0];
-    setMediaId(selectedMedia.id); // Save the ID of the selected media
+    setMediaId(selectedMedia.id);
     const previewMediaUrl = selectedMedia.media?.thumbnail?.mediaUrl;
     setMedia(previewMediaUrl);
     setIsModalOpen(true);
@@ -67,11 +67,10 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
       showMessage('INVALID URL', 'error');
       return;
     }
-    // Assuming media is already correctly defined as `string | undefined`
     const newItem: common_ArchiveItemInsert = {
-      mediaId: mediaId, // make sure this is either string or undefined
-      url: url, // ensure url is always a string, never undefined
-      title: title, // title should also be string, handle undefined explicitly if needed
+      mediaId: mediaId,
+      url: url,
+      title: title,
     };
 
     setArchive((prev) => ({
@@ -155,9 +154,10 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
     <Grid container spacing={2} marginTop={4} alignItems='center'>
       <Grid item xs={10}>
         <Grid container className={styles.scroll_container} wrap='nowrap'>
+          <p>create new archive</p>
           <Grid item className={styles.media_item_add}>
             <MediaSelectorLayout
-              label='create new item'
+              label='add media'
               allowMultiple={false}
               saveSelectedMedia={mediaPreview}
             />
@@ -205,7 +205,8 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
               name='heading'
               value={archive.archive?.heading}
               onChange={handleTextFieldChange}
-              label='HEADING'
+              //TODO: try to upercase via scss
+              label='TITLE'
               InputLabelProps={{ shrink: true }}
               size='small'
               required
