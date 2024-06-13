@@ -1,29 +1,24 @@
-import { adminService } from './admin';
+import { adminService, frontService } from './admin';
 import {
   AddArchiveRequest,
   AddArchiveResponse,
-  GetArchivesPagedRequest,
-  GetArchivesPagedResponse,
-  AddArchiveItemsRequest,
-  AddArchiveItemsResponse,
   DeleteArchiveByIdRequest,
   DeleteArchiveByIdResponse,
-  DeleteArchiveItemRequest,
-  DeleteArchiveItemResponse,
   UpdateArchiveRequest,
-  UpdateArchiveResponse,
+  UpdateArchiveResponse
 } from './proto-http/admin';
+import { GetArchivesPagedRequest, GetArchivesPagedResponse } from './proto-http/frontend';
 
 export function addArchive(request: AddArchiveRequest): Promise<AddArchiveResponse> {
   return adminService.AddArchive(request);
 }
 
 export function getArchive(request: GetArchivesPagedRequest): Promise<GetArchivesPagedResponse> {
-  return adminService.GetArchivesPaged(request);
+  return frontService.GetArchivesPaged(request);
 }
 
-export function addArchiveItem(request: AddArchiveItemsRequest): Promise<AddArchiveItemsResponse> {
-  return adminService.AddArchiveItems(request);
+export function addArchiveItem(request: UpdateArchiveRequest): Promise<UpdateArchiveResponse> {
+  return adminService.UpdateArchive(request);
 }
 
 export function deleteArchive(
@@ -32,11 +27,11 @@ export function deleteArchive(
   return adminService.DeleteArchiveById(request);
 }
 
-export function deleteItemFromArchive(
-  request: DeleteArchiveItemRequest,
-): Promise<DeleteArchiveItemResponse> {
-  return adminService.DeleteArchiveItem(request);
-}
+// export function deleteItemFromArchive(
+//   request: DeleteArchiveByIdRequest,
+// ): Promise<DeleteArchiveByIdResponse> {
+//   return adminService.DeleteArchiveById(request);
+// }
 
 export function updateArchive(request: UpdateArchiveRequest): Promise<UpdateArchiveResponse> {
   return adminService.UpdateArchive(request);

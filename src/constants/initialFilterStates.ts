@@ -10,7 +10,7 @@ export const defaultProductFilterSettings: GetProductsPagedRequest = {
         to: undefined,
         onSale: undefined,
         color: undefined,
-        categoryId: undefined,
+        categoryIds: undefined,
         sizesIds: undefined,
         preorder: undefined,
         byTag: undefined,

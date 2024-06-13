@@ -1,5 +1,5 @@
 
-import { common_MediaFull, common_MediaInsert } from 'api/proto-http/admin';
+import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 
 export interface MediaSelectorLayoutProps {
     label: string
@@ -48,5 +48,5 @@ export interface FilterMediasInterface {
 export interface FullSizeMediaModalInterface {
     open: boolean;
     close: () => void;
-    clickedMedia: common_MediaInsert | undefined
+    clickedMedia: common_MediaItem | undefined
 }

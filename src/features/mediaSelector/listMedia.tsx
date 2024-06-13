@@ -13,7 +13,7 @@ import {
   useTheme,
 } from '@mui/material';
 import { deleteFiles } from 'api/admin';
-import { common_MediaFull, common_MediaInsert } from 'api/proto-http/admin';
+import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
@@ -32,7 +32,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const { showMessage, isSnackBarOpen, closeSnackBar, snackBarMessage, snackBarSeverity } =
     useMediaSelector();
   const [openModal, setOpenModal] = useState(false);
-  const [clickedMedia, setClickedMedia] = useState<common_MediaInsert | undefined>();
+  const [clickedMedia, setClickedMedia] = useState<common_MediaItem | undefined>();
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const [videoSizes, setVideoSizes] = useState<{

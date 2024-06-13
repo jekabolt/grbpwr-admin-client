@@ -11,14 +11,13 @@ export const Archive: FC = () => {
     isLoading,
     hasMore,
     fetchArchive,
-    deleteArchiveFromList,
-    deleteArchiveItem,
-    addNewItemsToArchive,
     showMessage,
     snackBarMessage,
     snackBarSeverity,
     isSnackBarOpen,
     setIsSnackBarOpen,
+    deleteArchiveFromList,
+    setArchive,
     updateArchiveInformation,
   } = fetchArchives();
 
@@ -53,11 +52,10 @@ export const Archive: FC = () => {
         <Grid item xs={10}>
           <ListArchive
             archive={archive}
-            deleteArchive={deleteArchiveFromList}
-            deleteItem={deleteArchiveItem}
-            newItemToArchive={addNewItemsToArchive}
-            showMessage={showMessage}
+            setArchive={setArchive}
+            deleteArchiveFromList={deleteArchiveFromList}
             updateArchiveInformation={updateArchiveInformation}
+            showMessage={showMessage}
           />
         </Grid>
         <Snackbar

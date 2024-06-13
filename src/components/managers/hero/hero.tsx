@@ -8,13 +8,12 @@ import {
   Snackbar,
   TextField,
 } from '@mui/material';
-import { addHero, getHero } from 'api/hero';
 import { common_MediaFull } from 'api/proto-http/frontend';
 import { ProductPickerModal } from 'components/common/productPickerModal';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
-import { common_HeroInsert, common_Product } from '../../../api/proto-http/admin';
+import { common_Product } from '../../../api/proto-http/admin'; // common_HeroInsert
 import { SingleMediaViewAndSelect } from '../../common/singleMediaViewAndSelect';
 import { HeroProductTable } from './heroProductsTable';
 
@@ -38,30 +37,30 @@ export const Hero: FC = () => {
 
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  useEffect(() => {
-    const fetchHero = async () => {
-      const response = await getHero({});
-      setMainContentLink(response.hero?.main?.contentLink);
-      setMainExploreLink(response.hero?.main?.exploreLink);
-      setMainExploreText(response.hero?.main?.exploreText);
+  // useEffect(() => {
+  //   const fetchHero = async () => {
+  //     const response = await getHero({});
+  //     setMainContentLink(response.hero?.main?.contentLink);
+  //     setMainExploreLink(response.hero?.main?.exploreLink);
+  //     setMainExploreText(response.hero?.main?.exploreText);
 
-      if (response.hero?.ads) {
-        if (response.hero.ads[0]) {
-          setFirstAdContentLink(response.hero?.ads[0].contentLink);
-          setFirstAdExploreLink(response.hero?.ads[0].exploreLink);
-          setFirstAdExploreText(response.hero?.ads[0].exploreText);
-        }
-        if (response.hero.ads[1]) {
-          setSecondAdContentLink(response.hero?.ads[1].contentLink);
-          setSecondAdExploreLink(response.hero?.ads[1].exploreLink);
-          setSecondAdExploreText(response.hero?.ads[1].exploreText);
-        }
-      }
+  //     if (response.hero?.ads) {
+  //       if (response.hero.ads[0]) {
+  //         setFirstAdContentLink(response.hero?.ads[0].contentLink);
+  //         setFirstAdExploreLink(response.hero?.ads[0].exploreLink);
+  //         setFirstAdExploreText(response.hero?.ads[0].exploreText);
+  //       }
+  //       if (response.hero.ads[1]) {
+  //         setSecondAdContentLink(response.hero?.ads[1].contentLink);
+  //         setSecondAdExploreLink(response.hero?.ads[1].exploreLink);
+  //         setSecondAdExploreText(response.hero?.ads[1].exploreText);
+  //       }
+  //     }
 
-      setProducts(response.hero?.productsFeatured ? response.hero?.productsFeatured : []);
-    };
-    fetchHero();
-  }, []);
+  //     setProducts(response.hero?.productsFeatured ? response.hero?.productsFeatured : []);
+  //   };
+  //   fetchHero();
+  // }, []);
 
   useEffect(() => {
     // Function to validate all links
@@ -121,40 +120,36 @@ export const Hero: FC = () => {
   };
 
   const updateHero = async () => {
-    const ads: common_HeroInsert[] = [];
-
-    if (firstAdContentLink !== undefined) {
-      ads.push({
-        contentLink: firstAdContentLink,
-        contentType: 'image',
-        exploreLink: firstAdExploreLink,
-        exploreText: firstAdExploreText,
-      });
-    }
-
-    if (secondAdContentLink !== undefined) {
-      ads.push({
-        contentLink: secondAdContentLink,
-        contentType: 'image',
-        exploreLink: secondAdExploreLink,
-        exploreText: secondAdExploreText,
-      });
-    }
-
-    const response = await addHero({
-      main: {
-        contentLink: mainContentLink,
-        contentType: 'image',
-        exploreLink: mainExploreLink,
-        exploreText: mainExploreText,
-      },
-      ads: ads.length > 0 ? ads : undefined,
-      productIds: products.map((x) => x.id!),
-    });
-
-    if (response) {
-      setSaveSuccess(true);
-    }
+    // const ads: common_HeroInsert[] = [];
+    // if (firstAdContentLink !== undefined) {
+    //   ads.push({
+    //     contentLink: firstAdContentLink,
+    //     contentType: 'image',
+    //     exploreLink: firstAdExploreLink,
+    //     exploreText: firstAdExploreText,
+    //   });
+    // }
+    // if (secondAdContentLink !== undefined) {
+    //   ads.push({
+    //     contentLink: secondAdContentLink,
+    //     contentType: 'image',
+    //     exploreLink: secondAdExploreLink,
+    //     exploreText: secondAdExploreText,
+    //   });
+    // }
+    // const response = await addHero({
+    //   main: {
+    //     contentLink: mainContentLink,
+    //     contentType: 'image',
+    //     exploreLink: mainExploreLink,
+    //     exploreText: mainExploreText,
+    //   },
+    //   ads: ads.length > 0 ? ads : undefined,
+    //   productIds: products.map((x) => x.id!),
+    // });
+    // if (response) {
+    //   setSaveSuccess(true);
+    // }
   };
 
   const [isModalOpen, setIsModalOpen] = useState(false);

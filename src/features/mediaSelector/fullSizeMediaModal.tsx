@@ -10,13 +10,13 @@ import {
   Snackbar,
   Typography,
 } from '@mui/material';
-import { common_MediaInsert } from 'api/proto-http/admin';
+import { common_MediaItem } from 'api/proto-http/admin';
 import { FullSizeMediaModalInterface } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/media-selector.scss';
 
-type MediaKey = keyof common_MediaInsert;
+type MediaKey = keyof common_MediaItem;
 type VideoDimensions = {
   [key: string]: string | undefined;
 };
