@@ -1,6 +1,6 @@
 import DeleteIcon from '@mui/icons-material/Delete';
 import { Box, Button, Divider, Grid, TextField } from '@mui/material';
-import { common_ArchiveBody, common_MediaFull } from 'api/proto-http/admin';
+import { common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveItemFull } from 'api/proto-http/frontend';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useEffect, useState } from 'react';
@@ -136,31 +136,24 @@ export const ListArchive: FC<listArchive> = ({
   };
 
   const handleUpdateArchive = (archiveId: number | undefined) => {
-    const archiveEntry = archive.find((entry) => entry.archive?.id === archiveId);
-    if (archiveEntry) {
-      updateArchiveInformation(archiveId, convertArchiveFullToNew(archiveEntry));
-      showMessage('ARCHIVE UPDATED', 'success');
-    }
-  };
-
-  const handleUpdateHeadingDescription = (archiveId: number | undefined) => {
     if (!archiveId) return;
 
     setArchive((prevArchive) =>
       prevArchive.map((archiveEntry) => {
         if (archiveEntry.archive?.id === archiveId) {
-          const updatedArchive: common_ArchiveFull = {
+          const updatedArchive = {
             ...archiveEntry,
             archive: {
               ...archiveEntry.archive,
               archiveBody: {
-                heading: heading[archiveId] ?? archiveEntry.archive.archiveBody?.heading ?? '',
+                heading: heading[archiveId] ?? archiveEntry.archive?.archiveBody?.heading ?? '',
                 description:
-                  description[archiveId] ?? archiveEntry.archive.archiveBody?.description ?? '',
-              } as common_ArchiveBody,
+                  description[archiveId] ?? archiveEntry.archive?.archiveBody?.description ?? '',
+              },
             },
-          };
+          } as common_ArchiveFull;
           updateArchiveInformation(archiveId, convertArchiveFullToNew(updatedArchive));
+          showMessage('ARCHIVE UPDATED', 'success');
           return updatedArchive;
         }
         return archiveEntry;
@@ -172,21 +165,11 @@ export const ListArchive: FC<listArchive> = ({
     if (archiveId) {
       if (isEditMode[archiveId]) {
         handleUpdateArchive(archiveId);
-        handleUpdateHeadingDescription(archiveId);
       }
       seIsEditMode((prevEditMode) => ({
         ...prevEditMode,
         [archiveId]: !prevEditMode[archiveId],
       }));
-    }
-  };
-
-  const truncateString = (text: string | undefined, num: number) => {
-    if (!text) return;
-    if (text.length > num) {
-      return text.slice(0, num) + '...';
-    } else {
-      return text;
     }
   };
 

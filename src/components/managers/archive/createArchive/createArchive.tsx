@@ -153,8 +153,10 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
   return (
     <Grid container spacing={2} marginTop={4} alignItems='center'>
       <Grid item xs={10}>
+        <Typography variant='h5' textTransform='uppercase'>
+          create new archive
+        </Typography>
         <Grid container className={styles.scroll_container} wrap='nowrap'>
-          <p>create new archive</p>
           <Grid item className={styles.media_item_add}>
             <MediaSelectorLayout
               label='add media'
@@ -205,9 +207,8 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
               name='heading'
               value={archive.archive?.heading}
               onChange={handleTextFieldChange}
-              //TODO: try to upercase via scss
               label='TITLE'
-              InputLabelProps={{ shrink: true }}
+              InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
               size='small'
               required
             />
@@ -219,7 +220,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
               value={archive.archive?.description}
               onChange={handleTextFieldChange}
               label='DESCRIPTION'
-              InputLabelProps={{ shrink: true }}
+              InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
               size='small'
               fullWidth
               multiline
