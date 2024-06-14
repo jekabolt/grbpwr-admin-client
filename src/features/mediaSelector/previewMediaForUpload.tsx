@@ -45,9 +45,11 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
           <Grid item xs={3}>
             {b64Media && (
               <Box display='grid' gap='10px'>
-                <Button variant='contained' size='small' onClick={() => setIsCropperOpen(true)}>
-                  Crop
-                </Button>
+                {!isBase64Video(b64Media) && (
+                  <Button variant='contained' size='small' onClick={() => setIsCropperOpen(true)}>
+                    Crop
+                  </Button>
+                )}
 
                 <Button variant='contained' size='small' onClick={handleUploadMedia}>
                   Upload
