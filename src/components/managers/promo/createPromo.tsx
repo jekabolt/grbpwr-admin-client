@@ -1,17 +1,16 @@
 import { Button, Checkbox, FormControlLabel, Grid, TextField } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { addPromo } from 'api/promo';
 import { common_PromoCodeInsert } from 'api/proto-http/admin';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { FC, useState } from 'react';
 
 interface CreatePromoInterface {
-  fetchPromos: (limit: number, offset: number) => void;
+  createNewPromo: (newPromo: common_PromoCodeInsert) => void;
   showMessage: (message: string, severity: 'success' | 'error') => void;
 }
 
-export const CreatePromo: FC<CreatePromoInterface> = ({ fetchPromos, showMessage }) => {
+export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPromo }) => {
   const initialPromoStates: common_PromoCodeInsert = {
     code: '',
     freeShipping: false,
@@ -61,19 +60,13 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ fetchPromos, showMessage
     } as React.ChangeEvent<HTMLInputElement>);
   };
 
-  const createNewPromo = async () => {
-    try {
-      if (parseFloat(promo.discount?.value || '') > 100) {
-        showMessage("PRODUCT CAN'T BE CREATED", 'error');
-      } else {
-        await addPromo({ promo });
-        setPromo(initialPromoStates);
-        showMessage('PROMO CREATED', 'success');
-        fetchPromos(50, 0);
-      }
-    } catch {
-      showMessage('smth', 'error');
+  const uploadNewPromo = () => {
+    if (parseFloat(promo.discount?.value || '') > 100) {
+      showMessage("PROMO CAN'T BE CREATED: DISCOUNT CAN'T BE MORE THAN A HUNDRED", 'error');
+      return;
     }
+    createNewPromo(promo);
+    setPromo(initialPromoStates);
   };
 
   return (
@@ -163,7 +156,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ fetchPromos, showMessage
           </Grid>
         </Grid>
         <Grid item xs={12} sm={4} md={2} container alignItems='center'>
-          <Button variant='contained' size='large' onClick={createNewPromo}>
+          <Button variant='contained' size='large' onClick={uploadNewPromo}>
             Create Promo
           </Button>
         </Grid>
