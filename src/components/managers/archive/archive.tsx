@@ -56,6 +56,7 @@ export const Archive: FC = () => {
             deleteArchiveFromList={deleteArchiveFromList}
             updateArchiveInformation={updateArchiveInformation}
             showMessage={showMessage}
+            fetchArchive={fetchArchive}
           />
         </Grid>
         <Snackbar

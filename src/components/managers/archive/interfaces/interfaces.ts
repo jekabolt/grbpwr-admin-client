@@ -24,4 +24,5 @@ export interface listArchive {
     deleteArchiveFromList: (id: number | undefined) => void
     updateArchiveInformation: (archiveId: number | undefined, items: common_ArchiveNew) => void
     showMessage: (message: string, severity: 'success' | 'error') => void;
+    fetchArchive: (limit: number, offset: number) => void;
 }

@@ -16,6 +16,7 @@ export const ListArchive: FC<listArchive> = ({
   deleteArchiveFromList,
   updateArchiveInformation,
   showMessage,
+  fetchArchive,
 }) => {
   const [media, setMedia] = useState<string>('');
   const [heading, setHeading] = useState<{ [key: number]: string }>({});
@@ -105,7 +106,7 @@ export const ListArchive: FC<listArchive> = ({
           }
 
           const newItem = {
-            id: new Date().getTime(),
+            id: undefined,
             archiveId,
             archiveItem: {
               media: {
@@ -123,7 +124,10 @@ export const ListArchive: FC<listArchive> = ({
           };
           const updatedItems = [...(archiveEntry.items || []), newItem];
           showMessage('ITEM ADDED TO THE ARCHIVE SUCCESSFULLY', 'success');
-          return { ...archiveEntry, items: updatedItems };
+
+          const updatedArchiveEntry = { ...archiveEntry, items: updatedItems };
+          updateArchiveInformation(archiveId, convertArchiveFullToNew(updatedArchiveEntry));
+          return updatedArchiveEntry;
         }
         return archiveEntry;
       }),
@@ -188,7 +192,8 @@ export const ListArchive: FC<listArchive> = ({
               <Box display='flex' gap='20px'>
                 <TextField
                   label='title'
-                  InputLabelProps={{ style: { textTransform: 'uppercase' } }}
+                  style={{ textTransform: 'uppercase' }}
+                  InputLabelProps={{ shrink: true }}
                   required
                   name='heading'
                   value={
@@ -243,7 +248,8 @@ export const ListArchive: FC<listArchive> = ({
             <Grid item xs={8}>
               <TextField
                 label='description'
-                InputLabelProps={{ style: { textTransform: 'uppercase' } }}
+                style={{ textTransform: 'uppercase' }}
+                InputLabelProps={{ shrink: true }}
                 value={
                   description[archiveEntry.archive?.id as number] ??
                   archiveEntry.archive?.archiveBody?.description ??
