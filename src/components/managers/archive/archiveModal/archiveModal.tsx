@@ -1,19 +1,28 @@
 import { Button, Dialog, Grid, TextField } from '@mui/material';
+import { isValidURL } from 'features/utilitty/isValidUrl';
 import { FC } from 'react';
 import styles from 'styles/creatArchiveItemModal.scss';
 import { ArchiveModalInterface } from '../interfaces/interfaces';
 
 export const ArchiveModal: FC<ArchiveModalInterface> = ({
+  id,
   open,
-  close,
   media,
   title,
+  url,
+  close,
   setTitle,
   addNewItem,
-  url,
   setUrl,
-  id,
 }) => {
+  const handleDescriptionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value;
+    if (value.length > 256) {
+      value = value.substring(0, 256);
+    }
+    setTitle(value);
+  };
+
   return (
     <Dialog open={open} onClose={close} fullWidth scroll='paper' maxWidth='md'>
       <Grid container spacing={3} padding={6} alignItems='flex-start' className={styles.container}>
@@ -25,10 +34,13 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
             <Grid item xs={12} justifySelf='center'>
               <TextField
                 value={url}
+                error={!!url && !isValidURL(url)}
+                helperText={url && !isValidURL(url) ? 'the entered url is invalid' : ''}
                 onChange={(e) => setUrl(e.target.value)}
-                label='URL IS OPT'
+                label='url'
                 fullWidth
                 size='small'
+                style={{ textTransform: 'uppercase' }}
               />
             </Grid>
           </Grid>
@@ -36,11 +48,12 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
         <Grid item xs={6}>
           <TextField
             value={title}
-            onChange={(e) => setTitle(e.target.value.substring(0, 255))}
-            label='DESCRIPTION IS OPT'
+            onChange={handleDescriptionChange}
+            label='description'
             variant='outlined'
             multiline
             fullWidth
+            style={{ textTransform: 'uppercase' }}
           />
         </Grid>
         <Grid item className={styles.add_btn}>

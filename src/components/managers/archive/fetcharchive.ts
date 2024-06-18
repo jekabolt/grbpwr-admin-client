@@ -1,28 +1,25 @@
-import {
-    deleteArchive,
-    getArchive,
-    updateArchive
-} from 'api/archive';
-import { common_ArchiveNew } from 'api/proto-http/admin';
+import { deleteArchive, getArchive, updateArchive } from 'api/archive';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { useCallback, useState } from 'react';
+import { convertArchiveFullToNew } from './utility/convertArchiveFromFullToNew';
 
 export const fetchArchives = (
     initialLoading = false,
     initialHasMore = true,
 ): {
     archive: common_ArchiveFull[];
-    setArchive: React.Dispatch<React.SetStateAction<common_ArchiveFull[]>>;
     isLoading: boolean;
     hasMore: boolean;
-    fetchArchive: (limit: number, offset: number) => Promise<void>;
     snackBarMessage: string;
     snackBarSeverity: 'success' | 'error';
     isSnackBarOpen: boolean;
+    setArchive: React.Dispatch<React.SetStateAction<common_ArchiveFull[]>>;
+    fetchArchive: (limit: number, offset: number) => Promise<void>;
     setIsSnackBarOpen: (value: boolean) => void;
     showMessage: (message: string, severity: 'success' | 'error') => void;
-    deleteArchiveFromList: (id: number | undefined) => void
-    updateArchiveInformation: (archiveId: number | undefined, items: common_ArchiveNew) => void
+    deleteArchiveFromList: (id: number | undefined) => void;
+    deleteItemFromArchive: (archiveId: number | undefined, itemId: number | undefined) => void;
+    updateArchiveInformation: (archiveId: number | undefined, items: common_ArchiveFull) => void;
 } => {
     const [archive, setArchive] = useState<common_ArchiveFull[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialLoading);
@@ -52,43 +49,77 @@ export const fetchArchives = (
     }, []);
 
     const deleteArchiveFromList = async (id: number | undefined) => {
-        if (!id) return
+        if (!id) return;
 
         try {
-            await deleteArchive({ id })
-            fetchArchive(50, 0)
-            showMessage('ARCHIVE REMOVED', 'success')
+            await deleteArchive({ id });
+            fetchArchive(50, 0);
+            showMessage('ARCHIVE REMOVED', 'success');
         } catch {
-            showMessage('ARCHIVE CANNOT BE REMOVED', 'error')
+            showMessage('ARCHIVE CANNOT BE REMOVED', 'error');
         }
-    }
+    };
 
     const updateArchiveInformation = async (
         archiveId: number | undefined,
-        items: common_ArchiveNew,
+        items: common_ArchiveFull,
     ) => {
+        const convertedItemsData = convertArchiveFullToNew(items);
+
         try {
             await updateArchive({
                 id: archiveId,
-                archiveUpdate: items,
+                archiveUpdate: convertedItemsData,
             });
         } catch (error) {
             showMessage(`ARCHIVE CANNOT BE UPDATED`, 'error');
         }
     };
 
+    const deleteItemFromArchive = async (archiveId: number | undefined, itemId: number | undefined) => {
+        setArchive((prevArchive) =>
+            prevArchive.map((archiveEntry) => {
+                if (archiveEntry.archive?.id === archiveId) {
+                    const currentItems = archiveEntry.items || [];
+                    const updatedItems = currentItems.filter((item) => item.id !== itemId);
+
+                    if (currentItems.length === 1 && updatedItems.length === 0) {
+                        const userConfirmed = window.confirm(
+                            'This is the last item in the archive. If you delete it, the entire archive will be deleted. Are you sure you want to delete it?',
+                        );
+                        if (!userConfirmed) {
+                            showMessage('Item deletion cancelled', 'error');
+                            return archiveEntry;
+                        }
+                        deleteArchiveFromList(archiveId);
+                        return null;
+                    }
+
+                    const updatedArchiveEntry = { ...archiveEntry, items: updatedItems };
+                    showMessage('Item removed from archive', 'success');
+                    updateArchiveInformation(archiveId, updatedArchiveEntry);
+                    return updatedArchiveEntry;
+                } else {
+                    showMessage('Item cannot be removed from archive', 'error');
+                }
+                return archiveEntry;
+            }).filter((archiveEntry) => archiveEntry !== null) as common_ArchiveFull[]
+        );
+    }
+
     return {
         archive,
-        setArchive,
         isLoading,
         hasMore,
-        fetchArchive,
         snackBarMessage,
         snackBarSeverity,
-        showMessage,
         isSnackBarOpen,
+        setArchive,
+        fetchArchive,
+        showMessage,
         setIsSnackBarOpen,
         deleteArchiveFromList,
-        updateArchiveInformation
+        deleteItemFromArchive,
+        updateArchiveInformation,
     };
 };

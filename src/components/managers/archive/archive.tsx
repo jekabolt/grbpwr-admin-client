@@ -17,6 +17,7 @@ export const Archive: FC = () => {
     isSnackBarOpen,
     setIsSnackBarOpen,
     deleteArchiveFromList,
+    deleteItemFromArchive,
     setArchive,
     updateArchiveInformation,
   } = fetchArchives();
@@ -54,6 +55,7 @@ export const Archive: FC = () => {
             archive={archive}
             setArchive={setArchive}
             deleteArchiveFromList={deleteArchiveFromList}
+            deleteItemFromArchive={deleteItemFromArchive}
             updateArchiveInformation={updateArchiveInformation}
             showMessage={showMessage}
           />
@@ -63,7 +65,7 @@ export const Archive: FC = () => {
           autoHideDuration={6000}
           onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
         >
-          <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+          <Alert severity={snackBarSeverity}>{snackBarMessage.toUpperCase()}</Alert>
         </Snackbar>
       </Grid>
     </Layout>

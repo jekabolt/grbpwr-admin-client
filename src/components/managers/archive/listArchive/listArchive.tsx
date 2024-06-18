@@ -3,17 +3,18 @@ import { Box, Button, Divider, Grid, TextField } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveItemFull } from 'api/proto-http/frontend';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
+import { isValidURL } from 'features/utilitty/isValidUrl';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/archiveList.scss';
 import { ArchiveModal } from '../archiveModal/archiveModal';
-import { listArchive } from '../interfaces/interfaces';
-import { convertArchiveFullToNew } from '../utility/convertArchiveFromFullToNew';
+import { ListArchiveInterface } from '../interfaces/interfaces';
 import { ArchiveTable } from './archiveTable';
 
-export const ListArchive: FC<listArchive> = ({
+export const ListArchive: FC<ListArchiveInterface> = ({
   archive,
   setArchive,
   deleteArchiveFromList,
+  deleteItemFromArchive,
   updateArchiveInformation,
   showMessage,
 }) => {
@@ -40,24 +41,31 @@ export const ListArchive: FC<listArchive> = ({
     });
   }, [archive]);
 
-  const deleteItemFromArchive = (archiveId: number | undefined, itemId: number | undefined) => {
+  const toggleModal = () => {
+    setIsModalOpen(!isModalOpen);
+    setTitle('');
+    setUrl('');
+  };
+
+  const handleSaveNewOrderOfRows = (
+    updatedItems: common_ArchiveItemFull[],
+    archiveId: number | undefined,
+  ) => {
     setArchive((prevArchive) =>
       prevArchive.map((archiveEntry) => {
         if (archiveEntry.archive?.id === archiveId) {
-          const updatedItems = archiveEntry.items?.filter((item) => item.id !== itemId) || [];
+          const originalOrder = archiveEntry.items?.map((item) => item.id).join(',');
+          const newOrder = updatedItems.map((item) => item.id).join(',');
+          if (originalOrder !== newOrder) {
+            showMessage('items order changed', 'success');
+          }
           const updatedArchiveEntry = { ...archiveEntry, items: updatedItems };
-          updateArchiveInformation(archiveId, convertArchiveFullToNew(updatedArchiveEntry));
+          updateArchiveInformation(archiveId, updatedArchiveEntry);
           return updatedArchiveEntry;
         }
         return archiveEntry;
       }),
     );
-  };
-
-  const toggleModal = () => {
-    setIsModalOpen(!isModalOpen);
-    setTitle('');
-    setUrl('');
   };
 
   const mediaPreview =
@@ -71,28 +79,17 @@ export const ListArchive: FC<listArchive> = ({
       }
     };
 
-  const handleSaveNewOrderOfRows = (
-    updatedItems: common_ArchiveItemFull[],
-    archiveId: number | undefined,
-  ) => {
-    setArchive((prevArchive) =>
-      prevArchive.map((archiveEntry) => {
-        if (archiveEntry.archive?.id === archiveId) {
-          const originalOrder = archiveEntry.items?.map((item) => item.id).join(',');
-          const newOrder = updatedItems.map((item) => item.id).join(',');
-          if (originalOrder !== newOrder) {
-            showMessage('ITEMS ORDER CHANGED', 'success');
-          }
-          const updatedArchiveEntry = { ...archiveEntry, items: updatedItems };
-          updateArchiveInformation(archiveId, convertArchiveFullToNew(updatedArchiveEntry));
-          return updatedArchiveEntry;
-        }
-        return archiveEntry;
-      }),
-    );
-  };
-
   const addNewItemToArchive = (archiveId: number | undefined) => {
+    if (url && !isValidURL(url)) {
+      showMessage('url is not valid', 'error');
+      return;
+    }
+
+    if (title.length > 256) {
+      showMessage('description cannot be longer than 256 symbols', 'error');
+      return;
+    }
+
     setArchive((prevArchive) =>
       prevArchive.map((archiveEntry) => {
         if (archiveEntry.archive?.id === archiveId) {
@@ -100,30 +97,27 @@ export const ListArchive: FC<listArchive> = ({
             (item) => item.archiveItem?.media?.id === mediaId,
           );
           if (mediaExists) {
-            showMessage('THIS MEDIA IS ALREADY ADDED TO THE ARCHIVE', 'error');
+            showMessage('this media is already added to the archive', 'error');
             return archiveEntry;
           }
-
           const newItem = {
-            id: new Date().getTime(),
             archiveId,
             archiveItem: {
               media: {
                 id: mediaId,
                 media: {
-                  fullSize: { mediaUrl: media, width: undefined, height: undefined },
                   thumbnail: { mediaUrl: media, width: undefined, height: undefined },
-                  compressed: { mediaUrl: media, width: undefined, height: undefined },
                 },
-                createdAt: undefined,
               },
               url,
               title,
             },
-          };
+          } as common_ArchiveItemFull;
           const updatedItems = [...(archiveEntry.items || []), newItem];
-          showMessage('ITEM ADDED TO THE ARCHIVE SUCCESSFULLY', 'success');
-          return { ...archiveEntry, items: updatedItems };
+          showMessage('item added to the archive successfully', 'success');
+          const updatedArchiveEntry = { ...archiveEntry, items: updatedItems };
+          updateArchiveInformation(archiveId, updatedArchiveEntry);
+          return updatedArchiveEntry;
         }
         return archiveEntry;
       }),
@@ -152,8 +146,8 @@ export const ListArchive: FC<listArchive> = ({
               },
             },
           } as common_ArchiveFull;
-          updateArchiveInformation(archiveId, convertArchiveFullToNew(updatedArchive));
-          showMessage('ARCHIVE UPDATED', 'success');
+          updateArchiveInformation(archiveId, updatedArchive);
+          showMessage('new archive data has been saved', 'success');
           return updatedArchive;
         }
         return archiveEntry;
@@ -162,8 +156,20 @@ export const ListArchive: FC<listArchive> = ({
   };
 
   const toggleEditMode = (archiveId: number | undefined) => {
-    if (archiveId) {
+    if (archiveId !== undefined) {
+      const archiveEntry = archive.find((entry) => entry.archive?.id === archiveId);
+      if (!archiveEntry) {
+        showMessage('archive entry not found', 'error');
+        return;
+      }
+
       if (isEditMode[archiveId]) {
+        const archiveTitle = heading[archiveId] ?? archiveEntry.archive?.archiveBody?.heading ?? '';
+
+        if (!archiveTitle) {
+          showMessage('archive title cannot be empty', 'error');
+          return;
+        }
         handleUpdateArchive(archiveId);
       }
       seIsEditMode((prevEditMode) => ({
@@ -188,8 +194,9 @@ export const ListArchive: FC<listArchive> = ({
               <Box display='flex' gap='20px'>
                 <TextField
                   label='title'
-                  InputLabelProps={{ style: { textTransform: 'uppercase' } }}
-                  required
+                  style={{ textTransform: 'uppercase' }}
+                  InputLabelProps={{ shrink: true }}
+                  required={isEditMode[archiveEntry.archive?.id ?? 0]}
                   name='heading'
                   value={
                     heading[archiveEntry.archive?.id as number] ??
@@ -211,7 +218,7 @@ export const ListArchive: FC<listArchive> = ({
                   size='medium'
                   onClick={() => toggleEditMode(archiveEntry.archive?.id)}
                 >
-                  {isEditMode[archiveEntry.archive?.id ?? 0] ? 'update' : 'edit'}
+                  {isEditMode[archiveEntry.archive?.id ?? 0] ? 'save' : 'edit'}
                 </Button>
               </Box>
             </Grid>
@@ -243,11 +250,18 @@ export const ListArchive: FC<listArchive> = ({
             <Grid item xs={8}>
               <TextField
                 label='description'
-                InputLabelProps={{ style: { textTransform: 'uppercase' } }}
+                style={{ textTransform: 'uppercase' }}
+                InputLabelProps={{ shrink: true }}
                 value={
-                  description[archiveEntry.archive?.id as number] ??
-                  archiveEntry.archive?.archiveBody?.description ??
-                  ''
+                  isEditMode[archiveEntry.archive?.id as number]
+                    ? description[archiveEntry.archive?.id as number] ??
+                      archiveEntry.archive?.archiveBody?.description ??
+                      ''
+                    : (
+                        description[archiveEntry.archive?.id as number] ??
+                        archiveEntry.archive?.archiveBody?.description ??
+                        ''
+                      ).slice(0, 100)
                 }
                 onChange={(e) =>
                   setDescription({
@@ -258,6 +272,7 @@ export const ListArchive: FC<listArchive> = ({
                 inputProps={{ readOnly: !isEditMode[archiveEntry.archive?.id ?? 0] }}
                 size='small'
                 fullWidth
+                multiline
               />
             </Grid>
             <Grid item>

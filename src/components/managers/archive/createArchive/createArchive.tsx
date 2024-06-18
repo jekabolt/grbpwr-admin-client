@@ -64,7 +64,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
 
   const addNewItem = () => {
     if (url && !isValidUrl(url)) {
-      showMessage('INVALID URL', 'error');
+      showMessage('invalid url', 'error');
       return;
     }
     const newItem: common_ArchiveItemInsert = {
@@ -75,7 +75,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
 
     setArchive((prev) => ({
       ...prev,
-      itemsInsert: [...(prev.itemsInsert ?? []), newItem], // Use ?? to handle undefined safely
+      itemsInsert: [...(prev.itemsInsert ?? []), newItem],
     }));
     if (media) {
       const newMediaItem: common_MediaItem = {
@@ -84,20 +84,18 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
         compressed: undefined,
       };
 
-      const newMediaFull: common_MediaFull = {
-        id: undefined, // Or some logic to generate/set ID
-        createdAt: undefined, // Or set the current timestamp or undefined
+      const newMediaFull = {
         media: newMediaItem,
-      };
+      } as common_MediaFull;
 
       setMediaItem((prevMediaItems) => [...prevMediaItems, newMediaFull]);
     }
 
-    setMedia(undefined); // Reset media to undefined as it's type is string | undefined
+    setMedia(undefined);
     setTitle('');
     setUrl('');
     toggleModal();
-    showMessage('ITEM ADDED', 'success');
+    showMessage('item added', 'success');
   };
 
   const handleTextFieldChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,12 +139,12 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
         setArchive(initialArchiveState);
         fetchArchive(50, 0);
         setMediaItem([]);
-        showMessage('ARCHIVE CREATED', 'success');
+        showMessage('archive created', 'success');
       } else {
-        showMessage('ADD ITEM TO THE ARCHIVE', 'error');
+        showMessage('add item to the archive', 'error');
       }
     } catch (error) {
-      showMessage('ARCHIVE COULD NOT BE CREATED ', 'success');
+      showMessage('archive cannot be created ', 'success');
     }
   };
 
