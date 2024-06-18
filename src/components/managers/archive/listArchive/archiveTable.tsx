@@ -73,7 +73,7 @@ export const ArchiveTable: FC<ArchiveTableInterface> = ({
       ),
     },
     {
-      accessorKey: 'archiveItem.media.media.fullSize.mediaUrl',
+      accessorKey: 'archiveItem.media.media.thumbnail.mediaUrl',
       header: 'Media',
       Cell: ({ cell }) => (
         <img
