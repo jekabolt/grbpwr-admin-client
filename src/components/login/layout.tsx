@@ -1,6 +1,6 @@
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import { Button } from '@mui/material';
+import { Button, Grid } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
 import { FC, ReactNode } from 'react';
@@ -19,29 +19,33 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
   };
 
   return (
-    <div className={styles.layout}>
-      <div className={styles.layout_logo}>
+    <Grid container justifyContent='center' className={styles.layout}>
+      <Grid item xs={1} className={styles.layout_logo}>
         <Button
           variant='contained'
+          size='small'
           startIcon={<ArrowBackIosIcon />}
           onClick={() => window.history.back()}
-          className={styles.hide_btn}
+          sx={{ whiteSpace: 'nowrap' }}
         >
           Go Back
         </Button>
-      </div>
-      <div className={styles.layout_content}>{children}</div>
-      <div className={styles.layout_logout}>
+      </Grid>
+      <Grid item xs={11} className={styles.layout_content}>
+        {children}
+      </Grid>
+      <Grid item xs={12} className={styles.layout_logout}>
         <Button
           variant='outlined'
-          color='secondary' // Choose a color that fits your app's theme
+          color='secondary'
+          size='small'
           startIcon={<ExitToAppIcon />}
           onClick={handleLogout}
           className={styles.hide_btn}
         >
           Log Out
         </Button>
-      </div>
-    </div>
+      </Grid>
+    </Grid>
   );
 };

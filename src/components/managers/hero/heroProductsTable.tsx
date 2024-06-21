@@ -1,7 +1,7 @@
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { Button, Checkbox } from '@mui/material';
+import { Checkbox, useMediaQuery, useTheme } from '@mui/material';
 import IconButton from '@mui/material/IconButton';
 import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
@@ -27,6 +27,9 @@ export const HeroProductTable: FC<
   const navigate = useNavigate();
 
   const [data, setData] = useState(products);
+
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   useEffect(() => {
     setData(products);
@@ -61,28 +64,24 @@ export const HeroProductTable: FC<
         header: 'Order',
         Cell: ({ row }) => (
           <div>
-            <Button
+            <IconButton
               onClick={(event) => {
                 event.stopPropagation();
                 moveRow(row.index, row.index - 1);
               }}
               disabled={row.index === 0}
-              size='small'
-              variant='outlined'
             >
               <ArrowUpwardIcon fontSize='small' />
-            </Button>
-            <Button
+            </IconButton>
+            <IconButton
               onClick={(event) => {
                 event.stopPropagation();
                 moveRow(row.index, row.index + 1);
               }}
               disabled={row.index === data.length - 1}
-              size='small'
-              variant='outlined'
             >
               <ArrowDownwardIcon fontSize='small' />
-            </Button>
+            </IconButton>
           </div>
         ),
       },
@@ -97,7 +96,7 @@ export const HeroProductTable: FC<
           <img
             src={cell.getValue() as string}
             alt='Thumbnail'
-            style={{ width: '100px', height: 'auto' }}
+            style={{ width: '100px', height: 'auto', objectFit: 'scale-down' }}
           />
         ),
       },
@@ -108,6 +107,7 @@ export const HeroProductTable: FC<
       {
         accessorKey: 'productInsert.hidden',
         header: 'isHidden',
+
         Cell: ({ cell }) => {
           const hidden = cell.getValue() as boolean;
           return (
@@ -130,6 +130,7 @@ export const HeroProductTable: FC<
       {
         accessorKey: 'productInsert.categoryId',
         header: 'Category',
+        enableResizing: true,
         Cell: ({ cell }) => {
           const categoryId = cell.getValue() as number; // get the current row's categoryId
           const category = categories.find((c) => c.id === categoryId); // find the category in the state
@@ -139,6 +140,7 @@ export const HeroProductTable: FC<
       {
         id: 'delete',
         header: 'Delete',
+
         Cell: ({ row }) => (
           <IconButton
             onClick={(event) => {
@@ -162,8 +164,8 @@ export const HeroProductTable: FC<
     autoResetPageIndex: false,
     columns,
     data,
-    enableRowOrdering: true,
     enableSorting: false,
+    enableRowOrdering: true,
     muiRowDragHandleProps: ({ table }) => ({
       onDragEnd: () => {
         const { draggingRow, hoveredRow } = table.getState();
@@ -178,6 +180,7 @@ export const HeroProductTable: FC<
         }
       },
     }),
+    muiTableContainerProps: { sx: { overflowX: 'auto', display: 'flex' } },
     muiTableBodyRowProps: ({ row }) => ({
       onClick: () => {
         navigate({ to: `${ROUTES.singleProduct}/${row.original.id}` });
