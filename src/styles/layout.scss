@@ -1,16 +1,11 @@
 .layout {
   position: relative;
   margin: 20px;
-  display: grid;
-  grid-template-areas:
-    'logo content'
-    'logout content';
-  grid-template-columns: 40px 1fr;
-  grid-template-rows: 1fr auto;
 
   .layout_logo {
-    grid-area: logo;
     position: fixed;
+    top: 20px;
+    left: 20px;
   }
 
   .layout_content {
@@ -18,12 +13,11 @@
   }
 
   .layout_logout {
-    grid-area: logout;
     position: fixed;
     bottom: 20px;
     right: 20px;
-    text-align: right;
   }
+
   @media print {
     .hide_btn {
       display: none;

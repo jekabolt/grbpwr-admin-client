@@ -1,33 +1,41 @@
+import DeleteIcon from '@mui/icons-material/Delete';
 import {
   Alert,
+  Box,
   Button,
   Dialog,
   DialogActions,
   DialogTitle,
   Grid,
+  IconButton,
   Snackbar,
   TextField,
+  Typography,
 } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
 import { common_MediaFull } from 'api/proto-http/frontend';
 import { ProductPickerModal } from 'components/common/productPickerModal';
+import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/hero.scss';
 import { common_HeroItemInsert, common_Product } from '../../../api/proto-http/admin'; // common_HeroInsert
-import { SingleMediaViewAndSelect } from '../../common/singleMediaViewAndSelect';
 import { HeroProductTable } from './heroProductsTable';
 
 export const Hero: FC = () => {
   const [mainContentLink, setMainContentLink] = useState<string | undefined>('');
+  const [mainContentLinkId, setMainContentLinkId] = useState<number | undefined>();
   const [mainExploreLink, setMainExploreLink] = useState<string | undefined>('');
   const [mainExploreLinkError, setMainExploreLinkError] = useState<boolean>(false);
   const [mainExploreText, setMainExploreText] = useState<string | undefined>('');
+
   const [firstAdContentLink, setFirstAdContentLink] = useState<string | undefined>('');
+  const [firstAdContentLinkId, setFirstAdContentLinkId] = useState<number | undefined>();
   const [firstAdExploreLink, setFirstAdExploreLink] = useState<string | undefined>('');
   const [firstAdExploreLinkError, setFirstAdExploreLinkError] = useState<boolean>(false);
   const [firstAdExploreText, setFirstAdExploreText] = useState<string | undefined>('');
+
   const [secondAdContentLink, setSecondAdContentLink] = useState<string | undefined>('');
+  const [secondAdContentLinkId, setSecondAdContentLinkId] = useState<number | undefined>();
   const [secondAdExploreLink, setSecondAdExploreLink] = useState<string | undefined>('');
   const [secondAdExploreLinkError, setSecondAdExploreLinkError] = useState<boolean>(false);
   const [secondAdExploreText, setSecondAdExploreText] = useState<string | undefined>('');
@@ -38,18 +46,29 @@ export const Hero: FC = () => {
 
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleOpenProductSelection = () => setIsModalOpen(true);
+  const handleCloseModal = () => setIsModalOpen(false);
+
   useEffect(() => {
     const fetchHero = async () => {
       const response = await getHero({});
+      setMainContentLink(response.hero?.main?.media?.media?.thumbnail?.mediaUrl);
+      setMainContentLinkId(response.hero?.main?.media?.id);
       setMainExploreLink(response.hero?.main?.exploreLink);
       setMainExploreText(response.hero?.main?.exploreText);
 
       if (response.hero?.ads) {
         if (response.hero.ads[0]) {
+          setFirstAdContentLink(response.hero.ads[0].media?.media?.thumbnail?.mediaUrl);
+          setFirstAdContentLinkId(response.hero.ads[0].media?.id);
           setFirstAdExploreLink(response.hero?.ads[0].exploreLink);
           setFirstAdExploreText(response.hero?.ads[0].exploreText);
         }
         if (response.hero.ads[1]) {
+          setSecondAdContentLink(response.hero.ads[1].media?.media?.thumbnail?.mediaUrl);
+          setSecondAdContentLinkId(response.hero.ads[1].media?.id);
           setSecondAdExploreLink(response.hero?.ads[1].exploreLink);
           setSecondAdExploreText(response.hero?.ads[1].exploreText);
         }
@@ -77,25 +96,30 @@ export const Hero: FC = () => {
   const saveMainContentLink = (mediaLink: common_MediaFull[]) => {
     if (mediaLink[0]) {
       setMainContentLink(mediaLink[0].media?.thumbnail?.mediaUrl);
-      return;
+      setMainContentLinkId(mediaLink[0].id);
     }
     setMainContentLink(undefined);
+    setMainContentLinkId(undefined);
   };
 
   const saveFirstAdContentLink = (mediaLink: common_MediaFull[]) => {
     if (mediaLink[0]) {
       setFirstAdContentLink(mediaLink[0].media?.thumbnail?.mediaUrl);
+      setFirstAdContentLinkId(mediaLink[0].id);
       return;
     }
     setFirstAdContentLink(undefined);
+    setFirstAdContentLinkId(undefined);
   };
 
   const saveSecondAdContentLink = (mediaLink: common_MediaFull[]) => {
     if (mediaLink[0]) {
       setSecondAdContentLink(mediaLink[0].media?.thumbnail?.mediaUrl);
+      setSecondAdContentLinkId(mediaLink[0].id);
       return;
     }
     setSecondAdContentLink(undefined);
+    setSecondAdContentLinkId(undefined);
   };
 
   const handleProductsReorder = (newProductsOrder: common_Product[]) => {
@@ -104,15 +128,18 @@ export const Hero: FC = () => {
 
   const removeFirstAd = () => {
     setFirstAdContentLink(secondAdContentLink);
+    setFirstAdContentLinkId(secondAdContentLinkId);
     setFirstAdExploreLink(secondAdExploreLink);
     setFirstAdExploreText(secondAdExploreText);
     setSecondAdContentLink(undefined);
+    setSecondAdContentLinkId(undefined);
     setSecondAdExploreLink(undefined);
     setSecondAdExploreText(undefined);
   };
 
   const removeSecondAd = () => {
     setSecondAdContentLink(undefined);
+    setSecondAdContentLinkId(undefined);
     setSecondAdExploreLink(undefined);
     setSecondAdExploreText(undefined);
   };
@@ -121,21 +148,21 @@ export const Hero: FC = () => {
     const ads: common_HeroItemInsert[] = [];
     if (firstAdContentLink !== undefined) {
       ads.push({
-        mediaId: 1,
+        mediaId: firstAdContentLinkId,
         exploreLink: firstAdExploreLink,
         exploreText: firstAdExploreText,
       });
     }
     if (secondAdContentLink !== undefined) {
       ads.push({
-        mediaId: 1,
+        mediaId: secondAdContentLinkId,
         exploreLink: secondAdExploreLink,
         exploreText: secondAdExploreText,
       });
     }
     const response = await addHero({
       main: {
-        mediaId: 2,
+        mediaId: mainContentLinkId,
         exploreLink: mainExploreLink,
         exploreText: mainExploreText,
       },
@@ -146,11 +173,6 @@ export const Hero: FC = () => {
       setSaveSuccess(true);
     }
   };
-
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
-  const handleOpenProductSelection = () => setIsModalOpen(true);
-  const handleCloseModal = () => setIsModalOpen(false);
 
   const handleSaveNewSelection = (newSelection: common_Product[]) => {
     setProducts(newSelection);
@@ -165,7 +187,7 @@ export const Hero: FC = () => {
   };
 
   const handleSaveClick = () => {
-    if (hasError) {
+    if (mainExploreLinkError || firstAdExploreLinkError || secondAdExploreLinkError) {
       setDialogOpen(true);
     } else {
       updateHero();
@@ -179,174 +201,185 @@ export const Hero: FC = () => {
 
   return (
     <Layout>
-      <div className={styles.hero}>
-        <Grid container spacing={2} direction='column'>
-          <Grid item xs={6}>
-            <h2>Main</h2>
+      <Grid container spacing={2} justifyContent='center'>
+        <Grid item xs={12} md={8}>
+          <Grid container spacing={2} justifyContent='center'>
+            <Grid item xs={10}>
+              <Typography variant='h4'>Main</Typography>
+              <SingleMediaViewAndSelect
+                link={mainContentLink}
+                saveSelectedMedia={saveMainContentLink}
+              />
+            </Grid>
+            <Grid item xs={10}>
+              <TextField
+                error={mainExploreLinkError}
+                helperText={mainExploreLinkError ? 'Not valid url.' : ''}
+                size='small'
+                label='Main explore link'
+                value={mainExploreLink || ''}
+                onChange={(e) => {
+                  const { value } = e.target;
+                  setMainExploreLink(value);
+                  if (!isValidUrl(value)) {
+                    setMainExploreLinkError(true);
+                  } else {
+                    setMainExploreLinkError(false);
+                  }
+                }}
+              />
+            </Grid>
+            <Grid item xs={10}>
+              <TextField
+                size='small'
+                label='Main explore text'
+                value={mainExploreText || ''}
+                onChange={(e) => setMainExploreText(e.target.value)}
+              />
+            </Grid>
           </Grid>
-          <Grid item xs={6}>
-            <SingleMediaViewAndSelect
-              link={mainContentLink}
-              saveSelectedMedia={saveMainContentLink}
-            />
+        </Grid>
+        <Grid item xs={12} md={8}>
+          <Grid container justifyContent='center' spacing={2}>
+            <Grid item xs={10}>
+              <Box display='flex' gap='15px' alignItems='center'>
+                <Typography variant='h4'>First Ad</Typography>
+                {firstAdContentLink && (
+                  <IconButton onClick={removeFirstAd}>
+                    <DeleteIcon color='secondary' />
+                  </IconButton>
+                )}
+              </Box>
+              <SingleMediaViewAndSelect
+                link={firstAdContentLink}
+                saveSelectedMedia={saveFirstAdContentLink}
+              />
+            </Grid>
+            <Grid item xs={10}>
+              <TextField
+                error={firstAdExploreLinkError}
+                helperText={firstAdExploreLinkError ? 'Not valid url.' : ''}
+                size='small'
+                label='First ad explore link'
+                value={firstAdExploreLink || ''}
+                onChange={(e) => {
+                  const { value } = e.target;
+                  setFirstAdExploreLink(value);
+                  if (!isValidUrl(value)) {
+                    setFirstAdExploreLinkError(true);
+                  } else {
+                    setFirstAdExploreLinkError(false);
+                  }
+                }}
+              />
+            </Grid>
+            <Grid item xs={10}>
+              <TextField
+                size='small'
+                label='First ad explore text'
+                value={firstAdExploreText || ''}
+                onChange={(e) => setFirstAdExploreText(e.target.value)}
+              />
+            </Grid>
           </Grid>
-          <Grid item xs={6}>
-            <TextField
-              error={mainExploreLinkError}
-              helperText={mainExploreLinkError ? 'Not valid url.' : ''}
-              size='small'
-              label='Main explore link'
-              value={mainExploreLink || ''}
-              onChange={(e) => {
-                const { value } = e.target;
-                setMainExploreLink(value);
-                if (!isValidUrl(value)) {
-                  setMainExploreLinkError(true);
-                } else {
-                  setMainExploreLinkError(false);
-                }
-              }}
-            />
+        </Grid>
+        <Grid item xs={12} md={8}>
+          <Grid container justifyContent='center' spacing={2}>
+            <Grid item xs={10}>
+              <Box display='flex' alignItems='center' gap='15px'>
+                <Typography variant='h4'>Second Ad</Typography>
+                {secondAdContentLink && (
+                  <IconButton onClick={removeSecondAd}>
+                    <DeleteIcon color='secondary' />
+                  </IconButton>
+                )}
+              </Box>
+              <SingleMediaViewAndSelect
+                link={secondAdContentLink}
+                saveSelectedMedia={saveSecondAdContentLink}
+              />
+            </Grid>
+            <Grid item xs={10}>
+              <Box display='flex' alignItems='center' gap='15px'>
+                <TextField
+                  error={secondAdExploreLinkError}
+                  helperText={secondAdExploreLinkError ? 'Not valid url.' : ''}
+                  size='small'
+                  label='Second ad explore link'
+                  value={secondAdExploreLink || ''}
+                  onChange={(e) => {
+                    const { value } = e.target;
+                    setSecondAdExploreLink(value);
+                    if (!isValidUrl(value)) {
+                      setSecondAdExploreLinkError(true);
+                    } else {
+                      setSecondAdExploreLinkError(false);
+                    }
+                  }}
+                />
+                {/* {secondAdContentLink && (
+          )} */}
+              </Box>
+            </Grid>
+            <Grid item xs={10}>
+              <TextField
+                size='small'
+                label='Second ad explore text'
+                value={secondAdExploreText || ''}
+                onChange={(e) => setSecondAdExploreText(e.target.value)}
+              />
+            </Grid>
           </Grid>
-          <Grid item xs={6}>
-            <TextField
-              size='small'
-              label='Main explore text'
-              value={mainExploreText || ''}
-              onChange={(e) => setMainExploreText(e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <h2>First ad</h2>
-          </Grid>
-          <Grid item xs={6}>
-            {firstAdContentLink && (
-              <Button variant='contained' onClick={removeFirstAd}>
-                Remove
+        </Grid>
+        <Grid item xs={12} md={8}>
+          <Grid container spacing={2} justifyContent='center'>
+            <Grid item xs={12}>
+              <HeroProductTable products={products} onReorder={handleProductsReorder} />
+              <Button size='small' variant='contained' onClick={handleOpenProductSelection}>
+                Add Products
               </Button>
-            )}
-          </Grid>
-          <Grid item xs={6}>
-            <SingleMediaViewAndSelect
-              link={firstAdContentLink}
-              saveSelectedMedia={saveFirstAdContentLink}
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <TextField
-              error={firstAdExploreLinkError}
-              helperText={firstAdExploreLinkError ? 'Not valid url.' : ''}
-              size='small'
-              label='First ad explore link'
-              value={firstAdExploreLink || ''}
-              onChange={(e) => {
-                const { value } = e.target;
-                setFirstAdExploreLink(value);
-                if (!isValidUrl(value)) {
-                  setFirstAdExploreLinkError(true);
-                } else {
-                  setFirstAdExploreLinkError(false);
-                }
-              }}
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <TextField
-              size='small'
-              label='First ad explore text'
-              value={firstAdExploreText || ''}
-              onChange={(e) => setFirstAdExploreText(e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <h2>Second ad</h2>
-          </Grid>
-          <Grid item xs={6}>
-            {secondAdContentLink && (
-              <Button variant='contained' onClick={removeSecondAd}>
-                Remove
+            </Grid>
+            <Grid item xs={2}>
+              <Button variant='contained' onClick={handleSaveClick}>
+                Save
               </Button>
-            )}
+            </Grid>
           </Grid>
-          <Grid item xs={6}>
-            <SingleMediaViewAndSelect
-              link={secondAdContentLink}
-              saveSelectedMedia={saveSecondAdContentLink}
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <TextField
-              error={secondAdExploreLinkError}
-              helperText={secondAdExploreLinkError ? 'Not valid url.' : ''}
-              size='small'
-              label='Second ad explore link'
-              value={secondAdExploreLink || ''}
-              onChange={(e) => {
-                const { value } = e.target;
-                setSecondAdExploreLink(value);
-                if (!isValidUrl(value)) {
-                  setSecondAdExploreLinkError(true);
-                } else {
-                  setSecondAdExploreLinkError(false);
-                }
-              }}
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <TextField
-              size='small'
-              label='Second ad explore text'
-              value={secondAdExploreText || ''}
-              onChange={(e) => setSecondAdExploreText(e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={6} sx={{ mt: 4 }}>
-            <HeroProductTable
-              products={products}
-              onReorder={handleProductsReorder}
-            ></HeroProductTable>
-          </Grid>
-          <Grid item xs={6}>
-            <Button variant='contained' onClick={handleOpenProductSelection}>
-              Add Products
-            </Button>
-          </Grid>
+        </Grid>
+
+        <Grid item xs={12}>
           <ProductPickerModal
             open={isModalOpen}
             onClose={handleCloseModal}
             onSave={handleSaveNewSelection}
             selectedProductIds={products.map((x) => x.id!)}
           />
-          <Grid item xs={6} sx={{ mt: 4, textAlign: 'center' }}>
-            <Button variant='contained' onClick={handleSaveClick}>
-              Save
-            </Button>
-          </Grid>
-          <Dialog
-            open={dialogOpen}
-            onClose={() => setDialogOpen(false)}
-            aria-labelledby='alert-dialog-title'
-          >
-            <DialogTitle id='alert-dialog-title'>
-              {'There are errors. Are you sure you want to save?'}
-            </DialogTitle>
-            <DialogActions>
-              <Button onClick={() => setDialogOpen(false)}>No</Button>
-              <Button onClick={handleConfirmSave} autoFocus>
-                Yes
-              </Button>
-            </DialogActions>
-          </Dialog>
-          <Snackbar
-            open={saveSuccess}
-            onClose={() => setSaveSuccess(false)}
-            autoHideDuration={2000}
-            anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
-          >
-            <Alert severity='success'>Save successful</Alert>
-          </Snackbar>
         </Grid>
-      </div>
+
+        <Snackbar
+          open={saveSuccess}
+          onClose={() => setSaveSuccess(false)}
+          autoHideDuration={2000}
+          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+        >
+          <Alert severity='success'>Save successful</Alert>
+        </Snackbar>
+      </Grid>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        aria-labelledby='alert-dialog-title'
+      >
+        <DialogTitle id='alert-dialog-title'>
+          {'There are errors. Are you sure you want to save?'}
+        </DialogTitle>
+        <DialogActions>
+          <Button onClick={() => setDialogOpen(false)}>No</Button>
+          <Button onClick={handleConfirmSave} autoFocus>
+            Yes
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Layout>
   );
 };
