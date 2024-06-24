@@ -1,41 +1,45 @@
 
 import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
+import { Dispatch, SetStateAction } from 'react';
 
 export interface MediaSelectorLayoutProps {
     label: string
-    saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
     allowMultiple: boolean;
+    saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
 
 export interface MediaSelectorModalProps {
+    allowMultiple: boolean;
     closeMediaSelector: () => void;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
-    allowMultiple: boolean;
 }
 
 export interface MediaSelectorInterface {
     allowMultiple: boolean;
     selectedMedia: common_MediaFull[] | undefined;
-    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void
     enableModal?: boolean
+    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void
 
 }
 
 export interface MediaSelectorMediaListProps {
     media: common_MediaFull[] | undefined;
-    setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
     allowMultiple: boolean;
     selectedMedia: common_MediaFull[] | undefined;
-    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
     height?: string | number;
-    sortedAndFilteredMedia: () => common_MediaFull[];
     enableModal?: boolean;
+    croppedImage: string | null
+    setCroppedImage: (img: string | null) => void
+    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
+    setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
+    sortedAndFilteredMedia: () => common_MediaFull[];
+    handleUploadMedia: () => Promise<void>
 }
 
 export interface UploadMediaByUrlProps {
     url: string;
-    setUrl: React.Dispatch<React.SetStateAction<string>>;
     isLoading: boolean;
+    setUrl: React.Dispatch<React.SetStateAction<string>>;
 }
 
 export interface FilterMediasInterface {
@@ -47,6 +51,19 @@ export interface FilterMediasInterface {
 
 export interface FullSizeMediaModalInterface {
     open: boolean;
-    close: () => void;
+    croppedImage: string | null
     clickedMedia: common_MediaItem | undefined
+    setCroppedImage: (img: string | null) => void
+    close: () => void;
+    handleUploadMedia: () => Promise<void>
+}
+
+export interface PreviewMediaForUploadInterface {
+    b64Media: string;
+    croppedImage: string | null;
+    isCropperOpen: boolean;
+    handleUploadMedia: () => Promise<void>;
+    setCroppedImage: (img: string | null) => void;
+    setIsCropperOpen: Dispatch<SetStateAction<boolean>>;
+    clear: () => void;
 }

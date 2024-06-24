@@ -1,20 +1,11 @@
 import { Box, Button, Grid } from '@mui/material';
+import { PreviewMediaForUploadInterface } from 'features/interfaces/mediaSelectorInterfaces';
 import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
 import { isBase64Video } from 'features/utilitty/filterContentType';
 import { getBase64ImageFromUrl } from 'features/utilitty/getBase64';
-import { Dispatch, FC, SetStateAction, useEffect } from 'react';
+import { FC, useEffect } from 'react';
 import styles from 'styles/media-selector.scss';
 import { MediaCropper } from './cropper';
-
-interface PreviewMediaForUploadInterface {
-  b64Media: string;
-  croppedImage: string | null;
-  isCropperOpen: boolean;
-  handleUploadMedia: () => Promise<void>;
-  setCroppedImage: (img: string | null) => void;
-  setIsCropperOpen: Dispatch<SetStateAction<boolean>>;
-  clear: () => void;
-}
 
 export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
   b64Media,
