@@ -148,7 +148,7 @@ const useMediaSelector = (
             const baseData64 = await getBase64ImageFromUrl(url);
             await processAndUpload(baseData64, 'image');
         } else {
-            showMessage('NO DATA FOR UPLOAD', 'error');
+            showMessage('NO MEDIA FOR UPLOAD', 'error');
             setLoading(false);
         }
     }, [url, croppedImage, selectedFiles, reload]);

@@ -15,6 +15,7 @@ import { FullSizeMediaModalInterface } from 'features/interfaces/mediaSelectorIn
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/media-selector.scss';
+import { PreviewMediaForUpload } from './previewMediaForUpload';
 
 type MediaKey = keyof common_MediaItem;
 type VideoDimensions = {
@@ -23,12 +24,21 @@ type VideoDimensions = {
 
 export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   open,
-  close,
   clickedMedia,
+  croppedImage,
+  close,
+  setCroppedImage,
+  handleUploadMedia,
 }) => {
   const [snackBarOpen, setSnackbarOpen] = useState(false);
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [videoDimensions, setVideoDimensions] = useState<VideoDimensions>({});
+  const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+
+  const togglePreviewMode = () => {
+    setIsPreviewOpen(!isPreviewOpen);
+  };
 
   const loadVideoDimensions = (url: string | undefined, type: string) => {
     if (!url) return;
@@ -76,9 +86,19 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
     return url.length > maxLength ? `${url.substring(0, maxLength)}...` : url;
   };
 
+  const clearDragDropSelector = () => {
+    setCroppedImage('');
+    setIsPreviewOpen(!isPreviewOpen);
+  };
+
+  const closePreviewAndModal = () => {
+    close();
+    setIsPreviewOpen(false);
+  };
+
   return (
     <>
-      <Dialog open={open} onClose={close} scroll='paper' maxWidth='lg'>
+      <Dialog open={open} onClose={closePreviewAndModal} scroll='paper' maxWidth='lg'>
         <Box position='relative'>
           <DialogContent className={styles.dialog}>
             <Box component='div' className={styles.full_size_modal_media_container}>
@@ -88,9 +108,23 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                     <video src={clickedMedia.thumbnail?.mediaUrl}></video>
                   </a>
                 ) : (
-                  <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
-                    <img src={clickedMedia.thumbnail?.mediaUrl} alt='' />
-                  </a>
+                  <>
+                    {isPreviewOpen ? (
+                      <PreviewMediaForUpload
+                        b64Media={clickedMedia.thumbnail?.mediaUrl || ''}
+                        croppedImage={croppedImage}
+                        isCropperOpen={isCropperOpen}
+                        setCroppedImage={setCroppedImage}
+                        setIsCropperOpen={setIsCropperOpen}
+                        clear={clearDragDropSelector}
+                        handleUploadMedia={handleUploadMedia}
+                      />
+                    ) : (
+                      <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
+                        <img src={clickedMedia.thumbnail?.mediaUrl} alt='' />
+                      </a>
+                    )}
+                  </>
                 ))}
             </Box>
             {['fullSize', 'compressed', 'thumbnail'].map((type) => (
@@ -115,9 +149,20 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
             ))}
           </DialogContent>
           <DialogActions>
-            <IconButton onClick={close} style={{ position: 'absolute', right: '0', top: '0' }}>
+            <IconButton
+              onClick={closePreviewAndModal}
+              style={{ position: 'absolute', right: '0', top: '0' }}
+            >
               <CloseIcon fontSize='medium' />
             </IconButton>
+            <Button
+              size='small'
+              style={{ position: 'absolute', left: '0', top: '10px' }}
+              variant='contained'
+              onClick={() => togglePreviewMode()}
+            >
+              crop media
+            </Button>
           </DialogActions>
         </Box>
       </Dialog>

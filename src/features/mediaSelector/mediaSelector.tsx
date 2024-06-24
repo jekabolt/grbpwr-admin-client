@@ -1,6 +1,5 @@
 import { Box, Grid } from '@mui/material';
 import { MediaSelectorInterface } from 'features/interfaces/mediaSelectorInterfaces';
-import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
 import 'react-advanced-cropper/dist/style.css';
@@ -39,7 +38,6 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
     setCroppedImage,
   } = useMediaSelector();
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
-  const isValid = checkIsHttpHttpsMediaLink(url);
 
   useEffect(() => {
     fetchFiles(50, 0);
@@ -99,13 +97,16 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
       </Grid>
       <Grid item xs={12}>
         <MediaList
-          setMedia={setMedia}
           media={media}
           allowMultiple={allowMultiple}
-          select={select}
           selectedMedia={selectedMedia}
-          sortedAndFilteredMedia={sortedAndFilteredMedia}
           enableModal={enableModal}
+          croppedImage={croppedImage}
+          setCroppedImage={setCroppedImage}
+          select={select}
+          setMedia={setMedia}
+          handleUploadMedia={handleMediaUpload}
+          sortedAndFilteredMedia={sortedAndFilteredMedia}
         />
       </Grid>
     </Grid>

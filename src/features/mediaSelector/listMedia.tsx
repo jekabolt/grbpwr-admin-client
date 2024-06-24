@@ -22,14 +22,17 @@ import styles from 'styles/media-selector.scss';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
-  setMedia,
   allowMultiple,
-  select,
   selectedMedia,
-  sortedAndFilteredMedia,
   enableModal = false,
+  croppedImage,
+  setCroppedImage,
+  select,
+  setMedia,
+  sortedAndFilteredMedia,
+  handleUploadMedia,
 }) => {
-  const { showMessage, isSnackBarOpen, closeSnackBar, snackBarMessage, snackBarSeverity } =
+  const { isSnackBarOpen, snackBarMessage, snackBarSeverity, showMessage, closeSnackBar } =
     useMediaSelector();
   const [openModal, setOpenModal] = useState(false);
   const [clickedMedia, setClickedMedia] = useState<common_MediaItem | undefined>();
@@ -191,7 +194,14 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
           </ImageList>
         )}
       </Grid>
-      <FullSizeMediaModal open={openModal} close={handleCloseModal} clickedMedia={clickedMedia} />
+      <FullSizeMediaModal
+        open={openModal}
+        clickedMedia={clickedMedia}
+        croppedImage={croppedImage}
+        close={handleCloseModal}
+        setCroppedImage={setCroppedImage}
+        handleUploadMedia={handleUploadMedia}
+      />
       <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
         <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
       </Snackbar>

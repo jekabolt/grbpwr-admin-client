@@ -63,7 +63,6 @@ export const MediaCropper: FC<CropperInterface> = ({
 
   const handleSave = async () => {
     if (selectedFile && croppedAreaPixels) {
-      // TODO: add png and other
       const format = selectedFile.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
       const croppedImage = await getCroppedImg(selectedFile, croppedAreaPixels, aspect, format);
       saveCroppedImage(croppedImage);
