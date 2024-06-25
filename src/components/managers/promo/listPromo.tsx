@@ -41,16 +41,16 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMe
 
   const columns = [
     { field: 'id', headerName: 'ID', width: 30 },
-    { field: 'code', headerName: 'CODE', width: 200 },
-    { field: 'expiration', headerName: 'EXPIRATION', width: 180 },
-    { field: 'discount', headerName: 'DISCOUNT', width: 150 },
-    { field: 'freeShipping', headerName: 'SHIPPING', width: 150 },
-    { field: 'allowed', headerName: 'ALLOWED', width: 150 },
-    { field: 'voucher', headerName: 'VOUCHER', width: 150 },
+    { field: 'code', headerName: 'CODE', width: 120 },
+    { field: 'expiration', headerName: 'EXPIRATION', width: 120 },
+    { field: 'discount', headerName: 'DISCOUNT', flex: 1 },
+    { field: 'freeShipping', headerName: 'SHIPPING', flex: 1 },
+    { field: 'allowed', headerName: 'ALLOWED', flex: 1 },
+    { field: 'voucher', headerName: 'VOUCHER', flex: 1 },
     {
       field: 'delete',
       headerName: 'DELETE',
-      width: 150,
+      flex: 0.5,
       renderCell: (params: any) => (
         <IconButton onClick={() => deletePromoFromList(params.row.code)}>
           <DeleteIcon fontSize='medium' />

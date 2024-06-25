@@ -1,4 +1,4 @@
-import { Alert, Grid, Snackbar } from '@mui/material';
+import { Alert, Grid, Snackbar, Theme, useMediaQuery } from '@mui/material';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect } from 'react';
 import { CreatePromo } from './createPromo';
@@ -16,6 +16,7 @@ export const Promo: FC = () => {
     setIsSnackBarOpen,
     showMessage,
   } = usePromo();
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   useEffect(() => {
     fetchPromos(50, 0);
@@ -23,7 +24,12 @@ export const Promo: FC = () => {
 
   return (
     <Layout>
-      <Grid container justifyContent='center' spacing={2}>
+      <Grid
+        container
+        justifyContent='center'
+        spacing={2}
+        padding={isMobile ? '3% 17% 3% 17%' : '2%'}
+      >
         <Grid item xs={12}>
           <CreatePromo createNewPromo={createNewPromo} showMessage={showMessage} />
         </Grid>

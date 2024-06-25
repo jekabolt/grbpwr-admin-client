@@ -3,7 +3,6 @@ import { useNavigate } from '@tanstack/react-location';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
-import styles from 'styles/main.scss';
 
 export const Main: FC = () => {
   const navigate = useNavigate();
@@ -38,40 +37,47 @@ export const Main: FC = () => {
 
   return (
     <Layout>
-      <div className={styles.main}>
-        <Grid container direction='column' spacing={2}>
+      <div
+        style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}
+      >
+        <Grid container spacing={2} direction='column' justifyContent='center' alignItems='center'>
           <Grid item>
-            <Button variant='contained' onClick={navigateMediaManager} className={styles.btn}>
+            <Button variant='contained' onClick={navigateMediaManager} sx={{ width: 120 }}>
               MEDIA
             </Button>
           </Grid>
+
           <Grid item>
-            <Button variant='contained' onClick={navigateProductManager} className={styles.btn}>
+            <Button variant='contained' onClick={navigateProductManager} sx={{ width: 120 }}>
               PRODUCTS
             </Button>
           </Grid>
+
           <Grid item>
-            <Button variant='contained' onClick={navigateOrders} className={styles.btn}>
+            <Button variant='contained' onClick={navigateOrders} sx={{ width: 120 }}>
               ORDERS
             </Button>
           </Grid>
+
           <Grid item>
-            <Button variant='contained' onClick={navigateHero} className={styles.btn}>
+            <Button variant='contained' onClick={navigateHero} sx={{ width: 120 }}>
               HERO
             </Button>
           </Grid>
+
           <Grid item>
-            <Button variant='contained' onClick={navigatePromo} className={styles.btn}>
+            <Button variant='contained' onClick={navigatePromo} sx={{ width: 120 }}>
               PROMO
             </Button>
           </Grid>
           <Grid item>
-            <Button variant='contained' onClick={navigateArchive} className={styles.btn}>
+            <Button variant='contained' onClick={navigateArchive} sx={{ width: 120 }}>
               ARCHIVE
             </Button>
           </Grid>
+
           <Grid item>
-            <Button variant='contained' onClick={navigateSettings} className={styles.btn}>
+            <Button variant='contained' onClick={navigateSettings} sx={{ width: 120 }}>
               SETTINGS
             </Button>
           </Grid>

@@ -7,7 +7,9 @@ import {
   Grid,
   Snackbar,
   TextField,
+  Theme,
   Typography,
+  useMediaQuery,
 } from '@mui/material';
 import { getDictionary } from 'api/admin';
 import { UpdateSettingsRequest, common_Dictionary } from 'api/proto-http/admin';
@@ -24,6 +26,7 @@ export const Settings: FC = () => {
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const showMessage = (message: string, severity: 'success' | 'error') => {
     setSnackBarMessage(message);
@@ -64,7 +67,13 @@ export const Settings: FC = () => {
       >
         {({ values, setFieldValue, isSubmitting }) => (
           <Form>
-            <Grid container spacing={2} direction='column' alignContent='center' marginTop={4}>
+            <Grid
+              container
+              spacing={2}
+              direction='column'
+              alignContent='center'
+              padding={isMobile ? '20%' : '3%'}
+            >
               <Grid item xs={12}>
                 <Typography variant='h6'>PAYMENT METHODS</Typography>
               </Grid>
