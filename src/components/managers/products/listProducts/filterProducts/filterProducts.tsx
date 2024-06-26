@@ -14,6 +14,7 @@ import {
   common_Dictionary,
   common_FilterConditions,
 } from 'api/proto-http/admin';
+import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, FieldProps, Form, Formik } from 'formik';
@@ -41,10 +42,17 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
 
     if (fieldName.includes('filterConditions')) {
       const keys = fieldName.split('.');
-      updatedFilter.filterConditions = {
-        ...filter.filterConditions,
-        [keys[1]]: value,
-      } as common_FilterConditions;
+      if (keys[1] === 'sizesIds' && value.includes('')) {
+        updatedFilter.filterConditions = {
+          ...filter.filterConditions,
+          sizesIds: [],
+        } as common_FilterConditions;
+      } else {
+        updatedFilter.filterConditions = {
+          ...filter.filterConditions,
+          [keys[1]]: value,
+        } as common_FilterConditions;
+      }
     } else {
       updatedFilter[fieldName as keyof GetProductsPagedRequest] = value;
     }
@@ -119,6 +127,7 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                           value={field.value}
                           label='CATEGORY'
                         >
+                          <MenuItem value=''>ANY</MenuItem>
                           {dictionary?.categories?.map((s) => (
                             <MenuItem key={s.id} value={s.id}>
                               {findInDictionary(dictionary, s.id, 'category')}
@@ -137,12 +146,17 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                         <Select
                           {...field}
                           onChange={(e) =>
-                            handleFieldChange(setFieldValue, field.name, e.target.value as number[])
+                            handleFieldChange(
+                              setFieldValue,
+                              field.name,
+                              e.target.value.includes('') ? [] : (e.target.value as number[]),
+                            )
                           }
                           value={field.value || []}
                           label='SIZES'
                           multiple
                         >
+                          <MenuItem value=''>ANY</MenuItem>
                           {dictionary?.sizes?.map((s) => (
                             <MenuItem key={s.id} value={s.id}>
                               {findInDictionary(dictionary, s.id, 'size')}
@@ -182,14 +196,28 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                  <TextField
-                    label='COLOR'
-                    type='string'
-                    value={filter.filterConditions?.color}
-                    onChange={(e) =>
-                      handleFieldChange(setFieldValue, 'filterConditions.color', e.target.value)
-                    }
-                  />
+                  <Field name='filterConditions.color'>
+                    {({ field }: FieldProps) => (
+                      <FormControl fullWidth>
+                        <InputLabel>COLOR</InputLabel>
+                        <Select
+                          {...field}
+                          onChange={(e) =>
+                            handleFieldChange(setFieldValue, field.name, e.target.value)
+                          }
+                          value={field.value}
+                          label='COLOR'
+                        >
+                          <MenuItem value=''>ANY</MenuItem>
+                          {colors.map((color, id) => (
+                            <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
+                              {color.name.toLowerCase().replace(/\s/g, '_')}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Field>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <TextField
