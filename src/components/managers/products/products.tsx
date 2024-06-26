@@ -15,13 +15,13 @@ export const Product: FC = () => {
 
   return (
     <Layout>
-      <Grid container spacing={2} justifyContent='center' padding={isMobile ? '10%' : '3%'}>
-        <Grid item xs={6} sm={3} md={3}>
+      <Grid container spacing={2} justifyContent='center' padding={isMobile ? '20%' : '3% 6%'}>
+        <Grid item>
           <Button onClick={navigateAddProduct} size='large' variant='contained'>
             ADD PRODUCT
           </Button>
         </Grid>
-        <Grid item xs={10}>
+        <Grid item xs={12}>
           <AllProducts />
         </Grid>
       </Grid>

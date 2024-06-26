@@ -82,7 +82,7 @@ export const AllProducts: FC = () => {
 
   return (
     <Grid container spacing={1} justifyContent='center'>
-      <Grid item xs={10}>
+      <Grid item xs={12}>
         <Filter filter={filter} onFilterChange={handleFilterChange} />
       </Grid>
       <Grid item xs={12}>
