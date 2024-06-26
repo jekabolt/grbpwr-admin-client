@@ -1,11 +1,13 @@
-import { ContentCopy } from '@mui/icons-material';
 import CloseIcon from '@mui/icons-material/Close';
+import ContentCopy from '@mui/icons-material/ContentCopy';
+import CropIcon from '@mui/icons-material/Crop';
 import {
   Box,
   Button,
   Dialog,
   DialogActions,
   DialogContent,
+  Grid,
   IconButton,
   Snackbar,
   Typography,
@@ -14,7 +16,6 @@ import { common_MediaItem } from 'api/proto-http/admin';
 import { FullSizeMediaModalInterface } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/media-selector.scss';
 import { PreviewMediaForUpload } from './previewMediaForUpload';
 
 type MediaKey = keyof common_MediaItem;
@@ -100,54 +101,72 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
     <>
       <Dialog open={open} onClose={closePreviewAndModal} scroll='paper' maxWidth='lg'>
         <Box position='relative'>
-          <DialogContent className={styles.dialog}>
-            <Box component='div' className={styles.full_size_modal_media_container}>
-              {clickedMedia &&
-                (isVideo(clickedMedia.thumbnail?.mediaUrl) ? (
-                  <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
-                    <video src={clickedMedia.thumbnail?.mediaUrl}></video>
-                  </a>
-                ) : (
-                  <>
-                    {isPreviewOpen ? (
-                      <PreviewMediaForUpload
-                        b64Media={clickedMedia.thumbnail?.mediaUrl || ''}
-                        croppedImage={croppedImage}
-                        isCropperOpen={isCropperOpen}
-                        setCroppedImage={setCroppedImage}
-                        setIsCropperOpen={setIsCropperOpen}
-                        clear={clearDragDropSelector}
-                        handleUploadMedia={handleUploadMedia}
-                      />
+          <Grid container spacing={2} justifyContent='center' alignItems='center' padding='10%'>
+            <Grid xs={12}>
+              <DialogContent>
+                {clickedMedia &&
+                  (isVideo(clickedMedia.thumbnail?.mediaUrl) ? (
+                    <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
+                      <video src={clickedMedia.thumbnail?.mediaUrl}></video>
+                    </a>
+                  ) : (
+                    <>
+                      {isPreviewOpen ? (
+                        <PreviewMediaForUpload
+                          b64Media={clickedMedia.thumbnail?.mediaUrl || ''}
+                          croppedImage={croppedImage}
+                          isCropperOpen={isCropperOpen}
+                          setCroppedImage={setCroppedImage}
+                          setIsCropperOpen={setIsCropperOpen}
+                          clear={clearDragDropSelector}
+                          handleUploadMedia={handleUploadMedia}
+                        />
+                      ) : (
+                        <Box position='relative'>
+                          <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
+                            <img
+                              src={clickedMedia.thumbnail?.mediaUrl}
+                              alt=''
+                              style={{ width: '100%', height: '100%' }}
+                            />
+                          </a>
+                          <IconButton
+                            style={{ position: 'absolute', left: '0' }}
+                            onClick={() => togglePreviewMode()}
+                          >
+                            <CropIcon fontSize='large' color='action' />
+                          </IconButton>
+                        </Box>
+                      )}
+                    </>
+                  ))}
+              </DialogContent>
+            </Grid>
+            <Grid xs={12}>
+              <DialogContent>
+                {['fullSize', 'compressed', 'thumbnail'].map((type) => (
+                  <Typography variant='body1' key={type}>
+                    {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
+                      <>
+                        {`${type.charAt(0).toUpperCase() + type.slice(1)}: ${trimUrl(clickedMedia[type as MediaKey]?.mediaUrl)}`}
+                        <Button
+                          size='small'
+                          onClick={() =>
+                            handleCopyToClipboard(clickedMedia[type as MediaKey]?.mediaUrl)
+                          }
+                        >
+                          <ContentCopy />
+                        </Button>
+                        {` Dimensions: ${videoDimensions[type] || `${clickedMedia[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia[type as MediaKey]?.height || 'N/A'}px`}`}
+                      </>
                     ) : (
-                      <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
-                        <img src={clickedMedia.thumbnail?.mediaUrl} alt='' />
-                      </a>
+                      `No ${type} available`
                     )}
-                  </>
+                  </Typography>
                 ))}
-            </Box>
-            {['fullSize', 'compressed', 'thumbnail'].map((type) => (
-              <Typography variant='body1' key={type}>
-                {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
-                  <>
-                    {`${type.charAt(0).toUpperCase() + type.slice(1)}: ${trimUrl(clickedMedia[type as MediaKey]?.mediaUrl)}`}
-                    <Button
-                      size='small'
-                      onClick={() =>
-                        handleCopyToClipboard(clickedMedia[type as MediaKey]?.mediaUrl)
-                      }
-                    >
-                      <ContentCopy />
-                    </Button>
-                    {` Dimensions: ${videoDimensions[type] || `${clickedMedia[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia[type as MediaKey]?.height || 'N/A'}px`}`}
-                  </>
-                ) : (
-                  `No ${type} available`
-                )}
-              </Typography>
-            ))}
-          </DialogContent>
+              </DialogContent>
+            </Grid>
+          </Grid>
           <DialogActions>
             <IconButton
               onClick={closePreviewAndModal}
@@ -155,14 +174,6 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
             >
               <CloseIcon fontSize='medium' />
             </IconButton>
-            <Button
-              size='small'
-              style={{ position: 'absolute', left: '0', top: '10px' }}
-              variant='contained'
-              onClick={() => togglePreviewMode()}
-            >
-              crop media
-            </Button>
           </DialogActions>
         </Box>
       </Dialog>
