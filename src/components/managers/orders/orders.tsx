@@ -1,5 +1,15 @@
 import SearchIcon from '@mui/icons-material/Search';
-import { Button, FormControl, Grid, InputLabel, MenuItem, Select, TextField } from '@mui/material';
+import {
+  Button,
+  FormControl,
+  Grid,
+  InputLabel,
+  MenuItem,
+  Select,
+  TextField,
+  Theme,
+  useMediaQuery,
+} from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
@@ -41,6 +51,7 @@ export const Orders: FC = () => {
   const [email, setEmail] = useState('');
 
   const [orderId, setOrderId] = useState('');
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const [searchFilters, setSearchFilters] = useState<SearchFilters>({
     status: undefined,
@@ -208,9 +219,9 @@ export const Orders: FC = () => {
 
   return (
     <Layout>
-      <div style={{ margin: '5% 10%' }}>
-        <Grid container spacing={2} sx={{ mb: 4 }}>
-          <Grid item xs={3}>
+      <Grid container spacing={2} padding={isMobile ? '18%' : '5%'}>
+        <Grid item xs={12} container spacing={2}>
+          <Grid item xs={12} sm={3}>
             <FormControl fullWidth>
               <InputLabel>Status</InputLabel>
               <Select value={selectedStatus} label='Status' onChange={handleStatusChange}>
@@ -223,7 +234,7 @@ export const Orders: FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={3}>
+          <Grid item xs={12} sm={3}>
             <FormControl fullWidth>
               <InputLabel>Payment</InputLabel>
               <Select value={selectedPayment} label='Payment' onChange={handlePaymentChange}>
@@ -236,63 +247,62 @@ export const Orders: FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={3}>
-            <FormControl fullWidth>
-              <TextField
-                label='Email'
-                variant='outlined'
-                value={email}
-                onChange={handleEmailChange}
-              />
-            </FormControl>
+          <Grid item xs={12} sm={3}>
+            <TextField
+              label='Email'
+              variant='outlined'
+              value={email}
+              onChange={handleEmailChange}
+              fullWidth
+            />
           </Grid>
-          <Grid item xs={3}>
-            <FormControl fullWidth>
-              <TextField
-                type='number'
-                label='Order id'
-                variant='outlined'
-                value={orderId}
-                onChange={handleOrderIdChange}
-                inputProps={{ min: 0 }}
-                onKeyDown={removePossibilityToUseSigns}
-              />
-            </FormControl>
-          </Grid>
-          <Grid item xs={3}>
-            <Button
-              variant='contained'
-              disabled={loading}
-              onClick={initSearchFilters}
-              sx={{ height: '100%' }}
-              startIcon={<SearchIcon />}
-            >
-              Search
-            </Button>
+          <Grid item xs={12} sm={3}>
+            <TextField
+              type='number'
+              label='Order id'
+              variant='outlined'
+              value={orderId}
+              onChange={handleOrderIdChange}
+              inputProps={{ min: 0 }}
+              onKeyDown={removePossibilityToUseSigns}
+              fullWidth
+            />
           </Grid>
         </Grid>
-
-        <DataGrid
-          rows={rows}
-          columns={columns}
-          autoHeight
-          loading={loading}
-          rowSelection={false}
-          pageSizeOptions={[]}
-          onRowClick={handleRowClick}
-        />
-
-        {loadMoreVisible && (
+        <Grid item xs={12}>
           <Button
             variant='contained'
-            onClick={loadMore}
             disabled={loading}
-            style={{ marginTop: '20px' }}
+            onClick={initSearchFilters}
+            sx={{ height: '100%' }}
+            startIcon={<SearchIcon />}
           >
-            Load More
+            Search
           </Button>
-        )}
-      </div>
+        </Grid>
+        <Grid item xs={12}>
+          <DataGrid
+            rows={rows}
+            columns={columns}
+            autoHeight
+            loading={loading}
+            rowSelection={false}
+            pageSizeOptions={[]}
+            onRowClick={handleRowClick}
+          />
+          {loadMoreVisible && (
+            <Button
+              variant='contained'
+              onClick={loadMore}
+              disabled={loading}
+              style={{ marginTop: '20px' }}
+            >
+              Load More
+            </Button>
+          )}
+        </Grid>
+      </Grid>
+      {/* </div> */}
     </Layout>
   );
 };

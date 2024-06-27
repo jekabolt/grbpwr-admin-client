@@ -1,5 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Alert, Button, Dialog, Grid, IconButton, Snackbar } from '@mui/material';
+import { Alert, Button, Dialog, IconButton, Snackbar } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelectorModalProps } from 'features/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
@@ -57,30 +57,27 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
         maxWidth='xl'
         className={styles.modal}
       >
-        <Grid container spacing={2} justifyContent='center'>
-          <MediaSelector
-            allowMultiple={allowMultiple}
-            select={select}
-            selectedMedia={selectedMedia}
-          />
-          <Grid item xs={2} className={styles.save_btn}>
-            <Button onClick={handleMediaAndCloseSelector} variant='contained' size='small'>
-              Save
-            </Button>
-          </Grid>
-          <IconButton
-            className={styles.close_modal}
-            size='small'
-            aria-label='close'
-            onClick={handleClose}
-          >
-            <ClearIcon />
-          </IconButton>
-        </Grid>
-        <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
-          <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
-        </Snackbar>
+        <MediaSelector
+          allowMultiple={allowMultiple}
+          select={select}
+          selectedMedia={selectedMedia}
+        />
+
+        <Button onClick={handleMediaAndCloseSelector} variant='contained' size='small'>
+          Save
+        </Button>
+        <IconButton
+          className={styles.close_modal}
+          size='small'
+          aria-label='close'
+          onClick={handleClose}
+        >
+          <ClearIcon />
+        </IconButton>
       </Dialog>
+      <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
+        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+      </Snackbar>
     </>
   );
 };

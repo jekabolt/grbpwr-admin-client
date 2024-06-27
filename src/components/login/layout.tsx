@@ -20,30 +20,29 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
 
   return (
     <Grid container justifyContent='center' className={styles.layout}>
-      <Grid item xs={1} className={styles.layout_logo}>
+      <Grid item className={styles.layout_logo}>
         <Button
           variant='contained'
-          size='small'
-          startIcon={<ArrowBackIosIcon />}
+          // startIcon={<ArrowBackIosIcon fontSize='small' />}
           onClick={() => window.history.back()}
-          sx={{ whiteSpace: 'nowrap' }}
+          sx={{ whiteSpace: 'nowrap', width: 10 }}
         >
-          Go Back
+          <ArrowBackIosIcon fontSize='small' />
         </Button>
       </Grid>
-      <Grid item xs={11} className={styles.layout_content}>
+      <Grid item xs={12} className={styles.layout_content}>
         {children}
       </Grid>
-      <Grid item xs={12} className={styles.layout_logout}>
+      <Grid item className={styles.layout_logout}>
         <Button
           variant='outlined'
           color='secondary'
           size='small'
-          startIcon={<ExitToAppIcon />}
+          // startIcon={<ExitToAppIcon fontSize='small' />}
           onClick={handleLogout}
           className={styles.hide_btn}
         >
-          Log Out
+          <ExitToAppIcon fontSize='small' />
         </Button>
       </Grid>
     </Grid>

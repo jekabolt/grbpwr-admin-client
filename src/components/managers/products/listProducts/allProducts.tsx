@@ -3,7 +3,8 @@ import { useNavigate } from '@tanstack/react-location';
 import { deleteProductByID } from 'api/admin';
 import { GetProductsPagedRequest } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { FC, MouseEvent, useEffect, useState } from 'react';
+import debounce from 'lodash/debounce';
+import { FC, MouseEvent, useCallback, useEffect, useState } from 'react';
 import { Filter } from './filterProducts/filterProducts';
 import { ListProducts } from './listProducts';
 import useListProduct from './useListProduct/useListProduct';
@@ -48,6 +49,13 @@ export const AllProducts: FC = () => {
     setSnackbarOpen(false);
   };
 
+  const debouncedFetchProducts = useCallback(
+    debounce((values: GetProductsPagedRequest) => {
+      fetchProducts(50, 0, values);
+    }, 500),
+    [fetchProducts],
+  );
+
   useEffect(() => {
     const handleScroll = () => {
       if (
@@ -64,17 +72,18 @@ export const AllProducts: FC = () => {
   }, [isLoading, hasMore, products.length, fetchProducts]);
 
   useEffect(() => {
-    fetchProducts(50, 0, filter);
-  }, [fetchProducts]);
+    debouncedFetchProducts(filter);
+  }, [filter, debouncedFetchProducts]);
 
-  const handleSubmit = (values: GetProductsPagedRequest) => {
-    fetchProducts(50, 0, values);
+  const handleFilterChange = (values: GetProductsPagedRequest) => {
+    setFilter(values);
+    debouncedFetchProducts(values);
   };
 
   return (
     <Grid container spacing={1} justifyContent='center'>
-      <Grid item xs={10}>
-        <Filter filter={filter} onSubmit={handleSubmit} />
+      <Grid item xs={12}>
+        <Filter filter={filter} onFilterChange={handleFilterChange} />
       </Grid>
       <Grid item xs={12}>
         <ListProducts

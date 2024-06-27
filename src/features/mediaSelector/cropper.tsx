@@ -5,6 +5,7 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  Grid,
   IconButton,
   Slider,
   Typography,
@@ -72,58 +73,64 @@ export const MediaCropper: FC<CropperInterface> = ({
 
   return (
     <Dialog open={selectedFile ? open : false} onClose={close} fullWidth maxWidth='md'>
-      <Box display='flex' justifyContent='center' gap='50px' position='relative'>
-        <IconButton onClick={close} style={{ position: 'absolute', right: '0' }}>
-          <CloseIcon fontSize='medium' />
-        </IconButton>
-        <Box display='grid'>
-          <DialogContent
-            style={{
-              height: '500px',
-              width: '400px',
-              position: 'relative',
-            }}
-          >
-            <Cropper
-              onCropChange={setCrop}
-              image={selectedFile || ''}
-              zoom={zoom}
-              crop={crop}
-              aspect={aspect}
-              onCropComplete={onCropComplete}
-              onZoomChange={setZoom}
-            />
-          </DialogContent>
-          <DialogActions>
-            <Slider
-              value={zoom}
-              min={1}
-              max={3}
-              step={0.1}
-              aria-labelledby='Zoom'
-              onChange={(e, zoom) => setZoom(Number(zoom))}
-            />
-          </DialogActions>
+      <Dialog open={selectedFile ? open : false} onClose={close} fullWidth maxWidth='md'>
+        <Box display='flex' justifyContent='center' position='relative'>
+          <IconButton onClick={close} style={{ position: 'absolute', right: '0', top: '0' }}>
+            <CloseIcon fontSize='medium' />
+          </IconButton>
+          <Grid container spacing={2} padding='8%'>
+            <Grid item xs={12} md={8}>
+              <DialogContent
+                style={{
+                  height: '500px',
+                  width: '100%',
+                  position: 'relative',
+                }}
+              >
+                <Cropper
+                  onCropChange={setCrop}
+                  image={selectedFile || ''}
+                  zoom={zoom}
+                  crop={crop}
+                  aspect={aspect}
+                  onCropComplete={onCropComplete}
+                  onZoomChange={setZoom}
+                />
+              </DialogContent>
+              <DialogActions>
+                <Slider
+                  value={zoom}
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  aria-labelledby='Zoom'
+                  onChange={(e, zoom) => setZoom(Number(zoom))}
+                />
+              </DialogActions>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Box position='relative'>
+                <Typography variant='h6'>Select Aspect Ratio</Typography>
+                <Box display='grid' gap='5px'>
+                  {aspectRatios.map((ratio) => (
+                    <Button
+                      key={ratio.label}
+                      onClick={() => setAspect(ratio.value)}
+                      variant={aspect === ratio.value ? 'contained' : 'outlined'}
+                      style={{
+                        backgroundColor: aspect === ratio.value ? ratio.color : 'transparent',
+                      }}
+                    >
+                      {ratio.label}
+                    </Button>
+                  ))}
+                  <Button onClick={handleSave}>Save Crop</Button>
+                </Box>
+              </Box>
+            </Grid>
+          </Grid>
         </Box>
-        <DialogActions>
-          <Box>
-            <Typography variant='h6'>Select Aspect Ratio</Typography>
-            <Box display='grid' gap='5px'>
-              {aspectRatios.map((ratio) => (
-                <Button
-                  key={ratio.label}
-                  onClick={() => setAspect(ratio.value)}
-                  variant={aspect === ratio.value ? 'contained' : 'outlined'}
-                  style={{ backgroundColor: aspect === ratio.value ? ratio.color : 'transparent' }}
-                >
-                  {ratio.label}
-                </Button>
-              ))}
-              <Button onClick={handleSave}>Save Crop</Button>
-            </Box>
-          </Box>
-        </DialogActions>
-      </Box>
+      </Dialog>
     </Dialog>
   );
 };

@@ -1,5 +1,4 @@
 import {
-  Button,
   Checkbox,
   FormControl,
   FormControlLabel,
@@ -10,7 +9,12 @@ import {
   TextField,
 } from '@mui/material';
 import { getDictionary } from 'api/admin';
-import { GetProductsPagedRequest, common_Dictionary } from 'api/proto-http/admin';
+import {
+  GetProductsPagedRequest,
+  common_Dictionary,
+  common_FilterConditions,
+} from 'api/proto-http/admin';
+import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, FieldProps, Form, Formik } from 'formik';
@@ -18,10 +22,10 @@ import { FC, useEffect, useState } from 'react';
 
 interface FilterProps {
   filter: GetProductsPagedRequest;
-  onSubmit: (values: GetProductsPagedRequest) => void;
+  onFilterChange: (values: GetProductsPagedRequest) => void;
 }
 
-export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
+export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
   const [dictionary, setDictionary] = useState<common_Dictionary>();
 
   useEffect(() => {
@@ -32,39 +36,48 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
     fetchDictionary();
   }, []);
 
+  const handleFieldChange = (setFieldValue: Function, fieldName: string, value: any) => {
+    setFieldValue(fieldName, value);
+    const updatedFilter = { ...filter };
+
+    if (fieldName.includes('filterConditions')) {
+      const keys = fieldName.split('.');
+      if (keys[1] === 'sizesIds' && value.includes('')) {
+        updatedFilter.filterConditions = {
+          ...filter.filterConditions,
+          sizesIds: [],
+        } as common_FilterConditions;
+      } else {
+        updatedFilter.filterConditions = {
+          ...filter.filterConditions,
+          [keys[1]]: value,
+        } as common_FilterConditions;
+      }
+    } else {
+      updatedFilter[fieldName as keyof GetProductsPagedRequest] = value;
+    }
+
+    onFilterChange(updatedFilter);
+  };
+
   return (
-    <Formik
-      initialValues={filter}
-      onSubmit={(values, { setSubmitting }) => {
-        onSubmit(values);
-        setSubmitting(false);
-      }}
-    >
-      {({ handleSubmit, setFieldValue }) => (
-        <Form onSubmit={handleSubmit}>
+    <Formik initialValues={filter} onSubmit={() => {}}>
+      {({ setFieldValue }) => (
+        <Form>
           <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <Grid container justifyContent='flex-end'>
-                <Grid item>
-                  <Button variant='contained' type='submit'>
-                    Apply Filters
-                  </Button>
-                </Grid>
-              </Grid>
-            </Grid>
             <Grid item xs={6}>
               <Grid container spacing={2}>
                 <Grid item xs={12} sm={6} md={3}>
                   <Field name='sortFactors'>
-                    {({ field, form }: FieldProps) => (
+                    {({ field }: FieldProps) => (
                       <FormControl fullWidth>
                         <InputLabel id='sortFactors-label'>SORT FACTORS</InputLabel>
                         <Select
                           labelId='sortFactors-label'
                           {...field}
-                          onChange={(e) => {
-                            form.setFieldValue(field.name, [e.target.value]);
-                          }}
+                          onChange={(e) =>
+                            handleFieldChange(setFieldValue, field.name, [e.target.value])
+                          }
                           value={field.value || ''}
                           label='SORT FACTORS'
                         >
@@ -80,14 +93,14 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Field name='orderFactor'>
-                    {({ field, form }: FieldProps) => (
+                    {({ field }: FieldProps) => (
                       <FormControl fullWidth>
                         <InputLabel id='orderFactor-label'>ORDER</InputLabel>
                         <Select
                           {...field}
-                          onChange={(event) => {
-                            form.setFieldValue(field.name, event.target.value);
-                          }}
+                          onChange={(e) =>
+                            handleFieldChange(setFieldValue, field.name, e.target.value)
+                          }
                           value={field.value || ''}
                           label='ORDER'
                         >
@@ -103,17 +116,18 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Field name='filterConditions.categoryId'>
-                    {({ field, form }: FieldProps) => (
+                    {({ field }: FieldProps) => (
                       <FormControl fullWidth>
                         <InputLabel>CATEGORY</InputLabel>
                         <Select
                           {...field}
-                          onChange={(event) => {
-                            form.setFieldValue(field.name, event.target.value);
-                          }}
+                          onChange={(e) =>
+                            handleFieldChange(setFieldValue, field.name, e.target.value)
+                          }
                           value={field.value}
                           label='CATEGORY'
                         >
+                          <MenuItem value=''>ANY</MenuItem>
                           {dictionary?.categories?.map((s) => (
                             <MenuItem key={s.id} value={s.id}>
                               {findInDictionary(dictionary, s.id, 'category')}
@@ -126,19 +140,23 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Field name='filterConditions.sizesIds'>
-                    {({ field, form }: FieldProps) => (
+                    {({ field }: FieldProps) => (
                       <FormControl fullWidth>
                         <InputLabel>SIZES</InputLabel>
                         <Select
                           {...field}
-                          onChange={(event) => {
-                            const selectedSizes = event.target.value as number[];
-                            form.setFieldValue(field.name, selectedSizes);
-                          }}
+                          onChange={(e) =>
+                            handleFieldChange(
+                              setFieldValue,
+                              field.name,
+                              e.target.value.includes('') ? [] : (e.target.value as number[]),
+                            )
+                          }
                           value={field.value || []}
                           label='SIZES'
                           multiple
                         >
+                          <MenuItem value=''>ANY</MenuItem>
                           {dictionary?.sizes?.map((s) => (
                             <MenuItem key={s.id} value={s.id}>
                               {findInDictionary(dictionary, s.id, 'size')}
@@ -157,7 +175,9 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <TextField
                     label='FROM'
                     type='number'
-                    onChange={(e) => setFieldValue('filterConditions.from', e.target.value)}
+                    onChange={(e) =>
+                      handleFieldChange(setFieldValue, 'filterConditions.from', e.target.value)
+                    }
                     value={filter.filterConditions?.from}
                     inputProps={{ min: 0 }}
                     onKeyDown={removePossibilityToUseSigns}
@@ -167,45 +187,64 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                   <TextField
                     label='TO'
                     type='number'
-                    onChange={(e) => setFieldValue('filterConditions.to', e.target.value)}
+                    onChange={(e) =>
+                      handleFieldChange(setFieldValue, 'filterConditions.to', e.target.value)
+                    }
                     value={filter.filterConditions?.to}
                     inputProps={{ min: 0 }}
                     onKeyDown={removePossibilityToUseSigns}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                  <TextField
-                    label='COLOR'
-                    type='string'
-                    value={filter.filterConditions?.color}
-                    onChange={(e) => setFieldValue('filterConditions.color', e.target.value)}
-                  />
+                  <Field name='filterConditions.color'>
+                    {({ field }: FieldProps) => (
+                      <FormControl fullWidth>
+                        <InputLabel>COLOR</InputLabel>
+                        <Select
+                          {...field}
+                          onChange={(e) =>
+                            handleFieldChange(setFieldValue, field.name, e.target.value)
+                          }
+                          value={field.value}
+                          label='COLOR'
+                        >
+                          <MenuItem value=''>ANY</MenuItem>
+                          {colors.map((color, id) => (
+                            <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
+                              {color.name.toLowerCase().replace(/\s/g, '_')}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Field>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <TextField
                     label='TAG'
                     type='string'
                     value={filter.filterConditions?.byTag}
-                    onChange={(e) => setFieldValue('filterConditions.byTag', e.target.value)}
+                    onChange={(e) =>
+                      handleFieldChange(setFieldValue, 'filterConditions.byTag', e.target.value)
+                    }
                   />
                 </Grid>
               </Grid>
             </Grid>
-
             <Grid item xs={12} justifyContent='space-between'>
               <Grid container spacing={2}>
                 <Grid item>
                   <Field name='filterConditions.onSale'>
-                    {({ form, field }: FieldProps) => (
+                    {({ field }: FieldProps) => (
                       <FormControlLabel
                         label='SALE'
                         control={
                           <Checkbox
                             {...field}
                             checked={field.value || false}
-                            onChange={(e) => {
-                              form.setFieldValue(field.name, e.target.checked);
-                            }}
+                            onChange={(e) =>
+                              handleFieldChange(setFieldValue, field.name, e.target.checked)
+                            }
                           />
                         }
                       />
@@ -214,16 +253,16 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                 </Grid>
                 <Grid item>
                   <Field name='filterConditions.preorder'>
-                    {({ form, field }: FieldProps) => (
+                    {({ field }: FieldProps) => (
                       <FormControlLabel
                         label='PREORDER'
                         control={
                           <Checkbox
                             {...field}
                             checked={field.value || false}
-                            onChange={(e) => {
-                              form.setFieldValue(field.name, e.target.checked);
-                            }}
+                            onChange={(e) =>
+                              handleFieldChange(setFieldValue, field.name, e.target.checked)
+                            }
                           />
                         }
                       />
@@ -232,16 +271,16 @@ export const Filter: FC<FilterProps> = ({ filter, onSubmit }) => {
                 </Grid>
                 <Grid item>
                   <Field name='showHidden'>
-                    {({ form, field }: FieldProps) => (
+                    {({ field }: FieldProps) => (
                       <FormControlLabel
                         label='HIDDEN'
                         control={
                           <Checkbox
                             {...field}
                             checked={field.value || false}
-                            onChange={(e) => {
-                              form.setFieldValue(field.name, e.target.checked);
-                            }}
+                            onChange={(e) =>
+                              handleFieldChange(setFieldValue, field.name, e.target.checked)
+                            }
                           />
                         }
                       />

@@ -105,7 +105,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
 
   return (
     <Grid container justifyContent='center'>
-      <Grid item xs={11}>
+      <Grid item xs={12}>
         {sortedAndFilteredMedia && (
           <ImageList
             variant='standard'

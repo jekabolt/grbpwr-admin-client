@@ -1,4 +1,12 @@
-import { Button, Checkbox, FormControlLabel, Grid, TextField } from '@mui/material';
+import {
+  Button,
+  Checkbox,
+  FormControlLabel,
+  Grid,
+  TextField,
+  Theme,
+  useMediaQuery,
+} from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_PromoCodeInsert } from 'api/proto-http/admin';
@@ -22,6 +30,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
 
   const [promo, setPromo] = useState<common_PromoCodeInsert>(initialPromoStates);
   const [error, setError] = useState('');
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const handlePromoFieldsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -82,6 +91,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 label='PROMO CODE'
                 size='small'
                 onChange={handlePromoFieldsChange}
+                fullWidth={true}
               />
             </Grid>
             <Grid item xs={12} sm={4}>
@@ -97,7 +107,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 label='DISCOUNT'
                 size='small'
                 onChange={handlePromoFieldsChange}
-                style={{ width: '195px' }}
+                fullWidth={true}
               />
             </Grid>
             <Grid item xs={12} sm={4}>
@@ -106,7 +116,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 onChange={handleDateTimeChange}
                 minDate={new Date()}
                 label='EXPIRATION DATE'
-                slotProps={{ textField: { size: 'small' } }}
+                slotProps={{ textField: { size: 'small', fullWidth: isMobile } }}
               />
             </Grid>
           </Grid>
