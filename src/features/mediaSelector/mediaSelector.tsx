@@ -1,9 +1,8 @@
-import { Box, Grid } from '@mui/material';
+import { Grid, Theme, useMediaQuery } from '@mui/material';
 import { MediaSelectorInterface } from 'features/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
 import 'react-advanced-cropper/dist/style.css';
-import styles from 'styles/media-selector.scss';
 import { ByUrl } from './byUrl';
 import { DragDrop } from './dragDrop';
 import { FilterMedias } from './filterMedias';
@@ -38,6 +37,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
     setCroppedImage,
   } = useMediaSelector();
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   useEffect(() => {
     fetchFiles(50, 0);
@@ -65,24 +65,30 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   };
 
   return (
-    <Grid container spacing={2} justifyContent='center'>
-      <Grid item xs={11} className={styles.filter_upload_boxes}>
-        <Box component='div' className={styles.filter_upload_media_container}>
-          <ByUrl url={url} setUrl={setUrl} isLoading={isLoading} />
-          <DragDrop
-            loading={loading}
-            selectedFiles={selectedFiles}
-            setSelectedFiles={setSelectedFiles}
-            selectedFileUrl={selectedFileUrl}
-            setSelectedFileUrl={setSelectedFileUrl}
-          />
-          <FilterMedias
-            filterByType={filterByType}
-            setFilterByType={setFilterByType}
-            sortByDate={sortByDate}
-            setSortByDate={setSortByDate}
-          />
-        </Box>
+    <Grid container justifyContent='center' spacing={3} padding={isMobile ? '10%' : '3%'}>
+      <Grid item xs={12}>
+        <Grid container alignItems='center' spacing={2} justifyContent='center'>
+          <Grid item xs={12} sm={4}>
+            <ByUrl url={url} setUrl={setUrl} isLoading={isLoading} />
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <DragDrop
+              loading={loading}
+              selectedFiles={selectedFiles}
+              setSelectedFiles={setSelectedFiles}
+              selectedFileUrl={selectedFileUrl}
+              setSelectedFileUrl={setSelectedFileUrl}
+            />
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <FilterMedias
+              filterByType={filterByType}
+              setFilterByType={setFilterByType}
+              sortByDate={sortByDate}
+              setSortByDate={setSortByDate}
+            />
+          </Grid>
+        </Grid>
       </Grid>
       <Grid item>
         <PreviewMediaForUpload
