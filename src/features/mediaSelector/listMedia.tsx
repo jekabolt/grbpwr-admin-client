@@ -112,7 +112,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             sx={{
               width: '100%',
             }}
-            cols={isSmallScreen ? 1 : 5}
+            cols={isSmallScreen ? 2 : 5}
             gap={8}
             rowHeight={200}
           >
@@ -175,7 +175,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                   >
                     {isVideo(m.media?.thumbnail?.mediaUrl) && videoSizes[m.id ?? 0] ? (
                       <>
-                        ASPECT RATIO:{' '}
+                        RATIO:{' '}
                         {calculateAspectRatio(
                           videoSizes[m.id ?? 0].width,
                           videoSizes[m.id ?? 0].height,
@@ -183,7 +183,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                       </>
                     ) : (
                       <>
-                        ASPECT RATIO:{' '}
+                        RATIO:{' '}
                         {calculateAspectRatio(m.media?.fullSize?.width, m.media?.fullSize?.height)}
                       </>
                     )}

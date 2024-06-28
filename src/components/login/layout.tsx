@@ -1,10 +1,11 @@
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import { Button, Grid } from '@mui/material';
+import { AppBar, Box, Button, Container, IconButton, Toolbar } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
+import logo from 'img/tex-text.png';
 import { FC, ReactNode } from 'react';
-import styles from 'styles/layout.scss';
+import { HideOnScroll } from './scroll';
 
 interface LayoutProps {
   children: ReactNode;
@@ -18,33 +19,34 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
     navigate({ to: ROUTES.login, replace: true });
   };
 
+  const navigateMainPage = () => {
+    navigate({ to: ROUTES.main, replace: true });
+  };
+
   return (
-    <Grid container justifyContent='center' className={styles.layout}>
-      <Grid item className={styles.layout_logo}>
-        <Button
-          variant='contained'
-          // startIcon={<ArrowBackIosIcon fontSize='small' />}
-          onClick={() => window.history.back()}
-          sx={{ whiteSpace: 'nowrap', width: 10 }}
-        >
-          <ArrowBackIosIcon fontSize='small' />
-        </Button>
-      </Grid>
-      <Grid item xs={12} className={styles.layout_content}>
+    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+      <HideOnScroll>
+        <AppBar position='sticky' sx={{ backgroundColor: 'transparent', boxShadow: 'none' }}>
+          <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Button
+              variant='contained'
+              onClick={() => window.history.back()}
+              sx={{ whiteSpace: 'nowrap' }}
+            >
+              <ArrowBackIosIcon fontSize='small' />
+            </Button>
+            <IconButton onClick={navigateMainPage}>
+              <img src={logo} style={{ width: '30px', height: '30px' }} />
+            </IconButton>
+            <Button variant='outlined' color='secondary' size='small' onClick={handleLogout}>
+              <ExitToAppIcon fontSize='small' />
+            </Button>
+          </Toolbar>
+        </AppBar>
+      </HideOnScroll>
+      <Container component='main' sx={{ flexGrow: 1, overflowY: 'auto' }}>
         {children}
-      </Grid>
-      <Grid item className={styles.layout_logout}>
-        <Button
-          variant='outlined'
-          color='secondary'
-          size='small'
-          // startIcon={<ExitToAppIcon fontSize='small' />}
-          onClick={handleLogout}
-          className={styles.hide_btn}
-        >
-          <ExitToAppIcon fontSize='small' />
-        </Button>
-      </Grid>
-    </Grid>
+      </Container>
+    </Box>
   );
 };

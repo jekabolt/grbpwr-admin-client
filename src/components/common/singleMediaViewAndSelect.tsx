@@ -11,7 +11,7 @@ export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
 }) => {
   return (
     <Grid container>
-      <Grid item xs={10} className={styles.thumbnail_container}>
+      <Grid item xs={12} className={styles.thumbnail_container}>
         {link ? (
           isVideo(link) ? (
             <video src={link} controls></video>
