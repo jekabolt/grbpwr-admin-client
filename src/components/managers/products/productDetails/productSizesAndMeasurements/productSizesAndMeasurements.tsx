@@ -19,7 +19,6 @@ import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/product-details.scss';
 import { ProductIdProps } from '../utility/interfaces';
 
 export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
@@ -124,7 +123,7 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
   };
 
   return (
-    <TableContainer component={Paper} className={styles.size_measurement_table}>
+    <TableContainer component={Paper}>
       <Table aria-label='sizes table'>
         <TableHead>
           <TableRow>

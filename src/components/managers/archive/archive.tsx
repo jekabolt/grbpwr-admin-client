@@ -43,7 +43,7 @@ export const Archive: FC = () => {
 
   return (
     <Layout>
-      <Grid container spacing={4} justifyContent='center'>
+      <Grid container spacing={2} justifyContent='center'>
         <Grid item xs={12}>
           <CreateArchive fetchArchive={fetchArchive} showMessage={showMessage} />
         </Grid>

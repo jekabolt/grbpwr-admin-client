@@ -23,7 +23,7 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
   }, [b64Media]);
 
   return (
-    <Grid container justifyContent='center' alignItems='center' gap={1}>
+    <Grid container justifyContent='center' padding='2%' alignItems='center' gap={1}>
       {b64Media && (
         <>
           <Grid item xs={8} className={styles.preview_media_to_upload}>

@@ -16,7 +16,6 @@ export const Promo: FC = () => {
     setIsSnackBarOpen,
     showMessage,
   } = usePromo();
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   useEffect(() => {
     fetchPromos(50, 0);
