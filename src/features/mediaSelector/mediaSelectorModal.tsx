@@ -12,14 +12,8 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
   allowMultiple,
   saveSelectedMedia,
 }) => {
-  const {
-    fetchFiles,
-    snackBarMessage,
-    closeSnackBar,
-    isSnackBarOpen,
-    showMessage,
-    snackBarSeverity,
-  } = useMediaSelector();
+  const { snackBarMessage, closeSnackBar, isSnackBarOpen, showMessage, snackBarSeverity } =
+    useMediaSelector();
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [open, setOpen] = useState(true);
 
@@ -63,7 +57,12 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
           selectedMedia={selectedMedia}
         />
 
-        <Button onClick={handleMediaAndCloseSelector} variant='contained' size='small'>
+        <Button
+          onClick={handleMediaAndCloseSelector}
+          className={styles.save_btn}
+          variant='contained'
+          size='small'
+        >
           Save
         </Button>
         <IconButton

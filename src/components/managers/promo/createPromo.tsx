@@ -80,7 +80,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Grid container marginTop={4} justifyContent='center' spacing={4}>
+      <Grid container marginTop={4} justifyContent='center' spacing={2}>
         <Grid item xs={12} sm={8} md={7}>
           <Grid container spacing={2}>
             <Grid item xs={12} sm={4}>

@@ -150,12 +150,12 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
 
   return (
     <Grid container spacing={2} marginTop={4} alignItems='center'>
-      <Grid item xs={10}>
+      <Grid item xs={12}>
         <Typography variant='h5' textTransform='uppercase'>
           create new archive
         </Typography>
         <Grid container className={styles.scroll_container} wrap='nowrap'>
-          <Grid item className={styles.media_item_add}>
+          <Grid item xs={6} sm={3} className={styles.media_item_add}>
             <MediaSelectorLayout
               label='add media'
               allowMultiple={false}
@@ -163,9 +163,9 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
             />
           </Grid>
           {mediaItem.map((media, id) => (
-            <Box width='396px' key={id}>
-              <Grid item className={styles.media_item}>
-                <img src={media.media?.fullSize?.mediaUrl} alt={`Media item ${id}`} />
+            <>
+              <Grid item xs={6} sm={3} className={styles.media_item}>
+                <img src={media.media?.fullSize?.mediaUrl} />
                 <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
                   <ClearIcon fontSize='small' />
                 </IconButton>
@@ -175,7 +175,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
                   variant='overline'
                   className={expandedItemId === id ? styles.description : styles.hidden_description}
                 >
-                  {archive.itemsInsert?.[id]?.title ?? 'No title'} {/* Safe access */}
+                  {archive.itemsInsert?.[id]?.title ?? 'No title'}
                 </Typography>
 
                 {archive.itemsInsert?.[id]?.title &&
@@ -188,13 +188,13 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
                       )}
                     </IconButton>
                   )}
+                {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
+                  <a href={archive.itemsInsert[id].url} target='_blank' rel='noopener noreferrer'>
+                    go to link
+                  </a>
+                )}
               </Box>
-              {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
-                <a href={archive.itemsInsert[id].url} target='_blank' rel='noopener noreferrer'>
-                  go to link
-                </a>
-              )}
-            </Box>
+            </>
           ))}
         </Grid>
 
@@ -226,7 +226,8 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
           </Grid>
         </Grid>
       </Grid>
-      <Grid item xs={3}>
+
+      <Grid item xs={12}>
         <Button
           onClick={() => createArchive()}
           variant='contained'

@@ -48,40 +48,38 @@ export const ProductDetails: FC = () => {
 
   return (
     <Layout>
-      <Grid container spacing={2} marginTop={4} justifyContent='center'>
-        <Grid item xs={9}>
-          <Grid container spacing={2}>
-            <Grid item xs={7}>
-              <MediaView
+      <Grid container spacing={2} padding='2%' justifyContent='center'>
+        <Grid item xs={12} sm={6}>
+          <MediaView
+            product={product}
+            id={id}
+            fetchProduct={fetchProduct}
+            showMessage={showMessage}
+          />
+        </Grid>
+
+        <Grid item xs={12} sm={6}>
+          <Grid container spacing={2} padding='2%'>
+            <Grid item xs={12}>
+              <BasicProductIformation
                 product={product}
                 id={id}
                 fetchProduct={fetchProduct}
                 showMessage={showMessage}
               />
             </Grid>
-            <Grid item xs={5}>
-              <Grid container spacing={2}>
-                <Grid item xs={9}>
-                  <BasicProductIformation
-                    product={product}
-                    id={id}
-                    fetchProduct={fetchProduct}
-                    showMessage={showMessage}
-                  />
-                </Grid>
-                <Grid item>
-                  <ProductTags
-                    product={product}
-                    id={id}
-                    fetchProduct={fetchProduct}
-                    showMessage={showMessage}
-                  />
-                </Grid>
-              </Grid>
+            <Grid item xs={12}>
+              <ProductTags
+                product={product}
+                id={id}
+                fetchProduct={fetchProduct}
+                showMessage={showMessage}
+              />
             </Grid>
           </Grid>
         </Grid>
-        <Grid item xs={9.5}>
+
+        <Grid item xs={12}>
           <ProductSizesAndMeasurements
             product={product}
             fetchProduct={fetchProduct}

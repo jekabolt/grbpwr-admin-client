@@ -6,6 +6,8 @@ import {
   Select,
   SelectChangeEvent,
   TextField,
+  Theme,
+  useMediaQuery,
 } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
@@ -27,6 +29,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
     initial: values.product?.preorder || '',
     formatted: formatPreorderDate(values.product?.preorder) || '',
   });
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
     const { name, value } = e.target;
@@ -96,28 +99,30 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
 
   return (
     <Grid container display='grid' spacing={2}>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <Field
           as={TextField}
           variant='outlined'
           label='NAME'
           name='product.name'
           required
+          fullWidth
           InputLabelProps={{ shrink: true }}
         />
       </Grid>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <Field
           as={TextField}
           variant='outlined'
           label='BRAND'
           name='product.brand'
           required
+          fullWidth
           InputLabelProps={{ shrink: true }}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
         />
       </Grid>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <FormControl required fullWidth>
           <InputLabel shrink>GENDER</InputLabel>
           <Select
@@ -137,7 +142,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           </Select>
         </FormControl>
       </Grid>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <FormControl required fullWidth>
           <InputLabel shrink>CATEGORY</InputLabel>
           <Select
@@ -155,7 +160,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           </Select>
         </FormControl>
       </Grid>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <FormControl fullWidth required>
           <InputLabel shrink>COLOR</InputLabel>
           <Select
@@ -173,7 +178,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           </Select>
         </FormControl>
       </Grid>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <Field
           as={TextField}
           type='color'
@@ -184,7 +189,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           fullWidth
         />
       </Grid>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <FormControl fullWidth required>
           <InputLabel shrink>COUNTRY</InputLabel>
           <Select
@@ -202,7 +207,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           </Select>
         </FormControl>
       </Grid>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <Field
           as={TextField}
           variant='outlined'
@@ -211,6 +216,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           type='number'
           inputProps={{ min: 0 }}
           required
+          fullWidth
           InputLabelProps={{ shrink: true }}
           onChange={handlePriceChange}
           onKeyDown={removePossibilityToUseSigns}
@@ -218,7 +224,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
       </Grid>
 
       {showSales && (
-        <Grid item>
+        <Grid item xs={isMobile ? 12 : 8.5}>
           <Field
             as={TextField}
             label='SALE PERCENTAGE'
@@ -234,7 +240,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
       )}
 
       {showPreorder && (
-        <Grid item>
+        <Grid item xs={isMobile ? 12 : 8.5}>
           <Field
             as={TextField}
             label='PREORDER'
@@ -248,18 +254,19 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
           />
         </Grid>
       )}
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <Field
           as={TextField}
           label='DESCRIPTION'
           name='product.description'
           InputLabelProps={{ shrink: true }}
+          fullWidth
           multiline
           required
         />
       </Grid>
 
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <Field
           as={TextField}
           label='SKU'

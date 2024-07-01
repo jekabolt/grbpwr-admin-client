@@ -34,24 +34,15 @@ export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveS
   }, [product]);
 
   return (
-    <Grid container gap={2} className={styles.listed_media_container}>
+    <Grid container spacing={1} className={styles.listed_media_container}>
       {uniqueMedia?.map((media) => (
-        <Grid
-          item
-          xs={12}
-          sm={6}
-          md={4}
-          lg={3}
-          key={media.id}
-          className={styles.listed_media_wrapper}
-        >
+        <Grid item xs={6} md={3} key={media.id} className={styles.listed_media_wrapper}>
           {isVideo(media.media?.thumbnail?.mediaUrl) ? (
             <video src={media.media?.thumbnail?.mediaUrl} controls className={styles.media}></video>
           ) : (
             <img src={media.media?.thumbnail?.mediaUrl} alt='media' className={styles.media} />
           )}
           <IconButton
-            aria-label='delete'
             size='small'
             onClick={() => handleDeleteMedia(media.id)}
             className={styles.media_btn}
@@ -60,12 +51,14 @@ export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveS
           </IconButton>
         </Grid>
       ))}
-      <Grid item xs={12} sm={6} md={4} lg={3} className={styles.listed_media_wrapper}>
-        <MediaSelectorLayout
-          label='select media'
-          allowMultiple={true}
-          saveSelectedMedia={saveSelectedMedia}
-        />
+      <Grid item xs={6} md={3}>
+        <div className={styles.select_media_wrapper}>
+          <MediaSelectorLayout
+            label='select media'
+            allowMultiple={true}
+            saveSelectedMedia={saveSelectedMedia}
+          />
+        </div>
       </Grid>
     </Grid>
   );

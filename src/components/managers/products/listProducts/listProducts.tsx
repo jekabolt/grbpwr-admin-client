@@ -35,11 +35,18 @@ export const ListProducts: FC<ProductProps> = ({
           onMouseLeave={() => setHoveredProductId(undefined)}
           onClick={() => productClick(product.id)}
           className={`${styles.product} ${product.productInsert?.hidden && showHidden ? styles.hidden_product : ''}`}
-          xs={12}
+          xs={6}
           sm={6}
           md={4}
           lg={3}
         >
+          {deletingProductId === product.id ? (
+            <Typography variant='h4'>product removed</Typography>
+          ) : isVideo(product.productInsert?.thumbnail) ? (
+            <video src={product.productInsert?.thumbnail} controls />
+          ) : (
+            <img src={product.productInsert?.thumbnail} alt='Product Image' />
+          )}
           {hoveredProductId === product.id && (
             <IconButton
               onClick={(e) => {
@@ -50,13 +57,6 @@ export const ListProducts: FC<ProductProps> = ({
             >
               {confirmDeleteProductId === product.id ? <CheckIcon /> : <CloseIcon />}
             </IconButton>
-          )}
-          {deletingProductId === product.id ? (
-            <Typography variant='h4'>product removed</Typography>
-          ) : isVideo(product.productInsert?.thumbnail) ? (
-            <video src={product.productInsert?.thumbnail} controls />
-          ) : (
-            <img src={product.productInsert?.thumbnail} alt='Product Image' />
           )}
           <Typography
             variant='overline'

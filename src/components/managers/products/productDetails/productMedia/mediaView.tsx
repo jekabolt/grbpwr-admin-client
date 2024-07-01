@@ -1,4 +1,4 @@
-import { Grid, Typography } from '@mui/material';
+import { Grid, Theme, Typography, useMediaQuery } from '@mui/material';
 import { addMediaByID } from 'api/admin';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { updateProductById } from 'api/updateProductsById';
@@ -8,6 +8,7 @@ import { ProductIdProps } from '../utility/interfaces';
 import { ProductMedias } from './components/productIdMedias';
 
 export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct, showMessage }) => {
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const saveThumbnail = async (newSelectedMedia: common_MediaFull[]) => {
     const thumbnailUrl = newSelectedMedia[0].media?.thumbnail?.mediaUrl ?? '';
 
@@ -55,7 +56,7 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct, showM
   };
 
   return (
-    <Grid container spacing={4}>
+    <Grid container padding={isMobile ? '2%' : ''} spacing={3}>
       <Grid item xs={12}>
         <Typography variant='h4' textTransform='uppercase'>
           thumbnail
@@ -67,7 +68,7 @@ export const MediaView: FC<ProductIdProps> = ({ product, id, fetchProduct, showM
       </Grid>
       <Grid item xs={12}>
         <Typography variant='h4' textTransform='uppercase'>
-          product medias
+          media
         </Typography>
         <ProductMedias
           product={product}

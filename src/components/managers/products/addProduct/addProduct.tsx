@@ -104,31 +104,26 @@ export const AddProducts: FC = () => {
       <Formik initialValues={initialProductState} onSubmit={handleSubmit}>
         {({ isSubmitting }) => (
           <Form>
-            <Grid
-              container
-              justifyContent='center'
-              style={{ width: '90%', margin: '3%' }}
-              spacing={2}
-            >
-              <Grid item xs={7}>
+            <Grid container justifyContent='center' padding='2%' spacing={2}>
+              <Grid item xs={12} sm={6}>
                 <Field component={Media} name='mediaIds' clearMediaPreview={clearMediaPreview} />
               </Grid>
-              <Grid item xs={4}>
+              <Grid item xs={12} sm={6}>
                 <Grid container spacing={2}>
-                  <Grid item>
+                  <Grid item xs={12}>
                     <Field component={CommonProductInsert} name='product' dictionary={dictionary} />
                   </Grid>
-                  <Grid item>
+                  <Grid item xs={12}>
                     <Field component={Tags} name='tags' />
                   </Grid>
                 </Grid>
               </Grid>
-              <Grid item xs={11}>
+              <Grid item xs={12}>
                 <Field component={Sizes} name='sizeMeasurements' dictionary={dictionary} />
               </Grid>
               <Grid item>
                 <Button type='submit' variant='contained' size='large'>
-                  {isSubmitting ? <CircularProgress size={24} /> : 'submit'}
+                  {isSubmitting ? <CircularProgress size={24} /> : 'save'}
                 </Button>
               </Grid>
             </Grid>

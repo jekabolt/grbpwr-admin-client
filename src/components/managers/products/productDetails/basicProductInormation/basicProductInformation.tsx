@@ -9,7 +9,9 @@ import {
   Select,
   SelectChangeEvent,
   TextField,
+  Theme,
   Typography,
+  useMediaQuery,
 } from '@mui/material';
 import { getDictionary } from 'api/admin';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
@@ -26,7 +28,6 @@ import { formatDate } from 'features/utilitty/formateDate';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
-import styles from 'styles/product-details.scss';
 import { Country } from '../../addProduct/addProductInterface/addProductInterface';
 import { ProductIdProps } from '../utility/interfaces';
 
@@ -50,6 +51,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
   const initialPreorderValue = product?.product?.productInsert?.preorder !== '';
   const [showSales, setShowSales] = useState(initialSaleValue);
   const [showPreorder, setShowPreorder] = useState(initialPreorderValue);
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   useEffect(() => {
     const showSalesField =
@@ -181,18 +183,20 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     return format(today, 'yyyy-MM-dd');
   };
 
-  console.log('Initial Preorder Date:', preorderDate.initial);
-  console.log('Formatted Preorder Date:', preorderDate.formatted);
-
   return (
-    <Grid container spacing={2} className={styles.product_details_container}>
-      <Grid item xs={12}>
+    <Grid container spacing={2}>
+      <Grid item xs={6}>
         <TextField
           label='PRODUCT ID'
           InputLabelProps={{ shrink: true }}
           InputProps={{ readOnly: true }}
           value={product?.product?.id || ''}
         />
+      </Grid>
+      <Grid item xs={6}>
+        <Button size='large' onClick={updateProductAndToggleEditMode} variant='contained'>
+          {isEdit ? 'upload' : 'edit'}
+        </Button>
       </Grid>
       <Grid item xs={12}>
         <TextField
@@ -210,7 +214,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           value={product?.product?.updatedAt ? formatDate(product?.product?.updatedAt) : ''}
         />
       </Grid>
-      <Grid item xs={12}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <TextField
           name='name'
           onChange={handleChange}
@@ -221,9 +225,10 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
           required={isEdit}
+          fullWidth
         />
       </Grid>
-      <Grid item xs={12}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <TextField
           name='brand'
           onChange={handleChange}
@@ -234,9 +239,10 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
           required={isEdit}
+          fullWidth
         />
       </Grid>
-      <Grid item xs={8.5}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>GENDER</InputLabel>
           <Select
@@ -259,7 +265,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={8.5}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>CATEGORY</InputLabel>
           <Select
@@ -281,7 +287,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={8.5}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>COLOR</InputLabel>
           <Select
@@ -303,7 +309,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={8.5}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <TextField
           name='colorHex'
           onChange={handleChange}
@@ -317,7 +323,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           required={isEdit}
         />
       </Grid>
-      <Grid item xs={8.5}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>COUNTRY</InputLabel>
           <Select
@@ -339,7 +345,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={12}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <TextField
           type='number'
           name='price'
@@ -353,10 +359,11 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           disabled={!isEdit}
           required={isEdit}
           onKeyDown={removePossibilityToUseSigns}
+          fullWidth
         />
       </Grid>
       {showSales && (
-        <Grid item xs={12}>
+        <Grid item xs={isMobile ? 12 : 8.5}>
           <TextField
             type='number'
             name='salePercentage'
@@ -372,12 +379,13 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
             inputProps={{ min: 0 }}
             disabled={!isEdit}
             onKeyDown={removePossibilityToUseSigns}
+            fullWidth
           />
         </Grid>
       )}
 
       {showPreorder && (
-        <Grid item xs={8.5}>
+        <Grid item xs={isMobile ? 12 : 8.5}>
           <TextField
             key={preorderDate.initial}
             name='preorder'
@@ -399,7 +407,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           />
         </Grid>
       )}
-      <Grid item xs={8.5}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <TextField
           name='description'
           onChange={handleChange}
@@ -414,7 +422,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           required={isEdit}
         />
       </Grid>
-      <Grid item>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <TextField
           name='sku'
           onChange={handleChange}
@@ -428,9 +436,11 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           fullWidth
         />
       </Grid>
-      <Grid item xs={12}>
+      <Grid item xs={isMobile ? 12 : 8.5}>
         <Box display='flex' alignItems='center'>
-          <Typography variant='h6'>hide</Typography>
+          <Typography textTransform='uppercase' variant='h6'>
+            hiden
+          </Typography>
           <Checkbox
             name='hidden'
             checked={!!updatePayload.hidden || false}
@@ -438,12 +448,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
             disabled={!isEdit}
           />
         </Box>
-      </Grid>
-
-      <Grid item>
-        <Button onClick={updateProductAndToggleEditMode} variant='contained' className={styles.btn}>
-          {isEdit ? 'upload' : 'edit'}
-        </Button>
       </Grid>
     </Grid>
   );
