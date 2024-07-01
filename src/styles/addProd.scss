@@ -1,33 +1,39 @@
-.media_list {
-  .media_item {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    position: relative;
+.media_item {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+
+  height: 220px;
+
+  .media {
     border: 1px solid #000;
-    width: 220px;
+    width: 100%;
     height: 220px;
+    object-fit: scale-down;
+  }
 
-    .media {
-      width: 100%;
-      height: 220px;
-      object-fit: scale-down;
-    }
+  .delete_btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: none;
+  }
 
+  &:hover {
     .delete_btn {
-      position: absolute;
-      top: 0;
-      right: 0;
-      display: none;
-    }
-
-    &:hover {
-      .delete_btn {
-        display: block;
-        cursor: pointer;
-      }
+      display: block;
+      cursor: pointer;
     }
   }
+}
+
+.select_media {
+  border: 1px solid #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 220px;
 }
 
 .table_cell {

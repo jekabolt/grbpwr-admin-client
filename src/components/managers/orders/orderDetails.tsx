@@ -1,6 +1,6 @@
 import EditIcon from '@mui/icons-material/Edit';
 import LaunchIcon from '@mui/icons-material/Launch';
-import { Button, Grid, TextField } from '@mui/material';
+import { Button, Grid, TextField, Typography } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import { DataGrid, GridPaginationModel } from '@mui/x-data-grid';
@@ -17,7 +17,6 @@ import { common_OrderFull } from 'api/proto-http/frontend';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
-import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
 import styles from 'styles/order.scss';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
@@ -292,8 +291,7 @@ export const OrderDetails = () => {
       <div>
         <div>SHIPPING:</div>
         <Grid container spacing={2} alignItems='flex-start'>
-          {' '}
-          <Grid item xs={3}>
+          <Grid item xs={12} sm={6}>
             {orderDetails?.shipment?.trackingCode && (
               <div>
                 {isEdit && !isPrinting ? (
@@ -345,7 +343,7 @@ export const OrderDetails = () => {
               </div>
             )}
           </Grid>
-          <Grid item xs={3}>
+          <Grid item xs={12} sm={6}>
             {buyer && (
               <div>
                 {buyer?.email && (
@@ -469,83 +467,101 @@ export const OrderDetails = () => {
 
   return (
     <Layout>
-      <img src={logo} className={styles.img_print} alt='logo' />
-      <div style={{ margin: '5% 5%' }}>
-        <Grid container spacing={1} style={{ alignItems: 'center' }}>
-          <Grid item xs={2} className={styles.hide_cell}>
-            ORDER ID: {orderDetails?.order?.id}
-          </Grid>
-          <Grid item xs={2} className={isPrinting ? styles.hide_cell : styles.non_print_state}>
-            UUID:&nbsp;
-            <CopyToClipboard
-              text={orderDetails?.order?.uuid || ''}
-              displayText={
-                orderDetails?.order?.uuid
-                  ? `${orderDetails.order.uuid?.slice(0, 4)}...${orderDetails.order.uuid?.slice(-4)}`
-                  : 'NO UUID'
-              }
-            />
-          </Grid>
-          <Grid item xs={2} className={isPrinting ? styles.hide_cell : styles.non_print_state}>
-            STATUS:&nbsp;{orderStatusColored}
-          </Grid>
-          <Grid item xs={3} className={styles.support}>
-            COMPANY ADRESS: ADRESS ADRESS ADRESS
-          </Grid>
-          <Grid item xs={3} className={styles.support}>
-            COMPANY VAT ID: ID
-          </Grid>
-          <Grid item xs={isPrinting ? 4 : 2}>
-            PLACED: {formatDateTime(orderDetails?.order?.placed)}
-          </Grid>
-          <Grid item className={styles.hide_cell} xs={3}>
-            MODIFIED: {formatDateTime(orderDetails?.order?.modified)}
+      <Grid container spacing={2} justifyContent='center' alignItems='center'>
+        <Grid item xs={12}>
+          <Grid container justifyContent='flex-start'>
+            <Grid item xs={12} sm={2} className={styles.hide_cell}>
+              <Typography fontWeight='bold' textTransform='uppercase'>
+                order id: {orderDetails?.order?.id}
+              </Typography>
+            </Grid>
+            <Grid
+              item
+              xs={12}
+              sm={2}
+              className={isPrinting ? styles.hide_cell : styles.non_print_state}
+            >
+              <Typography fontWeight='bold' textTransform='uppercase'>
+                uuid:&nbsp;
+              </Typography>
+              <CopyToClipboard
+                text={orderDetails?.order?.uuid || ''}
+                displayText={
+                  orderDetails?.order?.uuid
+                    ? `${orderDetails.order.uuid?.slice(0, 4)}...${orderDetails.order.uuid?.slice(-4)}`
+                    : 'NO UUID'
+                }
+              />
+            </Grid>
+            <Grid
+              item
+              xs={12}
+              sm={2}
+              className={isPrinting ? styles.hide_cell : styles.non_print_state}
+            >
+              STATUS:&nbsp;{orderStatusColored}
+            </Grid>
+            <Grid item xs={12} sm={5} className={styles.support}>
+              COMPANY ADRESS: ADRESS ADRESS ADRESS
+            </Grid>
+            <Grid item xs={12} sm={3} className={styles.support}>
+              COMPANY VAT ID: ID
+            </Grid>
+            <Grid item xs={12} sm={isPrinting ? 4 : 3}>
+              PLACED: {formatDateTime(orderDetails?.order?.placed)}
+            </Grid>
+            <Grid item className={styles.hide_cell} xs={12} sm={3}>
+              MODIFIED: {formatDateTime(orderDetails?.order?.modified)}
+            </Grid>
           </Grid>
         </Grid>
 
-        <DataGrid
-          rows={orderDetails?.orderItems || []}
-          columns={orderItemsColumns}
-          columnVisibilityModel={columnVisibility}
-          rowSelection={false}
-          paginationModel={
-            isPrinting
-              ? { page: page, pageSize: orderDetails?.orderItems?.length || pageSize }
-              : { page: page, pageSize: pageSize }
-          }
-          onPaginationModelChange={onPaginationChange}
-          pageSizeOptions={[5, 10, 20]}
-          sx={{ marginTop: '2rem', width: '90%' }}
-          rowHeight={100}
-          hideFooterPagination={isPrinting}
-          hideFooter={isPrinting}
-        />
-        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+        <Grid item xs={12}>
+          <DataGrid
+            rows={orderDetails?.orderItems || []}
+            columns={orderItemsColumns}
+            columnVisibilityModel={columnVisibility}
+            rowSelection={false}
+            paginationModel={
+              isPrinting
+                ? { page: page, pageSize: orderDetails?.orderItems?.length || pageSize }
+                : { page: page, pageSize: pageSize }
+            }
+            onPaginationModelChange={onPaginationChange}
+            pageSizeOptions={[5, 10, 20]}
+            rowHeight={100}
+            hideFooterPagination={isPrinting}
+            hideFooter={isPrinting}
+          />
+        </Grid>
+        <Grid item xs={12} className={styles.hide_cell}>
           {promoApplied}
-        </div>
-        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+        </Grid>
+        <Grid item xs={12} className={styles.hide_cell}>
           {payment}
-        </div>
-        <div style={{ marginTop: '2rem' }}>{shipping}</div>
-        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+        </Grid>
+        <Grid item xs={12}>
+          {shipping}
+        </Grid>
+        <Grid item xs={12} className={styles.hide_cell}>
           {billing}
-        </div>
-        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+        </Grid>
+        <Grid item xs={12} className={styles.hide_cell}>
           {trackingNumberSection}
-        </div>
-        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+        </Grid>
+        <Grid item xs={12} className={styles.hide_cell}>
           {markAsDeliveredSection}
-        </div>
-        <div className={styles.hide_cell} style={{ marginTop: '2rem' }}>
+        </Grid>
+        <Grid item xs={12} className={styles.hide_cell}>
           {refundOrderSection}
-        </div>
-        <div className={styles.total}>
+        </Grid>
+        <Grid item xs={12} className={styles.total}>
           Total: {orderDetails?.order?.totalPrice?.value}&nbsp;{dictionary?.baseCurrency}
-        </div>
-        <div className={styles.support}>
+        </Grid>
+        <Grid item xs={12} className={styles.support}>
           If you have any questions, please send an email to customercare@grbpwr.com
-        </div>
-      </div>
+        </Grid>
+      </Grid>
     </Layout>
   );
 };

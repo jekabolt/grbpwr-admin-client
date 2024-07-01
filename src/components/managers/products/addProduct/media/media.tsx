@@ -51,8 +51,8 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
   };
 
   return (
-    <Grid container display='grid' spacing={2}>
-      <Grid item xs={11}>
+    <Grid container spacing={2}>
+      <Grid item xs={12}>
         <Typography variant='h4' textTransform='uppercase'>
           thumbnail
         </Typography>
@@ -66,16 +66,16 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
           </Typography>
         )}
       </Grid>
-      <Grid item xs={11}>
+      <Grid item xs={12}>
         <Typography variant='h4' textTransform='uppercase'>
-          product medias
+          media
         </Typography>
         {mediaPreview && (
-          <Grid container className={styles.media_list} gap={2}>
+          <Grid container alignItems='center' spacing={2}>
             {mediaPreview.map((media, id) => {
               const mediaUrl = media.media?.fullSize?.mediaUrl ?? '';
               return (
-                <Grid item key={id} className={styles.media_item} xs={12} sm={6} md={4} lg={3}>
+                <Grid item key={id} className={styles.media_item} xs={6} md={3}>
                   {isVideo(mediaUrl) ? (
                     <video src={mediaUrl} controls className={styles.media}></video>
                   ) : (
@@ -90,12 +90,14 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
                 </Grid>
               );
             })}
-            <Grid item xs={12} sm={6} md={4} lg={3} className={styles.media_item}>
-              <MediaSelectorLayout
-                allowMultiple={true}
-                saveSelectedMedia={uploadMediasInProduct}
-                label='select media'
-              />
+            <Grid item xs={6} md={3}>
+              <div className={styles.select_media}>
+                <MediaSelectorLayout
+                  allowMultiple={true}
+                  saveSelectedMedia={uploadMediasInProduct}
+                  label='select media'
+                />
+              </div>
             </Grid>
           </Grid>
         )}

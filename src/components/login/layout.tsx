@@ -1,6 +1,6 @@
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import { AppBar, Box, Button, Container, IconButton, Toolbar } from '@mui/material';
+import { AppBar, Box, Button, Container, IconButton, Toolbar, styled } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
 import logo from 'img/tex-text.png';
@@ -10,6 +10,12 @@ import { HideOnScroll } from './scroll';
 interface LayoutProps {
   children: ReactNode;
 }
+
+const PrintHiddenToolbar = styled(Toolbar)(({ theme }) => ({
+  '@media print': {
+    display: 'none',
+  },
+}));
 
 export const Layout: FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
@@ -27,7 +33,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
       <HideOnScroll>
         <AppBar position='sticky' sx={{ backgroundColor: 'transparent', boxShadow: 'none' }}>
-          <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <PrintHiddenToolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
             <Button
               variant='contained'
               onClick={() => window.history.back()}
@@ -41,7 +47,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
             <Button variant='outlined' color='secondary' size='small' onClick={handleLogout}>
               <ExitToAppIcon fontSize='small' />
             </Button>
-          </Toolbar>
+          </PrintHiddenToolbar>
         </AppBar>
       </HideOnScroll>
       <Container component='main' sx={{ flexGrow: 1, overflowY: 'auto' }}>

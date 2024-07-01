@@ -24,16 +24,11 @@ export const Promo: FC = () => {
 
   return (
     <Layout>
-      <Grid
-        container
-        justifyContent='center'
-        spacing={2}
-        padding={isMobile ? '3% 17% 3% 17%' : '2%'}
-      >
+      <Grid container justifyContent='center' spacing={2}>
         <Grid item xs={12}>
           <CreatePromo createNewPromo={createNewPromo} showMessage={showMessage} />
         </Grid>
-        <Grid item xs={12} md={10}>
+        <Grid item xs={12}>
           <ListPromo promos={promos} fetchPromos={fetchPromos} showMessage={showMessage} />
         </Grid>
       </Grid>

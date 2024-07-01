@@ -183,15 +183,9 @@ export const ListArchive: FC<ListArchiveInterface> = ({
     <Grid container spacing={2}>
       {archive.map((archiveEntry) => (
         <Grid item xs={12} key={archiveEntry.archive?.id}>
-          <Grid
-            container
-            alignItems='center'
-            justifyContent='space-between'
-            spacing={2}
-            marginBottom={2}
-          >
+          <Grid container justifyContent='space-between' spacing={2}>
             <Grid item>
-              <Box display='flex' gap='20px'>
+              <Box alignItems='center' display='flex' gap='20px'>
                 <TextField
                   label='title'
                   style={{ textTransform: 'uppercase' }}
@@ -227,66 +221,69 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                 <DeleteIcon color='error' fontSize='medium' />
               </Button>
             </Grid>
-          </Grid>
 
-          <Grid item xs={12}>
-            {isEditMode[archiveEntry.archive?.id ?? 0] ? (
-              <ArchiveTable
-                data={archiveEntry.items || []}
-                deleteItemFromArchive={deleteItemFromArchive}
-                handleSaveNewOrderOfRows={handleSaveNewOrderOfRows}
-              />
-            ) : (
-              <Grid container gap={4}>
-                {archiveEntry.items?.slice(0, 4).map((item, index) => (
-                  <Grid item key={index} className={styles.item} xs={2}>
-                    <img src={item.archiveItem?.media?.media?.thumbnail?.mediaUrl} />
-                  </Grid>
-                ))}
-              </Grid>
-            )}
-          </Grid>
-          <Grid container spacing={2} justifyContent='space-between' marginTop={1}>
-            <Grid item xs={8}>
-              <TextField
-                label='description'
-                style={{ textTransform: 'uppercase' }}
-                InputLabelProps={{ shrink: true }}
-                value={
-                  isEditMode[archiveEntry.archive?.id as number]
-                    ? description[archiveEntry.archive?.id as number] ??
-                      archiveEntry.archive?.archiveBody?.description ??
-                      ''
-                    : (
-                        description[archiveEntry.archive?.id as number] ??
-                        archiveEntry.archive?.archiveBody?.description ??
-                        ''
-                      ).slice(0, 100)
-                }
-                onChange={(e) =>
-                  setDescription({
-                    ...description,
-                    [archiveEntry.archive?.id as number]: e.target.value,
-                  })
-                }
-                inputProps={{ readOnly: !isEditMode[archiveEntry.archive?.id ?? 0] }}
-                size='small'
-                fullWidth
-                multiline
-              />
-            </Grid>
-            <Grid item>
+            <Grid item xs={12}>
               {isEditMode[archiveEntry.archive?.id ?? 0] ? (
-                <MediaSelectorLayout
-                  label='add new item'
-                  allowMultiple={false}
-                  saveSelectedMedia={mediaPreview(archiveEntry.archive?.id)}
+                <ArchiveTable
+                  data={archiveEntry.items || []}
+                  deleteItemFromArchive={deleteItemFromArchive}
+                  handleSaveNewOrderOfRows={handleSaveNewOrderOfRows}
                 />
               ) : (
-                ''
+                <Grid container spacing={2}>
+                  {archiveEntry.items?.slice(0, 4).map((item, index) => (
+                    <Grid item key={index} className={styles.item} xs={6} sm={3}>
+                      <img src={item.archiveItem?.media?.media?.thumbnail?.mediaUrl} />
+                    </Grid>
+                  ))}
+                </Grid>
               )}
             </Grid>
+            <Grid item xs={12}>
+              <Grid container spacing={2} justifyContent='space-between'>
+                <Grid item xs={8} sm={10}>
+                  <TextField
+                    label='description'
+                    style={{ textTransform: 'uppercase' }}
+                    InputLabelProps={{ shrink: true }}
+                    value={
+                      isEditMode[archiveEntry.archive?.id as number]
+                        ? description[archiveEntry.archive?.id as number] ??
+                          archiveEntry.archive?.archiveBody?.description ??
+                          ''
+                        : (
+                            description[archiveEntry.archive?.id as number] ??
+                            archiveEntry.archive?.archiveBody?.description ??
+                            ''
+                          ).slice(0, 100)
+                    }
+                    onChange={(e) =>
+                      setDescription({
+                        ...description,
+                        [archiveEntry.archive?.id as number]: e.target.value,
+                      })
+                    }
+                    inputProps={{ readOnly: !isEditMode[archiveEntry.archive?.id ?? 0] }}
+                    size='small'
+                    fullWidth
+                    multiline
+                  />
+                </Grid>
+                <Grid item xs={4} sm={2}>
+                  {isEditMode[archiveEntry.archive?.id ?? 0] ? (
+                    <MediaSelectorLayout
+                      label='add new item'
+                      allowMultiple={false}
+                      saveSelectedMedia={mediaPreview(archiveEntry.archive?.id)}
+                    />
+                  ) : (
+                    ''
+                  )}
+                </Grid>
+              </Grid>
+            </Grid>
           </Grid>
+
           <Grid item xs={12} margin='2% 0  2% 0'>
             <Divider />
           </Grid>

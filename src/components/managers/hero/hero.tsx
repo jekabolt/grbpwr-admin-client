@@ -10,9 +10,7 @@ import {
   IconButton,
   Snackbar,
   TextField,
-  Theme,
   Typography,
-  useMediaQuery,
 } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
 import { common_MediaFull } from 'api/proto-http/frontend';
@@ -52,7 +50,7 @@ export const Hero: FC = () => {
 
   const handleOpenProductSelection = () => setIsModalOpen(true);
   const handleCloseModal = () => setIsModalOpen(false);
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
+  // const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   useEffect(() => {
     const fetchHero = async () => {
@@ -204,7 +202,7 @@ export const Hero: FC = () => {
 
   return (
     <Layout>
-      <Grid container spacing={2} justifyContent='center' padding={isMobile ? '10%' : '3%'}>
+      <Grid container spacing={2} justifyContent='center' padding='2%'>
         <Grid item xs={12} md={8}>
           <Grid container spacing={2} justifyContent='center'>
             <Grid item xs={10}>
