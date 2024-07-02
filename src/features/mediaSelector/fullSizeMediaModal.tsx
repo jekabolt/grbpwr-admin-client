@@ -154,7 +154,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                       <Grid item xs={12} sm={3}>
                         <Typography
                           key={type}
-                        >{` Dimensions: ${videoDimensions[type] || `${clickedMedia?.[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia?.[type as MediaKey]?.height || 'N/A'}px`}`}</Typography>
+                        >{` ${videoDimensions[type] || `${clickedMedia?.[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia?.[type as MediaKey]?.height || 'N/A'}px`}`}</Typography>
                       </Grid>
                     </Grid>
                   </Grid>

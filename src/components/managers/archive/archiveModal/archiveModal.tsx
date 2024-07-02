@@ -1,5 +1,14 @@
 import CloseIcon from '@mui/icons-material/Close';
-import { Box, Button, Dialog, Grid, IconButton, TextField } from '@mui/material';
+import {
+  Box,
+  Button,
+  Dialog,
+  Grid,
+  IconButton,
+  TextField,
+  Theme,
+  useMediaQuery,
+} from '@mui/material';
 import { isValidURL } from 'features/utilitty/isValidUrl';
 import { FC } from 'react';
 import styles from 'styles/creatArchiveItemModal.scss';
@@ -16,6 +25,7 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
   addNewItem,
   setUrl,
 }) => {
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value;
     if (value.length > 256) {
@@ -25,19 +35,12 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
   };
 
   return (
-    <Dialog open={open} onClose={close} fullWidth scroll='paper' maxWidth='lg'>
+    <Dialog open={open} onClose={close} fullWidth scroll='paper' maxWidth='xl'>
       <Box position='relative'>
-        <Button
-          variant='contained'
-          onClick={() => addNewItem(id)}
-          sx={{ position: 'absolute', left: 0 }}
-        >
-          add item
-        </Button>
         <IconButton onClick={close} sx={{ position: 'absolute', right: 0 }}>
           <CloseIcon />
         </IconButton>
-        <Grid container spacing={2} padding='2%'>
+        <Grid container spacing={2} justifyContent='center' padding='2%'>
           <Grid item xs={12} className={styles.media_item_add}>
             {media ? <img src={media} /> : ''}
           </Grid>
@@ -63,6 +66,15 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
               fullWidth
               style={{ textTransform: 'uppercase' }}
             />
+          </Grid>
+          <Grid
+            item
+            xs={12}
+            style={{ display: 'flex', justifyContent: isMobile ? 'center' : 'flex-end' }}
+          >
+            <Button variant='contained' onClick={() => addNewItem(id)}>
+              add item
+            </Button>
           </Grid>
         </Grid>
       </Box>

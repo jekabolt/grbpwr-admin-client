@@ -22,18 +22,23 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
     }
   }, [b64Media]);
 
+  const uploadCroppedMediaAndCloseModal = () => {
+    handleUploadMedia();
+    clear();
+  };
+
   return (
     <Grid container justifyContent='center' padding='2%' alignItems='center' gap={1}>
       {b64Media && (
         <>
-          <Grid item xs={8} className={styles.preview_media_to_upload}>
+          <Grid item xs={12} className={styles.preview_media_to_upload}>
             {isBase64Video(b64Media) ? (
               <video src={b64Media} controls></video>
             ) : (
               <img src={croppedImage || b64Media} alt='' />
             )}
           </Grid>
-          <Grid item xs={3}>
+          <Grid item xs={12}>
             {b64Media && (
               <Box display='grid' gap='10px'>
                 {!isBase64Video(b64Media) && (
@@ -42,7 +47,7 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
                   </Button>
                 )}
 
-                <Button variant='contained' size='small' onClick={handleUploadMedia}>
+                <Button variant='contained' size='small' onClick={uploadCroppedMediaAndCloseModal}>
                   Upload
                 </Button>
 

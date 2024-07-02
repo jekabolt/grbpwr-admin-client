@@ -65,9 +65,9 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   };
 
   return (
-    <Grid container justifyContent='center' spacing={2} padding={isMobile ? '10% 2% 0 ' : '2%'}>
+    <Grid container justifyContent='center' spacing={2} padding='2%'>
       <Grid item xs={12}>
-        <Grid container alignItems='center' spacing={2} justifyContent='center'>
+        <Grid container alignItems='center' spacing={2} justifyContent='center' marginTop='1%'>
           <Grid item xs={8} sm={4}>
             <ByUrl url={url} setUrl={setUrl} isLoading={isLoading} />
           </Grid>

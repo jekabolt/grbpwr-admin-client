@@ -1,16 +1,6 @@
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import {
-  AppBar,
-  Box,
-  Button,
-  Container,
-  IconButton,
-  Theme,
-  Toolbar,
-  styled,
-  useMediaQuery,
-} from '@mui/material';
+import { AppBar, Box, Button, Container, IconButton, Toolbar, styled } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
 import logo from 'img/tex-text.png';
@@ -29,7 +19,6 @@ const PrintHiddenToolbar = styled(Toolbar)(({ theme }) => ({
 
 export const Layout: FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
