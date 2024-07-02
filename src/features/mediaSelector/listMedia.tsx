@@ -1,3 +1,4 @@
+import CheckIcon from '@mui/icons-material/Check';
 import ClearIcon from '@mui/icons-material/Clear';
 import {
   Alert,
@@ -41,6 +42,9 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const [videoSizes, setVideoSizes] = useState<{
     [key: number]: { width: number; height: number };
   }>({});
+  const [confirmDeletionId, setConfirmDeletionId] = useState<number | undefined>(undefined);
+  const [deletingMedia, setDeletingMedia] = useState<number | undefined>(undefined);
+  const [hoveredMediaId, setHoveredMediaId] = useState<number | undefined>(undefined);
 
   const handleVideoLoadedMetadata = (
     event: React.SyntheticEvent<HTMLVideoElement>,
@@ -56,9 +60,22 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
 
   const handleDeleteFile = async (id: number | undefined, e: React.MouseEvent) => {
     e.stopPropagation();
-    await deleteFiles({ id });
-    showMessage('MEDIA WAS SUCCESSFULLY DELETED', 'success');
-    setMedia((currentFiles) => currentFiles?.filter((file) => file.id !== id));
+
+    if (confirmDeletionId !== id) {
+      setConfirmDeletionId(id);
+    } else {
+      setDeletingMedia(id);
+      try {
+        await deleteFiles({ id });
+        setMedia((currentFiles) => currentFiles?.filter((file) => file.id !== id));
+        setTimeout(() => setConfirmDeletionId(undefined), 1000);
+      } catch (e) {
+        showMessage('MEDIA CANNOT BE REMOVED', 'error');
+      } finally {
+        setConfirmDeletionId(undefined);
+        showMessage('MEDIA WAS SUCCESSFULLY DELETED', 'success');
+      }
+    }
   };
 
   const handleSelect = async (
@@ -121,6 +138,8 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                 <Box>
                   <ImageListItem
                     onClick={(event) => handleSelect(m, allowMultiple, event)}
+                    onMouseEnter={() => setHoveredMediaId(m.id)}
+                    onMouseLeave={() => setHoveredMediaId(undefined)}
                     className={styles.list_media_item}
                     key={m.id}
                   >
@@ -128,7 +147,9 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                       {selectedMedia?.some((item) => item.id === m.id) ? (
                         <span className={styles.selected_flag}>selected</span>
                       ) : null}
-                      {isVideo(m.media?.thumbnail?.mediaUrl) ? (
+                      {deletingMedia === m.id ? (
+                        <Typography variant='h5'>media removed</Typography>
+                      ) : isVideo(m.media?.thumbnail?.mediaUrl) ? (
                         <video
                           key={m.id}
                           src={m.media?.thumbnail?.mediaUrl}
@@ -145,14 +166,15 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                         />
                       )}
                     </InputLabel>
-                    <IconButton
-                      aria-label='delete'
-                      size='small'
-                      onClick={(e) => handleDeleteFile(m.id, e)}
-                      className={styles.delete_btn}
-                    >
-                      <ClearIcon />
-                    </IconButton>
+                    {hoveredMediaId === m.id && (
+                      <IconButton
+                        size='small'
+                        onClick={(e) => handleDeleteFile(m.id, e)}
+                        className={styles.delete_btn}
+                      >
+                        {confirmDeletionId === m.id ? <CheckIcon /> : <ClearIcon />}
+                      </IconButton>
+                    )}
                   </ImageListItem>
                   <Typography
                     variant='overline'

@@ -1,9 +1,7 @@
 import CloseIcon from '@mui/icons-material/Close';
-import ContentCopy from '@mui/icons-material/ContentCopy';
 import CropIcon from '@mui/icons-material/Crop';
 import {
   Box,
-  Button,
   Dialog,
   DialogActions,
   DialogContent,
@@ -13,6 +11,7 @@ import {
   Typography,
 } from '@mui/material';
 import { common_MediaItem } from 'api/proto-http/admin';
+import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { FullSizeMediaModalInterface } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useEffect, useState } from 'react';
@@ -36,6 +35,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   const [videoDimensions, setVideoDimensions] = useState<VideoDimensions>({});
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+  const mediaTypes = ['fullSize', 'compressed', 'thumbnail'];
 
   const togglePreviewMode = () => {
     setIsPreviewOpen(!isPreviewOpen);
@@ -72,21 +72,6 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
     setSnackbarOpen(true);
   };
 
-  const handleCopyToClipboard = async (text: string | undefined) => {
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      showMessage('URL copied to clipboard!');
-    } catch (err) {
-      showMessage('Failed to copy URL');
-    }
-  };
-
-  const trimUrl = (url: string | undefined, maxLength = 30): string => {
-    if (!url) return '';
-    return url.length > maxLength ? `${url.substring(0, maxLength)}...` : url;
-  };
-
   const clearDragDropSelector = () => {
     setCroppedImage('');
     setIsPreviewOpen(!isPreviewOpen);
@@ -101,9 +86,9 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
     <>
       <Dialog open={open} onClose={closePreviewAndModal} scroll='paper' maxWidth='lg'>
         <Box position='relative'>
-          <Grid container spacing={2} justifyContent='center' alignItems='center' padding='10%'>
-            <Grid xs={12}>
-              <DialogContent>
+          <Grid container spacing={2}>
+            <DialogContent>
+              <Grid xs={12} padding='2%'>
                 {clickedMedia &&
                   (isVideo(clickedMedia.thumbnail?.mediaUrl) ? (
                     <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
@@ -127,7 +112,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                             <img
                               src={clickedMedia.thumbnail?.mediaUrl}
                               alt=''
-                              style={{ width: '100%', height: '100%' }}
+                              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                             />
                           </a>
                           <IconButton
@@ -140,39 +125,49 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                       )}
                     </>
                   ))}
-              </DialogContent>
-            </Grid>
-            <Grid xs={12}>
-              <DialogContent>
-                {['fullSize', 'compressed', 'thumbnail'].map((type) => (
-                  <Typography variant='body1' key={type}>
-                    {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
-                      <>
-                        {`${type.charAt(0).toUpperCase() + type.slice(1)}: ${trimUrl(clickedMedia[type as MediaKey]?.mediaUrl)}`}
-                        <Button
-                          size='small'
-                          onClick={() =>
-                            handleCopyToClipboard(clickedMedia[type as MediaKey]?.mediaUrl)
+              </Grid>
+            </DialogContent>
+            <DialogContent>
+              <Grid container spacing={2}>
+                {mediaTypes.map((type) => (
+                  <Grid item xs={12} key={type}>
+                    <Grid container alignItems='center'>
+                      <Grid item xs={4} sm={1}>
+                        <Typography variant='body1'>
+                          {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
+                            <>{`${type.charAt(0).toUpperCase() + type.slice(1)}`}</>
+                          ) : (
+                            `No ${type} available`
+                          )}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={8} sm={4}>
+                        <CopyToClipboard
+                          text={clickedMedia?.[type as MediaKey]?.mediaUrl || ''}
+                          displayText={
+                            clickedMedia?.[type as MediaKey]?.mediaUrl
+                              ? `${clickedMedia?.[type as MediaKey]?.mediaUrl?.slice(0, 5)}...${clickedMedia?.[type as MediaKey]?.mediaUrl?.slice(-14)}`
+                              : 'NO UUID'
                           }
-                        >
-                          <ContentCopy />
-                        </Button>
-                        {` Dimensions: ${videoDimensions[type] || `${clickedMedia[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia[type as MediaKey]?.height || 'N/A'}px`}`}
-                      </>
-                    ) : (
-                      `No ${type} available`
-                    )}
-                  </Typography>
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={3}>
+                        <Typography
+                          key={type}
+                        >{` Dimensions: ${videoDimensions[type] || `${clickedMedia?.[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia?.[type as MediaKey]?.height || 'N/A'}px`}`}</Typography>
+                      </Grid>
+                    </Grid>
+                  </Grid>
                 ))}
-              </DialogContent>
-            </Grid>
+              </Grid>
+            </DialogContent>
           </Grid>
           <DialogActions>
             <IconButton
               onClick={closePreviewAndModal}
               style={{ position: 'absolute', right: '0', top: '0' }}
             >
-              <CloseIcon fontSize='medium' />
+              <CloseIcon fontSize='small' />
             </IconButton>
           </DialogActions>
         </Box>
