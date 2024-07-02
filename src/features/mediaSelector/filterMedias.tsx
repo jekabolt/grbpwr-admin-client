@@ -10,8 +10,8 @@ export const FilterMedias: FC<FilterMediasInterface> = ({
 }) => {
   return (
     <Grid container justifyContent='center' spacing={1}>
-      <Grid item xs={6}>
-        <FormControl size='small'>
+      <Grid item xs={12} sm={6}>
+        <FormControl size='small' fullWidth>
           <InputLabel shrink>TYPE</InputLabel>
           <Select
             value={filterByType}
@@ -25,8 +25,8 @@ export const FilterMedias: FC<FilterMediasInterface> = ({
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={6}>
-        <FormControl size='small'>
+      <Grid item xs={12} sm={6}>
+        <FormControl size='small' fullWidth>
           <InputLabel>ORDER</InputLabel>
           <Select value={sortByDate} onChange={(e) => setSortByDate(e.target.value)} label='ORDER'>
             <MenuItem value='desc'>DESCENDING</MenuItem>

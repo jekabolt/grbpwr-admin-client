@@ -203,6 +203,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
             <TextField
               type='text'
               name='heading'
+              fullWidth
               value={archive.archive?.heading}
               onChange={handleTextFieldChange}
               label='TITLE'
@@ -211,7 +212,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
               required
             />
           </Grid>
-          <Grid item xs={4}>
+          <Grid item xs={12}>
             <TextField
               type='text'
               name='description'

@@ -32,7 +32,13 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
       <HideOnScroll>
-        <AppBar position='sticky' sx={{ backgroundColor: 'transparent', boxShadow: 'none' }}>
+        <AppBar
+          position='sticky'
+          sx={{
+            backgroundColor: 'transparent',
+            boxShadow: 'none',
+          }}
+        >
           <PrintHiddenToolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
             <Button
               variant='contained'

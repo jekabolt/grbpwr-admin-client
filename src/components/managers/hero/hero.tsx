@@ -50,7 +50,6 @@ export const Hero: FC = () => {
 
   const handleOpenProductSelection = () => setIsModalOpen(true);
   const handleCloseModal = () => setIsModalOpen(false);
-  // const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   useEffect(() => {
     const fetchHero = async () => {
@@ -205,20 +204,21 @@ export const Hero: FC = () => {
       <Grid container spacing={2} justifyContent='center' padding='2%'>
         <Grid item xs={12} md={8}>
           <Grid container spacing={2} justifyContent='center'>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <Typography variant='h4'>Main</Typography>
               <SingleMediaViewAndSelect
                 link={mainContentLink}
                 saveSelectedMedia={saveMainContentLink}
               />
             </Grid>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <TextField
                 error={mainExploreLinkError}
                 helperText={mainExploreLinkError ? 'Not valid url.' : ''}
                 size='small'
                 label='Main explore link'
                 value={mainExploreLink || ''}
+                fullWidth
                 onChange={(e) => {
                   const { value } = e.target;
                   setMainExploreLink(value);
@@ -230,19 +230,20 @@ export const Hero: FC = () => {
                 }}
               />
             </Grid>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <TextField
                 size='small'
                 label='Main explore text'
                 value={mainExploreText || ''}
                 onChange={(e) => setMainExploreText(e.target.value)}
+                fullWidth
               />
             </Grid>
           </Grid>
         </Grid>
         <Grid item xs={12} md={8}>
           <Grid container justifyContent='center' spacing={2}>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <Box display='flex' gap='15px' alignItems='center'>
                 <Typography variant='h4'>First Ad</Typography>
                 {firstAdContentLink && (
@@ -256,12 +257,13 @@ export const Hero: FC = () => {
                 saveSelectedMedia={saveFirstAdContentLink}
               />
             </Grid>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <TextField
                 error={firstAdExploreLinkError}
                 helperText={firstAdExploreLinkError ? 'Not valid url.' : ''}
                 size='small'
                 label='First ad explore link'
+                fullWidth
                 value={firstAdExploreLink || ''}
                 onChange={(e) => {
                   const { value } = e.target;
@@ -274,11 +276,12 @@ export const Hero: FC = () => {
                 }}
               />
             </Grid>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <TextField
                 size='small'
                 label='First ad explore text'
                 value={firstAdExploreText || ''}
+                fullWidth
                 onChange={(e) => setFirstAdExploreText(e.target.value)}
               />
             </Grid>
@@ -286,7 +289,7 @@ export const Hero: FC = () => {
         </Grid>
         <Grid item xs={12} md={8}>
           <Grid container justifyContent='center' spacing={2}>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <Box display='flex' alignItems='center' gap='15px'>
                 <Typography variant='h4'>Second Ad</Typography>
                 {secondAdContentLink && (
@@ -300,7 +303,7 @@ export const Hero: FC = () => {
                 saveSelectedMedia={saveSecondAdContentLink}
               />
             </Grid>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <Box display='flex' alignItems='center' gap='15px'>
                 <TextField
                   error={secondAdExploreLinkError}
@@ -308,6 +311,7 @@ export const Hero: FC = () => {
                   size='small'
                   label='Second ad explore link'
                   value={secondAdExploreLink || ''}
+                  fullWidth
                   onChange={(e) => {
                     const { value } = e.target;
                     setSecondAdExploreLink(value);
@@ -318,15 +322,14 @@ export const Hero: FC = () => {
                     }
                   }}
                 />
-                {/* {secondAdContentLink && (
-          )} */}
               </Box>
             </Grid>
-            <Grid item xs={10}>
+            <Grid item xs={12}>
               <TextField
                 size='small'
                 label='Second ad explore text'
                 value={secondAdExploreText || ''}
+                fullWidth
                 onChange={(e) => setSecondAdExploreText(e.target.value)}
               />
             </Grid>

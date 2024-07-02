@@ -180,7 +180,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
   };
 
   return (
-    <Grid container spacing={2}>
+    <Grid container spacing={2} marginTop='3%'>
       {archive.map((archiveEntry) => (
         <Grid item xs={12} key={archiveEntry.archive?.id}>
           <Grid container justifyContent='space-between' spacing={2}>
@@ -284,7 +284,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
             </Grid>
           </Grid>
 
-          <Grid item xs={12} margin='2% 0  2% 0'>
+          <Grid item xs={12} margin='5% 0 5% 0'>
             <Divider />
           </Grid>
         </Grid>
