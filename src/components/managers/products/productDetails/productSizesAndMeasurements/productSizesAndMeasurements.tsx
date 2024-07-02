@@ -21,6 +21,10 @@ import { removePossibilityToUseSigns } from 'features/utilitty/removePossibility
 import { FC, useEffect, useState } from 'react';
 import { ProductIdProps } from '../utility/interfaces';
 
+interface Size {
+  id?: number;
+}
+
 export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
   product,
   id,
@@ -30,7 +34,18 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
   const [dictionary, setDictionary] = useState<common_Dictionary>();
   const [sizeQuantity, setSizeQuantity] = useState<{ [sizeId: number]: number }>({});
   const [measurementQuantity, setMeasurementQuantity] = useState<{ [key: string]: string }>({});
-  const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
+  const moveLastToFirst = (arr: Size[]): Size[] => {
+    if (arr.length > 1) {
+      const lastItem = arr.pop();
+      if (lastItem !== undefined) {
+        arr.unshift(lastItem);
+      }
+    }
+    return arr;
+  };
+
+  const sortedSizes: Size[] = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
+  const updatedSizes = moveLastToFirst([...sortedSizes]);
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
 
@@ -58,7 +73,8 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
 
   const handleQuantityChange = (sizeId: number | undefined, newValue: number) => {
     if (typeof sizeId === 'number') {
-      setSizeQuantity({ ...sizeQuantity, [sizeId]: newValue });
+      const newSizeQuantity = { ...sizeQuantity, [sizeId]: newValue };
+      setSizeQuantity(newSizeQuantity);
     }
   };
 
@@ -68,10 +84,22 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
 
       try {
         if (isConfirmed) {
+          const newSizeQuantity = { ...sizeQuantity };
+
+          if (newSizeQuantity[updatedSizes[0].id!] > 0) {
+            for (const size of updatedSizes.slice(1)) {
+              if (typeof size.id === 'number') {
+                newSizeQuantity[size.id] = 0;
+              }
+            }
+          }
+
+          setSizeQuantity(newSizeQuantity);
+
           const request: UpdateProductSizeStockRequest = {
             productId: Number(id),
             sizeId: sizeId,
-            quantity: sizeQuantity[sizeId],
+            quantity: newSizeQuantity[sizeId],
           };
           const response = await updateSize(request);
           showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
@@ -122,6 +150,9 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
     }
   };
 
+  const firstSizeQuantity = sizeQuantity[updatedSizes[0]?.id!] || 0;
+  const shouldHideFirstSize = updatedSizes.slice(1).some((size) => sizeQuantity[size.id!] > 0);
+
   return (
     <TableContainer component={Paper}>
       <Table aria-label='sizes table'>
@@ -137,7 +168,11 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {sortedSizes.map((size) => {
+          {updatedSizes.map((size, index) => {
+            if ((shouldHideFirstSize && index === 0) || (firstSizeQuantity > 0 && index > 0)) {
+              return null;
+            }
+
             const sizeId = typeof size.id === 'number' ? size.id : null;
             const sizeUpdateValue = sizeId !== null ? sizeQuantity[sizeId] || 0 : 0;
 
