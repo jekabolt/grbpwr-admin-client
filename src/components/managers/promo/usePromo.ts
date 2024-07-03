@@ -39,15 +39,13 @@ const usePromo = (initialIsLoading = false, initialHasMore = true): {
     }, [])
 
     const createNewPromo = useCallback(async (newPromo: common_PromoCodeInsert) => {
-        // if (promos.some(promo => promo.promoCodeInsert?.code === newPromo.code)) {
-        //     showMessage('PROMO ALREADY EXIST IN THE LIST', 'error')
-        //     return
-        // }
+
         try {
             await addPromo({ promo: newPromo })
             showMessage('PROMO CREATED', 'success');
-        } catch (e) {
-            showMessage('PROMO CAN\'T BE CREATED', 'error')
+            fetchPromos(50, 0)
+        } catch (error) {
+            showMessage(`${(error as Error).message}`, 'error');
         }
     }, [promos])
 

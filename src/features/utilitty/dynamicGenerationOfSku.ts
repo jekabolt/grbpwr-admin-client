@@ -30,14 +30,28 @@ const getColorCode = (color: string | undefined) => {
 const formatCategory = (categoryId: string | undefined) => {
     if (!categoryId) return;
     const cleanCategory = categoryId.replace('CATEGORY_ENUM_', '').replace(/_/g, '');
+    if (cleanCategory.length < 4) {
+        return cleanCategory.padEnd(4, '0')
+    }
     return cleanCategory.substring(0, 4);
 };
 
 
+const sanitizeBrand = (brand: string) => {
+    return brand.replace(/[\/\-,\$%\^]/g, '');
+}
+
+const formatBrand = (brand: string) => {
+    const sanitizedBrand = sanitizeBrand(brand).replace(/\s/g, '');
+    if (sanitizedBrand.length < 6) {
+        return sanitizedBrand.padEnd(6, '0');
+    }
+    return sanitizedBrand.substring(0, 6);
+}
+
 export const generateSKU = (brand: string | undefined, gender: common_GenderEnum | undefined, categoryId: string | undefined, color: string | undefined, country: string | undefined) => {
     if (brand) {
-        const removeSpaces = brand.replace(/\s/g, '');
-        const formattedBrand = removeSpaces.length > 6 ? removeSpaces.substring(0, 6) : removeSpaces;
+        const formattedBrand = formatBrand(brand);
         const colorCode = getColorCode(color)
         const date = getCurrentSeasonCode();
         const randomNumbers = generateNumbers()

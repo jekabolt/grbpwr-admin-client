@@ -63,6 +63,7 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMe
     <Grid container justifyContent='flex-start'>
       <Grid item xs={12}>
         <DataGrid
+          rowSelection={false}
           rows={transformPromoForDataGrid}
           columns={columns}
           pageSizeOptions={[10, 25, 100]}
