@@ -18,12 +18,19 @@ interface CreatePromoInterface {
   showMessage: (message: string, severity: 'success' | 'error') => void;
 }
 
+const addMonths = (date: Date, months: number) => {
+  const newDate = new Date(date);
+  newDate.setMonth(newDate.getMonth() + months);
+  return newDate;
+};
+
 export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPromo }) => {
+  const defaultDate = addMonths(new Date(), 3);
   const initialPromoStates: common_PromoCodeInsert = {
     code: '',
     freeShipping: false,
     discount: { value: '0' },
-    expiration: '',
+    expiration: defaultDate.toISOString(),
     allowed: true,
     voucher: false,
   };
@@ -31,6 +38,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
   const [promo, setPromo] = useState<common_PromoCodeInsert>(initialPromoStates);
   const [error, setError] = useState('');
   const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
+  const [codeError, setCodeError] = useState('');
 
   const handlePromoFieldsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -61,20 +69,48 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
   };
 
   const handleDateTimeChange = (newValue: Date | null) => {
+    const defaultTime = new Date();
+    defaultTime.setHours(12, 0, 0, 0);
+    const selectedDate = newValue ? new Date(newValue.setHours(12, 0, 0, 0)) : '';
+
     handlePromoFieldsChange({
       target: {
         name: 'expiration',
-        value: newValue ? newValue.toISOString() : '',
+        value: selectedDate ? selectedDate.toISOString() : '',
       },
     } as React.ChangeEvent<HTMLInputElement>);
   };
 
+  const validatePromoCode = (code: string) => {
+    const promoCodeRegex = /^[a-zA-Z0-9-_]+$/;
+    if (!promoCodeRegex.test(code)) {
+      setCodeError('Promo code can only contain letters, numbers, hyphens, and underscores');
+      return false;
+    }
+    setCodeError('');
+    return true;
+  };
+
   const uploadNewPromo = () => {
+    const sanitizedCode = promo.code?.replace(/\s/g, '');
+
+    if (sanitizedCode?.trim() === '') {
+      setCodeError('Promo code is required');
+      return;
+    } else {
+      setCodeError('');
+    }
+
+    if (!validatePromoCode(sanitizedCode || '')) {
+      return;
+    }
+
     if (parseFloat(promo.discount?.value || '') > 100) {
       showMessage("PROMO CAN'T BE CREATED: DISCOUNT CAN'T BE MORE THAN A HUNDRED", 'error');
       return;
     }
-    createNewPromo(promo);
+    const newPromo = { ...promo, code: sanitizedCode };
+    createNewPromo(newPromo);
     setPromo(initialPromoStates);
   };
 
@@ -92,6 +128,9 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 size='small'
                 onChange={handlePromoFieldsChange}
                 fullWidth={true}
+                required
+                error={!!codeError}
+                helperText={codeError}
               />
             </Grid>
             <Grid item xs={12} sm={4}>
@@ -116,7 +155,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 onChange={handleDateTimeChange}
                 minDate={new Date()}
                 label='EXPIRATION DATE'
-                slotProps={{ textField: { size: 'small', fullWidth: isMobile } }}
+                slotProps={{ textField: { size: 'small', fullWidth: isMobile, required: true } }}
               />
             </Grid>
           </Grid>
