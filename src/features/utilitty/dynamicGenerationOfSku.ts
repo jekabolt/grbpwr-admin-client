@@ -38,8 +38,11 @@ const formatCategory = (categoryId: string | undefined) => {
 
 
 const sanitizeBrand = (brand: string) => {
-    return brand.replace(/[\/\-,\$%\^]/g, '');
-}
+    return brand
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[\/\-,\$%\^:;()!@#&*+=`~.{}|]/g, '');
+};
 
 const formatBrand = (brand: string) => {
     const sanitizedBrand = sanitizeBrand(brand).replace(/\s/g, '');
