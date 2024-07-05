@@ -62,7 +62,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
         }
         return {
           ...prevPromo,
-          [name]: value,
+          [name]: value.trim(),
         };
       }
     });
@@ -82,9 +82,14 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
   };
 
   const validatePromoCode = (code: string) => {
+    const trimmedCode = code.trim();
+
     const promoCodeRegex = /^[a-zA-Z0-9-_]+$/;
-    if (!promoCodeRegex.test(code)) {
-      setCodeError('Promo code can only contain letters, numbers, hyphens, and underscores');
+
+    if (!promoCodeRegex.test(trimmedCode)) {
+      setCodeError(
+        'Promo code can only contain letters, numbers, hyphens, and underscores, and cannot contain spaces',
+      );
       return false;
     }
     setCodeError('');
@@ -92,16 +97,14 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
   };
 
   const uploadNewPromo = () => {
-    const sanitizedCode = promo.code?.replace(/\s/g, '');
-
-    if (sanitizedCode?.trim() === '') {
+    if (promo.code?.trim() === '') {
       setCodeError('Promo code is required');
       return;
     } else {
       setCodeError('');
     }
 
-    if (!validatePromoCode(sanitizedCode || '')) {
+    if (!validatePromoCode(promo.code || '')) {
       return;
     }
 
@@ -109,7 +112,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
       showMessage("PROMO CAN'T BE CREATED: DISCOUNT CAN'T BE MORE THAN A HUNDRED", 'error');
       return;
     }
-    const newPromo = { ...promo, code: sanitizedCode };
+    const newPromo = { ...promo, code: promo.code };
     createNewPromo(newPromo);
     setPromo(initialPromoStates);
   };
@@ -131,6 +134,11 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 required
                 error={!!codeError}
                 helperText={codeError}
+                onKeyDown={(e) => {
+                  if (e.key === ' ') {
+                    e.preventDefault();
+                  }
+                }}
               />
             </Grid>
             <Grid item xs={12} sm={4}>

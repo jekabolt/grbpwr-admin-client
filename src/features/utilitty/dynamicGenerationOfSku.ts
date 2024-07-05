@@ -41,7 +41,7 @@ const sanitizeBrand = (brand: string) => {
     return brand
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[\/\-,\$%\^:;()!@#&*+=`~.{}|]/g, '');
+        .replace(/[\/\-,\$%\^:;()!@#&*+=`~.{}|\[\]]/g, '');
 };
 
 const formatBrand = (brand: string) => {
