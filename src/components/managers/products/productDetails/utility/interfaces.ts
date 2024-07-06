@@ -1,10 +1,16 @@
-import { common_MediaFull, common_ProductFull } from "api/proto-http/admin";
+import { common_MediaFull, common_ProductFull, common_ProductInsert } from "api/proto-http/admin";
 
 export interface ProductIdProps {
     id: string
     product: common_ProductFull | undefined
     fetchProduct: () => void
     showMessage: (message: string, severity: 'success' | 'error') => void
+}
+
+export interface BasicProductInterface {
+    product: common_ProductFull | undefined
+    isEdit: boolean;
+    onPayloadChange: (payload: Partial<common_ProductInsert>) => void;
 }
 
 export interface MediaViewComponentsProps {
