@@ -1,6 +1,5 @@
 import {
   Box,
-  Button,
   Checkbox,
   FormControl,
   Grid,
@@ -9,13 +8,10 @@ import {
   Select,
   SelectChangeEvent,
   TextField,
-  Theme,
   Typography,
-  useMediaQuery,
 } from '@mui/material';
 import { getDictionary } from 'api/admin';
 import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
-import { updateProductById } from 'api/updateProductsById';
 import { colors } from 'constants/colors';
 import { format } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
@@ -29,15 +25,18 @@ import { removePossibilityToUseSigns } from 'features/utilitty/removePossibility
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { Country } from '../../addProduct/addProductInterface/addProductInterface';
-import { ProductIdProps } from '../utility/interfaces';
+import { BasicProductInterface } from '../utility/interfaces';
 
 type UpdateProductPayload = Partial<common_ProductInsert>;
 
-export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMessage }) => {
+export const BasicProductIformation: FC<BasicProductInterface> = ({
+  product,
+  isEdit,
+  onPayloadChange,
+}) => {
   const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
     hidden: product?.product?.productInsert?.hidden ?? false,
   });
-  const [isEdit, setIsEdit] = useState(false);
   const [dict, setDict] = useState<common_Dictionary>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const extractDate = convertFormattedStringToDate(product?.product?.productInsert?.preorder);
@@ -51,7 +50,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
   const initialPreorderValue = product?.product?.productInsert?.preorder !== '';
   const [showSales, setShowSales] = useState(initialSaleValue);
   const [showPreorder, setShowPreorder] = useState(initialPreorderValue);
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   useEffect(() => {
     const showSalesField =
@@ -73,10 +71,6 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
     };
     fetchDictionary();
   }, []);
-
-  const enableEditMode = () => {
-    setIsEdit(!isEdit);
-  };
 
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
@@ -131,45 +125,9 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         updatedPayload.countryOfOrigin ||
           product?.product?.productInsert?.countryOfOrigin?.substring(0, 2),
       );
-
+      onPayloadChange(updatedPayload);
       return updatedPayload;
     });
-  };
-
-  const updateProduct = async () => {
-    if (
-      Object.entries(updatePayload).some(([key, value]) => {
-        return key !== 'hidden' && key !== 'preorder' && !value;
-      })
-    ) {
-      showMessage('PLEASE FILL OUT ALL REQUIRED FIELDS', 'error');
-      return;
-    }
-    try {
-      const updatedDetails = {
-        ...product?.product?.productInsert,
-        ...updatePayload,
-      };
-      if (updatedDetails.preorder !== '' && updatedDetails.salePercentage?.value) {
-        updatedDetails.salePercentage.value = '0';
-      }
-      await updateProductById({
-        id: Number(id),
-        product: updatedDetails as common_ProductInsert,
-      });
-      showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
-      setUpdatePayload(updatedDetails);
-    } catch (error) {
-      const message = sessionStorage.getItem('errorcode');
-      message ? showMessage(message, 'error') : showMessage('PRODUCT CANNOT BE UPDATED', 'error');
-    }
-  };
-
-  const updateProductAndToggleEditMode = () => {
-    if (isEdit) {
-      updateProduct();
-    }
-    enableEditMode();
   };
 
   const getCountryLabel = (countryValue: string | undefined) => {
@@ -185,18 +143,14 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
 
   return (
     <Grid container spacing={2}>
-      <Grid item xs={6}>
+      <Grid item xs={12}>
         <TextField
           label='PRODUCT ID'
           InputLabelProps={{ shrink: true }}
           InputProps={{ readOnly: true }}
           value={product?.product?.id || ''}
+          fullWidth
         />
-      </Grid>
-      <Grid item xs={6}>
-        <Button size='large' onClick={updateProductAndToggleEditMode} variant='contained'>
-          {isEdit ? 'upload' : 'edit'}
-        </Button>
       </Grid>
       <Grid item xs={12}>
         <TextField
@@ -204,6 +158,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           InputLabelProps={{ shrink: true }}
           InputProps={{ readOnly: true }}
           value={product?.product?.createdAt ? formatDate(product?.product?.createdAt) : ''}
+          fullWidth
         />
       </Grid>
       <Grid item xs={12}>
@@ -212,37 +167,36 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           InputLabelProps={{ shrink: true }}
           InputProps={{ readOnly: true }}
           value={product?.product?.updatedAt ? formatDate(product?.product?.updatedAt) : ''}
+          fullWidth
         />
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <TextField
           name='name'
           onChange={handleChange}
-          value={updatePayload.name || ''}
+          value={updatePayload.name ?? product?.product?.productInsert?.name ?? ''}
           variant='outlined'
           label='NAME'
-          placeholder={product?.product?.productInsert?.name}
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
           required={isEdit}
           fullWidth
         />
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <TextField
           name='brand'
           onChange={handleChange}
-          value={updatePayload.brand || ''}
+          value={updatePayload.brand ?? product?.product?.productInsert?.brand ?? ''}
           variant='outlined'
           label='BRAND'
-          placeholder={product?.product?.productInsert?.brand}
           InputLabelProps={{ shrink: true }}
           disabled={!isEdit}
           required={isEdit}
           fullWidth
         />
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>GENDER</InputLabel>
           <Select
@@ -265,7 +219,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>CATEGORY</InputLabel>
           <Select
@@ -287,7 +241,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>COLOR</InputLabel>
           <Select
@@ -309,7 +263,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <TextField
           name='colorHex'
           onChange={handleChange}
@@ -323,7 +277,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           required={isEdit}
         />
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <FormControl fullWidth required={isEdit}>
           <InputLabel shrink>COUNTRY</InputLabel>
           <Select
@@ -345,7 +299,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <TextField
           type='number'
           name='price'
@@ -363,7 +317,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
         />
       </Grid>
       {showSales && (
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <TextField
             type='number'
             name='salePercentage'
@@ -385,7 +339,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
       )}
 
       {showPreorder && (
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <TextField
             key={preorderDate.initial}
             name='preorder'
@@ -407,7 +361,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           />
         </Grid>
       )}
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <TextField
           name='description'
           onChange={handleChange}
@@ -422,7 +376,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           required={isEdit}
         />
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <TextField
           name='sku'
           onChange={handleChange}
@@ -436,7 +390,7 @@ export const BasicProductIformation: FC<ProductIdProps> = ({ product, id, showMe
           fullWidth
         />
       </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid item xs={12}>
         <Box display='flex' alignItems='center'>
           <Typography textTransform='uppercase' variant='h6'>
             hiden

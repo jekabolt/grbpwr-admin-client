@@ -15,7 +15,7 @@ export const Product: FC = () => {
 
   return (
     <Layout>
-      <Grid container spacing={2} justifyContent='center' overflow='hidden'>
+      <Grid container spacing={2} justifyContent='center'>
         <Grid item>
           <Button onClick={navigateAddProduct} size='large' variant='contained'>
             ADD PRODUCT
