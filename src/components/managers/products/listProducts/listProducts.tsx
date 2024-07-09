@@ -42,10 +42,13 @@ export const ListProducts: FC<ProductProps> = ({
         >
           {deletingProductId === product.id ? (
             <Typography variant='h4'>product removed</Typography>
-          ) : isVideo(product.productDisplay?.thumbnail?.thumbnail?.mediaUrl) ? (
-            <video src={product.productDisplay?.thumbnail?.thumbnail?.mediaUrl} controls />
+          ) : isVideo(product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl) ? (
+            <video src={product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl} controls />
           ) : (
-            <img src={product.productDisplay?.thumbnail?.thumbnail?.mediaUrl} alt='Product Image' />
+            <img
+              src={product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl}
+              alt='Product Image'
+            />
           )}
           {hoveredProductId === product.id && (
             <IconButton

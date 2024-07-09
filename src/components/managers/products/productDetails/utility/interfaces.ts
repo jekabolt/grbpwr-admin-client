@@ -3,7 +3,6 @@ import { common_MediaFull, common_ProductFull } from "api/proto-http/admin";
 export interface ProductIdProps {
     id: string
     product: common_ProductFull | undefined
-    setThumbnailId?: (id: number | undefined) => void
     fetchProduct: () => void
     showMessage: (message: string, severity: 'success' | 'error') => void
 }

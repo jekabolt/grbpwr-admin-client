@@ -1,8 +1,7 @@
 import { Alert, AppBar, Button, Grid, Snackbar, Toolbar } from '@mui/material';
 import { MakeGenerics, useMatch } from '@tanstack/react-location';
-import { getProductByID } from 'api/admin';
-import { UpdateProductRequest, common_GenderEnum, common_ProductFull } from 'api/proto-http/admin';
-import { updateProductById } from 'api/updateProductsById';
+import { getProductByID, upsertProduct } from 'api/admin';
+import { UpsertProductRequest, common_GenderEnum, common_ProductFull } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { Field, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
@@ -46,15 +45,15 @@ export const ProductDetails: FC = () => {
     }
   };
 
-  const updateProduct = async (updatePayload: UpdateProductRequest) => {
+  const updateProduct = async (updatePayload: UpsertProductRequest) => {
     try {
       if (
-        updatePayload.product?.productBody?.preorder !== '' &&
-        updatePayload.product?.productBody?.salePercentage?.value
+        updatePayload.product?.product?.productBody?.preorder !== '' &&
+        updatePayload.product?.product?.productBody?.salePercentage?.value
       ) {
-        updatePayload.product.productBody.salePercentage.value = '0';
+        updatePayload.product.product.productBody.salePercentage.value = '0';
       }
-      await updateProductById(updatePayload);
+      await upsertProduct(updatePayload);
       showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
       fetchProduct();
     } catch (error) {
@@ -68,15 +67,17 @@ export const ProductDetails: FC = () => {
   }, [id]);
 
   const handleFormSubmit = (
-    values: UpdateProductRequest,
+    values: UpsertProductRequest,
     setSubmitting: (isSubmitting: boolean) => void,
   ) => {
-    const updatePayload: UpdateProductRequest = {
+    const updatePayload: UpsertProductRequest = {
       id: parseInt(id),
-      product: values.product,
-      measurements: values.measurements,
-      tags: values.tags,
-      mediaIds: values.mediaIds,
+      product: {
+        product: values.product?.product,
+        sizeMeasurements: values.product?.sizeMeasurements,
+        tags: values.product?.tags,
+        mediaIds: values.product?.mediaIds,
+      },
     };
     updateProduct(updatePayload);
     setSubmitting(false);
@@ -93,26 +94,28 @@ export const ProductDetails: FC = () => {
         initialValues={{
           id: product?.product?.id,
           product: {
-            productBody: {
-              preorder: '',
-              name: product?.product?.productDisplay?.productBody?.name ?? '',
-              brand: product?.product?.productDisplay?.productBody?.brand ?? '',
-              sku: '',
-              color: '',
-              colorHex: '',
-              countryOfOrigin: '',
-              price: { value: '0' },
-              salePercentage: { value: '0' },
-              categoryId: 0,
-              description: '',
-              hidden: false,
-              targetGender: '' as common_GenderEnum,
+            product: {
+              productBody: {
+                preorder: '',
+                name: product?.product?.productDisplay?.productBody?.name ?? '',
+                brand: '',
+                sku: '',
+                color: '',
+                colorHex: '',
+                countryOfOrigin: '',
+                price: { value: '0' },
+                salePercentage: { value: '0' },
+                categoryId: 0,
+                description: '',
+                hidden: false,
+                targetGender: '' as common_GenderEnum,
+              },
+              thumbnailMediaId: product?.product?.productDisplay?.thumbnail?.id,
             },
-            thumbnailMediaId: 0,
+            sizeMeasurements: [],
+            tags: [],
+            mediaIds: [],
           },
-          measurements: [],
-          tags: [],
-          mediaIds: [],
         }}
         enableReinitialize={true}
         onSubmit={(values, { setSubmitting }) => handleFormSubmit(values, setSubmitting)}
@@ -143,7 +146,6 @@ export const ProductDetails: FC = () => {
                   id={id}
                   fetchProduct={fetchProduct}
                   showMessage={showMessage}
-                  setThumbnailId={setThumbnailId}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -151,11 +153,10 @@ export const ProductDetails: FC = () => {
                   <Grid item xs={12}>
                     <Field
                       component={BasicProductIformation}
-                      name='product.productBody'
+                      name='product.product.productBody'
                       product={product}
                       isEdit={isEdit}
                     />
-                    {/* <BasicProductIformation product={product} isEdit={isEdit} /> */}
                   </Grid>
                   <Grid item xs={12}>
                     <ProductTags

@@ -116,7 +116,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
       <Grid item xs={12}>
         <Field
           as={TextField}
-          name='product.productBody.name'
+          name='product.product.productBody.name'
           variant='outlined'
           label='NAME'
           InputLabelProps={{ shrink: true }}
@@ -126,7 +126,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
       <Grid item xs={12}>
         <Field
           as={TextField}
-          name='product.productBody.brand'
+          name='product.product.productBody.brand'
           variant='outlined'
           label='BRAND'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
@@ -138,7 +138,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
         <FormControl fullWidth>
           <InputLabel shrink>GENDER</InputLabel>
           <Select
-            name='product.productBody.targetGender'
+            name='product.product.productBody.targetGender'
             value={values.product?.productBody?.targetGender || ''}
             onChange={(e) => {
               handleFieldChange(e, 'targetGender');
@@ -161,7 +161,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
         <FormControl fullWidth>
           <InputLabel shrink>CATEGORY</InputLabel>
           <Select
-            name='product.productBody.categoryId'
+            name='product.product.productBody.categoryId'
             onChange={(e) => handleFieldChange(e, 'categoryId')}
             value={values.product?.productBody?.categoryId || ''}
             displayEmpty
@@ -186,7 +186,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
         <FormControl fullWidth>
           <InputLabel shrink>COLOR</InputLabel>
           <Select
-            name='product.productBody.color'
+            name='product.product.productBody.color'
             value={values.product?.productBody?.color || ''}
             onChange={(e) => handleFieldChange(e, 'color')}
             displayEmpty
@@ -206,7 +206,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
       <Grid item xs={12}>
         <Field
           as={TextField}
-          name='product.productBody.colorHex'
+          name='product.product.productBody.colorHex'
           variant='outlined'
           label='COLOR HEX'
           InputLabelProps={{ shrink: true }}
@@ -218,7 +218,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
         <FormControl fullWidth>
           <InputLabel shrink>COUNTRY</InputLabel>
           <Select
-            name='product.productBody.countryOfOrigin'
+            name='product.product.productBody.countryOfOrigin'
             value={values.product?.productBody?.countryOfOrigin || ''}
             onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
             displayEmpty
@@ -239,7 +239,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
         <Field
           as={TextField}
           type='number'
-          name='product.productBody.price.value'
+          name='product.product.productBody.price.value'
           variant='outlined'
           label='PRICE'
           InputLabelProps={{ shrink: true }}
@@ -252,7 +252,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
       <Grid item xs={12}>
         <TextField
           type='number'
-          name='salePercentage'
+          name='product.product.productBody.salePercentage.value'
           variant='outlined'
           label='SALE PERCENTAGE'
           InputLabelProps={{ shrink: true }}
@@ -264,7 +264,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
 
       <Grid item xs={12}>
         <TextField
-          name='preorder'
+          name='product.product.productBody.preorder'
           type='date'
           variant='outlined'
           label='PREORDER'
@@ -279,10 +279,9 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
       <Grid item xs={12}>
         <Field
           as={TextField}
-          name='product.productBody.description'
+          name='product.product.productBody.description'
           variant='outlined'
           label='DESCRIPTION'
-          placeholder={product?.product?.productDisplay?.productBody?.description}
           InputLabelProps={{ shrink: true }}
           multiline
           fullWidth
@@ -291,7 +290,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
       <Grid item xs={12}>
         <Field
           as={TextField}
-          name='product.productBody.sku'
+          name='product.product.productBody.sku'
           variant='outlined'
           label='SKU'
           InputProps={{ readOnly: true }}
@@ -304,7 +303,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isE
           <Typography textTransform='uppercase' variant='h6'>
             hiden
           </Typography>
-          <Checkbox name='product.productBody.hidden' />
+          <Checkbox name='product.product.productBody.hidden' />
         </Box>
       </Grid>
     </Grid>

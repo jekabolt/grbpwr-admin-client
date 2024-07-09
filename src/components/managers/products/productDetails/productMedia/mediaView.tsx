@@ -1,28 +1,18 @@
 import { Grid, Typography } from '@mui/material';
 
-import { UpdateProductRequest, common_MediaFull } from 'api/proto-http/admin';
+import { UpsertProductRequest, common_MediaFull } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
-import { FC, useState } from 'react';
+import { FC } from 'react';
 import { SingleMediaViewAndSelect } from '../../../../common/singleMediaViewAndSelect';
 import { ProductIdProps } from '../utility/interfaces';
 import { ProductMedias } from './components/productIdMedias';
 
-export const MediaView: FC<ProductIdProps> = ({
-  product,
-  id,
-  fetchProduct,
-  showMessage,
-  setThumbnailId,
-}) => {
-  const [thumbnailPreview, setThumbnailPreview] = useState('');
-  const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
-  const { values, setFieldValue } = useFormikContext<UpdateProductRequest>();
+export const MediaView: FC<ProductIdProps> = ({ product, fetchProduct, showMessage }) => {
+  const { values, setFieldValue } = useFormikContext<UpsertProductRequest>();
+
   const saveThumbnail = async (newSelectedMedia: common_MediaFull[]) => {
     const thumbnail = newSelectedMedia[0].id;
-    const thumbnailUrl = newSelectedMedia[0].media?.thumbnail?.mediaUrl ?? '';
-    setThumbnailPreview(thumbnailUrl);
     setFieldValue('product.thumbnailMediaId', thumbnail);
-    // const baseProductInsert = product?.product?.productDisplay?.thumbnail;
   };
 
   const saveMedia = async (newSelectedMedia: common_MediaFull[]) => {
@@ -35,7 +25,7 @@ export const MediaView: FC<ProductIdProps> = ({
       return;
     }
     const updatedMediaIds = [
-      ...(values.mediaIds || []),
+      ...(values.product?.mediaIds || []),
       ...newSelectedMedia.map((media) => media.id),
     ];
     setFieldValue('mediaIds', updatedMediaIds);
@@ -48,9 +38,7 @@ export const MediaView: FC<ProductIdProps> = ({
           thumbnail
         </Typography>
         <SingleMediaViewAndSelect
-          link={
-            thumbnailPreview || product?.product?.productDisplay?.thumbnail?.thumbnail?.mediaUrl
-          }
+          link={product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl}
           saveSelectedMedia={saveThumbnail}
         />
       </Grid>

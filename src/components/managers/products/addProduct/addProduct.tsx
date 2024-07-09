@@ -1,8 +1,8 @@
 import { Alert, Button, Grid, Snackbar } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
-import { addProduct, getDictionary } from 'api/admin';
+import { getDictionary, upsertProduct } from 'api/admin';
 import {
-  AddProductRequest,
+  UpsertProductRequest,
   common_Dictionary,
   common_GenderEnum,
   common_ProductNew,
@@ -18,7 +18,7 @@ import { Tags } from './tag/tag';
 export const initialProductState: common_ProductNew = {
   product: {
     productBody: {
-      preorder: '',
+      preorder: undefined,
       name: '',
       brand: '',
       sku: '',
@@ -77,11 +77,12 @@ export const AddProducts: FC = () => {
           sizeMeasurement.productSize &&
           sizeMeasurement.productSize.quantity !== null,
       );
-      const productToSubmit: AddProductRequest = {
+      const productToSubmit: UpsertProductRequest = {
+        id: undefined,
         product: {
           ...values,
           sizeMeasurements: nonEmptySizeMeasurements,
-        },
+        } as common_ProductNew,
       };
 
       if (parseFloat(values.product?.productBody?.price?.value || '') <= 0) {
@@ -90,7 +91,7 @@ export const AddProducts: FC = () => {
         return;
       }
 
-      await addProduct(productToSubmit);
+      await upsertProduct(productToSubmit);
       setClearMediaPreview(true);
       showMessage('PRODUCT UPLOADED', 'success');
       resetForm();

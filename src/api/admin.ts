@@ -1,7 +1,5 @@
 import { axiosRequestHandler } from './api';
 import {
-  AddProductRequest,
-  AddProductResponse,
   DeleteFromBucketRequest,
   DeleteFromBucketResponse,
   DeleteProductByIDRequest,
@@ -18,6 +16,8 @@ import {
   UploadContentImageResponse,
   UploadContentVideoRequest,
   UploadContentVideoResponse,
+  UpsertProductRequest,
+  UpsertProductResponse,
   createAdminServiceClient
 } from './proto-http/admin';
 import { createFrontendServiceClient } from './proto-http/frontend';
@@ -48,8 +48,8 @@ export function deleteFiles(request: DeleteFromBucketRequest): Promise<DeleteFro
   return adminService.DeleteFromBucket(request);
 }
 
-export function addProduct(product: AddProductRequest): Promise<AddProductResponse> {
-  return adminService.AddProduct(product);
+export function upsertProduct(request: UpsertProductRequest): Promise<UpsertProductResponse> {
+  return adminService.UpsertProduct(request)
 }
 
 export function getProductsPaged(
