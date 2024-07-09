@@ -1,6 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton } from '@mui/material';
-import { deleteMediaById } from 'api/updateProductsById';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useMemo } from 'react';
@@ -12,10 +11,6 @@ export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveS
     if (!id) {
       alert('no id');
       return;
-    }
-    const response = await deleteMediaById({ productId: product?.product?.id, mediaId: id });
-    if (response) {
-      fetchProduct();
     }
   };
 

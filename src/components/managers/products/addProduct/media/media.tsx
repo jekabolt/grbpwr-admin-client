@@ -24,10 +24,11 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
     if (!newSelectedMedia.length) {
       return;
     }
+    const thumbnailId = newSelectedMedia[0].id;
     const thumbnail = newSelectedMedia[0];
     const thumbnailUrl = thumbnail.media?.fullSize?.mediaUrl ?? '';
     setImagePreviewUrl(thumbnailUrl);
-    setFieldValue('product.thumbnail', thumbnailUrl);
+    setFieldValue('product.thumbnailMediaId', thumbnailId);
   };
   const uploadMediasInProduct = (newSelectedMedia: common_MediaFull[]) => {
     if (newSelectedMedia.length === 0) {
@@ -60,7 +61,7 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
           link={imagePreviewUrl}
           saveSelectedMedia={uploadThumbnailInProduct}
         />
-        {!values.product?.thumbnail && (
+        {!values.product?.thumbnailMediaId && (
           <Typography color='error' variant='overline'>
             THUMBNAIL MUST BE SELECTED
           </Typography>

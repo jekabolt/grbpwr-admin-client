@@ -34,7 +34,7 @@ export const ListProducts: FC<ProductProps> = ({
           onMouseEnter={() => setHoveredProductId(product.id)}
           onMouseLeave={() => setHoveredProductId(undefined)}
           onClick={() => productClick(product.id)}
-          className={`${styles.product} ${product.productInsert?.hidden && showHidden ? styles.hidden_product : ''}`}
+          className={`${styles.product} ${product.productDisplay?.productBody?.hidden && showHidden ? styles.hidden_product : ''}`}
           xs={6}
           sm={6}
           md={4}
@@ -42,10 +42,10 @@ export const ListProducts: FC<ProductProps> = ({
         >
           {deletingProductId === product.id ? (
             <Typography variant='h4'>product removed</Typography>
-          ) : isVideo(product.productInsert?.thumbnail) ? (
-            <video src={product.productInsert?.thumbnail} controls />
+          ) : isVideo(product.productDisplay?.thumbnail?.thumbnail?.mediaUrl) ? (
+            <video src={product.productDisplay?.thumbnail?.thumbnail?.mediaUrl} controls />
           ) : (
-            <img src={product.productInsert?.thumbnail} alt='Product Image' />
+            <img src={product.productDisplay?.thumbnail?.thumbnail?.mediaUrl} alt='Product Image' />
           )}
           {hoveredProductId === product.id && (
             <IconButton
@@ -61,7 +61,7 @@ export const ListProducts: FC<ProductProps> = ({
           <Typography
             variant='overline'
             className={styles.info}
-          >{`[${product.id}] ${product.productInsert?.brand} ${product.productInsert?.name}`}</Typography>
+          >{`[${product.id}] ${product.productDisplay?.productBody?.brand} ${product.productDisplay?.productBody?.name}`}</Typography>
         </Grid>
       ))}
     </Grid>

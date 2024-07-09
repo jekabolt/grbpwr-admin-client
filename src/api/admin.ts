@@ -1,7 +1,5 @@
 import { axiosRequestHandler } from './api';
 import {
-  AddProductMediaRequest,
-  AddProductMediaResponse,
   AddProductRequest,
   AddProductResponse,
   DeleteFromBucketRequest,
@@ -62,10 +60,6 @@ export function getProductsPaged(
 
 export function getProductByID(request: GetProductByIDRequest): Promise<GetProductByIDResponse> {
   return adminService.GetProductByID(request);
-}
-
-export function addMediaByID(request: AddProductMediaRequest): Promise<AddProductMediaResponse> {
-  return adminService.AddProductMedia(request);
 }
 
 export function deleteProductByID(

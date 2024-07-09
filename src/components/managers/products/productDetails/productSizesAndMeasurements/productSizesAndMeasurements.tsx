@@ -1,7 +1,6 @@
 import CheckIcon from '@mui/icons-material/Check';
 import {
   Box,
-  Button,
   IconButton,
   Paper,
   Table,
@@ -14,7 +13,7 @@ import {
 } from '@mui/material';
 import { getDictionary } from 'api/admin';
 import { UpdateProductSizeStockRequest, common_Dictionary } from 'api/proto-http/admin';
-import { updateMeasurement, updateSize } from 'api/updateProductsById';
+import { updateSize } from 'api/updateProductsById';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
@@ -124,31 +123,31 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
     }
   };
 
-  const handleBatchUpdateMeasurements = async () => {
-    const measurementQuantityArray = Object.entries(measurementQuantity).map(([key, value]) => {
-      const [productSizeId, measurementNameId] = key.split('-').map(Number);
-      return {
-        sizeId: productSizeId,
-        measurementNameId: measurementNameId,
-        measurementValue: { value: value },
-      };
-    });
+  // const handleBatchUpdateMeasurements = async () => {
+  //   const measurementQuantityArray = Object.entries(measurementQuantity).map(([key, value]) => {
+  //     const [productSizeId, measurementNameId] = key.split('-').map(Number);
+  //     return {
+  //       sizeId: productSizeId,
+  //       measurementNameId: measurementNameId,
+  //       measurementValue: { value: value },
+  //     };
+  //   });
 
-    try {
-      const request = {
-        productId: Number(id),
-        measurements: measurementQuantityArray,
-      };
-      const response = await updateMeasurement(request);
-      showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
-      if (response) {
-        setMeasurementQuantity({});
-        fetchProduct();
-      }
-    } catch (error) {
-      showMessage('MEASUREMENTS CANNOT BE UPDATED', 'error');
-    }
-  };
+  //   try {
+  //     const request = {
+  //       productId: Number(id),
+  //       measurements: measurementQuantityArray,
+  //     };
+  //     const response = await updateMeasurement(request);
+  //     showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
+  //     if (response) {
+  //       setMeasurementQuantity({});
+  //       fetchProduct();
+  //     }
+  //   } catch (error) {
+  //     showMessage('MEASUREMENTS CANNOT BE UPDATED', 'error');
+  //   }
+  // };
 
   const firstSizeQuantity = sizeQuantity[updatedSizes[0]?.id!] || 0;
   const shouldHideFirstSize = updatedSizes.slice(1).some((size) => sizeQuantity[size.id!] > 0);
@@ -233,14 +232,14 @@ export const ProductSizesAndMeasurements: FC<ProductIdProps> = ({
           })}
         </TableBody>
       </Table>
-      <Button
+      {/* <Button
         variant='contained'
         color='primary'
         onClick={handleBatchUpdateMeasurements}
         style={{ margin: '20px' }}
       >
         Update All Measurements
-      </Button>
+      </Button> */}
     </TableContainer>
   );
 };

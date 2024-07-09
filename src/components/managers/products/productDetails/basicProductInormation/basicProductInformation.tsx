@@ -11,124 +11,67 @@ import {
   Typography,
 } from '@mui/material';
 import { getDictionary } from 'api/admin';
-import { common_Dictionary, common_ProductInsert } from 'api/proto-http/admin';
+import { common_Dictionary } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { format } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import {
-  convertFormattedStringToDate,
-  formatPreorderDate,
-} from 'features/utilitty/formatPreorderDate';
 import { formatDate } from 'features/utilitty/formateDate';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
-import React, { FC, useEffect, useMemo, useState } from 'react';
+import { Field, useFormikContext } from 'formik';
+import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { Country } from '../../addProduct/addProductInterface/addProductInterface';
 import { BasicProductInterface } from '../utility/interfaces';
 
-type UpdateProductPayload = Partial<common_ProductInsert>;
-
-export const BasicProductIformation: FC<BasicProductInterface> = ({
-  product,
-  isEdit,
-  onPayloadChange,
-}) => {
-  const [updatePayload, setUpdatePayload] = useState<UpdateProductPayload>({
-    hidden: product?.product?.productInsert?.hidden ?? false,
-  });
-  const [dict, setDict] = useState<common_Dictionary>();
+export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isEdit }) => {
+  const { values, setFieldValue } = useFormikContext<any>();
+  const [dictionary, setDictionary] = useState<common_Dictionary>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
-  const extractDate = convertFormattedStringToDate(product?.product?.productInsert?.preorder);
-  const [preorderDate, setPreorderDate] = useState({
-    initial: product?.product?.productInsert?.preorder || '',
-    formatted: formatPreorderDate(product?.product?.productInsert?.preorder) || '',
-  });
-  const initialSaleValue =
-    product?.product?.productInsert?.salePercentage?.value !== '' &&
-    product?.product?.productInsert?.salePercentage?.value !== '0';
-  const initialPreorderValue = product?.product?.productInsert?.preorder !== '';
-  const [showSales, setShowSales] = useState(initialSaleValue);
-  const [showPreorder, setShowPreorder] = useState(initialPreorderValue);
-
-  useEffect(() => {
-    const showSalesField =
-      updatePayload.salePercentage?.value !== '' && updatePayload.salePercentage?.value !== '0';
-    const showPreorderField = updatePayload.preorder !== '';
-
-    const bothEmpty =
-      (updatePayload.salePercentage?.value === '' || updatePayload.salePercentage?.value === '0') &&
-      !updatePayload.preorder;
-
-    setShowSales(showSalesField || bothEmpty);
-    setShowPreorder(showPreorderField || bothEmpty);
-  }, [updatePayload.salePercentage?.value, updatePayload.preorder]);
 
   useEffect(() => {
     const fetchDictionary = async () => {
       const response = await getDictionary({});
-      setDict(response.dictionary);
+      setDictionary(response.dictionary);
     };
     fetchDictionary();
   }, []);
 
-  const handleChange = (
-    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent,
-  ) => {
-    const target = event.target as HTMLInputElement | HTMLTextAreaElement;
-    const name = target.name;
-    const isCheckbox = target instanceof HTMLInputElement && target.type === 'checkbox';
-    const value = isCheckbox ? target.checked : target.value;
-
-    setUpdatePayload((prev) => {
-      let updatedPayload: UpdateProductPayload = { ...prev };
-
-      if (name === 'color' && typeof value === 'string') {
+  const handleFieldChange = useCallback(
+    (
+      e: SelectChangeEvent<string | number> | React.ChangeEvent<HTMLInputElement>,
+      field: string,
+    ) => {
+      let newValue = e.target.value;
+      if (field === 'color' && typeof newValue === 'string') {
+        newValue = newValue.toLowerCase().replace(/\s/g, '_');
         const selectedColor = colors.find(
-          (color) => color.name.toLowerCase().replace(/\s/g, '_') === value,
+          (color) => color.name.toLowerCase().replace(/\s/g, '_') === newValue,
         );
-        updatedPayload = {
-          ...updatedPayload,
-          color: value,
-          colorHex: selectedColor ? selectedColor.hex : '#000000',
-        };
-      } else if (name === 'price' || (name === 'salePercentage' && typeof value === 'string')) {
-        updatedPayload = {
-          ...updatedPayload,
-          [name]: { ...prev[name], value },
-        };
-      } else if (name === 'preorder' && typeof value === 'string') {
-        const formattedDate = value ? formatPreorderDate(value) : '';
-        setPreorderDate({
-          initial: value,
-          formatted: formattedDate,
-        });
-        updatedPayload.preorder = formattedDate;
-      } else if (name === 'categoryId' && typeof value === 'string') {
-        updatedPayload = {
-          ...updatedPayload,
-          categoryId: Number(value),
-        };
-      } else {
-        updatedPayload = {
-          ...updatedPayload,
-          [name]: value,
-        };
+        setFieldValue(
+          'product.productBody.colorHex',
+          selectedColor ? selectedColor.hex : '#000000',
+          false,
+        );
       }
+      setFieldValue(`product.productBody.${field}`, newValue);
 
-      updatedPayload.sku = generateSKU(
-        updatedPayload.brand || product?.product?.productInsert?.brand,
-        updatedPayload.targetGender || product?.product?.productInsert?.targetGender,
-        findInDictionary(dict, updatedPayload.categoryId, 'category') ||
-          findInDictionary(dict, product?.product?.productInsert?.categoryId, 'category'),
-        updatedPayload.color || product?.product?.productInsert?.color,
-        updatedPayload.countryOfOrigin ||
-          product?.product?.productInsert?.countryOfOrigin?.substring(0, 2),
+      const updatedValues = {
+        ...values.product,
+        [field]: newValue,
+      };
+
+      const newSKU = generateSKU(
+        updatedValues.productBody?.brand,
+        updatedValues.productBody?.targetGender,
+        findInDictionary(dictionary, updatedValues.productBody?.categoryId, 'category'),
+        updatedValues.productBody?.color,
+        updatedValues.productBody?.countryOfOrigin,
       );
-      onPayloadChange(updatedPayload);
-      return updatedPayload;
-    });
-  };
+      setFieldValue('product.productBody.sku', newSKU);
+    },
+    [values.product, setFieldValue],
+  );
 
   const getCountryLabel = (countryValue: string | undefined) => {
     if (!countryValue || !countries) return '';
@@ -171,47 +114,42 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({
         />
       </Grid>
       <Grid item xs={12}>
-        <TextField
-          name='name'
-          onChange={handleChange}
-          value={updatePayload.name ?? product?.product?.productInsert?.name ?? ''}
+        <Field
+          as={TextField}
+          name='product.productBody.name'
           variant='outlined'
           label='NAME'
           InputLabelProps={{ shrink: true }}
-          disabled={!isEdit}
-          required={isEdit}
           fullWidth
         />
       </Grid>
       <Grid item xs={12}>
-        <TextField
-          name='brand'
-          onChange={handleChange}
-          value={updatePayload.brand ?? product?.product?.productInsert?.brand ?? ''}
+        <Field
+          as={TextField}
+          name='product.productBody.brand'
           variant='outlined'
           label='BRAND'
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
           InputLabelProps={{ shrink: true }}
-          disabled={!isEdit}
-          required={isEdit}
           fullWidth
         />
       </Grid>
       <Grid item xs={12}>
-        <FormControl fullWidth required={isEdit}>
+        <FormControl fullWidth>
           <InputLabel shrink>GENDER</InputLabel>
           <Select
-            name='targetGender'
-            value={
-              updatePayload.targetGender ||
-              product?.product?.productInsert?.targetGender ||
-              'GENDER_ENUM_MALE'
-            }
-            onChange={handleChange}
+            name='product.productBody.targetGender'
+            value={values.product?.productBody?.targetGender || ''}
+            onChange={(e) => {
+              handleFieldChange(e, 'targetGender');
+            }}
             displayEmpty
             label='GENDER'
-            disabled={!isEdit}
           >
-            {dict?.genders?.map((gender) => (
+            <MenuItem value='' disabled>
+              {product?.product?.productDisplay?.productBody?.targetGender}
+            </MenuItem>
+            {dictionary?.genders?.map((gender) => (
               <MenuItem key={gender.id} value={gender.id}>
                 {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
               </MenuItem>
@@ -220,40 +158,42 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({
         </FormControl>
       </Grid>
       <Grid item xs={12}>
-        <FormControl fullWidth required={isEdit}>
+        <FormControl fullWidth>
           <InputLabel shrink>CATEGORY</InputLabel>
           <Select
-            name='categoryId'
-            value={updatePayload.categoryId?.toString() || ''}
-            onChange={handleChange}
+            name='product.productBody.categoryId'
+            onChange={(e) => handleFieldChange(e, 'categoryId')}
+            value={values.product?.productBody?.categoryId || ''}
             displayEmpty
             label='CATEGORY'
-            disabled={!isEdit}
           >
             <MenuItem value='' disabled>
-              {findInDictionary(dict, product?.product?.productInsert?.categoryId, 'category')}
+              {findInDictionary(
+                dictionary,
+                product?.product?.productDisplay?.productBody?.categoryId,
+                'category',
+              )}
             </MenuItem>
-            {dict?.categories?.map((category) => (
+            {dictionary?.categories?.map((category) => (
               <MenuItem key={category.id} value={category.id?.toString()}>
-                {findInDictionary(dict, category.id, 'category')}
+                {findInDictionary(dictionary, category.id, 'category')}
               </MenuItem>
             ))}
           </Select>
         </FormControl>
       </Grid>
       <Grid item xs={12}>
-        <FormControl fullWidth required={isEdit}>
+        <FormControl fullWidth>
           <InputLabel shrink>COLOR</InputLabel>
           <Select
-            name='color'
-            value={updatePayload.color || ''}
-            onChange={handleChange}
+            name='product.productBody.color'
+            value={values.product?.productBody?.color || ''}
+            onChange={(e) => handleFieldChange(e, 'color')}
             displayEmpty
             label='COLOR'
-            disabled={!isEdit}
           >
             <MenuItem value='' disabled>
-              {product?.product?.productInsert?.color}
+              {product?.product?.productDisplay?.productBody?.color}
             </MenuItem>
             {colors.map((color, id) => (
               <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
@@ -264,32 +204,28 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({
         </FormControl>
       </Grid>
       <Grid item xs={12}>
-        <TextField
-          name='colorHex'
-          onChange={handleChange}
-          value={updatePayload.colorHex || product?.product?.productInsert?.colorHex || ''}
+        <Field
+          as={TextField}
+          name='product.productBody.colorHex'
           variant='outlined'
           label='COLOR HEX'
           InputLabelProps={{ shrink: true }}
           type='color'
           fullWidth
-          disabled={!isEdit}
-          required={isEdit}
         />
       </Grid>
       <Grid item xs={12}>
-        <FormControl fullWidth required={isEdit}>
+        <FormControl fullWidth>
           <InputLabel shrink>COUNTRY</InputLabel>
           <Select
-            name='countryOfOrigin'
-            value={updatePayload.countryOfOrigin || ''}
-            onChange={handleChange}
+            name='product.productBody.countryOfOrigin'
+            value={values.product?.productBody?.countryOfOrigin || ''}
+            onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
             displayEmpty
             label='COUNTRY'
-            disabled={!isEdit}
           >
             <MenuItem value='' disabled>
-              {getCountryLabel(product?.product?.productInsert?.countryOfOrigin)}
+              {getCountryLabel(product?.product?.productDisplay?.productBody?.countryOfOrigin)}
             </MenuItem>
             {countries.map((country) => (
               <MenuItem key={country.value} value={country.value}>
@@ -300,93 +236,66 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({
         </FormControl>
       </Grid>
       <Grid item xs={12}>
-        <TextField
+        <Field
+          as={TextField}
           type='number'
-          name='price'
-          onChange={handleChange}
-          value={updatePayload.price?.value || ''}
+          name='product.productBody.price.value'
           variant='outlined'
           label='PRICE'
-          placeholder={product?.product?.productInsert?.price?.value}
           InputLabelProps={{ shrink: true }}
           inputProps={{ min: 0, pattern: '[0-9]*' }}
-          disabled={!isEdit}
-          required={isEdit}
           onKeyDown={removePossibilityToUseSigns}
           fullWidth
         />
       </Grid>
-      {showSales && (
-        <Grid item xs={12}>
-          <TextField
-            type='number'
-            name='salePercentage'
-            onChange={handleChange}
-            value={
-              updatePayload.salePercentage?.value ||
-              product?.product?.productInsert?.salePercentage?.value ||
-              ''
-            }
-            variant='outlined'
-            label='SALE PERCENTAGE'
-            InputLabelProps={{ shrink: true }}
-            inputProps={{ min: 0 }}
-            disabled={!isEdit}
-            onKeyDown={removePossibilityToUseSigns}
-            fullWidth
-          />
-        </Grid>
-      )}
 
-      {showPreorder && (
-        <Grid item xs={12}>
-          <TextField
-            key={preorderDate.initial}
-            name='preorder'
-            type={isEdit ? 'date' : 'text'}
-            onChange={handleChange}
-            value={
-              isEdit
-                ? preorderDate.initial || extractDate || ''
-                : updatePayload.preorder || product?.product?.productInsert?.preorder || ''
-            }
-            variant='outlined'
-            label='PREORDER'
-            InputLabelProps={{ shrink: true }}
-            inputProps={{
-              min: isEdit ? getCurrentDate() : undefined,
-            }}
-            disabled={!isEdit}
-            fullWidth
-          />
-        </Grid>
-      )}
       <Grid item xs={12}>
         <TextField
-          name='description'
-          onChange={handleChange}
-          value={updatePayload.description || ''}
+          type='number'
+          name='salePercentage'
+          variant='outlined'
+          label='SALE PERCENTAGE'
+          InputLabelProps={{ shrink: true }}
+          inputProps={{ min: 0 }}
+          onKeyDown={removePossibilityToUseSigns}
+          fullWidth
+        />
+      </Grid>
+
+      <Grid item xs={12}>
+        <TextField
+          name='preorder'
+          type='date'
+          variant='outlined'
+          label='PREORDER'
+          InputLabelProps={{ shrink: true }}
+          inputProps={{
+            min: isEdit ? getCurrentDate() : undefined,
+          }}
+          fullWidth
+        />
+      </Grid>
+
+      <Grid item xs={12}>
+        <Field
+          as={TextField}
+          name='product.productBody.description'
           variant='outlined'
           label='DESCRIPTION'
-          placeholder={product?.product?.productInsert?.description}
+          placeholder={product?.product?.productDisplay?.productBody?.description}
           InputLabelProps={{ shrink: true }}
           multiline
           fullWidth
-          disabled={!isEdit}
-          required={isEdit}
         />
       </Grid>
       <Grid item xs={12}>
-        <TextField
-          name='sku'
-          onChange={handleChange}
-          value={updatePayload.sku || ''}
+        <Field
+          as={TextField}
+          name='product.productBody.sku'
           variant='outlined'
           label='SKU'
-          placeholder={product?.product?.productInsert?.sku}
           InputProps={{ readOnly: true }}
           InputLabelProps={{ shrink: true }}
-          disabled={!isEdit}
           fullWidth
         />
       </Grid>
@@ -395,12 +304,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({
           <Typography textTransform='uppercase' variant='h6'>
             hiden
           </Typography>
-          <Checkbox
-            name='hidden'
-            checked={!!updatePayload.hidden || false}
-            onChange={handleChange}
-            disabled={!isEdit}
-          />
+          <Checkbox name='product.productBody.hidden' />
         </Box>
       </Grid>
     </Grid>

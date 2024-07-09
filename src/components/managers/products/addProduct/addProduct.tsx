@@ -17,20 +17,22 @@ import { Tags } from './tag/tag';
 
 export const initialProductState: common_ProductNew = {
   product: {
-    preorder: '',
-    name: '',
-    brand: '',
-    sku: '',
-    color: '',
-    colorHex: '',
-    countryOfOrigin: '',
-    thumbnail: '',
-    price: { value: '0' },
-    salePercentage: { value: '0' },
-    categoryId: 0,
-    description: '',
-    hidden: false,
-    targetGender: '' as common_GenderEnum,
+    productBody: {
+      preorder: '',
+      name: '',
+      brand: '',
+      sku: '',
+      color: '',
+      colorHex: '',
+      countryOfOrigin: '',
+      price: { value: '0' },
+      salePercentage: { value: '0' },
+      categoryId: 0,
+      description: '',
+      hidden: false,
+      targetGender: '' as common_GenderEnum,
+    },
+    thumbnailMediaId: undefined,
   },
   sizeMeasurements: [],
   mediaIds: [],
@@ -82,7 +84,7 @@ export const AddProducts: FC = () => {
         },
       };
 
-      if (parseFloat(values.product?.price?.value || '') <= 0) {
+      if (parseFloat(values.product?.productBody?.price?.value || '') <= 0) {
         showMessage('PRICE CANNOT BE ZERO', 'error');
         setSubmitting(false);
         return;
@@ -111,7 +113,11 @@ export const AddProducts: FC = () => {
               <Grid item xs={12} sm={6}>
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
-                    <Field component={CommonProductInsert} name='product' dictionary={dictionary} />
+                    <Field
+                      component={CommonProductInsert}
+                      name='product.productBody'
+                      dictionary={dictionary}
+                    />
                   </Grid>
                   <Grid item xs={12}>
                     <Field component={Tags} name='tags' />
