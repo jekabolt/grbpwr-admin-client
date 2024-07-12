@@ -1,7 +1,7 @@
-import { Alert, AppBar, Button, Grid, Snackbar, Toolbar } from '@mui/material';
+import { AppBar, Button, Grid, Toolbar } from '@mui/material';
 import { MakeGenerics, useMatch } from '@tanstack/react-location';
 import { getProductByID, upsertProduct } from 'api/admin';
-import { UpsertProductRequest, common_GenderEnum, common_ProductFull } from 'api/proto-http/admin';
+import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { Field, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
@@ -22,24 +22,13 @@ export const ProductDetails: FC = () => {
   } = useMatch<ProductIdProps>();
 
   const [product, setProduct] = useState<common_ProductFull | undefined>();
-  const [thumbnailId, setThumbnailId] = useState<number | undefined>();
-  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
-  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
-  const [isEdit, setIsEdit] = useState<boolean>(false);
-
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    setSnackBarMessage(message);
-    setSnackBarSeverity(severity);
-    setIsSnackBarOpen(!isSnackBarOpen);
-  };
+  const [initialValues, setInitialValues] = useState<common_ProductNew | undefined>();
 
   const fetchProduct = async () => {
     try {
-      const response = await getProductByID({
-        id: parseInt(id),
-      });
+      const response = await getProductByID({ id: parseInt(id) });
       setProduct(response.product);
+      setInitialValues(getInitialValues(response.product));
     } catch (error) {
       console.error(error);
     }
@@ -47,19 +36,10 @@ export const ProductDetails: FC = () => {
 
   const updateProduct = async (updatePayload: UpsertProductRequest) => {
     try {
-      if (
-        updatePayload.product?.product?.productBody?.preorder !== '' &&
-        updatePayload.product?.product?.productBody?.salePercentage?.value
-      ) {
-        updatePayload.product.product.productBody.salePercentage.value = '0';
-      }
       await upsertProduct(updatePayload);
-      showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
-      fetchProduct();
-    } catch (error) {
-      const message = sessionStorage.getItem('errorcode');
-      message ? showMessage(message, 'error') : showMessage('PRODUCT CANNOT BE UPDATED', 'error');
-    }
+
+      // fetchProduct();
+    } catch (error) {}
   };
 
   useEffect(() => {
@@ -67,123 +47,99 @@ export const ProductDetails: FC = () => {
   }, [id]);
 
   const handleFormSubmit = (
-    values: UpsertProductRequest,
+    values: common_ProductNew,
     setSubmitting: (isSubmitting: boolean) => void,
   ) => {
     const updatePayload: UpsertProductRequest = {
       id: parseInt(id),
-      product: {
-        product: values.product?.product,
-        sizeMeasurements: values.product?.sizeMeasurements,
-        tags: values.product?.tags,
-        mediaIds: values.product?.mediaIds,
-      },
+      product: values,
     };
+
     updateProduct(updatePayload);
     setSubmitting(false);
-    enableEditMode();
   };
 
-  const enableEditMode = () => {
-    setIsEdit(!isEdit);
+  const getInitialValues = (product?: common_ProductFull): common_ProductNew => {
+    if (!product) {
+      return {} as common_ProductNew;
+    }
+
+    const sizeMeasurements =
+      product.sizes?.map((size) => ({
+        productSize: {
+          quantity: { value: size.quantity?.value || '0' },
+          sizeId: size.sizeId,
+        },
+        measurements:
+          product.measurements
+            ?.filter((measurement) => measurement.productSizeId === size.id)
+            ?.map((measurement) => ({
+              measurementNameId: measurement.measurementNameId,
+              measurementValue: { value: measurement.measurementValue?.value || '0' },
+            })) || [],
+      })) || [];
+
+    return {
+      product: {
+        productBody: product.product?.productDisplay?.productBody,
+        thumbnailMediaId: product.product?.productDisplay?.thumbnail?.id || 0,
+      },
+      sizeMeasurements: sizeMeasurements,
+      tags:
+        product.tags?.map((tag) => ({
+          tag: tag.productTagInsert?.tag || '',
+        })) || [],
+      mediaIds:
+        product.media?.map((media) => media.id).filter((id): id is number => id !== undefined) ||
+        [],
+    };
   };
 
   return (
     <Layout>
       <Formik
-        initialValues={{
-          id: product?.product?.id,
-          product: {
-            product: {
-              productBody: {
-                preorder: '',
-                name: product?.product?.productDisplay?.productBody?.name ?? '',
-                brand: '',
-                sku: '',
-                color: '',
-                colorHex: '',
-                countryOfOrigin: '',
-                price: { value: '0' },
-                salePercentage: { value: '0' },
-                categoryId: 0,
-                description: '',
-                hidden: false,
-                targetGender: '' as common_GenderEnum,
-              },
-              thumbnailMediaId: product?.product?.productDisplay?.thumbnail?.id,
-            },
-            sizeMeasurements: [],
-            tags: [],
-            mediaIds: [],
-          },
-        }}
+        initialValues={initialValues || getInitialValues(product)}
         enableReinitialize={true}
         onSubmit={(values, { setSubmitting }) => handleFormSubmit(values, setSubmitting)}
       >
-        {({ values, handleSubmit }) => (
+        {({ handleSubmit }) => (
           <Form onSubmit={handleSubmit}>
             <AppBar
               position='fixed'
               sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
             >
               <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <Button
-                  size='small'
-                  variant='contained'
-                  onClick={() => setIsEdit(!isEdit)}
-                  type='submit'
-                >
+                <Button size='small' variant='contained' type='submit'>
                   save
                 </Button>
               </Toolbar>
             </AppBar>
             <Grid container spacing={2} padding='2%' justifyContent='center'>
               <Grid item xs={12} sm={6}>
-                <Field
-                  name='mediaIds'
-                  component={MediaView}
-                  product={product}
-                  id={id}
-                  fetchProduct={fetchProduct}
-                  showMessage={showMessage}
-                />
+                <Field name='product.mediaIds' component={MediaView} product={product} />
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
                     <Field
                       component={BasicProductIformation}
-                      name='product.product.productBody'
+                      name='product.productBody'
                       product={product}
-                      isEdit={isEdit}
                     />
                   </Grid>
                   <Grid item xs={12}>
-                    <ProductTags
-                      product={product}
-                      id={id}
-                      fetchProduct={fetchProduct}
-                      showMessage={showMessage}
-                    />
+                    <Field component={ProductTags} product={product} name='tags' />
                   </Grid>
                 </Grid>
               </Grid>
               <Grid item xs={12}>
-                <ProductSizesAndMeasurements
+                <Field
+                  component={ProductSizesAndMeasurements}
+                  name='sizeMeasurements'
                   product={product}
-                  fetchProduct={fetchProduct}
-                  id={id}
-                  showMessage={showMessage}
                 />
               </Grid>
             </Grid>
-            <Snackbar
-              open={isSnackBarOpen}
-              autoHideDuration={6000}
-              onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
-            >
-              <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
-            </Snackbar>
           </Form>
         )}
       </Formik>

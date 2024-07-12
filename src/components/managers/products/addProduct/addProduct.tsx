@@ -15,10 +15,10 @@ import { Media } from './media/media';
 import { Sizes } from './sizes/sizes';
 import { Tags } from './tag/tag';
 
-export const initialProductState: common_ProductNew = {
+const initialProductState: common_ProductNew = {
   product: {
     productBody: {
-      preorder: undefined,
+      preorder: '',
       name: '',
       brand: '',
       sku: '',

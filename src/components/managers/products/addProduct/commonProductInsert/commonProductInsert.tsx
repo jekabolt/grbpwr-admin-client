@@ -13,6 +13,7 @@ import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
+import { isValid, parseISO } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
@@ -77,6 +78,16 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
     },
     [values.product, setFieldValue],
   );
+
+  const parseDate = (dateString: string | undefined) => {
+    if (!dateString) return null;
+    const parsedDate = parseISO(dateString);
+    return isValid(parsedDate) && dateString !== '0001-01-01T00:00:00Z' ? parsedDate : null;
+  };
+
+  const handleDateChange = (date: Date | null) => {
+    setFieldValue('product.productBody.preorder', date ? date.toISOString() : '');
+  };
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -223,7 +234,15 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
 
         {showPreorder && (
           <Grid item xs={isMobile ? 12 : 8.5}>
-            <DatePicker label='PREORDER' minDate={new Date()} name='product.productBody.preorder' />
+            <DatePicker
+              label='PREORDER'
+              value={parseDate(values.product?.productBody?.preorder)}
+              onChange={handleDateChange}
+              minDate={new Date()}
+              slotProps={{
+                textField: { fullWidth: true, InputLabelProps: { shrink: true } },
+              }}
+            />
           </Grid>
         )}
         <Grid item xs={isMobile ? 12 : 8.5}>

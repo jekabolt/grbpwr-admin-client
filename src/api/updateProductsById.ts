@@ -5,8 +5,6 @@ import {
 } from './proto-http/admin';
 
 
-
-
 export function updateSize(
   request: UpdateProductSizeStockRequest,
 ): Promise<UpdateProductSizeStockResponse> {
