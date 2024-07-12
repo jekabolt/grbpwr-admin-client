@@ -1,8 +1,8 @@
 import { Alert, Button, Grid, Snackbar } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
-import { addProduct, getDictionary } from 'api/admin';
+import { getDictionary, upsertProduct } from 'api/admin';
 import {
-  AddProductRequest,
+  UpsertProductRequest,
   common_Dictionary,
   common_GenderEnum,
   common_ProductNew,
@@ -15,22 +15,24 @@ import { Media } from './media/media';
 import { Sizes } from './sizes/sizes';
 import { Tags } from './tag/tag';
 
-export const initialProductState: common_ProductNew = {
+const initialProductState: common_ProductNew = {
   product: {
-    preorder: '',
-    name: '',
-    brand: '',
-    sku: '',
-    color: '',
-    colorHex: '',
-    countryOfOrigin: '',
-    thumbnail: '',
-    price: { value: '0' },
-    salePercentage: { value: '0' },
-    categoryId: 0,
-    description: '',
-    hidden: false,
-    targetGender: '' as common_GenderEnum,
+    productBody: {
+      preorder: '',
+      name: '',
+      brand: '',
+      sku: '',
+      color: '',
+      colorHex: '',
+      countryOfOrigin: '',
+      price: { value: '0' },
+      salePercentage: { value: '0' },
+      categoryId: 0,
+      description: '',
+      hidden: false,
+      targetGender: '' as common_GenderEnum,
+    },
+    thumbnailMediaId: undefined,
   },
   sizeMeasurements: [],
   mediaIds: [],
@@ -75,20 +77,21 @@ export const AddProducts: FC = () => {
           sizeMeasurement.productSize &&
           sizeMeasurement.productSize.quantity !== null,
       );
-      const productToSubmit: AddProductRequest = {
+      const productToSubmit: UpsertProductRequest = {
+        id: undefined,
         product: {
           ...values,
           sizeMeasurements: nonEmptySizeMeasurements,
-        },
+        } as common_ProductNew,
       };
 
-      if (parseFloat(values.product?.price?.value || '') <= 0) {
+      if (parseFloat(values.product?.productBody?.price?.value || '') <= 0) {
         showMessage('PRICE CANNOT BE ZERO', 'error');
         setSubmitting(false);
         return;
       }
 
-      await addProduct(productToSubmit);
+      await upsertProduct(productToSubmit);
       setClearMediaPreview(true);
       showMessage('PRODUCT UPLOADED', 'success');
       resetForm();
@@ -111,7 +114,11 @@ export const AddProducts: FC = () => {
               <Grid item xs={12} sm={6}>
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
-                    <Field component={CommonProductInsert} name='product' dictionary={dictionary} />
+                    <Field
+                      component={CommonProductInsert}
+                      name='product.productBody'
+                      dictionary={dictionary}
+                    />
                   </Grid>
                   <Grid item xs={12}>
                     <Field component={Tags} name='tags' />

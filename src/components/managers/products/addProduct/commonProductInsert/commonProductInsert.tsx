@@ -9,11 +9,13 @@ import {
   Theme,
   useMediaQuery,
 } from '@mui/material';
+import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
+import { isValid, parseISO } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import { formatPreorderDate } from 'features/utilitty/formatPreorderDate';
 import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, useFormikContext } from 'formik';
 import React, { FC, useCallback, useMemo, useState } from 'react';
@@ -25,10 +27,6 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
-  const [preorderDate, setPreorderDate] = useState({
-    initial: values.product?.preorder || '',
-    formatted: formatPreorderDate(values.product?.preorder) || '',
-  });
   const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
@@ -56,9 +54,13 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
         const selectedColor = colors.find(
           (color) => color.name.toLowerCase().replace(/\s/g, '_') === newValue,
         );
-        setFieldValue('product.colorHex', selectedColor ? selectedColor.hex : '#000000', false);
+        setFieldValue(
+          'product.productBody.colorHex',
+          selectedColor ? selectedColor.hex : '#000000',
+          false,
+        );
       }
-      setFieldValue(`product.${field}`, newValue);
+      setFieldValue(`product.productBody.${field}`, newValue);
 
       const updatedValues = {
         ...values.product,
@@ -66,217 +68,207 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
       };
 
       const newSKU = generateSKU(
-        updatedValues.brand,
-        updatedValues.targetGender,
-        findInDictionary(dictionary, updatedValues.categoryId, 'category'),
-        updatedValues.color,
-        updatedValues.countryOfOrigin,
+        updatedValues.productBody?.brand,
+        updatedValues.productBody?.targetGender,
+        findInDictionary(dictionary, updatedValues.productBody?.categoryId, 'category'),
+        updatedValues.productBody?.color,
+        updatedValues.productBody?.countryOfOrigin,
       );
-      setFieldValue('product.sku', newSKU);
+      setFieldValue('product.productBody.sku', newSKU);
     },
     [values.product, setFieldValue],
   );
 
-  const handlePreorderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawDate = e.target.value;
-    if (rawDate !== '') {
-      const formattedDate = formatPreorderDate(rawDate);
-      setPreorderDate({
-        initial: rawDate,
-        formatted: formattedDate,
-      });
-      setFieldValue('product.preorder', formattedDate);
-      setShowSales(false);
-    } else {
-      setPreorderDate({
-        initial: '',
-        formatted: '',
-      });
-      setFieldValue('product.preorder', '');
-      setShowSales(true);
-    }
+  const parseDate = (dateString: string | undefined) => {
+    if (!dateString) return null;
+    const parsedDate = parseISO(dateString);
+    return isValid(parsedDate) && dateString !== '0001-01-01T00:00:00Z' ? parsedDate : null;
+  };
+
+  const handleDateChange = (date: Date | null) => {
+    setFieldValue('product.productBody.preorder', date ? date.toISOString() : '');
   };
 
   return (
-    <Grid container display='grid' spacing={2}>
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <Field
-          as={TextField}
-          variant='outlined'
-          label='NAME'
-          name='product.name'
-          required
-          fullWidth
-          InputLabelProps={{ shrink: true }}
-        />
-      </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <Field
-          as={TextField}
-          variant='outlined'
-          label='BRAND'
-          name='product.brand'
-          required
-          fullWidth
-          InputLabelProps={{ shrink: true }}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
-        />
-      </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <FormControl required fullWidth>
-          <InputLabel shrink>GENDER</InputLabel>
-          <Select
-            value={values.product?.targetGender || ''}
-            onChange={(e) => {
-              handleFieldChange(e, 'targetGender');
-            }}
-            label='GENDER'
-            displayEmpty
-            name='product.targetGender'
-          >
-            {dictionary?.genders?.map((gender) => (
-              <MenuItem key={gender.id} value={gender.id}>
-                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <FormControl required fullWidth>
-          <InputLabel shrink>CATEGORY</InputLabel>
-          <Select
-            name='prodcut.categoryId'
-            onChange={(e) => handleFieldChange(e, 'categoryId')}
-            value={values.product?.categoryId || ''}
-            label='CATEGORY'
-            displayEmpty
-          >
-            {dictionary?.categories?.map((category) => (
-              <MenuItem value={category.id} key={category.id}>
-                {findInDictionary(dictionary, category.id, 'category')}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <FormControl fullWidth required>
-          <InputLabel shrink>COLOR</InputLabel>
-          <Select
-            value={values.product?.color || ''}
-            onChange={(e) => handleFieldChange(e, 'color')}
-            label='COLOR'
-            displayEmpty
-            name='product.color'
-          >
-            {colors.map((color, id) => (
-              <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
-                {color.name.toLowerCase().replace(/\s/g, '_')}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <Field
-          as={TextField}
-          type='color'
-          label='COLOR HEX'
-          name='product.colorHex'
-          InputLabelProps={{ shrink: true }}
-          required
-          fullWidth
-        />
-      </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <FormControl fullWidth required>
-          <InputLabel shrink>COUNTRY</InputLabel>
-          <Select
-            name='product.countryOfOrigin'
-            value={values.product?.countryOfOrigin || ''}
-            onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
-            label='COUNTRY'
-            displayEmpty
-          >
-            {countries.map((country) => (
-              <MenuItem key={country.value} value={country.value}>
-                {country.label},{country.value}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <Field
-          as={TextField}
-          variant='outlined'
-          label='PRICE'
-          name='product.price.value'
-          type='number'
-          inputProps={{ min: 0 }}
-          required
-          fullWidth
-          InputLabelProps={{ shrink: true }}
-          onChange={handlePriceChange}
-          onKeyDown={removePossibilityToUseSigns}
-        />
-      </Grid>
-
-      {showSales && (
+    <LocalizationProvider dateAdapter={AdapterDateFns}>
+      <Grid container display='grid' spacing={2}>
         <Grid item xs={isMobile ? 12 : 8.5}>
           <Field
             as={TextField}
-            label='SALE PERCENTAGE'
-            name='product.salePercentage.value'
-            onChange={(e: any) => handlePriceChange(e, true)}
+            variant='outlined'
+            label='NAME'
+            name='product.productBody.name'
+            required
+            fullWidth
+            InputLabelProps={{ shrink: true }}
+          />
+        </Grid>
+        <Grid item xs={isMobile ? 12 : 8.5}>
+          <Field
+            as={TextField}
+            variant='outlined'
+            label='BRAND'
+            name='product.productBody.brand'
+            required
+            fullWidth
+            InputLabelProps={{ shrink: true }}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
+          />
+        </Grid>
+        <Grid item xs={isMobile ? 12 : 8.5}>
+          <FormControl required fullWidth>
+            <InputLabel shrink>GENDER</InputLabel>
+            <Select
+              value={values.product?.productBody?.targetGender || ''}
+              onChange={(e) => {
+                handleFieldChange(e, 'targetGender');
+              }}
+              label='GENDER'
+              displayEmpty
+              name='product.productBody.targetGender'
+            >
+              {dictionary?.genders?.map((gender) => (
+                <MenuItem key={gender.id} value={gender.id}>
+                  {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={isMobile ? 12 : 8.5}>
+          <FormControl required fullWidth>
+            <InputLabel shrink>CATEGORY</InputLabel>
+            <Select
+              name='product.productBody.categoryId'
+              onChange={(e) => handleFieldChange(e, 'categoryId')}
+              value={values.product?.productBody?.categoryId || ''}
+              label='CATEGORY'
+              displayEmpty
+            >
+              {dictionary?.categories?.map((category) => (
+                <MenuItem value={category.id} key={category.id}>
+                  {findInDictionary(dictionary, category.id, 'category')}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={isMobile ? 12 : 8.5}>
+          <FormControl fullWidth required>
+            <InputLabel shrink>COLOR</InputLabel>
+            <Select
+              value={values.product?.productBody?.color || ''}
+              onChange={(e) => handleFieldChange(e, 'color')}
+              label='COLOR'
+              displayEmpty
+              name='product.productBody.color'
+            >
+              {colors.map((color, id) => (
+                <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
+                  {color.name.toLowerCase().replace(/\s/g, '_')}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={isMobile ? 12 : 8.5}>
+          <Field
+            as={TextField}
+            type='color'
+            label='COLOR HEX'
+            name='product.productBody.colorHex'
+            InputLabelProps={{ shrink: true }}
+            required
+            fullWidth
+          />
+        </Grid>
+        <Grid item xs={isMobile ? 12 : 8.5}>
+          <FormControl fullWidth required>
+            <InputLabel shrink>COUNTRY</InputLabel>
+            <Select
+              name='product.productBody.countryOfOrigin'
+              value={values.product?.productBody?.countryOfOrigin || ''}
+              onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
+              label='COUNTRY'
+              displayEmpty
+            >
+              {countries.map((country) => (
+                <MenuItem key={country.value} value={country.value}>
+                  {country.label},{country.value}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={isMobile ? 12 : 8.5}>
+          <Field
+            as={TextField}
+            variant='outlined'
+            label='PRICE'
+            name='product.productBody.price.value'
             type='number'
-            inputProps={{ min: 0, max: 99 }}
-            InputLabelProps={{ shrink: true }}
-            onKeyDown={removePossibilityToUseSigns}
+            inputProps={{ min: 0 }}
+            required
             fullWidth
+            InputLabelProps={{ shrink: true }}
+            onChange={handlePriceChange}
+            onKeyDown={removePossibilityToUseSigns}
           />
         </Grid>
-      )}
 
-      {showPreorder && (
+        {showSales && (
+          <Grid item xs={isMobile ? 12 : 8.5}>
+            <Field
+              as={TextField}
+              label='SALE PERCENTAGE'
+              name='product.productBody.salePercentage.value'
+              onChange={(e: any) => handlePriceChange(e, true)}
+              type='number'
+              inputProps={{ min: 0, max: 99 }}
+              InputLabelProps={{ shrink: true }}
+              onKeyDown={removePossibilityToUseSigns}
+              fullWidth
+            />
+          </Grid>
+        )}
+
+        {showPreorder && (
+          <Grid item xs={isMobile ? 12 : 8.5}>
+            <DatePicker
+              label='PREORDER'
+              value={parseDate(values.product?.productBody?.preorder)}
+              onChange={handleDateChange}
+              minDate={new Date()}
+              slotProps={{
+                textField: { fullWidth: true, InputLabelProps: { shrink: true } },
+              }}
+            />
+          </Grid>
+        )}
         <Grid item xs={isMobile ? 12 : 8.5}>
           <Field
             as={TextField}
-            label='PREORDER'
-            type='date'
-            name='product.preorder'
-            value={preorderDate.initial}
-            onChange={handlePreorderChange}
-            helperText={preorderDate.formatted}
+            label='DESCRIPTION'
+            name='product.productBody.description'
             InputLabelProps={{ shrink: true }}
+            fullWidth
+            multiline
+            required
+          />
+        </Grid>
+
+        <Grid item xs={isMobile ? 12 : 8.5}>
+          <Field
+            as={TextField}
+            label='SKU'
+            name='product.productBody.sku'
+            InputProps={{ readOnly: true }}
+            InputLabelProps={{ shrink: true }}
+            required
             fullWidth
           />
         </Grid>
-      )}
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <Field
-          as={TextField}
-          label='DESCRIPTION'
-          name='product.description'
-          InputLabelProps={{ shrink: true }}
-          fullWidth
-          multiline
-          required
-        />
       </Grid>
-
-      <Grid item xs={isMobile ? 12 : 8.5}>
-        <Field
-          as={TextField}
-          label='SKU'
-          name='product.sku'
-          InputProps={{ readOnly: true }}
-          InputLabelProps={{ shrink: true }}
-          required
-          fullWidth
-        />
-      </Grid>
-    </Grid>
+    </LocalizationProvider>
   );
 };

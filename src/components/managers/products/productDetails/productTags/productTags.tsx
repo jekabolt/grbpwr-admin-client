@@ -1,58 +1,49 @@
 import { Box, Button, Chip, TextField } from '@mui/material';
-import { deleteTag, updateTag } from 'api/updateProductsById';
+import { common_ProductNew } from 'api/proto-http/admin';
+import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
 import { ProductIdProps } from '../utility/interfaces';
 
-export const ProductTags: FC<ProductIdProps> = ({ product, id, fetchProduct, showMessage }) => {
+export const ProductTags: FC<ProductIdProps> = ({ product }) => {
+  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const [tag, setTag] = useState('');
 
-  const deleteTagFromList = async (removeTag: string | undefined) => {
-    if (product?.tags && product.tags.length > 1) {
-      const response = await deleteTag({ productId: Number(id), tag: removeTag });
-      showMessage('TAG REMOVED', 'success');
-      if (response) {
-        fetchProduct();
-      }
-    } else {
-      showMessage('PRODUCT SHOULD CONTAIN AT LEAST 1 TAG', 'error');
+  const handleAddTag = () => {
+    if (tag.trim() !== '') {
+      const newTags = [...(values.tags ?? []), { tag }];
+      setFieldValue('tags', newTags);
+      setTag('');
     }
   };
 
-  const addNewTag = async () => {
-    if (tag.trim()) {
-      const response = await updateTag({ productId: Number(id), tag: tag });
-      showMessage('TAG ADDED', 'success');
-      if (response) {
-        fetchProduct();
-      }
-      setTag('');
-    } else {
-      showMessage('PLEASE FILL TAG TO UPLOAD', 'error');
-    }
+  const handleDeleteTag = (tagToDelete: string | undefined) => {
+    const newTags = values.tags?.filter((t) => t.tag !== tagToDelete);
+    setFieldValue('tags', newTags);
   };
+
   return (
     <Box display='grid' alignItems='center' gap='10px'>
       <Box display='flex' alignItems='center' gap='5px'>
         <TextField
           type='text'
           value={tag}
-          onChange={(e) => setTag(e.target.value)}
-          placeholder='upload new tag'
+          placeholder='Upload new tag'
           size='small'
           label='TAG'
           InputLabelProps={{ shrink: true }}
+          onChange={(e) => setTag(e.target.value)}
         />
-        <Button variant='contained' onClick={addNewTag}>
-          upload
+        <Button variant='contained' onClick={handleAddTag}>
+          Upload
         </Button>
       </Box>
       <Box display='grid' gridTemplateColumns='repeat(2, 1fr)' gap='5px'>
-        {product?.tags?.map((tag) => (
+        {values.tags?.map((tag, index) => (
           <Chip
-            key={tag.id}
-            label={tag.productTagInsert?.tag}
-            onDelete={() => deleteTagFromList(tag.productTagInsert?.tag)}
+            key={index}
+            label={tag.tag}
             color='default'
+            onDelete={() => handleDeleteTag(tag.tag)}
           />
         ))}
       </Box>

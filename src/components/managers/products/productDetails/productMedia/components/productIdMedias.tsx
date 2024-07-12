@@ -1,21 +1,16 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton } from '@mui/material';
-import { deleteMediaById } from 'api/updateProductsById';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useMemo } from 'react';
 import styles from 'styles/product-id-media.scss';
 import { MediaListProps } from '../../utility/interfaces';
 
-export const ProductMedias: FC<MediaListProps> = ({ product, fetchProduct, saveSelectedMedia }) => {
+export const ProductMedias: FC<MediaListProps> = ({ product, saveSelectedMedia }) => {
   const handleDeleteMedia = async (id: number | undefined) => {
     if (!id) {
       alert('no id');
       return;
-    }
-    const response = await deleteMediaById({ productId: product?.product?.id, mediaId: id });
-    if (response) {
-      fetchProduct();
     }
   };
 

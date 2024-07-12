@@ -1,9 +1,9 @@
-import { Alert, AppBar, Button, Grid, Snackbar, Toolbar } from '@mui/material';
+import { AppBar, Button, Grid, Toolbar } from '@mui/material';
 import { MakeGenerics, useMatch } from '@tanstack/react-location';
-import { getProductByID } from 'api/admin';
-import { common_ProductFull, common_ProductInsert } from 'api/proto-http/admin';
-import { updateProductById } from 'api/updateProductsById';
+import { getProductByID, upsertProduct } from 'api/admin';
+import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
+import { Field, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import { BasicProductIformation } from './basicProductInormation/basicProductInformation';
 import { MediaView } from './productMedia/mediaView';
@@ -22,138 +22,127 @@ export const ProductDetails: FC = () => {
   } = useMatch<ProductIdProps>();
 
   const [product, setProduct] = useState<common_ProductFull | undefined>();
-  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
-  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
-  const [isEdit, setIsEdit] = useState<boolean>(false);
-  const [currentPayload, setCurrentPayload] = useState<Partial<common_ProductInsert>>({});
-
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    setSnackBarMessage(message);
-    setSnackBarSeverity(severity);
-    setIsSnackBarOpen(!isSnackBarOpen);
-  };
+  const [initialValues, setInitialValues] = useState<common_ProductNew | undefined>();
 
   const fetchProduct = async () => {
     try {
-      const response = await getProductByID({
-        id: parseInt(id),
-      });
+      const response = await getProductByID({ id: parseInt(id) });
       setProduct(response.product);
+      setInitialValues(getInitialValues(response.product));
     } catch (error) {
       console.error(error);
     }
   };
 
-  const updateProduct = async (updatePayload: Partial<common_ProductInsert>) => {
-    if (
-      Object.entries(updatePayload).some(([key, value]) => {
-        return key !== 'hidden' && key !== 'preorder' && !value;
-      })
-    ) {
-      showMessage('PLEASE FILL OUT ALL REQUIRED FIELDS', 'error');
-      return;
-    }
+  const updateProduct = async (updatePayload: UpsertProductRequest) => {
     try {
-      const updatedDetails = {
-        ...product?.product?.productInsert,
-        ...updatePayload,
-      };
-      if (updatedDetails.preorder !== '' && updatedDetails.salePercentage?.value) {
-        updatedDetails.salePercentage.value = '0';
-      }
-      await updateProductById({
-        id: Number(id),
-        product: updatedDetails as common_ProductInsert,
-      });
-      showMessage('PRODUCT HAS BEEN UPLOADED', 'success');
-      setProduct((prev) =>
-        prev
-          ? ({
-              ...prev,
-              product: { ...prev.product, productInsert: updatedDetails },
-            } as common_ProductFull)
-          : prev,
-      );
-    } catch (error) {
-      const message = sessionStorage.getItem('errorcode');
-      message ? showMessage(message, 'error') : showMessage('PRODUCT CANNOT BE UPDATED', 'error');
-    }
-  };
+      await upsertProduct(updatePayload);
 
-  const enableEditMode = () => {
-    setIsEdit(!isEdit);
-  };
-
-  const saveAndToggleEditMode = () => {
-    if (isEdit) {
-      updateProduct(currentPayload);
-    }
-    enableEditMode();
+      // fetchProduct();
+    } catch (error) {}
   };
 
   useEffect(() => {
     fetchProduct();
   }, [id]);
 
+  const handleFormSubmit = (
+    values: common_ProductNew,
+    setSubmitting: (isSubmitting: boolean) => void,
+  ) => {
+    const updatePayload: UpsertProductRequest = {
+      id: parseInt(id),
+      product: values,
+    };
+
+    updateProduct(updatePayload);
+    setSubmitting(false);
+  };
+
+  const getInitialValues = (product?: common_ProductFull): common_ProductNew => {
+    if (!product) {
+      return {} as common_ProductNew;
+    }
+
+    const sizeMeasurements =
+      product.sizes?.map((size) => ({
+        productSize: {
+          quantity: { value: size.quantity?.value || '0' },
+          sizeId: size.sizeId,
+        },
+        measurements:
+          product.measurements
+            ?.filter((measurement) => measurement.productSizeId === size.id)
+            ?.map((measurement) => ({
+              measurementNameId: measurement.measurementNameId,
+              measurementValue: { value: measurement.measurementValue?.value || '0' },
+            })) || [],
+      })) || [];
+
+    return {
+      product: {
+        productBody: product.product?.productDisplay?.productBody,
+        thumbnailMediaId: product.product?.productDisplay?.thumbnail?.id || 0,
+      },
+      sizeMeasurements: sizeMeasurements,
+      tags:
+        product.tags?.map((tag) => ({
+          tag: tag.productTagInsert?.tag || '',
+        })) || [],
+      mediaIds:
+        product.media?.map((media) => media.id).filter((id): id is number => id !== undefined) ||
+        [],
+    };
+  };
+
   return (
     <Layout>
-      <AppBar
-        position='fixed'
-        sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
+      <Formik
+        initialValues={initialValues || getInitialValues(product)}
+        enableReinitialize={true}
+        onSubmit={(values, { setSubmitting }) => handleFormSubmit(values, setSubmitting)}
       >
-        <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button size='small' onClick={saveAndToggleEditMode} variant='contained'>
-            {isEdit ? 'Save' : 'Edit'}
-          </Button>
-        </Toolbar>
-      </AppBar>
-      <Grid container spacing={2} padding='2%' justifyContent='center'>
-        <Grid item xs={12} sm={6}>
-          <MediaView
-            product={product}
-            id={id}
-            fetchProduct={fetchProduct}
-            showMessage={showMessage}
-          />
-        </Grid>
-
-        <Grid item xs={12} sm={6}>
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <BasicProductIformation
-                product={product}
-                onPayloadChange={setCurrentPayload}
-                isEdit={isEdit}
-              />
+        {({ handleSubmit }) => (
+          <Form onSubmit={handleSubmit}>
+            <AppBar
+              position='fixed'
+              sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
+            >
+              <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button size='small' variant='contained' type='submit'>
+                  save
+                </Button>
+              </Toolbar>
+            </AppBar>
+            <Grid container spacing={2} padding='2%' justifyContent='center'>
+              <Grid item xs={12} sm={6}>
+                <Field name='product.mediaIds' component={MediaView} product={product} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Field
+                      component={BasicProductIformation}
+                      name='product.productBody'
+                      product={product}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Field component={ProductTags} product={product} name='tags' />
+                  </Grid>
+                </Grid>
+              </Grid>
+              <Grid item xs={12}>
+                <Field
+                  component={ProductSizesAndMeasurements}
+                  name='sizeMeasurements'
+                  product={product}
+                />
+              </Grid>
             </Grid>
-            <Grid item xs={12}>
-              <ProductTags
-                product={product}
-                id={id}
-                fetchProduct={fetchProduct}
-                showMessage={showMessage}
-              />
-            </Grid>
-          </Grid>
-        </Grid>
-
-        <Grid item xs={12}>
-          <ProductSizesAndMeasurements
-            product={product}
-            fetchProduct={fetchProduct}
-            id={id}
-            showMessage={showMessage}
-          />
-        </Grid>
-      </Grid>
-      <Snackbar
-        open={isSnackBarOpen}
-        autoHideDuration={6000}
-        onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
-      >
-        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
-      </Snackbar>
+          </Form>
+        )}
+      </Formik>
     </Layout>
   );
 };

@@ -1,0 +1,10 @@
+.cont {
+  position: relative;
+  width: 100%;
+
+  .under_cont {
+    position: fixed;
+    top: 20px;
+    bottom: 200px;
+  }
+}
