@@ -15,5 +15,7 @@ export interface MediaViewComponentsProps {
 
 export interface MediaListProps {
     product: common_ProductFull | undefined;
+    mediaPreview: common_MediaFull[];
+    deleteMediaFromProduct: (id: number | undefined) => void;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }

@@ -29,14 +29,13 @@ export const ListProducts: FC<ProductProps> = ({
     <Grid container spacing={3} justifyContent='flex-start'>
       {products?.map((product) => (
         <Grid
-          item
           key={product.id}
+          item
           onMouseEnter={() => setHoveredProductId(product.id)}
           onMouseLeave={() => setHoveredProductId(undefined)}
           onClick={() => productClick(product.id)}
           className={`${styles.product} ${product.productDisplay?.productBody?.hidden && showHidden ? styles.hidden_product : ''}`}
-          xs={6}
-          sm={6}
+          xs={12}
           md={4}
           lg={3}
         >
@@ -63,6 +62,7 @@ export const ListProducts: FC<ProductProps> = ({
           )}
           <Typography
             variant='overline'
+            noWrap
             className={styles.info}
           >{`[${product.id}] ${product.productDisplay?.productBody?.brand} ${product.productDisplay?.productBody?.name}`}</Typography>
         </Grid>

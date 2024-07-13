@@ -42,39 +42,61 @@ export const ProductSizesAndMeasurements: FC<ProductSizesAndMeasurementsProps> =
 
   const handleSizeChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-    sizeIndex: number,
     sizeId: number | undefined,
   ) => {
     const { value } = event.target;
-    const quantityPath = `sizeMeasurements[${sizeIndex}].productSize.quantity.value`;
-    setFieldValue(quantityPath, value);
-    const sizeIdPath = `sizeMeasurements[${sizeIndex}].productSize.sizeId`;
-    setFieldValue(sizeIdPath, sizeId);
+    const sizeIndex = values.sizeMeasurements?.findIndex(
+      (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
+    );
+
+    if (sizeIndex === -1) {
+      // Add new sizeMeasurement entry if it doesn't exist
+      const newSizeMeasurement = {
+        productSize: { sizeId, quantity: { value } },
+        measurements: [],
+      };
+      setFieldValue('sizeMeasurements', [...(values.sizeMeasurements || []), newSizeMeasurement]);
+    } else if (sizeIndex !== undefined) {
+      const quantityPath = `sizeMeasurements[${sizeIndex}].productSize.quantity.value`;
+      setFieldValue(quantityPath, value);
+    }
   };
 
   const handleMeasurementChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-    sizeIndex: number,
-    measurementNameId: number,
+    sizeId: number | undefined,
+    measurementNameId: number | undefined,
   ) => {
     const measurementValue = e.target.value;
-    const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
-    const currentMeasurements = values.sizeMeasurements?.[sizeIndex]?.measurements || [];
-
-    const updatedMeasurements = currentMeasurements.map((measurement) =>
-      measurement.measurementNameId === measurementNameId
-        ? { ...measurement, measurementValue: { value: measurementValue } }
-        : measurement,
+    const sizeIndex = values.sizeMeasurements?.findIndex(
+      (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
     );
 
-    if (!updatedMeasurements.find((m) => m.measurementNameId === measurementNameId)) {
-      updatedMeasurements.push({
-        measurementNameId,
-        measurementValue: { value: measurementValue },
-      });
-    }
+    if (sizeIndex === -1) {
+      // Add new sizeMeasurement entry if it doesn't exist
+      const newSizeMeasurement = {
+        productSize: { sizeId, quantity: { value: '' } },
+        measurements: [{ measurementNameId, measurementValue: { value: measurementValue } }],
+      };
+      setFieldValue('sizeMeasurements', [...(values.sizeMeasurements || []), newSizeMeasurement]);
+    } else if (sizeIndex !== undefined) {
+      const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
+      const currentMeasurements = values.sizeMeasurements?.[sizeIndex]?.measurements || [];
 
-    setFieldValue(measurementsPath, updatedMeasurements);
+      const updatedMeasurements = currentMeasurements.map((measurement) =>
+        measurement.measurementNameId === measurementNameId
+          ? { ...measurement, measurementValue: { value: measurementValue } }
+          : measurement,
+      );
+
+      if (!updatedMeasurements.find((m) => m.measurementNameId === measurementNameId)) {
+        updatedMeasurements.push({
+          measurementNameId,
+          measurementValue: { value: measurementValue },
+        });
+      }
+      setFieldValue(measurementsPath, updatedMeasurements);
+    }
   };
 
   return (
@@ -90,40 +112,53 @@ export const ProductSizesAndMeasurements: FC<ProductSizesAndMeasurementsProps> =
           </TableRow>
         </TableHead>
         <TableBody>
-          {sortedSizes.map((size, sizeIndex) => (
-            <TableRow key={size.id}>
-              <TableCell component='th' scope='row'>
-                {findInDictionary(dictionary, size.id, 'size')}
-              </TableCell>
-              <TableCell align='center' sx={{ bgcolor: '#f0f0f0' }}>
-                <Box display='flex' alignItems='center'>
-                  <TextField
-                    name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
-                    type='number'
-                    value={values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value || ''}
-                    onChange={(e) => handleSizeChange(e, sizeIndex, size.id)}
-                    inputProps={{ min: 0 }}
-                    style={{ width: '80px' }}
-                  />
-                </Box>
-              </TableCell>
-              {sortedMeasurements.map((measurement) => (
-                <TableCell key={measurement.id}>
-                  <TextField
-                    type='number'
-                    value={
-                      values.sizeMeasurements?.[sizeIndex]?.measurements?.find(
-                        (m) => m.measurementNameId === measurement.id,
-                      )?.measurementValue?.value || ''
-                    }
-                    onChange={(e) => handleMeasurementChange(e, sizeIndex, measurement.id!)}
-                    inputProps={{ min: 0 }}
-                    style={{ width: '80px' }}
-                  />
+          {sortedSizes.map((size) => {
+            const sizeIndex =
+              values.sizeMeasurements?.findIndex(
+                (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === size.id,
+              ) ?? -1;
+
+            return (
+              <TableRow key={size.id}>
+                <TableCell component='th' scope='row'>
+                  {findInDictionary(dictionary, size.id, 'size')}
                 </TableCell>
-              ))}
-            </TableRow>
-          ))}
+                <TableCell align='center' sx={{ bgcolor: '#f0f0f0' }}>
+                  <Box display='flex' alignItems='center'>
+                    <TextField
+                      name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
+                      type='number'
+                      value={
+                        sizeIndex !== -1
+                          ? values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value || ''
+                          : ''
+                      }
+                      onChange={(e) => handleSizeChange(e, size.id)}
+                      inputProps={{ min: 0 }}
+                      style={{ width: '80px' }}
+                    />
+                  </Box>
+                </TableCell>
+                {sortedMeasurements.map((measurement) => (
+                  <TableCell key={measurement.id}>
+                    <TextField
+                      type='number'
+                      value={
+                        sizeIndex !== -1
+                          ? values.sizeMeasurements?.[sizeIndex]?.measurements?.find(
+                              (m) => m.measurementNameId === measurement.id,
+                            )?.measurementValue?.value || ''
+                          : ''
+                      }
+                      onChange={(e) => handleMeasurementChange(e, size.id, measurement.id)}
+                      inputProps={{ min: 0 }}
+                      style={{ width: '80px' }}
+                    />
+                  </TableCell>
+                ))}
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </TableContainer>

@@ -22,13 +22,11 @@ export const ProductDetails: FC = () => {
   } = useMatch<ProductIdProps>();
 
   const [product, setProduct] = useState<common_ProductFull | undefined>();
-  const [initialValues, setInitialValues] = useState<common_ProductNew | undefined>();
 
   const fetchProduct = async () => {
     try {
       const response = await getProductByID({ id: parseInt(id) });
       setProduct(response.product);
-      setInitialValues(getInitialValues(response.product));
     } catch (error) {
       console.error(error);
     }
@@ -38,7 +36,7 @@ export const ProductDetails: FC = () => {
     try {
       await upsertProduct(updatePayload);
 
-      // fetchProduct();
+      fetchProduct();
     } catch (error) {}
   };
 
@@ -64,27 +62,23 @@ export const ProductDetails: FC = () => {
       return {} as common_ProductNew;
     }
 
-    const sizeMeasurements =
-      product.sizes?.map((size) => ({
-        productSize: {
-          quantity: { value: size.quantity?.value || '0' },
-          sizeId: size.sizeId,
-        },
-        measurements:
-          product.measurements
-            ?.filter((measurement) => measurement.productSizeId === size.id)
-            ?.map((measurement) => ({
-              measurementNameId: measurement.measurementNameId,
-              measurementValue: { value: measurement.measurementValue?.value || '0' },
-            })) || [],
-      })) || [];
-
     return {
       product: {
         productBody: product.product?.productDisplay?.productBody,
         thumbnailMediaId: product.product?.productDisplay?.thumbnail?.id || 0,
       },
-      sizeMeasurements: sizeMeasurements,
+      sizeMeasurements: product.sizes?.map((size) => ({
+        productSize: {
+          quantity: { value: size.quantity?.value } || { value: '0' },
+          sizeId: size.sizeId,
+        },
+        measurements: product.measurements
+          ?.filter((measurement) => measurement.productSizeId === size.sizeId)
+          .map((m) => ({
+            measurementNameId: m.measurementNameId,
+            measurementValue: { value: m.measurementValue?.value } || { value: '0' },
+          })),
+      })),
       tags:
         product.tags?.map((tag) => ({
           tag: tag.productTagInsert?.tag || '',
@@ -98,7 +92,7 @@ export const ProductDetails: FC = () => {
   return (
     <Layout>
       <Formik
-        initialValues={initialValues || getInitialValues(product)}
+        initialValues={getInitialValues(product)}
         enableReinitialize={true}
         onSubmit={(values, { setSubmitting }) => handleFormSubmit(values, setSubmitting)}
       >
@@ -116,7 +110,7 @@ export const ProductDetails: FC = () => {
             </AppBar>
             <Grid container spacing={2} padding='2%' justifyContent='center'>
               <Grid item xs={12} sm={6}>
-                <Field name='product.mediaIds' component={MediaView} product={product} />
+                <Field name='mediaIds' component={MediaView} product={product} />
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Grid container spacing={2}>

@@ -26,8 +26,13 @@
 
   .info {
     position: absolute;
+    top: 97%;
     left: 23px;
-    bottom: -25px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 90%;
+    display: block;
   }
 
   h4 {
