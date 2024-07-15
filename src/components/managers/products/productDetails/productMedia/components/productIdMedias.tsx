@@ -10,6 +10,7 @@ import { MediaListProps } from '../../utility/interfaces';
 
 export const ProductMedias: FC<MediaListProps> = ({
   product,
+  isEditMode,
   mediaPreview,
   deleteMediaFromProduct,
   saveSelectedMedia,
@@ -36,22 +37,24 @@ export const ProductMedias: FC<MediaListProps> = ({
           )}
           <IconButton
             size='small'
-            onClick={() => deleteMediaFromProduct(media.id)}
+            onClick={isEditMode ? () => deleteMediaFromProduct(media.id) : undefined}
             className={styles.media_btn}
           >
             <ClearIcon />
           </IconButton>
         </Grid>
       ))}
-      <Grid item xs={6} md={3}>
-        <div className={styles.select_media_wrapper}>
-          <MediaSelectorLayout
-            label='select media'
-            allowMultiple={true}
-            saveSelectedMedia={saveSelectedMedia}
-          />
-        </div>
-      </Grid>
+      {isEditMode && (
+        <Grid item xs={6} md={3}>
+          <div className={styles.select_media_wrapper}>
+            <MediaSelectorLayout
+              label='select media'
+              allowMultiple={true}
+              saveSelectedMedia={saveSelectedMedia}
+            />
+          </div>
+        </Grid>
+      )}
     </Grid>
   );
 };

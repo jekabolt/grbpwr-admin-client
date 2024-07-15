@@ -16,7 +16,7 @@ import {
 } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
+import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, FieldProps, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
 
@@ -180,7 +180,7 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     }
                     value={filter.filterConditions?.from}
                     inputProps={{ min: 0 }}
-                    onKeyDown={removePossibilityToUseSigns}
+                    onKeyDown={restrictNumericInput}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
@@ -192,7 +192,7 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     }
                     value={filter.filterConditions?.to}
                     inputProps={{ min: 0 }}
-                    onKeyDown={removePossibilityToUseSigns}
+                    onKeyDown={restrictNumericInput}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>

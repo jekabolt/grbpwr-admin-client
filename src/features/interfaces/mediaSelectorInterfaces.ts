@@ -4,6 +4,7 @@ import { Dispatch, SetStateAction } from 'react';
 
 export interface MediaSelectorLayoutProps {
     label: string
+    isEditMode?: boolean;
     allowMultiple: boolean;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }

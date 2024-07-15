@@ -5,6 +5,7 @@ import { MediaSelectorModal } from './mediaSelectorModal';
 
 export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   label,
+  isEditMode = true,
   allowMultiple,
   saveSelectedMedia,
 }) => {
@@ -16,7 +17,12 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   return (
     <Grid container justifyContent='center'>
       <Grid item>
-        <Button variant='contained' size='medium' onClick={handleMediaSelectorVisibility}>
+        <Button
+          variant='contained'
+          size='medium'
+          onClick={handleMediaSelectorVisibility}
+          disabled={!isEditMode}
+        >
           {label}
         </Button>
       </Grid>

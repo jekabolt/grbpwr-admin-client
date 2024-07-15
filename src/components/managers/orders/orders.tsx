@@ -22,7 +22,7 @@ import {
 } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
-import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
+import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { FC, useEffect, useState } from 'react';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 
@@ -264,7 +264,7 @@ export const Orders: FC = () => {
               value={orderId}
               onChange={handleOrderIdChange}
               inputProps={{ min: 0 }}
-              onKeyDown={removePossibilityToUseSigns}
+              onKeyDown={restrictNumericInput}
               fullWidth
             />
           </Grid>

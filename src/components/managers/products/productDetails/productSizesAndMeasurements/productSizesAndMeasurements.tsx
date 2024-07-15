@@ -10,21 +10,19 @@ import {
   TextField,
 } from '@mui/material';
 import { getDictionary } from 'api/admin';
-import { common_Dictionary, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
+import { common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
+import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
+import { EditProductTagsAndMeasurements } from '../utility/interfaces';
 
 interface Size {
   id?: number;
 }
 
-interface ProductSizesAndMeasurementsProps {
-  product: common_ProductFull;
-}
-
-export const ProductSizesAndMeasurements: FC<ProductSizesAndMeasurementsProps> = ({ product }) => {
+export const ProductSizesAndMeasurements: FC<EditProductTagsAndMeasurements> = ({ isEditMode }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const [dictionary, setDictionary] = useState<common_Dictionary>();
 
@@ -45,12 +43,12 @@ export const ProductSizesAndMeasurements: FC<ProductSizesAndMeasurementsProps> =
     sizeId: number | undefined,
   ) => {
     const { value } = event.target;
+
     const sizeIndex = values.sizeMeasurements?.findIndex(
       (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
     );
 
     if (sizeIndex === -1) {
-      // Add new sizeMeasurement entry if it doesn't exist
       const newSizeMeasurement = {
         productSize: { sizeId, quantity: { value } },
         measurements: [],
@@ -68,12 +66,12 @@ export const ProductSizesAndMeasurements: FC<ProductSizesAndMeasurementsProps> =
     measurementNameId: number | undefined,
   ) => {
     const measurementValue = e.target.value;
+
     const sizeIndex = values.sizeMeasurements?.findIndex(
       (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
     );
 
     if (sizeIndex === -1) {
-      // Add new sizeMeasurement entry if it doesn't exist
       const newSizeMeasurement = {
         productSize: { sizeId, quantity: { value: '' } },
         measurements: [{ measurementNameId, measurementValue: { value: measurementValue } }],
@@ -129,13 +127,13 @@ export const ProductSizesAndMeasurements: FC<ProductSizesAndMeasurementsProps> =
                       name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
                       type='number'
                       value={
-                        sizeIndex !== -1
-                          ? values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value || ''
-                          : ''
+                        values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value || ''
                       }
                       onChange={(e) => handleSizeChange(e, size.id)}
+                      onKeyDown={restrictNumericInput}
                       inputProps={{ min: 0 }}
                       style={{ width: '80px' }}
+                      disabled={!isEditMode}
                     />
                   </Box>
                 </TableCell>
@@ -144,15 +142,15 @@ export const ProductSizesAndMeasurements: FC<ProductSizesAndMeasurementsProps> =
                     <TextField
                       type='number'
                       value={
-                        sizeIndex !== -1
-                          ? values.sizeMeasurements?.[sizeIndex]?.measurements?.find(
-                              (m) => m.measurementNameId === measurement.id,
-                            )?.measurementValue?.value || ''
-                          : ''
+                        values.sizeMeasurements?.[sizeIndex]?.measurements?.find(
+                          (m) => m.measurementNameId === measurement.id,
+                        )?.measurementValue?.value || ''
                       }
                       onChange={(e) => handleMeasurementChange(e, size.id, measurement.id)}
+                      onKeyDown={restrictNumericInput}
                       inputProps={{ min: 0 }}
                       style={{ width: '80px' }}
+                      disabled={!isEditMode}
                     />
                   </TableCell>
                 ))}

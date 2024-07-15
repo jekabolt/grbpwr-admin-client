@@ -4,11 +4,13 @@ import { getProductByID, upsertProduct } from 'api/admin';
 import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { Field, Form, Formik } from 'formik';
+import isEqual from 'lodash/isEqual';
 import { FC, useEffect, useState } from 'react';
 import { BasicProductIformation } from './basicProductInormation/basicProductInformation';
 import { MediaView } from './productMedia/mediaView';
 import { ProductSizesAndMeasurements } from './productSizesAndMeasurements/productSizesAndMeasurements';
 import { ProductTags } from './productTags/productTags';
+import { productInitialValues } from './utility/productInitialValues';
 
 export type ProductIdProps = MakeGenerics<{
   Params: {
@@ -22,29 +24,25 @@ export const ProductDetails: FC = () => {
   } = useMatch<ProductIdProps>();
 
   const [product, setProduct] = useState<common_ProductFull | undefined>();
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [initialValues, setInitialValues] = useState<common_ProductNew>(productInitialValues());
+  const [isFormChanged, setIsFormChanged] = useState<boolean>(false);
 
   const fetchProduct = async () => {
     try {
       const response = await getProductByID({ id: parseInt(id) });
       setProduct(response.product);
+      setInitialValues(productInitialValues(response.product));
     } catch (error) {
       console.error(error);
     }
-  };
-
-  const updateProduct = async (updatePayload: UpsertProductRequest) => {
-    try {
-      await upsertProduct(updatePayload);
-
-      fetchProduct();
-    } catch (error) {}
   };
 
   useEffect(() => {
     fetchProduct();
   }, [id]);
 
-  const handleFormSubmit = (
+  const handleFormSubmit = async (
     values: common_ProductNew,
     setSubmitting: (isSubmitting: boolean) => void,
   ) => {
@@ -53,89 +51,92 @@ export const ProductDetails: FC = () => {
       product: values,
     };
 
-    updateProduct(updatePayload);
-    setSubmitting(false);
+    try {
+      await upsertProduct(updatePayload);
+      fetchProduct();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setSubmitting(false);
+      toggleEditMode();
+    }
   };
 
-  const getInitialValues = (product?: common_ProductFull): common_ProductNew => {
-    if (!product) {
-      return {} as common_ProductNew;
-    }
-
-    return {
-      product: {
-        productBody: product.product?.productDisplay?.productBody,
-        thumbnailMediaId: product.product?.productDisplay?.thumbnail?.id || 0,
-      },
-      sizeMeasurements: product.sizes?.map((size) => ({
-        productSize: {
-          quantity: { value: size.quantity?.value } || { value: '0' },
-          sizeId: size.sizeId,
-        },
-        measurements: product.measurements
-          ?.filter((measurement) => measurement.productSizeId === size.sizeId)
-          .map((m) => ({
-            measurementNameId: m.measurementNameId,
-            measurementValue: { value: m.measurementValue?.value } || { value: '0' },
-          })),
-      })),
-      tags:
-        product.tags?.map((tag) => ({
-          tag: tag.productTagInsert?.tag || '',
-        })) || [],
-      mediaIds:
-        product.media?.map((media) => media.id).filter((id): id is number => id !== undefined) ||
-        [],
-    };
+  const toggleEditMode = () => {
+    setIsEditMode(!isEditMode);
   };
 
   return (
     <Layout>
       <Formik
-        initialValues={getInitialValues(product)}
+        initialValues={initialValues}
         enableReinitialize={true}
         onSubmit={(values, { setSubmitting }) => handleFormSubmit(values, setSubmitting)}
       >
-        {({ handleSubmit }) => (
-          <Form onSubmit={handleSubmit}>
-            <AppBar
-              position='fixed'
-              sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
-            >
-              <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <Button size='small' variant='contained' type='submit'>
-                  save
-                </Button>
-              </Toolbar>
-            </AppBar>
-            <Grid container spacing={2} padding='2%' justifyContent='center'>
-              <Grid item xs={12} sm={6}>
-                <Field name='mediaIds' component={MediaView} product={product} />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <Field
-                      component={BasicProductIformation}
-                      name='product.productBody'
-                      product={product}
-                    />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Field component={ProductTags} product={product} name='tags' />
+        {({ values, handleSubmit }) => {
+          useEffect(() => {
+            setIsFormChanged(!isEqual(values, initialValues));
+          }, [values, initialValues]);
+
+          return (
+            <Form>
+              <AppBar
+                position='fixed'
+                sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
+              >
+                <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    size='small'
+                    variant='contained'
+                    type='button'
+                    onClick={() => {
+                      if (isEditMode) {
+                        handleSubmit();
+                      } else {
+                        toggleEditMode();
+                      }
+                    }}
+                    disabled={isEditMode && !isFormChanged}
+                  >
+                    {isEditMode ? 'Save' : 'Edit'}
+                  </Button>
+                </Toolbar>
+              </AppBar>
+              <Grid container spacing={2} padding='2%' justifyContent='center'>
+                <Grid item xs={12} sm={6}>
+                  <Field
+                    name='mediaIds'
+                    isEditMode={isEditMode}
+                    product={product}
+                    component={MediaView}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12}>
+                      <Field
+                        name='product.productBody'
+                        isEditMode={isEditMode}
+                        product={product}
+                        component={BasicProductIformation}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Field name='tags' isEditMode={isEditMode} component={ProductTags} />
+                    </Grid>
                   </Grid>
                 </Grid>
+                <Grid item xs={12}>
+                  <Field
+                    component={ProductSizesAndMeasurements}
+                    name='sizeMeasurements'
+                    isEditMode={isEditMode}
+                  />
+                </Grid>
               </Grid>
-              <Grid item xs={12}>
-                <Field
-                  component={ProductSizesAndMeasurements}
-                  name='sizeMeasurements'
-                  product={product}
-                />
-              </Grid>
-            </Grid>
-          </Form>
-        )}
+            </Form>
+          );
+        }}
       </Formik>
     </Layout>
   );

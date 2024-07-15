@@ -1,5 +1,6 @@
-export const removePossibilityToUseSigns = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === '+' || e.key === '-') {
-        e.preventDefault();
+export const restrictNumericInput = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    const invalidChars = ['-', '+', 'e', 'E', '.', ','];
+    if (invalidChars.includes(event.key)) {
+        event.preventDefault();
     }
 };

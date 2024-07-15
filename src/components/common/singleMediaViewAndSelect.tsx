@@ -3,10 +3,11 @@ import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout'
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { MediaViewComponentsProps } from '../managers/products/productDetails/utility/interfaces';
+import { SingleMediaView } from '../managers/products/productDetails/utility/interfaces';
 
-export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
+export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   link,
+  isEditMode,
   saveSelectedMedia,
 }) => {
   return (
@@ -24,8 +25,9 @@ export const SingleMediaViewAndSelect: FC<MediaViewComponentsProps> = ({
         <Grid item className={link ? styles.media_selector : styles.empty_media_selector}>
           <MediaSelectorLayout
             label={link ? 'edit' : 'select media'}
-            saveSelectedMedia={saveSelectedMedia}
+            isEditMode={isEditMode}
             allowMultiple={false}
+            saveSelectedMedia={saveSelectedMedia}
           />
         </Grid>
       </Grid>

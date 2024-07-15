@@ -1,5 +1,4 @@
-import { Alert, Button, Grid, Snackbar } from '@mui/material';
-import CircularProgress from '@mui/material/CircularProgress';
+import { Alert, AppBar, Button, CircularProgress, Grid, Snackbar, Toolbar } from '@mui/material';
 import { getDictionary, upsertProduct } from 'api/admin';
 import {
   UpsertProductRequest,
@@ -107,6 +106,16 @@ export const AddProducts: FC = () => {
       <Formik initialValues={initialProductState} onSubmit={handleSubmit}>
         {({ isSubmitting }) => (
           <Form>
+            <AppBar
+              position='fixed'
+              sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
+            >
+              <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button size='small' variant='contained' type='submit'>
+                  {isSubmitting ? <CircularProgress size={24} /> : 'save'}
+                </Button>
+              </Toolbar>
+            </AppBar>
             <Grid container justifyContent='center' padding='2%' spacing={2}>
               <Grid item xs={12} sm={6}>
                 <Field component={Media} name='mediaIds' clearMediaPreview={clearMediaPreview} />
@@ -127,11 +136,6 @@ export const AddProducts: FC = () => {
               </Grid>
               <Grid item xs={12}>
                 <Field component={Sizes} name='sizeMeasurements' dictionary={dictionary} />
-              </Grid>
-              <Grid item>
-                <Button type='submit' variant='contained' size='large'>
-                  {isSubmitting ? <CircularProgress size={24} /> : 'save'}
-                </Button>
               </Grid>
             </Grid>
           </Form>

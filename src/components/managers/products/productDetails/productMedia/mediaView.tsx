@@ -3,10 +3,10 @@ import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
 import { SingleMediaViewAndSelect } from '../../../../common/singleMediaViewAndSelect';
-import { ProductIdProps } from '../utility/interfaces';
+import { MediaViewInterface } from '../utility/interfaces';
 import { ProductMedias } from './components/productIdMedias';
 
-export const MediaView: FC<ProductIdProps> = ({ product }) => {
+export const MediaView: FC<MediaViewInterface> = ({ product, isEditMode }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
   const [thumbnailPreview, setThumbnailPreview] = useState<string | undefined>('');
@@ -51,6 +51,7 @@ export const MediaView: FC<ProductIdProps> = ({ product }) => {
             thumbnailPreview ||
             product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl
           }
+          isEditMode={isEditMode}
           saveSelectedMedia={saveThumbnail}
         />
       </Grid>
@@ -60,6 +61,7 @@ export const MediaView: FC<ProductIdProps> = ({ product }) => {
         </Typography>
         <ProductMedias
           product={product}
+          isEditMode={isEditMode}
           mediaPreview={mediaPreview}
           deleteMediaFromProduct={deleteMediaFromProduct}
           saveSelectedMedia={saveMedia}

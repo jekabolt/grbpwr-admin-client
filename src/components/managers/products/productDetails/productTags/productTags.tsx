@@ -2,9 +2,9 @@ import { Box, Button, Chip, TextField } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
-import { ProductIdProps } from '../utility/interfaces';
+import { EditProductTagsAndMeasurements } from '../utility/interfaces';
 
-export const ProductTags: FC<ProductIdProps> = ({ product }) => {
+export const ProductTags: FC<EditProductTagsAndMeasurements> = ({ isEditMode }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const [tag, setTag] = useState('');
 
@@ -33,7 +33,7 @@ export const ProductTags: FC<ProductIdProps> = ({ product }) => {
           InputLabelProps={{ shrink: true }}
           onChange={(e) => setTag(e.target.value)}
         />
-        <Button variant='contained' onClick={handleAddTag}>
+        <Button variant='contained' onClick={handleAddTag} disabled={!isEditMode}>
           Upload
         </Button>
       </Box>
@@ -43,7 +43,7 @@ export const ProductTags: FC<ProductIdProps> = ({ product }) => {
             key={index}
             label={tag.tag}
             color='default'
-            onDelete={() => handleDeleteTag(tag.tag)}
+            onDelete={isEditMode ? () => handleDeleteTag(tag.tag) : undefined}
           />
         ))}
       </Box>
