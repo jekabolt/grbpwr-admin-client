@@ -19,14 +19,14 @@ import { isValid, parseISO } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { formatDate } from 'features/utilitty/formateDate';
-import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
+import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, useFormikContext } from 'formik';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { Country } from '../../addProduct/addProductInterface/addProductInterface';
 import { BasicProductInterface } from '../utility/interfaces';
 
-export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) => {
+export const BasicProductIformation: FC<BasicProductInterface> = ({ product, isEditMode }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const [dictionary, setDictionary] = useState<common_Dictionary>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
@@ -75,16 +75,6 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
     [values.product?.productBody, setFieldValue],
   );
 
-  // const getCountryLabel = (countryValue: string | undefined) => {
-  //   if (!countryValue || !countries) return '';
-  //   const matchingCountry = countries.find((country) => country.value === countryValue);
-  //   return matchingCountry ? matchingCountry.label : '';
-  // };
-
-  // const handleDateChange = (date: Date | null) => {
-  //   setFieldValue('product.product.productBody.preorder', date);
-  // };
-
   const parseDate = (dateString: string | undefined) => {
     if (!dateString) return null;
     const parsedDate = parseISO(dateString);
@@ -129,6 +119,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             label='NAME'
             InputLabelProps={{ shrink: true }}
             fullWidth
+            disabled={!isEditMode}
           />
         </Grid>
         <Grid item xs={12}>
@@ -140,6 +131,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
             InputLabelProps={{ shrink: true }}
             fullWidth
+            disabled={!isEditMode}
           />
         </Grid>
         <Grid item xs={12}>
@@ -153,6 +145,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
               }}
               displayEmpty
               label='GENDER'
+              disabled={!isEditMode}
             >
               {dictionary?.genders?.map((gender) => (
                 <MenuItem key={gender.id} value={gender.id}>
@@ -171,6 +164,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
               value={values.product?.productBody?.categoryId || ''}
               displayEmpty
               label='CATEGORY'
+              disabled={!isEditMode}
             >
               {dictionary?.categories?.map((category) => (
                 <MenuItem key={category.id} value={category.id?.toString()}>
@@ -189,6 +183,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
               onChange={(e) => handleFieldChange(e, 'color')}
               displayEmpty
               label='COLOR'
+              disabled={!isEditMode}
             >
               <MenuItem value='' disabled>
                 {product?.product?.productDisplay?.productBody?.color}
@@ -210,6 +205,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             InputLabelProps={{ shrink: true }}
             type='color'
             fullWidth
+            disabled={!isEditMode}
           />
         </Grid>
         <Grid item xs={12}>
@@ -221,6 +217,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
               onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
               displayEmpty
               label='COUNTRY'
+              disabled={!isEditMode}
             >
               {countries.map((country) => (
                 <MenuItem key={country.value} value={country.value}>
@@ -239,8 +236,9 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             label='PRICE'
             InputLabelProps={{ shrink: true }}
             inputProps={{ min: 0, pattern: '[0-9]*' }}
-            onKeyDown={removePossibilityToUseSigns}
+            onKeyDown={restrictNumericInput}
             fullWidth
+            disabled={!isEditMode}
           />
         </Grid>
 
@@ -252,8 +250,9 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             label='SALE PERCENTAGE'
             InputLabelProps={{ shrink: true }}
             inputProps={{ min: 0 }}
-            onKeyDown={removePossibilityToUseSigns}
+            onKeyDown={restrictNumericInput}
             fullWidth
+            disabled={!isEditMode}
           />
         </Grid>
 
@@ -266,6 +265,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             slotProps={{
               textField: { fullWidth: true, InputLabelProps: { shrink: true } },
             }}
+            disabled={!isEditMode}
           />
         </Grid>
 
@@ -278,6 +278,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             InputLabelProps={{ shrink: true }}
             multiline
             fullWidth
+            disabled={!isEditMode}
           />
         </Grid>
         <Grid item xs={12}>
@@ -289,6 +290,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             InputProps={{ readOnly: true }}
             InputLabelProps={{ shrink: true }}
             fullWidth
+            disabled={!isEditMode}
           />
         </Grid>
         <Grid item xs={12}>
@@ -296,7 +298,7 @@ export const BasicProductIformation: FC<BasicProductInterface> = ({ product }) =
             <Typography textTransform='uppercase' variant='h6'>
               hiden
             </Typography>
-            <Checkbox name='product.productBody.hidden' />
+            <Checkbox name='product.productBody.hidden' disabled={!isEditMode} />
           </Box>
         </Grid>
       </Grid>

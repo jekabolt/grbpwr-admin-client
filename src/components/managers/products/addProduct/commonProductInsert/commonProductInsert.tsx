@@ -16,7 +16,7 @@ import { colors } from 'constants/colors';
 import { isValid, parseISO } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
+import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, useFormikContext } from 'formik';
 import React, { FC, useCallback, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
@@ -212,7 +212,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             fullWidth
             InputLabelProps={{ shrink: true }}
             onChange={handlePriceChange}
-            onKeyDown={removePossibilityToUseSigns}
+            onKeyDown={restrictNumericInput}
           />
         </Grid>
 
@@ -226,7 +226,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
               type='number'
               inputProps={{ min: 0, max: 99 }}
               InputLabelProps={{ shrink: true }}
-              onKeyDown={removePossibilityToUseSigns}
+              onKeyDown={restrictNumericInput}
               fullWidth
             />
           </Grid>

@@ -1,14 +1,14 @@
 import { Grid, Typography } from '@mui/material';
-
-import { UpsertProductRequest, common_MediaFull } from 'api/proto-http/admin';
+import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
 import { SingleMediaViewAndSelect } from '../../../../common/singleMediaViewAndSelect';
-import { ProductIdProps } from '../utility/interfaces';
+import { MediaViewInterface } from '../utility/interfaces';
 import { ProductMedias } from './components/productIdMedias';
 
-export const MediaView: FC<ProductIdProps> = ({ product }) => {
-  const { values, setFieldValue } = useFormikContext<UpsertProductRequest>();
+export const MediaView: FC<MediaViewInterface> = ({ product, isEditMode }) => {
+  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
   const [thumbnailPreview, setThumbnailPreview] = useState<string | undefined>('');
 
   const saveThumbnail = async (newSelectedMedia: common_MediaFull[]) => {
@@ -18,17 +18,25 @@ export const MediaView: FC<ProductIdProps> = ({ product }) => {
   };
 
   const saveMedia = async (newSelectedMedia: common_MediaFull[]) => {
-    const mediaIds = newSelectedMedia
-      .map((media) => media.id)
-      .filter((id) => id !== undefined) as number[];
-
-    if (mediaIds.length === 0) {
-      return;
-    }
     const updatedMediaIds = [
-      ...(values.product?.mediaIds || []),
+      ...(values.mediaIds || []),
       ...newSelectedMedia.map((media) => media.id),
     ];
+    const uniqueMediaIds = Array.from(new Set(updatedMediaIds));
+    setMediaPreview((prevPreview) => [
+      ...prevPreview,
+      ...newSelectedMedia.filter((media) => !prevPreview.some((prev) => prev.id === media.id)),
+    ]);
+    setFieldValue('mediaIds', uniqueMediaIds);
+  };
+
+  const deleteMediaFromProduct = async (id: number | undefined) => {
+    if (!id) {
+      alert('no id');
+      return;
+    }
+    setMediaPreview((prevPreview) => prevPreview.filter((media) => media.id !== id));
+    const updatedMediaIds = values.mediaIds?.filter((mediaId) => mediaId !== id);
     setFieldValue('mediaIds', updatedMediaIds);
   };
 
@@ -43,6 +51,7 @@ export const MediaView: FC<ProductIdProps> = ({ product }) => {
             thumbnailPreview ||
             product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl
           }
+          isEditMode={isEditMode}
           saveSelectedMedia={saveThumbnail}
         />
       </Grid>
@@ -50,7 +59,13 @@ export const MediaView: FC<ProductIdProps> = ({ product }) => {
         <Typography variant='h4' textTransform='uppercase'>
           media
         </Typography>
-        <ProductMedias product={product} saveSelectedMedia={saveMedia} />
+        <ProductMedias
+          product={product}
+          isEditMode={isEditMode}
+          mediaPreview={mediaPreview}
+          deleteMediaFromProduct={deleteMediaFromProduct}
+          saveSelectedMedia={saveMedia}
+        />
       </Grid>
     </Grid>
   );

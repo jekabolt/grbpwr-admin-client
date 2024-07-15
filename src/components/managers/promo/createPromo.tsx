@@ -10,7 +10,7 @@ import {
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_PromoCodeInsert } from 'api/proto-http/admin';
-import { removePossibilityToUseSigns } from 'features/utilitty/removePossibilityToEnterSigns';
+import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { FC, useState } from 'react';
 
 interface CreatePromoInterface {
@@ -149,7 +149,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 value={promo.discount?.value}
                 type='number'
                 inputProps={{ min: 0, max: 99 }}
-                onKeyDown={removePossibilityToUseSigns}
+                onKeyDown={restrictNumericInput}
                 variant='outlined'
                 label='DISCOUNT'
                 size='small'

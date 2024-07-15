@@ -1,36 +1,34 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton } from '@mui/material';
+import { common_ProductNew } from 'api/proto-http/admin';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
+import { useFormikContext } from 'formik';
 import { FC, useMemo } from 'react';
 import styles from 'styles/product-id-media.scss';
 import { MediaListProps } from '../../utility/interfaces';
 
-export const ProductMedias: FC<MediaListProps> = ({ product, saveSelectedMedia }) => {
-  const handleDeleteMedia = async (id: number | undefined) => {
-    if (!id) {
-      alert('no id');
-      return;
-    }
-  };
+export const ProductMedias: FC<MediaListProps> = ({
+  product,
+  isEditMode,
+  mediaPreview,
+  deleteMediaFromProduct,
+  saveSelectedMedia,
+}) => {
+  const { values } = useFormikContext<common_ProductNew>();
 
-  const uniqueMedia = useMemo(() => {
-    const uniqueUrls = new Set();
-    return (
-      product?.media?.filter((media) => {
-        const fullSizeUrl = media.media?.fullSize?.mediaUrl;
-        if (fullSizeUrl && !uniqueUrls.has(fullSizeUrl)) {
-          uniqueUrls.add(fullSizeUrl);
-          return true;
-        }
-        return false;
-      }) || []
+  const selectedMedia = useMemo(() => {
+    const existingMedia =
+      product?.media?.filter((media) => values.mediaIds?.includes(media.id as number)) || [];
+    const newMedia = mediaPreview.filter(
+      (media) => !existingMedia.some((existing) => existing.id === media.id),
     );
-  }, [product]);
+    return [...existingMedia, ...newMedia];
+  }, [product, values.mediaIds, mediaPreview]);
 
   return (
     <Grid container spacing={1} className={styles.listed_media_container}>
-      {uniqueMedia?.map((media) => (
+      {selectedMedia.map((media) => (
         <Grid item xs={6} md={3} key={media.id} className={styles.listed_media_wrapper}>
           {isVideo(media.media?.thumbnail?.mediaUrl) ? (
             <video src={media.media?.thumbnail?.mediaUrl} controls className={styles.media}></video>
@@ -39,22 +37,24 @@ export const ProductMedias: FC<MediaListProps> = ({ product, saveSelectedMedia }
           )}
           <IconButton
             size='small'
-            onClick={() => handleDeleteMedia(media.id)}
+            onClick={isEditMode ? () => deleteMediaFromProduct(media.id) : undefined}
             className={styles.media_btn}
           >
             <ClearIcon />
           </IconButton>
         </Grid>
       ))}
-      <Grid item xs={6} md={3}>
-        <div className={styles.select_media_wrapper}>
-          <MediaSelectorLayout
-            label='select media'
-            allowMultiple={true}
-            saveSelectedMedia={saveSelectedMedia}
-          />
-        </div>
-      </Grid>
+      {isEditMode && (
+        <Grid item xs={6} md={3}>
+          <div className={styles.select_media_wrapper}>
+            <MediaSelectorLayout
+              label='select media'
+              allowMultiple={true}
+              saveSelectedMedia={saveSelectedMedia}
+            />
+          </div>
+        </Grid>
+      )}
     </Grid>
   );
 };
