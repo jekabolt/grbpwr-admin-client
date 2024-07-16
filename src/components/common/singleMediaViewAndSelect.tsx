@@ -1,9 +1,15 @@
 import { Grid } from '@mui/material';
+import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
 import styles from 'styles/product-id-media.scss';
-import { SingleMediaView } from '../managers/products/productDetails/utility/interfaces';
+
+interface SingleMediaView {
+  link: string | undefined;
+  isEditMode?: boolean;
+  saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
+}
 
 export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   link,
