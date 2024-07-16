@@ -6,12 +6,10 @@ import {
   Select,
   SelectChangeEvent,
   TextField,
-  Theme,
-  useMediaQuery,
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { common_ProductNew } from 'api/proto-http/admin';
+import { common_Dictionary, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { isValid, parseISO } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
@@ -20,28 +18,33 @@ import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnter
 import { Field, useFormikContext } from 'formik';
 import React, { FC, useCallback, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
-import { AddProductInterface, Country } from '../addProductInterface/addProductInterface';
 
-export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => {
+export interface Country {
+  value: string;
+  label: string;
+}
+
+interface GenericProductFormFieldsProps {
+  dictionary?: common_Dictionary;
+  product?: common_ProductNew | common_ProductFull;
+  isEditMode?: boolean;
+  isAddingProduct: boolean;
+}
+
+const isCommonProductFull = (product: any): product is common_ProductFull => {
+  return product && 'id' in product && 'createdAt' in product && 'updatedAt' in product;
+};
+
+export const BasicProductFields: FC<GenericProductFormFieldsProps> = ({
+  dictionary,
+  product,
+  isEditMode,
+  isAddingProduct,
+}) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
-
-  const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
-    const { name, value } = e.target;
-    setFieldValue(name, value.toString());
-    if (flag) {
-      const saleValue = value.trim();
-      if (saleValue === '') {
-        setShowPreorder(true);
-      } else {
-        const saleNumber = parseFloat(saleValue);
-        setShowPreorder(saleNumber <= 0);
-      }
-    }
-  };
 
   const handleFieldChange = useCallback(
     (
@@ -63,36 +66,79 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
       setFieldValue(`product.productBody.${field}`, newValue);
 
       const updatedValues = {
-        ...values.product,
+        ...values.product?.productBody,
         [field]: newValue,
       };
 
       const newSKU = generateSKU(
-        updatedValues.productBody?.brand,
-        updatedValues.productBody?.targetGender,
-        findInDictionary(dictionary, updatedValues.productBody?.categoryId, 'category'),
-        updatedValues.productBody?.color,
-        updatedValues.productBody?.countryOfOrigin,
+        updatedValues.brand,
+        updatedValues.targetGender,
+        findInDictionary(dictionary, updatedValues.categoryId, 'category'),
+        updatedValues.color,
+        updatedValues.countryOfOrigin,
       );
       setFieldValue('product.productBody.sku', newSKU);
     },
-    [values.product, setFieldValue],
+    [values.product?.productBody, setFieldValue, dictionary],
   );
+
+  const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
+    const { name, value } = e.target;
+    setFieldValue(name, value.toString());
+    if (flag) {
+      const saleValue = value.trim();
+      if (saleValue === '') {
+        setShowPreorder(true);
+      } else {
+        const saleNumber = parseFloat(saleValue);
+        setShowPreorder(saleNumber <= 0);
+      }
+    }
+  };
 
   const parseDate = (dateString: string | undefined) => {
     if (!dateString) return null;
     const parsedDate = parseISO(dateString);
-    return isValid(parsedDate) && dateString !== '0001-01-01T00:00:00Z' ? parsedDate : null;
+    return isValid(parsedDate) ? parsedDate : null;
   };
 
-  const handleDateChange = (date: Date | null) => {
-    setFieldValue('product.productBody.preorder', date ? date.toISOString() : '');
-  };
+  const disableFields = isAddingProduct ? false : !isEditMode;
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Grid container display='grid' spacing={2}>
-        <Grid item xs={isMobile ? 12 : 8.5}>
+      <Grid container spacing={2}>
+        {isCommonProductFull(product) && (
+          <>
+            <Grid item xs={12}>
+              <TextField
+                label='PRODUCT ID'
+                InputLabelProps={{ shrink: true }}
+                InputProps={{ readOnly: true }}
+                value={product.product?.id || ''}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                label='CREATED'
+                InputLabelProps={{ shrink: true }}
+                InputProps={{ readOnly: true }}
+                value={product.product?.createdAt || ''}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                label='UPDATED'
+                InputLabelProps={{ shrink: true }}
+                InputProps={{ readOnly: true }}
+                value={product.product?.updatedAt || ''}
+                fullWidth
+              />
+            </Grid>
+          </>
+        )}
+        <Grid item xs={12}>
           <Field
             as={TextField}
             variant='outlined'
@@ -101,9 +147,10 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             required
             fullWidth
             InputLabelProps={{ shrink: true }}
+            disabled={disableFields}
           />
         </Grid>
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <Field
             as={TextField}
             variant='outlined'
@@ -113,19 +160,19 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             fullWidth
             InputLabelProps={{ shrink: true }}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
+            disabled={disableFields}
           />
         </Grid>
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <FormControl required fullWidth>
             <InputLabel shrink>GENDER</InputLabel>
             <Select
               value={values.product?.productBody?.targetGender || ''}
-              onChange={(e) => {
-                handleFieldChange(e, 'targetGender');
-              }}
+              onChange={(e) => handleFieldChange(e, 'targetGender')}
               label='GENDER'
               displayEmpty
               name='product.productBody.targetGender'
+              disabled={disableFields}
             >
               {dictionary?.genders?.map((gender) => (
                 <MenuItem key={gender.id} value={gender.id}>
@@ -135,7 +182,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <FormControl required fullWidth>
             <InputLabel shrink>CATEGORY</InputLabel>
             <Select
@@ -144,6 +191,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
               value={values.product?.productBody?.categoryId || ''}
               label='CATEGORY'
               displayEmpty
+              disabled={disableFields}
             >
               {dictionary?.categories?.map((category) => (
                 <MenuItem value={category.id} key={category.id}>
@@ -153,7 +201,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <FormControl fullWidth required>
             <InputLabel shrink>COLOR</InputLabel>
             <Select
@@ -162,6 +210,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
               label='COLOR'
               displayEmpty
               name='product.productBody.color'
+              disabled={disableFields}
             >
               {colors.map((color, id) => (
                 <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
@@ -171,7 +220,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <Field
             as={TextField}
             type='color'
@@ -180,9 +229,10 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             InputLabelProps={{ shrink: true }}
             required
             fullWidth
+            disabled={disableFields}
           />
         </Grid>
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <FormControl fullWidth required>
             <InputLabel shrink>COUNTRY</InputLabel>
             <Select
@@ -191,16 +241,17 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
               onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
               label='COUNTRY'
               displayEmpty
+              disabled={disableFields}
             >
               {countries.map((country) => (
                 <MenuItem key={country.value} value={country.value}>
-                  {country.label},{country.value}
+                  {country.label}, {country.value}
                 </MenuItem>
               ))}
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <Field
             as={TextField}
             variant='outlined'
@@ -213,11 +264,12 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             InputLabelProps={{ shrink: true }}
             onChange={handlePriceChange}
             onKeyDown={restrictNumericInput}
+            disabled={disableFields}
           />
         </Grid>
 
         {showSales && (
-          <Grid item xs={isMobile ? 12 : 8.5}>
+          <Grid item xs={12}>
             <Field
               as={TextField}
               label='SALE PERCENTAGE'
@@ -228,24 +280,28 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
               InputLabelProps={{ shrink: true }}
               onKeyDown={restrictNumericInput}
               fullWidth
+              disabled={disableFields}
             />
           </Grid>
         )}
 
         {showPreorder && (
-          <Grid item xs={isMobile ? 12 : 8.5}>
+          <Grid item xs={12}>
             <DatePicker
               label='PREORDER'
               value={parseDate(values.product?.productBody?.preorder)}
-              onChange={handleDateChange}
+              onChange={(date) =>
+                setFieldValue('product.productBody.preorder', date ? date.toISOString() : '')
+              }
               minDate={new Date()}
               slotProps={{
                 textField: { fullWidth: true, InputLabelProps: { shrink: true } },
               }}
+              disabled={disableFields}
             />
           </Grid>
         )}
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <Field
             as={TextField}
             label='DESCRIPTION'
@@ -254,10 +310,11 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             fullWidth
             multiline
             required
+            disabled={disableFields}
           />
         </Grid>
 
-        <Grid item xs={isMobile ? 12 : 8.5}>
+        <Grid item xs={12}>
           <Field
             as={TextField}
             label='SKU'
@@ -266,6 +323,7 @@ export const CommonProductInsert: FC<AddProductInterface> = ({ dictionary }) => 
             InputLabelProps={{ shrink: true }}
             required
             fullWidth
+            disabled={disableFields}
           />
         </Grid>
       </Grid>

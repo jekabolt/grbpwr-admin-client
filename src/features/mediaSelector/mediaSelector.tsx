@@ -65,13 +65,13 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   };
 
   return (
-    <Grid container justifyContent='center' spacing={2} padding='2%'>
+    <Grid container justifyContent='center' spacing={2} padding='1%'>
       <Grid item xs={12}>
-        <Grid container alignItems='center' spacing={2} justifyContent='center' marginTop='1%'>
-          <Grid item xs={8} sm={4}>
+        <Grid container alignItems='center' spacing={2} marginTop={isMobile ? '3%' : '1%'}>
+          <Grid item xs={12} sm={4}>
             <ByUrl url={url} setUrl={setUrl} isLoading={isLoading} />
           </Grid>
-          <Grid item xs={8} sm={4}>
+          <Grid item xs={12} sm={4}>
             <DragDrop
               loading={loading}
               selectedFiles={selectedFiles}
@@ -80,7 +80,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
               setSelectedFileUrl={setSelectedFileUrl}
             />
           </Grid>
-          <Grid item xs={8} sm={4}>
+          <Grid item xs={12} sm={4}>
             <FilterMedias
               filterByType={filterByType}
               setFilterByType={setFilterByType}

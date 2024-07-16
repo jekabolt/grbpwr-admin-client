@@ -1,14 +1,26 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton, Typography } from '@mui/material';
-import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
+import { common_MediaFull, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { useFormikContext } from 'formik';
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import styles from 'styles/addProd.scss';
 
-export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview }) => {
+interface GenericMediaComponentProps {
+  clearMediaPreview?: boolean;
+  isEditMode?: boolean;
+  isAddingProduct: boolean;
+  product?: common_ProductFull;
+}
+
+export const MediaView: FC<GenericMediaComponentProps> = ({
+  clearMediaPreview,
+  isEditMode,
+  isAddingProduct,
+  product,
+}) => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
@@ -21,17 +33,15 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
   }, [clearMediaPreview]);
 
   const uploadThumbnailInProduct = (newSelectedMedia: common_MediaFull[]) => {
-    if (!newSelectedMedia.length) {
-      return;
-    }
-    const thumbnailId = newSelectedMedia[0].id;
+    if (!newSelectedMedia.length) return;
+
     const thumbnail = newSelectedMedia[0];
-    const thumbnailUrl = thumbnail.media?.fullSize?.mediaUrl ?? '';
-    setImagePreviewUrl(thumbnailUrl);
-    setFieldValue('product.thumbnailMediaId', thumbnailId);
+    setImagePreviewUrl(thumbnail.media?.fullSize?.mediaUrl ?? '');
+    setFieldValue('product.thumbnailMediaId', thumbnail.id);
   };
+
   const uploadMediasInProduct = (newSelectedMedia: common_MediaFull[]) => {
-    if (newSelectedMedia.length === 0) {
+    if (!newSelectedMedia.length) {
       alert('No selected media');
       return;
     }
@@ -51,14 +61,26 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
     setFieldValue('mediaIds', updatedMediaIds);
   };
 
+  const selectedMedia = useMemo(() => {
+    const existingMedia =
+      product?.media?.filter((media) => values.mediaIds?.includes(media.id as number)) || [];
+    const newMedia = mediaPreview.filter(
+      (media) => !existingMedia.some((existing) => existing.id === media.id),
+    );
+    return [...existingMedia, ...newMedia];
+  }, [product, values.mediaIds, mediaPreview]);
+
   return (
     <Grid container spacing={2}>
       <Grid item xs={12}>
         <Typography variant='h4' textTransform='uppercase'>
-          thumbnail
+          Thumbnail
         </Typography>
         <SingleMediaViewAndSelect
-          link={imagePreviewUrl}
+          link={
+            imagePreviewUrl ||
+            product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl
+          }
           saveSelectedMedia={uploadThumbnailInProduct}
         />
         {!values.product?.thumbnailMediaId && (
@@ -69,29 +91,31 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
       </Grid>
       <Grid item xs={12}>
         <Typography variant='h4' textTransform='uppercase'>
-          media
+          Media
         </Typography>
-        {mediaPreview && (
-          <Grid container alignItems='center' spacing={2}>
-            {mediaPreview.map((media, id) => {
-              const mediaUrl = media.media?.fullSize?.mediaUrl ?? '';
-              return (
-                <Grid item key={id} className={styles.media_item} xs={6} md={3}>
-                  {isVideo(mediaUrl) ? (
-                    <video src={mediaUrl} controls className={styles.media}></video>
-                  ) : (
-                    <img src={mediaUrl} alt='' className={styles.media} />
-                  )}
+        <Grid container alignItems='center' spacing={1}>
+          {selectedMedia.map((media) => {
+            const mediaUrl = media.media?.fullSize?.mediaUrl ?? '';
+            return (
+              <Grid item key={media.id} className={styles.media_item} xs={12} md={6}>
+                {isVideo(mediaUrl) ? (
+                  <video src={mediaUrl} controls className={styles.media}></video>
+                ) : (
+                  <img src={mediaUrl} alt='' className={styles.media} />
+                )}
+                {isEditMode && (
                   <IconButton
-                    onClick={() => removeSelectedMedia(media.id ?? 0)}
+                    onClick={() => removeSelectedMedia(media.id as number)}
                     className={styles.delete_btn}
                   >
                     <ClearIcon />
                   </IconButton>
-                </Grid>
-              );
-            })}
-            <Grid item xs={6} md={3}>
+                )}
+              </Grid>
+            );
+          })}
+          {(isAddingProduct || isEditMode) && (
+            <Grid item xs={12} md={6}>
               <div className={styles.select_media}>
                 <MediaSelectorLayout
                   allowMultiple={true}
@@ -100,8 +124,8 @@ export const Media: FC<{ clearMediaPreview: boolean }> = ({ clearMediaPreview })
                 />
               </div>
             </Grid>
-          </Grid>
-        )}
+          )}
+        </Grid>
         {values.mediaIds && values.mediaIds.length < 1 && (
           <Typography color='error' variant='overline'>
             AT LEAST ONE MEDIA MUST BE ADDED TO THE PRODUCT
