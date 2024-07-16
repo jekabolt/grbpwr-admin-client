@@ -1,4 +1,15 @@
-import { Alert, Box, CircularProgress, Grid, Paper, Snackbar, Typography } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  Grid,
+  Paper,
+  Snackbar,
+  Theme,
+  Typography,
+  useMediaQuery,
+} from '@mui/material';
 import { getBase64File } from 'features/utilitty/getBase64';
 import React, { Dispatch, FC, SetStateAction, useState } from 'react';
 
@@ -21,6 +32,7 @@ export const DragDrop: FC<DragDropProps> = ({
   const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
   const [snackbarMessage, setSnackbarMessage] = useState<string>('');
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const handleSnackbarClose = () => {
     setSnackbarOpen(false);
@@ -74,7 +86,7 @@ export const DragDrop: FC<DragDropProps> = ({
   };
   return (
     <Grid container>
-      <Grid item>
+      <Grid item xs={12}>
         <Box
           onDragOver={(e) => handleDrag(e, true)}
           onDragEnter={(e) => handleDrag(e, true)}
@@ -83,15 +95,30 @@ export const DragDrop: FC<DragDropProps> = ({
           display='flex'
           alignItems='center'
         >
-          <Paper sx={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {!selectedFiles.length && <label htmlFor='files'>DRAG AND DROP HERE</label>}
-            <input
-              id='files'
-              type='file'
-              accept='image/*, video/*'
-              onChange={handleFileChange}
-              style={{ display: 'none' }}
-            />
+          <Paper
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              width: isMobile ? '100%' : 'auto',
+            }}
+          >
+            {!selectedFiles.length && (
+              <Button
+                variant='outlined'
+                component='label'
+                sx={{ width: isMobile ? '100%' : 'auto' }}
+              >
+                DRAG AND DROP YOUR MEDIA HERE
+                <input
+                  id='files'
+                  type='file'
+                  accept='image/*, video/*'
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                />
+              </Button>
+            )}
             {selectedFiles.length > 0 && <Typography>Media is selected</Typography>}
           </Paper>
           {loading && <CircularProgress />}

@@ -1,5 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Alert, Button, Dialog, IconButton, Snackbar } from '@mui/material';
+import { Alert, AppBar, Button, Dialog, IconButton, Snackbar, Toolbar } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelectorModalProps } from 'features/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
@@ -42,41 +42,36 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
   };
 
   return (
-    <>
-      <Dialog
-        open={open}
-        onClose={handleClose}
-        aria-labelledby='media-selector-dialog-title'
-        fullWidth={true}
-        maxWidth='xl'
-        className={styles.modal}
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      aria-labelledby='media-selector-dialog-title'
+      fullWidth={true}
+      maxWidth='xl'
+      className={styles.modal}
+    >
+      <IconButton
+        className={styles.close_modal}
+        size='small'
+        aria-label='close'
+        onClick={handleClose}
       >
-        <MediaSelector
-          allowMultiple={allowMultiple}
-          select={select}
-          selectedMedia={selectedMedia}
-        />
-
-        <Button
-          onClick={handleMediaAndCloseSelector}
-          className={styles.save_btn}
-          variant='contained'
-          size='small'
-        >
-          Save
-        </Button>
-        <IconButton
-          className={styles.close_modal}
-          size='small'
-          aria-label='close'
-          onClick={handleClose}
-        >
-          <ClearIcon />
-        </IconButton>
-      </Dialog>
+        <ClearIcon />
+      </IconButton>
+      <MediaSelector allowMultiple={allowMultiple} select={select} selectedMedia={selectedMedia} />
+      <AppBar
+        position='sticky'
+        sx={{ bottom: 0, right: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
+      >
+        <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={handleMediaAndCloseSelector} variant='contained' size='small'>
+            Save
+          </Button>
+        </Toolbar>
+      </AppBar>
       <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
         <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
       </Snackbar>
-    </>
+    </Dialog>
   );
 };

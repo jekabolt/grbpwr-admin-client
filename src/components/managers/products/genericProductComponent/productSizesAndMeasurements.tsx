@@ -8,35 +8,36 @@ import {
   TableHead,
   TableRow,
   TextField,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
-import { getDictionary } from 'api/admin';
 import { common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { useFormikContext } from 'formik';
-import { FC, useEffect, useState } from 'react';
-import { EditProductTagsAndMeasurements } from '../utility/interfaces';
+import React, { FC, useState } from 'react';
+import styles from 'styles/addProd.scss';
 
-interface Size {
-  id?: number;
+interface GenericSizesAndMeasurementsProps {
+  isEditMode?: boolean;
+  dictionary?: common_Dictionary;
+  isAddingProduct: boolean;
 }
 
-export const ProductSizesAndMeasurements: FC<EditProductTagsAndMeasurements> = ({ isEditMode }) => {
+export const ProductSizesAndMeasurements: FC<GenericSizesAndMeasurementsProps> = ({
+  isEditMode = true,
+  isAddingProduct,
+  dictionary,
+}) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
-  const [dictionary, setDictionary] = useState<common_Dictionary>();
-
-  const sortedSizes: Size[] = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
+  const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
 
-  useEffect(() => {
-    const fetchDictionary = async () => {
-      const response = await getDictionary({});
-      setDictionary(response.dictionary);
-    };
-    fetchDictionary();
-  }, []);
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
+  const [isSizeFilled, setIsSizeFilled] = useState(false);
 
   const handleSizeChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -62,48 +63,40 @@ export const ProductSizesAndMeasurements: FC<EditProductTagsAndMeasurements> = (
 
   const handleMeasurementChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-    sizeId: number | undefined,
+    sizeIndex: number | undefined,
     measurementNameId: number | undefined,
   ) => {
     const measurementValue = e.target.value;
-
-    const sizeIndex = values.sizeMeasurements?.findIndex(
-      (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
+    const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
+    const currentMeasurements = values.sizeMeasurements?.[sizeIndex as number]?.measurements || [];
+    const measurementIndex = currentMeasurements.findIndex(
+      (m) => m.measurementNameId === measurementNameId,
     );
 
-    if (sizeIndex === -1) {
-      const newSizeMeasurement = {
-        productSize: { sizeId, quantity: { value: '' } },
-        measurements: [{ measurementNameId, measurementValue: { value: measurementValue } }],
-      };
-      setFieldValue('sizeMeasurements', [...(values.sizeMeasurements || []), newSizeMeasurement]);
-    } else if (sizeIndex !== undefined) {
-      const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
-      const currentMeasurements = values.sizeMeasurements?.[sizeIndex]?.measurements || [];
-
-      const updatedMeasurements = currentMeasurements.map((measurement) =>
-        measurement.measurementNameId === measurementNameId
-          ? { ...measurement, measurementValue: { value: measurementValue } }
-          : measurement,
+    if (measurementIndex > -1) {
+      setFieldValue(
+        `${measurementsPath}[${measurementIndex}].measurementValue.value`,
+        measurementValue,
       );
-
-      if (!updatedMeasurements.find((m) => m.measurementNameId === measurementNameId)) {
-        updatedMeasurements.push({
-          measurementNameId,
-          measurementValue: { value: measurementValue },
-        });
-      }
+    } else {
+      const newMeasurement = {
+        measurementNameId,
+        measurementValue: { value: measurementValue },
+      };
+      const updatedMeasurements = [...currentMeasurements, newMeasurement];
       setFieldValue(measurementsPath, updatedMeasurements);
     }
   };
 
+  const disableFields = isAddingProduct ? false : !isEditMode;
+
   return (
     <TableContainer component={Paper} sx={{ border: '1px solid black' }}>
-      <Table>
+      <Table size={matches ? 'small' : 'medium'}>
         <TableHead>
           <TableRow>
             <TableCell>Size Name</TableCell>
-            <TableCell>Quantity</TableCell>
+            <TableCell className={styles.table_cell}>Quantity</TableCell>
             {sortedMeasurements.map((m) => (
               <TableCell key={m.id}>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
             ))}
@@ -133,7 +126,7 @@ export const ProductSizesAndMeasurements: FC<EditProductTagsAndMeasurements> = (
                       onKeyDown={restrictNumericInput}
                       inputProps={{ min: 0 }}
                       style={{ width: '80px' }}
-                      disabled={!isEditMode}
+                      disabled={disableFields}
                     />
                   </Box>
                 </TableCell>
@@ -150,7 +143,7 @@ export const ProductSizesAndMeasurements: FC<EditProductTagsAndMeasurements> = (
                       onKeyDown={restrictNumericInput}
                       inputProps={{ min: 0 }}
                       style={{ width: '80px' }}
-                      disabled={!isEditMode}
+                      disabled={disableFields}
                     />
                   </TableCell>
                 ))}

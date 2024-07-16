@@ -1,4 +1,4 @@
-import { Alert, AppBar, Button, CircularProgress, Grid, Snackbar, Toolbar } from '@mui/material';
+import { Alert, Snackbar } from '@mui/material';
 import { getDictionary, upsertProduct } from 'api/admin';
 import {
   UpsertProductRequest,
@@ -7,12 +7,8 @@ import {
   common_ProductNew,
 } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
-import { Field, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
-import { CommonProductInsert } from './commonProductInsert/commonProductInsert';
-import { Media } from './media/media';
-import { Sizes } from './sizes/sizes';
-import { Tags } from './tag/tag';
+import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
 
 const initialProductState: common_ProductNew = {
   product: {
@@ -48,7 +44,7 @@ export const AddProducts: FC = () => {
   const showMessage = (message: string, severity: 'success' | 'error') => {
     setSnackBarMessage(message);
     setSnackBarSeverity(severity);
-    setIsSnackBarOpen(!isSnackBarOpen);
+    setIsSnackBarOpen(true);
   };
 
   useEffect(() => {
@@ -64,10 +60,7 @@ export const AddProducts: FC = () => {
     {
       setSubmitting,
       resetForm,
-    }: {
-      setSubmitting: (isSubmitting: boolean) => void;
-      resetForm: () => void;
-    },
+    }: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
   ) => {
     try {
       const nonEmptySizeMeasurements = values.sizeMeasurements?.filter(
@@ -103,48 +96,17 @@ export const AddProducts: FC = () => {
 
   return (
     <Layout>
-      <Formik initialValues={initialProductState} onSubmit={handleSubmit}>
-        {({ isSubmitting }) => (
-          <Form>
-            <AppBar
-              position='fixed'
-              sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
-            >
-              <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <Button size='small' variant='contained' type='submit'>
-                  {isSubmitting ? <CircularProgress size={24} /> : 'save'}
-                </Button>
-              </Toolbar>
-            </AppBar>
-            <Grid container justifyContent='center' padding='2%' spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <Field component={Media} name='mediaIds' clearMediaPreview={clearMediaPreview} />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <Field
-                      component={CommonProductInsert}
-                      name='product.productBody'
-                      dictionary={dictionary}
-                    />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Field component={Tags} name='tags' />
-                  </Grid>
-                </Grid>
-              </Grid>
-              <Grid item xs={12}>
-                <Field component={Sizes} name='sizeMeasurements' dictionary={dictionary} />
-              </Grid>
-            </Grid>
-          </Form>
-        )}
-      </Formik>
+      <GenericProductForm
+        initialProductState={initialProductState}
+        dictionary={dictionary}
+        isEditMode={false}
+        isAddingProduct={true}
+        onSubmit={handleSubmit}
+      />
       <Snackbar
         open={isSnackBarOpen}
         autoHideDuration={6000}
-        onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
+        onClose={() => setIsSnackBarOpen(false)}
       >
         <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
       </Snackbar>

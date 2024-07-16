@@ -9,7 +9,7 @@ export const FilterMedias: FC<FilterMediasInterface> = ({
   setSortByDate,
 }) => {
   return (
-    <Grid container justifyContent='center' spacing={1}>
+    <Grid container justifyContent='center' spacing={2}>
       <Grid item xs={12} sm={6}>
         <FormControl size='small' fullWidth>
           <InputLabel shrink>TYPE</InputLabel>

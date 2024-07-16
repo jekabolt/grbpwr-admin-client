@@ -129,7 +129,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             sx={{
               width: '100%',
             }}
-            cols={isSmallScreen ? 2 : 5}
+            cols={isSmallScreen ? 1 : 5}
             gap={8}
             rowHeight={200}
           >
