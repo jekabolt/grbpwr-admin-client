@@ -11,21 +11,16 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
+import { common_ProductNew } from 'api/proto-http/admin';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { useFormikContext } from 'formik';
-import React, { FC, useState } from 'react';
+import React, { FC } from 'react';
 import styles from 'styles/addProd.scss';
+import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
 
-interface GenericSizesAndMeasurementsProps {
-  isEditMode?: boolean;
-  dictionary?: common_Dictionary;
-  isAddingProduct: boolean;
-}
-
-export const ProductSizesAndMeasurements: FC<GenericSizesAndMeasurementsProps> = ({
+export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   isEditMode = true,
   isAddingProduct,
   dictionary,
@@ -37,7 +32,6 @@ export const ProductSizesAndMeasurements: FC<GenericSizesAndMeasurementsProps> =
 
   const theme = useTheme();
   const matches = useMediaQuery(theme.breakpoints.down('sm'));
-  const [isSizeFilled, setIsSizeFilled] = useState(false);
 
   const handleSizeChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,

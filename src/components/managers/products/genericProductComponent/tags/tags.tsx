@@ -2,25 +2,21 @@ import { Box, Button, Chip, TextField, Typography } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
+import { ProductTagsInterface } from '../interface/interface';
 
-interface GenericTagsComponentProps {
-  isEditMode?: boolean;
-  isAddingProduct: boolean;
-  initialTags?: string[];
-}
-
-export const ProductTags: FC<GenericTagsComponentProps> = ({
+export const Tags: FC<ProductTagsInterface> = ({
   isEditMode = true,
   isAddingProduct,
   initialTags = [],
 }) => {
-  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const { setFieldValue } = useFormikContext<common_ProductNew>();
   const [newTag, setNewTag] = useState('');
   const [tags, setTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
     return storedTags ? JSON.parse(storedTags) : [];
   });
   const [selectedTags, setSelectedTags] = useState<string[]>(initialTags);
+  const [showAddTagField, setShowAddTagField] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('productTags', JSON.stringify(tags));
@@ -44,6 +40,7 @@ export const ProductTags: FC<GenericTagsComponentProps> = ({
     if (!trimmedTag || tags.includes(trimmedTag)) return;
     setTags([...tags, trimmedTag]);
     setNewTag('');
+    setShowAddTagField(false);
   };
 
   const handleDeleteTag = (tagToDelete: string) => {
@@ -61,7 +58,12 @@ export const ProductTags: FC<GenericTagsComponentProps> = ({
 
   return (
     <Box display='grid' gap='10px'>
-      {(isAddingProduct || isEditMode) && (
+      {isAddingProduct && !showAddTagField && (
+        <Button variant='contained' onClick={() => setShowAddTagField(true)}>
+          Add new tag
+        </Button>
+      )}
+      {(isEditMode || showAddTagField) && (
         <Box display='flex' alignItems='center' gap='15px'>
           <TextField
             value={newTag}
@@ -77,19 +79,23 @@ export const ProductTags: FC<GenericTagsComponentProps> = ({
           </Button>
         </Box>
       )}
-
+      {!isEditMode && !isAddingProduct && (
+        <Typography textTransform='uppercase' variant='h5'>
+          list of tags
+        </Typography>
+      )}
       <Box display='grid' gridTemplateColumns='repeat(2, 1fr)' gap='5px'>
         {tags.map((tag) => (
           <Chip
             label={tag}
             key={tag}
-            onClick={() => handleTagClick(tag)}
+            onClick={isAddingProduct ? () => handleTagClick(tag) : undefined}
             onDelete={isEditMode || isAddingProduct ? () => handleDeleteTag(tag) : undefined}
             color={selectedTags.includes(tag) ? 'primary' : 'default'}
           />
         ))}
       </Box>
-      {selectedTags.length === 0 && (
+      {isAddingProduct && selectedTags.length === 0 && (
         <Typography color='error' variant='overline'>
           No tag selected. Please select a tag.
         </Typography>

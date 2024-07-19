@@ -44,6 +44,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
               variant='contained'
               onClick={() => window.history.back()}
               sx={{ whiteSpace: 'nowrap' }}
+              size='small'
             >
               <ArrowBackIosIcon fontSize='small' />
             </Button>

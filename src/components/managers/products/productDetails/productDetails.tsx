@@ -10,7 +10,7 @@ import {
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
-import { productInitialValues } from './utility/productInitialValues';
+import { productInitialValues } from '../genericProductComponent/utility/productInitialValues';
 
 export type ProductIdProps = MakeGenerics<{
   Params: {

@@ -1,5 +1,7 @@
 import {
+  Checkbox,
   FormControl,
+  FormControlLabel,
   Grid,
   InputLabel,
   MenuItem,
@@ -9,33 +11,18 @@ import {
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { common_Dictionary, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
+import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { isValid, parseISO } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, useFormikContext } from 'formik';
-import React, { FC, useCallback, useMemo, useState } from 'react';
+import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
+import { BasicProductFieldsInterface, Country } from '../interface/interface';
 
-export interface Country {
-  value: string;
-  label: string;
-}
-
-interface GenericProductFormFieldsProps {
-  dictionary?: common_Dictionary;
-  product?: common_ProductNew | common_ProductFull;
-  isEditMode?: boolean;
-  isAddingProduct: boolean;
-}
-
-const isCommonProductFull = (product: any): product is common_ProductFull => {
-  return product && 'id' in product && 'createdAt' in product && 'updatedAt' in product;
-};
-
-export const BasicProductFields: FC<GenericProductFormFieldsProps> = ({
+export const BasicFields: FC<BasicProductFieldsInterface> = ({
   dictionary,
   product,
   isEditMode,
@@ -89,10 +76,23 @@ export const BasicProductFields: FC<GenericProductFormFieldsProps> = ({
       const saleValue = value.trim();
       if (saleValue === '') {
         setShowPreorder(true);
+        setFieldValue('product.productBody.preorder', null);
       } else {
         const saleNumber = parseFloat(saleValue);
         setShowPreorder(saleNumber <= 0);
+        setFieldValue('product.productBody.preorder', null);
       }
+    }
+  };
+
+  const handlePreorderChange = (date: Date | null) => {
+    if (date) {
+      setFieldValue('product.productBody.preorder', date.toISOString());
+      setShowSales(false);
+      setFieldValue('product.productBody.salePercentage.value', '');
+    } else {
+      setFieldValue('product.productBody.preorder', null);
+      setShowSales(true);
     }
   };
 
@@ -104,17 +104,28 @@ export const BasicProductFields: FC<GenericProductFormFieldsProps> = ({
 
   const disableFields = isAddingProduct ? false : !isEditMode;
 
+  useEffect(() => {
+    const salePercentage = values.product?.productBody?.salePercentage?.value;
+    const preorderValue = values.product?.productBody?.preorder;
+    if (salePercentage && parseFloat(salePercentage) > 0) {
+      setShowPreorder(false);
+      setFieldValue('product.productBody.preorder', null);
+    } else if (preorderValue) {
+      setShowSales(false);
+    }
+  }, [values.product?.productBody?.salePercentage?.value, setFieldValue]);
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Grid container spacing={2}>
-        {isCommonProductFull(product) && (
+        {!isAddingProduct && (
           <>
             <Grid item xs={12}>
               <TextField
                 label='PRODUCT ID'
                 InputLabelProps={{ shrink: true }}
                 InputProps={{ readOnly: true }}
-                value={product.product?.id || ''}
+                value={product?.product?.id}
                 fullWidth
               />
             </Grid>
@@ -123,7 +134,7 @@ export const BasicProductFields: FC<GenericProductFormFieldsProps> = ({
                 label='CREATED'
                 InputLabelProps={{ shrink: true }}
                 InputProps={{ readOnly: true }}
-                value={product.product?.createdAt || ''}
+                value={product?.product?.createdAt || ''}
                 fullWidth
               />
             </Grid>
@@ -132,12 +143,13 @@ export const BasicProductFields: FC<GenericProductFormFieldsProps> = ({
                 label='UPDATED'
                 InputLabelProps={{ shrink: true }}
                 InputProps={{ readOnly: true }}
-                value={product.product?.updatedAt || ''}
+                value={product?.product?.updatedAt || ''}
                 fullWidth
               />
             </Grid>
           </>
         )}
+
         <Grid item xs={12}>
           <Field
             as={TextField}
@@ -289,13 +301,12 @@ export const BasicProductFields: FC<GenericProductFormFieldsProps> = ({
           <Grid item xs={12}>
             <DatePicker
               label='PREORDER'
-              value={parseDate(values.product?.productBody?.preorder)}
-              onChange={(date) =>
-                setFieldValue('product.productBody.preorder', date ? date.toISOString() : '')
-              }
+              value={parseDate(values.product?.productBody?.preorder) || null}
+              onChange={handlePreorderChange}
               minDate={new Date()}
               slotProps={{
                 textField: { fullWidth: true, InputLabelProps: { shrink: true } },
+                field: { clearable: true },
               }}
               disabled={disableFields}
             />
@@ -324,6 +335,14 @@ export const BasicProductFields: FC<GenericProductFormFieldsProps> = ({
             required
             fullWidth
             disabled={disableFields}
+          />
+        </Grid>
+        <Grid item>
+          <FormControlLabel
+            control={
+              <Field as={Checkbox} name='product.productBody.hidden' disabled={disableFields} />
+            }
+            label='HIDDEN'
           />
         </Grid>
       </Grid>

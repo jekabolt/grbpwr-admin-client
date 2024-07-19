@@ -1,38 +1,10 @@
 import { Alert, Snackbar } from '@mui/material';
 import { getDictionary, upsertProduct } from 'api/admin';
-import {
-  UpsertProductRequest,
-  common_Dictionary,
-  common_GenderEnum,
-  common_ProductNew,
-} from 'api/proto-http/admin';
+import { UpsertProductRequest, common_Dictionary, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
-
-const initialProductState: common_ProductNew = {
-  product: {
-    productBody: {
-      preorder: '',
-      name: '',
-      brand: '',
-      sku: '',
-      color: '',
-      colorHex: '',
-      countryOfOrigin: '',
-      price: { value: '0' },
-      salePercentage: { value: '0' },
-      categoryId: 0,
-      description: '',
-      hidden: false,
-      targetGender: '' as common_GenderEnum,
-    },
-    thumbnailMediaId: undefined,
-  },
-  sizeMeasurements: [],
-  mediaIds: [],
-  tags: [],
-};
+import { initialProductState } from '../genericProductComponent/utility/productInitialValues';
 
 export const AddProducts: FC = () => {
   const [dictionary, setDictionary] = useState<common_Dictionary | undefined>();

@@ -1,29 +1,17 @@
 import { AppBar, Button, CircularProgress, Grid, Toolbar } from '@mui/material';
 import { getProductByID } from 'api/admin';
-import { common_Dictionary, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
-import { Field, Form, Formik } from 'formik';
+import { common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
+import { Field, Form, Formik, FormikHelpers } from 'formik';
 import isEqual from 'lodash/isEqual';
 import { FC, useEffect, useState } from 'react';
-import { productInitialValues } from '../productDetails/utility/productInitialValues';
-import { BasicProductFields } from './basicProductFields';
-import { MediaView } from './mediaView';
-import { ProductSizesAndMeasurements } from './productSizesAndMeasurements';
-import { ProductTags } from './productTags';
+import { BasicFields } from './basicFields/basicFields';
+import { GenericProductFormInterface } from './interface/interface';
+import { MediaView } from './mediaView/mediaView';
+import { SizesAndMeasurements } from './sizesAndMeasurements/sizesAndMeasurements';
+import { Tags } from './tags/tags';
+import { productInitialValues } from './utility/productInitialValues';
 
-interface GenericProductFormProps {
-  initialProductState: common_ProductNew;
-  isEditMode?: boolean;
-  isAddingProduct?: boolean;
-  productId?: string;
-  dictionary?: common_Dictionary;
-  onSubmit: (
-    values: common_ProductNew,
-    actions: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
-  ) => Promise<void>;
-  onEditModeChange?: (isEditMode: boolean) => void;
-}
-
-export const GenericProductForm: FC<GenericProductFormProps> = ({
+export const GenericProductForm: FC<GenericProductFormInterface> = ({
   initialProductState,
   isEditMode = false,
   isAddingProduct = false,
@@ -52,8 +40,42 @@ export const GenericProductForm: FC<GenericProductFormProps> = ({
     }
   }, [productId]);
 
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isEditMode) {
+        if (onEditModeChange) onEditModeChange(false);
+      }
+    };
+
+    const handleDoubleClick = () => {
+      if (isEditMode && onEditModeChange) {
+        onEditModeChange(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeydown);
+    document.addEventListener('dblclick', handleDoubleClick);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeydown);
+      document.removeEventListener('dblclick', handleDoubleClick);
+    };
+  }, [isEditMode, onEditModeChange]);
+
+  const handleFormSubmit = async (
+    values: common_ProductNew,
+    actions: FormikHelpers<common_ProductNew>,
+  ) => {
+    await onSubmit(values, actions);
+    setInitialValues(values);
+    setIsFormChanged(false);
+    if (onEditModeChange) {
+      onEditModeChange(false);
+    }
+  };
+
   return (
-    <Formik initialValues={initialValues} onSubmit={onSubmit} enableReinitialize={true}>
+    <Formik initialValues={initialValues} onSubmit={handleFormSubmit} enableReinitialize={true}>
       {({ values, handleSubmit, isSubmitting }) => {
         useEffect(() => {
           setIsFormChanged(!isEqual(values, initialValues));
@@ -106,8 +128,9 @@ export const GenericProductForm: FC<GenericProductFormProps> = ({
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
                     <Field
-                      component={BasicProductFields}
+                      component={BasicFields}
                       name='product.productBody'
+                      product={product}
                       dictionary={dictionary}
                       isEditMode={isEditMode}
                       isAddingProduct={isAddingProduct}
@@ -115,7 +138,7 @@ export const GenericProductForm: FC<GenericProductFormProps> = ({
                   </Grid>
                   <Grid item xs={12}>
                     <Field
-                      component={ProductTags}
+                      component={Tags}
                       name='tags'
                       isEditMode={isEditMode}
                       isAddingProduct={isAddingProduct}
@@ -130,7 +153,7 @@ export const GenericProductForm: FC<GenericProductFormProps> = ({
               </Grid>
               <Grid item xs={12}>
                 <Field
-                  component={ProductSizesAndMeasurements}
+                  component={SizesAndMeasurements}
                   name='sizeMeasurements'
                   dictionary={dictionary}
                   isEditMode={isEditMode}
