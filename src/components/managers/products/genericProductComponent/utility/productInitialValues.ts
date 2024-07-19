@@ -1,4 +1,4 @@
-import { common_ProductFull, common_ProductNew } from "api/proto-http/admin";
+import { common_GenderEnum, common_ProductFull, common_ProductNew } from "api/proto-http/admin";
 
 export const productInitialValues = (product?: common_ProductFull): common_ProductNew => {
     if (!product) {
@@ -30,3 +30,29 @@ export const productInitialValues = (product?: common_ProductFull): common_Produ
             [],
     };
 };
+
+export const initialProductState: common_ProductNew = {
+    product: {
+        productBody: {
+            preorder: '',
+            name: '',
+            brand: '',
+            sku: '',
+            color: '',
+            colorHex: '',
+            countryOfOrigin: '',
+            price: { value: '0' },
+            salePercentage: { value: '0' },
+            categoryId: 0,
+            description: '',
+            hidden: false,
+            targetGender: '' as common_GenderEnum,
+        },
+        thumbnailMediaId: undefined,
+    },
+    sizeMeasurements: [],
+    mediaIds: [],
+    tags: [],
+};
+
+

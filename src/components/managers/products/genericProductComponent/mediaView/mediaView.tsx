@@ -1,21 +1,15 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton, Typography } from '@mui/material';
-import { common_MediaFull, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
+import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { useFormikContext } from 'formik';
 import { FC, useEffect, useMemo, useState } from 'react';
 import styles from 'styles/addProd.scss';
+import { MediaViewInterface } from '../interface/interface';
 
-interface GenericMediaComponentProps {
-  clearMediaPreview?: boolean;
-  isEditMode?: boolean;
-  isAddingProduct: boolean;
-  product?: common_ProductFull;
-}
-
-export const MediaView: FC<GenericMediaComponentProps> = ({
+export const MediaView: FC<MediaViewInterface> = ({
   clearMediaPreview,
   isEditMode,
   isAddingProduct,
@@ -93,7 +87,7 @@ export const MediaView: FC<GenericMediaComponentProps> = ({
         <Typography variant='h4' textTransform='uppercase'>
           Media
         </Typography>
-        <Grid container alignItems='center' spacing={1}>
+        <Grid container alignItems='center' spacing={2}>
           {selectedMedia.map((media) => {
             const mediaUrl = media.media?.fullSize?.mediaUrl ?? '';
             return (
