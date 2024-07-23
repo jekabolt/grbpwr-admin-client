@@ -1,44 +1,29 @@
 import { AppBar, Button, CircularProgress, Grid, Toolbar } from '@mui/material';
-import { getProductByID } from 'api/admin';
-import { common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
-import { Field, Form, Formik, FormikHelpers } from 'formik';
-import isEqual from 'lodash/isEqual';
-import { FC, useEffect, useState } from 'react';
+import { common_ProductNew } from 'api/proto-http/admin';
+import { Field, Form, Formik, FormikHelpers, FormikProps } from 'formik';
+import { FC, useEffect, useRef, useState } from 'react';
 import { BasicFields } from './basicFields/basicFields';
 import { GenericProductFormInterface } from './interface/interface';
 import { MediaView } from './mediaView/mediaView';
 import { SizesAndMeasurements } from './sizesAndMeasurements/sizesAndMeasurements';
 import { Tags } from './tags/tags';
-import { productInitialValues } from './utility/productInitialValues';
 
 export const GenericProductForm: FC<GenericProductFormInterface> = ({
   initialProductState,
   isEditMode = false,
   isAddingProduct = false,
-  productId,
   dictionary,
+  product,
   onSubmit,
   onEditModeChange,
 }) => {
-  const [product, setProduct] = useState<common_ProductFull | undefined>();
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
-  const [initialValues, setInitialValues] = useState<common_ProductNew>(initialProductState);
-  const [isFormChanged, setIsFormChanged] = useState<boolean>(false);
+  const [isFormChanged, setIsFormChanged] = useState(false);
+  const initialProductRef = useRef(initialProductState);
 
   useEffect(() => {
-    if (productId) {
-      const fetchProduct = async () => {
-        try {
-          const response = await getProductByID({ id: parseInt(productId) });
-          setProduct(response.product);
-          setInitialValues(productInitialValues(response.product));
-        } catch (error) {
-          console.error(error);
-        }
-      };
-      fetchProduct();
-    }
-  }, [productId]);
+    initialProductRef.current = initialProductState;
+  }, [initialProductState]);
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -67,19 +52,22 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     actions: FormikHelpers<common_ProductNew>,
   ) => {
     await onSubmit(values, actions);
-    setInitialValues(values);
-    setIsFormChanged(false);
+    setIsFormChanged(false); // Reset form change state on submit
     if (onEditModeChange) {
       onEditModeChange(false);
     }
   };
 
   return (
-    <Formik initialValues={initialValues} onSubmit={handleFormSubmit} enableReinitialize={true}>
-      {({ values, handleSubmit, isSubmitting }) => {
+    <Formik
+      initialValues={initialProductState}
+      onSubmit={handleFormSubmit}
+      enableReinitialize={true}
+    >
+      {({ handleSubmit, isSubmitting, values }: FormikProps<common_ProductNew>) => {
         useEffect(() => {
-          setIsFormChanged(!isEqual(values, initialValues));
-        }, [values, initialValues]);
+          setIsFormChanged(JSON.stringify(values) !== JSON.stringify(initialProductRef.current));
+        }, [values]);
 
         return (
           <Form>
@@ -101,7 +89,6 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                       handleSubmit();
                     }
                   }}
-                  disabled={isEditMode && !isFormChanged}
                 >
                   {isSubmitting ? (
                     <CircularProgress size={24} />
@@ -113,6 +100,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                 </Button>
               </Toolbar>
             </AppBar>
+            {isFormChanged && <p>Product has been modified.</p>}
             <Grid container justifyContent='center' padding='2%' spacing={2}>
               <Grid item xs={12} sm={6}>
                 <Field
@@ -142,11 +130,6 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                       name='tags'
                       isEditMode={isEditMode}
                       isAddingProduct={isAddingProduct}
-                      initialTags={
-                        product
-                          ? product.tags?.map((tag) => tag.productTagInsert?.tag || '') || []
-                          : undefined
-                      }
                     />
                   </Grid>
                 </Grid>

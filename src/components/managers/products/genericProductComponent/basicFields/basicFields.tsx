@@ -76,11 +76,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       const saleValue = value.trim();
       if (saleValue === '') {
         setShowPreorder(true);
-        setFieldValue('product.productBody.preorder', null);
+        setFieldValue('product.productBody.preorder', '');
       } else {
         const saleNumber = parseFloat(saleValue);
         setShowPreorder(saleNumber <= 0);
-        setFieldValue('product.productBody.preorder', null);
+        setFieldValue('product.productBody.preorder', '');
       }
     }
   };
@@ -109,7 +109,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
     const preorderValue = values.product?.productBody?.preorder;
     if (salePercentage && parseFloat(salePercentage) > 0) {
       setShowPreorder(false);
-      setFieldValue('product.productBody.preorder', null);
+      setFieldValue('product.productBody.preorder', '');
     } else if (preorderValue) {
       setShowSales(false);
     }
@@ -301,7 +301,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Grid item xs={12}>
             <DatePicker
               label='PREORDER'
-              value={parseDate(values.product?.productBody?.preorder) || null}
+              value={parseDate(values.product?.productBody?.preorder)}
               onChange={handlePreorderChange}
               minDate={new Date()}
               slotProps={{

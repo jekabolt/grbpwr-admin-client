@@ -6,10 +6,10 @@ export interface Country {
 }
 
 export interface GenericProductFormInterface {
+    product?: common_ProductFull | undefined;
     initialProductState: common_ProductNew;
     isEditMode?: boolean;
     isAddingProduct?: boolean;
-    productId?: string;
     dictionary?: common_Dictionary;
     onSubmit: (
         values: common_ProductNew,
@@ -41,5 +41,5 @@ export interface ProductSizesAndMeasurementsInterface {
 export interface ProductTagsInterface {
     isEditMode?: boolean;
     isAddingProduct: boolean;
-    initialTags?: string[];
+    initialTags?: string[]
 }
