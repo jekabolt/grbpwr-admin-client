@@ -11,14 +11,14 @@ export const productInitialValues = (product?: common_ProductFull): common_Produ
         },
         sizeMeasurements: product.sizes?.map((size) => ({
             productSize: {
-                quantity: { value: size.quantity?.value } || { value: '0' },
+                quantity: { value: size.quantity?.value || '' },
                 sizeId: size.sizeId,
             },
             measurements: product.measurements
                 ?.filter((measurement) => measurement.productSizeId === size.sizeId)
                 .map((m) => ({
                     measurementNameId: m.measurementNameId,
-                    measurementValue: { value: m.measurementValue?.value } || { value: '0' },
+                    measurementValue: { value: m.measurementValue?.value || '' },
                 })),
         })),
         tags:

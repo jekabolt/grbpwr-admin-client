@@ -1,5 +1,5 @@
 import { AppBar, Button, CircularProgress, Grid, Toolbar } from '@mui/material';
-import { common_ProductNew } from 'api/proto-http/admin';
+import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
 import { Field, Form, Formik, FormikHelpers, FormikProps } from 'formik';
 import { FC, useEffect, useRef, useState } from 'react';
 import { BasicFields } from './basicFields/basicFields';
@@ -32,27 +32,34 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
       }
     };
 
-    const handleDoubleClick = () => {
-      if (isEditMode && onEditModeChange) {
-        onEditModeChange(false);
-      }
-    };
-
     document.addEventListener('keydown', handleKeydown);
-    document.addEventListener('dblclick', handleDoubleClick);
 
     return () => {
       document.removeEventListener('keydown', handleKeydown);
-      document.removeEventListener('dblclick', handleDoubleClick);
     };
   }, [isEditMode, onEditModeChange]);
+
+  const filterEmptySizes = (sizes: common_SizeWithMeasurementInsert[] | undefined) => {
+    return sizes?.filter((size) => {
+      const hasValidQuantity =
+        size.productSize?.quantity?.value && size.productSize.quantity.value !== '0';
+      const hasValidMeasurements = size.measurements?.some(
+        (m) => m.measurementValue?.value && m.measurementValue.value !== '0',
+      );
+      return hasValidQuantity || hasValidMeasurements;
+    });
+  };
 
   const handleFormSubmit = async (
     values: common_ProductNew,
     actions: FormikHelpers<common_ProductNew>,
   ) => {
-    await onSubmit(values, actions);
-    setIsFormChanged(false); // Reset form change state on submit
+    const filteredValues = {
+      ...values,
+      sizeMeasurements: filterEmptySizes(values.sizeMeasurements),
+    };
+    await onSubmit(filteredValues, actions);
+    setIsFormChanged(false);
     if (onEditModeChange) {
       onEditModeChange(false);
     }
@@ -89,6 +96,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                       handleSubmit();
                     }
                   }}
+                  disabled={isEditMode && !isFormChanged}
                 >
                   {isSubmitting ? (
                     <CircularProgress size={24} />
@@ -100,7 +108,6 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                 </Button>
               </Toolbar>
             </AppBar>
-            {isFormChanged && <p>Product has been modified.</p>}
             <Grid container justifyContent='center' padding='2%' spacing={2}>
               <Grid item xs={12} sm={6}>
                 <Field

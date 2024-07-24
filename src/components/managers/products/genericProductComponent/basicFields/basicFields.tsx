@@ -76,11 +76,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       const saleValue = value.trim();
       if (saleValue === '') {
         setShowPreorder(true);
-        setFieldValue('product.productBody.preorder', '');
+        setFieldValue('product.productBody.preorder', null);
       } else {
         const saleNumber = parseFloat(saleValue);
         setShowPreorder(saleNumber <= 0);
-        setFieldValue('product.productBody.preorder', '');
+        setFieldValue('product.productBody.preorder', null);
       }
     }
   };
@@ -91,29 +91,35 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       setShowSales(false);
       setFieldValue('product.productBody.salePercentage.value', '');
     } else {
-      setFieldValue('product.productBody.preorder', null);
+      setFieldValue('product.productBody.preorder', '0001-01-01T00:00:00Z');
       setShowSales(true);
     }
   };
 
-  const parseDate = (dateString: string | undefined) => {
-    if (!dateString) return null;
+  const parseDate = (dateString: string | undefined): Date | null => {
+    if (!dateString || dateString === '0001-01-01T00:00:00Z') return null;
     const parsedDate = parseISO(dateString);
     return isValid(parsedDate) ? parsedDate : null;
   };
 
-  const disableFields = isAddingProduct ? false : !isEditMode;
-
   useEffect(() => {
     const salePercentage = values.product?.productBody?.salePercentage?.value;
     const preorderValue = values.product?.productBody?.preorder;
+
     if (salePercentage && parseFloat(salePercentage) > 0) {
       setShowPreorder(false);
-      setFieldValue('product.productBody.preorder', '');
-    } else if (preorderValue) {
+    } else if (preorderValue && preorderValue !== '0001-01-01T00:00:00Z') {
       setShowSales(false);
+    } else if (
+      (preorderValue === '' || preorderValue === '0001-01-01T00:00:00Z') &&
+      salePercentage === ''
+    ) {
+      setShowSales(true);
+      setShowPreorder(true);
     }
-  }, [values.product?.productBody?.salePercentage?.value, setFieldValue]);
+  }, [values.product?.productBody?.salePercentage?.value, values.product?.productBody?.preorder]);
+
+  const disableFields = isAddingProduct ? false : !isEditMode;
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
