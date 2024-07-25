@@ -89,7 +89,7 @@ export const ProductDetails: FC = () => {
       <GenericProductForm
         initialProductState={initialValues}
         isEditMode={isEditMode}
-        productId={id}
+        product={product}
         onSubmit={handleFormSubmit}
         dictionary={dictionary}
         onEditModeChange={setIsEditMode}

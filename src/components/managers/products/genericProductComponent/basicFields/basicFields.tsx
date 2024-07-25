@@ -22,6 +22,10 @@ import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 
+const hasInvalidSpecialChars = (str: string) => {
+  return (str.length > 0 && /^[^a-zA-Z0-9]*$/.test(str)) || /[^a-zA-Z0-9]{3,}/.test(str);
+};
+
 export const BasicFields: FC<BasicProductFieldsInterface> = ({
   dictionary,
   product,
@@ -39,6 +43,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       field: string,
     ) => {
       let newValue = e.target.value;
+
+      if ((field === 'brand' || field === 'name') && hasInvalidSpecialChars(String(newValue))) {
+        return;
+      }
+
       if (field === 'color' && typeof newValue === 'string') {
         newValue = newValue.toLowerCase().replace(/\s/g, '_');
         const selectedColor = colors.find(
@@ -91,29 +100,42 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       setShowSales(false);
       setFieldValue('product.productBody.salePercentage.value', '');
     } else {
-      setFieldValue('product.productBody.preorder', null);
+      setFieldValue('product.productBody.preorder', '0001-01-01T00:00:00Z');
       setShowSales(true);
     }
   };
 
-  const parseDate = (dateString: string | undefined) => {
-    if (!dateString) return null;
+  const parseDate = (dateString: string | undefined): Date | null => {
+    if (!dateString || dateString === '0001-01-01T00:00:00Z') return null;
     const parsedDate = parseISO(dateString);
     return isValid(parsedDate) ? parsedDate : null;
   };
 
-  const disableFields = isAddingProduct ? false : !isEditMode;
-
   useEffect(() => {
     const salePercentage = values.product?.productBody?.salePercentage?.value;
     const preorderValue = values.product?.productBody?.preorder;
+
     if (salePercentage && parseFloat(salePercentage) > 0) {
       setShowPreorder(false);
-      setFieldValue('product.productBody.preorder', null);
-    } else if (preorderValue) {
+    } else if (preorderValue && preorderValue !== '0001-01-01T00:00:00Z') {
       setShowSales(false);
+    } else if (
+      (preorderValue === '' || preorderValue === '0001-01-01T00:00:00Z') &&
+      salePercentage === ''
+    ) {
+      setShowSales(true);
+      setShowPreorder(true);
     }
-  }, [values.product?.productBody?.salePercentage?.value, setFieldValue]);
+  }, [values.product?.productBody?.salePercentage?.value, values.product?.productBody?.preorder]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const allowedKeys = /^[a-zA-Z0-9._-]$/;
+    if (!allowedKeys.test(e.key) && e.key !== 'Backspace' && e.key !== 'Tab' && e.key !== 'Enter') {
+      e.preventDefault();
+    }
+  };
+
+  const disableFields = isAddingProduct ? false : !isEditMode;
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -160,6 +182,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             fullWidth
             InputLabelProps={{ shrink: true }}
             disabled={disableFields}
+            onKeyDown={handleKeyDown}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'name')}
           />
         </Grid>
         <Grid item xs={12}>
@@ -301,7 +325,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Grid item xs={12}>
             <DatePicker
               label='PREORDER'
-              value={parseDate(values.product?.productBody?.preorder) || null}
+              value={parseDate(values.product?.productBody?.preorder)}
               onChange={handlePreorderChange}
               minDate={new Date()}
               slotProps={{

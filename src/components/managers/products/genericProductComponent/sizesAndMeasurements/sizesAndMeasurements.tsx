@@ -16,7 +16,7 @@ import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { useFormikContext } from 'formik';
-import React, { FC } from 'react';
+import React, { FC, useCallback, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
 
@@ -26,6 +26,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   dictionary,
 }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const [lastSizeNonZero, setLastSizeNonZero] = useState(false);
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
@@ -33,54 +34,106 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const theme = useTheme();
   const matches = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const handleSizeChange = (
-    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-    sizeId: number | undefined,
-  ) => {
-    const { value } = event.target;
-
-    const sizeIndex = values.sizeMeasurements?.findIndex(
-      (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
-    );
-
-    if (sizeIndex === -1) {
-      const newSizeMeasurement = {
-        productSize: { sizeId, quantity: { value } },
-        measurements: [],
-      };
-      setFieldValue('sizeMeasurements', [...(values.sizeMeasurements || []), newSizeMeasurement]);
-    } else if (sizeIndex !== undefined) {
-      const quantityPath = `sizeMeasurements[${sizeIndex}].productSize.quantity.value`;
-      setFieldValue(quantityPath, value);
-    }
-  };
-
-  const handleMeasurementChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-    sizeIndex: number | undefined,
-    measurementNameId: number | undefined,
-  ) => {
-    const measurementValue = e.target.value;
-    const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
-    const currentMeasurements = values.sizeMeasurements?.[sizeIndex as number]?.measurements || [];
-    const measurementIndex = currentMeasurements.findIndex(
-      (m) => m.measurementNameId === measurementNameId,
-    );
-
-    if (measurementIndex > -1) {
-      setFieldValue(
-        `${measurementsPath}[${measurementIndex}].measurementValue.value`,
-        measurementValue,
+  useEffect(() => {
+    if (sortedSizes.length > 0) {
+      const lastSize = sortedSizes[sortedSizes.length - 1];
+      const lastSizeMeasurement = values.sizeMeasurements?.find(
+        (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === lastSize.id,
       );
-    } else {
-      const newMeasurement = {
-        measurementNameId,
-        measurementValue: { value: measurementValue },
-      };
-      const updatedMeasurements = [...currentMeasurements, newMeasurement];
-      setFieldValue(measurementsPath, updatedMeasurements);
+
+      const lastSizeValue = lastSizeMeasurement?.productSize?.quantity?.value || '0';
+
+      setLastSizeNonZero(
+        lastSizeValue !== '0' && lastSizeValue !== undefined && lastSizeValue !== '',
+      );
+
+      if (
+        lastSizeValue !== '0' &&
+        lastSizeValue !== undefined &&
+        lastSizeValue !== '' &&
+        values.sizeMeasurements &&
+        values.sizeMeasurements.length > 1
+      ) {
+        const updatedSizeMeasurements = values.sizeMeasurements?.filter(
+          (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === lastSize.id,
+        );
+        setFieldValue('sizeMeasurements', updatedSizeMeasurements);
+      }
     }
-  };
+  }, [values.sizeMeasurements, sortedSizes, setFieldValue]);
+
+  const handleSizeChange = useCallback(
+    (
+      event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+      sizeId: number | undefined,
+    ) => {
+      const { value } = event.target;
+
+      const sizeIndex = values.sizeMeasurements?.findIndex(
+        (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
+      );
+
+      if (sizeIndex === -1 || sizeIndex === undefined) {
+        if (value !== '0' && value !== '') {
+          const newSizeMeasurement = {
+            productSize: { sizeId, quantity: { value } },
+            measurements: [],
+          };
+          setFieldValue('sizeMeasurements', [
+            ...(values.sizeMeasurements || []),
+            newSizeMeasurement,
+          ]);
+        }
+      } else {
+        const quantityPath = `sizeMeasurements[${sizeIndex}].productSize.quantity.value`;
+        setFieldValue(quantityPath, value);
+      }
+
+      const lastSizeId = sortedSizes[sortedSizes.length - 1].id;
+      if (sizeId === lastSizeId) {
+        setLastSizeNonZero(value !== '0' && value !== '');
+      }
+    },
+    [values.sizeMeasurements, setFieldValue, sortedSizes],
+  );
+
+  const handleMeasurementChange = useCallback(
+    (
+      e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+      sizeId: number | undefined,
+      measurementNameId: number | undefined,
+    ) => {
+      const measurementValue = e.target.value;
+      const sizeIndex = values.sizeMeasurements?.findIndex(
+        (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
+      );
+
+      if (sizeIndex === -1 || sizeIndex === undefined) {
+        return;
+      }
+
+      const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
+      const currentMeasurements = values.sizeMeasurements?.[sizeIndex]?.measurements || [];
+      const measurementIndex = currentMeasurements.findIndex(
+        (m) => m.measurementNameId === measurementNameId,
+      );
+
+      if (measurementIndex > -1) {
+        setFieldValue(
+          `${measurementsPath}[${measurementIndex}].measurementValue.value`,
+          measurementValue,
+        );
+      } else {
+        const newMeasurement = {
+          measurementNameId,
+          measurementValue: { value: measurementValue },
+        };
+        const updatedMeasurements = [...currentMeasurements, newMeasurement];
+        setFieldValue(measurementsPath, updatedMeasurements);
+      }
+    },
+    [values.sizeMeasurements, setFieldValue],
+  );
 
   const disableFields = isAddingProduct ? false : !isEditMode;
 
@@ -97,11 +150,17 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {sortedSizes.map((size) => {
+          {sortedSizes.map((size, index) => {
             const sizeIndex =
               values.sizeMeasurements?.findIndex(
                 (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === size.id,
               ) ?? -1;
+
+            const isLastSize = index === sortedSizes.length - 1;
+
+            if (!isLastSize && lastSizeNonZero) {
+              return null;
+            }
 
             return (
               <TableRow key={size.id}>
@@ -114,13 +173,15 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                       name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
                       type='number'
                       value={
-                        values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value || ''
+                        values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value === '0'
+                          ? ''
+                          : values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value || ''
                       }
                       onChange={(e) => handleSizeChange(e, size.id)}
                       onKeyDown={restrictNumericInput}
                       inputProps={{ min: 0 }}
                       style={{ width: '80px' }}
-                      disabled={disableFields}
+                      disabled={disableFields || (!isLastSize && lastSizeNonZero)}
                     />
                   </Box>
                 </TableCell>
@@ -137,7 +198,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                       onKeyDown={restrictNumericInput}
                       inputProps={{ min: 0 }}
                       style={{ width: '80px' }}
-                      disabled={disableFields}
+                      disabled={disableFields || (!isLastSize && lastSizeNonZero)}
                     />
                   </TableCell>
                 ))}
