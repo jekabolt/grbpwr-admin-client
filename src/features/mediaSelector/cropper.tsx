@@ -33,7 +33,9 @@ export const MediaCropper: FC<CropperInterface> = ({
   const [zoom, setZoom] = useState(1);
   const [aspect, setAspect] = useState<number | undefined>(4 / 5);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
-  const [freeAspectRatio, setFreeAspectRatio] = useState<number | undefined>(undefined);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(
+    null,
+  );
 
   const aspectRatios = [
     { label: '16:9', value: 1.7778, color: '#cc0000' },
@@ -43,15 +45,14 @@ export const MediaCropper: FC<CropperInterface> = ({
     { label: '3:4', value: 0.75, color: '#45818e' },
     { label: '5:4', value: 1.25, color: '#3d85c6' },
     { label: '9:16', value: 0.5625, color: '#674ea7' },
-    ...(freeAspectRatio ? [{ label: 'free', value: freeAspectRatio, color: '#808080' }] : []),
+    ...(imageDimensions ? [{ label: 'free', value: undefined, color: '#808080' }] : []),
   ];
 
   useEffect(() => {
     if (selectedFile) {
       const img = new Image();
       img.onload = () => {
-        const freeAspect = img.width / img.height;
-        setFreeAspectRatio(freeAspect);
+        setImageDimensions({ width: img.width, height: img.height });
       };
       img.src = selectedFile;
     }
@@ -92,6 +93,11 @@ export const MediaCropper: FC<CropperInterface> = ({
                 zoom={zoom}
                 crop={crop}
                 aspect={aspect}
+                cropSize={
+                  aspect === undefined && imageDimensions
+                    ? { width: imageDimensions.width, height: imageDimensions.height }
+                    : undefined
+                }
                 onCropComplete={onCropComplete}
                 onZoomChange={setZoom}
               />
