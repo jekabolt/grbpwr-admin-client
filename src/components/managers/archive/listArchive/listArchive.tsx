@@ -274,6 +274,8 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                     <MediaSelectorLayout
                       label='add new item'
                       allowMultiple={false}
+                      aspectRatio={['1:1', '3:4', '4:3']}
+                      hideVideos={true}
                       saveSelectedMedia={mediaPreview(archiveEntry.archive?.id)}
                     />
                   ) : (

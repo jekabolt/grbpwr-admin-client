@@ -8,12 +8,16 @@ import styles from 'styles/product-id-media.scss';
 interface SingleMediaView {
   link: string | undefined;
   isEditMode?: boolean;
+  aspectRatio?: string[];
+  hideVideos?: boolean;
   saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
 
 export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   link,
   isEditMode,
+  aspectRatio,
+  hideVideos,
   saveSelectedMedia,
 }) => {
   return (
@@ -33,6 +37,8 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
             label={link ? 'edit' : 'select media'}
             isEditMode={isEditMode}
             allowMultiple={false}
+            aspectRatio={aspectRatio}
+            hideVideos={hideVideos}
             saveSelectedMedia={saveSelectedMedia}
           />
         </Grid>

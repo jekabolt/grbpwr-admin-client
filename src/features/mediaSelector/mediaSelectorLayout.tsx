@@ -7,6 +7,8 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   label,
   isEditMode = true,
   allowMultiple,
+  aspectRatio,
+  hideVideos,
   saveSelectedMedia,
 }) => {
   const [mediaSelectorVisibility, setMediaSelectorVisibility] = useState(false);
@@ -29,9 +31,11 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
       <Grid item>
         {mediaSelectorVisibility && (
           <MediaSelectorModal
+            aspectRatio={aspectRatio}
+            hideVideos={hideVideos}
+            allowMultiple={allowMultiple}
             saveSelectedMedia={saveSelectedMedia}
             closeMediaSelector={handleMediaSelectorVisibility}
-            allowMultiple={allowMultiple}
           />
         )}
       </Grid>

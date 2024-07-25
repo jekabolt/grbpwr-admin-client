@@ -6,11 +6,15 @@ export interface MediaSelectorLayoutProps {
     label: string
     isEditMode?: boolean;
     allowMultiple: boolean;
+    aspectRatio?: string[];
+    hideVideos?: boolean;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
 
 export interface MediaSelectorModalProps {
     allowMultiple: boolean;
+    aspectRatio?: string[];
+    hideVideos?: boolean;
     closeMediaSelector: () => void;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
@@ -19,6 +23,8 @@ export interface MediaSelectorInterface {
     allowMultiple: boolean;
     selectedMedia: common_MediaFull[] | undefined;
     enableModal?: boolean
+    aspectRatio?: string[]
+    hideVideos?: boolean
     select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void
 
 }
@@ -30,6 +36,8 @@ export interface MediaSelectorMediaListProps {
     height?: string | number;
     enableModal?: boolean;
     croppedImage: string | null
+    aspectRatio?: string[]
+    hideVideos?: boolean
     setCroppedImage: (img: string | null) => void
     select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
     setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
