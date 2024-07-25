@@ -22,6 +22,10 @@ import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 
+const hasInvalidSpecialChars = (str: string) => {
+  return (str.length > 0 && /^[^a-zA-Z0-9]*$/.test(str)) || /[^a-zA-Z0-9]{3,}/.test(str);
+};
+
 export const BasicFields: FC<BasicProductFieldsInterface> = ({
   dictionary,
   product,
@@ -39,6 +43,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       field: string,
     ) => {
       let newValue = e.target.value;
+
+      if ((field === 'brand' || field === 'name') && hasInvalidSpecialChars(String(newValue))) {
+        return; // Prevent update if the field contains only special characters
+      }
+
       if (field === 'color' && typeof newValue === 'string') {
         newValue = newValue.toLowerCase().replace(/\s/g, '_');
         const selectedColor = colors.find(
@@ -119,6 +128,13 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
     }
   }, [values.product?.productBody?.salePercentage?.value, values.product?.productBody?.preorder]);
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const allowedKeys = /^[a-zA-Z0-9._-]$/;
+    if (!allowedKeys.test(e.key) && e.key !== 'Backspace' && e.key !== 'Tab' && e.key !== 'Enter') {
+      e.preventDefault();
+    }
+  };
+
   const disableFields = isAddingProduct ? false : !isEditMode;
 
   return (
@@ -166,6 +182,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             fullWidth
             InputLabelProps={{ shrink: true }}
             disabled={disableFields}
+            onKeyDown={handleKeyDown}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'name')}
           />
         </Grid>
         <Grid item xs={12}>
