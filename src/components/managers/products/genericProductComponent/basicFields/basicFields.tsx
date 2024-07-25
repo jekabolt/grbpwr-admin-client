@@ -45,7 +45,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       let newValue = e.target.value;
 
       if ((field === 'brand' || field === 'name') && hasInvalidSpecialChars(String(newValue))) {
-        return; // Prevent update if the field contains only special characters
+        return;
       }
 
       if (field === 'color' && typeof newValue === 'string') {
