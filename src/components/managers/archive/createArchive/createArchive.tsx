@@ -159,6 +159,8 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
             <MediaSelectorLayout
               label='add media'
               allowMultiple={false}
+              aspectRatio={['1:1', '3:4', '4:3']}
+              hideVideos={true}
               saveSelectedMedia={mediaPreview}
             />
           </Grid>

@@ -8,8 +8,10 @@ import styles from 'styles/media-selector.scss';
 import { MediaSelector } from './mediaSelector';
 
 export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
-  closeMediaSelector,
   allowMultiple,
+  aspectRatio,
+  hideVideos,
+  closeMediaSelector,
   saveSelectedMedia,
 }) => {
   const { snackBarMessage, closeSnackBar, isSnackBarOpen, showMessage, snackBarSeverity } =
@@ -58,7 +60,13 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
       >
         <ClearIcon />
       </IconButton>
-      <MediaSelector allowMultiple={allowMultiple} select={select} selectedMedia={selectedMedia} />
+      <MediaSelector
+        allowMultiple={allowMultiple}
+        aspectRatio={aspectRatio}
+        hideVideos={hideVideos}
+        selectedMedia={selectedMedia}
+        select={select}
+      />
       <AppBar
         position='sticky'
         sx={{ bottom: 0, right: 0, backgroundColor: 'transparent', boxShadow: 'none' }}

@@ -13,6 +13,8 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   allowMultiple,
   selectedMedia,
   enableModal,
+  aspectRatio,
+  hideVideos,
   select,
 }) => {
   const {
@@ -108,6 +110,8 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
           selectedMedia={selectedMedia}
           enableModal={enableModal}
           croppedImage={croppedImage}
+          aspectRatio={aspectRatio}
+          hideVideos={hideVideos}
           setCroppedImage={setCroppedImage}
           select={select}
           setMedia={setMedia}

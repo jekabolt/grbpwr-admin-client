@@ -75,6 +75,8 @@ export const MediaView: FC<MediaViewInterface> = ({
             imagePreviewUrl ||
             product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl
           }
+          aspectRatio={['4:5']}
+          hideVideos={true}
           saveSelectedMedia={uploadThumbnailInProduct}
         />
         {!values.product?.thumbnailMediaId && (
@@ -112,9 +114,10 @@ export const MediaView: FC<MediaViewInterface> = ({
             <Grid item xs={12} md={6}>
               <div className={styles.select_media}>
                 <MediaSelectorLayout
+                  label='select media'
+                  aspectRatio={['3:4']}
                   allowMultiple={true}
                   saveSelectedMedia={uploadMediasInProduct}
-                  label='select media'
                 />
               </div>
             </Grid>

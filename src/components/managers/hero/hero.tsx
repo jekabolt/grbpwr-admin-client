@@ -208,6 +208,7 @@ export const Hero: FC = () => {
               <Typography variant='h4'>Main</Typography>
               <SingleMediaViewAndSelect
                 link={mainContentLink}
+                aspectRatio={['4:5', '5:4', '1:1', '16:9', '9:16']}
                 saveSelectedMedia={saveMainContentLink}
               />
             </Grid>
@@ -254,6 +255,7 @@ export const Hero: FC = () => {
               </Box>
               <SingleMediaViewAndSelect
                 link={firstAdContentLink}
+                aspectRatio={['4:5']}
                 saveSelectedMedia={saveFirstAdContentLink}
               />
             </Grid>
@@ -300,6 +302,7 @@ export const Hero: FC = () => {
               </Box>
               <SingleMediaViewAndSelect
                 link={secondAdContentLink}
+                aspectRatio={['4:5']}
                 saveSelectedMedia={saveSecondAdContentLink}
               />
             </Grid>
