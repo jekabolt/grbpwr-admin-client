@@ -23,6 +23,15 @@ interface CropperInterface {
   saveCroppedImage: (croppedImage: string) => void;
 }
 
+const calculateAspectRatio = (width: number | undefined, height: number | undefined) => {
+  if (!width || !height) return;
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const divisor = gcd(width, height);
+  const newWidth = width / divisor;
+  const newHeight = height / divisor;
+  return newWidth / newHeight;
+};
+
 export const MediaCropper: FC<CropperInterface> = ({
   selectedFile,
   open,
@@ -36,6 +45,7 @@ export const MediaCropper: FC<CropperInterface> = ({
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(
     null,
   );
+  const [dynamicAspectRatio, setDynamicAspectRatio] = useState<number | undefined>(undefined);
 
   const aspectRatios = [
     { label: '16:9', value: 1.7778, color: '#cc0000' },
@@ -53,10 +63,13 @@ export const MediaCropper: FC<CropperInterface> = ({
       const img = new Image();
       img.onload = () => {
         setImageDimensions({ width: img.width, height: img.height });
+        if (aspect === undefined) {
+          setDynamicAspectRatio(calculateAspectRatio(img.width, img.height));
+        }
       };
       img.src = selectedFile;
     }
-  }, [selectedFile]);
+  }, [selectedFile, aspect]);
 
   const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
     console.log(croppedArea, croppedAreaPixels);
@@ -72,6 +85,18 @@ export const MediaCropper: FC<CropperInterface> = ({
     }
   };
 
+  const handleAspectRatioChange = (value: number | undefined) => {
+    setAspect(value);
+  };
+
+  useEffect(() => {
+    if (aspect === undefined && imageDimensions) {
+      setDynamicAspectRatio(calculateAspectRatio(imageDimensions.width, imageDimensions.height));
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+    }
+  }, [aspect, imageDimensions]);
+
   return (
     <Dialog open={selectedFile ? open : false} onClose={close} fullWidth maxWidth='md'>
       <Box display='flex' justifyContent='center' position='relative'>
@@ -83,8 +108,10 @@ export const MediaCropper: FC<CropperInterface> = ({
             <DialogContent
               style={{
                 height: '500px',
-                width: '100%',
                 position: 'relative',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
               }}
             >
               <Cropper
@@ -92,7 +119,7 @@ export const MediaCropper: FC<CropperInterface> = ({
                 image={selectedFile || ''}
                 zoom={zoom}
                 crop={crop}
-                aspect={aspect}
+                aspect={aspect !== undefined ? aspect : dynamicAspectRatio}
                 cropSize={
                   aspect === undefined && imageDimensions
                     ? { width: imageDimensions.width, height: imageDimensions.height }
@@ -100,6 +127,7 @@ export const MediaCropper: FC<CropperInterface> = ({
                 }
                 onCropComplete={onCropComplete}
                 onZoomChange={setZoom}
+                restrictPosition={false}
               />
             </DialogContent>
             <DialogActions>
@@ -120,7 +148,7 @@ export const MediaCropper: FC<CropperInterface> = ({
                 {aspectRatios.map((ratio) => (
                   <Button
                     key={ratio.label}
-                    onClick={() => setAspect(ratio.value)}
+                    onClick={() => handleAspectRatioChange(ratio.value)}
                     variant={aspect === ratio.value ? 'contained' : 'outlined'}
                     style={{
                       backgroundColor: aspect === ratio.value ? ratio.color : 'transparent',
