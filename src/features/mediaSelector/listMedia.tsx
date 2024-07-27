@@ -49,15 +49,28 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const [hoveredMediaId, setHoveredMediaId] = useState<number | undefined>(undefined);
   const [filteredMedia, setFilteredMedia] = useState<common_MediaFull[]>([]);
 
+  const mediaAspectRatio = (media: common_MediaFull) => {
+    const width = media.media?.thumbnail?.width || videoSizes[media.id as number]?.width;
+    const height = media.media?.thumbnail?.height || videoSizes[media.id as number]?.height;
+    return calculateAspectRatio(width, height);
+  };
+
   useEffect(() => {
-    const filtered = sortedAndFilteredMedia().filter((m) => {
-      const mediaRatio = mediaAspectRatio(m);
-      const matchesAspectRatio = !aspectRatio || (mediaRatio && aspectRatio.includes(mediaRatio));
-      const isNotVideo = !hideVideos || !isVideo(m.media?.thumbnail?.mediaUrl);
-      return matchesAspectRatio && isNotVideo;
-    });
-    setFilteredMedia(filtered);
-  }, [aspectRatio, hideVideos, sortedAndFilteredMedia]);
+    const applyFilter = () => {
+      const filtered = sortedAndFilteredMedia().filter((m) => {
+        const mediaRatio = mediaAspectRatio(m);
+        const matchesAspectRatio = !aspectRatio || (mediaRatio && aspectRatio.includes(mediaRatio));
+        const isNotVideo = !hideVideos || !isVideo(m.media?.thumbnail?.mediaUrl);
+        const isVideoWithAspectRatio = isVideo(m.media?.thumbnail?.mediaUrl) && matchesAspectRatio;
+        return (
+          (!hideVideos && isVideo(m.media?.thumbnail?.mediaUrl)) ||
+          ((isNotVideo || isVideoWithAspectRatio) && matchesAspectRatio)
+        );
+      });
+      setFilteredMedia(filtered);
+    };
+    applyFilter();
+  }, [aspectRatio, hideVideos, sortedAndFilteredMedia, videoSizes]);
 
   const handleVideoLoadedMetadata = (
     event: React.SyntheticEvent<HTMLVideoElement>,
@@ -131,12 +144,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
       '9:16': '#674ea7',
     };
     return colorMap[aspectRatio as keyof typeof colorMap] || '#808080';
-  };
-
-  const mediaAspectRatio = (media: common_MediaFull) => {
-    const width = media.media?.thumbnail?.width || videoSizes[media.id as number]?.width;
-    const height = media.media?.thumbnail?.height || videoSizes[media.id as number]?.height;
-    return calculateAspectRatio(width, height);
   };
 
   return (
