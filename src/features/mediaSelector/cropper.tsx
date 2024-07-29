@@ -40,6 +40,7 @@ export const MediaCropper: FC<CropperInterface> = ({
 }) => {
   const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
   const [aspect, setAspect] = useState<number | undefined>(4 / 5);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(
@@ -72,14 +73,19 @@ export const MediaCropper: FC<CropperInterface> = ({
   }, [selectedFile, aspect]);
 
   const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
-    console.log(croppedArea, croppedAreaPixels);
     setCroppedAreaPixels(croppedAreaPixels);
   }, []);
 
   const handleSave = async () => {
     if (selectedFile && croppedAreaPixels) {
       const format = selectedFile.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-      const croppedImage = await getCroppedImg(selectedFile, croppedAreaPixels, aspect, format);
+      const croppedImage = await getCroppedImg(
+        selectedFile,
+        croppedAreaPixels,
+        aspect,
+        format,
+        rotation,
+      );
       saveCroppedImage(croppedImage);
       close();
     }
@@ -127,18 +133,36 @@ export const MediaCropper: FC<CropperInterface> = ({
                 }
                 onCropComplete={onCropComplete}
                 onZoomChange={setZoom}
+                onRotationChange={setRotation}
+                rotation={rotation}
                 restrictPosition={false}
               />
             </DialogContent>
             <DialogActions>
-              <Slider
-                value={zoom}
-                min={1}
-                max={3}
-                step={0.1}
-                aria-labelledby='Zoom'
-                onChange={(e, zoom) => setZoom(Number(zoom))}
-              />
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  <Typography textTransform='uppercase'>zoom</Typography>
+                  <Slider
+                    value={zoom}
+                    min={1}
+                    max={3}
+                    step={0.1}
+                    aria-labelledby='Zoom'
+                    onChange={(e, zoom) => setZoom(Number(zoom))}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography textTransform='uppercase'>rotation</Typography>
+                  <Slider
+                    value={rotation}
+                    min={0}
+                    max={360}
+                    step={1}
+                    aria-labelledby='Rotation'
+                    onChange={(e, rotation) => setRotation(Number(rotation))}
+                  />
+                </Grid>
+              </Grid>
             </DialogActions>
           </Grid>
           <Grid item xs={12} md={4}>

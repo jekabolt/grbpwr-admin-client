@@ -1,6 +1,10 @@
 import { Area } from "react-easy-crop";
 
-function findBestCrop(width: number, height: number, targetRatio: number) {
+function findBestCrop(width: number, height: number, targetRatio: number | undefined) {
+    if (targetRatio === undefined) {
+        return { bestWidth: width, bestHeight: height };
+    }
+
     let bestWidth = 0;
     let bestHeight = 0;
     let minDiff = Infinity;
@@ -20,9 +24,9 @@ function findBestCrop(width: number, height: number, targetRatio: number) {
     return { bestWidth, bestHeight };
 }
 
-export default async function getCroppedImg(imageSrc: string, crop: Area, aspect: number = 4 / 5, format: string = 'image/jpeg') {
+async function getRotatedImage(imageSrc: string, rotation: number): Promise<HTMLCanvasElement> {
     const image = new Image();
-    image.crossOrigin = 'Anonymous'
+    image.crossOrigin = 'Anonymous';
     image.src = imageSrc;
 
     await new Promise((resolve) => {
@@ -32,10 +36,49 @@ export default async function getCroppedImg(imageSrc: string, crop: Area, aspect
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
-    const scaleX = image.naturalWidth / image.width;
-    const scaleY = image.naturalHeight / image.height;
+    const angleInRads = (rotation * Math.PI) / 180;
+    const sin = Math.sin(angleInRads);
+    const cos = Math.cos(angleInRads);
 
-    // Calculate the best crop dimensions to maintain the aspect ratio
+    const width = image.width;
+    const height = image.height;
+
+    const newWidth = Math.abs(width * cos) + Math.abs(height * sin);
+    const newHeight = Math.abs(width * sin) + Math.abs(height * cos);
+
+    canvas.width = newWidth;
+    canvas.height = newHeight;
+
+    if (ctx) {
+        ctx.translate(newWidth / 2, newHeight / 2);
+        ctx.rotate(angleInRads);
+        ctx.drawImage(image, -width / 2, -height / 2);
+    }
+
+    return canvas;
+}
+
+export default async function getCroppedImg(
+    imageSrc: string,
+    crop: Area,
+    aspect?: number,
+    format: string = 'image/jpeg',
+    rotation = 0
+): Promise<string> {
+    const rotatedCanvas = await getRotatedImage(imageSrc, rotation);
+    const rotatedImage = new Image();
+    rotatedImage.src = rotatedCanvas.toDataURL();
+
+    await new Promise((resolve) => {
+        rotatedImage.onload = resolve;
+    });
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const scaleX = rotatedImage.width / rotatedImage.width;
+    const scaleY = rotatedImage.height / rotatedImage.height;
+
     const { bestWidth, bestHeight } = findBestCrop(crop.width, crop.height, aspect);
 
     canvas.width = bestWidth;
@@ -46,7 +89,7 @@ export default async function getCroppedImg(imageSrc: string, crop: Area, aspect
         ctx.imageSmoothingQuality = 'high';
 
         ctx.drawImage(
-            image,
+            rotatedImage,
             crop.x * scaleX,
             crop.y * scaleY,
             crop.width * scaleX,
