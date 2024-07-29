@@ -87,7 +87,13 @@ export const Settings: FC = () => {
                             {...field}
                             checked={field.value ?? false}
                             onChange={(e) => {
-                              field.onChange(e);
+                              if (
+                                window.confirm(
+                                  'Are you sure you want to change this payment method status?',
+                                )
+                              ) {
+                                field.onChange(e);
+                              }
                             }}
                           />
                         }
