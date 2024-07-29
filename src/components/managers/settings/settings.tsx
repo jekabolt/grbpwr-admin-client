@@ -1,7 +1,6 @@
 import {
   Alert,
   Box,
-  Button,
   Checkbox,
   FormControlLabel,
   Grid,
@@ -15,8 +14,9 @@ import { getDictionary } from 'api/admin';
 import { UpdateSettingsRequest, common_Dictionary } from 'api/proto-http/admin';
 import { updateSettings } from 'api/settings';
 import { Layout } from 'components/login/layout';
-import { Field, FieldProps, Form, Formik } from 'formik';
-import { FC, useEffect, useState } from 'react';
+import { Field, FieldProps, Formik } from 'formik';
+import debounce from 'lodash/debounce';
+import { FC, useCallback, useEffect, useState } from 'react';
 import { defaultSettingsStates } from './defaultSettingsStates';
 import { mapPaymentMethods, mapShipmentCarriers } from './mappingFunctions';
 
@@ -49,24 +49,22 @@ export const Settings: FC = () => {
     fetchDictionary();
   }, []);
 
+  const handleFieldChange = async (values: UpdateSettingsRequest) => {
+    try {
+      await updateSettings(values);
+      showMessage('Settings updated successfully.', 'success');
+    } catch (error) {
+      showMessage('Failed to update settings.', 'error');
+    }
+  };
+
+  const debouncedHandleFieldChange = useCallback(debounce(handleFieldChange, 1000), []);
+
   return (
     <Layout>
-      <Formik
-        initialValues={settings}
-        enableReinitialize={true}
-        onSubmit={async (values, actions) => {
-          try {
-            await updateSettings(values);
-            showMessage('Settings updated successfully.', 'success');
-            actions.setSubmitting(false);
-          } catch (error) {
-            showMessage('Failed to update settings.', 'error');
-            actions.setSubmitting(false);
-          }
-        }}
-      >
-        {({ values, setFieldValue, isSubmitting }) => (
-          <Form>
+      <Formik initialValues={settings} enableReinitialize={true} onSubmit={() => {}}>
+        {({ values, setFieldValue }) => (
+          <form>
             <Grid
               container
               spacing={2}
@@ -89,10 +87,16 @@ export const Settings: FC = () => {
                             onChange={(e) => {
                               if (
                                 window.confirm(
-                                  'Are you sure you want to change this payment method status?',
+                                  'Are you sure you want to change this payment method?',
                                 )
                               ) {
                                 field.onChange(e);
+                                handleFieldChange({
+                                  ...values,
+                                  paymentMethods: values.paymentMethods?.map((p, idx) =>
+                                    idx === id ? { ...p, allow: e.target.checked } : p,
+                                  ),
+                                });
                               }
                             }}
                           />
@@ -118,6 +122,12 @@ export const Settings: FC = () => {
                               checked={field.value ?? false}
                               onChange={(e) => {
                                 field.onChange(e);
+                                handleFieldChange({
+                                  ...values,
+                                  shipmentCarriers: values.shipmentCarriers?.map((c, idx) =>
+                                    idx === index ? { ...c, allow: e.target.checked } : c,
+                                  ),
+                                });
                               }}
                             />
                           }
@@ -132,12 +142,16 @@ export const Settings: FC = () => {
                       type='number'
                       size='small'
                       inputProps={{ step: '0.01', min: 0 }}
-                      onChange={(e: any) =>
-                        setFieldValue(
-                          `shipmentCarriers[${index}].price.value`,
-                          e.target.value.toString(),
-                        )
-                      }
+                      onChange={(e: any) => {
+                        const newValue = parseFloat(e.target.value).toFixed(2); // Convert to string with 2 decimal places
+                        setFieldValue(`shipmentCarriers[${index}].price.value`, newValue);
+                        debouncedHandleFieldChange({
+                          ...values,
+                          shipmentCarriers: values.shipmentCarriers?.map((c, idx) =>
+                            idx === index ? { ...c, price: { value: newValue } } : c,
+                          ),
+                        });
+                      }}
                     />
                   </Box>
                   <Typography variant='body2' color='textSecondary'>
@@ -154,7 +168,10 @@ export const Settings: FC = () => {
                       control={
                         <Checkbox
                           checked={field.value ?? false}
-                          onChange={field.onChange}
+                          onChange={(e) => {
+                            field.onChange(e);
+                            handleFieldChange({ ...values, siteAvailable: e.target.checked });
+                          }}
                           name={field.name}
                           color='primary'
                         />
@@ -173,21 +190,18 @@ export const Settings: FC = () => {
                   value={values.maxOrderItems}
                   InputLabelProps={{ shrink: true }}
                   size='small'
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setFieldValue('maxOrderItems', e.target.value)
-                  }
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    const newValue = parseInt(e.target.value, 10); // Convert to number
+                    setFieldValue('maxOrderItems', newValue);
+                    debouncedHandleFieldChange({ ...values, maxOrderItems: newValue });
+                  }}
                 />
               </Grid>
               <Grid item xs={12}>
                 <Typography variant='body1'>BASE CURRENCY: {dictionary?.baseCurrency}</Typography>
               </Grid>
-              <Grid item xs={12}>
-                <Button variant='contained' size='small' type='submit' disabled={isSubmitting}>
-                  Save Settings
-                </Button>
-              </Grid>
             </Grid>
-          </Form>
+          </form>
         )}
       </Formik>
       <Snackbar
