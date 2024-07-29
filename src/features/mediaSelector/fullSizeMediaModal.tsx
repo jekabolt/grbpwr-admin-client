@@ -116,7 +116,13 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                             />
                           </a>
                           <IconButton
-                            style={{ position: 'absolute', left: '0' }}
+                            style={{
+                              position: 'absolute',
+                              left: '0',
+                              backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                              borderRadius: '0%',
+                              boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
+                            }}
                             onClick={() => togglePreviewMode()}
                           >
                             <CropIcon fontSize='large' color='action' />
