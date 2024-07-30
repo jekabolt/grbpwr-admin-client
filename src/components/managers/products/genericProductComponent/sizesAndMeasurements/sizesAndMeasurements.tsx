@@ -8,10 +8,12 @@ import {
   TableHead,
   TableRow,
   TextField,
-  useMediaQuery,
-  useTheme,
 } from '@mui/material';
-import { common_ProductNew } from 'api/proto-http/admin';
+import {
+  common_CategoryEnum,
+  common_MeasurementNameEnum,
+  common_ProductNew,
+} from 'api/proto-http/admin';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
@@ -19,6 +21,7 @@ import { useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
+import { categoryMeasurementsMapping } from './mappingMeasurementsForCategories';
 
 export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   isEditMode = true,
@@ -30,9 +33,17 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
+  const disableFields = isAddingProduct ? false : !isEditMode;
 
-  const theme = useTheme();
-  const matches = useMediaQuery(theme.breakpoints.down('sm'));
+  const selectedCategory = dictionary?.categories?.find(
+    (category) => category.id === values.product?.productBody?.categoryId,
+  );
+  const relevantMeasurements = selectedCategory
+    ? categoryMeasurementsMapping[selectedCategory.name as common_CategoryEnum] ?? []
+    : [];
+  const measurementsToDisplay = sortedMeasurements.filter((m) =>
+    relevantMeasurements.includes(m.name as common_MeasurementNameEnum),
+  );
 
   useEffect(() => {
     if (sortedSizes.length > 0) {
@@ -135,16 +146,14 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
     [values.sizeMeasurements, setFieldValue],
   );
 
-  const disableFields = isAddingProduct ? false : !isEditMode;
-
   return (
     <TableContainer component={Paper} sx={{ border: '1px solid black' }}>
-      <Table size={matches ? 'small' : 'medium'}>
+      <Table>
         <TableHead>
           <TableRow>
             <TableCell>Size Name</TableCell>
             <TableCell className={styles.table_cell}>Quantity</TableCell>
-            {sortedMeasurements.map((m) => (
+            {measurementsToDisplay.map((m) => (
               <TableCell key={m.id}>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
             ))}
           </TableRow>
@@ -185,7 +194,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                     />
                   </Box>
                 </TableCell>
-                {sortedMeasurements.map((measurement) => (
+                {measurementsToDisplay.map((measurement) => (
                   <TableCell key={measurement.id}>
                     <TextField
                       type='number'
