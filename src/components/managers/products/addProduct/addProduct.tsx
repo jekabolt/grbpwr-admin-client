@@ -11,7 +11,6 @@ export const AddProducts: FC = () => {
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
-  const [clearMediaPreview, setClearMediaPreview] = useState(false);
 
   const showMessage = (message: string, severity: 'success' | 'error') => {
     setSnackBarMessage(message);
@@ -56,7 +55,7 @@ export const AddProducts: FC = () => {
       }
 
       await upsertProduct(productToSubmit);
-      setClearMediaPreview(true);
+
       showMessage('PRODUCT UPLOADED', 'success');
       resetForm();
     } catch (error) {

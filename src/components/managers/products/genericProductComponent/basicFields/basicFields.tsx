@@ -2,6 +2,7 @@ import {
   Checkbox,
   FormControl,
   FormControlLabel,
+  FormHelperText,
   Grid,
   InputLabel,
   MenuItem,
@@ -32,7 +33,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   isEditMode,
   isAddingProduct,
 }) => {
-  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, submitCount } = useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
@@ -180,6 +181,10 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             name='product.productBody.name'
             required
             fullWidth
+            error={!values.product?.productBody?.name && submitCount > 0}
+            helperText={
+              !values.product?.productBody?.name && submitCount > 0 ? 'Name is required' : ''
+            }
             InputLabelProps={{ shrink: true }}
             disabled={disableFields}
             onKeyDown={handleKeyDown}
@@ -194,13 +199,21 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             name='product.productBody.brand'
             required
             fullWidth
+            error={!values.product?.productBody?.brand && submitCount > 0}
+            helperText={
+              !values.product?.productBody?.brand && submitCount > 0 ? 'Brand is required' : ''
+            }
             InputLabelProps={{ shrink: true }}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
             disabled={disableFields}
           />
         </Grid>
         <Grid item xs={12}>
-          <FormControl required fullWidth>
+          <FormControl
+            required
+            fullWidth
+            error={!values.product?.productBody?.targetGender && submitCount > 0}
+          >
             <InputLabel shrink>GENDER</InputLabel>
             <Select
               value={values.product?.productBody?.targetGender || ''}
@@ -216,10 +229,17 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </MenuItem>
               ))}
             </Select>
+            {!values.product?.productBody?.targetGender && submitCount > 0 && (
+              <FormHelperText>Gender is required</FormHelperText>
+            )}
           </FormControl>
         </Grid>
         <Grid item xs={12}>
-          <FormControl required fullWidth>
+          <FormControl
+            required
+            fullWidth
+            error={!values.product?.productBody?.categoryId && submitCount > 0}
+          >
             <InputLabel shrink>CATEGORY</InputLabel>
             <Select
               name='product.productBody.categoryId'
@@ -235,10 +255,17 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </MenuItem>
               ))}
             </Select>
+            {!values.product?.productBody?.categoryId && submitCount > 0 && (
+              <FormHelperText>Category is required</FormHelperText>
+            )}
           </FormControl>
         </Grid>
         <Grid item xs={12}>
-          <FormControl fullWidth required>
+          <FormControl
+            fullWidth
+            required
+            error={!values.product?.productBody?.color && submitCount > 0}
+          >
             <InputLabel shrink>COLOR</InputLabel>
             <Select
               value={values.product?.productBody?.color || ''}
@@ -254,6 +281,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </MenuItem>
               ))}
             </Select>
+            {!values.product?.productBody?.color && submitCount > 0 && (
+              <FormHelperText>Color is required</FormHelperText>
+            )}
           </FormControl>
         </Grid>
         <Grid item xs={12}>
@@ -269,7 +299,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           />
         </Grid>
         <Grid item xs={12}>
-          <FormControl fullWidth required>
+          <FormControl
+            fullWidth
+            required
+            error={!values.product?.productBody?.countryOfOrigin && submitCount > 0}
+          >
             <InputLabel shrink>COUNTRY</InputLabel>
             <Select
               name='product.productBody.countryOfOrigin'
@@ -285,6 +319,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </MenuItem>
               ))}
             </Select>
+            {!values.product?.productBody?.countryOfOrigin && submitCount > 0 && (
+              <FormHelperText>Country is required</FormHelperText>
+            )}
           </FormControl>
         </Grid>
         <Grid item xs={12}>
@@ -301,6 +338,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             onChange={handlePriceChange}
             onKeyDown={restrictNumericInput}
             disabled={disableFields}
+            error={values.product?.productBody?.price?.value === '0' && submitCount > 0}
+            helperText={
+              values.product?.productBody?.price?.value === '0' && submitCount > 0
+                ? 'Price is required'
+                : ''
+            }
           />
         </Grid>
 
@@ -346,6 +389,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             multiline
             required
             disabled={disableFields}
+            error={!values.product?.productBody?.description && submitCount > 0}
+            helperText={
+              !values.product?.productBody?.description && submitCount > 0
+                ? 'Description is required'
+                : ''
+            }
           />
         </Grid>
 
