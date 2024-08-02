@@ -17,8 +17,8 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
   onSubmit,
   onEditModeChange,
 }) => {
-  const [clearMediaPreview, setClearMediaPreview] = useState(false);
   const [isFormChanged, setIsFormChanged] = useState(false);
+  const [clearMediaPreview, setClearMediaPreview] = useState(false);
   const initialProductRef = useRef(initialProductState);
 
   useEffect(() => {
@@ -50,18 +50,61 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     });
   };
 
+  const validateForm = (values: common_ProductNew) => {
+    const errors: { [key: string]: any } = {};
+    if (!values.product?.productBody?.name) {
+      errors.name = 'Name is required';
+    }
+    if (!values.product?.productBody?.brand) {
+      errors.brand = 'Brand is required';
+    }
+    if (!values.product?.productBody?.targetGender) {
+      errors.targetGender = 'Gender is required';
+    }
+    if (!values.product?.productBody?.categoryId) {
+      errors.categoryId = 'Category is required';
+    }
+    if (!values.product?.productBody?.color) {
+      errors.color = 'Color is required';
+    }
+    if (!values.product?.productBody?.countryOfOrigin) {
+      errors.countryOfOrigin = 'Country is required';
+    }
+    if (!values.product?.productBody?.price?.value) {
+      errors.price = 'Price is required';
+    }
+    if (!values.product?.productBody?.description) {
+      errors.description = 'Description is required';
+    }
+    return errors;
+  };
+
   const handleFormSubmit = async (
     values: common_ProductNew,
     actions: FormikHelpers<common_ProductNew>,
   ) => {
-    const filteredValues = {
-      ...values,
-      sizeMeasurements: filterEmptySizes(values.sizeMeasurements),
-    };
-    await onSubmit(filteredValues, actions);
-    setIsFormChanged(false);
-    if (onEditModeChange) {
-      onEditModeChange(false);
+    try {
+      if ((values.mediaIds?.length || 0) < 2) {
+        actions.setErrors({ mediaIds: 'At least two media must be added to the product' });
+        actions.setSubmitting(false);
+        return;
+      }
+      const filteredValues = {
+        ...values,
+        sizeMeasurements: filterEmptySizes(values.sizeMeasurements),
+      };
+      await onSubmit(filteredValues, actions);
+      setIsFormChanged(false);
+      if (isAddingProduct) {
+        setClearMediaPreview(true);
+        setTimeout(() => setClearMediaPreview(false), 0);
+      }
+      if (onEditModeChange) {
+        onEditModeChange(false);
+      }
+    } catch (error) {
+    } finally {
+      actions.setSubmitting(false);
     }
   };
 
@@ -70,6 +113,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
       initialValues={initialProductState}
       onSubmit={handleFormSubmit}
       enableReinitialize={true}
+      validate={validateForm}
     >
       {({ handleSubmit, isSubmitting, values }: FormikProps<common_ProductNew>) => {
         useEffect(() => {
@@ -131,6 +175,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                       isAddingProduct={isAddingProduct}
                     />
                   </Grid>
+
                   <Grid item xs={12}>
                     <Field
                       component={Tags}

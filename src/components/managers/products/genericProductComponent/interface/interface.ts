@@ -11,6 +11,7 @@ export interface GenericProductFormInterface {
     isEditMode?: boolean;
     isAddingProduct?: boolean;
     dictionary?: common_Dictionary;
+
     onSubmit: (
         values: common_ProductNew,
         actions: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },

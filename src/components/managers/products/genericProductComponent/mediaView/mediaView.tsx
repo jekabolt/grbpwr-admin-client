@@ -17,14 +17,16 @@ export const MediaView: FC<MediaViewInterface> = ({
 }) => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
-  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, errors } = useFormikContext<common_ProductNew>();
 
   useEffect(() => {
     if (clearMediaPreview) {
       setImagePreviewUrl('');
       setMediaPreview([]);
+      setFieldValue('mediaIds', []);
+      setFieldValue('product.thumbnailMediaId', '');
     }
-  }, [clearMediaPreview]);
+  }, [clearMediaPreview, setFieldValue]);
 
   const uploadThumbnailInProduct = (newSelectedMedia: common_MediaFull[]) => {
     if (!newSelectedMedia.length) return;
@@ -80,8 +82,8 @@ export const MediaView: FC<MediaViewInterface> = ({
           saveSelectedMedia={uploadThumbnailInProduct}
         />
         {!values.product?.thumbnailMediaId && (
-          <Typography color='error' variant='overline'>
-            THUMBNAIL MUST BE SELECTED
+          <Typography color='error' textTransform='uppercase' variant='overline'>
+            thumbnail must be selected
           </Typography>
         )}
       </Grid>
@@ -123,9 +125,9 @@ export const MediaView: FC<MediaViewInterface> = ({
             </Grid>
           )}
         </Grid>
-        {values.mediaIds && values.mediaIds.length < 1 && (
-          <Typography color='error' variant='overline'>
-            AT LEAST ONE MEDIA MUST BE ADDED TO THE PRODUCT
+        {errors.mediaIds && (
+          <Typography color='error' textTransform='uppercase' variant='overline'>
+            {errors.mediaIds}
           </Typography>
         )}
       </Grid>
