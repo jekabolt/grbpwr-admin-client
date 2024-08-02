@@ -1,7 +1,11 @@
 import { AppBar, Button, CircularProgress, Grid, Toolbar } from '@mui/material';
-import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
+import {
+  common_ProductBody,
+  common_ProductNew,
+  common_SizeWithMeasurementInsert,
+} from 'api/proto-http/admin';
 import { Field, Form, Formik, FormikHelpers, FormikProps } from 'formik';
-import { FC, useEffect, useRef, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { BasicFields } from './basicFields/basicFields';
 import { GenericProductFormInterface } from './interface/interface';
 import { MediaView } from './mediaView/mediaView';
@@ -19,11 +23,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
 }) => {
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
-  const initialProductRef = useRef(initialProductState);
-
-  useEffect(() => {
-    initialProductRef.current = initialProductState;
-  }, [initialProductState]);
+  const initialValues = useMemo(() => initialProductState, [initialProductState]);
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -50,75 +50,85 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     });
   };
 
-  const validateForm = (values: common_ProductNew) => {
-    const errors: { [key: string]: any } = {};
-    if (!values.product?.productBody?.name) {
-      errors.name = 'Name is required';
-    }
-    if (!values.product?.productBody?.brand) {
-      errors.brand = 'Brand is required';
-    }
-    if (!values.product?.productBody?.targetGender) {
-      errors.targetGender = 'Gender is required';
-    }
-    if (!values.product?.productBody?.categoryId) {
-      errors.categoryId = 'Category is required';
-    }
-    if (!values.product?.productBody?.color) {
-      errors.color = 'Color is required';
-    }
-    if (!values.product?.productBody?.countryOfOrigin) {
-      errors.countryOfOrigin = 'Country is required';
-    }
-    if (!values.product?.productBody?.price?.value) {
-      errors.price = 'Price is required';
-    }
-    if (!values.product?.productBody?.description) {
-      errors.description = 'Description is required';
-    }
-    return errors;
-  };
-
   const handleFormSubmit = async (
     values: common_ProductNew,
     actions: FormikHelpers<common_ProductNew>,
   ) => {
-    try {
-      if ((values.mediaIds?.length || 0) < 2) {
-        actions.setErrors({ mediaIds: 'At least two media must be added to the product' });
-        actions.setSubmitting(false);
-        return;
-      }
-      const filteredValues = {
-        ...values,
-        sizeMeasurements: filterEmptySizes(values.sizeMeasurements),
-      };
-      await onSubmit(filteredValues, actions);
-      setIsFormChanged(false);
-      if (isAddingProduct) {
-        setClearMediaPreview(true);
-        setTimeout(() => setClearMediaPreview(false), 0);
-      }
-      if (onEditModeChange) {
-        onEditModeChange(false);
-      }
-    } catch (error) {
-    } finally {
+    if ((values.mediaIds?.length || 0) < 2) {
+      actions.setErrors({ mediaIds: 'At least two media must be added to the product' });
       actions.setSubmitting(false);
+      return;
+    }
+    const hasFilledSize = values.sizeMeasurements?.some(
+      (sizeMeasurement) =>
+        sizeMeasurement.productSize?.quantity?.value &&
+        sizeMeasurement.productSize.quantity.value !== '0',
+    );
+
+    if (!hasFilledSize) {
+      actions.setErrors({ sizeMeasurements: 'At least one size must be specified' });
+      actions.setSubmitting(false);
+      return;
+    }
+
+    if ((values.tags?.length || 0) < 1) {
+      actions.setErrors({ tags: 'At least one tag must be added to the product' });
+      actions.setSubmitting(false);
+      return;
+    }
+
+    const requiredProductBodyFields: (keyof common_ProductBody)[] = [
+      'name',
+      'brand',
+      'sku',
+      'color',
+      'colorHex',
+      'countryOfOrigin',
+      'price',
+      'categoryId',
+      'description',
+      'hidden',
+      'targetGender',
+    ];
+    const productBody = values.product?.productBody;
+    const hasAllProductBodyFields = requiredProductBodyFields.every((field) =>
+      productBody ? productBody[field] : false,
+    );
+
+    if (!hasAllProductBodyFields) {
+      actions.setSubmitting(false);
+      return;
+    }
+
+    const filteredValues = {
+      ...values,
+      sizeMeasurements: filterEmptySizes(values.sizeMeasurements),
+    };
+    await onSubmit(filteredValues, actions);
+    setIsFormChanged(false);
+    if (isAddingProduct) {
+      setClearMediaPreview(true);
+      setTimeout(() => setClearMediaPreview(false), 0);
+    }
+    if (onEditModeChange) {
+      onEditModeChange(false);
     }
   };
 
+  const checkChanges = useCallback(
+    (values: common_ProductNew) => {
+      const isChanged = JSON.stringify(values) !== JSON.stringify(initialValues);
+      setIsFormChanged(isChanged);
+    },
+    [initialValues],
+  );
+
   return (
-    <Formik
-      initialValues={initialProductState}
-      onSubmit={handleFormSubmit}
-      enableReinitialize={true}
-      validate={validateForm}
-    >
+    <Formik initialValues={initialValues} onSubmit={handleFormSubmit} enableReinitialize={true}>
       {({ handleSubmit, isSubmitting, values }: FormikProps<common_ProductNew>) => {
         useEffect(() => {
-          setIsFormChanged(JSON.stringify(values) !== JSON.stringify(initialProductRef.current));
-        }, [values]);
+          checkChanges(values);
+        }, [checkChanges, values]);
 
         return (
           <Form>

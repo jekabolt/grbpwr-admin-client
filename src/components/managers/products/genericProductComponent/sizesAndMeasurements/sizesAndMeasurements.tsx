@@ -8,6 +8,7 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Typography,
 } from '@mui/material';
 import {
   common_CategoryEnum,
@@ -28,8 +29,9 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   isAddingProduct,
   dictionary,
 }) => {
-  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, errors, touched } = useFormikContext<common_ProductNew>();
   const [lastSizeNonZero, setLastSizeNonZero] = useState(false);
+  const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
@@ -80,6 +82,14 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
     ) => {
       const { value } = event.target;
 
+      if (isEditMode && sizeId && !hasChangedSize[sizeId]) {
+        const confirmed = window.confirm('Are you sure you want to change the size quantity?');
+        if (!confirmed) {
+          return;
+        }
+        setHasChangedSize((prev) => ({ ...prev, [sizeId]: true }));
+      }
+
       const sizeIndex = values.sizeMeasurements?.findIndex(
         (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
       );
@@ -105,7 +115,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
         setLastSizeNonZero(value !== '0' && value !== '');
       }
     },
-    [values.sizeMeasurements, setFieldValue, sortedSizes],
+    [values.sizeMeasurements, setFieldValue, sortedSizes, isEditMode, hasChangedSize],
   );
 
   const handleMeasurementChange = useCallback(
@@ -147,75 +157,93 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   );
 
   return (
-    <TableContainer component={Paper} sx={{ border: '1px solid black' }}>
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell>Size Name</TableCell>
-            <TableCell className={styles.table_cell}>Quantity</TableCell>
-            {measurementsToDisplay.map((m) => (
-              <TableCell key={m.id}>{findInDictionary(dictionary, m.id, 'measurement')}</TableCell>
-            ))}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {sortedSizes.map((size, index) => {
-            const sizeIndex =
-              values.sizeMeasurements?.findIndex(
-                (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === size.id,
-              ) ?? -1;
-
-            const isLastSize = index === sortedSizes.length - 1;
-
-            if (!isLastSize && lastSizeNonZero) {
-              return null;
-            }
-
-            return (
-              <TableRow key={size.id}>
-                <TableCell component='th' scope='row'>
-                  {findInDictionary(dictionary, size.id, 'size')}
+    <>
+      <TableContainer
+        component={Paper}
+        sx={{
+          border:
+            touched.sizeMeasurements && errors.sizeMeasurements
+              ? '2px solid red'
+              : '1px solid black',
+        }}
+      >
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Size Name</TableCell>
+              <TableCell className={styles.table_cell}>Quantity</TableCell>
+              {measurementsToDisplay.map((m) => (
+                <TableCell key={m.id}>
+                  {findInDictionary(dictionary, m.id, 'measurement')}
                 </TableCell>
-                <TableCell align='center' sx={{ bgcolor: '#f0f0f0' }}>
-                  <Box display='flex' alignItems='center'>
-                    <TextField
-                      name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
-                      type='number'
-                      value={
-                        values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value === '0'
-                          ? ''
-                          : values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value || ''
-                      }
-                      onChange={(e) => handleSizeChange(e, size.id)}
-                      onKeyDown={restrictNumericInput}
-                      inputProps={{ min: 0 }}
-                      style={{ width: '80px' }}
-                      disabled={disableFields || (!isLastSize && lastSizeNonZero)}
-                    />
-                  </Box>
-                </TableCell>
-                {measurementsToDisplay.map((measurement) => (
-                  <TableCell key={measurement.id}>
-                    <TextField
-                      type='number'
-                      value={
-                        values.sizeMeasurements?.[sizeIndex]?.measurements?.find(
-                          (m) => m.measurementNameId === measurement.id,
-                        )?.measurementValue?.value || ''
-                      }
-                      onChange={(e) => handleMeasurementChange(e, size.id, measurement.id)}
-                      onKeyDown={restrictNumericInput}
-                      inputProps={{ min: 0 }}
-                      style={{ width: '80px' }}
-                      disabled={disableFields || (!isLastSize && lastSizeNonZero)}
-                    />
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {sortedSizes.map((size, index) => {
+              const sizeIndex =
+                values.sizeMeasurements?.findIndex(
+                  (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === size.id,
+                ) ?? -1;
+
+              const isLastSize = index === sortedSizes.length - 1;
+
+              if (!isLastSize && lastSizeNonZero) {
+                return null;
+              }
+
+              return (
+                <TableRow key={size.id}>
+                  <TableCell component='th' scope='row'>
+                    {findInDictionary(dictionary, size.id, 'size')}
                   </TableCell>
-                ))}
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </TableContainer>
+                  <TableCell align='center' sx={{ bgcolor: '#f0f0f0' }}>
+                    <Box display='flex' alignItems='center'>
+                      <TextField
+                        name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
+                        type='number'
+                        value={
+                          values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value === '0'
+                            ? ''
+                            : values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value ||
+                              ''
+                        }
+                        onChange={(e) => handleSizeChange(e, size.id)}
+                        onKeyDown={restrictNumericInput}
+                        inputProps={{ min: 0 }}
+                        style={{ width: '80px' }}
+                        disabled={disableFields || (!isLastSize && lastSizeNonZero)}
+                      />
+                    </Box>
+                  </TableCell>
+                  {measurementsToDisplay.map((measurement) => (
+                    <TableCell key={measurement.id}>
+                      <TextField
+                        type='number'
+                        value={
+                          values.sizeMeasurements?.[sizeIndex]?.measurements?.find(
+                            (m) => m.measurementNameId === measurement.id,
+                          )?.measurementValue?.value || ''
+                        }
+                        onChange={(e) => handleMeasurementChange(e, size.id, measurement.id)}
+                        onKeyDown={restrictNumericInput}
+                        inputProps={{ min: 0 }}
+                        style={{ width: '80px' }}
+                        disabled={disableFields || (!isLastSize && lastSizeNonZero)}
+                      />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      {touched.sizeMeasurements && errors.sizeMeasurements && (
+        <Typography color='error' variant='overline'>
+          {errors.sizeMeasurements}
+        </Typography>
+      )}
+    </>
   );
 };

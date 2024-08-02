@@ -33,7 +33,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   isEditMode,
   isAddingProduct,
 }) => {
-  const { values, setFieldValue, submitCount } = useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, submitCount, setFormikState } =
+    useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
@@ -75,8 +76,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         updatedValues.countryOfOrigin,
       );
       setFieldValue('product.productBody.sku', newSKU);
+      setFormikState((prevState) => ({ ...prevState, isFormChanged: true }));
     },
-    [values.product?.productBody, setFieldValue, dictionary],
+    [values.product?.productBody, setFieldValue, dictionary, setFormikState],
   );
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
@@ -93,6 +95,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         setFieldValue('product.productBody.preorder', null);
       }
     }
+    setFormikState((prevState) => ({ ...prevState, isFormChanged: true }));
   };
 
   const handlePreorderChange = (date: Date | null) => {
@@ -104,6 +107,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       setFieldValue('product.productBody.preorder', '0001-01-01T00:00:00Z');
       setShowSales(true);
     }
+    setFormikState((prevState) => ({ ...prevState, isFormChanged: true }));
   };
 
   const parseDate = (dateString: string | undefined): Date | null => {
