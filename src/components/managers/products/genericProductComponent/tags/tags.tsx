@@ -5,7 +5,8 @@ import { FC, useEffect, useState } from 'react';
 import { ProductTagsInterface } from '../interface/interface';
 
 export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) => {
-  const { values, setFieldValue, initialValues } = useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, initialValues, errors, touched } =
+    useFormikContext<common_ProductNew>();
   const [tag, setTag] = useState('');
   const [localTags, setLocalTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
@@ -119,6 +120,11 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) 
           />
         ))}
       </Box>
+      {touched.tags && errors.tags && (
+        <Typography color='error' variant='overline'>
+          {errors.tags}
+        </Typography>
+      )}
     </Box>
   );
 };

@@ -31,6 +31,12 @@ export const ProductDetails: FC = () => {
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
 
+  const showMessage = (message: string, severity: 'success' | 'error') => {
+    setSnackBarMessage(message);
+    setSnackBarSeverity(severity);
+    setIsSnackBarOpen(true);
+  };
+
   useEffect(() => {
     const fetchDictionary = async () => {
       const response = await getDictionary({});
@@ -40,13 +46,9 @@ export const ProductDetails: FC = () => {
   }, []);
 
   const fetchProduct = async () => {
-    try {
-      const response = await getProductByID({ id: parseInt(id) });
-      setProduct(response.product);
-      setInitialValues(productInitialValues(response.product));
-    } catch (error) {
-      console.error(error);
-    }
+    const response = await getProductByID({ id: parseInt(id) });
+    setProduct(response.product);
+    setInitialValues(productInitialValues(response.product));
   };
 
   useEffect(() => {
@@ -55,10 +57,7 @@ export const ProductDetails: FC = () => {
 
   const handleFormSubmit = async (
     values: common_ProductNew,
-    {
-      setSubmitting,
-      resetForm,
-    }: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
+    { setSubmitting }: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
   ) => {
     const updatePayload: UpsertProductRequest = {
       id: parseInt(id),
@@ -70,18 +69,11 @@ export const ProductDetails: FC = () => {
       showMessage('PRODUCT UPDATED', 'success');
       fetchProduct();
     } catch (error) {
-      console.error(error);
       showMessage("PRODUCT CAN'T BE UPDATED", 'error');
     } finally {
       setSubmitting(false);
       setIsEditMode(false);
     }
-  };
-
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    setSnackBarMessage(message);
-    setSnackBarSeverity(severity);
-    setIsSnackBarOpen(true);
   };
 
   return (

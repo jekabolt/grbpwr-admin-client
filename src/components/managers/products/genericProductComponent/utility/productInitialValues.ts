@@ -1,13 +1,14 @@
-import { common_GenderEnum, common_ProductFull, common_ProductNew } from "api/proto-http/admin";
+import { common_ProductFull, common_ProductNew } from "api/proto-http/admin";
 
 export const productInitialValues = (product?: common_ProductFull): common_ProductNew => {
     if (!product) {
-        return {} as common_ProductNew;
+        return initialProductState;
     }
+
     return {
         product: {
             productBody: product.product?.productDisplay?.productBody,
-            thumbnailMediaId: product.product?.productDisplay?.thumbnail?.id || 0,
+            thumbnailMediaId: product.product?.productDisplay?.thumbnail?.id || undefined,
         },
         sizeMeasurements: product.sizes?.map((size) => ({
             productSize: {
@@ -20,21 +21,21 @@ export const productInitialValues = (product?: common_ProductFull): common_Produ
                     measurementNameId: m.measurementNameId,
                     measurementValue: { value: m.measurementValue?.value || '' },
                 })),
-        })),
-        tags:
-            product.tags?.map((tag) => ({
-                tag: tag.productTagInsert?.tag || '',
-            })) || [],
-        mediaIds:
-            product.media?.map((media) => media.id).filter((id): id is number => id !== undefined) ||
-            [],
+        })) || [],
+        tags: product.tags?.map((tag) => ({
+            tag: tag.productTagInsert?.tag || '',
+        })) || [],
+        mediaIds: product.media
+            ?.map((media) => media.id)
+            .filter((id): id is number => id !== undefined) || [],
     };
 };
+
 
 export const initialProductState: common_ProductNew = {
     product: {
         productBody: {
-            preorder: '',
+            preorder: '0001-01-01T00:00:00Z',
             name: '',
             brand: '',
             sku: '',
@@ -46,7 +47,7 @@ export const initialProductState: common_ProductNew = {
             categoryId: 0,
             description: '',
             hidden: false,
-            targetGender: '' as common_GenderEnum,
+            targetGender: 'GENDER_ENUM_UNKNOWN',
         },
         thumbnailMediaId: undefined,
     },

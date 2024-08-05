@@ -18,13 +18,21 @@ import { isValid, parseISO } from 'date-fns';
 import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
-import { Field, useFormikContext } from 'formik';
+import { ErrorMessage, Field, useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
+import { handleKeyDown } from '../utility/brandNameRegExp';
 
-const hasInvalidSpecialChars = (str: string) => {
-  return (str.length > 0 && /^[^a-zA-Z0-9]*$/.test(str)) || /[^a-zA-Z0-9]{3,}/.test(str);
+const parseWellKnownTimestamp = (timestamp: string): Date | null => {
+  if (!timestamp || timestamp === '0001-01-01T00:00:00Z') return null;
+  const parsedDate = parseISO(timestamp);
+  return isValid(parsedDate) ? parsedDate : null;
+};
+
+const formatWellKnownTimestamp = (date: Date | null): string => {
+  if (!date) return '0001-01-01T00:00:00Z';
+  return date.toISOString();
 };
 
 export const BasicFields: FC<BasicProductFieldsInterface> = ({
@@ -33,10 +41,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   isEditMode,
   isAddingProduct,
 }) => {
-  const { values, setFieldValue, submitCount } = useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, submitCount, errors, touched } =
+    useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
+  const disableFields = isAddingProduct ? false : !isEditMode;
 
   const handleFieldChange = useCallback(
     (
@@ -44,10 +54,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       field: string,
     ) => {
       let newValue = e.target.value;
-
-      if ((field === 'brand' || field === 'name') && hasInvalidSpecialChars(String(newValue))) {
-        return;
-      }
 
       if (field === 'color' && typeof newValue === 'string') {
         newValue = newValue.toLowerCase().replace(/\s/g, '_');
@@ -67,12 +73,16 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         [field]: newValue,
       };
 
+      const currentSKU = values.product?.productBody?.sku || '';
+      const existingUuid = currentSKU.slice(-4);
+
       const newSKU = generateSKU(
         updatedValues.brand,
         updatedValues.targetGender,
         findInDictionary(dictionary, updatedValues.categoryId, 'category'),
         updatedValues.color,
         updatedValues.countryOfOrigin,
+        existingUuid,
       );
       setFieldValue('product.productBody.sku', newSKU);
     },
@@ -86,30 +96,21 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       const saleValue = value.trim();
       if (saleValue === '') {
         setShowPreorder(true);
-        setFieldValue('product.productBody.preorder', null);
       } else {
         const saleNumber = parseFloat(saleValue);
         setShowPreorder(saleNumber <= 0);
-        setFieldValue('product.productBody.preorder', null);
       }
     }
   };
 
   const handlePreorderChange = (date: Date | null) => {
-    if (date) {
-      setFieldValue('product.productBody.preorder', date.toISOString());
-      setShowSales(false);
-      setFieldValue('product.productBody.salePercentage.value', '');
-    } else {
-      setFieldValue('product.productBody.preorder', '0001-01-01T00:00:00Z');
-      setShowSales(true);
-    }
+    const formattedDate = formatWellKnownTimestamp(date);
+    setFieldValue('product.productBody.preorder', formattedDate);
+    setShowSales(!date);
   };
 
   const parseDate = (dateString: string | undefined): Date | null => {
-    if (!dateString || dateString === '0001-01-01T00:00:00Z') return null;
-    const parsedDate = parseISO(dateString);
-    return isValid(parsedDate) ? parsedDate : null;
+    return parseWellKnownTimestamp(dateString || '0001-01-01T00:00:00Z');
   };
 
   useEffect(() => {
@@ -128,15 +129,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       setShowPreorder(true);
     }
   }, [values.product?.productBody?.salePercentage?.value, values.product?.productBody?.preorder]);
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    const allowedKeys = /^[a-zA-Z0-9._-]$/;
-    if (!allowedKeys.test(e.key) && e.key !== 'Backspace' && e.key !== 'Tab' && e.key !== 'Enter') {
-      e.preventDefault();
-    }
-  };
-
-  const disableFields = isAddingProduct ? false : !isEditMode;
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -181,14 +173,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             name='product.productBody.name'
             required
             fullWidth
-            error={!values.product?.productBody?.name && submitCount > 0}
-            helperText={
-              !values.product?.productBody?.name && submitCount > 0 ? 'Name is required' : ''
-            }
+            error={!!(errors.product && touched.product && !values.product?.productBody?.name)}
+            helperText={<ErrorMessage name='product.productBody.name' />}
             InputLabelProps={{ shrink: true }}
             disabled={disableFields}
             onKeyDown={handleKeyDown}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'name')}
           />
         </Grid>
         <Grid item xs={12}>
@@ -199,12 +188,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             name='product.productBody.brand'
             required
             fullWidth
-            error={!values.product?.productBody?.brand && submitCount > 0}
-            helperText={
-              !values.product?.productBody?.brand && submitCount > 0 ? 'Brand is required' : ''
-            }
+            error={!!(errors.product && touched.product && !values.product?.productBody?.brand)}
+            helperText={<ErrorMessage name='product.productBody.brand' />}
             InputLabelProps={{ shrink: true }}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
+            onKeyDown={handleKeyDown}
             disabled={disableFields}
           />
         </Grid>
@@ -212,7 +200,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <FormControl
             required
             fullWidth
-            error={!values.product?.productBody?.targetGender && submitCount > 0}
+            error={
+              !!(errors.product && touched.product && !values.product?.productBody?.targetGender)
+            }
           >
             <InputLabel shrink>GENDER</InputLabel>
             <Select
@@ -230,7 +220,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               ))}
             </Select>
             {!values.product?.productBody?.targetGender && submitCount > 0 && (
-              <FormHelperText>Gender is required</FormHelperText>
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.targetGender' />
+              </FormHelperText>
             )}
           </FormControl>
         </Grid>
@@ -238,7 +230,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <FormControl
             required
             fullWidth
-            error={!values.product?.productBody?.categoryId && submitCount > 0}
+            error={
+              !!(errors.product && touched.product && !values.product?.productBody?.categoryId)
+            }
           >
             <InputLabel shrink>CATEGORY</InputLabel>
             <Select
@@ -256,7 +250,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               ))}
             </Select>
             {!values.product?.productBody?.categoryId && submitCount > 0 && (
-              <FormHelperText>Category is required</FormHelperText>
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.categoryId' />
+              </FormHelperText>
             )}
           </FormControl>
         </Grid>
@@ -264,7 +260,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <FormControl
             fullWidth
             required
-            error={!values.product?.productBody?.color && submitCount > 0}
+            error={!!(errors.product && touched.product && !values.product?.productBody?.color)}
           >
             <InputLabel shrink>COLOR</InputLabel>
             <Select
@@ -282,7 +278,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               ))}
             </Select>
             {!values.product?.productBody?.color && submitCount > 0 && (
-              <FormHelperText>Color is required</FormHelperText>
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.color' />
+              </FormHelperText>
             )}
           </FormControl>
         </Grid>
@@ -302,7 +300,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <FormControl
             fullWidth
             required
-            error={!values.product?.productBody?.countryOfOrigin && submitCount > 0}
+            error={
+              !!(errors.product && touched.product && !values.product?.productBody?.countryOfOrigin)
+            }
           >
             <InputLabel shrink>COUNTRY</InputLabel>
             <Select
@@ -320,7 +320,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               ))}
             </Select>
             {!values.product?.productBody?.countryOfOrigin && submitCount > 0 && (
-              <FormHelperText>Country is required</FormHelperText>
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.countryOfOrigin' />
+              </FormHelperText>
             )}
           </FormControl>
         </Grid>
@@ -338,12 +340,14 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             onChange={handlePriceChange}
             onKeyDown={restrictNumericInput}
             disabled={disableFields}
-            error={values.product?.productBody?.price?.value === '0' && submitCount > 0}
-            helperText={
-              values.product?.productBody?.price?.value === '0' && submitCount > 0
-                ? 'Price is required'
-                : ''
+            error={
+              !!(
+                errors.product &&
+                touched.product &&
+                values.product?.productBody?.price?.value === '0'
+              )
             }
+            helperText={<ErrorMessage name='product.productBody.price.value' />}
           />
         </Grid>
 
@@ -372,7 +376,10 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               onChange={handlePreorderChange}
               minDate={new Date()}
               slotProps={{
-                textField: { fullWidth: true, InputLabelProps: { shrink: true } },
+                textField: {
+                  fullWidth: true,
+                  InputLabelProps: { shrink: true },
+                },
                 field: { clearable: true },
               }}
               disabled={disableFields}
@@ -389,12 +396,10 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             multiline
             required
             disabled={disableFields}
-            error={!values.product?.productBody?.description && submitCount > 0}
-            helperText={
-              !values.product?.productBody?.description && submitCount > 0
-                ? 'Description is required'
-                : ''
+            error={
+              !!(errors.product && touched.product && !values.product?.productBody?.description)
             }
+            helperText={<ErrorMessage name='product.productBody.description' />}
           />
         </Grid>
 
