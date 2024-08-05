@@ -41,7 +41,7 @@ const sanitizeBrand = (brand: string) => {
     return brand
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[\/\-,\$%\^:;()!@#&*+=`~.{}|\[\]]/g, '');
+        .replace(/[\/\-,\$%\^:;()!@#&*+=`~.{}|\[\]_]/g, '');
 };
 
 const formatBrand = (brand: string) => {
@@ -52,12 +52,13 @@ const formatBrand = (brand: string) => {
     return sanitizedBrand.substring(0, 6);
 }
 
-export const generateSKU = (brand: string | undefined, gender: common_GenderEnum | undefined, categoryId: string | undefined, color: string | undefined, country: string | undefined) => {
+
+export const generateSKU = (brand: string | undefined, gender: common_GenderEnum | undefined, categoryId: string | undefined, color: string | undefined, country: string | undefined, existingUuid?: string) => {
     if (brand) {
         const formattedBrand = formatBrand(brand);
         const colorCode = getColorCode(color)
         const date = getCurrentSeasonCode();
-        const randomNumbers = generateNumbers()
+        const randomNumbers = existingUuid || generateNumbers()
         const formattedGender = gender?.replace('GENDER_ENUM_', '').charAt(0)
         const formattedCategory = formatCategory(categoryId)
         return `${formattedBrand}${formattedGender}${formattedCategory}${colorCode}${country}${date}${randomNumbers}`.toUpperCase();

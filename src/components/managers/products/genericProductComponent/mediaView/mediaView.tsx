@@ -4,7 +4,7 @@ import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isVideo } from 'features/utilitty/filterContentType';
-import { useFormikContext } from 'formik';
+import { ErrorMessage, useFormikContext } from 'formik';
 import { FC, useEffect, useMemo, useState } from 'react';
 import styles from 'styles/addProd.scss';
 import { MediaViewInterface } from '../interface/interface';
@@ -83,7 +83,7 @@ export const MediaView: FC<MediaViewInterface> = ({
         />
         {!values.product?.thumbnailMediaId && (
           <Typography color='error' textTransform='uppercase' variant='overline'>
-            thumbnail must be selected
+            <ErrorMessage name='product.thumbnailMediaId' />
           </Typography>
         )}
       </Grid>
