@@ -21,7 +21,6 @@ import { useEffect, useState } from 'react';
 import styles from 'styles/order.scss';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 
-// Define the expected params structure
 export type OrderDetailsPathProps = MakeGenerics<{
   Params: {
     uuid: string;
@@ -330,12 +329,12 @@ export const OrderDetails = () => {
             )}
             {shipping && (
               <div>
-                {shipping.street && shipping.houseNumber && (
+                {/* {shipping.street && shipping.houseNumber && (
                   <div>
                     STREET ADDRESS: {shipping.street} {shipping.houseNumber}
                     {shipping.apartmentNumber ? ', ' + shipping.apartmentNumber : ''}
                   </div>
-                )}
+                )} */}
                 {shipping.city && <div>CITY: {shipping.city}</div>}
                 {shipping.state && <div>STATE: {shipping.state}</div>}
                 {shipping.country && <div>COUNTRY: {shipping.country}</div>}
@@ -381,12 +380,12 @@ export const OrderDetails = () => {
           {showBilling ? (
             <div>
               <div>BILLING ADDRESS:</div>
-              {billing.street && billing.houseNumber && (
+              {/* {billing.street && billing.houseNumber && (
                 <div>
                   STREET ADDRESS: {billing.street} {billing.houseNumber}
                   {billing.apartmentNumber ? ', ' + billing.apartmentNumber : ''}
                 </div>
-              )}
+              )} */}
               {billing.city && <div>CITY: {billing.city}</div>}
               {billing.state && <div>STATE: {billing.state}</div>}
               {billing.country && <div>COUNTRY: {billing.country}</div>}
