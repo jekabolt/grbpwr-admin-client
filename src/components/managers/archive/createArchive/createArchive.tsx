@@ -1,7 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { Box, Button, Grid, IconButton, TextField, Typography } from '@mui/material';
+import { Button, Grid, IconButton, TextField, Typography } from '@mui/material';
 import { addArchive } from 'api/archive';
 import {
   common_ArchiveItemInsert,
@@ -9,6 +7,7 @@ import {
   common_MediaFull,
   common_MediaItem,
 } from 'api/proto-http/admin';
+import { TruncateText } from 'components/common/truncateText';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useState } from 'react';
 import styles from 'styles/archive.scss';
@@ -30,15 +29,21 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
   const [media, setMedia] = useState<string | undefined>('');
   const [mediaId, setMediaId] = useState<number | undefined>();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [expandedItemId, setExpandedItemId] = useState<number | undefined>();
+  const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(null);
 
-  const toggleTextExpansion = (id: number | undefined) => {
-    setExpandedItemId((prevId) => (prevId === id ? undefined : id));
-  };
-
-  const toggleModal = () => {
+  const toggleModal = (index: number | null = null) => {
     if (isModalOpen) {
       setTitle('');
+      setUrl('');
+      setMedia(undefined);
+      setSelectedItemIndex(null);
+    } else if (index !== null) {
+      const item = archive.itemsInsert?.[index];
+      const media = mediaItem[index];
+      setTitle(item?.title || '');
+      setUrl(item?.url || '');
+      setMedia(media?.media?.fullSize?.mediaUrl);
+      setSelectedItemIndex(index);
     }
     setIsModalOpen(!isModalOpen);
   };
@@ -67,28 +72,53 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
       showMessage('invalid url', 'error');
       return;
     }
+
     const newItem: common_ArchiveItemInsert = {
       mediaId: mediaId,
       url: url,
       title: title,
     };
 
-    setArchive((prev) => ({
-      ...prev,
-      itemsInsert: [...(prev.itemsInsert ?? []), newItem],
-    }));
-    if (media) {
+    if (selectedItemIndex !== null) {
+      const updatedItems = [...(archive.itemsInsert || [])];
+      updatedItems[selectedItemIndex] = newItem;
+      setArchive((prev) => ({
+        ...prev,
+        itemsInsert: updatedItems,
+      }));
+
       const newMediaItem: common_MediaItem = {
         fullSize: { mediaUrl: media, width: undefined, height: undefined },
         thumbnail: undefined,
         compressed: undefined,
       };
-
       const newMediaFull = {
         media: newMediaItem,
       } as common_MediaFull;
 
-      setMediaItem((prevMediaItems) => [...prevMediaItems, newMediaFull]);
+      const updatedMediaItems = [...mediaItem];
+      updatedMediaItems[selectedItemIndex] = newMediaFull;
+
+      setMediaItem(updatedMediaItems);
+    } else {
+      setArchive((prev) => ({
+        ...prev,
+        itemsInsert: [...(prev.itemsInsert ?? []), newItem],
+      }));
+
+      if (media) {
+        const newMediaItem: common_MediaItem = {
+          fullSize: { mediaUrl: media, width: undefined, height: undefined },
+          thumbnail: undefined,
+          compressed: undefined,
+        };
+
+        const newMediaFull = {
+          media: newMediaItem,
+        } as common_MediaFull;
+
+        setMediaItem((prevMediaItems) => [...prevMediaItems, newMediaFull]);
+      }
     }
 
     setMedia(undefined);
@@ -126,12 +156,6 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
     }));
   };
 
-  const isDescriptionShort = (title: string | undefined) => {
-    if (!title) return;
-    const maxLineLength = 60;
-    return title.length <= maxLineLength;
-  };
-
   const createArchive = async () => {
     try {
       if (mediaItem.length > 0) {
@@ -144,7 +168,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
         showMessage('add item to the archive', 'error');
       }
     } catch (error) {
-      showMessage('archive cannot be created ', 'success');
+      showMessage('archive cannot be created ', 'error');
     }
   };
 
@@ -155,48 +179,37 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
           create new archive
         </Typography>
         <Grid container className={styles.scroll_container} wrap='nowrap'>
-          <Grid item xs={6} sm={3} className={styles.media_item_add}>
+          <Grid item xs={12} md={3} className={styles.media_item_add}>
             <MediaSelectorLayout
               label='add media'
               allowMultiple={false}
-              aspectRatio={['1:1', '3:4', '4:3']}
-              hideVideos={true}
               saveSelectedMedia={mediaPreview}
+              aspectRatio={['1:1', '3:4', '4:3']}
             />
           </Grid>
           {mediaItem.map((media, id) => (
-            <>
-              <Grid item xs={6} sm={3} className={styles.media_item}>
-                <img src={media.media?.fullSize?.mediaUrl} />
-                <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
-                  <ClearIcon fontSize='small' />
-                </IconButton>
-              </Grid>
-              <Box display='flex' alignItems='flex-start'>
-                <Typography
-                  variant='overline'
-                  className={expandedItemId === id ? styles.description : styles.hidden_description}
-                >
-                  {archive.itemsInsert?.[id]?.title ?? 'No title'}
-                </Typography>
-
-                {archive.itemsInsert?.[id]?.title &&
-                  !isDescriptionShort(archive.itemsInsert[id].title) && (
-                    <IconButton onClick={() => toggleTextExpansion(id)}>
-                      {expandedItemId === id ? (
-                        <ExpandLessIcon fontSize='small' />
-                      ) : (
-                        <ExpandMoreIcon fontSize='small' />
-                      )}
-                    </IconButton>
+            <Grid item key={id} xs={12} md={3}>
+              <Grid container>
+                <Grid item xs={12} className={styles.media_item}>
+                  <img
+                    src={media.media?.fullSize?.mediaUrl}
+                    alt=''
+                    onClick={() => toggleModal(id)}
+                  />
+                  <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
+                    <ClearIcon fontSize='small' />
+                  </IconButton>
+                </Grid>
+                <Grid item xs={12}>
+                  <TruncateText text={archive.itemsInsert?.[id].title} length={60} />
+                  {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
+                    <a href={archive.itemsInsert[id].url} target='_blank' rel='noopener noreferrer'>
+                      go to link
+                    </a>
                   )}
-                {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
-                  <a href={archive.itemsInsert[id].url} target='_blank' rel='noopener noreferrer'>
-                    go to link
-                  </a>
-                )}
-              </Box>
-            </>
+                </Grid>
+              </Grid>
+            </Grid>
           ))}
         </Grid>
 
@@ -242,11 +255,12 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
 
       <ArchiveModal
         open={isModalOpen}
-        close={toggleModal}
+        isEditMode={selectedItemIndex !== null}
         media={media?.toString() || ''}
         title={title}
-        setTitle={setTitle}
         url={url}
+        close={toggleModal}
+        setTitle={setTitle}
         setUrl={setUrl}
         addNewItem={addNewItem}
       />

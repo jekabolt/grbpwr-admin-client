@@ -97,9 +97,8 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) 
             label='TAG'
             InputLabelProps={{ shrink: true }}
             onChange={(e) => setTag(e.target.value)}
-            disabled={!isAddingProduct}
           />
-          <Button variant='contained' onClick={handleAddTag} disabled={!isAddingProduct}>
+          <Button variant='contained' onClick={handleAddTag}>
             Upload
           </Button>
         </Box>

@@ -65,9 +65,9 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
       {({ setFieldValue }) => (
         <Form>
           <Grid container spacing={2}>
-            <Grid item xs={6}>
+            <Grid item xs={12}>
               <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} md={3}>
                   <Field name='sortFactors'>
                     {({ field }: FieldProps) => (
                       <FormControl fullWidth>
@@ -91,7 +91,7 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     )}
                   </Field>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} md={3}>
                   <Field name='orderFactor'>
                     {({ field }: FieldProps) => (
                       <FormControl fullWidth>
@@ -114,7 +114,7 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     )}
                   </Field>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} md={3}>
                   <Field name='filterConditions.categoryId'>
                     {({ field }: FieldProps) => (
                       <FormControl fullWidth>
@@ -138,7 +138,7 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     )}
                   </Field>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} md={3}>
                   <Field name='filterConditions.sizesIds'>
                     {({ field }: FieldProps) => (
                       <FormControl fullWidth>
@@ -169,9 +169,9 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                 </Grid>
               </Grid>
             </Grid>
-            <Grid item xs={6}>
+            <Grid item xs={12}>
               <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} md={2}>
                   <TextField
                     label='FROM'
                     type='number'
@@ -183,7 +183,7 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     onKeyDown={restrictNumericInput}
                   />
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} md={2}>
                   <TextField
                     label='TO'
                     type='number'
@@ -195,7 +195,7 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     onKeyDown={restrictNumericInput}
                   />
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} md={3}>
                   <Field name='filterConditions.color'>
                     {({ field }: FieldProps) => (
                       <FormControl fullWidth>
@@ -219,7 +219,31 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     )}
                   </Field>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} md={3}>
+                  <Field name='filterConditions.gender'>
+                    {({ field }: FieldProps) => (
+                      <FormControl fullWidth>
+                        <InputLabel>GENDER</InputLabel>
+                        <Select
+                          {...field}
+                          onChange={(e) =>
+                            handleFieldChange(setFieldValue, field.name, e.target.value)
+                          }
+                          value={field.value}
+                          label='GENDER'
+                        >
+                          <MenuItem value=''>ANY</MenuItem>
+                          {dictionary?.genders?.map((gender, id) => (
+                            <MenuItem key={id} value={gender.id}>
+                              {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Field>
+                </Grid>
+                <Grid item xs={12} md={2}>
                   <TextField
                     label='TAG'
                     type='string'

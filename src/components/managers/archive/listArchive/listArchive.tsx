@@ -2,6 +2,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { Box, Button, Divider, Grid, TextField } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveItemFull } from 'api/proto-http/frontend';
+import { TruncateText } from 'components/common/truncateText';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isValidURL } from 'features/utilitty/isValidUrl';
 import { FC, useEffect, useState } from 'react';
@@ -232,8 +233,15 @@ export const ListArchive: FC<ListArchiveInterface> = ({
               ) : (
                 <Grid container spacing={2}>
                   {archiveEntry.items?.slice(0, 4).map((item, index) => (
-                    <Grid item key={index} className={styles.item} xs={6} sm={3}>
-                      <img src={item.archiveItem?.media?.media?.thumbnail?.mediaUrl} />
+                    <Grid item xs={6} md={3}>
+                      <Grid container>
+                        <Grid item key={index} className={styles.item} xs={12}>
+                          <img src={item.archiveItem?.media?.media?.thumbnail?.mediaUrl} />
+                        </Grid>
+                        <Grid item xs={12}>
+                          <TruncateText text={item.archiveItem?.title} length={60} />
+                        </Grid>
+                      </Grid>
                     </Grid>
                   ))}
                 </Grid>
