@@ -20,6 +20,7 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
   media,
   title,
   url,
+  isEditMode,
   close,
   setTitle,
   addNewItem,
@@ -35,7 +36,7 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
   };
 
   return (
-    <Dialog open={open} onClose={close} fullWidth scroll='paper' maxWidth='xl'>
+    <Dialog open={open} onClose={close} fullWidth scroll='paper' maxWidth='sm'>
       <Box position='relative'>
         <IconButton onClick={close} sx={{ position: 'absolute', right: 0 }}>
           <CloseIcon />
@@ -73,7 +74,7 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
             style={{ display: 'flex', justifyContent: isMobile ? 'center' : 'flex-end' }}
           >
             <Button variant='contained' onClick={() => addNewItem(id)}>
-              add item
+              {isEditMode ? 'save' : 'add item'}
             </Button>
           </Grid>
         </Grid>

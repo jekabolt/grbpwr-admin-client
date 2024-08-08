@@ -6,6 +6,7 @@ export interface ArchiveModalInterface {
     media: string;
     title: string;
     url: string;
+    isEditMode?: boolean;
     close: () => void;
     setTitle: (value: string) => void;
     setUrl: (value: string) => void;
