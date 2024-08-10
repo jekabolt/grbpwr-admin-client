@@ -329,12 +329,7 @@ export const OrderDetails = () => {
             )}
             {shipping && (
               <div>
-                {/* {shipping.street && shipping.houseNumber && (
-                  <div>
-                    STREET ADDRESS: {shipping.street} {shipping.houseNumber}
-                    {shipping.apartmentNumber ? ', ' + shipping.apartmentNumber : ''}
-                  </div>
-                )} */}
+                {shipping.addressLineOne && <div>STREET ADDRESS: {shipping.addressLineOne}</div>}
                 {shipping.city && <div>CITY: {shipping.city}</div>}
                 {shipping.state && <div>STATE: {shipping.state}</div>}
                 {shipping.country && <div>COUNTRY: {shipping.country}</div>}
@@ -380,12 +375,7 @@ export const OrderDetails = () => {
           {showBilling ? (
             <div>
               <div>BILLING ADDRESS:</div>
-              {/* {billing.street && billing.houseNumber && (
-                <div>
-                  STREET ADDRESS: {billing.street} {billing.houseNumber}
-                  {billing.apartmentNumber ? ', ' + billing.apartmentNumber : ''}
-                </div>
-              )} */}
+              {billing.addressLineOne && <div>STREET ADDRESS: {billing.addressLineOne}</div>}
               {billing.city && <div>CITY: {billing.city}</div>}
               {billing.state && <div>STATE: {billing.state}</div>}
               {billing.country && <div>COUNTRY: {billing.country}</div>}

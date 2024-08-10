@@ -235,6 +235,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
               onChange={handleTextFieldChange}
               label='DESCRIPTION'
               InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+              inputProps={{ maxLength: 255 }}
               size='small'
               fullWidth
               multiline

@@ -27,12 +27,6 @@ export function deleteArchive(
   return adminService.DeleteArchiveById(request);
 }
 
-// export function deleteItemFromArchive(
-//   request: DeleteArchiveByIdRequest,
-// ): Promise<DeleteArchiveByIdResponse> {
-//   return adminService.DeleteArchiveById(request);
-// }
-
 export function updateArchive(request: UpdateArchiveRequest): Promise<UpdateArchiveResponse> {
   return adminService.UpdateArchive(request);
 }

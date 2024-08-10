@@ -29,8 +29,8 @@ export const ArchiveModal: FC<ArchiveModalInterface> = ({
   const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value;
-    if (value.length > 256) {
-      value = value.substring(0, 256);
+    if (value.length > 255) {
+      value = value.substring(0, 255);
     }
     setTitle(value);
   };
