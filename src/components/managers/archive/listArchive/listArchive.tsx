@@ -19,296 +19,291 @@ export const ListArchive: FC<ListArchiveInterface> = ({
   updateArchiveInformation,
   showMessage,
 }) => {
-  const [media, setMedia] = useState<string>('');
+  const [media, setMedia] = useState('');
+  const [mediaId, setMediaId] = useState<number>();
+  const [title, setTitle] = useState('');
+  const [url, setUrl] = useState('');
+  const [selectedArchiveId, setSelectedArchiveId] = useState<number>();
+  const [selectedItemId, setSelectedItemId] = useState<number | undefined>(undefined);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState<{ [key: number]: boolean }>({});
   const [heading, setHeading] = useState<{ [key: number]: string }>({});
   const [description, setDescription] = useState<{ [key: number]: string }>({});
-  const [mediaId, setMediaId] = useState<number>();
-  const [title, setTitle] = useState<string>('');
-  const [url, setUrl] = useState<string>('');
-  const [selectedArchiveId, setSelectedArchiveId] = useState<number | undefined>();
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isEditMode, seIsEditMode] = useState<{ [key: number]: boolean }>({});
+  const toggleModal = () => setIsModalOpen(!isModalOpen);
 
-  useEffect(() => {
-    archive.forEach((archiveEntry) => {
-      if (archiveEntry.items) {
-        archiveEntry.items = archiveEntry.items.map((item) => ({
-          ...item,
-          media: item.archiveItem?.media?.media?.thumbnail?.mediaUrl,
-          title: item.archiveItem?.title,
-          url: item.archiveItem?.url,
-        }));
-      }
-    });
-  }, [archive]);
-
-  const toggleModal = () => {
-    setIsModalOpen(!isModalOpen);
-    setTitle('');
-    setUrl('');
-  };
-
-  const handleSaveNewOrderOfRows = (
-    updatedItems: common_ArchiveItemFull[],
-    archiveId: number | undefined,
-  ) => {
-    setArchive((prevArchive) =>
-      prevArchive.map((archiveEntry) => {
-        if (archiveEntry.archive?.id === archiveId) {
-          const originalOrder = archiveEntry.items?.map((item) => item.id).join(',');
-          const newOrder = updatedItems.map((item) => item.id).join(',');
-          if (originalOrder !== newOrder) {
-            showMessage('items order changed', 'success');
-          }
-          const updatedArchiveEntry = { ...archiveEntry, items: updatedItems };
-          updateArchiveInformation(archiveId, updatedArchiveEntry);
-          return updatedArchiveEntry;
-        }
-        return archiveEntry;
-      }),
-    );
-  };
-
-  const mediaPreview =
-    (archiveId: number | undefined) => (newSelectedMedia: common_MediaFull[]) => {
-      if (newSelectedMedia.length > 0) {
-        const media = newSelectedMedia[0];
-        setMedia(media.media?.fullSize?.mediaUrl ?? '');
-        setMediaId(media.id);
-        setSelectedArchiveId(archiveId);
-        setIsModalOpen(true);
-      }
-    };
-
-  const addNewItemToArchive = (archiveId: number | undefined) => {
-    if (url && !isValidURL(url)) {
-      showMessage('url is not valid', 'error');
-      return;
-    }
-
-    if (title.length > 256) {
-      showMessage('description cannot be longer than 256 symbols', 'error');
-      return;
-    }
-
-    setArchive((prevArchive) =>
-      prevArchive.map((archiveEntry) => {
-        if (archiveEntry.archive?.id === archiveId) {
-          const mediaExists = archiveEntry.items?.some(
-            (item) => item.archiveItem?.media?.id === mediaId,
-          );
-          if (mediaExists) {
-            showMessage('this media is already added to the archive', 'error');
-            return archiveEntry;
-          }
-          const newItem = {
-            archiveId,
-            archiveItem: {
-              media: {
-                id: mediaId,
-                media: {
-                  thumbnail: { mediaUrl: media, width: undefined, height: undefined },
-                },
-              },
-              url,
-              title,
-            },
-          } as common_ArchiveItemFull;
-          const updatedItems = [...(archiveEntry.items || []), newItem];
-          showMessage('item added to the archive successfully', 'success');
-          const updatedArchiveEntry = { ...archiveEntry, items: updatedItems };
-          updateArchiveInformation(archiveId, updatedArchiveEntry);
-          return updatedArchiveEntry;
-        }
-        return archiveEntry;
-      }),
-    );
+  const resetState = () => {
     toggleModal();
     setMedia('');
     setTitle('');
     setUrl('');
-    setMediaId(undefined);
+    setSelectedItemId(undefined);
   };
 
-  const handleUpdateArchive = (archiveId: number | undefined) => {
-    if (!archiveId) return;
+  const handleRowClick = (item: common_ArchiveItemFull, archiveId?: number) => {
+    setMedia(item.archiveItem?.media?.media?.thumbnail?.mediaUrl ?? '');
+    setTitle(item.archiveItem?.title ?? '');
+    setUrl(item.archiveItem?.url ?? '');
+    setSelectedArchiveId(archiveId);
+    setSelectedItemId(item.id);
+    setIsModalOpen(true);
+  };
 
-    setArchive((prevArchive) =>
-      prevArchive.map((archiveEntry) => {
-        if (archiveEntry.archive?.id === archiveId) {
-          const updatedArchive = {
-            ...archiveEntry,
-            archive: {
-              ...archiveEntry.archive,
-              archiveBody: {
-                heading: heading[archiveId] ?? archiveEntry.archive?.archiveBody?.heading ?? '',
-                description:
-                  description[archiveId] ?? archiveEntry.archive?.archiveBody?.description ?? '',
-              },
-            },
-          } as common_ArchiveFull;
-          updateArchiveInformation(archiveId, updatedArchive);
-          showMessage('new archive data has been saved', 'success');
-          return updatedArchive;
+  useEffect(() => {
+    archive.forEach((entry) => {
+      entry.items = entry.items?.map((item) => ({
+        ...item,
+        media: item.archiveItem?.media?.media?.thumbnail?.mediaUrl,
+        title: item.archiveItem?.title,
+        url: item.archiveItem?.url,
+      }));
+    });
+  }, [archive]);
+
+  const handleSaveOrder = (updatedItems: common_ArchiveItemFull[], archiveId?: number) => {
+    setArchive((prev) =>
+      prev.map((entry) => {
+        if (entry.archive?.id === archiveId) {
+          const updated = { ...entry, items: updatedItems };
+          updateArchiveInformation(archiveId, updated);
+          showMessage('items order changed', 'success');
+          return updated;
         }
-        return archiveEntry;
+        return entry;
       }),
     );
   };
 
-  const toggleEditMode = (archiveId: number | undefined) => {
-    if (archiveId !== undefined) {
-      const archiveEntry = archive.find((entry) => entry.archive?.id === archiveId);
-      if (!archiveEntry) {
-        showMessage('archive entry not found', 'error');
-        return;
-      }
-
-      if (isEditMode[archiveId]) {
-        const archiveTitle = heading[archiveId] ?? archiveEntry.archive?.archiveBody?.heading ?? '';
-
-        if (!archiveTitle) {
-          showMessage('archive title cannot be empty', 'error');
-          return;
-        }
-        handleUpdateArchive(archiveId);
-      }
-      seIsEditMode((prevEditMode) => ({
-        ...prevEditMode,
-        [archiveId]: !prevEditMode[archiveId],
-      }));
+  const handleMediaPreview = (archiveId?: number) => (media: common_MediaFull[]) => {
+    if (media.length) {
+      const selected = media[0];
+      setMedia(selected.media?.fullSize?.mediaUrl ?? '');
+      setMediaId(selected.id);
+      setSelectedArchiveId(archiveId);
+      setIsModalOpen(true);
     }
+  };
+
+  const addNewItemToArchive = (archiveId?: number) => {
+    if (url && !isValidURL(url)) {
+      showMessage('url is not valid', 'error');
+      return;
+    }
+    setArchive((prev) =>
+      prev.map((entry) => {
+        if (entry.archive?.id === archiveId) {
+          if (entry.items?.some((item) => item.archiveItem?.media?.id === mediaId)) {
+            return showMessage('this media is already added', 'error'), entry;
+          }
+          const newItem = {
+            archiveId,
+            archiveItem: {
+              media: { id: mediaId, media: { thumbnail: { mediaUrl: media } } },
+              url,
+              title,
+            },
+          } as common_ArchiveItemFull;
+          const updatedItems = [...(entry.items || []), newItem];
+          const updated = { ...entry, items: updatedItems };
+          updateArchiveInformation(archiveId, updated);
+          showMessage('item added successfully', 'success');
+          return updated;
+        }
+        return entry;
+      }),
+    );
+    resetState();
+  };
+
+  const handleUpdateItemInArchive = (archiveId?: number) => {
+    if (!archiveId || selectedItemId === undefined) {
+      return;
+    }
+    setArchive((prev) =>
+      prev.map((entry) => {
+        if (entry.archive?.id === archiveId) {
+          const updatedItems = entry.items?.map((item) => {
+            if (item.id === selectedItemId) {
+              const updatedItem: common_ArchiveItemFull = {
+                ...item,
+                archiveItem: {
+                  ...item.archiveItem,
+                  media: {
+                    id: mediaId || item.archiveItem?.media?.id,
+                    media: {
+                      ...item.archiveItem?.media?.media,
+                      thumbnail: {
+                        ...item.archiveItem?.media?.media?.thumbnail,
+                        mediaUrl: media || item.archiveItem?.media?.media?.thumbnail?.mediaUrl,
+                      },
+                    },
+                  } as common_MediaFull,
+                  url: url || item.archiveItem?.url,
+                  title: title || item.archiveItem?.title,
+                },
+              };
+
+              return updatedItem;
+            }
+            return item;
+          });
+
+          const updated = { ...entry, items: updatedItems as common_ArchiveItemFull[] };
+          updateArchiveInformation(archiveId, updated);
+          showMessage('item updated successfully', 'success');
+          return updated;
+        }
+        return entry;
+      }),
+    );
+    resetState();
+  };
+
+  const handleUpdateArchive = (archiveId?: number) => {
+    if (!archiveId) return;
+    setArchive((prev) =>
+      prev.map((entry) => {
+        if (entry.archive?.id === archiveId) {
+          const updated = {
+            ...entry,
+            archive: {
+              ...entry.archive,
+              archiveBody: {
+                heading: heading[archiveId] ?? entry.archive?.archiveBody?.heading ?? '',
+                description:
+                  description[archiveId] ?? entry.archive?.archiveBody?.description ?? '',
+              },
+            },
+          } as common_ArchiveFull;
+          updateArchiveInformation(archiveId, updated);
+          showMessage('new archive data saved', 'success');
+          return updated;
+        }
+        return entry;
+      }),
+    );
+  };
+
+  const toggleEditMode = (archiveId?: number) => {
+    if (archiveId === undefined) return;
+    const currentHeading =
+      heading[archiveId] ??
+      archive.find((entry) => entry.archive?.id === archiveId)?.archive?.archiveBody?.heading ??
+      '';
+    if (isEditMode[archiveId] && !currentHeading.trim()) {
+      showMessage('archive title cannot be empty', 'error');
+      return;
+    }
+    if (isEditMode[archiveId]) {
+      handleUpdateArchive(archiveId);
+    }
+    setIsEditMode((prev) => ({ ...prev, [archiveId]: !prev[archiveId] }));
   };
 
   return (
     <Grid container spacing={2} marginTop='3%'>
-      {archive.map((archiveEntry) => (
-        <Grid item xs={12} key={archiveEntry.archive?.id}>
+      {archive.map((entry) => (
+        <Grid item xs={12} key={entry.archive?.id}>
           <Grid container justifyContent='space-between' spacing={2}>
             <Grid item>
-              <Box alignItems='center' display='flex' gap='20px'>
+              <Box display='flex' gap='20px'>
                 <TextField
                   label='title'
-                  style={{ textTransform: 'uppercase' }}
                   InputLabelProps={{ shrink: true }}
-                  required={isEditMode[archiveEntry.archive?.id ?? 0]}
-                  name='heading'
+                  required={isEditMode[entry.archive?.id ?? 0]}
                   value={
-                    heading[archiveEntry.archive?.id as number] ??
-                    archiveEntry.archive?.archiveBody?.heading ??
-                    ''
+                    heading[entry.archive?.id ?? 0] ?? entry.archive?.archiveBody?.heading ?? ''
                   }
                   onChange={(e) =>
-                    setHeading({
-                      ...heading,
-                      [archiveEntry.archive?.id as number]: e.target.value,
-                    })
+                    setHeading({ ...heading, [entry.archive?.id ?? 0]: e.target.value })
                   }
-                  inputProps={{ readOnly: !isEditMode[archiveEntry.archive?.id ?? 0] }}
+                  inputProps={{ readOnly: !isEditMode[entry.archive?.id ?? 0] }}
                   size='small'
                 />
-
                 <Button
                   variant='contained'
                   size='medium'
-                  onClick={() => toggleEditMode(archiveEntry.archive?.id)}
+                  onClick={() => toggleEditMode(entry.archive?.id)}
                 >
-                  {isEditMode[archiveEntry.archive?.id ?? 0] ? 'save' : 'edit'}
+                  {isEditMode[entry.archive?.id ?? 0] ? 'save' : 'edit'}
                 </Button>
               </Box>
             </Grid>
             <Grid item>
-              <Button onClick={() => deleteArchiveFromList(archiveEntry.archive?.id)}>
+              <Button onClick={() => deleteArchiveFromList(entry.archive?.id)}>
                 <DeleteIcon color='error' fontSize='medium' />
               </Button>
             </Grid>
 
             <Grid item xs={12}>
-              {isEditMode[archiveEntry.archive?.id ?? 0] ? (
+              {isEditMode[entry.archive?.id ?? 0] ? (
                 <ArchiveTable
-                  data={archiveEntry.items || []}
+                  data={entry.items || []}
                   deleteItemFromArchive={deleteItemFromArchive}
-                  handleSaveNewOrderOfRows={handleSaveNewOrderOfRows}
+                  handleSaveNewOrderOfRows={handleSaveOrder}
+                  onRowClick={(item) => handleRowClick(item, entry.archive?.id)}
                 />
               ) : (
                 <Grid container spacing={2}>
-                  {archiveEntry.items?.slice(0, 4).map((item, index) => (
-                    <Grid item xs={6} md={3}>
-                      <Grid container>
-                        <Grid item key={index} className={styles.item} xs={12}>
-                          <img src={item.archiveItem?.media?.media?.thumbnail?.mediaUrl} />
-                        </Grid>
-                        <Grid item xs={12}>
-                          <TruncateText text={item.archiveItem?.title} length={60} />
-                        </Grid>
+                  {entry.items?.slice(0, 4).map((item, index) => (
+                    <Grid item xs={6} md={3} key={index}>
+                      <Grid item xs={12} className={styles.item}>
+                        <img src={item.archiveItem?.media?.media?.thumbnail?.mediaUrl} />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <TruncateText text={item.archiveItem?.title} length={60} />
                       </Grid>
                     </Grid>
                   ))}
                 </Grid>
               )}
             </Grid>
+
             <Grid item xs={12}>
-              <Grid container spacing={2} justifyContent='space-between'>
+              <Grid container spacing={2}>
                 <Grid item xs={8} sm={10}>
                   <TextField
                     label='description'
-                    style={{ textTransform: 'uppercase' }}
                     InputLabelProps={{ shrink: true }}
                     value={
-                      isEditMode[archiveEntry.archive?.id as number]
-                        ? description[archiveEntry.archive?.id as number] ??
-                          archiveEntry.archive?.archiveBody?.description ??
-                          ''
-                        : (
-                            description[archiveEntry.archive?.id as number] ??
-                            archiveEntry.archive?.archiveBody?.description ??
-                            ''
-                          ).slice(0, 100)
+                      description[entry.archive?.id ?? 0] ??
+                      entry.archive?.archiveBody?.description ??
+                      ''
                     }
                     onChange={(e) =>
-                      setDescription({
-                        ...description,
-                        [archiveEntry.archive?.id as number]: e.target.value,
-                      })
+                      setDescription({ ...description, [entry.archive?.id ?? 0]: e.target.value })
                     }
-                    inputProps={{ readOnly: !isEditMode[archiveEntry.archive?.id ?? 0] }}
+                    inputProps={{ readOnly: !isEditMode[entry.archive?.id ?? 0], maxLength: 255 }}
                     size='small'
                     fullWidth
                     multiline
                   />
                 </Grid>
-                <Grid item xs={4} sm={2}>
-                  {isEditMode[archiveEntry.archive?.id ?? 0] ? (
+                {isEditMode[entry.archive?.id ?? 0] && (
+                  <Grid item xs={4} sm={2}>
                     <MediaSelectorLayout
                       label='add new item'
                       allowMultiple={false}
-                      aspectRatio={['1:1', '3:4', '4:3']}
-                      hideVideos={true}
-                      saveSelectedMedia={mediaPreview(archiveEntry.archive?.id)}
+                      saveSelectedMedia={handleMediaPreview(entry.archive?.id)}
                     />
-                  ) : (
-                    ''
-                  )}
-                </Grid>
+                  </Grid>
+                )}
               </Grid>
             </Grid>
           </Grid>
-
-          <Grid item xs={12} margin='5% 0 5% 0'>
-            <Divider />
-          </Grid>
+          <Divider sx={{ margin: '5% 0' }} />
         </Grid>
       ))}
       <ArchiveModal
-        title={title}
-        setTitle={setTitle}
         id={selectedArchiveId}
-        addNewItem={addNewItemToArchive}
+        title={title}
         url={url}
-        setUrl={setUrl}
         media={media}
         open={isModalOpen}
+        setTitle={setTitle}
+        addNewItem={selectedItemId ? handleUpdateItemInArchive : addNewItemToArchive}
+        setUrl={setUrl}
         close={toggleModal}
+        isEditMode={selectedItemId !== null}
       />
     </Grid>
   );

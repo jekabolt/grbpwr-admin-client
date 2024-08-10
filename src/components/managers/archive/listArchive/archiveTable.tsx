@@ -13,12 +13,14 @@ interface ArchiveTableInterface {
     archiveId: number | undefined,
   ) => void;
   deleteItemFromArchive: (archiveId: number | undefined, itemId: number | undefined) => void;
+  onRowClick: (item: common_ArchiveItemFull) => void; // New prop
 }
 
 export const ArchiveTable: FC<ArchiveTableInterface> = ({
   data,
   handleSaveNewOrderOfRows,
   deleteItemFromArchive,
+  onRowClick,
 }) => {
   const [tableData, setTableData] = useState(data);
 
@@ -83,12 +85,14 @@ export const ArchiveTable: FC<ArchiveTableInterface> = ({
         />
       ),
     },
-    { accessorKey: 'archiveItem.title', header: 'Description', size: 200 },
+    { accessorKey: 'archiveItem.title', header: 'Description' },
     {
       accessorKey: 'archiveItem.url',
       header: 'URL',
       Cell: ({ cell }) => (
-        <a href={cell.getValue() as string} target='_blank' rel='noopener noreferrer'></a>
+        <a href={cell.getValue() as string} target='_blank' rel='noopener noreferrer'>
+          go to link
+        </a>
       ),
     },
     {
@@ -118,11 +122,13 @@ export const ArchiveTable: FC<ArchiveTableInterface> = ({
       enableBottomToolbar={true}
       enableRowOrdering
       muiTableContainerProps={{ style: { height: '400px' } }}
-      muiTableBodyRowProps={{
+      muiTableBodyRowProps={({ row }) => ({
+        onClick: () => onRowClick(row.original),
         sx: {
+          cursor: 'pointer',
           height: '60px',
         },
-      }}
+      })}
       muiRowDragHandleProps={({ table }) => ({
         onDragEnd: () => {
           const { draggingRow, hoveredRow } = table.getState();
