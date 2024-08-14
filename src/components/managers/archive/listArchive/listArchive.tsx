@@ -251,6 +251,11 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                       </Grid>
                       <Grid item xs={12}>
                         <TruncateText text={item.archiveItem?.title} length={60} />
+                        {item.archiveItem?.url && (
+                          <a href={item.archiveItem.url} target='_blank' rel='noopener noreferrer'>
+                            go to link
+                          </a>
+                        )}
                       </Grid>
                     </Grid>
                   ))}
