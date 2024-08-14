@@ -1,5 +1,4 @@
 import CloseIcon from '@mui/icons-material/Close';
-import CropIcon from '@mui/icons-material/Crop';
 import {
   Box,
   Dialog,
@@ -34,12 +33,8 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [videoDimensions, setVideoDimensions] = useState<VideoDimensions>({});
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(true);
   const mediaTypes = ['fullSize', 'compressed', 'thumbnail'];
-
-  const togglePreviewMode = () => {
-    setIsPreviewOpen(!isPreviewOpen);
-  };
 
   const loadVideoDimensions = (url: string | undefined, type: string) => {
     if (!url) return;
@@ -84,7 +79,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
 
   return (
     <>
-      <Dialog open={open} onClose={closePreviewAndModal} scroll='paper' maxWidth='lg'>
+      <Dialog open={open} onClose={closePreviewAndModal} scroll='paper' maxWidth='md'>
         <Box position='relative'>
           <Grid container spacing={2}>
             <DialogContent>
@@ -92,44 +87,19 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                 {clickedMedia &&
                   (isVideo(clickedMedia.thumbnail?.mediaUrl) ? (
                     <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
-                      <video src={clickedMedia.thumbnail?.mediaUrl}></video>
+                      <video src={clickedMedia.thumbnail?.mediaUrl} controls></video>
                     </a>
                   ) : (
-                    <>
-                      {isPreviewOpen ? (
-                        <PreviewMediaForUpload
-                          b64Media={clickedMedia.thumbnail?.mediaUrl || ''}
-                          croppedImage={croppedImage}
-                          isCropperOpen={isCropperOpen}
-                          setCroppedImage={setCroppedImage}
-                          setIsCropperOpen={setIsCropperOpen}
-                          clear={clearDragDropSelector}
-                          handleUploadMedia={handleUploadMedia}
-                        />
-                      ) : (
-                        <Box position='relative'>
-                          <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
-                            <img
-                              src={clickedMedia.thumbnail?.mediaUrl}
-                              alt=''
-                              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                            />
-                          </a>
-                          <IconButton
-                            style={{
-                              position: 'absolute',
-                              left: '0',
-                              backgroundColor: 'rgba(255, 255, 255, 0.7)',
-                              borderRadius: '0%',
-                              boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
-                            }}
-                            onClick={() => togglePreviewMode()}
-                          >
-                            <CropIcon fontSize='large' color='action' />
-                          </IconButton>
-                        </Box>
-                      )}
-                    </>
+                    <PreviewMediaForUpload
+                      b64Media={clickedMedia.thumbnail?.mediaUrl || ''}
+                      croppedImage={croppedImage}
+                      isCropperOpen={isCropperOpen}
+                      isMediaSelector={false}
+                      setCroppedImage={setCroppedImage}
+                      setIsCropperOpen={setIsCropperOpen}
+                      clear={clearDragDropSelector}
+                      handleUploadMedia={handleUploadMedia}
+                    />
                   ))}
               </Grid>
             </DialogContent>

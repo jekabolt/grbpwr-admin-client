@@ -71,6 +71,7 @@ export interface PreviewMediaForUploadInterface {
     b64Media: string;
     croppedImage: string | null;
     isCropperOpen: boolean;
+    isMediaSelector: boolean
     handleUploadMedia: () => Promise<void>;
     setCroppedImage: (img: string | null) => void;
     setIsCropperOpen: Dispatch<SetStateAction<boolean>>;
