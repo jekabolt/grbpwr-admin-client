@@ -1,4 +1,4 @@
-import { Box, Button, Grid } from '@mui/material';
+import { Button, Grid } from '@mui/material';
 import { PreviewMediaForUploadInterface } from 'features/interfaces/mediaSelectorInterfaces';
 import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
 import { isBase64Video } from 'features/utilitty/filterContentType';
@@ -11,6 +11,7 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
   b64Media,
   croppedImage,
   isCropperOpen,
+  isMediaSelector,
   handleUploadMedia,
   setCroppedImage,
   setIsCropperOpen,
@@ -28,34 +29,52 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
   };
 
   return (
-    <Grid container justifyContent='center' padding='2%' alignItems='center' gap={1}>
+    <Grid container padding='2%' spacing={2}>
       {b64Media && (
         <>
           <Grid item xs={12} className={styles.preview_media_to_upload}>
             {isBase64Video(b64Media) ? (
               <video src={b64Media} controls></video>
-            ) : (
+            ) : isMediaSelector ? (
               <img src={croppedImage || b64Media} alt='' />
+            ) : (
+              <a href={b64Media} target='_blank'>
+                <img src={croppedImage || b64Media} alt='' />
+              </a>
             )}
           </Grid>
-          <Grid item xs={12}>
-            {b64Media && (
-              <Box display='grid' gap='10px'>
-                {!isBase64Video(b64Media) && (
-                  <Button variant='contained' size='small' onClick={() => setIsCropperOpen(true)}>
-                    Crop
-                  </Button>
-                )}
-
-                <Button variant='contained' size='small' onClick={uploadCroppedMediaAndCloseModal}>
-                  Upload
-                </Button>
-
-                <Button variant='contained' size='small' onClick={clear}>
-                  clear
-                </Button>
-              </Box>
-            )}
+          <Grid item xs={4}>
+            <Button
+              variant='contained'
+              fullWidth
+              size='small'
+              onClick={() => setIsCropperOpen(true)}
+              disabled={isBase64Video(b64Media)}
+            >
+              crop
+            </Button>
+          </Grid>
+          <Grid item xs={4}>
+            <Button
+              variant='contained'
+              fullWidth
+              size='small'
+              disabled={!croppedImage && !isMediaSelector}
+              onClick={uploadCroppedMediaAndCloseModal}
+            >
+              upload
+            </Button>
+          </Grid>
+          <Grid item xs={4}>
+            <Button
+              variant='contained'
+              fullWidth
+              disabled={!croppedImage && !isMediaSelector}
+              size='small'
+              onClick={clear}
+            >
+              clear
+            </Button>
           </Grid>
         </>
       )}

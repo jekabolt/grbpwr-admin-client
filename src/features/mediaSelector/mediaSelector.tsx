@@ -96,8 +96,9 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
         <PreviewMediaForUpload
           croppedImage={croppedImage}
           isCropperOpen={isCropperOpen}
-          setIsCropperOpen={setIsCropperOpen}
           b64Media={selectedFileUrl || url}
+          isMediaSelector={true}
+          setIsCropperOpen={setIsCropperOpen}
           clear={clearDragDropSelector}
           setCroppedImage={setCroppedImage}
           handleUploadMedia={handleMediaUpload}
