@@ -97,9 +97,10 @@ export const Hero: FC = () => {
     if (mediaLink[0]) {
       setMainContentLink(mediaLink[0].media?.thumbnail?.mediaUrl);
       setMainContentLinkId(mediaLink[0].id);
+    } else {
+      setMainContentLink(undefined);
+      setMainContentLinkId(undefined);
     }
-    setMainContentLink(undefined);
-    setMainContentLinkId(undefined);
   };
 
   const saveFirstAdContentLink = (mediaLink: common_MediaFull[]) => {
