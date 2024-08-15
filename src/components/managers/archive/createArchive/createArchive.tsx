@@ -185,6 +185,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
               allowMultiple={false}
               saveSelectedMedia={mediaPreview}
               aspectRatio={['1:1', '3:4', '4:3']}
+              hideVideos={true}
             />
           </Grid>
           {mediaItem.map((media, id) => (

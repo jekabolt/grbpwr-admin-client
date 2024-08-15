@@ -289,6 +289,8 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                       label='add new item'
                       allowMultiple={false}
                       saveSelectedMedia={handleMediaPreview(entry.archive?.id)}
+                      aspectRatio={['1:1', '3:4', '4:3']}
+                      hideVideos={true}
                     />
                   </Grid>
                 )}
