@@ -72,7 +72,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
         if (hideVideos && isVideo(media.media?.thumbnail?.mediaUrl)) return false;
 
         if (!aspectRatio || aspectRatio.length === 0) {
-          // If aspectRatio is not defined or empty, display all media
           return true;
         }
 
