@@ -70,8 +70,14 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
     const applyFilter = () => {
       const filtered = sortedAndFilteredMedia().filter((media) => {
         if (hideVideos && isVideo(media.media?.thumbnail?.mediaUrl)) return false;
+
+        if (!aspectRatio || aspectRatio.length === 0) {
+          // If aspectRatio is not defined or empty, display all media
+          return true;
+        }
+
         const mediaRatio = mediaAspectRatio(media);
-        return mediaRatio && aspectRatio?.includes(mediaRatio);
+        return mediaRatio && aspectRatio.includes(mediaRatio);
       });
       setFilteredMedia(filtered);
     };
