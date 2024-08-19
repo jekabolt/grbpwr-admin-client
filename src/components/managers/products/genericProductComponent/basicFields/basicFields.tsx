@@ -91,9 +91,22 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
     const { name, value } = e.target;
-    setFieldValue(name, value.toString());
+
+    let formattedValue = value;
+
+    if (name === 'product.productBody.salePercentage.value') {
+      let numericValue = parseFloat(value);
+      if (numericValue > 99) {
+        return;
+      }
+      formattedValue = numericValue.toString();
+    } else if (value.includes('.') && value.split('.')[1].length > 2) {
+      formattedValue = parseFloat(value).toFixed(2);
+    }
+    setFieldValue(name, formattedValue);
+
     if (flag) {
-      const saleValue = value.trim();
+      const saleValue = formattedValue.trim();
       if (saleValue === '') {
         setShowPreorder(true);
       } else {
@@ -333,7 +346,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             label='PRICE'
             name='product.productBody.price.value'
             type='number'
-            inputProps={{ min: 0 }}
+            inputProps={{ min: 0, type: 'number', step: '0.01' }}
             required
             fullWidth
             InputLabelProps={{ shrink: true }}
