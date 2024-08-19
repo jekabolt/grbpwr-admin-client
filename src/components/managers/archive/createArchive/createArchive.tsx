@@ -18,7 +18,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
   const initialArchiveState: common_ArchiveNew = {
     archive: {
       heading: '',
-      description: '',
+      text: '',
     },
     itemsInsert: [],
   };
@@ -40,7 +40,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
     } else if (index !== null) {
       const item = archive.itemsInsert?.[index];
       const media = mediaItem[index];
-      setTitle(item?.title || '');
+      setTitle(item?.name || '');
       setUrl(item?.url || '');
       setMedia(media?.media?.fullSize?.mediaUrl);
       setSelectedItemIndex(index);
@@ -76,7 +76,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
     const newItem: common_ArchiveItemInsert = {
       mediaId: mediaId,
       url: url,
-      title: title,
+      name: title,
     };
 
     if (selectedItemIndex !== null) {
@@ -137,7 +137,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
           ...prevArchive.archive,
           [name]: value,
           heading: name === 'heading' ? value : prevArchive.archive?.heading || '',
-          description: name === 'description' ? value : prevArchive.archive?.description || '',
+          text: name === 'description' ? value : prevArchive.archive?.text || '',
         },
         itemsInsert: prevArchive.itemsInsert,
       };
@@ -202,7 +202,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
                   </IconButton>
                 </Grid>
                 <Grid item xs={12}>
-                  <TruncateText text={archive.itemsInsert?.[id].title} length={60} />
+                  <TruncateText text={archive.itemsInsert?.[id].name} length={60} />
                   {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
                     <a href={archive.itemsInsert[id].url} target='_blank' rel='noopener noreferrer'>
                       go to link
@@ -232,7 +232,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
             <TextField
               type='text'
               name='description'
-              value={archive.archive?.description}
+              value={archive.archive?.text}
               onChange={handleTextFieldChange}
               label='DESCRIPTION'
               InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}

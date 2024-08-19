@@ -41,8 +41,8 @@ export const ListArchive: FC<ListArchiveInterface> = ({
 
   const handleRowClick = (item: common_ArchiveItemFull, archiveId?: number) => {
     setMedia(item.archiveItem?.media?.media?.thumbnail?.mediaUrl ?? '');
-    setTitle(item.archiveItem?.title ?? '');
-    setUrl(item.archiveItem?.url ?? '');
+    setTitle(item.archiveItem?.name || '');
+    setUrl(item.archiveItem?.url || '');
     setSelectedArchiveId(archiveId);
     setSelectedItemId(item.id);
     setIsModalOpen(true);
@@ -53,7 +53,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
       entry.items = entry.items?.map((item) => ({
         ...item,
         media: item.archiveItem?.media?.media?.thumbnail?.mediaUrl,
-        title: item.archiveItem?.title,
+        title: item.archiveItem?.name,
         url: item.archiveItem?.url,
       }));
     });
@@ -99,7 +99,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
             archiveItem: {
               media: { id: mediaId, media: { thumbnail: { mediaUrl: media } } },
               url,
-              title,
+              name,
             },
           } as common_ArchiveItemFull;
           const updatedItems = [...(entry.items || []), newItem];
@@ -138,7 +138,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                     },
                   } as common_MediaFull,
                   url: url || item.archiveItem?.url,
-                  title: title || item.archiveItem?.title,
+                  name: title || item.archiveItem?.name,
                 },
               };
 
@@ -169,8 +169,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
               ...entry.archive,
               archiveBody: {
                 heading: heading[archiveId] ?? entry.archive?.archiveBody?.heading ?? '',
-                description:
-                  description[archiveId] ?? entry.archive?.archiveBody?.description ?? '',
+                text: description[archiveId] ?? entry.archive?.archiveBody?.text ?? '',
               },
             },
           } as common_ArchiveFull;
@@ -250,7 +249,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                         <img src={item.archiveItem?.media?.media?.thumbnail?.mediaUrl} />
                       </Grid>
                       <Grid item xs={12}>
-                        <TruncateText text={item.archiveItem?.title} length={60} />
+                        <TruncateText text={item.archiveItem?.name} length={60} />
                         {item.archiveItem?.url && (
                           <a href={item.archiveItem.url} target='_blank' rel='noopener noreferrer'>
                             go to link
@@ -270,9 +269,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                     label='description'
                     InputLabelProps={{ shrink: true }}
                     value={
-                      description[entry.archive?.id ?? 0] ??
-                      entry.archive?.archiveBody?.description ??
-                      ''
+                      description[entry.archive?.id ?? 0] ?? entry.archive?.archiveBody?.text ?? ''
                     }
                     onChange={(e) =>
                       setDescription({ ...description, [entry.archive?.id ?? 0]: e.target.value })

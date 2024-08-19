@@ -90,7 +90,7 @@ export const HeroProductTable: FC<
         header: 'Id',
       },
       {
-        accessorKey: 'productInsert.thumbnail',
+        accessorKey: 'productDisplay.thumbnail.media.thumbnail.mediaUrl',
         header: 'Thumbnail',
         Cell: ({ cell }) => (
           <img
@@ -101,11 +101,11 @@ export const HeroProductTable: FC<
         ),
       },
       {
-        accessorKey: 'productInsert.name',
+        accessorKey: 'productDisplay.productBody.name',
         header: 'Name',
       },
       {
-        accessorKey: 'productInsert.hidden',
+        accessorKey: 'productDisplay.productBody.hidden',
         header: 'isHidden',
 
         Cell: ({ cell }) => {
@@ -120,15 +120,15 @@ export const HeroProductTable: FC<
         },
       },
       {
-        accessorKey: 'productInsert.price.value',
+        accessorKey: 'productDisplay.productBody.price.value',
         header: 'Price',
       },
       {
-        accessorKey: 'productInsert.salePercentage.value',
+        accessorKey: 'productDisplay.productBody.salePercentage.value',
         header: 'Sale percentage',
       },
       {
-        accessorKey: 'productInsert.categoryId',
+        accessorKey: 'productDisplay.productBody.categoryId',
         header: 'Category',
         enableResizing: true,
         Cell: ({ cell }) => {

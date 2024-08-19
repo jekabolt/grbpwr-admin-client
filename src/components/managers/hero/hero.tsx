@@ -47,42 +47,65 @@ export const Hero: FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-
   const handleOpenProductSelection = () => setIsModalOpen(true);
   const handleCloseModal = () => setIsModalOpen(false);
 
   useEffect(() => {
     const fetchHero = async () => {
       const response = await getHero({});
-      setMainContentLink(response.hero?.main?.media?.media?.thumbnail?.mediaUrl);
-      setMainContentLinkId(response.hero?.main?.media?.id);
-      setMainExploreLink(response.hero?.main?.exploreLink);
-      setMainExploreText(response.hero?.main?.exploreText);
-
       if (response.hero?.ads) {
-        if (response.hero.ads[0]) {
-          setFirstAdContentLink(response.hero.ads[0].media?.media?.thumbnail?.mediaUrl);
-          setFirstAdContentLinkId(response.hero.ads[0].media?.id);
-          setFirstAdExploreLink(response.hero?.ads[0].exploreLink);
-          setFirstAdExploreText(response.hero?.ads[0].exploreText);
+        const mainAd = response.hero.ads.find((ad) => ad.isMain);
+        const otherAds = response.hero.ads.filter((ad) => !ad.isMain);
+
+        console.log('Main Ad:', mainAd);
+        console.log('Other Ads:', otherAds);
+
+        // Присваиваем объявления соответствующим позициям
+        if (mainAd) {
+          setMainContentLink(mainAd.media?.media?.thumbnail?.mediaUrl);
+          setMainContentLinkId(mainAd.media?.id);
+          setMainExploreLink(mainAd.exploreLink);
+          setMainExploreText(mainAd.exploreText);
+        } else {
+          setMainContentLink(undefined);
+          setMainContentLinkId(undefined);
+          setMainExploreLink(undefined);
+          setMainExploreText(undefined);
         }
-        if (response.hero.ads[1]) {
-          setSecondAdContentLink(response.hero.ads[1].media?.media?.thumbnail?.mediaUrl);
-          setSecondAdContentLinkId(response.hero.ads[1].media?.id);
-          setSecondAdExploreLink(response.hero?.ads[1].exploreLink);
-          setSecondAdExploreText(response.hero?.ads[1].exploreText);
+
+        if (otherAds[0]) {
+          setFirstAdContentLink(otherAds[0].media?.media?.thumbnail?.mediaUrl);
+          setFirstAdContentLinkId(otherAds[0].media?.id);
+          setFirstAdExploreLink(otherAds[0].exploreLink);
+          setFirstAdExploreText(otherAds[0].exploreText);
+        } else {
+          setFirstAdContentLink(undefined);
+          setFirstAdContentLinkId(undefined);
+          setFirstAdExploreLink(undefined);
+          setFirstAdExploreText(undefined);
+        }
+
+        if (otherAds[1]) {
+          setSecondAdContentLink(otherAds[1].media?.media?.thumbnail?.mediaUrl);
+          setSecondAdContentLinkId(otherAds[1].media?.id);
+          setSecondAdExploreLink(otherAds[1].exploreLink);
+          setSecondAdExploreText(otherAds[1].exploreText);
+        } else {
+          setSecondAdContentLink(undefined);
+          setSecondAdContentLinkId(undefined);
+          setSecondAdExploreLink(undefined);
+          setSecondAdExploreText(undefined);
         }
       }
 
       setProducts(response.hero?.productsFeatured ? response.hero?.productsFeatured : []);
     };
+
     fetchHero();
   }, []);
 
   useEffect(() => {
-    // Function to validate all links
     const validateAllLinks = () => {
-      // Assuming you have state setters like setMainExploreLinkError for validation states
       setMainExploreLinkError(mainContentLink ? !isValidUrl(mainExploreLink) : false);
       setFirstAdExploreLinkError(firstAdContentLink ? !isValidUrl(firstAdExploreLink) : false);
       setSecondAdExploreLinkError(secondAdContentLink ? !isValidUrl(secondAdExploreLink) : false);
@@ -127,15 +150,26 @@ export const Hero: FC = () => {
     setProducts(newProductsOrder);
   };
 
+  const removeMain = () => {
+    setMainContentLink(undefined);
+    setMainContentLinkId(undefined);
+    setMainExploreLink(undefined);
+    setMainExploreText(undefined);
+  };
+
   const removeFirstAd = () => {
-    setFirstAdContentLink(secondAdContentLink);
-    setFirstAdContentLinkId(secondAdContentLinkId);
-    setFirstAdExploreLink(secondAdExploreLink);
-    setFirstAdExploreText(secondAdExploreText);
-    setSecondAdContentLink(undefined);
-    setSecondAdContentLinkId(undefined);
-    setSecondAdExploreLink(undefined);
-    setSecondAdExploreText(undefined);
+    if (secondAdContentLink) {
+      setFirstAdContentLink(secondAdContentLink);
+      setFirstAdContentLinkId(secondAdContentLinkId);
+      setFirstAdExploreLink(secondAdExploreLink);
+      setFirstAdExploreText(secondAdExploreText);
+      removeSecondAd();
+    } else {
+      setFirstAdContentLink(undefined);
+      setFirstAdContentLinkId(undefined);
+      setFirstAdExploreLink(undefined);
+      setFirstAdExploreText(undefined);
+    }
   };
 
   const removeSecondAd = () => {
@@ -147,29 +181,37 @@ export const Hero: FC = () => {
 
   const updateHero = async () => {
     const ads: common_HeroItemInsert[] = [];
-    if (firstAdContentLink !== undefined) {
+
+    if (mainContentLink) {
+      ads.push({
+        mediaId: mainContentLinkId,
+        exploreLink: mainExploreLink,
+        exploreText: mainExploreText,
+        isMain: true,
+      });
+    }
+    if (firstAdContentLink) {
       ads.push({
         mediaId: firstAdContentLinkId,
         exploreLink: firstAdExploreLink,
         exploreText: firstAdExploreText,
+        isMain: false,
       });
     }
-    if (secondAdContentLink !== undefined) {
+    if (secondAdContentLink) {
       ads.push({
         mediaId: secondAdContentLinkId,
         exploreLink: secondAdExploreLink,
         exploreText: secondAdExploreText,
+        isMain: false,
       });
     }
+
     const response = await addHero({
-      main: {
-        mediaId: mainContentLinkId,
-        exploreLink: mainExploreLink,
-        exploreText: mainExploreText,
-      },
       ads: ads.length > 0 ? ads : undefined,
       productIds: products.map((x) => x.id!),
     });
+
     if (response) {
       setSaveSuccess(true);
     }
@@ -206,12 +248,20 @@ export const Hero: FC = () => {
         <Grid item xs={12} md={8}>
           <Grid container spacing={2} justifyContent='center'>
             <Grid item xs={12}>
-              <Typography variant='h4'>Main</Typography>
+              <Box display='flex' gap='15px' alignItems='center'>
+                <Typography variant='h4'>Main</Typography>
+                {mainContentLink && (
+                  <IconButton onClick={removeMain}>
+                    <DeleteIcon color='secondary' />
+                  </IconButton>
+                )}
+              </Box>
               <SingleMediaViewAndSelect
                 link={mainContentLink}
                 aspectRatio={['4:5', '5:4', '1:1', '16:9', '9:16']}
                 saveSelectedMedia={saveMainContentLink}
               />
+              <p>{mainContentLink}</p>
             </Grid>
             <Grid item xs={12}>
               <TextField

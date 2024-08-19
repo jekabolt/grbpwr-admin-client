@@ -9,14 +9,14 @@ export const convertArchiveFullToNew = (
         archive: archiveFull.archive
             ? {
                 heading: archiveFull.archive.archiveBody?.heading,
-                description: archiveFull.archive.archiveBody?.description,
+                text: archiveFull.archive.archiveBody?.text,
             }
             : undefined,
         itemsInsert: [
             ...(archiveFull.items?.map((item) => ({
                 mediaId: item.archiveItem?.media?.id,
                 url: item.archiveItem?.url,
-                title: item.archiveItem?.title,
+                name: item.archiveItem?.name,
             })) || []),
             ...(newItem ? [newItem] : []),
         ].filter((item) => item !== undefined) as common_ArchiveItemInsert[],
