@@ -14,6 +14,7 @@ import { getDictionary } from 'api/admin';
 import { UpdateSettingsRequest, common_Dictionary } from 'api/proto-http/admin';
 import { updateSettings } from 'api/settings';
 import { Layout } from 'components/login/layout';
+import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, FieldProps, Formik } from 'formik';
 import debounce from 'lodash/debounce';
 import { FC, useCallback, useEffect, useState } from 'react';
@@ -141,14 +142,19 @@ export const Settings: FC = () => {
                       label='Price'
                       type='number'
                       size='small'
-                      inputProps={{ step: '0.01', min: 0 }}
+                      inputProps={{ min: 0, step: '.01' }}
+                      onKeyDown={restrictNumericInput}
                       onChange={(e: any) => {
-                        const newValue = parseFloat(e.target.value).toFixed(2); // Convert to string with 2 decimal places
-                        setFieldValue(`shipmentCarriers[${index}].price.value`, newValue);
+                        const rawValue = e.target.value;
+                        setFieldValue(`shipmentCarriers[${index}].price.value`, rawValue);
+                      }}
+                      onBlur={(e: any) => {
+                        const formattedValue = parseFloat(e.target.value || '0').toFixed(2);
+                        setFieldValue(`shipmentCarriers[${index}].price.value`, formattedValue);
                         debouncedHandleFieldChange({
                           ...values,
                           shipmentCarriers: values.shipmentCarriers?.map((c, idx) =>
-                            idx === index ? { ...c, price: { value: newValue } } : c,
+                            idx === index ? { ...c, price: { value: formattedValue } } : c,
                           ),
                         });
                       }}
@@ -191,7 +197,7 @@ export const Settings: FC = () => {
                   InputLabelProps={{ shrink: true }}
                   size='small'
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    const newValue = parseInt(e.target.value, 10); // Convert to number
+                    const newValue = parseInt(e.target.value, 10);
                     setFieldValue('maxOrderItems', newValue);
                     debouncedHandleFieldChange({ ...values, maxOrderItems: newValue });
                   }}
