@@ -100,8 +100,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         return;
       }
       formattedValue = numericValue.toString();
-    } else if (value.includes('.') && value.split('.')[1].length > 2) {
-      formattedValue = parseFloat(value).toFixed(2);
     }
     setFieldValue(name, formattedValue);
 
@@ -346,12 +344,16 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             label='PRICE'
             name='product.productBody.price.value'
             type='number'
-            inputProps={{ min: 0, type: 'number', step: '0.01' }}
+            inputProps={{ min: 0, step: '0.01' }}
             required
             fullWidth
             InputLabelProps={{ shrink: true }}
             onChange={handlePriceChange}
             onKeyDown={restrictNumericInput}
+            onBlur={(e: any) => {
+              const formattedValue = parseFloat(e.target.value).toFixed(2);
+              setFieldValue('product.productBody.price.value', formattedValue);
+            }}
             disabled={disableFields}
             error={
               !!(

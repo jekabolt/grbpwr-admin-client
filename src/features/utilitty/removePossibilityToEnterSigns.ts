@@ -1,10 +1,12 @@
-export const restrictNumericInput = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    const invalidChars = ['-', '+', 'e', 'E', ',', '/'];
-    const { key, target } = event;
+let selectedDot = false;
+
+export const restrictNumericInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const { key, target } = e;
+    const inputElement = target as HTMLInputElement;
+    const inputValue = inputElement.value;
 
     const allowedControlKeys = [
         'Backspace',
-        'Delete',
         'ArrowUp',
         'ArrowDown',
         'ArrowLeft',
@@ -12,10 +14,16 @@ export const restrictNumericInput = (event: React.KeyboardEvent<HTMLInputElement
     ];
 
     if (
-        invalidChars.includes(key) ||
-        (key === '.' && (target as HTMLInputElement).value.includes('.')) ||
-        !allowedControlKeys.includes(key) && (isNaN(Number(key)) && key !== '.')
+        key === 'e' ||
+        key === 'E' ||
+        (isNaN(Number(key)) && key !== '.' && !allowedControlKeys.includes(key))
     ) {
-        event.preventDefault();
+        e.preventDefault();
     }
+
+    if (key === '.' && (inputValue.includes('.') || selectedDot)) {
+        e.preventDefault();
+    }
+
+    selectedDot = key === '.';
 };
