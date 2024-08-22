@@ -37,7 +37,6 @@ export const OrderDetails = () => {
   const [dictionary, setDictionary] = useState<common_Dictionary>();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(5);
-
   const [showBilling, setShowBilling] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState('');
   const [orderStatus, setOrderStatus] = useState<string | undefined>('');
@@ -113,17 +112,34 @@ export const OrderDetails = () => {
     {
       field: 'sku',
       headerName: 'SKU',
-      width: isPrinting ? 250 : 300,
+      width: isPrinting ? 150 : 300,
+      renderCell: (params: any) => (
+        <div
+          style={{
+            whiteSpace: isPrinting ? 'normal' : 'nowrap',
+            wordWrap: isPrinting ? 'break-word' : 'normal',
+            overflow: isPrinting ? 'visible' : 'auto',
+            display: isPrinting ? 'block' : 'flex',
+            alignItems: 'center',
+            lineHeight: isPrinting ? '1.5' : 'normal',
+            height: '100%',
+            width: '100%',
+            margin: isPrinting ? '30% auto' : '0',
+          }}
+        >
+          {params.value}
+        </div>
+      ),
     },
     {
       field: 'productName',
-      headerName: isPrinting ? 'name' : 'PRODUCT NAME',
-      width: isPrinting ? 250 : 200,
+      headerName: isPrinting ? 'NAME' : 'PRODUCT NAME',
+      width: isPrinting ? 100 : 200,
     },
     {
       field: 'quantity',
       headerName: 'QUANTITY',
-      width: isPrinting ? 250 : 200,
+      width: isPrinting ? 100 : 200,
       valueGetter: (_params: any, row: any) => {
         return row.orderItem.quantity;
       },
@@ -142,9 +158,19 @@ export const OrderDetails = () => {
     {
       field: 'productPrice',
       headerName: 'PRICE',
-      width: isPrinting ? 250 : 200,
+      width: isPrinting ? 100 : 200,
       valueGetter: (params: any, row: any) =>
         `${params * row.orderItem.quantity} ${dictionary?.baseCurrency}`,
+    },
+    {
+      field: 'productSalePercentage',
+      headerName: 'SALE',
+      width: isPrinting ? 100 : 200,
+    },
+    {
+      field: 'productPriceWithSale',
+      headerName: isPrinting ? 'PWS' : 'PRICE WITH SALE',
+      width: isPrinting ? 100 : 200,
     },
     {
       field: 'productLink',
