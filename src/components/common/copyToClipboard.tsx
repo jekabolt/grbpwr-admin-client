@@ -18,7 +18,7 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, displayText })
       .writeText(text)
       .then(() => {
         setCopied(true);
-        setTimeout(() => setCopied(false), 1500); // Reset copied status after 1.5 seconds
+        setTimeout(() => setCopied(false), 1500);
       })
       .catch((err) => console.error('Failed to copy: ', err));
   };
