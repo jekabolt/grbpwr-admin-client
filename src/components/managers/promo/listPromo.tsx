@@ -12,8 +12,8 @@ interface ListPromosInterface {
 }
 
 export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMessage }) => {
-  const transformPromoForDataGrid = promos.map((promo) => ({
-    id: promo.id,
+  const transformPromoForDataGrid = promos.map((promo, index) => ({
+    id: index,
     code: promo.promoCodeInsert?.code,
     freeShipping: promo.promoCodeInsert?.freeShipping ? 'free' : 'paid',
     discount: promo.promoCodeInsert?.discount ? `${promo.promoCodeInsert.discount.value}%` : '',
@@ -40,7 +40,6 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMe
   }, []);
 
   const columns = [
-    { field: 'id', headerName: 'ID', width: 30 },
     { field: 'code', headerName: 'CODE', width: 120 },
     { field: 'expiration', headerName: 'EXPIRATION', width: 120 },
     { field: 'discount', headerName: 'DISCOUNT', flex: 1 },
@@ -66,6 +65,7 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMe
           rowSelection={false}
           rows={transformPromoForDataGrid}
           columns={columns}
+          getRowId={(row) => row.id}
           pageSizeOptions={[10, 25, 100]}
           initialState={{
             pagination: {
