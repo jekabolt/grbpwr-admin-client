@@ -360,6 +360,11 @@ export const OrderDetails = () => {
                 {shipping.state && <div>STATE: {shipping.state}</div>}
                 {shipping.country && <div>COUNTRY: {shipping.country}</div>}
                 {shipping.postalCode && <div>POSTAL CODE: {shipping.postalCode}</div>}
+                {orderDetails.shipment?.cost && (
+                  <div>
+                    COST: {orderDetails.shipment?.cost.value}&nbsp;{dictionary?.baseCurrency}
+                  </div>
+                )}
               </div>
             )}
           </Grid>
