@@ -81,7 +81,7 @@ export const AllProducts: FC = () => {
   };
 
   return (
-    <Grid container spacing={1} paddingBottom='5%' overflow='hidden' justifyContent='center'>
+    <Grid container spacing={2} overflow='hidden' justifyContent='center'>
       <Grid item xs={12}>
         <Filter filter={filter} onFilterChange={handleFilterChange} />
       </Grid>
