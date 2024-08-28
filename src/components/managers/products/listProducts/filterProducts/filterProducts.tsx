@@ -42,7 +42,12 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
 
     if (fieldName.includes('filterConditions')) {
       const keys = fieldName.split('.');
-      if (keys[1] === 'sizesIds' && value.includes('')) {
+      if (keys[1] === 'categoryIds') {
+        updatedFilter.filterConditions = {
+          ...filter.filterConditions,
+          categoryIds: Array.isArray(value) ? value : [value],
+        } as common_FilterConditions;
+      } else if (keys[1] === 'sizesIds' && value.includes('')) {
         updatedFilter.filterConditions = {
           ...filter.filterConditions,
           sizesIds: [],
@@ -116,17 +121,22 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     </Field>
                   </Grid>
                   <Grid item xs={12} md={3}>
-                    <Field name='filterConditions.categoryId'>
+                    <Field name='filterConditions.categoryIds'>
                       {({ field }: FieldProps) => (
                         <FormControl fullWidth>
                           <InputLabel>CATEGORY</InputLabel>
                           <Select
                             {...field}
                             onChange={(e) =>
-                              handleFieldChange(setFieldValue, field.name, e.target.value)
+                              handleFieldChange(
+                                setFieldValue,
+                                field.name,
+                                e.target.value.includes('') ? [] : (e.target.value as number[]),
+                              )
                             }
-                            value={field.value}
+                            value={field.value || []}
                             label='CATEGORY'
+                            multiple
                           >
                             <MenuItem value=''>ANY</MenuItem>
                             {dictionary?.categories?.map((s) => (
