@@ -1,5 +1,5 @@
 export const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    const allowedKeys = /^[a-zA-Z0-9._-]$/;
+    const allowedKeys = /^[a-zA-Z0-9._\-\s]$/;
     const specialSymbols = /^[._-]$/;
     const inputElement = e.currentTarget;
     const inputValue = inputElement.value;
@@ -10,7 +10,6 @@ export const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
 
     const controlKeys = [
         'Backspace',
-        'Tab',
         'Enter',
         'ArrowLeft',
         'ArrowUp',

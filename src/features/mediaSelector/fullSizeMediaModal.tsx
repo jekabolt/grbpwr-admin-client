@@ -107,8 +107,8 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
               <Grid container spacing={2}>
                 {mediaTypes.map((type) => (
                   <Grid item xs={12} key={type}>
-                    <Grid container alignItems='center'>
-                      <Grid item xs={4} sm={1}>
+                    <Grid container>
+                      <Grid item>
                         <Typography variant='body1'>
                           {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
                             <>{`${type.charAt(0).toUpperCase() + type.slice(1)}`}</>
@@ -117,7 +117,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                           )}
                         </Typography>
                       </Grid>
-                      <Grid item xs={8} sm={4}>
+                      <Grid item>
                         <CopyToClipboard
                           text={clickedMedia?.[type as MediaKey]?.mediaUrl || ''}
                           displayText={
@@ -127,7 +127,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                           }
                         />
                       </Grid>
-                      <Grid item xs={12} sm={3}>
+                      <Grid item>
                         <Typography
                           key={type}
                         >{` ${videoDimensions[type] || `${clickedMedia?.[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia?.[type as MediaKey]?.height || 'N/A'}px`}`}</Typography>

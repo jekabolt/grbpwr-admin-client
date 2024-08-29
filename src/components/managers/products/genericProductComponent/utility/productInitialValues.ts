@@ -55,5 +55,3 @@ export const initialProductState: common_ProductNew = {
     mediaIds: [],
     tags: [],
 };
-
-

@@ -146,33 +146,25 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       <Grid container spacing={2}>
         {!isAddingProduct && (
           <>
-            <Grid item xs={12}>
-              <TextField
-                label='PRODUCT ID'
-                InputLabelProps={{ shrink: true }}
-                InputProps={{ readOnly: true }}
-                value={product?.product?.id}
-                fullWidth
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label='CREATED'
-                InputLabelProps={{ shrink: true }}
-                InputProps={{ readOnly: true }}
-                value={product?.product?.createdAt || ''}
-                fullWidth
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label='UPDATED'
-                InputLabelProps={{ shrink: true }}
-                InputProps={{ readOnly: true }}
-                value={product?.product?.updatedAt || ''}
-                fullWidth
-              />
-            </Grid>
+            {['id', 'createdAt', 'updatedAt'].map((field) => (
+              <Grid item xs={12} key={field}>
+                <TextField
+                  label={
+                    field === 'id'
+                      ? 'product id'.toUpperCase()
+                      : field === 'createdAt'
+                        ? 'created at'.toUpperCase()
+                        : field === 'updatedAt'
+                          ? 'updated at'.toUpperCase()
+                          : ''
+                  }
+                  value={(product?.product as any)?.[field] || ''}
+                  InputLabelProps={{ shrink: true }}
+                  InputProps={{ readOnly: true }}
+                  fullWidth
+                />
+              </Grid>
+            ))}
           </>
         )}
 
@@ -180,7 +172,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Field
             as={TextField}
             variant='outlined'
-            label='NAME'
+            label={'name'.toUpperCase()}
             name='product.productBody.name'
             required
             fullWidth
@@ -195,7 +187,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Field
             as={TextField}
             variant='outlined'
-            label='BRAND'
+            label={'brand'.toUpperCase()}
             name='product.productBody.brand'
             required
             fullWidth
@@ -215,11 +207,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               !!(errors.product && touched.product && !values.product?.productBody?.targetGender)
             }
           >
-            <InputLabel shrink>GENDER</InputLabel>
+            <InputLabel shrink>{'gender'.toUpperCase()}</InputLabel>
             <Select
               value={values.product?.productBody?.targetGender || ''}
               onChange={(e) => handleFieldChange(e, 'targetGender')}
-              label='GENDER'
+              label={'gender'.toUpperCase()}
               displayEmpty
               name='product.productBody.targetGender'
               disabled={disableFields}
@@ -245,12 +237,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               !!(errors.product && touched.product && !values.product?.productBody?.categoryId)
             }
           >
-            <InputLabel shrink>CATEGORY</InputLabel>
+            <InputLabel shrink>{'category'.toUpperCase()}</InputLabel>
             <Select
               name='product.productBody.categoryId'
               onChange={(e) => handleFieldChange(e, 'categoryId')}
               value={values.product?.productBody?.categoryId || ''}
-              label='CATEGORY'
+              label={'category'.toUpperCase()}
               displayEmpty
               disabled={disableFields}
             >
@@ -273,11 +265,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             required
             error={!!(errors.product && touched.product && !values.product?.productBody?.color)}
           >
-            <InputLabel shrink>COLOR</InputLabel>
+            <InputLabel shrink>{'color'.toUpperCase()}</InputLabel>
             <Select
               value={values.product?.productBody?.color || ''}
               onChange={(e) => handleFieldChange(e, 'color')}
-              label='COLOR'
+              label={'color'.toUpperCase()}
               displayEmpty
               name='product.productBody.color'
               disabled={disableFields}
@@ -315,12 +307,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               !!(errors.product && touched.product && !values.product?.productBody?.countryOfOrigin)
             }
           >
-            <InputLabel shrink>COUNTRY</InputLabel>
+            <InputLabel shrink>{'color'.toUpperCase()}</InputLabel>
             <Select
               name='product.productBody.countryOfOrigin'
               value={values.product?.productBody?.countryOfOrigin || ''}
               onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
-              label='COUNTRY'
+              label={'color'.toUpperCase()}
               displayEmpty
               disabled={disableFields}
             >
@@ -341,7 +333,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Field
             as={TextField}
             variant='outlined'
-            label='PRICE'
+            label={'price'.toUpperCase()}
             name='product.productBody.price.value'
             type='number'
             inputProps={{ min: 0, step: '0.01' }}
@@ -370,7 +362,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Grid item xs={12}>
             <Field
               as={TextField}
-              label='SALE PERCENTAGE'
+              label={'sale percentage'.toUpperCase()}
               name='product.productBody.salePercentage.value'
               onChange={(e: any) => handlePriceChange(e, true)}
               type='number'
@@ -386,7 +378,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         {showPreorder && (
           <Grid item xs={12}>
             <DatePicker
-              label='PREORDER'
+              label={'preorder'.toUpperCase()}
               value={parseDate(values.product?.productBody?.preorder)}
               onChange={handlePreorderChange}
               minDate={new Date()}
@@ -404,7 +396,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         <Grid item xs={12}>
           <Field
             as={TextField}
-            label='DESCRIPTION'
+            label={'description'.toUpperCase()}
             name='product.productBody.description'
             InputLabelProps={{ shrink: true }}
             fullWidth
@@ -421,7 +413,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         <Grid item xs={12}>
           <Field
             as={TextField}
-            label='SKU'
+            label={'sku'.toUpperCase()}
             name='product.productBody.sku'
             InputProps={{ readOnly: true }}
             InputLabelProps={{ shrink: true }}
@@ -433,9 +425,14 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         <Grid item>
           <FormControlLabel
             control={
-              <Field as={Checkbox} name='product.productBody.hidden' disabled={disableFields} />
+              <Field
+                as={Checkbox}
+                name='product.productBody.hidden'
+                disabled={disableFields}
+                checked={values.product?.productBody?.hidden || false}
+              />
             }
-            label='HIDDEN'
+            label={'hidden'.toUpperCase()}
           />
         </Grid>
       </Grid>

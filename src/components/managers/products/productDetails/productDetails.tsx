@@ -12,7 +12,7 @@ import { FC, useEffect, useState } from 'react';
 import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
 import { productInitialValues } from '../genericProductComponent/utility/productInitialValues';
 
-export type ProductIdProps = MakeGenerics<{
+type ProductIdProps = MakeGenerics<{
   Params: {
     id: string;
   };
