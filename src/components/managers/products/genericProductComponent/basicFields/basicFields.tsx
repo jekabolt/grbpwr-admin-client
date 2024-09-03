@@ -21,6 +21,7 @@ import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnter
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
+import { v4 as uuidv4 } from 'uuid';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 import { handleKeyDown } from '../utility/brandNameRegExp';
 
@@ -40,6 +41,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   product,
   isEditMode,
   isAddingProduct,
+  isCopyMode,
 }) => {
   const { values, setFieldValue, submitCount, errors, touched } =
     useFormikContext<common_ProductNew>();
@@ -47,6 +49,27 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
   const disableFields = isAddingProduct ? false : !isEditMode;
+
+  useEffect(() => {
+    if (
+      isCopyMode &&
+      values.product?.productBody?.sku === product?.product?.productDisplay?.productBody?.sku
+    ) {
+      console.log(values.product?.productBody?.sku);
+      console.log(product?.product?.productDisplay?.productBody?.sku);
+      console.log(isCopyMode);
+      const newUuid = uuidv4();
+      const newSKU = generateSKU(
+        values.product?.productBody?.brand,
+        values.product?.productBody?.targetGender,
+        findInDictionary(dictionary, values.product?.productBody?.categoryId, 'category'),
+        values.product?.productBody?.color,
+        values.product?.productBody?.countryOfOrigin,
+        newUuid.slice(-4),
+      );
+      setFieldValue('product.productBody.sku', newSKU, false);
+    }
+  }, [isCopyMode, values]);
 
   const handleFieldChange = useCallback(
     (

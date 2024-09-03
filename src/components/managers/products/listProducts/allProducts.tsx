@@ -22,6 +22,10 @@ export const AllProducts: FC = () => {
     navigate({ to: `${ROUTES.singleProduct}/${id}` });
   };
 
+  const handleCopyProductClick = (id: number | undefined) => {
+    navigate({ to: `${ROUTES.copyProduct}/${id}` });
+  };
+
   const handleDeleteClick = async (
     e: MouseEvent<HTMLButtonElement>,
     productId: number | undefined,
@@ -90,6 +94,7 @@ export const AllProducts: FC = () => {
           products={products}
           productClick={handleProductClick}
           deleteProduct={handleDeleteClick}
+          copy={handleCopyProductClick}
           confirmDeleteProductId={confirmDelete}
           deletingProductId={deletingProductId}
           showHidden={filter.showHidden}

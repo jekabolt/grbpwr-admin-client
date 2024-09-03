@@ -10,6 +10,7 @@ export interface GenericProductFormInterface {
     initialProductState: common_ProductNew;
     isEditMode?: boolean;
     isAddingProduct?: boolean;
+    isCopyMode: boolean;
     dictionary?: common_Dictionary;
 
     onSubmit: (
@@ -24,6 +25,7 @@ export interface BasicProductFieldsInterface {
     product?: common_ProductFull;
     isEditMode?: boolean;
     isAddingProduct: boolean;
+    isCopyMode: boolean;
 }
 
 export interface MediaViewInterface {

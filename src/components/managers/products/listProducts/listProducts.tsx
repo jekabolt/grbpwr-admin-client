@@ -1,5 +1,6 @@
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { Grid, IconButton, Typography } from '@mui/material';
 import { common_Product } from 'api/proto-http/admin';
 import { TruncateText } from 'components/common/truncateText';
@@ -10,6 +11,7 @@ import styles from 'styles/paged.scss';
 interface ProductProps {
   products: common_Product[] | undefined;
   productClick: (productId: number | undefined) => void;
+  copy: (productId: number | undefined) => void;
   deleteProduct: (e: React.MouseEvent<HTMLButtonElement>, productId: number | undefined) => void;
   confirmDeleteProductId: number | undefined;
   deletingProductId: number | undefined;
@@ -19,6 +21,7 @@ interface ProductProps {
 export const ListProducts: FC<ProductProps> = ({
   products,
   productClick,
+  copy,
   deleteProduct,
   confirmDeleteProductId,
   deletingProductId,
@@ -64,6 +67,15 @@ export const ListProducts: FC<ProductProps> = ({
                   {confirmDeleteProductId === product.id ? <CheckIcon /> : <CloseIcon />}
                 </IconButton>
               )}
+              <IconButton
+                onClick={(e) => {
+                  e.stopPropagation();
+                  copy(product.id);
+                }}
+                className={styles.copy_btn}
+              >
+                <ContentCopyIcon />
+              </IconButton>
             </Grid>
             <Grid item xs={12}>
               <TruncateText
