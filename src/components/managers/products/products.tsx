@@ -16,9 +16,9 @@ export const Product: FC = () => {
   return (
     <Layout>
       <Grid container spacing={2} justifyContent='center'>
-        <Grid item>
-          <Button onClick={navigateAddProduct} size='large' variant='contained'>
-            ADD PRODUCT
+        <Grid item position='fixed' right={10} bottom={10}>
+          <Button onClick={navigateAddProduct} sx={{ backgroundColor: '#000', color: '#fff' }}>
+            add
           </Button>
         </Grid>
         <Grid item xs={12}>

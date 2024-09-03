@@ -42,7 +42,12 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
 
     if (fieldName.includes('filterConditions')) {
       const keys = fieldName.split('.');
-      if (keys[1] === 'sizesIds' && value.includes('')) {
+      if (keys[1] === 'categoryIds') {
+        updatedFilter.filterConditions = {
+          ...filter.filterConditions,
+          categoryIds: Array.isArray(value) ? value : [value],
+        } as common_FilterConditions;
+      } else if (keys[1] === 'sizesIds' && value.includes('')) {
         updatedFilter.filterConditions = {
           ...filter.filterConditions,
           sizesIds: [],
@@ -61,261 +66,274 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
   };
 
   return (
-    <Formik initialValues={filter} onSubmit={() => {}}>
-      {({ setFieldValue }) => (
-        <Form>
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={3}>
-                  <Field name='sortFactors'>
-                    {({ field }: FieldProps) => (
-                      <FormControl fullWidth>
-                        <InputLabel id='sortFactors-label'>SORT FACTORS</InputLabel>
-                        <Select
-                          labelId='sortFactors-label'
-                          {...field}
-                          onChange={(e) =>
-                            handleFieldChange(setFieldValue, field.name, [e.target.value])
-                          }
-                          value={field.value || ''}
-                          label='SORT FACTORS'
-                        >
-                          {dictionary?.sortFactors?.map((s) => (
-                            <MenuItem key={s.id} value={s.id}>
-                              {findInDictionary(dictionary, s.id, 'sortFactors')}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Field>
+    <div style={{ marginTop: '2%' }}>
+      <Formik initialValues={filter} onSubmit={() => {}}>
+        {({ setFieldValue }) => (
+          <Form>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={3}>
+                    <Field name='sortFactors'>
+                      {({ field }: FieldProps) => (
+                        <FormControl fullWidth>
+                          <InputLabel id='sortFactors-label'>SORT FACTORS</InputLabel>
+                          <Select
+                            labelId='sortFactors-label'
+                            {...field}
+                            onChange={(e) =>
+                              handleFieldChange(setFieldValue, field.name, [e.target.value])
+                            }
+                            value={field.value || ''}
+                            label='SORT FACTORS'
+                          >
+                            {dictionary?.sortFactors?.map((s) => (
+                              <MenuItem key={s.id} value={s.id}>
+                                {findInDictionary(dictionary, s.id, 'sortFactors')}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      )}
+                    </Field>
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <Field name='orderFactor'>
+                      {({ field }: FieldProps) => (
+                        <FormControl fullWidth>
+                          <InputLabel id='orderFactor-label'>ORDER</InputLabel>
+                          <Select
+                            {...field}
+                            onChange={(e) =>
+                              handleFieldChange(setFieldValue, field.name, e.target.value)
+                            }
+                            value={field.value || ''}
+                            label='ORDER'
+                          >
+                            {dictionary?.orderFactors?.map((s) => (
+                              <MenuItem key={s.id} value={s.id}>
+                                {s.name}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      )}
+                    </Field>
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <Field name='filterConditions.categoryIds'>
+                      {({ field }: FieldProps) => (
+                        <FormControl fullWidth>
+                          <InputLabel>CATEGORY</InputLabel>
+                          <Select
+                            {...field}
+                            onChange={(e) =>
+                              handleFieldChange(
+                                setFieldValue,
+                                field.name,
+                                e.target.value.includes('') ? [] : (e.target.value as number[]),
+                              )
+                            }
+                            value={field.value || []}
+                            label='CATEGORY'
+                            multiple
+                          >
+                            <MenuItem value=''>ANY</MenuItem>
+                            {dictionary?.categories?.map((s) => (
+                              <MenuItem key={s.id} value={s.id}>
+                                {findInDictionary(dictionary, s.id, 'category')}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      )}
+                    </Field>
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <Field name='filterConditions.sizesIds'>
+                      {({ field }: FieldProps) => (
+                        <FormControl fullWidth>
+                          <InputLabel>SIZES</InputLabel>
+                          <Select
+                            {...field}
+                            onChange={(e) =>
+                              handleFieldChange(
+                                setFieldValue,
+                                field.name,
+                                e.target.value.includes('') ? [] : (e.target.value as number[]),
+                              )
+                            }
+                            value={field.value || []}
+                            label='SIZES'
+                            multiple
+                          >
+                            <MenuItem value=''>ANY</MenuItem>
+                            {dictionary?.sizes?.map((s) => (
+                              <MenuItem key={s.id} value={s.id}>
+                                {findInDictionary(dictionary, s.id, 'size')}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      )}
+                    </Field>
+                  </Grid>
                 </Grid>
-                <Grid item xs={12} md={3}>
-                  <Field name='orderFactor'>
-                    {({ field }: FieldProps) => (
-                      <FormControl fullWidth>
-                        <InputLabel id='orderFactor-label'>ORDER</InputLabel>
-                        <Select
-                          {...field}
-                          onChange={(e) =>
-                            handleFieldChange(setFieldValue, field.name, e.target.value)
-                          }
-                          value={field.value || ''}
-                          label='ORDER'
-                        >
-                          {dictionary?.orderFactors?.map((s) => (
-                            <MenuItem key={s.id} value={s.id}>
-                              {s.name}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Field>
+              </Grid>
+              <Grid item xs={12}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={2}>
+                    <TextField
+                      label='FROM'
+                      type='number'
+                      onChange={(e) =>
+                        handleFieldChange(setFieldValue, 'filterConditions.from', e.target.value)
+                      }
+                      value={filter.filterConditions?.from}
+                      inputProps={{ min: 0 }}
+                      onKeyDown={restrictNumericInput}
+                      fullWidth
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={2}>
+                    <TextField
+                      label='TO'
+                      type='number'
+                      onChange={(e) =>
+                        handleFieldChange(setFieldValue, 'filterConditions.to', e.target.value)
+                      }
+                      value={filter.filterConditions?.to}
+                      inputProps={{ min: 0 }}
+                      onKeyDown={restrictNumericInput}
+                      fullWidth
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <Field name='filterConditions.color'>
+                      {({ field }: FieldProps) => (
+                        <FormControl fullWidth>
+                          <InputLabel>COLOR</InputLabel>
+                          <Select
+                            {...field}
+                            onChange={(e) =>
+                              handleFieldChange(setFieldValue, field.name, e.target.value)
+                            }
+                            value={field.value}
+                            label='COLOR'
+                          >
+                            <MenuItem value=''>ANY</MenuItem>
+                            {colors.map((color, id) => (
+                              <MenuItem
+                                key={id}
+                                value={color.name.toLowerCase().replace(/\s/g, '_')}
+                              >
+                                {color.name.toLowerCase().replace(/\s/g, '_')}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      )}
+                    </Field>
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <Field name='filterConditions.gender'>
+                      {({ field }: FieldProps) => (
+                        <FormControl fullWidth>
+                          <InputLabel>GENDER</InputLabel>
+                          <Select
+                            {...field}
+                            onChange={(e) =>
+                              handleFieldChange(setFieldValue, field.name, e.target.value)
+                            }
+                            value={field.value}
+                            label='GENDER'
+                          >
+                            <MenuItem value=''>ANY</MenuItem>
+                            {dictionary?.genders?.map((gender, id) => (
+                              <MenuItem key={id} value={gender.id}>
+                                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      )}
+                    </Field>
+                  </Grid>
+                  <Grid item xs={12} md={2}>
+                    <TextField
+                      label='TAG'
+                      type='string'
+                      value={filter.filterConditions?.byTag}
+                      onChange={(e) =>
+                        handleFieldChange(setFieldValue, 'filterConditions.byTag', e.target.value)
+                      }
+                      fullWidth
+                    />
+                  </Grid>
                 </Grid>
-                <Grid item xs={12} md={3}>
-                  <Field name='filterConditions.categoryId'>
-                    {({ field }: FieldProps) => (
-                      <FormControl fullWidth>
-                        <InputLabel>CATEGORY</InputLabel>
-                        <Select
-                          {...field}
-                          onChange={(e) =>
-                            handleFieldChange(setFieldValue, field.name, e.target.value)
+              </Grid>
+              <Grid item xs={12}>
+                <Grid container spacing={2} display='flex' flexWrap='nowrap'>
+                  <Grid item>
+                    <Field name='filterConditions.onSale'>
+                      {({ field }: FieldProps) => (
+                        <FormControlLabel
+                          label='SALE'
+                          control={
+                            <Checkbox
+                              {...field}
+                              checked={field.value || false}
+                              onChange={(e) =>
+                                handleFieldChange(setFieldValue, field.name, e.target.checked)
+                              }
+                            />
                           }
-                          value={field.value}
-                          label='CATEGORY'
-                        >
-                          <MenuItem value=''>ANY</MenuItem>
-                          {dictionary?.categories?.map((s) => (
-                            <MenuItem key={s.id} value={s.id}>
-                              {findInDictionary(dictionary, s.id, 'category')}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Field>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <Field name='filterConditions.sizesIds'>
-                    {({ field }: FieldProps) => (
-                      <FormControl fullWidth>
-                        <InputLabel>SIZES</InputLabel>
-                        <Select
-                          {...field}
-                          onChange={(e) =>
-                            handleFieldChange(
-                              setFieldValue,
-                              field.name,
-                              e.target.value.includes('') ? [] : (e.target.value as number[]),
-                            )
+                        />
+                      )}
+                    </Field>
+                  </Grid>
+                  <Grid item>
+                    <Field name='filterConditions.preorder'>
+                      {({ field }: FieldProps) => (
+                        <FormControlLabel
+                          label='PREORDER'
+                          control={
+                            <Checkbox
+                              {...field}
+                              checked={field.value || false}
+                              onChange={(e) =>
+                                handleFieldChange(setFieldValue, field.name, e.target.checked)
+                              }
+                            />
                           }
-                          value={field.value || []}
-                          label='SIZES'
-                          multiple
-                        >
-                          <MenuItem value=''>ANY</MenuItem>
-                          {dictionary?.sizes?.map((s) => (
-                            <MenuItem key={s.id} value={s.id}>
-                              {findInDictionary(dictionary, s.id, 'size')}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Field>
+                        />
+                      )}
+                    </Field>
+                  </Grid>
+                  <Grid item>
+                    <Field name='showHidden'>
+                      {({ field }: FieldProps) => (
+                        <FormControlLabel
+                          label='HIDDEN'
+                          control={
+                            <Checkbox
+                              {...field}
+                              checked={field.value || false}
+                              onChange={(e) =>
+                                handleFieldChange(setFieldValue, field.name, e.target.checked)
+                              }
+                            />
+                          }
+                        />
+                      )}
+                    </Field>
+                  </Grid>
                 </Grid>
               </Grid>
             </Grid>
-            <Grid item xs={12}>
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={2}>
-                  <TextField
-                    label='FROM'
-                    type='number'
-                    onChange={(e) =>
-                      handleFieldChange(setFieldValue, 'filterConditions.from', e.target.value)
-                    }
-                    value={filter.filterConditions?.from}
-                    inputProps={{ min: 0 }}
-                    onKeyDown={restrictNumericInput}
-                  />
-                </Grid>
-                <Grid item xs={12} md={2}>
-                  <TextField
-                    label='TO'
-                    type='number'
-                    onChange={(e) =>
-                      handleFieldChange(setFieldValue, 'filterConditions.to', e.target.value)
-                    }
-                    value={filter.filterConditions?.to}
-                    inputProps={{ min: 0 }}
-                    onKeyDown={restrictNumericInput}
-                  />
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <Field name='filterConditions.color'>
-                    {({ field }: FieldProps) => (
-                      <FormControl fullWidth>
-                        <InputLabel>COLOR</InputLabel>
-                        <Select
-                          {...field}
-                          onChange={(e) =>
-                            handleFieldChange(setFieldValue, field.name, e.target.value)
-                          }
-                          value={field.value}
-                          label='COLOR'
-                        >
-                          <MenuItem value=''>ANY</MenuItem>
-                          {colors.map((color, id) => (
-                            <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
-                              {color.name.toLowerCase().replace(/\s/g, '_')}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Field>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <Field name='filterConditions.gender'>
-                    {({ field }: FieldProps) => (
-                      <FormControl fullWidth>
-                        <InputLabel>GENDER</InputLabel>
-                        <Select
-                          {...field}
-                          onChange={(e) =>
-                            handleFieldChange(setFieldValue, field.name, e.target.value)
-                          }
-                          value={field.value}
-                          label='GENDER'
-                        >
-                          <MenuItem value=''>ANY</MenuItem>
-                          {dictionary?.genders?.map((gender, id) => (
-                            <MenuItem key={id} value={gender.id}>
-                              {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Field>
-                </Grid>
-                <Grid item xs={12} md={2}>
-                  <TextField
-                    label='TAG'
-                    type='string'
-                    value={filter.filterConditions?.byTag}
-                    onChange={(e) =>
-                      handleFieldChange(setFieldValue, 'filterConditions.byTag', e.target.value)
-                    }
-                  />
-                </Grid>
-              </Grid>
-            </Grid>
-            <Grid item xs={12} justifyContent='space-between'>
-              <Grid container spacing={2}>
-                <Grid item>
-                  <Field name='filterConditions.onSale'>
-                    {({ field }: FieldProps) => (
-                      <FormControlLabel
-                        label='SALE'
-                        control={
-                          <Checkbox
-                            {...field}
-                            checked={field.value || false}
-                            onChange={(e) =>
-                              handleFieldChange(setFieldValue, field.name, e.target.checked)
-                            }
-                          />
-                        }
-                      />
-                    )}
-                  </Field>
-                </Grid>
-                <Grid item>
-                  <Field name='filterConditions.preorder'>
-                    {({ field }: FieldProps) => (
-                      <FormControlLabel
-                        label='PREORDER'
-                        control={
-                          <Checkbox
-                            {...field}
-                            checked={field.value || false}
-                            onChange={(e) =>
-                              handleFieldChange(setFieldValue, field.name, e.target.checked)
-                            }
-                          />
-                        }
-                      />
-                    )}
-                  </Field>
-                </Grid>
-                <Grid item>
-                  <Field name='showHidden'>
-                    {({ field }: FieldProps) => (
-                      <FormControlLabel
-                        label='HIDDEN'
-                        control={
-                          <Checkbox
-                            {...field}
-                            checked={field.value || false}
-                            onChange={(e) =>
-                              handleFieldChange(setFieldValue, field.name, e.target.checked)
-                            }
-                          />
-                        }
-                      />
-                    )}
-                  </Field>
-                </Grid>
-              </Grid>
-            </Grid>
-          </Grid>
-        </Form>
-      )}
-    </Formik>
+          </Form>
+        )}
+      </Formik>
+    </div>
   );
 };

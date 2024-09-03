@@ -14,18 +14,17 @@ import { productInitialValues } from '../genericProductComponent/utility/product
 
 export type ProductIdProps = MakeGenerics<{
   Params: {
-    id: string;
+    id?: string;
   };
 }>;
 
-export const ProductDetails: FC = () => {
-  const {
-    params: { id },
-  } = useMatch<ProductIdProps>();
-
+export const ProductForm: FC = () => {
+  const match = useMatch<ProductIdProps>();
+  const { id } = match.params;
+  const isCopyMode = match.pathname.includes('/copy');
   const [product, setProduct] = useState<common_ProductFull | undefined>();
   const [dictionary, setDictionary] = useState<common_Dictionary | undefined>();
-  const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [isEditMode, setIsEditMode] = useState<boolean>(!!id && !isCopyMode);
   const [initialValues, setInitialValues] = useState<common_ProductNew>(productInitialValues());
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
@@ -46,33 +45,65 @@ export const ProductDetails: FC = () => {
   }, []);
 
   const fetchProduct = async () => {
-    const response = await getProductByID({ id: parseInt(id) });
-    setProduct(response.product);
-    setInitialValues(productInitialValues(response.product));
+    if (id) {
+      const response = await getProductByID({ id: parseInt(id) });
+      setProduct(response.product);
+      setInitialValues(productInitialValues(response.product));
+    }
   };
 
   useEffect(() => {
     fetchProduct();
-  }, [id]);
+  }, [id, isCopyMode]);
 
   const handleFormSubmit = async (
     values: common_ProductNew,
-    { setSubmitting }: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
+    {
+      setSubmitting,
+      resetForm,
+    }: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
   ) => {
-    const updatePayload: UpsertProductRequest = {
-      id: parseInt(id),
-      product: values,
-    };
-
     try {
-      await upsertProduct(updatePayload);
-      showMessage('PRODUCT UPDATED', 'success');
-      fetchProduct();
+      const nonEmptySizeMeasurements = values.sizeMeasurements?.filter(
+        (sizeMeasurement) =>
+          sizeMeasurement &&
+          sizeMeasurement.productSize &&
+          sizeMeasurement.productSize.quantity !== null,
+      );
+
+      const productToSubmit: UpsertProductRequest = {
+        id: isCopyMode ? undefined : id ? parseInt(id) : undefined,
+        product: {
+          ...values,
+          sizeMeasurements: nonEmptySizeMeasurements,
+        } as common_ProductNew,
+      };
+
+      if (parseFloat(values.product?.productBody?.price?.value || '') <= 0) {
+        showMessage('PRICE CANNOT BE ZERO', 'error');
+        setSubmitting(false);
+        return;
+      }
+
+      await upsertProduct(productToSubmit);
+
+      showMessage(id && !isCopyMode ? 'PRODUCT UPDATED' : 'PRODUCT UPLOADED', 'success');
+      setSubmitting(false);
+
+      if (!id || (!isCopyMode && !id)) {
+        resetForm();
+        setInitialValues(productInitialValues());
+      }
+
+      if (!isCopyMode) fetchProduct();
     } catch (error) {
-      showMessage("PRODUCT CAN'T BE UPDATED", 'error');
+      showMessage(
+        id && !isCopyMode ? "PRODUCT CAN'T BE UPDATED" : "PRODUCT CAN'T BE UPLOADED",
+        'error',
+      );
     } finally {
       setSubmitting(false);
-      setIsEditMode(false);
+      if (id && !isCopyMode) setIsEditMode(false);
     }
   };
 
@@ -81,9 +112,11 @@ export const ProductDetails: FC = () => {
       <GenericProductForm
         initialProductState={initialValues}
         isEditMode={isEditMode}
+        isAddingProduct={isCopyMode || !id}
+        isCopyMode={isCopyMode}
         product={product}
-        onSubmit={handleFormSubmit}
         dictionary={dictionary}
+        onSubmit={handleFormSubmit}
         onEditModeChange={setIsEditMode}
       />
       <Snackbar

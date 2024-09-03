@@ -17,8 +17,7 @@ import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
 import { OrderDetails } from 'components/managers/orders/orderDetails';
 import { Orders } from 'components/managers/orders/orders';
-import { AddProducts } from 'components/managers/products/addProduct/addProduct';
-import { ProductDetails } from 'components/managers/products/productDetails/productDetails';
+import { ProductForm } from 'components/managers/products/productForm/productForm';
 import { Product } from 'components/managers/products/products';
 import { Promo } from 'components/managers/promo/promo';
 import { Settings } from 'components/managers/settings/settings';
@@ -67,7 +66,15 @@ const routes: Route<DefaultGenerics>[] = [
     path: ROUTES.addProduct,
     element: (
       <ProtectedRoute>
-        <AddProducts />
+        <ProductForm />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: `${ROUTES.copyProduct}/:id`,
+    element: (
+      <ProtectedRoute>
+        <ProductForm />
       </ProtectedRoute>
     ),
   },
@@ -75,7 +82,7 @@ const routes: Route<DefaultGenerics>[] = [
     path: `${ROUTES.singleProduct}/:id`,
     element: (
       <ProtectedRoute>
-        <ProductDetails />
+        <ProductForm />
       </ProtectedRoute>
     ),
   },

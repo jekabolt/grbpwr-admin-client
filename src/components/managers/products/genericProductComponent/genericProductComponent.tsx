@@ -14,6 +14,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
   initialProductState,
   isEditMode = false,
   isAddingProduct = false,
+  isCopyMode,
   dictionary,
   product,
   onSubmit,
@@ -51,7 +52,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     );
 
     setIsFormChanged(false);
-    if (isAddingProduct) {
+    if (isAddingProduct && !isCopyMode) {
       setClearMediaPreview(true);
       setTimeout(() => setClearMediaPreview(false), 0);
     }
@@ -71,7 +72,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
       enableReinitialize
       validationSchema={validationSchema}
     >
-      {({ handleSubmit, isSubmitting, values, errors }) => {
+      {({ isSubmitting, values }) => {
         useEffect(() => checkChanges(values), [checkChanges, values]);
 
         return (
@@ -84,14 +85,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                 <Button
                   size='small'
                   variant='contained'
-                  type='button'
-                  onClick={() =>
-                    isEditMode
-                      ? handleSubmit()
-                      : onEditModeChange
-                        ? onEditModeChange(true)
-                        : handleSubmit()
-                  }
+                  type='submit'
                   disabled={isEditMode && !isFormChanged}
                 >
                   {isSubmitting ? (
@@ -118,7 +112,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                     <Field
                       component={BasicFields}
                       name='product.productBody'
-                      {...{ product, dictionary, isEditMode, isAddingProduct }}
+                      {...{ product, dictionary, isEditMode, isAddingProduct, isCopyMode }}
                     />
                   </Grid>
                   <Grid item xs={12}>

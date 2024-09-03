@@ -92,7 +92,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
           </Grid>
         </Grid>
       </Grid>
-      <Grid item>
+      <Grid item xs={6}>
         <PreviewMediaForUpload
           croppedImage={croppedImage}
           isCropperOpen={isCropperOpen}

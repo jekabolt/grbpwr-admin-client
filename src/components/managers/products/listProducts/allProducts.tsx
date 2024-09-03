@@ -22,6 +22,10 @@ export const AllProducts: FC = () => {
     navigate({ to: `${ROUTES.singleProduct}/${id}` });
   };
 
+  const handleCopyProductClick = (id: number | undefined) => {
+    navigate({ to: `${ROUTES.copyProduct}/${id}` });
+  };
+
   const handleDeleteClick = async (
     e: MouseEvent<HTMLButtonElement>,
     productId: number | undefined,
@@ -81,7 +85,7 @@ export const AllProducts: FC = () => {
   };
 
   return (
-    <Grid container spacing={1} paddingBottom='5%' overflow='hidden' justifyContent='center'>
+    <Grid container spacing={2} overflow='hidden' justifyContent='center'>
       <Grid item xs={12}>
         <Filter filter={filter} onFilterChange={handleFilterChange} />
       </Grid>
@@ -90,6 +94,7 @@ export const AllProducts: FC = () => {
           products={products}
           productClick={handleProductClick}
           deleteProduct={handleDeleteClick}
+          copy={handleCopyProductClick}
           confirmDeleteProductId={confirmDelete}
           deletingProductId={deletingProductId}
           showHidden={filter.showHidden}

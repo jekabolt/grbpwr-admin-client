@@ -15,12 +15,13 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { isValid, parseISO } from 'date-fns';
-import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
+import { generateOrUpdateSKU, generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
+import { v4 as uuidv4 } from 'uuid';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 import { handleKeyDown } from '../utility/brandNameRegExp';
 
@@ -40,6 +41,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   product,
   isEditMode,
   isAddingProduct,
+  isCopyMode,
 }) => {
   const { values, setFieldValue, submitCount, errors, touched } =
     useFormikContext<common_ProductNew>();
@@ -48,13 +50,30 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   const [showSales, setShowSales] = useState(true);
   const disableFields = isAddingProduct ? false : !isEditMode;
 
+  useEffect(() => {
+    if (
+      isCopyMode &&
+      values.product?.productBody?.sku === product?.product?.productDisplay?.productBody?.sku
+    ) {
+      const newUuid = uuidv4();
+      const newSKU = generateSKU(
+        values.product?.productBody?.brand,
+        values.product?.productBody?.targetGender,
+        findInDictionary(dictionary, values.product?.productBody?.categoryId, 'category'),
+        values.product?.productBody?.color,
+        values.product?.productBody?.countryOfOrigin,
+        newUuid.slice(-4),
+      );
+      setFieldValue('product.productBody.sku', newSKU, false);
+    }
+  }, [isCopyMode, values]);
+
   const handleFieldChange = useCallback(
     (
       e: SelectChangeEvent<string | number> | React.ChangeEvent<HTMLInputElement>,
       field: string,
     ) => {
       let newValue = e.target.value;
-
       if (field === 'color' && typeof newValue === 'string') {
         newValue = newValue.toLowerCase().replace(/\s/g, '_');
         const selectedColor = colors.find(
@@ -67,24 +86,14 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         );
       }
       setFieldValue(`product.productBody.${field}`, newValue);
-
-      const updatedValues = {
-        ...values.product?.productBody,
-        [field]: newValue,
-      };
-
-      const currentSKU = values.product?.productBody?.sku || '';
-      const existingUuid = currentSKU.slice(-4);
-
-      const newSKU = generateSKU(
-        updatedValues.brand,
-        updatedValues.targetGender,
-        findInDictionary(dictionary, updatedValues.categoryId, 'category'),
-        updatedValues.color,
-        updatedValues.countryOfOrigin,
-        existingUuid,
+      setFieldValue(
+        'product.productBody.sku',
+        generateOrUpdateSKU(
+          values.product?.productBody?.sku,
+          { ...values.product?.productBody, [field]: newValue },
+          dictionary,
+        ),
       );
-      setFieldValue('product.productBody.sku', newSKU);
     },
     [values.product?.productBody, setFieldValue, dictionary],
   );
@@ -125,54 +134,44 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   };
 
   useEffect(() => {
-    const salePercentage = values.product?.productBody?.salePercentage?.value;
-    const preorderValue = values.product?.productBody?.preorder;
+    const { salePercentage, preorder } = values.product?.productBody || {};
+    const saleValue = salePercentage?.value || '';
+    const parsedSaleValue = parseFloat(saleValue);
 
-    if (salePercentage && parseFloat(salePercentage) > 0) {
+    if (parsedSaleValue > 0) {
       setShowPreorder(false);
-    } else if (preorderValue && preorderValue !== '0001-01-01T00:00:00Z') {
+    } else if (preorder && preorder !== '0001-01-01T00:00:00Z') {
       setShowSales(false);
-    } else if (
-      (preorderValue === '' || preorderValue === '0001-01-01T00:00:00Z') &&
-      salePercentage === ''
-    ) {
+    } else if ((!preorder || preorder === '0001-01-01T00:00:00Z') && saleValue === '') {
       setShowSales(true);
       setShowPreorder(true);
     }
-  }, [values.product?.productBody?.salePercentage?.value, values.product?.productBody?.preorder]);
+  }, [values.product?.productBody]);
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Grid container spacing={2}>
         {!isAddingProduct && (
           <>
-            <Grid item xs={12}>
-              <TextField
-                label='PRODUCT ID'
-                InputLabelProps={{ shrink: true }}
-                InputProps={{ readOnly: true }}
-                value={product?.product?.id}
-                fullWidth
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label='CREATED'
-                InputLabelProps={{ shrink: true }}
-                InputProps={{ readOnly: true }}
-                value={product?.product?.createdAt || ''}
-                fullWidth
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label='UPDATED'
-                InputLabelProps={{ shrink: true }}
-                InputProps={{ readOnly: true }}
-                value={product?.product?.updatedAt || ''}
-                fullWidth
-              />
-            </Grid>
+            {['id', 'createdAt', 'updatedAt'].map((field) => (
+              <Grid item xs={12} key={field}>
+                <TextField
+                  label={
+                    field === 'id'
+                      ? 'product id'.toUpperCase()
+                      : field === 'createdAt'
+                        ? 'created at'.toUpperCase()
+                        : field === 'updatedAt'
+                          ? 'updated at'.toUpperCase()
+                          : ''
+                  }
+                  value={(product?.product as any)?.[field] || ''}
+                  InputLabelProps={{ shrink: true }}
+                  InputProps={{ readOnly: true }}
+                  fullWidth
+                />
+              </Grid>
+            ))}
           </>
         )}
 
@@ -180,7 +179,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Field
             as={TextField}
             variant='outlined'
-            label='NAME'
+            label={'name'.toUpperCase()}
             name='product.productBody.name'
             required
             fullWidth
@@ -195,7 +194,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Field
             as={TextField}
             variant='outlined'
-            label='BRAND'
+            label={'brand'.toUpperCase()}
             name='product.productBody.brand'
             required
             fullWidth
@@ -215,11 +214,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               !!(errors.product && touched.product && !values.product?.productBody?.targetGender)
             }
           >
-            <InputLabel shrink>GENDER</InputLabel>
+            <InputLabel shrink>{'gender'.toUpperCase()}</InputLabel>
             <Select
               value={values.product?.productBody?.targetGender || ''}
               onChange={(e) => handleFieldChange(e, 'targetGender')}
-              label='GENDER'
+              label={'gender'.toUpperCase()}
               displayEmpty
               name='product.productBody.targetGender'
               disabled={disableFields}
@@ -245,12 +244,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               !!(errors.product && touched.product && !values.product?.productBody?.categoryId)
             }
           >
-            <InputLabel shrink>CATEGORY</InputLabel>
+            <InputLabel shrink>{'category'.toUpperCase()}</InputLabel>
             <Select
               name='product.productBody.categoryId'
               onChange={(e) => handleFieldChange(e, 'categoryId')}
               value={values.product?.productBody?.categoryId || ''}
-              label='CATEGORY'
+              label={'category'.toUpperCase()}
               displayEmpty
               disabled={disableFields}
             >
@@ -273,11 +272,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             required
             error={!!(errors.product && touched.product && !values.product?.productBody?.color)}
           >
-            <InputLabel shrink>COLOR</InputLabel>
+            <InputLabel shrink>{'color'.toUpperCase()}</InputLabel>
             <Select
               value={values.product?.productBody?.color || ''}
               onChange={(e) => handleFieldChange(e, 'color')}
-              label='COLOR'
+              label={'color'.toUpperCase()}
               displayEmpty
               name='product.productBody.color'
               disabled={disableFields}
@@ -315,12 +314,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               !!(errors.product && touched.product && !values.product?.productBody?.countryOfOrigin)
             }
           >
-            <InputLabel shrink>COUNTRY</InputLabel>
+            <InputLabel shrink>{'color'.toUpperCase()}</InputLabel>
             <Select
               name='product.productBody.countryOfOrigin'
               value={values.product?.productBody?.countryOfOrigin || ''}
               onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
-              label='COUNTRY'
+              label={'color'.toUpperCase()}
               displayEmpty
               disabled={disableFields}
             >
@@ -341,7 +340,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Field
             as={TextField}
             variant='outlined'
-            label='PRICE'
+            label={'price'.toUpperCase()}
             name='product.productBody.price.value'
             type='number'
             inputProps={{ min: 0, step: '0.01' }}
@@ -370,7 +369,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Grid item xs={12}>
             <Field
               as={TextField}
-              label='SALE PERCENTAGE'
+              label={'sale percentage'.toUpperCase()}
               name='product.productBody.salePercentage.value'
               onChange={(e: any) => handlePriceChange(e, true)}
               type='number'
@@ -386,7 +385,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         {showPreorder && (
           <Grid item xs={12}>
             <DatePicker
-              label='PREORDER'
+              label={'preorder'.toUpperCase()}
               value={parseDate(values.product?.productBody?.preorder)}
               onChange={handlePreorderChange}
               minDate={new Date()}
@@ -404,7 +403,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         <Grid item xs={12}>
           <Field
             as={TextField}
-            label='DESCRIPTION'
+            label={'description'.toUpperCase()}
             name='product.productBody.description'
             InputLabelProps={{ shrink: true }}
             fullWidth
@@ -421,7 +420,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         <Grid item xs={12}>
           <Field
             as={TextField}
-            label='SKU'
+            label={'sku'.toUpperCase()}
             name='product.productBody.sku'
             InputProps={{ readOnly: true }}
             InputLabelProps={{ shrink: true }}
@@ -433,9 +432,14 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         <Grid item>
           <FormControlLabel
             control={
-              <Field as={Checkbox} name='product.productBody.hidden' disabled={disableFields} />
+              <Field
+                as={Checkbox}
+                name='product.productBody.hidden'
+                disabled={disableFields}
+                checked={values.product?.productBody?.hidden || false}
+              />
             }
-            label='HIDDEN'
+            label={'hidden'.toUpperCase()}
           />
         </Grid>
       </Grid>
