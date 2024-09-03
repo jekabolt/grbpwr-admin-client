@@ -15,7 +15,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { isValid, parseISO } from 'date-fns';
-import { generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
+import { generateOrUpdateSKU, generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
@@ -55,9 +55,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       isCopyMode &&
       values.product?.productBody?.sku === product?.product?.productDisplay?.productBody?.sku
     ) {
-      console.log(values.product?.productBody?.sku);
-      console.log(product?.product?.productDisplay?.productBody?.sku);
-      console.log(isCopyMode);
       const newUuid = uuidv4();
       const newSKU = generateSKU(
         values.product?.productBody?.brand,
@@ -77,7 +74,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       field: string,
     ) => {
       let newValue = e.target.value;
-
       if (field === 'color' && typeof newValue === 'string') {
         newValue = newValue.toLowerCase().replace(/\s/g, '_');
         const selectedColor = colors.find(
@@ -90,24 +86,14 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         );
       }
       setFieldValue(`product.productBody.${field}`, newValue);
-
-      const updatedValues = {
-        ...values.product?.productBody,
-        [field]: newValue,
-      };
-
-      const currentSKU = values.product?.productBody?.sku || '';
-      const existingUuid = currentSKU.slice(-4);
-
-      const newSKU = generateSKU(
-        updatedValues.brand,
-        updatedValues.targetGender,
-        findInDictionary(dictionary, updatedValues.categoryId, 'category'),
-        updatedValues.color,
-        updatedValues.countryOfOrigin,
-        existingUuid,
+      setFieldValue(
+        'product.productBody.sku',
+        generateOrUpdateSKU(
+          values.product?.productBody?.sku,
+          { ...values.product?.productBody, [field]: newValue },
+          dictionary,
+        ),
       );
-      setFieldValue('product.productBody.sku', newSKU);
     },
     [values.product?.productBody, setFieldValue, dictionary],
   );
@@ -148,21 +134,19 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   };
 
   useEffect(() => {
-    const salePercentage = values.product?.productBody?.salePercentage?.value;
-    const preorderValue = values.product?.productBody?.preorder;
+    const { salePercentage, preorder } = values.product?.productBody || {};
+    const saleValue = salePercentage?.value || '';
+    const parsedSaleValue = parseFloat(saleValue);
 
-    if (salePercentage && parseFloat(salePercentage) > 0) {
+    if (parsedSaleValue > 0) {
       setShowPreorder(false);
-    } else if (preorderValue && preorderValue !== '0001-01-01T00:00:00Z') {
+    } else if (preorder && preorder !== '0001-01-01T00:00:00Z') {
       setShowSales(false);
-    } else if (
-      (preorderValue === '' || preorderValue === '0001-01-01T00:00:00Z') &&
-      salePercentage === ''
-    ) {
+    } else if ((!preorder || preorder === '0001-01-01T00:00:00Z') && saleValue === '') {
       setShowSales(true);
       setShowPreorder(true);
     }
-  }, [values.product?.productBody?.salePercentage?.value, values.product?.productBody?.preorder]);
+  }, [values.product?.productBody]);
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>

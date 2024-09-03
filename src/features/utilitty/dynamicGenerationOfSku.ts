@@ -1,4 +1,5 @@
 import { common_GenderEnum } from 'api/proto-http/admin';
+import { findInDictionary } from './findInDictionary';
 
 const getCurrentSeasonCode = () => {
     const date = new Date();
@@ -67,4 +68,21 @@ export const generateSKU = (
         const formattedCategory = formatCategory(categoryId);
         return `${formattedBrand}${formattedGender}${formattedCategory}${colorCode}${country}${date}${randomNumbers}`.toUpperCase();
     }
+};
+
+export const generateOrUpdateSKU = (
+    currentSKU: string | undefined,
+    productBody: any,
+    dictionary: any
+): string | undefined => {
+    const existingUuid = currentSKU ? currentSKU.slice(-4) : generateNumbers();
+
+    return generateSKU(
+        productBody.brand,
+        productBody.targetGender,
+        findInDictionary(dictionary, productBody.categoryId, 'category'),
+        productBody.color,
+        productBody.countryOfOrigin,
+        existingUuid
+    );
 };
