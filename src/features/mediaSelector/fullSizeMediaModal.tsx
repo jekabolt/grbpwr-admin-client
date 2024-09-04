@@ -1,14 +1,4 @@
-import CloseIcon from '@mui/icons-material/Close';
-import {
-  Box,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  Grid,
-  IconButton,
-  Snackbar,
-  Typography,
-} from '@mui/material';
+import { Box, Dialog, DialogContent, Grid, Snackbar, Typography } from '@mui/material';
 import { common_MediaItem } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { FullSizeMediaModalInterface } from 'features/interfaces/mediaSelectorInterfaces';
@@ -79,11 +69,11 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
 
   return (
     <>
-      <Dialog open={open} onClose={closePreviewAndModal} scroll='paper' maxWidth='md'>
+      <Dialog open={open} onClose={closePreviewAndModal} maxWidth='sm' fullWidth>
         <Box position='relative'>
-          <Grid container spacing={2}>
-            <DialogContent>
-              <Grid xs={12} padding='2%'>
+          <DialogContent>
+            <Grid container gap={2}>
+              <Grid item xs={12} container justifyContent='center'>
                 {clickedMedia &&
                   (isVideo(clickedMedia.thumbnail?.mediaUrl) ? (
                     <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
@@ -102,50 +92,38 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                     />
                   ))}
               </Grid>
-            </DialogContent>
-            <DialogContent>
-              <Grid container spacing={2}>
-                {mediaTypes.map((type) => (
-                  <Grid item xs={12} key={type}>
-                    <Grid container>
-                      <Grid item>
-                        <Typography variant='body1'>
-                          {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
-                            <>{`${type.charAt(0).toUpperCase() + type.slice(1)}`}</>
-                          ) : (
-                            `No ${type} available`
-                          )}
-                        </Typography>
-                      </Grid>
-                      <Grid item>
-                        <CopyToClipboard
-                          text={clickedMedia?.[type as MediaKey]?.mediaUrl || ''}
-                          displayText={
-                            clickedMedia?.[type as MediaKey]?.mediaUrl
-                              ? `${clickedMedia?.[type as MediaKey]?.mediaUrl?.slice(0, 5)}...${clickedMedia?.[type as MediaKey]?.mediaUrl?.slice(-14)}`
-                              : 'NO UUID'
-                          }
-                        />
-                      </Grid>
-                      <Grid item>
-                        <Typography
-                          key={type}
-                        >{` ${videoDimensions[type] || `${clickedMedia?.[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia?.[type as MediaKey]?.height || 'N/A'}px`}`}</Typography>
-                      </Grid>
+              {mediaTypes.map((type) => (
+                <Grid item xs={12} key={type}>
+                  <Grid container>
+                    <Grid item xs={4}>
+                      <Typography variant='body1'>
+                        {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
+                          <>{`${type.charAt(0).toUpperCase() + type.slice(1)}`}</>
+                        ) : (
+                          `No ${type} available`
+                        )}
+                      </Typography>
+                    </Grid>
+                    <Grid item>
+                      <CopyToClipboard
+                        text={clickedMedia?.[type as MediaKey]?.mediaUrl || ''}
+                        displayText={
+                          clickedMedia?.[type as MediaKey]?.mediaUrl
+                            ? `${clickedMedia?.[type as MediaKey]?.mediaUrl?.slice(0, 5)}...${clickedMedia?.[type as MediaKey]?.mediaUrl?.slice(-14)}`
+                            : 'NO UUID'
+                        }
+                      />
+                    </Grid>
+                    <Grid item>
+                      <Typography
+                        key={type}
+                      >{` ${videoDimensions[type] || `${clickedMedia?.[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia?.[type as MediaKey]?.height || 'N/A'}px`}`}</Typography>
                     </Grid>
                   </Grid>
-                ))}
-              </Grid>
-            </DialogContent>
-          </Grid>
-          <DialogActions>
-            <IconButton
-              onClick={closePreviewAndModal}
-              style={{ position: 'absolute', right: '0', top: '0' }}
-            >
-              <CloseIcon fontSize='small' />
-            </IconButton>
-          </DialogActions>
+                </Grid>
+              ))}
+            </Grid>
+          </DialogContent>
         </Box>
       </Dialog>
       <Snackbar
