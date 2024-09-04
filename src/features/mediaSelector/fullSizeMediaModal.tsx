@@ -1,4 +1,16 @@
-import { Box, Dialog, DialogContent, Grid, Snackbar, Typography } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
+import {
+  Box,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  Grid,
+  IconButton,
+  Snackbar,
+  Theme,
+  Typography,
+  useMediaQuery,
+} from '@mui/material';
 import { common_MediaItem } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { FullSizeMediaModalInterface } from 'features/interfaces/mediaSelectorInterfaces';
@@ -24,6 +36,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   const [videoDimensions, setVideoDimensions] = useState<VideoDimensions>({});
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(true);
+  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const mediaTypes = ['fullSize', 'compressed', 'thumbnail'];
 
   const loadVideoDimensions = (url: string | undefined, type: string) => {
@@ -94,8 +107,8 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
               </Grid>
               {mediaTypes.map((type) => (
                 <Grid item xs={12} key={type}>
-                  <Grid container>
-                    <Grid item xs={4}>
+                  <Grid container gap={isMobile ? 'auto' : 2}>
+                    <Grid item xs={isMobile ? 4 : 'auto'}>
                       <Typography variant='body1'>
                         {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
                           <>{`${type.charAt(0).toUpperCase() + type.slice(1)}`}</>
@@ -124,6 +137,14 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
               ))}
             </Grid>
           </DialogContent>
+          <DialogActions>
+            <IconButton
+              onClick={closePreviewAndModal}
+              style={{ position: 'absolute', right: '0', top: '0' }}
+            >
+              <CloseIcon fontSize='small' />
+            </IconButton>
+          </DialogActions>
         </Box>
       </Dialog>
       <Snackbar
