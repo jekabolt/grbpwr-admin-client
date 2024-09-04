@@ -2,6 +2,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { Box, Button, Divider, Grid, TextField } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveItemFull } from 'api/proto-http/frontend';
+import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { TruncateText } from 'components/common/truncateText';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { isValidURL } from 'features/utilitty/isValidUrl';
@@ -116,6 +117,10 @@ export const ListArchive: FC<ListArchiveInterface> = ({
 
   const handleUpdateItemInArchive = (archiveId?: number) => {
     if (!archiveId || selectedItemId === undefined) {
+      return;
+    }
+    if (url && !isValidURL(url)) {
+      showMessage('url is not valid', 'error');
       return;
     }
     setArchive((prev) =>
@@ -251,9 +256,10 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                       <Grid item xs={12}>
                         <TruncateText text={item.archiveItem?.name} length={60} />
                         {item.archiveItem?.url && (
-                          <a href={item.archiveItem.url} target='_blank' rel='noopener noreferrer'>
-                            go to link
-                          </a>
+                          <CopyToClipboard
+                            text={item.archiveItem?.url}
+                            displayText={`${item.archiveItem?.url.slice(0, 5)}...${item.archiveItem?.url.slice(-7)}`}
+                          />
                         )}
                       </Grid>
                     </Grid>

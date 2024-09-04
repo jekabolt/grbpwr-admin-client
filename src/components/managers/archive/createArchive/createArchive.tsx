@@ -7,12 +7,14 @@ import {
   common_MediaFull,
   common_MediaItem,
 } from 'api/proto-http/admin';
+import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { TruncateText } from 'components/common/truncateText';
 import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useState } from 'react';
 import styles from 'styles/archive.scss';
 import { ArchiveModal } from '../archiveModal/archiveModal';
 import { createArchives } from '../interfaces/interfaces';
+import { isValidUrl } from '../utility/isValidUrl';
 
 export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage }) => {
   const initialArchiveState: common_ArchiveNew = {
@@ -46,16 +48,6 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
       setSelectedItemIndex(index);
     }
     setIsModalOpen(!isModalOpen);
-  };
-
-  const isValidUrl = (url: string | undefined) => {
-    if (!url) return;
-    try {
-      new URL(url);
-      return true;
-    } catch (e) {
-      return false;
-    }
   };
 
   const mediaPreview = (newSelectedMedia: common_MediaFull[]) => {
@@ -204,9 +196,10 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
                 <Grid item xs={12}>
                   <TruncateText text={archive.itemsInsert?.[id].name} length={60} />
                   {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
-                    <a href={archive.itemsInsert[id].url} target='_blank' rel='noopener noreferrer'>
-                      go to link
-                    </a>
+                    <CopyToClipboard
+                      text={archive.itemsInsert[id].url || ''}
+                      displayText={`${archive.itemsInsert[id].url?.slice(0, 5)}...${archive.itemsInsert[id].url?.slice(-7)}`}
+                    />
                   )}
                 </Grid>
               </Grid>
