@@ -4,7 +4,7 @@ import { useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import { ProductTagsInterface } from '../interface/interface';
 
-export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) => {
+export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, isCopyMode }) => {
   const { values, setFieldValue, initialValues, errors, touched } =
     useFormikContext<common_ProductNew>();
   const [tag, setTag] = useState('');
@@ -16,7 +16,7 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) 
   const [showAddTagField, setShowAddTagField] = useState(false);
 
   useEffect(() => {
-    if (isAddingProduct) {
+    if (isAddingProduct && !isCopyMode) {
       setFieldValue(
         'tags',
         localTags.map((tag) => ({ tag })),
@@ -37,7 +37,7 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) 
   const handleAddTag = () => {
     if (tag.trim() !== '') {
       const newTags = [...localTags, tag];
-      if (isAddingProduct) {
+      if (isAddingProduct && !isCopyMode) {
         localStorage.setItem('productTags', JSON.stringify(newTags));
         setLocalTags(newTags);
         setShowAddTagField(false);
@@ -78,7 +78,8 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) 
     }
   }, [selectedTags, setFieldValue, isAddingProduct]);
 
-  const displayedTags = !isAddingProduct ? values.tags?.map((t) => t.tag) || [] : localTags;
+  const displayedTags =
+    !isAddingProduct || isCopyMode ? values.tags?.map((t) => t.tag) || [] : localTags;
 
   return (
     <Box display='grid' alignItems='center' gap='10px'>

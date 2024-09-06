@@ -56,7 +56,6 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
       setClearMediaPreview(true);
       setTimeout(() => setClearMediaPreview(false), 0);
     }
-    if (onEditModeChange) onEditModeChange(false);
   };
 
   const checkChanges = useCallback(
@@ -72,7 +71,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
       enableReinitialize
       validationSchema={validationSchema}
     >
-      {({ isSubmitting, values }) => {
+      {({ handleSubmit, isSubmitting, values }) => {
         useEffect(() => checkChanges(values), [checkChanges, values]);
 
         return (
@@ -85,7 +84,16 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                 <Button
                   size='small'
                   variant='contained'
-                  type='submit'
+                  type='button'
+                  onClick={() => {
+                    if (isEditMode) {
+                      handleSubmit();
+                    } else if (onEditModeChange) {
+                      onEditModeChange(true);
+                    } else {
+                      handleSubmit();
+                    }
+                  }}
                   disabled={isEditMode && !isFormChanged}
                 >
                   {isSubmitting ? (
@@ -103,7 +111,13 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                 <Field
                   component={MediaView}
                   name='mediaIds'
-                  {...{ isEditMode, isAddingProduct, product, clearMediaPreview }}
+                  {...{
+                    isEditMode,
+                    isCopyMode,
+                    isAddingProduct,
+                    product,
+                    clearMediaPreview,
+                  }}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -116,7 +130,11 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                     />
                   </Grid>
                   <Grid item xs={12}>
-                    <Field component={Tags} name='tags' {...{ isEditMode, isAddingProduct }} />
+                    <Field
+                      component={Tags}
+                      name='tags'
+                      {...{ isEditMode, isAddingProduct, isCopyMode }}
+                    />
                   </Grid>
                 </Grid>
               </Grid>

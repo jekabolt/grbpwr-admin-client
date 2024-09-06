@@ -14,6 +14,7 @@ export const MediaView: FC<MediaViewInterface> = ({
   isEditMode,
   isAddingProduct,
   product,
+  isCopyMode,
 }) => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
@@ -30,7 +31,6 @@ export const MediaView: FC<MediaViewInterface> = ({
 
   const uploadThumbnailInProduct = (newSelectedMedia: common_MediaFull[]) => {
     if (!newSelectedMedia.length) return;
-
     const thumbnail = newSelectedMedia[0];
     setImagePreviewUrl(thumbnail.media?.fullSize?.mediaUrl ?? '');
     setFieldValue('product.thumbnailMediaId', thumbnail.id);
@@ -101,7 +101,7 @@ export const MediaView: FC<MediaViewInterface> = ({
                 ) : (
                   <img src={mediaUrl} alt='' className={styles.media} />
                 )}
-                {isEditMode && (
+                {(isEditMode || isCopyMode) && (
                   <IconButton
                     onClick={() => removeSelectedMedia(media.id as number)}
                     className={styles.delete_btn}
