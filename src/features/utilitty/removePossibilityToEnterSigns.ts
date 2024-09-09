@@ -11,12 +11,14 @@ export const restrictNumericInput = (e: React.KeyboardEvent<HTMLInputElement>) =
         'ArrowDown',
         'ArrowLeft',
         'ArrowRight',
+        'Control',
+        'v',
+        'c',
     ];
 
     if (
-        key === 'e' ||
-        key === 'E' ||
-        (isNaN(Number(key)) && key !== '.' && !allowedControlKeys.includes(key))
+        (key === 'e' || key === 'E' || (isNaN(Number(key)) && key !== '.' && !allowedControlKeys.includes(key)))
+        && !(e.ctrlKey && (key === 'v' || key === 'c'))
     ) {
         e.preventDefault();
     }
@@ -26,4 +28,12 @@ export const restrictNumericInput = (e: React.KeyboardEvent<HTMLInputElement>) =
     }
 
     selectedDot = key === '.';
+};
+
+export const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasteData = e.clipboardData.getData('text');
+
+    if (isNaN(Number(pasteData)) || (pasteData.split('.').length - 1 > 1)) {
+        e.preventDefault();
+    }
 };
