@@ -1,5 +1,7 @@
 import { AppBar, Button, CircularProgress, Grid, Toolbar } from '@mui/material';
+import { useNavigate } from '@tanstack/react-location';
 import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
 import { Field, Form, Formik, FormikHelpers } from 'formik';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { BasicFields } from './basicFields/basicFields';
@@ -22,6 +24,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
 }) => {
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
+  const navigate = useNavigate();
   const initialValues = useMemo(() => initialProductState, [initialProductState]);
 
   useEffect(() => {
@@ -64,11 +67,15 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     [initialValues],
   );
 
+  const handleCopyProductClick = (id: number | undefined) => {
+    navigate({ to: `${ROUTES.copyProduct}/${id}` });
+  };
+
   return (
     <Formik
       initialValues={initialValues}
       onSubmit={handleFormSubmit}
-      enableReinitialize
+      enableReinitialize={true}
       validationSchema={validationSchema}
     >
       {({ handleSubmit, isSubmitting, values }) => {
@@ -80,18 +87,23 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
               position='fixed'
               sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
             >
-              <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Button
+                  onClick={() => handleCopyProductClick(product?.product?.id)}
+                  size='small'
+                  variant='contained'
+                >
+                  copy
+                </Button>
                 <Button
                   size='small'
                   variant='contained'
                   type='button'
                   onClick={() => {
-                    if (isEditMode) {
+                    if (isEditMode || isAddingProduct || isCopyMode) {
                       handleSubmit();
                     } else if (onEditModeChange) {
                       onEditModeChange(true);
-                    } else {
-                      handleSubmit();
                     }
                   }}
                   disabled={isEditMode && !isFormChanged}

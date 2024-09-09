@@ -12,6 +12,7 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
     const storedTags = localStorage.getItem('productTags');
     return storedTags ? JSON.parse(storedTags) : [];
   });
+
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showAddTagField, setShowAddTagField] = useState(false);
 
@@ -25,19 +26,30 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
   }, [isAddingProduct, localTags, setFieldValue]);
 
   useEffect(() => {
-    if (!isAddingProduct) {
+    if (!isAddingProduct || isCopyMode) {
       const safeTags =
         initialValues.tags
           ?.map((tag) => tag?.tag)
           .filter((tag): tag is string => tag !== undefined) || [];
       setLocalTags(safeTags);
     }
-  }, [isAddingProduct, initialValues.tags]);
+  }, [isAddingProduct, initialValues.tags, isCopyMode]);
+
+  useEffect(() => {
+    if (isCopyMode) {
+      const allTags = [...localTags, ...(values.tags?.map((t) => t.tag) || [])];
+      const uniqueTags = Array.from(
+        new Set(allTags.filter((tag): tag is string => tag !== undefined)),
+      );
+
+      setSelectedTags(uniqueTags);
+    }
+  }, [isCopyMode, localTags, values.tags]);
 
   const handleAddTag = () => {
     if (tag.trim() !== '') {
       const newTags = [...localTags, tag];
-      if (isAddingProduct && !isCopyMode) {
+      if (isAddingProduct || isCopyMode) {
         localStorage.setItem('productTags', JSON.stringify(newTags));
         setLocalTags(newTags);
         setShowAddTagField(false);
@@ -79,11 +91,11 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
   }, [selectedTags, setFieldValue, isAddingProduct]);
 
   const displayedTags =
-    !isAddingProduct || isCopyMode ? values.tags?.map((t) => t.tag) || [] : localTags;
+    isAddingProduct || isCopyMode ? localTags : values.tags?.map((t) => t.tag) || [];
 
   return (
     <Box display='grid' alignItems='center' gap='10px'>
-      {isAddingProduct && !showAddTagField && (
+      {(isAddingProduct || isCopyMode) && !showAddTagField && (
         <Button variant='contained' onClick={() => setShowAddTagField(true)}>
           Add new tag
         </Button>
