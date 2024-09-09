@@ -4,7 +4,7 @@ import { useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import { ProductTagsInterface } from '../interface/interface';
 
-export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) => {
+export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, isCopyMode }) => {
   const { values, setFieldValue, initialValues, errors, touched } =
     useFormikContext<common_ProductNew>();
   const [tag, setTag] = useState('');
@@ -12,11 +12,12 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) 
     const storedTags = localStorage.getItem('productTags');
     return storedTags ? JSON.parse(storedTags) : [];
   });
+
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showAddTagField, setShowAddTagField] = useState(false);
 
   useEffect(() => {
-    if (isAddingProduct) {
+    if (isAddingProduct && !isCopyMode) {
       setFieldValue(
         'tags',
         localTags.map((tag) => ({ tag })),
@@ -25,19 +26,30 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) 
   }, [isAddingProduct, localTags, setFieldValue]);
 
   useEffect(() => {
-    if (!isAddingProduct) {
+    if (!isAddingProduct || isCopyMode) {
       const safeTags =
         initialValues.tags
           ?.map((tag) => tag?.tag)
           .filter((tag): tag is string => tag !== undefined) || [];
       setLocalTags(safeTags);
     }
-  }, [isAddingProduct, initialValues.tags]);
+  }, [isAddingProduct, initialValues.tags, isCopyMode]);
+
+  useEffect(() => {
+    if (isCopyMode) {
+      const allTags = [...localTags, ...(values.tags?.map((t) => t.tag) || [])];
+      const uniqueTags = Array.from(
+        new Set(allTags.filter((tag): tag is string => tag !== undefined)),
+      );
+
+      setSelectedTags(uniqueTags);
+    }
+  }, [isCopyMode, localTags, values.tags]);
 
   const handleAddTag = () => {
     if (tag.trim() !== '') {
       const newTags = [...localTags, tag];
-      if (isAddingProduct) {
+      if (isAddingProduct || isCopyMode) {
         localStorage.setItem('productTags', JSON.stringify(newTags));
         setLocalTags(newTags);
         setShowAddTagField(false);
@@ -78,11 +90,12 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode }) 
     }
   }, [selectedTags, setFieldValue, isAddingProduct]);
 
-  const displayedTags = !isAddingProduct ? values.tags?.map((t) => t.tag) || [] : localTags;
+  const displayedTags =
+    isAddingProduct || isCopyMode ? localTags : values.tags?.map((t) => t.tag) || [];
 
   return (
     <Box display='grid' alignItems='center' gap='10px'>
-      {isAddingProduct && !showAddTagField && (
+      {(isAddingProduct || isCopyMode) && !showAddTagField && (
         <Button variant='contained' onClick={() => setShowAddTagField(true)}>
           Add new tag
         </Button>

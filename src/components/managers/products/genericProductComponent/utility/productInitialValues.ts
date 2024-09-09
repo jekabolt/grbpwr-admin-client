@@ -1,4 +1,4 @@
-import { common_ProductFull, common_ProductNew } from "api/proto-http/admin";
+import { common_GenderEnum, common_ProductFull, common_ProductNew } from "api/proto-http/admin";
 
 export const productInitialValues = (product?: common_ProductFull): common_ProductNew => {
     if (!product) {
@@ -44,10 +44,10 @@ export const initialProductState: common_ProductNew = {
             countryOfOrigin: '',
             price: { value: '0' },
             salePercentage: { value: '0' },
-            categoryId: 0,
+            categoryId: undefined,
             description: '',
             hidden: false,
-            targetGender: 'GENDER_ENUM_UNKNOWN',
+            targetGender: '' as common_GenderEnum,
         },
         thumbnailMediaId: undefined,
     },

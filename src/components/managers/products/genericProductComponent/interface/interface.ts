@@ -33,6 +33,7 @@ export interface MediaViewInterface {
     isEditMode?: boolean;
     isAddingProduct: boolean;
     product?: common_ProductFull;
+    isCopyMode: boolean;
 }
 
 export interface ProductSizesAndMeasurementsInterface {
@@ -44,5 +45,5 @@ export interface ProductSizesAndMeasurementsInterface {
 export interface ProductTagsInterface {
     isEditMode?: boolean;
     isAddingProduct: boolean;
-    initialTags?: string[]
+    isCopyMode: boolean;
 }

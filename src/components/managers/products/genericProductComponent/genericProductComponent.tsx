@@ -1,5 +1,7 @@
 import { AppBar, Button, CircularProgress, Grid, Toolbar } from '@mui/material';
+import { useNavigate } from '@tanstack/react-location';
 import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
 import { Field, Form, Formik, FormikHelpers } from 'formik';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { BasicFields } from './basicFields/basicFields';
@@ -23,6 +25,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
   const initialValues = useMemo(() => initialProductState, [initialProductState]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -55,8 +58,9 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     if (isAddingProduct && !isCopyMode) {
       setClearMediaPreview(true);
       setTimeout(() => setClearMediaPreview(false), 0);
+    } else if (isCopyMode) {
+      navigate({ to: ROUTES.product, replace: true });
     }
-    if (onEditModeChange) onEditModeChange(false);
   };
 
   const checkChanges = useCallback(
@@ -65,14 +69,18 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     [initialValues],
   );
 
+  const handleCopyProductClick = (id: number | undefined) => {
+    navigate({ to: `${ROUTES.copyProduct}/${id}` });
+  };
+
   return (
     <Formik
       initialValues={initialValues}
       onSubmit={handleFormSubmit}
-      enableReinitialize
+      enableReinitialize={true}
       validationSchema={validationSchema}
     >
-      {({ isSubmitting, values }) => {
+      {({ handleSubmit, isSubmitting, values }) => {
         useEffect(() => checkChanges(values), [checkChanges, values]);
 
         return (
@@ -81,12 +89,29 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
               position='fixed'
               sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
             >
-              <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                {!isAddingProduct && (
+                  <Button
+                    onClick={() => handleCopyProductClick(product?.product?.id)}
+                    size='small'
+                    variant='contained'
+                  >
+                    copy
+                  </Button>
+                )}
                 <Button
                   size='small'
                   variant='contained'
-                  type='submit'
+                  type='button'
+                  onClick={() => {
+                    if (isEditMode || isAddingProduct || isCopyMode) {
+                      handleSubmit();
+                    } else if (onEditModeChange) {
+                      onEditModeChange(true);
+                    }
+                  }}
                   disabled={isEditMode && !isFormChanged}
+                  style={{ position: 'absolute', right: '30px' }}
                 >
                   {isSubmitting ? (
                     <CircularProgress size={24} />
@@ -103,7 +128,13 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                 <Field
                   component={MediaView}
                   name='mediaIds'
-                  {...{ isEditMode, isAddingProduct, product, clearMediaPreview }}
+                  {...{
+                    isEditMode,
+                    isCopyMode,
+                    isAddingProduct,
+                    product,
+                    clearMediaPreview,
+                  }}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -116,7 +147,11 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                     />
                   </Grid>
                   <Grid item xs={12}>
-                    <Field component={Tags} name='tags' {...{ isEditMode, isAddingProduct }} />
+                    <Field
+                      component={Tags}
+                      name='tags'
+                      {...{ isEditMode, isAddingProduct, isCopyMode }}
+                    />
                   </Grid>
                 </Grid>
               </Grid>

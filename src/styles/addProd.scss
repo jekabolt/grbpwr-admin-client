@@ -14,9 +14,10 @@
 
   .delete_btn {
     position: absolute;
-    top: 10px;
+    top: 15px;
     right: 0;
     display: none;
+    border-radius: 0%;
   }
 
   &:hover {

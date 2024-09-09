@@ -24,7 +24,7 @@ export const ProductForm: FC = () => {
   const isCopyMode = match.pathname.includes('/copy');
   const [product, setProduct] = useState<common_ProductFull | undefined>();
   const [dictionary, setDictionary] = useState<common_Dictionary | undefined>();
-  const [isEditMode, setIsEditMode] = useState<boolean>(!!id && !isCopyMode);
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
   const [initialValues, setInitialValues] = useState<common_ProductNew>(productInitialValues());
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
