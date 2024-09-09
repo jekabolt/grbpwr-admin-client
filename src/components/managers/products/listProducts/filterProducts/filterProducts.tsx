@@ -139,9 +139,9 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                             multiple
                           >
                             <MenuItem value=''>ANY</MenuItem>
-                            {dictionary?.categories?.map((s) => (
-                              <MenuItem key={s.id} value={s.id}>
-                                {findInDictionary(dictionary, s.id, 'category')}
+                            {dictionary?.categories?.map((category) => (
+                              <MenuItem key={category.id} value={category.id}>
+                                {findInDictionary(dictionary, category.id, 'category')}
                               </MenuItem>
                             ))}
                           </Select>

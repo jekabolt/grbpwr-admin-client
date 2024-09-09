@@ -24,8 +24,8 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
 }) => {
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
-  const navigate = useNavigate();
   const initialValues = useMemo(() => initialProductState, [initialProductState]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -58,6 +58,8 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     if (isAddingProduct && !isCopyMode) {
       setClearMediaPreview(true);
       setTimeout(() => setClearMediaPreview(false), 0);
+    } else if (isCopyMode) {
+      navigate({ to: ROUTES.product, replace: true });
     }
   };
 
@@ -88,13 +90,15 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
               sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
             >
               <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Button
-                  onClick={() => handleCopyProductClick(product?.product?.id)}
-                  size='small'
-                  variant='contained'
-                >
-                  copy
-                </Button>
+                {!isAddingProduct && (
+                  <Button
+                    onClick={() => handleCopyProductClick(product?.product?.id)}
+                    size='small'
+                    variant='contained'
+                  >
+                    copy
+                  </Button>
+                )}
                 <Button
                   size='small'
                   variant='contained'
@@ -107,6 +111,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                     }
                   }}
                   disabled={isEditMode && !isFormChanged}
+                  style={{ position: 'absolute', right: '30px' }}
                 >
                   {isSubmitting ? (
                     <CircularProgress size={24} />

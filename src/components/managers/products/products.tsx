@@ -1,4 +1,4 @@
-import { Button, Grid, Theme, useMediaQuery } from '@mui/material';
+import { Button, Grid } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
@@ -7,7 +7,6 @@ import { AllProducts } from './listProducts/allProducts';
 
 export const Product: FC = () => {
   const navigate = useNavigate();
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const navigateAddProduct = () => {
     navigate({ to: ROUTES.addProduct });

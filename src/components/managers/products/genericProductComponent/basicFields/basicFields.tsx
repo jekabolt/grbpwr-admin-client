@@ -14,7 +14,6 @@ import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
-import { isValid, parseISO } from 'date-fns';
 import { generateOrUpdateSKU, generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
@@ -24,17 +23,8 @@ import CountryList from 'react-select-country-list';
 import { v4 as uuidv4 } from 'uuid';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 import { handleKeyDown } from '../utility/brandNameRegExp';
-
-const parseWellKnownTimestamp = (timestamp: string): Date | null => {
-  if (!timestamp || timestamp === '0001-01-01T00:00:00Z') return null;
-  const parsedDate = parseISO(timestamp);
-  return isValid(parsedDate) ? parsedDate : null;
-};
-
-const formatWellKnownTimestamp = (date: Date | null): string => {
-  if (!date) return '0001-01-01T00:00:00Z';
-  return date.toISOString();
-};
+import { genderOptions } from '../utility/genderList';
+import { formatWellKnownTimestamp, parseWellKnownTimestamp } from '../utility/preorderTime';
 
 export const BasicFields: FC<BasicProductFieldsInterface> = ({
   dictionary,
@@ -43,8 +33,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   isAddingProduct,
   isCopyMode,
 }) => {
-  const { values, setFieldValue, submitCount, errors, touched } =
-    useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, errors, touched } = useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
@@ -132,9 +121,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   const parseDate = (dateString: string | undefined): Date | null => {
     return parseWellKnownTimestamp(dateString || '0001-01-01T00:00:00Z');
   };
-
-  console.log(dictionary?.categories?.length); // Should log 20
-  console.log(dictionary?.categories); // Inspect if any category is missing
 
   useEffect(() => {
     const { salePercentage, preorder } = values.product?.productBody || {};
@@ -239,9 +225,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               name='product.productBody.targetGender'
               disabled={disableFields}
             >
-              {dictionary?.genders?.map((gender) => (
+              {genderOptions.map((gender) => (
                 <MenuItem key={gender.id} value={gender.id}>
-                  {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+                  {gender.name?.toUpperCase()}
                 </MenuItem>
               ))}
             </Select>
