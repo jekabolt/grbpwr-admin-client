@@ -133,6 +133,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
     return parseWellKnownTimestamp(dateString || '0001-01-01T00:00:00Z');
   };
 
+  console.log(dictionary?.categories?.length); // Should log 20
+  console.log(dictionary?.categories); // Inspect if any category is missing
+
   useEffect(() => {
     const { salePercentage, preorder } = values.product?.productBody || {};
     const saleValue = salePercentage?.value || '';

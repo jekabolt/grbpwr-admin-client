@@ -86,6 +86,10 @@ export const categoryMeasurementsMapping: { [key in common_CategoryEnum]?: commo
     CATEGORY_ENUM_OTHER: [
         "MEASUREMENT_NAME_ENUM_LENGTH",
         "MEASUREMENT_NAME_ENUM_WIDTH"
+    ],
+    CATEGORY_ENUM_BAG: [
+        "MEASUREMENT_NAME_ENUM_HEIGHT",
+        "MEASUREMENT_NAME_ENUM_WIDTH"
     ]
 
 };
