@@ -61,6 +61,22 @@ export const Settings: FC = () => {
 
   const debouncedHandleFieldChange = useCallback(debounce(handleFieldChange, 1000), []);
 
+  const handleCheckboxChange = (
+    index: number,
+    values: UpdateSettingsRequest,
+    setFieldValue: any,
+  ) => {
+    const updatedCarriers = values.shipmentCarriers?.map((carrier, idx) => ({
+      ...carrier,
+      allow: idx === index,
+    }));
+    setFieldValue('shipmentCarriers', updatedCarriers);
+    debouncedHandleFieldChange({
+      ...values,
+      shipmentCarriers: updatedCarriers,
+    });
+  };
+
   return (
     <Layout>
       <Formik initialValues={settings} enableReinitialize={true} onSubmit={() => {}}>
@@ -121,15 +137,7 @@ export const Settings: FC = () => {
                             <Checkbox
                               {...field}
                               checked={field.value ?? false}
-                              onChange={(e) => {
-                                field.onChange(e);
-                                handleFieldChange({
-                                  ...values,
-                                  shipmentCarriers: values.shipmentCarriers?.map((c, idx) =>
-                                    idx === index ? { ...c, allow: e.target.checked } : c,
-                                  ),
-                                });
-                              }}
+                              onChange={() => handleCheckboxChange(index, values, setFieldValue)}
                             />
                           }
                           label={carrier.carrier}
