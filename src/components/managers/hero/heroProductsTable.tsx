@@ -180,7 +180,6 @@ export const HeroProductTable: FC<
         }
       },
     }),
-    muiTableContainerProps: { sx: { overflowX: 'auto', display: 'flex' } },
     muiTableBodyRowProps: ({ row }) => ({
       onClick: () => {
         navigate({ to: `${ROUTES.singleProduct}/${row.original.id}` });
