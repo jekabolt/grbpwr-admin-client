@@ -5,14 +5,13 @@ import { FC, useEffect, useState } from 'react';
 import { ProductTagsInterface } from '../interface/interface';
 
 export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, isCopyMode }) => {
-  const { values, setFieldValue, initialValues, errors, touched } =
-    useFormikContext<common_ProductNew>();
+  const { values, setFieldValue, errors, touched } = useFormikContext<common_ProductNew>();
   const [tag, setTag] = useState('');
   const [localTags, setLocalTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
     return storedTags ? JSON.parse(storedTags) : [];
   });
-
+  const [copiedTags, setCopiedTags] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showAddTagField, setShowAddTagField] = useState(false);
 
@@ -26,33 +25,27 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
   }, [isAddingProduct, localTags, setFieldValue]);
 
   useEffect(() => {
-    if (!isAddingProduct || isCopyMode) {
-      const safeTags =
-        initialValues.tags
-          ?.map((tag) => tag?.tag)
-          .filter((tag): tag is string => tag !== undefined) || [];
-      setLocalTags(safeTags);
-    }
-  }, [isAddingProduct, initialValues.tags, isCopyMode]);
-
-  useEffect(() => {
-    if (isCopyMode) {
-      const allTags = [...localTags, ...(values.tags?.map((t) => t.tag) || [])];
-      const uniqueTags = Array.from(
-        new Set(allTags.filter((tag): tag is string => tag !== undefined)),
+    if (isCopyMode && values.tags && values.tags.length > 0) {
+      const copiedTagsFromValues =
+        values.tags?.map((tag) => tag?.tag).filter((tag): tag is string => tag !== undefined) || [];
+      setCopiedTags(copiedTagsFromValues);
+      setFieldValue(
+        'tags',
+        copiedTagsFromValues.map((tag) => ({ tag })),
       );
-
-      setSelectedTags(uniqueTags);
     }
-  }, [isCopyMode, localTags, values.tags]);
+  }, [isCopyMode]);
 
   const handleAddTag = () => {
     if (tag.trim() !== '') {
       const newTags = [...localTags, tag];
-      if (isAddingProduct || isCopyMode) {
+
+      if (isAddingProduct) {
         localStorage.setItem('productTags', JSON.stringify(newTags));
         setLocalTags(newTags);
-        setShowAddTagField(false);
+      }
+      if (isCopyMode) {
+        setCopiedTags((prevCopiedTags) => [...prevCopiedTags, tag]);
       } else {
         const updatedTags = [...(values.tags ?? []), { tag }];
         setFieldValue('tags', updatedTags);
@@ -63,6 +56,7 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
 
   const handleDeleteTag = (tagToDelete: string | undefined) => {
     let newTags;
+
     if (isAddingProduct) {
       newTags = localTags.filter((t) => t !== tagToDelete);
       localStorage.setItem('productTags', JSON.stringify(newTags));
@@ -71,14 +65,25 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
       newTags = values.tags?.filter((t) => t.tag !== tagToDelete) || [];
       setFieldValue('tags', newTags);
     }
+
+    if (isCopyMode) {
+      newTags = values.tags?.filter((t) => t.tag !== tagToDelete) || [];
+      setFieldValue('tags', newTags);
+      const updatedCopiedTags = copiedTags.filter((t) => t !== tagToDelete);
+      setCopiedTags(updatedCopiedTags);
+    }
   };
 
   const handleTagClick = (tag: string) => {
+    let updatedSelectedTags;
+
     if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter((t) => t !== tag));
+      updatedSelectedTags = selectedTags.filter((t) => t !== tag);
     } else {
-      setSelectedTags([...selectedTags, tag]);
+      updatedSelectedTags = [...selectedTags, tag];
     }
+
+    setSelectedTags(updatedSelectedTags);
   };
 
   useEffect(() => {
@@ -90,8 +95,11 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
     }
   }, [selectedTags, setFieldValue, isAddingProduct]);
 
-  const displayedTags =
-    isAddingProduct || isCopyMode ? localTags : values.tags?.map((t) => t.tag) || [];
+  const displayedTags = isCopyMode
+    ? copiedTags
+    : isAddingProduct
+      ? localTags
+      : values.tags?.map((t) => t.tag) || [];
 
   return (
     <Box display='grid' alignItems='center' gap='10px'>
@@ -127,8 +135,10 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
             key={index}
             label={tag}
             color={selectedTags.includes(tag || '') ? 'primary' : 'default'}
-            onClick={isAddingProduct ? () => handleTagClick(tag || '') : undefined}
-            onDelete={isEditMode || isAddingProduct ? () => handleDeleteTag(tag) : undefined}
+            onClick={isAddingProduct || isCopyMode ? () => handleTagClick(tag || '') : undefined}
+            onDelete={
+              isEditMode || isAddingProduct || isCopyMode ? () => handleDeleteTag(tag) : undefined
+            }
           />
         ))}
       </Box>
