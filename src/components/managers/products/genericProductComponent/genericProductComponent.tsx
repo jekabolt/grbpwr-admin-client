@@ -25,6 +25,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
   const initialValues = useMemo(() => initialProductState, [initialProductState]);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -82,7 +83,6 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     >
       {({ handleSubmit, isSubmitting, values }) => {
         useEffect(() => checkChanges(values), [checkChanges, values]);
-
         return (
           <Form>
             <AppBar
@@ -150,7 +150,11 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                     <Field
                       component={Tags}
                       name='tags'
-                      {...{ isEditMode, isAddingProduct, isCopyMode }}
+                      {...{
+                        isEditMode,
+                        isAddingProduct,
+                        isCopyMode,
+                      }}
                     />
                   </Grid>
                 </Grid>

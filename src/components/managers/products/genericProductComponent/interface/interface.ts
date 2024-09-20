@@ -45,5 +45,5 @@ export interface ProductSizesAndMeasurementsInterface {
 export interface ProductTagsInterface {
     isEditMode?: boolean;
     isAddingProduct: boolean;
-    isCopyMode: boolean;
+    isCopyMode: boolean
 }
