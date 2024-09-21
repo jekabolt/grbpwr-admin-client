@@ -17,6 +17,8 @@ import { common_MediaFull } from 'api/proto-http/frontend';
 import { ProductPickerModal } from 'components/common/productPickerModal';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { Layout } from 'components/login/layout';
+import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
+import { isValidUrlForHero as isValidUrl } from 'features/utilitty/isValidUrl';
 import { FC, useEffect, useState } from 'react';
 import { common_HeroItemInsert, common_Product } from '../../../api/proto-http/admin';
 import { HeroProductTable } from './heroProductsTable';
@@ -37,14 +39,14 @@ export const Hero: FC = () => {
 
   const [secondAdContentLink, setSecondAdContentLink] = useState<string | undefined>('');
   const [secondAdContentLinkId, setSecondAdContentLinkId] = useState<number | undefined>();
-  const [secondAdAspectRatio, setSecondAdAspectRatio] = useState<string | undefined>();
   const [secondAdExploreLink, setSecondAdExploreLink] = useState<string | undefined>('');
   const [secondAdExploreLinkError, setSecondAdExploreLinkError] = useState<boolean>(false);
   const [secondAdExploreText, setSecondAdExploreText] = useState<string | undefined>('');
 
+  const [allowedRatios, setAllowedRatios] = useState<string[]>(['4:5', '1:1']);
+  const [isSecondAdEmpty, setIsSecondAdEmpty] = useState(false);
   const [aspectRatioMismatch, setAspectRatioMismatch] = useState<boolean>(false);
-
-  const numberOfAds = [firstAdContentLink, secondAdContentLink].filter(Boolean).length;
+  const [secondAdVisible, setSecondAdVisible] = useState<boolean>(true);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState<boolean>(false);
 
   const [products, setProducts] = useState<common_Product[]>([]);
@@ -63,6 +65,10 @@ export const Hero: FC = () => {
       if (response.hero?.ads) {
         const mainAd = response.hero.ads.find((ad) => ad.isMain);
         const otherAds = response.hero.ads.filter((ad) => !ad.isMain);
+        const ratio = calculateAspectRatio(
+          otherAds[0].media?.media?.thumbnail?.width || 0,
+          otherAds[0].media?.media?.thumbnail?.height || 0,
+        );
 
         if (mainAd) {
           setMainContentLink(mainAd.media?.media?.thumbnail?.mediaUrl);
@@ -81,6 +87,16 @@ export const Hero: FC = () => {
           setFirstAdContentLinkId(otherAds[0].media?.id);
           setFirstAdExploreLink(otherAds[0].exploreLink);
           setFirstAdExploreText(otherAds[0].exploreText);
+          if (ratio === '16:9') {
+            setSecondAdVisible(false);
+          } else if (ratio === '4:5') {
+            setAllowedRatios(['4:5']);
+          } else if (ratio === '1:1') {
+            setAllowedRatios(['1:1']);
+          } else {
+            setSecondAdVisible(true);
+            setAllowedRatios(['4:5', '1:1']);
+          }
         } else {
           setFirstAdContentLink(undefined);
           setFirstAdContentLinkId(undefined);
@@ -99,6 +115,12 @@ export const Hero: FC = () => {
           setSecondAdExploreLink(undefined);
           setSecondAdExploreText(undefined);
         }
+
+        if ((ratio === '4:5' || ratio === '1:1') && !secondAdContentLink) {
+          setIsSecondAdEmpty(true);
+        } else {
+          setIsSecondAdEmpty(false);
+        }
       }
 
       setProducts(response.hero?.productsFeatured ? response.hero?.productsFeatured : []);
@@ -116,10 +138,6 @@ export const Hero: FC = () => {
 
     validateAllLinks();
   }, [mainContentLink, firstAdContentLink, secondAdContentLink]);
-
-  const calculateAspectRatio = (width: number, height: number) => {
-    return (width / height).toFixed(2);
-  };
 
   const saveMainContentLink = (mediaLink: common_MediaFull[]) => {
     if (mediaLink[0]) {
@@ -140,7 +158,21 @@ export const Hero: FC = () => {
         mediaLink[0].media?.thumbnail?.height!,
       );
       setFirstAdAspectRatio(ratio);
-      checkAspectRatioMismatch(ratio, secondAdAspectRatio);
+      if (ratio === '16:9') {
+        setSecondAdVisible(false);
+        setSecondAdContentLink(undefined);
+        setIsSecondAdEmpty(false); // Reset the error since second ad is not required
+      } else if (ratio === '4:5' || ratio === '1:1') {
+        setAllowedRatios([ratio]);
+        setSecondAdVisible(true);
+        if (!secondAdContentLink) {
+          setIsSecondAdEmpty(true); // Error when second ad is missing
+        }
+      } else {
+        setAllowedRatios(['4:5', '1:1']);
+        setSecondAdVisible(true);
+        setIsSecondAdEmpty(!secondAdContentLink);
+      }
       return;
     }
     setFirstAdContentLink(undefined);
@@ -156,13 +188,12 @@ export const Hero: FC = () => {
         mediaLink[0].media?.thumbnail?.width!,
         mediaLink[0].media?.thumbnail?.height!,
       );
-      setSecondAdAspectRatio(ratio);
       checkAspectRatioMismatch(firstAdAspectRatio, ratio);
+      setIsSecondAdEmpty(false);
       return;
     }
     setSecondAdContentLink(undefined);
     setSecondAdContentLinkId(undefined);
-    setSecondAdAspectRatio(undefined);
   };
 
   const checkAspectRatioMismatch = (ratio1?: string, ratio2?: string) => {
@@ -194,6 +225,7 @@ export const Hero: FC = () => {
     setSecondAdExploreLink(undefined);
     setSecondAdExploreText(undefined);
     setDeleteConfirmationOpen(false);
+    setSecondAdVisible(true);
   };
 
   const handleAdRemove = () => {
@@ -242,16 +274,8 @@ export const Hero: FC = () => {
     setProducts(newSelection);
   };
 
-  const isValidUrl = (url: string | undefined) => {
-    if (url === undefined) {
-      return false;
-    }
-    const pattern = new RegExp('https?://(?:[w-]+.)?grbpwr.com(?:/[^s]*)?'); // fragment locator
-    return !!pattern.test(url);
-  };
-
   const handleSaveClick = () => {
-    if (aspectRatioMismatch) {
+    if (isSecondAdEmpty) {
       setDialogOpen(true);
     } else if (mainExploreLinkError || firstAdExploreLinkError || secondAdExploreLinkError) {
       setDialogOpen(true);
@@ -328,14 +352,9 @@ export const Hero: FC = () => {
               </Box>
               <SingleMediaViewAndSelect
                 link={firstAdContentLink}
-                aspectRatio={numberOfAds === 0 ? ['9:16'] : ['4:5']}
+                aspectRatio={['16:9', '4:5', '1:1']}
                 saveSelectedMedia={saveFirstAdContentLink}
               />
-              {aspectRatioMismatch && (
-                <Typography variant='body2' textTransform='uppercase' color='red'>
-                  Select media with the appropriate aspect ratio
-                </Typography>
-              )}
             </Grid>
             <Grid item xs={12}>
               <TextField
@@ -368,53 +387,55 @@ export const Hero: FC = () => {
           </Grid>
         </Grid>
         <Grid item xs={12} md={8}>
-          <Grid container justifyContent='center' spacing={2}>
-            <Grid item xs={12}>
-              <Box display='flex' alignItems='center' gap='15px'>
-                <Typography variant='h4'>Second Ad</Typography>
-                {secondAdContentLink && (
-                  <IconButton onClick={handleAdRemove}>
-                    <DeleteIcon color='secondary' />
-                  </IconButton>
-                )}
-              </Box>
-              <SingleMediaViewAndSelect
-                link={secondAdContentLink}
-                aspectRatio={['4:5']}
-                saveSelectedMedia={saveSecondAdContentLink}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <Box display='flex' alignItems='center' gap='15px'>
-                <TextField
-                  error={secondAdExploreLinkError}
-                  helperText={secondAdExploreLinkError ? 'Not valid url.' : ''}
-                  size='small'
-                  label='Second ad explore link'
-                  value={secondAdExploreLink || ''}
-                  fullWidth
-                  onChange={(e) => {
-                    const { value } = e.target;
-                    setSecondAdExploreLink(value);
-                    if (!isValidUrl(value)) {
-                      setSecondAdExploreLinkError(true);
-                    } else {
-                      setSecondAdExploreLinkError(false);
-                    }
-                  }}
+          {secondAdVisible && (
+            <Grid container justifyContent='center' spacing={2}>
+              <Grid item xs={12}>
+                <Box display='flex' alignItems='center' gap='15px'>
+                  <Typography variant='h4'>Second Ad</Typography>
+                  {secondAdContentLink && (
+                    <IconButton onClick={handleAdRemove}>
+                      <DeleteIcon color='secondary' />
+                    </IconButton>
+                  )}
+                </Box>
+                <SingleMediaViewAndSelect
+                  link={secondAdContentLink}
+                  aspectRatio={allowedRatios}
+                  saveSelectedMedia={saveSecondAdContentLink}
                 />
-              </Box>
+              </Grid>
+              <Grid item xs={12}>
+                <Box display='flex' alignItems='center' gap='15px'>
+                  <TextField
+                    error={secondAdExploreLinkError}
+                    helperText={secondAdExploreLinkError ? 'Not valid url.' : ''}
+                    size='small'
+                    label='Second ad explore link'
+                    value={secondAdExploreLink || ''}
+                    fullWidth
+                    onChange={(e) => {
+                      const { value } = e.target;
+                      setSecondAdExploreLink(value);
+                      if (!isValidUrl(value)) {
+                        setSecondAdExploreLinkError(true);
+                      } else {
+                        setSecondAdExploreLinkError(false);
+                      }
+                    }}
+                  />
+                </Box>
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  size='small'
+                  label='Second ad explore text'
+                  value={secondAdExploreText || ''}
+                  fullWidth
+                  onChange={(e) => setSecondAdExploreText(e.target.value)}
+                />
+              </Grid>
             </Grid>
-            <Grid item xs={12}>
-              <TextField
-                size='small'
-                label='Second ad explore text'
-                value={secondAdExploreText || ''}
-                fullWidth
-                onChange={(e) => setSecondAdExploreText(e.target.value)}
-              />
-            </Grid>
-          </Grid>
+          )}
         </Grid>
         <Grid item xs={12} md={8}>
           <Grid container spacing={2} justifyContent='center'>
@@ -456,12 +477,12 @@ export const Hero: FC = () => {
         aria-labelledby='alert-dialog-title'
       >
         <DialogTitle id='alert-dialog-title'>
-          {aspectRatioMismatch
-            ? 'The aspect ratios of the first and second ads do not match. Please select media with matching aspect ratios.'
+          {isSecondAdEmpty
+            ? 'Both ads need to be filled'
             : 'There are errors. Are you sure you want to save?'}
         </DialogTitle>
         <DialogActions>
-          {aspectRatioMismatch ? (
+          {isSecondAdEmpty ? (
             <Button onClick={() => setDialogOpen(false)}>ok</Button>
           ) : (
             <>

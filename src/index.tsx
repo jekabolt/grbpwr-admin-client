@@ -8,7 +8,6 @@ import {
   createHashHistory,
 } from '@tanstack/react-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ErrorPage } from 'components/common/errorPage';
 import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
 import { Main } from 'components/managers/MainContent';
@@ -132,14 +131,6 @@ const routes: Route<DefaultGenerics>[] = [
     element: (
       <ProtectedRoute>
         <Orders />
-      </ProtectedRoute>
-    ),
-  },
-  {
-    path: ROUTES.error,
-    element: (
-      <ProtectedRoute>
-        <ErrorPage />
       </ProtectedRoute>
     ),
   },

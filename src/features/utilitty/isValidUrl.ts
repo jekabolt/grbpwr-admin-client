@@ -7,3 +7,11 @@ export const isValidURL = (url: string | undefined): boolean => {
         return false;
     }
 };
+
+export const isValidUrlForHero = (url: string | undefined) => {
+    if (url === undefined) {
+        return false;
+    }
+    const pattern = new RegExp('https?://(?:[w-]+.)?grbpwr.com(?:/[^s]*)?'); // fragment locator
+    return !!pattern.test(url);
+};
