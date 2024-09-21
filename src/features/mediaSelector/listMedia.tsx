@@ -16,6 +16,7 @@ import {
 import { deleteFiles } from 'api/admin';
 import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'features/interfaces/mediaSelectorInterfaces';
+import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
 import { isVideo } from 'features/utilitty/filterContentType';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useCallback, useEffect, useState } from 'react';
@@ -49,13 +50,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const [hoveredMediaId, setHoveredMediaId] = useState<number | undefined>(undefined);
   const [filteredMedia, setFilteredMedia] = useState<common_MediaFull[]>([]);
   const handleCloseModal = () => setOpenModal(false);
-
-  const calculateAspectRatio = useCallback((width?: number, height?: number) => {
-    if (!width || !height) return undefined;
-    const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-    const divisor = gcd(width, height);
-    return `${width / divisor}:${height / divisor}`;
-  }, []);
 
   const mediaAspectRatio = useCallback(
     (media: common_MediaFull) => {
