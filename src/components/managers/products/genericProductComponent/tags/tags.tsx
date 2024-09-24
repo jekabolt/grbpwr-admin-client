@@ -66,17 +66,30 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
   };
 
   const handleDeleteTag = (tagToDelete: string) => {
+    let updatedTags = [];
     if (isAddingProduct) {
       const newTags = localTags.filter((t) => t !== tagToDelete);
       localStorage.setItem('productTags', JSON.stringify(newTags));
       setLocalTags(newTags);
-    } else if (isCopyMode) {
+      updatedTags = newTags;
+    }
+    if (isEditMode) {
+      const updatedEditedTags = editedTags.filter((t) => t !== tagToDelete);
+      setEditedTags(updatedEditedTags);
+      updatedTags = updatedEditedTags;
+    }
+    if (isCopyMode) {
       const updatedCopiedTags = copiedTags.filter((t) => t !== tagToDelete);
       setCopiedTags(updatedCopiedTags);
-    } else {
-      const updateEditedTags = editedTags.filter((t) => t !== tagToDelete);
-      setEditedTags(updateEditedTags);
+      updatedTags = updatedCopiedTags;
     }
+
+    setSelectedTags((prevSelectedTags) => prevSelectedTags.filter((t) => t !== tagToDelete));
+
+    setFieldValue(
+      'tags',
+      selectedTags.filter((t) => t !== tagToDelete).map((tag) => ({ tag })),
+    );
   };
 
   const handleTagClick = (tag: string) => {

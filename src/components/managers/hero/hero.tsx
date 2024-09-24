@@ -32,7 +32,6 @@ export const Hero: FC = () => {
 
   const [firstAdContentLink, setFirstAdContentLink] = useState<string | undefined>('');
   const [firstAdContentLinkId, setFirstAdContentLinkId] = useState<number | undefined>();
-  const [firstAdAspectRatio, setFirstAdAspectRatio] = useState<string | undefined>();
   const [firstAdExploreLink, setFirstAdExploreLink] = useState<string | undefined>('');
   const [firstAdExploreLinkError, setFirstAdExploreLinkError] = useState<boolean>(false);
   const [firstAdExploreText, setFirstAdExploreText] = useState<string | undefined>('');
@@ -44,6 +43,11 @@ export const Hero: FC = () => {
   const [secondAdExploreText, setSecondAdExploreText] = useState<string | undefined>('');
 
   const [allowedRatios, setAllowedRatios] = useState<string[]>(['4:5', '1:1']);
+  const [firstAdAllowedRatios, setFirstAdAllowedRatios] = useState<string[]>([
+    '16:9',
+    '4:5',
+    '1:1',
+  ]);
   const [isSecondAdEmpty, setIsSecondAdEmpty] = useState(false);
   const [aspectRatioMismatch, setAspectRatioMismatch] = useState<boolean>(false);
   const [secondAdVisible, setSecondAdVisible] = useState<boolean>(true);
@@ -157,16 +161,15 @@ export const Hero: FC = () => {
         mediaLink[0].media?.thumbnail?.width!,
         mediaLink[0].media?.thumbnail?.height!,
       );
-      setFirstAdAspectRatio(ratio);
       if (ratio === '16:9') {
         setSecondAdVisible(false);
         setSecondAdContentLink(undefined);
-        setIsSecondAdEmpty(false); // Reset the error since second ad is not required
+        setIsSecondAdEmpty(false);
       } else if (ratio === '4:5' || ratio === '1:1') {
         setAllowedRatios([ratio]);
         setSecondAdVisible(true);
         if (!secondAdContentLink) {
-          setIsSecondAdEmpty(true); // Error when second ad is missing
+          setIsSecondAdEmpty(true);
         }
       } else {
         setAllowedRatios(['4:5', '1:1']);
@@ -177,31 +180,26 @@ export const Hero: FC = () => {
     }
     setFirstAdContentLink(undefined);
     setFirstAdContentLinkId(undefined);
-    setFirstAdAspectRatio(undefined);
   };
 
   const saveSecondAdContentLink = (mediaLink: common_MediaFull[]) => {
     if (mediaLink[0]) {
       setSecondAdContentLink(mediaLink[0].media?.thumbnail?.mediaUrl);
       setSecondAdContentLinkId(mediaLink[0].id);
+      setIsSecondAdEmpty(false);
       const ratio = calculateAspectRatio(
         mediaLink[0].media?.thumbnail?.width!,
         mediaLink[0].media?.thumbnail?.height!,
       );
-      checkAspectRatioMismatch(firstAdAspectRatio, ratio);
-      setIsSecondAdEmpty(false);
+      if (ratio === '4:5' || ratio === '1:1') {
+        setFirstAdAllowedRatios([ratio]);
+      } else {
+        setFirstAdAllowedRatios(['16:9', '4:5', '1:1']);
+      }
       return;
     }
     setSecondAdContentLink(undefined);
     setSecondAdContentLinkId(undefined);
-  };
-
-  const checkAspectRatioMismatch = (ratio1?: string, ratio2?: string) => {
-    if (ratio1 && ratio2 && ratio1 !== ratio2) {
-      setAspectRatioMismatch(true);
-    } else {
-      setAspectRatioMismatch(false);
-    }
   };
 
   const handleProductsReorder = (newProductsOrder: common_Product[]) => {
@@ -224,6 +222,8 @@ export const Hero: FC = () => {
     setSecondAdContentLinkId(undefined);
     setSecondAdExploreLink(undefined);
     setSecondAdExploreText(undefined);
+    setAllowedRatios(['4:5', '1:1']);
+    setFirstAdAllowedRatios(['16:9', '4:5', '1:1']);
     setDeleteConfirmationOpen(false);
     setSecondAdVisible(true);
   };
@@ -352,7 +352,7 @@ export const Hero: FC = () => {
               </Box>
               <SingleMediaViewAndSelect
                 link={firstAdContentLink}
-                aspectRatio={['16:9', '4:5', '1:1']}
+                aspectRatio={firstAdAllowedRatios}
                 saveSelectedMedia={saveFirstAdContentLink}
               />
             </Grid>
