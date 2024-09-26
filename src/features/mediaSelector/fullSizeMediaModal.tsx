@@ -11,7 +11,7 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { common_MediaItem } from 'api/proto-http/admin';
+import { common_MediaInfo, common_MediaItem } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { FullSizeMediaModalInterface } from 'features/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
@@ -56,10 +56,10 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
     if (clickedMedia) {
       ['fullSize', 'compressed', 'thumbnail'].forEach((type) => {
         if (
-          clickedMedia[type as MediaKey]?.mediaUrl &&
-          isVideo(clickedMedia[type as MediaKey]?.mediaUrl)
+          (clickedMedia[type as MediaKey] as common_MediaInfo)?.mediaUrl &&
+          isVideo((clickedMedia[type as MediaKey] as common_MediaInfo)?.mediaUrl)
         ) {
-          loadVideoDimensions(clickedMedia[type as MediaKey]?.mediaUrl, type);
+          loadVideoDimensions((clickedMedia[type as MediaKey] as common_MediaInfo)?.mediaUrl, type);
         }
       });
     }
@@ -110,7 +110,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                   <Grid container gap={isMobile ? 'auto' : 2}>
                     <Grid item xs={isMobile ? 4 : 'auto'}>
                       <Typography variant='body1'>
-                        {clickedMedia?.[type as MediaKey]?.mediaUrl ? (
+                        {(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl ? (
                           <>{`${type.charAt(0).toUpperCase() + type.slice(1)}`}</>
                         ) : (
                           `No ${type} available`
@@ -119,10 +119,12 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                     </Grid>
                     <Grid item>
                       <CopyToClipboard
-                        text={clickedMedia?.[type as MediaKey]?.mediaUrl || ''}
+                        text={
+                          (clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl || ''
+                        }
                         displayText={
-                          clickedMedia?.[type as MediaKey]?.mediaUrl
-                            ? `${clickedMedia?.[type as MediaKey]?.mediaUrl?.slice(0, 5)}...${clickedMedia?.[type as MediaKey]?.mediaUrl?.slice(-14)}`
+                          (clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl
+                            ? `${(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl?.slice(0, 5)}...${(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl?.slice(-14)}`
                             : 'NO UUID'
                         }
                       />
@@ -130,7 +132,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                     <Grid item>
                       <Typography
                         key={type}
-                      >{` ${videoDimensions[type] || `${clickedMedia?.[type as MediaKey]?.width || 'N/A'}px x ${clickedMedia?.[type as MediaKey]?.height || 'N/A'}px`}`}</Typography>
+                      >{` ${videoDimensions[type] || `${(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.width || 'N/A'}px x ${(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.height || 'N/A'}px`}`}</Typography>
                     </Grid>
                   </Grid>
                 </Grid>

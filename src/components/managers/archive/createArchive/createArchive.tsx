@@ -83,6 +83,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
         fullSize: { mediaUrl: media, width: undefined, height: undefined },
         thumbnail: undefined,
         compressed: undefined,
+        blurhash: undefined,
       };
       const newMediaFull = {
         media: newMediaItem,
@@ -103,6 +104,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
           fullSize: { mediaUrl: media, width: undefined, height: undefined },
           thumbnail: undefined,
           compressed: undefined,
+          blurhash: undefined,
         };
 
         const newMediaFull = {

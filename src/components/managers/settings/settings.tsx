@@ -66,10 +66,18 @@ export const Settings: FC = () => {
     values: UpdateSettingsRequest,
     setFieldValue: any,
   ) => {
+    const enabledCarriersCount =
+      values.shipmentCarriers?.filter((carrier) => carrier.allow).length || 0;
+
+    if (enabledCarriersCount === 1 && values.shipmentCarriers?.[index].allow) {
+      return;
+    }
+
     const updatedCarriers = values.shipmentCarriers?.map((carrier, idx) => ({
       ...carrier,
-      allow: idx === index,
+      allow: idx === index ? !carrier.allow : carrier.allow,
     }));
+
     setFieldValue('shipmentCarriers', updatedCarriers);
     debouncedHandleFieldChange({
       ...values,
