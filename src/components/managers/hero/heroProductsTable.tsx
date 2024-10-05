@@ -1,7 +1,7 @@
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { Checkbox, useMediaQuery, useTheme } from '@mui/material';
+import { Checkbox } from '@mui/material';
 import IconButton from '@mui/material/IconButton';
 import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
@@ -20,16 +20,17 @@ interface HeroProductTableData {
 }
 
 export const HeroProductTable: FC<
-  HeroProductTableData & { onReorder: (newOrder: common_Product[]) => void }
-> = ({ products, onReorder }) => {
+  HeroProductTableData & {
+    id: number;
+    onReorder: (newOrder: common_Product[]) => void;
+    setFieldValue: (field: string, value: any) => void;
+  }
+> = ({ products, id, onReorder, setFieldValue }) => {
   const [categories, setCategories] = useState<common_Category[]>([]);
 
   const navigate = useNavigate();
 
   const [data, setData] = useState(products);
-
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   useEffect(() => {
     setData(products);
@@ -51,9 +52,13 @@ export const HeroProductTable: FC<
         newData.splice(toIndex, 0, item);
         setData(newData);
         onReorder(newData);
+        setFieldValue(
+          `entities.${id}.featuredProducts.productIds`,
+          newData.map((product) => product.id),
+        );
       }
     },
-    [data, onReorder],
+    [data, onReorder, setFieldValue],
   );
 
   const columns = useMemo<MRT_ColumnDef<common_Product>[]>(
@@ -148,6 +153,10 @@ export const HeroProductTable: FC<
               const newData = data.filter((_, index) => index !== row.index);
               setData(newData);
               onReorder(newData);
+              setFieldValue(
+                `entities.${id}.featuredProducts.productIds`,
+                newData.map((p) => p.id),
+              );
             }}
             aria-label='delete'
             size='small'
