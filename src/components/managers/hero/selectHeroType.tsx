@@ -6,9 +6,10 @@ import { emptyHeroForm, heroTypes } from './mapHeroFunction';
 
 interface SelectHeroType {
   arrayHelpers: FieldArrayRenderProps;
+  unshiftEntity: (newEntity: any, arrayHelpers: any) => void;
 }
 
-export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers }) => {
+export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, unshiftEntity }) => {
   const { values } = useFormikContext<common_HeroFullInsert>();
   const [entityType, setEntityType] = useState<string>('');
 
@@ -17,17 +18,15 @@ export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers }) => {
     newEntity.type = entityType as common_HeroType;
 
     if (entityType === 'HERO_TYPE_MAIN_ADD') {
-      // Ensure there's only one main entity and it is at the first position
       const existingMainIndex = values.entities?.findIndex(
         (entity) => entity.type === 'HERO_TYPE_MAIN_ADD',
       );
       if (existingMainIndex !== undefined && existingMainIndex !== -1) {
-        arrayHelpers.remove(existingMainIndex); // Remove existing main entity
+        arrayHelpers.remove(existingMainIndex);
       }
-      arrayHelpers.unshift(newEntity); // Add new main entity at the first position
+      unshiftEntity(newEntity, arrayHelpers);
     } else {
-      // Unshift other entities to the beginning of the array
-      arrayHelpers.unshift(newEntity);
+      unshiftEntity(newEntity, arrayHelpers);
     }
   };
   return (
@@ -41,13 +40,11 @@ export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers }) => {
         value={entityType}
         onChange={(e: any) => setEntityType(e.target.value)}
       >
-        {heroTypes
-          .filter((type) => !values.entities?.some((entity) => entity.type === type.value))
-          .map((type) => (
-            <MenuItem key={type.value} value={type.value}>
-              {type.label}
-            </MenuItem>
-          ))}
+        {heroTypes.map((type) => (
+          <MenuItem key={type.value} value={type.value}>
+            {type.label}
+          </MenuItem>
+        ))}
       </Field>
 
       <Button onClick={handleAddEntity} style={{ marginTop: '20px' }}>
