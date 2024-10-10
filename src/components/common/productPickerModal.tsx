@@ -118,7 +118,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         header: 'Id',
       },
       {
-        accessorKey: 'productInsert.thumbnail',
+        accessorKey: 'productDisplay.thumbnail.media.thumbnail.mediaUrl',
         header: 'Thumbnail',
         Cell: ({ cell }) => (
           <img
@@ -130,11 +130,11 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         enableGlobalFilter: false,
       },
       {
-        accessorKey: 'productInsert.name',
+        accessorKey: 'productDisplay.productBody.name',
         header: 'Name',
       },
       {
-        accessorKey: 'productInsert.hidden',
+        accessorKey: 'productDisplay.productBody.hidden',
         header: 'isHidden',
         Cell: ({ cell }) => {
           const hidden = cell.getValue() as boolean;
@@ -148,15 +148,15 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         },
       },
       {
-        accessorKey: 'productInsert.price.value',
+        accessorKey: 'productDisplay.productBody.price.value',
         header: 'Price',
       },
       {
-        accessorKey: 'productInsert.salePercentage.value',
+        accessorKey: 'productDisplay.productBody.salePercentage.value',
         header: 'Sale percentage',
       },
       {
-        accessorKey: 'productInsert.categoryId',
+        accessorKey: 'productDisplay.productBody.categoryId',
         header: 'Category',
         Cell: ({ cell }) => {
           const categoryId = cell.getValue() as number; // get the current row's categoryId
