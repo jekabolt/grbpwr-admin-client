@@ -23,15 +23,12 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   return (
     <Grid container>
       <Grid item xs={12} className={styles.thumbnail_container}>
-        {link ? (
-          isVideo(link) ? (
+        {link &&
+          (isVideo(link) ? (
             <video src={link} controls></video>
           ) : (
             <img src={link} alt='thumbnail' />
-          )
-        ) : (
-          ''
-        )}
+          ))}
         <Grid item className={link ? styles.media_selector : styles.empty_media_selector}>
           <MediaSelectorLayout
             label={link ? 'edit' : 'select media'}
