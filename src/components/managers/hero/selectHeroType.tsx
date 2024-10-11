@@ -1,8 +1,9 @@
+import AddIcon from '@mui/icons-material/Add';
 import { Button, Grid, MenuItem, TextField } from '@mui/material';
 import { common_HeroFullInsert, common_HeroType } from 'api/proto-http/admin';
 import { Field, FieldArrayRenderProps, useFormikContext } from 'formik';
 import { FC, useState } from 'react';
-import { emptyHeroForm, heroTypes } from './mapHeroFunction';
+import { emptyHeroForm, heroTypes } from './utility/mapHeroFunction';
 import { validationForSelectHeroType } from './utility/validationForSelectHeroType';
 
 interface SelectHeroType {
@@ -30,39 +31,49 @@ export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, unshiftEntity
   };
 
   return (
-    <Grid container justifyContent='center' style={{ marginTop: '20px' }}>
-      <Field
-        name='entityType'
-        as={TextField}
-        select
-        label='Select Entity Type'
-        fullWidth
-        value={entityType}
-        onChange={(e: any) => setEntityType(e.target.value)}
-      >
-        {heroTypes
+    <Grid container gap={2} alignItems='center' justifyContent='end' marginTop={3} marginBottom={6}>
+      <Grid item>
+        <Field
+          name='entityType'
+          as={TextField}
+          select
+          label='Select Entity Type'
+          size='small'
+          sx={{ width: '250px' }}
+          value={entityType}
+          onChange={(e: any) => setEntityType(e.target.value)}
+        >
+          {heroTypes
 
-          .filter((type) => {
-            if (type.value === 'HERO_TYPE_MAIN_ADD' && isOtherEntitiesExist) {
-              return false;
-            }
+            .filter((type) => {
+              if (type.value === 'HERO_TYPE_MAIN_ADD' && isOtherEntitiesExist) {
+                return false;
+              }
 
-            if (type.value === 'HERO_TYPE_MAIN_ADD' && isMainAddExists) {
-              return false;
-            }
+              if (type.value === 'HERO_TYPE_MAIN_ADD' && isMainAddExists) {
+                return false;
+              }
 
-            return true;
-          })
-          .map((type) => (
-            <MenuItem key={type.value} value={type.value}>
-              {type.label}
-            </MenuItem>
-          ))}
-      </Field>
+              return true;
+            })
+            .map((type) => (
+              <MenuItem sx={{ textTransform: 'uppercase' }} key={type.value} value={type.value}>
+                {type.label.toUpperCase()}
+              </MenuItem>
+            ))}
+        </Field>
+      </Grid>
 
-      <Button onClick={handleAddEntity} disabled={isEntityIncomplete} style={{ marginTop: '20px' }}>
-        Add Entity
-      </Button>
+      <Grid item>
+        <Button
+          variant='contained'
+          size='large'
+          onClick={handleAddEntity}
+          disabled={isEntityIncomplete}
+        >
+          <AddIcon />
+        </Button>
+      </Grid>
     </Grid>
   );
 };

@@ -1,4 +1,4 @@
-import { Box, Button, Grid, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Grid, Snackbar, TextField, Typography } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
 import {
   common_HeroEntityInsert,
@@ -11,12 +11,14 @@ import { ProductPickerModal } from 'components/common/productPickerModal';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { Layout } from 'components/login/layout';
 import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
+import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { Field, FieldArray, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import { HeroProductTable } from './heroProductsTable';
-import { mapHeroFunction } from './mapHeroFunction';
 import { SelectHeroType } from './selectHeroType';
 import { removeEntityIndex, unshiftNewEntity } from './utility/arrayHelpers';
+import { heroValidationSchema } from './utility/heroValidationShema';
+import { mapHeroFunction } from './utility/mapHeroFunction';
 
 export const Hero: FC = () => {
   const [hero, setHero] = useState<common_HeroFullInsert>(mapHeroFunction());
@@ -28,10 +30,17 @@ export const Hero: FC = () => {
   const [product, setProduct] = useState<{ [key: number]: common_Product[] }>({});
   const [currentEntityIndex, setCurrentEntityIndex] = useState<number | null>(null);
   const [allowedRatios, setAllowedRatios] = useState<{ [key: number]: string[] }>({});
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
+  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
+  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+
+  const showMessage = (message: string, severity: 'success' | 'error') => {
+    setSnackBarMessage(message);
+    setSnackBarSeverity(severity);
+    setIsSnackBarOpen(true);
+  };
+
   const handleOpenProductSelection = (index: number) => {
     setCurrentEntityIndex(index);
     setIsModalOpen(true);
@@ -121,7 +130,12 @@ export const Hero: FC = () => {
   }, []);
 
   const saveHero = async (values: common_HeroFullInsert) => {
-    await addHero({ hero: values });
+    try {
+      await addHero({ hero: values });
+      showMessage('HERO SAVED SUCCESSFULLY', 'success');
+    } catch {
+      showMessage("HERO CAN'T BE SAVED", 'error');
+    }
   };
 
   const handleProductsReorder = (newProductsOrder: common_Product[], index: number) => {
@@ -203,7 +217,10 @@ export const Hero: FC = () => {
     setFieldValue(`entities.${index}.doubleAdd.${side}.mediaId`, doubleAddMediaId);
   };
 
-  const handleRemoveEntity = (index: number, arrayHelpers: any) => {
+  const handleRemoveEntity = (index: number, arrayHelpers: any, values: any) => {
+    if (values.entities[index].type === 'HERO_TYPE_MAIN_ADD') {
+      setMain('');
+    }
     setSingle((prevSingle) => removeEntityIndex(prevSingle, index));
     setDoubleAdd((prevDoubleAdd) => removeEntityIndex(prevDoubleAdd, index));
     setProduct((prevProduct) => removeEntityIndex(prevProduct, index));
@@ -234,8 +251,13 @@ export const Hero: FC = () => {
 
   return (
     <Layout>
-      <Formik initialValues={hero} enableReinitialize onSubmit={saveHero}>
-        {({ values, handleSubmit, setFieldValue }) => (
+      <Formik
+        initialValues={hero}
+        validationSchema={heroValidationSchema}
+        enableReinitialize
+        onSubmit={saveHero}
+      >
+        {({ values, handleSubmit, setFieldValue, errors, touched }) => (
           <Form onSubmit={handleSubmit}>
             <FieldArray
               name='entities'
@@ -247,7 +269,7 @@ export const Hero: FC = () => {
                   alignItems='center'
                   spacing={2}
                 >
-                  <Grid item xs={12}>
+                  <Grid item xs={12} md={10}>
                     <Field
                       component={SelectHeroType}
                       arrayHelpers={arrayHelpers}
@@ -279,7 +301,20 @@ export const Hero: FC = () => {
                                       as={TextField}
                                       name={`entities.${index}.mainAdd.singleAdd.exploreLink`}
                                       label='EXPLORE LINK'
-                                      fullwidth
+                                      error={
+                                        entity.mainAdd?.singleAdd?.exploreLink
+                                          ? !isValidUrlForHero(
+                                              entity.mainAdd?.singleAdd?.exploreLink,
+                                            )
+                                          : false
+                                      }
+                                      helperText={
+                                        entity.mainAdd?.singleAdd?.exploreLink &&
+                                        !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)
+                                          ? 'THIS IS NOT VALID EXPLORE LINK'
+                                          : ''
+                                      }
+                                      fullWidth
                                     />
                                     <Field
                                       as={TextField}
@@ -311,6 +346,17 @@ export const Hero: FC = () => {
                                       as={TextField}
                                       name={`entities.${index}.singleAdd.exploreLink`}
                                       label='EXPLORE LINK'
+                                      error={
+                                        entity.singleAdd?.exploreLink
+                                          ? !isValidUrlForHero(entity.singleAdd?.exploreLink)
+                                          : false
+                                      }
+                                      helperText={
+                                        entity.singleAdd?.exploreLink &&
+                                        !isValidUrlForHero(entity.singleAdd?.exploreLink)
+                                          ? 'THIS IS NOT VALID EXPLORE LINK'
+                                          : ''
+                                      }
                                       fullwidth
                                     />
                                     <Field
@@ -343,6 +389,17 @@ export const Hero: FC = () => {
                                       as={TextField}
                                       name={`entities.${index}.doubleAdd.left.exploreLink`}
                                       label='EXPLORE LINK'
+                                      error={
+                                        entity.doubleAdd?.left?.exploreLink
+                                          ? !isValidUrlForHero(entity.doubleAdd?.left?.exploreLink)
+                                          : false
+                                      }
+                                      helperText={
+                                        entity.doubleAdd?.left?.exploreLink &&
+                                        !isValidUrlForHero(entity.doubleAdd?.left?.exploreLink)
+                                          ? 'THIS IS NOT VALID EXPLORE LINK'
+                                          : ''
+                                      }
                                       fullwidth
                                     />
                                     <Field
@@ -366,6 +423,17 @@ export const Hero: FC = () => {
                                       as={TextField}
                                       name={`entities.${index}.doubleAdd.right.exploreLink`}
                                       label='EXPLORE LINK'
+                                      error={
+                                        entity.doubleAdd?.right?.exploreLink
+                                          ? !isValidUrlForHero(entity.doubleAdd?.right?.exploreLink)
+                                          : false
+                                      }
+                                      helperText={
+                                        entity.doubleAdd?.right?.exploreLink &&
+                                        !isValidUrlForHero(entity.doubleAdd?.right?.exploreLink)
+                                          ? 'THIS IS NOT VALID EXPLORE LINK'
+                                          : ''
+                                      }
                                       fullwidth
                                     />
                                     <Field
@@ -386,6 +454,37 @@ export const Hero: FC = () => {
                                   </Typography>
                                 </Grid>
                                 <Grid item xs={12} md={10}>
+                                  <Box component='div' display='grid' gap='15px'>
+                                    <Field
+                                      as={TextField}
+                                      name={`entities.${index}.featuredProducts.title`}
+                                      label='TITLE'
+                                      fullWidth
+                                    />
+                                    <Field
+                                      as={TextField}
+                                      name={`entities.${index}.featuredProducts.exploreLink`}
+                                      label='EXPLORE LINK'
+                                      error={
+                                        entity.featuredProducts?.exploreLink
+                                          ? !isValidUrlForHero(entity.featuredProducts.exploreLink)
+                                          : false
+                                      }
+                                      helperText={
+                                        entity.featuredProducts?.exploreLink &&
+                                        !isValidUrlForHero(entity.featuredProducts.exploreLink)
+                                          ? 'THIS IS NOT A VALID EXPLORE LINK'
+                                          : ''
+                                      }
+                                      fullWidth
+                                    />
+                                    <Field
+                                      as={TextField}
+                                      name={`entities.${index}.featuredProducts.exploreText`}
+                                      label='EXPLORE TEXT'
+                                      fullWidth
+                                    />
+                                  </Box>
                                   <HeroProductTable
                                     products={product[index] || []}
                                     id={index}
@@ -417,7 +516,7 @@ export const Hero: FC = () => {
                                 variant='contained'
                                 color='error'
                                 onClick={() => {
-                                  handleRemoveEntity(index, arrayHelpers);
+                                  handleRemoveEntity(index, arrayHelpers, values);
                                 }}
                               >
                                 Remove Entity
@@ -431,12 +530,12 @@ export const Hero: FC = () => {
               )}
             />
 
-            <Grid container justifyContent='center' style={{ marginTop: '20px' }}>
+            <Grid container justifyContent='center'>
               <Button
                 type='submit'
                 variant='contained'
                 color='primary'
-                disabled={values.entities?.length === 0}
+                sx={{ position: 'fixed', bottom: '20px', right: '20px' }}
               >
                 Save
               </Button>
@@ -444,6 +543,13 @@ export const Hero: FC = () => {
           </Form>
         )}
       </Formik>
+      <Snackbar
+        open={isSnackBarOpen}
+        autoHideDuration={3000}
+        onClose={() => setIsSnackBarOpen(false)}
+      >
+        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
+      </Snackbar>
     </Layout>
   );
 };
