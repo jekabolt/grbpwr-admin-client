@@ -8,10 +8,9 @@ import { validationForSelectHeroType } from './utility/validationForSelectHeroTy
 
 interface SelectHeroType {
   arrayHelpers: FieldArrayRenderProps;
-  unshiftEntity: (newEntity: any, arrayHelpers: any, values: any) => void;
 }
 
-export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, unshiftEntity }) => {
+export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers }) => {
   const { values } = useFormikContext<common_HeroFullInsert>();
   const [entityType, setEntityType] = useState<string>('');
   const isOtherEntitiesExist = values.entities?.some(
@@ -27,7 +26,7 @@ export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, unshiftEntity
   const handleAddEntity = () => {
     const newEntity = { ...emptyHeroForm.entities?.[0] };
     newEntity.type = entityType as common_HeroType;
-    unshiftEntity(newEntity, arrayHelpers, values);
+    arrayHelpers.push(newEntity);
   };
 
   return (
@@ -69,7 +68,7 @@ export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, unshiftEntity
           variant='contained'
           size='large'
           onClick={handleAddEntity}
-          disabled={isEntityIncomplete}
+          disabled={!entityType || isEntityIncomplete}
         >
           <AddIcon />
         </Button>
