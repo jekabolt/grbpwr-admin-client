@@ -1,4 +1,4 @@
-import { Alert, Box, Button, Grid, Snackbar, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Divider, Grid, Snackbar, TextField, Typography } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { ProductPickerModal } from 'components/common/productPickerModal';
@@ -6,8 +6,9 @@ import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSe
 import { Layout } from 'components/login/layout';
 import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
 import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
-import { Field, FieldArray, Form, Formik } from 'formik';
-import { FC, useEffect, useState } from 'react';
+import { ErrorMessage, Field, FieldArray, Form, Formik } from 'formik';
+import { FC, useEffect, useRef, useState } from 'react';
+import styles from 'styles/hero.scss';
 import { HeroProductTable } from './heroProductsTable';
 import { SelectHeroType } from './selectHeroType';
 import { removeEntityIndex } from './utility/arrayHelpers';
@@ -29,6 +30,7 @@ export const Hero: FC = () => {
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
+  const entityRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
 
   const showMessage = (message: string, severity: 'success' | 'error') => {
     setSnackBarMessage(message);
@@ -42,7 +44,7 @@ export const Hero: FC = () => {
   };
   const handleCloseModal = () => setIsModalOpen(false);
 
-  const fetchDictionary = async () => {
+  const fetchHero = async () => {
     const response = await getHero({});
     if (!response) return;
 
@@ -94,7 +96,8 @@ export const Hero: FC = () => {
   };
 
   useEffect(() => {
-    fetchDictionary();
+    fetchHero();
+    console.log(allowedRatios);
   }, []);
 
   const saveHero = async (values: common_HeroFullInsert) => {
@@ -209,17 +212,11 @@ export const Hero: FC = () => {
             <FieldArray
               name='entities'
               render={(arrayHelpers) => (
-                <Grid
-                  container
-                  justifyContent='center'
-                  marginTop={2}
-                  alignItems='center'
-                  spacing={2}
-                >
+                <Grid container spacing={2} className={styles.entities_container}>
                   {values.entities &&
                     values.entities.map((entity, index) => (
-                      <Grid item xs={12}>
-                        <Grid container spacing={2} marginBottom='130px' justifyContent='center'>
+                      <Grid item xs={12} ref={(el) => (entityRefs.current[index] = el)}>
+                        <Grid container spacing={2} className={styles.entity_container}>
                           {entity.type === 'HERO_TYPE_MAIN_ADD' && (
                             <>
                               <Grid item xs={12} md={10}>
@@ -235,7 +232,14 @@ export const Hero: FC = () => {
                                     saveMainMedia(selectedMedia, setFieldValue, index)
                                   }
                                 />
-                                <Box component='div' display='grid' gap='10px' marginTop='10px'>
+                                {`${errors}.entities.${index}.mainAdd..singleAdd.mediaId` && (
+                                  <ErrorMessage
+                                    className={styles.error}
+                                    name={`entities.${index}.mainAdd.singleAdd.mediaId`}
+                                    component='div'
+                                  />
+                                )}
+                                <Box component='div' className={styles.fields}>
                                   <Field
                                     as={TextField}
                                     name={`entities.${index}.mainAdd.singleAdd.exploreLink`}
@@ -278,7 +282,14 @@ export const Hero: FC = () => {
                                     saveSingleMedia(selectedMedia, setFieldValue, index)
                                   }
                                 />
-                                <Box component='div' display='grid' gap='10px' marginTop='10px'>
+                                {`${errors}.entities.${index}.singleAdd.mediaId` && (
+                                  <ErrorMessage
+                                    className={styles.error}
+                                    name={`entities.${index}.singleAdd.mediaId`}
+                                    component='div'
+                                  />
+                                )}
+                                <Box component='div' className={styles.fields}>
                                   <Field
                                     as={TextField}
                                     name={`entities.${index}.singleAdd.exploreLink`}
@@ -321,7 +332,14 @@ export const Hero: FC = () => {
                                     saveDoubleMedia(selectedMedia, 'left', setFieldValue, index)
                                   }
                                 />
-                                <Box component='div' display='grid' gap='10px' marginTop='10px'>
+                                {`${errors}.entities.${index}.doubleAdd.left.mediaId` && (
+                                  <ErrorMessage
+                                    className={styles.error}
+                                    name={`entities.${index}.doubleAdd.left.mediaId`}
+                                    component='div'
+                                  />
+                                )}
+                                <Box component='div' className={styles.fields}>
                                   <Field
                                     as={TextField}
                                     name={`entities.${index}.doubleAdd.left.exploreLink`}
@@ -355,7 +373,14 @@ export const Hero: FC = () => {
                                     saveDoubleMedia(selectedMedia, 'right', setFieldValue, index)
                                   }
                                 />
-                                <Box component='div' display='grid' gap='10px' marginTop='10px'>
+                                {`${errors}.entities.${index}.doubleAdd.right.mediaId` && (
+                                  <ErrorMessage
+                                    className={styles.error}
+                                    name={`entities.${index}.doubleAdd.right.mediaId`}
+                                    component='div'
+                                  />
+                                )}
+                                <Box component='div' className={styles.fields}>
                                   <Field
                                     as={TextField}
                                     name={`entities.${index}.doubleAdd.right.exploreLink`}
@@ -391,7 +416,7 @@ export const Hero: FC = () => {
                                 </Typography>
                               </Grid>
                               <Grid item xs={12} md={10}>
-                                <Box component='div' display='grid' gap='15px'>
+                                <Box component='div' className={styles.fields}>
                                   <Field
                                     as={TextField}
                                     name={`entities.${index}.featuredProducts.title`}
@@ -430,6 +455,13 @@ export const Hero: FC = () => {
                                   }
                                   setFieldValue={setFieldValue}
                                 />
+                                {`${errors}.entities.${index}.featuredProducts.productIds` && (
+                                  <ErrorMessage
+                                    className={styles.error}
+                                    name={`entities.${index}.featuredProducts.productIds`}
+                                    component='div'
+                                  />
+                                )}
                                 <Button
                                   variant='contained'
                                   onClick={() => handleOpenProductSelection(index)}
@@ -459,17 +491,24 @@ export const Hero: FC = () => {
                               Remove Entity
                             </Button>
                           </Grid>
+                          <Grid item xs={12} md={10} className={styles.divider_container}>
+                            <Divider className={styles.divider} />
+                          </Grid>
                         </Grid>
                       </Grid>
                     ))}
                   <Grid item xs={12} md={10}>
-                    <Field component={SelectHeroType} arrayHelpers={arrayHelpers} />
+                    <Field
+                      component={SelectHeroType}
+                      arrayHelpers={arrayHelpers}
+                      entityRefs={entityRefs}
+                    />
                   </Grid>
                 </Grid>
               )}
             />
 
-            <Grid container justifyContent='center'>
+            <Grid container>
               <Button
                 type='submit'
                 variant='contained'
