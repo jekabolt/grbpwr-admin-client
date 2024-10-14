@@ -93,6 +93,14 @@ export const HeroProductTable: FC<
       {
         accessorKey: 'id',
         header: 'Id',
+        Cell: ({ cell, row }) => (
+          <span
+            style={{ color: 'blue', cursor: 'pointer', textDecoration: 'underline' }}
+            onClick={() => navigate({ to: `${ROUTES.singleProduct}/${row.original.id}` })}
+          >
+            {cell.getValue() as string}
+          </span>
+        ),
       },
       {
         accessorKey: 'productDisplay.thumbnail.media.thumbnail.mediaUrl',
@@ -189,14 +197,14 @@ export const HeroProductTable: FC<
         }
       },
     }),
-    muiTableBodyRowProps: ({ row }) => ({
-      onClick: () => {
-        navigate({ to: `${ROUTES.singleProduct}/${row.original.id}` });
-      },
-      sx: {
-        cursor: 'pointer',
-      },
-    }),
+    // muiTableBodyRowProps: ({ row }) => ({
+    //   onClick: () => {
+    //     navigate({ to: `${ROUTES.singleProduct}/${row.original.id}` });
+    //   },
+    //   sx: {
+    //     cursor: 'pointer',
+    //   },
+    // }),
   });
 
   return <MRT_TableContainer table={table} />;

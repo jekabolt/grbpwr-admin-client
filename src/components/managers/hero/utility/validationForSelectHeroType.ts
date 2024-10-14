@@ -4,7 +4,6 @@ export const validationForSelectHeroType: Record<common_HeroType, (entity: commo
     HERO_TYPE_MAIN_ADD: (entity: common_HeroEntityInsert) =>
         !entity.mainAdd?.singleAdd?.mediaId,
 
-
     HERO_TYPE_SINGLE_ADD: (entity: common_HeroEntityInsert) =>
         !entity.singleAdd?.mediaId,
 
@@ -13,7 +12,8 @@ export const validationForSelectHeroType: Record<common_HeroType, (entity: commo
         !entity.doubleAdd?.right?.mediaId,
 
     HERO_TYPE_FEATURED_PRODUCTS: (entity: common_HeroEntityInsert) =>
-        !entity.featuredProducts?.productIds,
+        !entity.featuredProducts?.productIds || entity.featuredProducts.productIds.length === 0,
+
 
     HERO_TYPE_UNKNOWN: (entity: common_HeroEntityInsert) => false,
 }
