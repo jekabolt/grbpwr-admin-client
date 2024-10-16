@@ -18,14 +18,18 @@ export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, entityRefs })
   const isOtherEntitiesExist = values.entities?.some(
     (entity) => entity.type !== 'HERO_TYPE_MAIN_ADD',
   );
-  const isMainAddExists = values.entities?.some((entity) => entity.type === 'HERO_TYPE_MAIN_ADD');
   const [addedEntityIndex, setAddedEntityIndex] = useState<number | null>(null);
+
+  const isMainAddExists = values.entities?.some((entity) => entity.type === 'HERO_TYPE_MAIN_ADD');
 
   const isEntityIncomplete = values.entities?.some((entity) => {
     const validateEntity = validationForSelectHeroType[entity.type as common_HeroType];
     return validateEntity ? validateEntity(entity) : false;
   });
   const handleAddEntity = () => {
+    if (entityType === 'HERO_TYPE_MAIN_ADD' && isMainAddExists) {
+      return;
+    }
     const newEntity = { ...emptyHeroForm.entities?.[0] };
     newEntity.type = entityType as common_HeroType;
     arrayHelpers.push(newEntity);

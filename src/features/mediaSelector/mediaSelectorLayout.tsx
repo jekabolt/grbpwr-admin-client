@@ -19,12 +19,7 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   return (
     <Grid container justifyContent='center'>
       <Grid item>
-        <Button
-          variant='contained'
-          size='medium'
-          onClick={handleMediaSelectorVisibility}
-          disabled={!isEditMode}
-        >
+        <Button variant='contained' size='medium' onClick={handleMediaSelectorVisibility}>
           {label}
         </Button>
       </Grid>

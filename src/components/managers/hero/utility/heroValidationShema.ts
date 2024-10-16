@@ -1,3 +1,4 @@
+import { isValidUrl } from 'components/managers/archive/utility/isValidUrl';
 import * as Yup from 'yup';
 
 export const heroValidationSchema = Yup.object().shape({
@@ -10,7 +11,10 @@ export const heroValidationSchema = Yup.object().shape({
                         mainAdd: Yup.object().shape({
                             singleAdd: Yup.object().shape({
                                 mediaId: Yup.number().min(1, 'Main Add Media is required'),
-                                exploreLink: Yup.string().nullable(),
+                                exploreLink: Yup.string().nullable().test(
+                                    'is-valid-url',
+                                    (value) => !value || isValidUrl(value),
+                                ),
                                 exploreText: Yup.string().nullable(),
                             }),
                         }),
@@ -21,7 +25,10 @@ export const heroValidationSchema = Yup.object().shape({
                         type: Yup.string().required('Hero type is required'),
                         singleAdd: Yup.object().shape({
                             mediaId: Yup.number().min(1, 'Single Add Media is required'),
-                            exploreLink: Yup.string().nullable(),
+                            exploreLink: Yup.string().nullable().test(
+                                'is-valid-url',
+                                (value) => !value || isValidUrl(value),
+                            ),
                             exploreText: Yup.string().nullable(),
                         }),
                     });
@@ -32,12 +39,18 @@ export const heroValidationSchema = Yup.object().shape({
                         doubleAdd: Yup.object().shape({
                             left: Yup.object().shape({
                                 mediaId: Yup.number().min(1, 'Left media is required'),
-                                exploreLink: Yup.string().nullable(),
+                                exploreLink: Yup.string().nullable().test(
+                                    'is-valid-url',
+                                    (value) => !value || isValidUrl(value),
+                                ),
                                 exploreText: Yup.string().nullable(),
                             }),
                             right: Yup.object().shape({
                                 mediaId: Yup.number().min(1, 'Right media is required'),
-                                exploreLink: Yup.string().nullable(),
+                                exploreLink: Yup.string().nullable().test(
+                                    'is-valid-url',
+                                    (value) => !value || isValidUrl(value),
+                                ),
                                 exploreText: Yup.string().nullable(),
                             }),
                         }),
@@ -51,7 +64,10 @@ export const heroValidationSchema = Yup.object().shape({
                                 .of(Yup.number().min(1))
                                 .min(1, 'At least one product is required'),
                             title: Yup.string().nullable(),
-                            exploreLink: Yup.string().nullable(),
+                            exploreLink: Yup.string().nullable().test(
+                                'is-valid-url',
+                                (value) => !value || isValidUrl(value),
+                            ),
                             exploreText: Yup.string().nullable(),
                         }),
                     });
