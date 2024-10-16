@@ -77,6 +77,8 @@ export const MediaView: FC<MediaViewInterface> = ({
             imagePreviewUrl ||
             product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl
           }
+          isEditMode={isEditMode}
+          isAddingProduct={isAddingProduct}
           aspectRatio={['4:5']}
           hideVideos={true}
           saveSelectedMedia={uploadThumbnailInProduct}
