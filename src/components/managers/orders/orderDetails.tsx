@@ -274,9 +274,14 @@ export const OrderDetails = () => {
             </div>
           )}
           {payment.paymentInsert?.transactionAmount && (
-            <div>
-              AMOUNT: {payment.paymentInsert?.transactionAmount.value}{' '}
-              {payment.paymentInsert?.transactionAmountPaymentCurrency?.value}
+            <div style={{ display: 'flex' }}>
+              AMOUNT:&nbsp;
+              {payment.paymentInsert.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD' ||
+              payment.paymentInsert.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ? (
+                <p>{payment.paymentInsert?.transactionAmountPaymentCurrency?.value}</p>
+              ) : (
+                <p>{payment.paymentInsert?.transactionAmount.value}</p>
+              )}
             </div>
           )}
           {payment.paymentInsert?.payer && (
@@ -293,15 +298,32 @@ export const OrderDetails = () => {
           )}
           {payment.paymentInsert?.isTransactionDone && (
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              TXID:&nbsp;
-              <CopyToClipboard
-                text={payment?.paymentInsert?.transactionId || ''}
-                displayText={
-                  payment?.paymentInsert?.transactionId
-                    ? `${payment?.paymentInsert?.transactionId.slice(0, 4)}...${payment?.paymentInsert?.transactionId.slice(-4)}`
-                    : ''
-                }
-              />
+              {payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ||
+              payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD' ? (
+                <>
+                  CLIENT SECRET:&nbsp;
+                  <CopyToClipboard
+                    text={payment.paymentInsert?.clientSecret || ''}
+                    displayText={
+                      payment.paymentInsert?.clientSecret
+                        ? `${payment.paymentInsert?.clientSecret.slice(0, 4)}...${payment.paymentInsert?.clientSecret.slice(-4)}`
+                        : ''
+                    }
+                  />
+                </>
+              ) : (
+                <>
+                  TXID:&nbsp;
+                  <CopyToClipboard
+                    text={payment?.paymentInsert?.transactionId || ''}
+                    displayText={
+                      payment?.paymentInsert?.transactionId
+                        ? `${payment?.paymentInsert?.transactionId.slice(0, 4)}...${payment?.paymentInsert?.transactionId.slice(-4)}`
+                        : ''
+                    }
+                  />
+                </>
+              )}
             </div>
           )}
         </div>
