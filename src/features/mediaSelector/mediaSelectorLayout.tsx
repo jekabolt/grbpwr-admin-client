@@ -5,7 +5,6 @@ import { MediaSelectorModal } from './mediaSelectorModal';
 
 export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   label,
-  isEditMode = true,
   allowMultiple,
   aspectRatio,
   hideVideos,

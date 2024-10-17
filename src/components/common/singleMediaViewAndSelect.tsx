@@ -35,7 +35,6 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
           <Grid item className={link ? styles.media_selector : styles.empty_media_selector}>
             <MediaSelectorLayout
               label={link ? 'edit' : 'select media'}
-              isEditMode={isEditMode}
               allowMultiple={false}
               aspectRatio={aspectRatio}
               hideVideos={hideVideos}
