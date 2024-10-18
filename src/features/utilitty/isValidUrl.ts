@@ -12,6 +12,6 @@ export const isValidUrlForHero = (url: string | undefined) => {
     if (url === undefined) {
         return false;
     }
-    const pattern = new RegExp('https?://(?:[w-]+.)?grbpwr.com(?:/[^s]*)?'); // fragment locator
+    const pattern = new RegExp('https?://(?:[w-]+.)?grbpwr.com(?:/[^s]*)?');
     return !!pattern.test(url);
 };

@@ -245,18 +245,23 @@ export const Hero: FC = () => {
                                     name={`entities.${index}.mainAdd.singleAdd.exploreLink`}
                                     label='EXPLORE LINK'
                                     error={
-                                      entity.mainAdd?.singleAdd?.exploreLink
-                                        ? !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)
-                                        : false
+                                      (entity.mainAdd?.singleAdd?.exploreLink && errors.entities) ||
+                                      (entity.mainAdd?.singleAdd?.exploreLink &&
+                                        !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink))
                                     }
                                     helperText={
-                                      entity.mainAdd?.singleAdd?.exploreLink &&
-                                      !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)
-                                        ? 'THIS IS NOT VALID EXPLORE LINK'
-                                        : ''
+                                      entity.mainAdd?.singleAdd?.exploreLink && errors.entities
+                                        ? 'lol'
+                                        : entity.mainAdd?.singleAdd?.exploreLink &&
+                                            !isValidUrlForHero(
+                                              entity.mainAdd?.singleAdd?.exploreLink,
+                                            )
+                                          ? 'kek'
+                                          : ''
                                     }
                                     fullWidth
                                   />
+
                                   <Field
                                     as={TextField}
                                     name={`entities.${index}.mainAdd.singleAdd.exploreText`}
