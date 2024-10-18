@@ -2,6 +2,7 @@ import { isValidURL } from 'features/utilitty/isValidUrl';
 import * as Yup from 'yup';
 
 export const heroValidationSchema = Yup.object().shape({
+
     entities: Yup.array().of(
         Yup.lazy((entity) => {
             switch (entity?.type) {
@@ -28,7 +29,6 @@ export const heroValidationSchema = Yup.object().shape({
                             mediaId: Yup.number().min(1, 'Single Add Media is required'),
                             exploreLink: Yup.string().nullable().test(
                                 'is-valid-url',
-                                'This field need to be filled with URL',
                                 (value) => !value || isValidURL(value),
                             ),
                             exploreText: Yup.string().nullable(),
@@ -51,7 +51,6 @@ export const heroValidationSchema = Yup.object().shape({
                                 mediaId: Yup.number().min(1, 'Right media is required'),
                                 exploreLink: Yup.string().nullable().test(
                                     'is-valid-url',
-                                    'This field need to be filled with URL',
                                     (value) => !value || isValidURL(value),
                                 ),
                                 exploreText: Yup.string().nullable(),
@@ -69,7 +68,6 @@ export const heroValidationSchema = Yup.object().shape({
                             title: Yup.string().nullable(),
                             exploreLink: Yup.string().nullable().test(
                                 'is-valid-url',
-                                'This field need to be filled with URL',
                                 (value) => !value || isValidURL(value),
                             ),
                             exploreText: Yup.string().nullable(),
