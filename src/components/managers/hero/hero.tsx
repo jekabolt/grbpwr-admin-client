@@ -251,12 +251,12 @@ export const Hero: FC = () => {
                                     }
                                     helperText={
                                       entity.mainAdd?.singleAdd?.exploreLink && errors.entities
-                                        ? 'lol'
+                                        ? 'This field is required'
                                         : entity.mainAdd?.singleAdd?.exploreLink &&
                                             !isValidUrlForHero(
                                               entity.mainAdd?.singleAdd?.exploreLink,
                                             )
-                                          ? 'kek'
+                                          ? 'Please enter a valid URL'
                                           : ''
                                     }
                                     fullWidth
