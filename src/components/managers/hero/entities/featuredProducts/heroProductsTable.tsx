@@ -5,8 +5,9 @@ import { Checkbox } from '@mui/material';
 import IconButton from '@mui/material/IconButton';
 import { useNavigate } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
-import { common_Category, common_Product } from 'api/proto-http/admin';
+import { common_Category, common_HeroFullInsert, common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
+import { useFormikContext } from 'formik';
 import {
   MRT_TableContainer,
   useMaterialReactTable,
@@ -23,9 +24,9 @@ export const HeroProductTable: FC<
   HeroProductTableData & {
     id: number;
     onReorder: (newOrder: common_Product[]) => void;
-    setFieldValue: (field: string, value: any) => void;
   }
-> = ({ products, id, onReorder, setFieldValue }) => {
+> = ({ products, id, onReorder }) => {
+  const { setFieldValue } = useFormikContext<common_HeroFullInsert>();
   const [categories, setCategories] = useState<common_Category[]>([]);
 
   const navigate = useNavigate();

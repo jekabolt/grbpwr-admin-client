@@ -1,16 +1,16 @@
-import { Box, Button, Divider, Grid, TextField, Typography } from '@mui/material';
+import { Button, Divider, Grid } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_HeroEntity } from 'api/proto-http/frontend';
-import { ProductPickerModal } from 'components/common/productPickerModal';
-import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
-import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
-import { ErrorMessage, Field, FieldArrayRenderProps, useFormikContext } from 'formik';
+import { FieldArrayRenderProps, useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
-import { HeroProductTable } from '../heroProductsTable';
 import { removeEntityIndex } from '../utility/arrayHelpers';
 import { getAllowedRatios } from '../utility/getAllowedRatios';
+import { DoubleAdd } from './doubleAdd/doubleAdd';
+import { FeaturedProduct } from './featuredProducts/featuredProduct';
+import { MainAdd } from './mainAdd/mainAdd';
+import { SingleAdd } from './singleAdd/singleAdd';
 
 interface EntitiesProps {
   entities: common_HeroEntity[];
@@ -18,7 +18,7 @@ interface EntitiesProps {
   arrayHelpers: FieldArrayRenderProps;
 }
 export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers }) => {
-  const { values, errors, setFieldValue } = useFormikContext<common_HeroFullInsert>();
+  const { values, setFieldValue } = useFormikContext<common_HeroFullInsert>();
   const [main, setMain] = useState<string>('');
   const [single, setSingle] = useState<{ [key: number]: string }>({});
   const [doubleAdd, setDoubleAdd] = useState<{
@@ -28,6 +28,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   const [currentEntityIndex, setCurrentEntityIndex] = useState<number | null>(null);
   const [allowedRatios, setAllowedRatios] = useState<{ [key: number]: string[] }>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
+
   const handleOpenProductSelection = (index: number) => {
     setCurrentEntityIndex(index);
     setIsModalOpen(true);
@@ -103,11 +104,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     setMain(newMainMedia.media?.thumbnail?.mediaUrl || '');
   };
 
-  const saveSingleMedia = (
-    selectedMedia: common_MediaFull[],
-
-    index: number,
-  ) => {
+  const saveSingleMedia = (selectedMedia: common_MediaFull[], index: number) => {
     const newSingleMedia = selectedMedia[0];
     setFieldValue(`entities.${index}.singleAdd.mediaId`, newSingleMedia.id);
     setSingle((prev) => ({
@@ -119,7 +116,6 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   const saveDoubleMedia = (
     selectedMedia: common_MediaFull[],
     side: 'left' | 'right',
-
     index: number,
   ) => {
     if (!selectedMedia.length) return;
@@ -172,264 +168,37 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
           <Grid item xs={12} ref={(el) => (entityRefs.current[index] = el)}>
             <Grid container spacing={2} className={styles.entity_container}>
               {entity.type === 'HERO_TYPE_MAIN_ADD' && (
-                <>
-                  <Grid item xs={12} md={10}>
-                    <Typography variant='h4' textTransform='uppercase'>
-                      main
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} md={10}>
-                    <SingleMediaViewAndSelect
-                      link={main}
-                      aspectRatio={['4:5', '5:4', '1:1', '16:9', '9:16']}
-                      saveSelectedMedia={(selectedMedia) => saveMainMedia(selectedMedia, index)}
-                    />
-                    {`${errors}.entities.${index}.mainAdd..singleAdd.mediaId` && (
-                      <ErrorMessage
-                        className={styles.error}
-                        name={`entities.${index}.mainAdd.singleAdd.mediaId`}
-                        component='div'
-                      />
-                    )}
-                    <Box component='div' className={styles.fields}>
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.mainAdd.singleAdd.exploreLink`}
-                        label='EXPLORE LINK'
-                        error={
-                          (entity.mainAdd?.singleAdd?.exploreLink && errors.entities) ||
-                          (entity.mainAdd?.singleAdd?.exploreLink &&
-                            !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink))
-                        }
-                        helperText={
-                          entity.mainAdd?.singleAdd?.exploreLink && errors.entities
-                            ? 'This field is required'
-                            : entity.mainAdd?.singleAdd?.exploreLink &&
-                                !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)
-                              ? 'Please enter a valid URL'
-                              : ''
-                        }
-                        fullWidth
-                      />
-
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.mainAdd.singleAdd.exploreText`}
-                        label='EXPLORE TEXT'
-                        fullwidth
-                      />
-                    </Box>
-                  </Grid>
-                </>
+                <MainAdd index={index} entity={entity} link={main} saveMedia={saveMainMedia} />
               )}
               {entity.type === 'HERO_TYPE_SINGLE_ADD' && (
-                <>
-                  <Grid item xs={12} md={10}>
-                    <Typography variant='h4' textTransform='uppercase'>
-                      single add
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} md={10}>
-                    <SingleMediaViewAndSelect
-                      link={single[index]}
-                      aspectRatio={['16:9']}
-                      saveSelectedMedia={(selectedMedia) => saveSingleMedia(selectedMedia, index)}
-                    />
-                    {`${errors}.entities.${index}.singleAdd.mediaId` && (
-                      <ErrorMessage
-                        className={styles.error}
-                        name={`entities.${index}.singleAdd.mediaId`}
-                        component='div'
-                      />
-                    )}
-                    <Box component='div' className={styles.fields}>
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.singleAdd.exploreLink`}
-                        label='EXPLORE LINK'
-                        error={
-                          entity.singleAdd?.exploreLink
-                            ? !isValidUrlForHero(entity.singleAdd?.exploreLink)
-                            : false
-                        }
-                        helperText={
-                          entity.singleAdd?.exploreLink &&
-                          !isValidUrlForHero(entity.singleAdd?.exploreLink)
-                            ? 'THIS IS NOT VALID EXPLORE LINK'
-                            : ''
-                        }
-                        fullwidth
-                      />
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.singleAdd.exploreText`}
-                        label='EXPLORE TEXT'
-                        fullwidth
-                      />
-                    </Box>
-                  </Grid>
-                </>
+                <SingleAdd
+                  index={index}
+                  entity={entity}
+                  singleLink={single}
+                  saveMedia={saveSingleMedia}
+                />
               )}
               {entity.type === 'HERO_TYPE_DOUBLE_ADD' && (
-                <>
-                  <Grid item xs={12} md={10}>
-                    <Typography variant='h4' textTransform='uppercase'>
-                      double add
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} md={5}>
-                    <SingleMediaViewAndSelect
-                      link={doubleAdd[index]?.left || ''}
-                      aspectRatio={allowedRatios[index] || ['4:5', '1:1']}
-                      saveSelectedMedia={(selectedMedia) =>
-                        saveDoubleMedia(selectedMedia, 'left', index)
-                      }
-                    />
-                    {`${errors}.entities.${index}.doubleAdd.left.mediaId` && (
-                      <ErrorMessage
-                        className={styles.error}
-                        name={`entities.${index}.doubleAdd.left.mediaId`}
-                        component='div'
-                      />
-                    )}
-                    <Box component='div' className={styles.fields}>
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.doubleAdd.left.exploreLink`}
-                        label='EXPLORE LINK'
-                        error={
-                          entity.doubleAdd?.left?.exploreLink
-                            ? !isValidUrlForHero(entity.doubleAdd?.left?.exploreLink)
-                            : false
-                        }
-                        helperText={
-                          entity.doubleAdd?.left?.exploreLink &&
-                          !isValidUrlForHero(entity.doubleAdd?.left?.exploreLink)
-                            ? 'THIS IS NOT VALID EXPLORE LINK'
-                            : ''
-                        }
-                        fullwidth
-                      />
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.doubleAdd.left.exploreText`}
-                        label='EXPLORE TEXT'
-                        fullwidth
-                      />
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} md={5}>
-                    <SingleMediaViewAndSelect
-                      link={doubleAdd[index]?.right || ''}
-                      aspectRatio={allowedRatios[index] || ['4:5', '1:1']}
-                      saveSelectedMedia={(selectedMedia) =>
-                        saveDoubleMedia(selectedMedia, 'right', index)
-                      }
-                    />
-                    {`${errors}.entities.${index}.doubleAdd.right.mediaId` && (
-                      <ErrorMessage
-                        className={styles.error}
-                        name={`entities.${index}.doubleAdd.right.mediaId`}
-                        component='div'
-                      />
-                    )}
-                    <Box component='div' className={styles.fields}>
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.doubleAdd.right.exploreLink`}
-                        label='EXPLORE LINK'
-                        error={
-                          entity.doubleAdd?.right?.exploreLink
-                            ? !isValidUrlForHero(entity.doubleAdd?.right?.exploreLink)
-                            : false
-                        }
-                        helperText={
-                          entity.doubleAdd?.right?.exploreLink &&
-                          !isValidUrlForHero(entity.doubleAdd?.right?.exploreLink)
-                            ? 'THIS IS NOT VALID EXPLORE LINK'
-                            : ''
-                        }
-                        fullwidth
-                      />
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.doubleAdd.right.exploreText`}
-                        label='EXPLORE TEXT'
-                        fullwidth
-                      />
-                    </Box>
-                  </Grid>
-                </>
+                <DoubleAdd
+                  index={index}
+                  entity={entity}
+                  doubleLinks={doubleAdd}
+                  allowedRatios={allowedRatios}
+                  saveDoubleMedia={saveDoubleMedia}
+                />
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
-                <>
-                  <Grid item xs={12} md={10}>
-                    <Typography variant='h4' textTransform='uppercase'>
-                      featured products
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} md={10}>
-                    <Box component='div' className={styles.fields}>
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.featuredProducts.title`}
-                        label='TITLE'
-                        fullWidth
-                      />
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.featuredProducts.exploreLink`}
-                        label='EXPLORE LINK'
-                        error={
-                          entity.featuredProducts?.exploreLink
-                            ? !isValidUrlForHero(entity.featuredProducts.exploreLink)
-                            : false
-                        }
-                        helperText={
-                          entity.featuredProducts?.exploreLink &&
-                          !isValidUrlForHero(entity.featuredProducts.exploreLink)
-                            ? 'THIS IS NOT A VALID EXPLORE LINK'
-                            : ''
-                        }
-                        fullWidth
-                      />
-                      <Field
-                        as={TextField}
-                        name={`entities.${index}.featuredProducts.exploreText`}
-                        label='EXPLORE TEXT'
-                        fullWidth
-                      />
-                    </Box>
-                    <HeroProductTable
-                      products={product[index] || []}
-                      id={index}
-                      onReorder={(newProductsOrder) =>
-                        handleProductsReorder(newProductsOrder, index)
-                      }
-                      setFieldValue={setFieldValue}
-                    />
-                    {`${errors}.entities.${index}.featuredProducts.productIds` && (
-                      <ErrorMessage
-                        className={styles.error}
-                        name={`entities.${index}.featuredProducts.productIds`}
-                        component='div'
-                      />
-                    )}
-                    <Button
-                      variant='contained'
-                      onClick={() => handleOpenProductSelection(index)}
-                      sx={{ textTransform: 'uppercase' }}
-                    >
-                      add products
-                    </Button>
-                  </Grid>
-                  <ProductPickerModal
-                    open={isModalOpen && currentEntityIndex === index}
-                    onClose={handleCloseModal}
-                    onSave={(selectedProduct) => handleSaveNewSelection(selectedProduct, index)}
-                    selectedProductIds={(product[index] || []).map((x) => x.id!)}
-                  />
-                </>
+                <FeaturedProduct
+                  index={index}
+                  entity={entity}
+                  product={product}
+                  isModalOpen={isModalOpen}
+                  currentEntityIndex={currentEntityIndex}
+                  handleCloseModal={handleCloseModal}
+                  handleSaveNewSelection={handleSaveNewSelection}
+                  handleProductsReorder={handleProductsReorder}
+                  handleOpenProductSelection={handleOpenProductSelection}
+                />
               )}
               <Grid item xs={12} md={10}>
                 <Button

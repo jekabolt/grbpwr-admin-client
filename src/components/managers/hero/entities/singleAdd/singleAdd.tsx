@@ -7,52 +7,53 @@ import { FC } from 'react';
 import styles from 'styles/hero.scss';
 import { HeroMediaEntityInterface } from '../interface/interface';
 
-export const MainAdd: FC<HeroMediaEntityInterface> = ({ index, entity, link, saveMedia }) => {
+export const SingleAdd: FC<HeroMediaEntityInterface> = ({
+  index,
+  entity,
+  singleLink,
+  saveMedia,
+}) => {
   const { errors } = useFormikContext<common_HeroFullInsert>();
   return (
     <>
       <Grid item xs={12} md={10}>
         <Typography variant='h4' textTransform='uppercase'>
-          main
+          single add
         </Typography>
       </Grid>
       <Grid item xs={12} md={10}>
         <SingleMediaViewAndSelect
-          link={link}
-          aspectRatio={['4:5', '5:4', '1:1', '16:9', '9:16']}
+          link={singleLink?.[index]}
+          aspectRatio={['16:9']}
           saveSelectedMedia={(selectedMedia) => saveMedia && saveMedia(selectedMedia, index)}
         />
-        {`${errors}.entities.${index}.mainAdd..singleAdd.mediaId` && (
+        {`${errors}.entities.${index}.singleAdd.mediaId` && (
           <ErrorMessage
             className={styles.error}
-            name={`entities.${index}.mainAdd.singleAdd.mediaId`}
+            name={`entities.${index}.singleAdd.mediaId`}
             component='div'
           />
         )}
         <Box component='div' className={styles.fields}>
           <Field
             as={TextField}
-            name={`entities.${index}.mainAdd.singleAdd.exploreLink`}
+            name={`entities.${index}.singleAdd.exploreLink`}
             label='EXPLORE LINK'
             error={
-              (entity.mainAdd?.singleAdd?.exploreLink && errors.entities) ||
-              (entity.mainAdd?.singleAdd?.exploreLink &&
-                !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink))
+              entity.singleAdd?.exploreLink
+                ? !isValidUrlForHero(entity.singleAdd?.exploreLink)
+                : false
             }
             helperText={
-              entity.mainAdd?.singleAdd?.exploreLink && errors.entities
-                ? 'This field is required'
-                : entity.mainAdd?.singleAdd?.exploreLink &&
-                    !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)
-                  ? 'Please enter a valid URL'
-                  : ''
+              entity.singleAdd?.exploreLink && !isValidUrlForHero(entity.singleAdd?.exploreLink)
+                ? 'THIS IS NOT VALID EXPLORE LINK'
+                : ''
             }
-            fullWidth
+            fullwidth
           />
-
           <Field
             as={TextField}
-            name={`entities.${index}.mainAdd.singleAdd.exploreText`}
+            name={`entities.${index}.singleAdd.exploreText`}
             label='EXPLORE TEXT'
             fullwidth
           />
