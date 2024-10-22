@@ -47,7 +47,7 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
             helperText={
               entity.featuredProducts?.exploreLink &&
               !isValidUrlForHero(entity.featuredProducts.exploreLink)
-                ? 'THIS IS NOT A VALID EXPLORE LINK'
+                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
                 : ''
             }
             fullWidth

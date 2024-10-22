@@ -40,12 +40,10 @@ export const MainAdd: FC<HeroMediaEntityInterface> = ({ index, entity, link, sav
                 !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink))
             }
             helperText={
-              entity.mainAdd?.singleAdd?.exploreLink && errors.entities
-                ? 'This field is required'
-                : entity.mainAdd?.singleAdd?.exploreLink &&
-                    !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)
-                  ? 'Please enter a valid URL'
-                  : ''
+              entity.mainAdd?.singleAdd?.exploreLink &&
+              !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)
+                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
+                : ''
             }
             fullWidth
           />

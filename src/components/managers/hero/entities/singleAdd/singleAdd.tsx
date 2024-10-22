@@ -40,13 +40,12 @@ export const SingleAdd: FC<HeroMediaEntityInterface> = ({
             name={`entities.${index}.singleAdd.exploreLink`}
             label='EXPLORE LINK'
             error={
-              entity.singleAdd?.exploreLink
-                ? !isValidUrlForHero(entity.singleAdd?.exploreLink)
-                : false
+              (entity.singleAdd?.exploreLink && errors.entities) ||
+              (entity.singleAdd?.exploreLink && !isValidUrlForHero(entity.singleAdd?.exploreLink))
             }
             helperText={
               entity.singleAdd?.exploreLink && !isValidUrlForHero(entity.singleAdd?.exploreLink)
-                ? 'THIS IS NOT VALID EXPLORE LINK'
+                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
                 : ''
             }
             fullwidth

@@ -162,7 +162,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   };
 
   return (
-    <Grid container spacing={2} className={styles.entities_container}>
+    <Grid container spacing={2} marginTop={5}>
       {values.entities &&
         values.entities.map((entity, index) => (
           <Grid item xs={12} ref={(el) => (entityRefs.current[index] = el)}>

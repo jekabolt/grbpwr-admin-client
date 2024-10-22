@@ -43,14 +43,15 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
             name={`entities.${index}.doubleAdd.left.exploreLink`}
             label='EXPLORE LINK'
             error={
-              entity.doubleAdd?.left?.exploreLink
-                ? !isValidUrlForHero(entity.doubleAdd?.left?.exploreLink)
-                : false
+              (entity.doubleAdd.left.exploreLink &&
+                `${errors}.entities.${index}.doubleAdd.left.exploreLink`) ||
+              (entity.doubleAdd.left.exploreLink &&
+                !isValidUrlForHero(entity.doubleAdd.left.exploreLink))
             }
             helperText={
-              entity.doubleAdd?.left?.exploreLink &&
-              !isValidUrlForHero(entity.doubleAdd?.left?.exploreLink)
-                ? 'THIS IS NOT VALID EXPLORE LINK'
+              entity.doubleAdd.left.exploreLink &&
+              !isValidUrlForHero(entity.doubleAdd.left.exploreLink)
+                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
                 : ''
             }
             fullwidth
@@ -84,14 +85,14 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
             name={`entities.${index}.doubleAdd.right.exploreLink`}
             label='EXPLORE LINK'
             error={
-              entity.doubleAdd?.right?.exploreLink
-                ? !isValidUrlForHero(entity.doubleAdd?.right?.exploreLink)
-                : false
+              (entity.doubleAdd.right.exploreLink && errors.entities) ||
+              (entity.doubleAdd.right.exploreLink &&
+                !isValidUrlForHero(entity.doubleAdd.right.exploreLink))
             }
             helperText={
-              entity.doubleAdd?.right?.exploreLink &&
-              !isValidUrlForHero(entity.doubleAdd?.right?.exploreLink)
-                ? 'THIS IS NOT VALID EXPLORE LINK'
+              entity.doubleAdd.right.exploreLink &&
+              !isValidUrlForHero(entity.doubleAdd.right.exploreLink)
+                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
                 : ''
             }
             fullwidth
