@@ -4,7 +4,6 @@ import { Dispatch, SetStateAction } from 'react';
 
 export interface MediaSelectorLayoutProps {
     label: string
-    isEditMode?: boolean;
     allowMultiple: boolean;
     aspectRatio?: string[];
     hideVideos?: boolean;
