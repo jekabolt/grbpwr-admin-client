@@ -17,6 +17,13 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMe
     code: promo.promoCodeInsert?.code,
     freeShipping: promo.promoCodeInsert?.freeShipping ? 'free' : 'paid',
     discount: promo.promoCodeInsert?.discount ? `${promo.promoCodeInsert.discount.value}%` : '',
+    start: promo.promoCodeInsert?.start
+      ? new Date(promo.promoCodeInsert.start).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'numeric',
+          day: 'numeric',
+        })
+      : undefined,
     expiration: promo.promoCodeInsert?.expiration
       ? new Date(promo.promoCodeInsert.expiration).toLocaleDateString('en-US', {
           year: 'numeric',
@@ -41,6 +48,7 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMe
 
   const columns = [
     { field: 'code', headerName: 'CODE', width: 120 },
+    { field: 'start', headerName: 'START', width: 120 },
     { field: 'expiration', headerName: 'EXPIRATION', width: 120 },
     { field: 'discount', headerName: 'DISCOUNT', flex: 1 },
     { field: 'freeShipping', headerName: 'SHIPPING', flex: 1 },
