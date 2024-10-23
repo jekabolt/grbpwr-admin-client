@@ -32,6 +32,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const { values, setFieldValue, errors, touched } = useFormikContext<common_ProductNew>();
   const [lastSizeNonZero, setLastSizeNonZero] = useState(false);
   const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
+  const [hasConfirmedSizeChange, setHasConfirmedSizeChange] = useState(false);
   const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
@@ -82,12 +83,13 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
     ) => {
       const { value } = event.target;
 
-      if (isEditMode && sizeId && !hasChangedSize[sizeId]) {
+      if (isEditMode && sizeId && !hasChangedSize[sizeId] && !hasConfirmedSizeChange) {
         const confirmed = window.confirm('Are you sure you want to change the size quantity?');
         if (!confirmed) {
           return;
         }
         setHasChangedSize((prev) => ({ ...prev, [sizeId]: true }));
+        setHasConfirmedSizeChange(true);
       }
 
       const sizeIndex = values.sizeMeasurements?.findIndex(
