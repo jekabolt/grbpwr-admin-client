@@ -113,7 +113,7 @@ export const DragDrop: FC<DragDropProps> = ({
                 <input
                   id='files'
                   type='file'
-                  accept='image/*, video/*'
+                  accept='image/*, .heic, video/*'
                   onChange={handleFileChange}
                   style={{ display: 'none' }}
                 />
