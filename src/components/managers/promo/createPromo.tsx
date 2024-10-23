@@ -33,6 +33,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
     expiration: defaultDate.toISOString(),
     allowed: true,
     voucher: false,
+    start: new Date().toISOString(),
   };
 
   const [promo, setPromo] = useState<common_PromoCodeInsert>(initialPromoStates);
@@ -120,9 +121,9 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Grid container marginTop={4} justifyContent='center' spacing={2}>
-        <Grid item xs={12} sm={8} md={7}>
+        <Grid item xs={12} sm={8} md={10}>
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={3}>
               <TextField
                 name='code'
                 value={promo.code}
@@ -141,7 +142,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 }}
               />
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={3}>
               <TextField
                 error={!!error}
                 helperText={error}
@@ -157,7 +158,15 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 fullWidth={true}
               />
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={3}>
+              <DatePicker
+                value={promo.start ? new Date(promo.start) : null}
+                onChange={handleDateTimeChange}
+                label='START DATE'
+                slotProps={{ textField: { size: 'small', fullWidth: isMobile, required: true } }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={3}>
               <DatePicker
                 value={promo.expiration ? new Date(promo.expiration) : null}
                 onChange={handleDateTimeChange}
