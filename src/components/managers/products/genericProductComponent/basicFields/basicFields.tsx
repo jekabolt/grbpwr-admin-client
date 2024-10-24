@@ -23,7 +23,7 @@ import CountryList from 'react-select-country-list';
 import { v4 as uuidv4 } from 'uuid';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 import { handleKeyDown } from '../utility/brandNameRegExp';
-import { genderOptions } from '../utility/genderList';
+import { genderOptions } from '../utility/dictionaryConst';
 import { formatWellKnownTimestamp, parseWellKnownTimestamp } from '../utility/preorderTime';
 
 export const BasicFields: FC<BasicProductFieldsInterface> = ({

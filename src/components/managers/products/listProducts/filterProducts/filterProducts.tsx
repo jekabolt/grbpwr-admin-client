@@ -19,6 +19,11 @@ import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, FieldProps, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
+import {
+  genderOptions,
+  orderFactors,
+  sortFactors,
+} from '../../genericProductComponent/utility/dictionaryConst';
 
 interface FilterProps {
   filter: GetProductsPagedRequest;
@@ -87,9 +92,9 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                             value={field.value || ''}
                             label='SORT FACTORS'
                           >
-                            {dictionary?.sortFactors?.map((s) => (
+                            {sortFactors.map((s) => (
                               <MenuItem key={s.id} value={s.id}>
-                                {findInDictionary(dictionary, s.id, 'sortFactors')}
+                                {s.name?.toUpperCase()}
                               </MenuItem>
                             ))}
                           </Select>
@@ -110,9 +115,9 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                             value={field.value || ''}
                             label='ORDER'
                           >
-                            {dictionary?.orderFactors?.map((s) => (
-                              <MenuItem key={s.id} value={s.id}>
-                                {s.name}
+                            {orderFactors.map((order) => (
+                              <MenuItem key={order.id} value={order.id}>
+                                {order.name?.toUpperCase()}
                               </MenuItem>
                             ))}
                           </Select>
@@ -249,9 +254,9 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                             label='GENDER'
                           >
                             <MenuItem value=''>ANY</MenuItem>
-                            {dictionary?.genders?.map((gender, id) => (
-                              <MenuItem key={id} value={gender.id}>
-                                {gender.name?.replace('GENDER_ENUM_', '').toUpperCase()}
+                            {genderOptions.map((gender) => (
+                              <MenuItem key={gender.id} value={gender.id}>
+                                {gender.name?.toUpperCase()}
                               </MenuItem>
                             ))}
                           </Select>
