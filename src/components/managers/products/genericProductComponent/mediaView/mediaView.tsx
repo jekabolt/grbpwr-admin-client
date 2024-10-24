@@ -79,6 +79,7 @@ export const MediaView: FC<MediaViewInterface> = ({
           }
           isEditMode={isEditMode}
           isAddingProduct={isAddingProduct}
+          isDeleteAccepted={false}
           aspectRatio={['4:5']}
           hideVideos={true}
           saveSelectedMedia={uploadThumbnailInProduct}
@@ -120,6 +121,7 @@ export const MediaView: FC<MediaViewInterface> = ({
                 <MediaSelectorLayout
                   label='select media'
                   aspectRatio={['3:4']}
+                  isDeleteAccepted={false}
                   allowMultiple={true}
                   saveSelectedMedia={uploadMediasInProduct}
                 />

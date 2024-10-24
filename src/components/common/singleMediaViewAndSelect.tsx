@@ -11,6 +11,7 @@ interface SingleMediaView {
   isAddingProduct?: boolean;
   aspectRatio?: string[];
   hideVideos?: boolean;
+  isDeleteAccepted?: boolean;
   saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
 
@@ -20,6 +21,7 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   isAddingProduct,
   aspectRatio,
   hideVideos,
+  isDeleteAccepted,
   saveSelectedMedia,
 }) => {
   return (
@@ -38,6 +40,7 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
               allowMultiple={false}
               aspectRatio={aspectRatio}
               hideVideos={hideVideos}
+              isDeleteAccepted={isDeleteAccepted}
               saveSelectedMedia={saveSelectedMedia}
             />
           </Grid>

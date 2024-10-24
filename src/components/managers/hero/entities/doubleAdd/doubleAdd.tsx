@@ -26,6 +26,7 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
         <SingleMediaViewAndSelect
           link={doubleLinks?.[index]?.left || ''}
           aspectRatio={allowedRatios?.[index] || ['4:5', '1:1']}
+          isDeleteAccepted={false}
           saveSelectedMedia={(selectedMedia) =>
             saveDoubleMedia && saveDoubleMedia(selectedMedia, 'left', index)
           }
@@ -68,6 +69,7 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
         <SingleMediaViewAndSelect
           link={doubleLinks?.[index]?.right || ''}
           aspectRatio={allowedRatios?.[index] || ['4:5', '1:1']}
+          isDeleteAccepted={false}
           saveSelectedMedia={(selectedMedia) =>
             saveDoubleMedia && saveDoubleMedia(selectedMedia, 'right', index)
           }

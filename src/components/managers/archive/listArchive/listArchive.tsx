@@ -294,6 +294,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                       saveSelectedMedia={handleMediaPreview(entry.archive?.id)}
                       aspectRatio={['1:1', '3:4', '4:3']}
                       hideVideos={true}
+                      isDeleteAccepted={false}
                     />
                   </Grid>
                 )}

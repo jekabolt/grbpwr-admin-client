@@ -8,6 +8,7 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   allowMultiple,
   aspectRatio,
   hideVideos,
+  isDeleteAccepted,
   saveSelectedMedia,
 }) => {
   const [mediaSelectorVisibility, setMediaSelectorVisibility] = useState(false);
@@ -28,6 +29,7 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
             aspectRatio={aspectRatio}
             hideVideos={hideVideos}
             allowMultiple={allowMultiple}
+            isDeleteAccepted={isDeleteAccepted}
             saveSelectedMedia={saveSelectedMedia}
             closeMediaSelector={handleMediaSelectorVisibility}
           />

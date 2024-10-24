@@ -20,6 +20,7 @@ export const MainAdd: FC<HeroMediaEntityInterface> = ({ index, entity, link, sav
         <SingleMediaViewAndSelect
           link={link}
           aspectRatio={['4:5', '5:4', '1:1', '16:9', '9:16']}
+          isDeleteAccepted={false}
           saveSelectedMedia={(selectedMedia) => saveMedia && saveMedia(selectedMedia, index)}
         />
         {`${errors}.entities.${index}.mainAdd..singleAdd.mediaId` && (

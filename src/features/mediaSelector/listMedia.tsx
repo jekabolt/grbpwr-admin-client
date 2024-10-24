@@ -28,13 +28,14 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   selectedMedia,
   enableModal = false,
   croppedImage,
+  aspectRatio,
+  hideVideos = false,
+  isDeleteAccepted = true,
   setCroppedImage,
   select,
   setMedia,
   sortedAndFilteredMedia,
   handleUploadMedia,
-  aspectRatio,
-  hideVideos = false,
 }) => {
   const { isSnackBarOpen, snackBarMessage, snackBarSeverity, showMessage, closeSnackBar } =
     useMediaSelector();
@@ -190,7 +191,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                     />
                   )}
                 </InputLabel>
-                {hoveredMediaId === media.id && (
+                {hoveredMediaId === media.id && isDeleteAccepted && (
                   <IconButton
                     size='small'
                     onClick={(e) => handleDeleteFile(media.id, e)}
