@@ -151,7 +151,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
         <ImageList
           variant='standard'
           sx={{ width: '100%' }}
-          cols={isSmallScreen ? 1 : 5}
+          cols={isSmallScreen ? 2 : 5}
           gap={8}
           rowHeight={200}
         >
