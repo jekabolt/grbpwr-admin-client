@@ -11,6 +11,7 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
   allowMultiple,
   aspectRatio,
   hideVideos,
+  isDeleteAccepted,
   closeMediaSelector,
   saveSelectedMedia,
 }) => {
@@ -64,6 +65,7 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
         allowMultiple={allowMultiple}
         aspectRatio={aspectRatio}
         hideVideos={hideVideos}
+        isDeleteAccepted={isDeleteAccepted}
         selectedMedia={selectedMedia}
         select={select}
       />

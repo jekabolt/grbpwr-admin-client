@@ -7,6 +7,7 @@ export interface MediaSelectorLayoutProps {
     allowMultiple: boolean;
     aspectRatio?: string[];
     hideVideos?: boolean;
+    isDeleteAccepted?: boolean;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
 
@@ -14,6 +15,7 @@ export interface MediaSelectorModalProps {
     allowMultiple: boolean;
     aspectRatio?: string[];
     hideVideos?: boolean;
+    isDeleteAccepted?: boolean;
     closeMediaSelector: () => void;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
@@ -24,6 +26,7 @@ export interface MediaSelectorInterface {
     enableModal?: boolean
     aspectRatio?: string[]
     hideVideos?: boolean
+    isDeleteAccepted?: boolean;
     select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void
 
 }
@@ -37,6 +40,7 @@ export interface MediaSelectorMediaListProps {
     croppedImage: string | null
     aspectRatio?: string[]
     hideVideos?: boolean
+    isDeleteAccepted?: boolean;
     setCroppedImage: (img: string | null) => void
     select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
     setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
