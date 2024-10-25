@@ -14,6 +14,8 @@ export interface ArchiveModalInterface {
 }
 
 export interface createArchives {
+    open: boolean;
+    close: () => void;
     fetchArchive: (limit: number, offset: number) => void;
     showMessage: (message: string, severity: 'success' | 'error') => void;
 }
