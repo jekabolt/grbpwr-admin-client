@@ -89,11 +89,16 @@ export const ArchiveTable: FC<ArchiveTableInterface> = ({
     {
       accessorKey: 'archiveItem.url',
       header: 'URL',
-      Cell: ({ cell }) => (
-        <a href={cell.getValue() as string} target='_blank' rel='noopener noreferrer'>
-          go to link
-        </a>
-      ),
+      Cell: ({ cell }) => {
+        const url = cell.getValue() as string;
+        return url ? (
+          <a href={url} target='_blank' rel='noopener noreferrer'>
+            go to link
+          </a>
+        ) : (
+          'no link'
+        );
+      },
     },
     {
       accessorKey: 'id',

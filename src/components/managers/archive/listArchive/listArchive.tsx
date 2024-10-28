@@ -144,8 +144,8 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                       },
                     },
                   } as common_MediaFull,
-                  url: url || item.archiveItem?.url,
-                  name: title || item.archiveItem?.name,
+                  url: url,
+                  name: title,
                 },
               };
 
