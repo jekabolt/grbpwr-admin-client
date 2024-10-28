@@ -147,6 +147,25 @@ export const Orders: FC = () => {
   const columns = [
     { field: 'id', headerName: 'Order ID', width: 120 },
     {
+      field: 'orderStatusId',
+      headerName: 'Order status',
+      width: 180,
+      renderCell: (params: any) => {
+        const status = getOrderStatusName(dictionary, params.value);
+        return (
+          <div
+            style={{
+              backgroundColor: getStatusColor(status),
+              width: '100%',
+              height: '100%',
+            }}
+          >
+            {status}
+          </div>
+        );
+      },
+    },
+    {
       field: 'placed',
       headerName: 'Placed',
       flex: 1,
@@ -164,25 +183,6 @@ export const Orders: FC = () => {
       width: 300,
       renderCell: (params: any) => {
         return formatDateTime(params.value);
-      },
-    },
-    {
-      field: 'orderStatusId',
-      headerName: 'Order status',
-      width: 180,
-      renderCell: (params: any) => {
-        const status = getOrderStatusName(dictionary, params.value);
-        return (
-          <div
-            style={{
-              backgroundColor: getStatusColor(status),
-              width: '100%',
-              height: '100%',
-            }}
-          >
-            {status}
-          </div>
-        );
       },
     },
     {
