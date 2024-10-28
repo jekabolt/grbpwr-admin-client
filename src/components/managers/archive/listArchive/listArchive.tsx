@@ -102,7 +102,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
             archiveItem: {
               media: { id: mediaId, media: { thumbnail: { mediaUrl: media } } },
               url,
-              name,
+              name: title,
             },
           } as common_ArchiveItemFull;
           const updatedItems = [...(entry.items || []), newItem];
