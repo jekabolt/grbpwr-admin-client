@@ -106,7 +106,30 @@ export const OrderDetails = () => {
       headerName: '',
       width: 200,
       renderCell: (params: any) => (
-        <img src={params.value} alt='product' style={{ height: '100px', width: 'auto' }} />
+        <div
+          style={{
+            height: '100%',
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
+          onClick={() => {
+            if (params.row.orderItem.productId) {
+              window.open(
+                `${window.location.origin}/#/${ROUTES.singleProduct}/${params.row.orderItem.productId}`,
+                '_blank',
+              );
+            }
+          }}
+        >
+          <img
+            src={params.row.orderItem.productId ? params.value : ''}
+            alt='product'
+            style={{ height: '100px', width: 'auto' }}
+          />
+        </div>
       ),
     },
     {
