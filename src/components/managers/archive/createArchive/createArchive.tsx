@@ -53,6 +53,11 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
   const mediaPreview = (newSelectedMedia: common_MediaFull[]) => {
     if (newSelectedMedia.length === 0) return;
     const selectedMedia = newSelectedMedia[0];
+    const isDuplicate = archive.itemsInsert?.some((item) => item.mediaId === selectedMedia.id);
+    if (isDuplicate) {
+      showMessage('This media is already in the archive', 'error');
+      return;
+    }
     setMediaId(selectedMedia.id);
     const previewMediaUrl = selectedMedia.media?.thumbnail?.mediaUrl;
     setMedia(previewMediaUrl);
@@ -63,6 +68,14 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
     if (url && !isValidUrl(url)) {
       showMessage('invalid url', 'error');
       return;
+    }
+
+    if (mediaId && selectedItemIndex === null) {
+      const isDuplicate = archive.itemsInsert?.some((item) => item.mediaId === mediaId);
+      if (isDuplicate) {
+        showMessage('This media is already in the archive', 'error');
+        return;
+      }
     }
 
     const newItem: common_ArchiveItemInsert = {
@@ -158,6 +171,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
         fetchArchive(50, 0);
         setMediaItem([]);
         showMessage('archive created', 'success');
+        close();
       } else {
         showMessage('add item to the archive', 'error');
       }
@@ -165,9 +179,11 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
       showMessage('archive cannot be created ', 'error');
     }
   };
-
   return (
     <Dialog open={open} onClose={close} fullWidth maxWidth='xl'>
+      <Button onClick={close} sx={{ position: 'absolute', right: 0, top: 0 }}>
+        <ClearIcon />
+      </Button>
       <Grid container spacing={2} padding={4} alignItems='center'>
         <Grid item xs={12}>
           <Typography variant='h5' textTransform='uppercase'>
