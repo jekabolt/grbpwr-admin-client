@@ -1,5 +1,8 @@
 export const isValidURL = (url: string | undefined): boolean => {
     if (!url) return false;
+
+    if (!url.match(/^https?:\/\//)) return false;
+
     try {
         new URL(url);
         return true;

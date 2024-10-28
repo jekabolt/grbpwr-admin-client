@@ -99,8 +99,6 @@ export const fetchArchives = (
                     showMessage('Item removed from archive', 'success');
                     updateArchiveInformation(archiveId, updatedArchiveEntry);
                     return updatedArchiveEntry;
-                } else {
-                    showMessage('Item cannot be removed from archive', 'error');
                 }
                 return archiveEntry;
             }).filter((archiveEntry) => archiveEntry !== null) as common_ArchiveFull[]

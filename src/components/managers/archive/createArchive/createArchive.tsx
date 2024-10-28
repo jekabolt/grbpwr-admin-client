@@ -1,5 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Button, Grid, IconButton, TextField, Typography } from '@mui/material';
+import { Button, Dialog, Grid, IconButton, TextField, Typography } from '@mui/material';
 import { addArchive } from 'api/archive';
 import {
   common_ArchiveItemInsert,
@@ -16,7 +16,7 @@ import { ArchiveModal } from '../archiveModal/archiveModal';
 import { createArchives } from '../interfaces/interfaces';
 import { isValidUrl } from '../utility/isValidUrl';
 
-export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage }) => {
+export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, open, close }) => {
   const initialArchiveState: common_ArchiveNew = {
     archive: {
       heading: '',
@@ -53,6 +53,11 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
   const mediaPreview = (newSelectedMedia: common_MediaFull[]) => {
     if (newSelectedMedia.length === 0) return;
     const selectedMedia = newSelectedMedia[0];
+    const isDuplicate = archive.itemsInsert?.some((item) => item.mediaId === selectedMedia.id);
+    if (isDuplicate) {
+      showMessage('This media is already in the archive', 'error');
+      return;
+    }
     setMediaId(selectedMedia.id);
     const previewMediaUrl = selectedMedia.media?.thumbnail?.mediaUrl;
     setMedia(previewMediaUrl);
@@ -63,6 +68,14 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
     if (url && !isValidUrl(url)) {
       showMessage('invalid url', 'error');
       return;
+    }
+
+    if (mediaId && selectedItemIndex === null) {
+      const isDuplicate = archive.itemsInsert?.some((item) => item.mediaId === mediaId);
+      if (isDuplicate) {
+        showMessage('This media is already in the archive', 'error');
+        return;
+      }
     }
 
     const newItem: common_ArchiveItemInsert = {
@@ -158,6 +171,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
         fetchArchive(50, 0);
         setMediaItem([]);
         showMessage('archive created', 'success');
+        close();
       } else {
         showMessage('add item to the archive', 'error');
       }
@@ -165,103 +179,107 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage })
       showMessage('archive cannot be created ', 'error');
     }
   };
-
   return (
-    <Grid container spacing={2} marginTop={4} alignItems='center'>
-      <Grid item xs={12}>
-        <Typography variant='h5' textTransform='uppercase'>
-          create new archive
-        </Typography>
-        <Grid container className={styles.scroll_container} wrap='nowrap'>
-          <Grid item xs={12} md={3} className={styles.media_item_add}>
-            <MediaSelectorLayout
-              label='add media'
-              allowMultiple={false}
-              saveSelectedMedia={mediaPreview}
-              aspectRatio={['1:1', '3:4', '4:3']}
-              hideVideos={true}
-              isDeleteAccepted={false}
-            />
-          </Grid>
-          {mediaItem.map((media, id) => (
-            <Grid item key={id} xs={12} md={3}>
-              <Grid container>
-                <Grid item xs={12} className={styles.media_item}>
-                  <img
-                    src={media.media?.fullSize?.mediaUrl}
-                    alt=''
-                    onClick={() => toggleModal(id)}
-                  />
-                  <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
-                    <ClearIcon fontSize='small' />
-                  </IconButton>
-                </Grid>
-                <Grid item xs={12}>
-                  <TruncateText text={archive.itemsInsert?.[id].name} length={60} />
-                  {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
-                    <CopyToClipboard
-                      text={archive.itemsInsert[id].url || ''}
-                      displayText={`${archive.itemsInsert[id].url?.slice(0, 5)}...${archive.itemsInsert[id].url?.slice(-7)}`}
+    <Dialog open={open} onClose={close} fullWidth maxWidth='xl'>
+      <Button onClick={close} sx={{ position: 'absolute', right: 0, top: 0 }}>
+        <ClearIcon />
+      </Button>
+      <Grid container spacing={2} padding={4} alignItems='center'>
+        <Grid item xs={12}>
+          <Typography variant='h5' textTransform='uppercase'>
+            create new archive
+          </Typography>
+          <Grid container className={styles.scroll_container} wrap='nowrap'>
+            <Grid item xs={12} md={3} className={styles.media_item_add}>
+              <MediaSelectorLayout
+                label='add media'
+                allowMultiple={false}
+                saveSelectedMedia={mediaPreview}
+                aspectRatio={['1:1', '3:4', '4:3']}
+                hideVideos={true}
+                isDeleteAccepted={false}
+              />
+            </Grid>
+            {mediaItem.map((media, id) => (
+              <Grid item key={id} xs={12} md={3}>
+                <Grid container>
+                  <Grid item xs={12} className={styles.media_item}>
+                    <img
+                      src={media.media?.fullSize?.mediaUrl}
+                      alt=''
+                      onClick={() => toggleModal(id)}
                     />
-                  )}
+                    <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
+                      <ClearIcon fontSize='small' />
+                    </IconButton>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TruncateText text={archive.itemsInsert?.[id].name} length={60} />
+                    {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
+                      <CopyToClipboard
+                        text={archive.itemsInsert[id].url || ''}
+                        displayText={`${archive.itemsInsert[id].url?.slice(0, 5)}...${archive.itemsInsert[id].url?.slice(-7)}`}
+                      />
+                    )}
+                  </Grid>
                 </Grid>
               </Grid>
+            ))}
+          </Grid>
+
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField
+                type='text'
+                name='heading'
+                fullWidth
+                value={archive.archive?.heading}
+                onChange={handleTextFieldChange}
+                label='TITLE'
+                InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+                size='small'
+                required
+              />
             </Grid>
-          ))}
-        </Grid>
-
-        <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <TextField
-              type='text'
-              name='heading'
-              fullWidth
-              value={archive.archive?.heading}
-              onChange={handleTextFieldChange}
-              label='TITLE'
-              InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
-              size='small'
-              required
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              type='text'
-              name='description'
-              value={archive.archive?.text}
-              onChange={handleTextFieldChange}
-              label='DESCRIPTION'
-              InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
-              inputProps={{ maxLength: 255 }}
-              size='small'
-              fullWidth
-              multiline
-            />
+            <Grid item xs={12}>
+              <TextField
+                type='text'
+                name='description'
+                value={archive.archive?.text}
+                onChange={handleTextFieldChange}
+                label='DESCRIPTION'
+                InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+                inputProps={{ maxLength: 255 }}
+                size='small'
+                fullWidth
+                multiline
+              />
+            </Grid>
           </Grid>
         </Grid>
-      </Grid>
 
-      <Grid item xs={12}>
-        <Button
-          onClick={() => createArchive()}
-          variant='contained'
-          disabled={mediaItem.length === 0 || archive.archive?.heading?.trim() === ''}
-        >
-          submit
-        </Button>
-      </Grid>
+        <Grid item xs={12}>
+          <Button
+            onClick={() => createArchive()}
+            variant='contained'
+            disabled={mediaItem.length === 0 || archive.archive?.heading?.trim() === ''}
+          >
+            submit
+          </Button>
+        </Grid>
 
-      <ArchiveModal
-        open={isModalOpen}
-        isEditMode={selectedItemIndex !== null}
-        media={media?.toString() || ''}
-        title={title}
-        url={url}
-        close={toggleModal}
-        setTitle={setTitle}
-        setUrl={setUrl}
-        addNewItem={addNewItem}
-      />
-    </Grid>
+        <ArchiveModal
+          open={isModalOpen}
+          isEditMode={selectedItemIndex !== null}
+          media={media?.toString() || ''}
+          title={title}
+          url={url}
+          close={toggleModal}
+          setTitle={setTitle}
+          setUrl={setUrl}
+          addNewItem={addNewItem}
+        />
+      </Grid>
+    </Dialog>
   );
 };

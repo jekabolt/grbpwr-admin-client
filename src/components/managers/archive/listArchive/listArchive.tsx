@@ -1,5 +1,5 @@
 import DeleteIcon from '@mui/icons-material/Delete';
-import { Box, Button, Divider, Grid, TextField } from '@mui/material';
+import { Box, Button, Grid, TextField, Typography } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveItemFull } from 'api/proto-http/frontend';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
@@ -95,12 +95,14 @@ export const ListArchive: FC<ListArchiveInterface> = ({
           if (entry.items?.some((item) => item.archiveItem?.media?.id === mediaId)) {
             return showMessage('this media is already added', 'error'), entry;
           }
+          const tempId = Date.now();
           const newItem = {
+            id: tempId,
             archiveId,
             archiveItem: {
               media: { id: mediaId, media: { thumbnail: { mediaUrl: media } } },
               url,
-              name,
+              name: title,
             },
           } as common_ArchiveItemFull;
           const updatedItems = [...(entry.items || []), newItem];
@@ -142,8 +144,8 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                       },
                     },
                   } as common_MediaFull,
-                  url: url || item.archiveItem?.url,
-                  name: title || item.archiveItem?.name,
+                  url: url,
+                  name: title,
                 },
               };
 
@@ -204,10 +206,27 @@ export const ListArchive: FC<ListArchiveInterface> = ({
   };
 
   return (
-    <Grid container spacing={2} marginTop='3%'>
-      {archive.map((entry) => (
+    <Grid container spacing={3}>
+      {archive.map((entry, id) => (
         <Grid item xs={12} key={entry.archive?.id}>
-          <Grid container justifyContent='space-between' spacing={2}>
+          <Grid
+            container
+            justifyContent='space-between'
+            spacing={2}
+            borderBottom='5px solid #000'
+            padding={2}
+            sx={{ backgroundColor: id % 2 == 0 ? '#f5f5f5' : 'transparent' }}
+          >
+            <Grid item xs={12} display='flex' justifyContent='flex-end'>
+              <Typography variant='h6' textTransform='uppercase'>
+                total number of items: {entry.items?.length}
+              </Typography>
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant='h6' textTransform='uppercase'>
+                archive &#8470; {archive.length - id}
+              </Typography>
+            </Grid>
             <Grid item>
               <Box display='flex' gap='20px'>
                 <TextField
@@ -248,7 +267,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                 />
               ) : (
                 <Grid container spacing={2}>
-                  {entry.items?.slice(0, 4).map((item, index) => (
+                  {entry.items?.slice(-4).map((item, index) => (
                     <Grid item xs={6} md={3} key={index}>
                       <Grid item xs={12} className={styles.item}>
                         <img src={item.archiveItem?.media?.media?.thumbnail?.mediaUrl} />
@@ -301,7 +320,6 @@ export const ListArchive: FC<ListArchiveInterface> = ({
               </Grid>
             </Grid>
           </Grid>
-          <Divider sx={{ margin: '5% 0' }} />
         </Grid>
       ))}
       <ArchiveModal
