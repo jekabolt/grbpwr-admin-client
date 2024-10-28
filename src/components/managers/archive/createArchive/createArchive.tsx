@@ -168,7 +168,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
 
   return (
     <Dialog open={open} onClose={close} fullWidth maxWidth='xl'>
-      <Grid container spacing={2} alignItems='center'>
+      <Grid container spacing={2} padding={4} alignItems='center'>
         <Grid item xs={12}>
           <Typography variant='h5' textTransform='uppercase'>
             create new archive

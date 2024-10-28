@@ -1,4 +1,4 @@
-import { Alert, AppBar, Button, Divider, Grid, Snackbar, Toolbar } from '@mui/material';
+import { Alert, AppBar, Button, Grid, Snackbar, Toolbar } from '@mui/material';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import { CreateArchive } from './createArchive/createArchive';
@@ -70,9 +70,6 @@ export const Archive: FC = () => {
             fetchArchive={fetchArchive}
             showMessage={showMessage}
           />
-        </Grid>
-        <Grid item xs={12}>
-          <Divider />
         </Grid>
         <Grid item xs={12}>
           <ListArchive
