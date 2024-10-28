@@ -85,7 +85,7 @@ export const ArchiveTable: FC<ArchiveTableInterface> = ({
         />
       ),
     },
-    { accessorKey: 'archiveItem.title', header: 'Description' },
+    { accessorKey: 'archiveItem.name', header: 'Description' },
     {
       accessorKey: 'archiveItem.url',
       header: 'URL',
