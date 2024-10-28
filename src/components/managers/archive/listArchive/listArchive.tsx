@@ -95,7 +95,9 @@ export const ListArchive: FC<ListArchiveInterface> = ({
           if (entry.items?.some((item) => item.archiveItem?.media?.id === mediaId)) {
             return showMessage('this media is already added', 'error'), entry;
           }
+          const tempId = Date.now();
           const newItem = {
+            id: tempId,
             archiveId,
             archiveItem: {
               media: { id: mediaId, media: { thumbnail: { mediaUrl: media } } },
@@ -222,7 +224,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
             </Grid>
             <Grid item xs={12}>
               <Typography variant='h6' textTransform='uppercase'>
-                {archive.length - id} item
+                archive &#8470; {archive.length - id}
               </Typography>
             </Grid>
             <Grid item>
