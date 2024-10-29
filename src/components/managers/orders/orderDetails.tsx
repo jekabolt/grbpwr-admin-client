@@ -115,7 +115,11 @@ export const OrderDetails = () => {
             cursor: 'pointer',
           }}
           onClick={() => {
-            window.open(`/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`, '_blank');
+            const baseUrl = window.location.origin;
+            window.open(
+              `${baseUrl}/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`,
+              '_blank',
+            );
           }}
         >
           <img
