@@ -99,44 +99,21 @@ export const OrderDetails = () => {
 
   const navigate = useNavigate();
 
-  const handleNavigation = (productId: string) => {
-    const basePath = 'grbpwr-admin-client/#';
-    const deployPath = `${basePath}${ROUTES.singleProduct}/${productId}`;
-    const path = `${ROUTES.singleProduct}/${productId}`;
-
-    // Check if the environment is production
-    const isDeployed = process.env.REACT_APP_IS_DEPLOYED === 'true';
-
-    if (isDeployed) {
-      window.open(`/${deployPath}`, '_blank');
-    } else {
-      navigate({ to: `/${path}`, replace: true });
-    }
-  };
-
   const orderItemsColumns = [
     {
       field: 'thumbnail',
       headerName: '',
       width: 200,
       renderCell: (params: any) => (
-        <div
+        <a
+          href={`${ROUTES.singleProduct}/${params.row.orderItem.productId}`}
+          target='_blank'
           style={{
-            height: '100%',
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
             cursor: 'pointer',
           }}
-          onClick={() => handleNavigation(params.row.orderItem.productId)}
         >
-          <img
-            src={params.row.orderItem.productId ? params.value : ''}
-            alt='product'
-            style={{ height: '100px', width: 'auto' }}
-          />
-        </div>
+          <img src={params.value} alt='product' style={{ height: '100px', width: 'auto' }} />
+        </a>
       ),
     },
     {
