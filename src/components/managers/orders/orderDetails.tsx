@@ -1,5 +1,4 @@
 import EditIcon from '@mui/icons-material/Edit';
-import LaunchIcon from '@mui/icons-material/Launch';
 import { Button, Grid, TextField, Typography } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
@@ -194,25 +193,6 @@ export const OrderDetails = () => {
       field: 'productPriceWithSale',
       headerName: isPrinting ? 'PWS' : 'PRICE WITH SALE',
       width: isPrinting ? 100 : 200,
-    },
-    {
-      field: 'productLink',
-      headerName: 'LINK',
-      width: 100,
-      cellClassName: styles.hide_cell,
-      valueGetter: (_params: any, row: any) => {
-        return row.orderItem.productId;
-      },
-      renderCell: (params: any) => (
-        <IconButton
-          aria-label='explore product'
-          onClick={() => {
-            navigate({ to: `${ROUTES.singleProduct}/${params.value}` });
-          }}
-        >
-          <LaunchIcon />
-        </IconButton>
-      ),
     },
   ];
 
