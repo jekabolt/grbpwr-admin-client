@@ -118,7 +118,7 @@ export const OrderDetails = () => {
           onClick={() => {
             if (params.row.orderItem.productId) {
               window.open(
-                `${window.location.origin}/#/${ROUTES.singleProduct}/${params.row.orderItem.productId}`,
+                `${window.location.origin}/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`,
                 '_blank',
               );
             }
