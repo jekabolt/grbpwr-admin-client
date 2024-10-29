@@ -3,7 +3,7 @@ import { Button, Grid, TextField, Typography } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import { DataGrid, GridPaginationModel } from '@mui/x-data-grid';
-import { MakeGenerics, useMatch, useNavigate } from '@tanstack/react-location';
+import { MakeGenerics, useMatch } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
 import {
   deliveredOrderUpdate,
@@ -19,6 +19,8 @@ import { ROUTES } from 'constants/routes';
 import { useEffect, useState } from 'react';
 import styles from 'styles/order.scss';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
+
+const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
 
 export type OrderDetailsPathProps = MakeGenerics<{
   Params: {
@@ -97,8 +99,6 @@ export const OrderDetails = () => {
     setOrderStatus(getOrderStatusName(dictionary, orderDetails?.order?.orderStatusId));
   }, [orderDetails, dictionary]);
 
-  const navigate = useNavigate();
-
   const orderItemsColumns = [
     {
       field: 'thumbnail',
@@ -106,7 +106,7 @@ export const OrderDetails = () => {
       width: 200,
       renderCell: (params: any) => (
         <a
-          href={`${ROUTES.singleProduct}/${params.row.orderItem.productId}`}
+          href={`${BASE_PATH}/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`}
           target='_blank'
           style={{
             cursor: 'pointer',
