@@ -99,6 +99,21 @@ export const OrderDetails = () => {
 
   const navigate = useNavigate();
 
+  const handleNavigation = (productId: string) => {
+    const basePath = 'grbpwr-admin-client/#';
+    const deployPath = `${basePath}${ROUTES.singleProduct}/${productId}`;
+    const path = `${ROUTES.singleProduct}/${productId}`;
+
+    // Check if the environment is production
+    const isDeployed = process.env.REACT_APP_IS_DEPLOYED === 'true';
+
+    if (isDeployed) {
+      window.open(`/${deployPath}`, '_blank');
+    } else {
+      navigate({ to: `/${path}`, replace: true });
+    }
+  };
+
   const orderItemsColumns = [
     {
       field: 'thumbnail',
@@ -114,13 +129,7 @@ export const OrderDetails = () => {
             justifyContent: 'center',
             cursor: 'pointer',
           }}
-          onClick={() => {
-            const baseUrl = window.location.origin;
-            window.open(
-              `${baseUrl}/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`,
-              '_blank',
-            );
-          }}
+          onClick={() => handleNavigation(params.row.orderItem.productId)}
         >
           <img
             src={params.row.orderItem.productId ? params.value : ''}
