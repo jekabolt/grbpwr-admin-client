@@ -26,6 +26,8 @@ export type OrderDetailsPathProps = MakeGenerics<{
   };
 }>;
 
+const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
+
 export const OrderDetails = () => {
   const {
     params: { uuid },
@@ -106,7 +108,7 @@ export const OrderDetails = () => {
       width: 200,
       renderCell: (params: any) => (
         <a
-          href={`${ROUTES.singleProduct}/${params.row.orderItem.productId}`}
+          href={`${BASE_PATH}/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`}
           target='_blank'
           style={{
             cursor: 'pointer',
