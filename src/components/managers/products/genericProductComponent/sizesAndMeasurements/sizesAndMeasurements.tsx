@@ -203,16 +203,24 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                     <Box display='flex' alignItems='center'>
                       <TextField
                         name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
-                        type='number'
+                        type='text'
                         value={
                           values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value === '0'
                             ? ''
                             : values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value ||
                               ''
                         }
-                        onChange={(e) => handleSizeChange(e, size.id)}
+                        onChange={(e) => {
+                          if (e.target.value === '' || /^\d+$/.test(e.target.value)) {
+                            handleSizeChange(e, size.id);
+                          }
+                        }}
                         onKeyDown={restrictNumericInput}
-                        inputProps={{ min: 0 }}
+                        inputProps={{
+                          min: 0,
+                          inputMode: 'numeric',
+                          pattern: '[0-9]*',
+                        }}
                         style={{ width: '80px' }}
                         disabled={disableFields || (!isLastSize && lastSizeNonZero)}
                       />
