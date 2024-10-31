@@ -2,7 +2,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import { Button, Grid, TextField, Typography } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
-import { DataGrid, GridPaginationModel } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridPaginationModel } from '@mui/x-data-grid';
 import { MakeGenerics, useMatch } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
 import {
@@ -12,10 +12,11 @@ import {
   setTrackingNumberUpdate,
 } from 'api/orders';
 import { common_Dictionary } from 'api/proto-http/admin';
-import { common_OrderFull } from 'api/proto-http/frontend';
+import { common_OrderFull, common_OrderItem } from 'api/proto-http/frontend';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
+import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
 import styles from 'styles/order.scss';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
@@ -44,7 +45,6 @@ export const OrderDetails = () => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState({
     thumbnail: true,
-    productLink: true,
     size: true,
   });
   const [isEdit, setIsEdit] = useState(false);
@@ -59,7 +59,7 @@ export const OrderDetails = () => {
   };
 
   useEffect(() => {
-    setColumnVisibility({ thumbnail: !isPrinting, productLink: !isPrinting, size: !isPrinting });
+    setColumnVisibility({ thumbnail: !isPrinting, size: !isPrinting });
   }, [isPrinting]);
 
   useEffect(() => {
@@ -99,10 +99,11 @@ export const OrderDetails = () => {
     setOrderStatus(getOrderStatusName(dictionary, orderDetails?.order?.orderStatusId));
   }, [orderDetails, dictionary]);
 
-  const orderItemsColumns = [
+  const orderItemsColumns: GridColDef<common_OrderItem>[] = [
     {
       field: 'thumbnail',
       headerName: '',
+      align: 'center',
       width: 200,
       renderCell: (params: any) => (
         <a
@@ -119,6 +120,7 @@ export const OrderDetails = () => {
     {
       field: 'sku',
       headerName: 'SKU',
+      align: 'center',
       width: isPrinting ? 150 : 300,
       renderCell: (params: any) => (
         <div
@@ -140,12 +142,16 @@ export const OrderDetails = () => {
     },
     {
       field: 'productName',
-      headerName: isPrinting ? 'NAME' : 'PRODUCT NAME',
-      width: isPrinting ? 100 : 200,
+      align: 'center',
+      headerAlign: 'center',
+      headerName: 'PRODUCT NAME',
+      width: 150,
     },
     {
       field: 'quantity',
       headerName: 'QUANTITY',
+      headerAlign: 'center',
+      align: 'center',
       width: isPrinting ? 100 : 200,
       valueGetter: (_params: any, row: any) => {
         return row.orderItem.quantity;
@@ -154,6 +160,8 @@ export const OrderDetails = () => {
     {
       field: 'size',
       headerName: 'SIZE',
+      align: 'center',
+      headerAlign: 'center',
       width: 200,
       cellClassName: styles.hide_cell,
       valueGetter: (_params: any, row: any) => {
@@ -165,17 +173,23 @@ export const OrderDetails = () => {
     {
       field: 'productPrice',
       headerName: 'PRICE',
-      width: isPrinting ? 100 : 200,
+      align: 'center',
+      headerAlign: 'center',
+      width: isPrinting ? 90 : 200,
       valueGetter: (params: any, row: any) =>
         `${params * row.orderItem.quantity} ${dictionary?.baseCurrency}`,
     },
     {
       field: 'productSalePercentage',
       headerName: 'SALE',
-      width: isPrinting ? 100 : 200,
+      align: 'center',
+      headerAlign: 'center',
+      width: isPrinting ? 90 : 200,
     },
     {
       field: 'productPriceWithSale',
+      align: 'center',
+      headerAlign: 'center',
       headerName: isPrinting ? 'PWS' : 'PRICE WITH SALE',
       width: isPrinting ? 100 : 200,
     },
@@ -498,9 +512,15 @@ export const OrderDetails = () => {
   return (
     <Layout>
       <Grid container spacing={2} justifyContent='center' alignItems='center'>
+        {isPrinting && (
+          <Grid item xs={12}>
+            <img src={logo} alt='logo' style={{ width: '30px', height: 'auto' }} />
+          </Grid>
+        )}
+
         <Grid item xs={12}>
-          <Grid container justifyContent='flex-start'>
-            <Grid item xs={12} sm={2} className={styles.hide_cell}>
+          <Grid container justifyContent='flex-start' alignItems='center'>
+            <Grid item xs={12} md={2} className={styles.hide_cell}>
               <Typography fontWeight='bold' textTransform='uppercase'>
                 order id: {orderDetails?.order?.id}
               </Typography>
@@ -508,7 +528,7 @@ export const OrderDetails = () => {
             <Grid
               item
               xs={12}
-              sm={2}
+              md={2}
               className={isPrinting ? styles.hide_cell : styles.non_print_state}
             >
               <Typography fontWeight='bold' textTransform='uppercase'>
@@ -526,21 +546,18 @@ export const OrderDetails = () => {
             <Grid
               item
               xs={12}
-              sm={2}
+              md={2}
               className={isPrinting ? styles.hide_cell : styles.non_print_state}
             >
               STATUS:&nbsp;{orderStatusColored}
             </Grid>
-            <Grid item xs={12} sm={5} className={styles.support}>
+            <Grid item xs={12} className={styles.support}>
               COMPANY ADRESS: ADRESS ADRESS ADRESS
             </Grid>
-            <Grid item xs={12} sm={3} className={styles.support}>
-              COMPANY VAT ID: ID
-            </Grid>
-            <Grid item xs={12} sm={isPrinting ? 4 : 3}>
+            <Grid item xs={12} md={3}>
               PLACED: {formatDateTime(orderDetails?.order?.placed)}
             </Grid>
-            <Grid item className={styles.hide_cell} xs={12} sm={3}>
+            <Grid item className={styles.hide_cell} xs={12} md={3}>
               MODIFIED: {formatDateTime(orderDetails?.order?.modified)}
             </Grid>
           </Grid>
