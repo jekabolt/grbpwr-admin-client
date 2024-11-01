@@ -14,6 +14,8 @@ export const SingleAdd: FC<HeroMediaEntityInterface> = ({
   saveMedia,
 }) => {
   const { errors } = useFormikContext<common_HeroFullInsert>();
+  const errorEntities = (errors?.entities || []) as any[];
+
   return (
     <>
       <Grid item xs={12} md={10}>
@@ -41,13 +43,16 @@ export const SingleAdd: FC<HeroMediaEntityInterface> = ({
             name={`entities.${index}.singleAdd.exploreLink`}
             label='EXPLORE LINK'
             error={
-              (entity.singleAdd?.exploreLink && errors.entities) ||
-              (entity.singleAdd?.exploreLink && !isValidUrlForHero(entity.singleAdd?.exploreLink))
+              Boolean(errorEntities?.[index]?.singleAdd?.exploreLink) ||
+              (entity?.singleAdd?.exploreLink && !isValidUrlForHero(entity.singleAdd?.exploreLink))
             }
             helperText={
-              entity.singleAdd?.exploreLink && !isValidUrlForHero(entity.singleAdd?.exploreLink)
-                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
-                : ''
+              errorEntities?.[index]?.singleAdd?.exploreLink
+                ? errorEntities[index].singleAdd.exploreLink
+                : entity?.singleAdd?.exploreLink &&
+                    !isValidUrlForHero(entity.singleAdd?.exploreLink)
+                  ? 'URL is not from the allowed domain but will be saved with a warning'
+                  : ''
             }
             fullwidth
           />

@@ -20,6 +20,7 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
   handleSaveNewSelection,
 }) => {
   const { errors } = useFormikContext<common_HeroFullInsert>();
+  const errorEntities = (errors?.entities || []) as any[];
   return (
     <>
       <Grid item xs={12} md={10}>
@@ -40,15 +41,17 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
             name={`entities.${index}.featuredProducts.exploreLink`}
             label='EXPLORE LINK'
             error={
-              entity.featuredProducts?.exploreLink
-                ? !isValidUrlForHero(entity.featuredProducts.exploreLink)
-                : false
+              Boolean(errorEntities?.[index]?.featuredProducts?.exploreLink) ||
+              (entity?.featuredProducts.exploreLink &&
+                !isValidUrlForHero(entity.featuredProducts.exploreLink))
             }
             helperText={
-              entity.featuredProducts?.exploreLink &&
-              !isValidUrlForHero(entity.featuredProducts.exploreLink)
-                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
-                : ''
+              errorEntities?.[index]?.featuredProducts?.exploreLink
+                ? errorEntities[index].featuredProducts.exploreLink
+                : entity?.featuredProducts.exploreLink &&
+                    !isValidUrlForHero(entity.featuredProducts.exploreLink)
+                  ? 'URL is not from the allowed domain but will be saved with a warning'
+                  : ''
             }
             fullWidth
           />

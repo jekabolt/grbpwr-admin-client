@@ -1,5 +1,27 @@
-import { isValidURL } from 'features/utilitty/isValidUrl';
+import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import * as Yup from 'yup';
+
+const urlValidation = Yup.string().nullable()
+    .test(
+        'url-validation',
+        'Invalid URL format',
+        (value) => !value || isValidURL(value)
+    )
+    .test({
+        name: 'grbpwr-url-warning',
+        exclusive: false,
+        test: (value, context) => {
+            if (!value || !isValidURL(value)) return true;
+            const isGrbpwrUrl = isValidUrlForHero(value);
+            if (!isGrbpwrUrl) {
+                context.createError({
+                    message: 'URL is not from the allowed domain but will be saved with a warning',
+                    path: context.path
+                });
+            }
+            return true;
+        },
+    });
 
 export const heroValidationSchema = Yup.object().shape({
 
@@ -12,11 +34,7 @@ export const heroValidationSchema = Yup.object().shape({
                         mainAdd: Yup.object().shape({
                             singleAdd: Yup.object().shape({
                                 mediaId: Yup.number().min(1, 'Main Add Media is required'),
-                                exploreLink: Yup.string().nullable()
-                                    .test(
-                                        'is-valid-url',
-                                        (value) => !value || isValidURL(value),
-                                    ),
+                                exploreLink: urlValidation,
                                 exploreText: Yup.string().nullable(),
                             }),
                         }),
@@ -27,10 +45,7 @@ export const heroValidationSchema = Yup.object().shape({
                         type: Yup.string().required('Hero type is required'),
                         singleAdd: Yup.object().shape({
                             mediaId: Yup.number().min(1, 'Single Add Media is required'),
-                            exploreLink: Yup.string().nullable().test(
-                                'is-valid-url',
-                                (value) => !value || isValidURL(value),
-                            ),
+                            exploreLink: urlValidation,
                             exploreText: Yup.string().nullable(),
                         }),
                     });
@@ -41,18 +56,12 @@ export const heroValidationSchema = Yup.object().shape({
                         doubleAdd: Yup.object().shape({
                             left: Yup.object().shape({
                                 mediaId: Yup.number().min(1, 'Left media is required'),
-                                exploreLink: Yup.string().nullable().test(
-                                    'is-valid-url',
-                                    (value) => !value || isValidURL(value),
-                                ),
+                                exploreLink: urlValidation,
                                 exploreText: Yup.string().nullable(),
                             }),
                             right: Yup.object().shape({
                                 mediaId: Yup.number().min(1, 'Right media is required'),
-                                exploreLink: Yup.string().nullable().test(
-                                    'is-valid-url',
-                                    (value) => !value || isValidURL(value),
-                                ),
+                                exploreLink: urlValidation,
                                 exploreText: Yup.string().nullable(),
                             }),
                         }),
@@ -66,10 +75,7 @@ export const heroValidationSchema = Yup.object().shape({
                                 .of(Yup.number().min(1))
                                 .min(1, 'At least one product is required'),
                             title: Yup.string().nullable(),
-                            exploreLink: Yup.string().nullable().test(
-                                'is-valid-url',
-                                (value) => !value || isValidURL(value),
-                            ),
+                            exploreLink: urlValidation,
                             exploreText: Yup.string().nullable(),
                         }),
                     });
