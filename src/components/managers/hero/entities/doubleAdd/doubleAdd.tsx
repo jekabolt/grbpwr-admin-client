@@ -15,6 +15,7 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
   saveDoubleMedia,
 }) => {
   const { errors } = useFormikContext<common_HeroFullInsert>();
+  const errorEntities = (errors?.entities || []) as any[];
   return (
     <>
       <Grid item xs={12} md={10}>
@@ -44,16 +45,17 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
             name={`entities.${index}.doubleAdd.left.exploreLink`}
             label='EXPLORE LINK'
             error={
-              (entity.doubleAdd.left.exploreLink &&
-                `${errors}.entities.${index}.doubleAdd.left.exploreLink`) ||
-              (entity.doubleAdd.left.exploreLink &&
+              Boolean(errorEntities?.[index]?.doubleAdd?.left?.exploreLink) ||
+              (entity?.doubleAdd.left.exploreLink &&
                 !isValidUrlForHero(entity.doubleAdd.left.exploreLink))
             }
             helperText={
-              entity.doubleAdd.left.exploreLink &&
-              !isValidUrlForHero(entity.doubleAdd.left.exploreLink)
-                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
-                : ''
+              errorEntities?.[index]?.doubleAdd?.left?.exploreLink
+                ? errorEntities[index].doubleAdd.left.exploreLink
+                : entity?.doubleAdd?.left?.exploreLink &&
+                    !isValidUrlForHero(entity.doubleAdd.left.exploreLink)
+                  ? 'URL is not from the allowed domain but will be saved with a warning'
+                  : ''
             }
             fullwidth
           />
@@ -87,15 +89,17 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
             name={`entities.${index}.doubleAdd.right.exploreLink`}
             label='EXPLORE LINK'
             error={
-              (entity.doubleAdd.right.exploreLink && errors.entities) ||
-              (entity.doubleAdd.right.exploreLink &&
+              Boolean(errorEntities?.[index]?.doubleAdd?.right?.exploreLink) ||
+              (entity?.doubleAdd.right.exploreLink &&
                 !isValidUrlForHero(entity.doubleAdd.right.exploreLink))
             }
             helperText={
-              entity.doubleAdd.right.exploreLink &&
-              !isValidUrlForHero(entity.doubleAdd.right.exploreLink)
-                ? "The URL field will display an error message until a valid URL is provided. However, users are still able to save the link, even if it's not valid."
-                : ''
+              errorEntities?.[index]?.doubleAdd?.right?.exploreLink
+                ? errorEntities[index].doubleAdd.right.exploreLink
+                : entity?.doubleAdd?.right?.exploreLink &&
+                    !isValidUrlForHero(entity.doubleAdd.right.exploreLink)
+                  ? 'URL is not from the allowed domain but will be saved with a warning'
+                  : ''
             }
             fullwidth
           />
