@@ -6,19 +6,30 @@ export const restrictNumericInput = (e: React.KeyboardEvent<HTMLInputElement>) =
     const inputValue = inputElement.value;
 
     const allowedControlKeys = [
-        'Backspace',
-        'ArrowUp',
-        'ArrowDown',
-        'ArrowLeft',
-        'ArrowRight',
-        'Control',
+        'backspace',
+        'arrowup',
+        'arrowdown',
+        'arrowleft',
+        'arrowright',
+        'control',
+        'meta',
         'v',
         'c',
+        'tab',
+        'shift',
+        'delete'
     ];
 
+    // Convert key to lowercase for consistent checking
+    const lowerKey = key.toLowerCase();
+
+    // Check if it's a copy/paste command (Windows: Ctrl, Mac: Command)
+    const isCopyPaste = (e.ctrlKey || e.metaKey) && (lowerKey === 'c' || lowerKey === 'v');
+
     if (
-        (key === 'e' || key === 'E' || (isNaN(Number(key)) && key !== '.' && !allowedControlKeys.includes(key)))
-        && !(e.ctrlKey && (key === 'v' || key === 'c'))
+        (lowerKey === 'e' ||
+            (isNaN(Number(key)) && key !== '.' && !allowedControlKeys.includes(lowerKey)))
+        && !isCopyPaste
     ) {
         e.preventDefault();
     }
