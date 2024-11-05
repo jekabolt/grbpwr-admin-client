@@ -17,7 +17,7 @@ import {
 } from 'api/proto-http/admin';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
+import { handlePaste, restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
@@ -216,11 +216,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                           }
                         }}
                         onKeyDown={restrictNumericInput}
-                        inputProps={{
-                          min: 0,
-                          inputMode: 'numeric',
-                          pattern: '[0-9]*',
-                        }}
+                        onPaste={handlePaste}
                         style={{ width: '80px' }}
                         disabled={disableFields || (!isLastSize && lastSizeNonZero)}
                       />
@@ -237,6 +233,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                         }
                         onChange={(e) => handleMeasurementChange(e, size.id, measurement.id)}
                         onKeyDown={restrictNumericInput}
+                        onPaste={handlePaste}
                         inputProps={{ min: 0 }}
                         style={{ width: '80px' }}
                         disabled={disableFields || (!isLastSize && lastSizeNonZero)}
