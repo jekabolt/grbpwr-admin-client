@@ -10,7 +10,6 @@ import {
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_PromoCodeInsert } from 'api/proto-http/admin';
-import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { FC, useState } from 'react';
 
 interface CreatePromoInterface {
@@ -148,13 +147,16 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPr
                 helperText={error}
                 name='discount'
                 value={promo.discount?.value}
-                type='number'
+                type='text'
                 inputProps={{ min: 0, max: 99 }}
-                onKeyDown={restrictNumericInput}
                 variant='outlined'
                 label='DISCOUNT'
                 size='small'
-                onChange={handlePromoFieldsChange}
+                onChange={(e: any) => {
+                  if (/^\d*$/.test(e.target.value)) {
+                    handlePromoFieldsChange(e);
+                  }
+                }}
                 fullWidth={true}
               />
             </Grid>

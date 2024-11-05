@@ -14,7 +14,6 @@ import { getDictionary } from 'api/admin';
 import { UpdateSettingsRequest, common_Dictionary } from 'api/proto-http/admin';
 import { updateSettings } from 'api/settings';
 import { Layout } from 'components/login/layout';
-import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, FieldProps, Formik } from 'formik';
 import debounce from 'lodash/debounce';
 import { FC, useCallback, useEffect, useState } from 'react';
@@ -156,13 +155,13 @@ export const Settings: FC = () => {
                       as={TextField}
                       name={`shipmentCarriers[${index}].price.value`}
                       label='Price'
-                      type='number'
+                      type='text'
                       size='small'
                       inputProps={{ min: 0, step: '.01' }}
-                      onKeyDown={restrictNumericInput}
                       onChange={(e: any) => {
-                        const rawValue = e.target.value;
-                        setFieldValue(`shipmentCarriers[${index}].price.value`, rawValue);
+                        if (/^\d*\.?\d{0,2}$/.test(e.target.value)) {
+                          setFieldValue(`shipmentCarriers[${index}].price.value`, e.target.value);
+                        }
                       }}
                       onBlur={(e: any) => {
                         const formattedValue = parseFloat(e.target.value || '0').toFixed(2);
