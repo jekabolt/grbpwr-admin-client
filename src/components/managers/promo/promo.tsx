@@ -1,4 +1,4 @@
-import { Alert, Grid, Snackbar, Theme, useMediaQuery } from '@mui/material';
+import { Alert, Grid, Snackbar } from '@mui/material';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect } from 'react';
 import { CreatePromo } from './createPromo';

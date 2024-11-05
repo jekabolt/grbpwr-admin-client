@@ -16,7 +16,6 @@ import {
 } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { Field, FieldProps, Form, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import {
@@ -191,12 +190,13 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     <TextField
                       label='FROM'
                       type='number'
-                      onChange={(e) =>
-                        handleFieldChange(setFieldValue, 'filterConditions.from', e.target.value)
-                      }
+                      onChange={(e) => {
+                        if (/^\d*$/.test(e.target.value)) {
+                          handleFieldChange(setFieldValue, 'filterConditions.from', e.target.value);
+                        }
+                      }}
                       value={filter.filterConditions?.from}
                       inputProps={{ min: 0 }}
-                      onKeyDown={restrictNumericInput}
                       fullWidth
                     />
                   </Grid>
@@ -204,12 +204,13 @@ export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
                     <TextField
                       label='TO'
                       type='number'
-                      onChange={(e) =>
-                        handleFieldChange(setFieldValue, 'filterConditions.to', e.target.value)
-                      }
+                      onChange={(e) => {
+                        if (/^\d*$/.test(e.target.value)) {
+                          handleFieldChange(setFieldValue, 'filterConditions.to', e.target.value);
+                        }
+                      }}
                       value={filter.filterConditions?.to}
                       inputProps={{ min: 0 }}
-                      onKeyDown={restrictNumericInput}
                       fullWidth
                     />
                   </Grid>

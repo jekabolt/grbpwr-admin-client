@@ -16,7 +16,7 @@ import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { generateOrUpdateSKU, generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
+
 import { ErrorMessage, Field, getIn, useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
@@ -93,11 +93,15 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
     let formattedValue = value;
 
     if (name === 'product.productBody.salePercentage.value') {
-      let numericValue = parseFloat(value);
-      if (numericValue > 99) {
-        return;
+      if (value === '') {
+        formattedValue = '0';
+      } else {
+        let numericValue = parseFloat(value);
+        if (numericValue > 99) {
+          return;
+        }
+        formattedValue = numericValue.toString();
       }
-      formattedValue = numericValue.toString();
     }
     setFieldValue(name, formattedValue);
 
@@ -353,7 +357,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             variant='outlined'
             label={'price'.toUpperCase()}
             name='product.productBody.price.value'
-            type='number'
+            type='text'
             inputProps={{ min: 0, step: '0.01' }}
             required
             fullWidth
@@ -366,8 +370,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               getIn(errors, 'product.productBody.price.value')
             }
             InputLabelProps={{ shrink: true }}
-            onChange={handlePriceChange}
-            onKeyDown={restrictNumericInput}
+            onChange={(e: any) => {
+              if (/^\d*\.?\d{0,2}$/.test(e.target.value)) {
+                handlePriceChange(e);
+              }
+            }}
             onBlur={(e: any) => {
               const formattedValue = parseFloat(e.target.value).toFixed(2);
               setFieldValue('product.productBody.price.value', formattedValue);
@@ -382,11 +389,14 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               as={TextField}
               label={'sale percentage'.toUpperCase()}
               name='product.productBody.salePercentage.value'
-              onChange={(e: any) => handlePriceChange(e, true)}
-              type='number'
+              onChange={(e: any) => {
+                if (/^\d*$/.test(e.target.value)) {
+                  handlePriceChange(e, true);
+                }
+              }}
+              type='text'
               inputProps={{ min: 0, max: 99 }}
               InputLabelProps={{ shrink: true }}
-              onKeyDown={restrictNumericInput}
               fullWidth
               disabled={disableFields}
             />

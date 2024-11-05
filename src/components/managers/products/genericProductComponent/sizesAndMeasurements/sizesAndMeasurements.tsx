@@ -17,7 +17,6 @@ import {
 } from 'api/proto-http/admin';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-import { handlePaste, restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
 import { useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
@@ -215,8 +214,6 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                             handleSizeChange(e, size.id);
                           }
                         }}
-                        onKeyDown={restrictNumericInput}
-                        onPaste={handlePaste}
                         style={{ width: '80px' }}
                         disabled={disableFields || (!isLastSize && lastSizeNonZero)}
                       />
@@ -225,15 +222,17 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                   {measurementsToDisplay.map((measurement) => (
                     <TableCell key={measurement.id}>
                       <TextField
-                        type='number'
+                        type='text'
                         value={
                           values.sizeMeasurements?.[sizeIndex]?.measurements?.find(
                             (m) => m.measurementNameId === measurement.id,
                           )?.measurementValue?.value || ''
                         }
-                        onChange={(e) => handleMeasurementChange(e, size.id, measurement.id)}
-                        onKeyDown={restrictNumericInput}
-                        onPaste={handlePaste}
+                        onChange={(e) => {
+                          if (/^\d*$/.test(e.target.value)) {
+                            handleMeasurementChange(e, size.id, measurement.id);
+                          }
+                        }}
                         inputProps={{ min: 0 }}
                         style={{ width: '80px' }}
                         disabled={disableFields || (!isLastSize && lastSizeNonZero)}

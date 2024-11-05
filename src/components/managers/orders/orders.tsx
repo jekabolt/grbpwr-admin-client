@@ -22,7 +22,7 @@ import {
 } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
-import { restrictNumericInput } from 'features/utilitty/removePossibilityToEnterSigns';
+
 import { FC, useEffect, useState } from 'react';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 
@@ -258,13 +258,16 @@ export const Orders: FC = () => {
           </Grid>
           <Grid item xs={12} sm={3}>
             <TextField
-              type='number'
+              type='text'
               label='Order id'
               variant='outlined'
               value={orderId}
-              onChange={handleOrderIdChange}
+              onChange={(e) => {
+                if (/^\d*$/.test(e.target.value)) {
+                  handleOrderIdChange(e);
+                }
+              }}
               inputProps={{ min: 0 }}
-              onKeyDown={restrictNumericInput}
               fullWidth
             />
           </Grid>
