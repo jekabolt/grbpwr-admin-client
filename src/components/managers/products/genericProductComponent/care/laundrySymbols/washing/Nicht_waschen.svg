@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   version="1.0"
+   x="0.0000000"
+   y="0.0000000"
+   width="375.00000"
+   height="375.00000"
+   id="svg1">
+  <defs
+     id="defs3">
+    <linearGradient
+       id="linearGradient1547">
+      <stop
+         style="stop-color:#000000;stop-opacity:1.0000000"
+         offset="0.0000000"
+         id="stop1548" />
+      <stop
+         style="stop-color:#ffffff;stop-opacity:1.0000000"
+         offset="1.0000000"
+         id="stop1549" />
+    </linearGradient>
+  </defs>
+  <g
+     id="g1568">
+    <path
+       d="M 45.364784,145.60817 C 68.823063,145.60817 68.823063,124.71836 92.281348,124.71836 C 115.73961,124.71836 115.73961,145.60817 139.19788,145.60817 C 162.65617,145.60817 162.65617,124.71836 186.11443,124.71836 C 209.57270,124.71836 209.57270,145.60817 233.03099,145.60817 C 256.48927,145.60817 256.48927,124.71836 279.94753,124.71836 C 303.40580,124.71836 303.40580,145.60817 326.86409,145.60817"
+       transform="translate(2.500000,0.000000)"
+       style="fill:none;fill-opacity:0.75000000;fill-rule:evenodd;stroke:#000000;stroke-width:12.500000;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4.0000000;stroke-opacity:1.0000000"
+       id="path981" />
+    <path
+       d="M 36.468983,106.93153 L 70.866142,278.91732 L 301.18110,278.91732 L 336.61417,106.93153"
+       transform="translate(2.500000,0.000000)"
+       style="fill:none;fill-opacity:0.0000000;fill-rule:evenodd;stroke:#000000;stroke-width:12.500000;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4.0000000;stroke-dashoffset:0.0000000;stroke-opacity:1.0000000"
+       id="path2252" />
+  </g>
+  <g
+     transform="translate(2.500000,0.000000)"
+     id="g1563">
+    <path
+       d="M 13.312765,123.14133 L 336.61187,281.12942"
+       style="fill:none;fill-opacity:0.75000000;fill-rule:evenodd;stroke:#000000;stroke-width:12.500000;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4.0000000;stroke-opacity:1.0000000"
+       id="path2208" />
+    <path
+       d="M 322.45981,87.681648 L 69.874140,317.53740"
+       transform="matrix(1.293948,0.000000,1.214860e-2,0.682829,-58.99189,63.26976)"
+       style="fill:none;fill-opacity:0.75000000;fill-rule:evenodd;stroke:#000000;stroke-width:13.298285;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4.0000000;stroke-opacity:1.0000000"
+       id="path2831" />
+  </g>
+</svg>
