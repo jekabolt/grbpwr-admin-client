@@ -46,6 +46,12 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
                 exploreLink: entity.featuredProducts?.exploreLink,
                 exploreText: entity.featuredProducts?.exploreText,
             },
+            featuredProductsTag: {
+                tag: entity.featuredProductsTag?.tag,
+                title: entity.featuredProductsTag?.products?.title,
+                exploreLink: entity.featuredProductsTag?.products?.exploreLink,
+                exploreText: entity.featuredProductsTag?.products?.exploreText
+            }
         })),
     };
 };
@@ -80,6 +86,12 @@ export const emptyHeroForm: common_HeroFullInsert = {
             },
             featuredProducts: {
                 productIds: [],
+                title: '',
+                exploreLink: '',
+                exploreText: ''
+            },
+            featuredProductsTag: {
+                tag: '',
                 title: '',
                 exploreLink: '',
                 exploreText: ''

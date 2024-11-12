@@ -39,6 +39,8 @@ export const initialProductState: common_ProductNew = {
             name: '',
             brand: '',
             sku: '',
+            careInstructions: '',
+            composition: '',
             color: '',
             colorHex: '',
             countryOfOrigin: '',
