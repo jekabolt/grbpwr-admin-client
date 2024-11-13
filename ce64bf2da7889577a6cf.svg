@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   version="1.0"
+   x="0.0000000"
+   y="0.0000000"
+   width="375.00000"
+   height="375.00000"
+   id="svg559">
+  <defs
+     id="defs561">
+    <linearGradient
+       id="linearGradient1651">
+      <stop
+         style="stop-color:#000000;stop-opacity:1.0000000"
+         offset="0.0000000"
+         id="stop1652" />
+      <stop
+         style="stop-color:#ffffff;stop-opacity:1.0000000"
+         offset="1.0000000"
+         id="stop1653" />
+    </linearGradient>
+  </defs>
+  <path
+     d="M 111.85009,98.299393 L 300.00000,98.299393 L 337.50000,281.25000 L 37.500000,281.25000 C 37.500000,281.25000 93.750000,187.50000 150.00000,187.50000 C 206.25000,187.50000 318.75000,187.50000 318.75000,187.50000"
+     style="fill:none;fill-opacity:0.75000000;fill-rule:evenodd;stroke:#000000;stroke-width:12.500000;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4.0000000;stroke-opacity:1.0000000"
+     id="path1648" />
+  <path
+     d="M 177.78651,243.75000 C 177.78651,233.39466 170.05232,225.00000 160.51170,225.00000 C 150.97109,225.00000 143.23690,233.39466 143.23690,243.75000 C 143.23690,254.10534 150.97109,262.50000 160.51170,262.50000 C 170.05232,262.50000 177.78651,254.10534 177.78651,243.75000 L 177.78651,243.75000 z "
+     transform="translate(-14.26170,-8.125000)"
+     style="fill:#000000;fill-opacity:0.75000000;fill-rule:evenodd;stroke:#000000;stroke-width:1.0000000pt;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1.0000000"
+     id="path1649" />
+  <path
+     d="M 177.78651,243.75000 C 177.78651,233.39466 170.05232,225.00000 160.51170,225.00000 C 150.97109,225.00000 143.23690,233.39466 143.23690,243.75000 C 143.23690,254.10534 150.97109,262.50000 160.51170,262.50000 C 170.05232,262.50000 177.78651,254.10534 177.78651,243.75000 L 177.78651,243.75000 z "
+     transform="translate(46.58849,-8.125000)"
+     style="fill:#000000;fill-opacity:0.75000000;fill-rule:evenodd;stroke:#000000;stroke-width:1.0000000pt;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1.0000000"
+     id="path1659" />
+  <path
+     d="M 177.78651,243.75000 C 177.78651,233.39466 170.05232,225.00000 160.51170,225.00000 C 150.97109,225.00000 143.23690,233.39466 143.23690,243.75000 C 143.23690,254.10534 150.97109,262.50000 160.51170,262.50000 C 170.05232,262.50000 177.78651,254.10534 177.78651,243.75000 L 177.78651,243.75000 z "
+     transform="translate(109.4883,-8.125000)"
+     style="fill:#000000;fill-opacity:0.75000000;fill-rule:evenodd;stroke:#000000;stroke-width:1.0000000pt;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1.0000000"
+     id="path1660" />
+</svg>
