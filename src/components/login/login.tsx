@@ -5,7 +5,7 @@ import { login } from 'api/auth';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/login-block.module.scss';
+import styles from 'styles/login-block.scss';
 import * as Yup from 'yup';
 import { isTokenExpired } from './protectedRoute';
 

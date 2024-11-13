@@ -16,7 +16,6 @@ import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { generateOrUpdateSKU, generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
-
 import { ErrorMessage, Field, getIn, useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
