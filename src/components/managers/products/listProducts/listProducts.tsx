@@ -1,6 +1,6 @@
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
-import { Button, Grid, IconButton, Typography } from '@mui/material';
+import { Button, Grid2 as Grid, IconButton, Typography } from '@mui/material';
 import { common_Product } from 'api/proto-http/admin';
 import { TruncateText } from 'components/common/truncateText';
 import { isVideo } from 'features/utilitty/filterContentType';
@@ -31,11 +31,10 @@ export const ListProducts: FC<ProductProps> = ({
   return (
     <Grid container spacing={3} justifyContent='flex-start'>
       {products?.map((product) => (
-        <Grid item xs={6} md={4} lg={3}>
+        <Grid size={{ xs: 6, md: 4, lg: 3 }}>
           <Grid container>
             <Grid
-              item
-              xs={12}
+              size={{ xs: 12 }}
               key={product.id}
               onMouseEnter={() => setHoveredProductId(product.id)}
               onMouseLeave={() => setHoveredProductId(undefined)}
@@ -78,7 +77,7 @@ export const ListProducts: FC<ProductProps> = ({
                 copy
               </Button>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <TruncateText
                 text={`[${product.id}] ${product.productDisplay?.productBody?.brand} ${product.productDisplay?.productBody?.name}`}
                 length={28}
