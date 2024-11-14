@@ -38,7 +38,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
   selectedInstructions,
 }) => {
   const careCategories = Object.keys(careInstruction.care_instructions);
-  const [selectedCare, setSelectedCare] = useState<string | null>(null);
+  const [selectedCare, setSelectedCare] = useState<string | null>('Washing');
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
