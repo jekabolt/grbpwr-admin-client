@@ -1,4 +1,4 @@
-import { Button, Grid, Typography } from '@mui/material';
+import { Button, Grid2 as Grid, TextField } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
@@ -8,10 +8,22 @@ interface SelectedInstructions {
   [category: string]: string;
 }
 
-export const Care: FC = () => {
+interface CareInterface {
+  isAddingProduct: boolean;
+  isEditMode?: boolean;
+}
+
+export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
   const [isCareTableOpen, setIsCareTableOpen] = useState(false);
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
-  const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>({});
+  const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>(() => {
+    const careInstructions = values.product?.productBody?.careInstructions || '';
+    const instructions = careInstructions.split(',').filter(Boolean);
+    return instructions.reduce((acc, code) => {
+      acc[code] = code;
+      return acc;
+    }, {} as SelectedInstructions);
+  });
 
   // ... existing code ...
   const handleSelectCareInstruction = (
@@ -52,15 +64,42 @@ export const Care: FC = () => {
     setIsCareTableOpen(false);
   };
 
+  const handleClearInstructions = () => {
+    setSelectedInstructions({});
+    setFieldValue('product.productBody.careInstructions', '');
+  };
+
   return (
-    <Grid>
-      <Button onClick={handleOpenCareTable}>Care Instructions</Button>
-      {Object.keys(selectedInstructions).length > 0 && (
-        <Grid item xs={12}>
-          <Typography variant='subtitle2'>Selected Instructions:</Typography>
-          <Typography variant='body2'>{Object.values(selectedInstructions).join(', ')}</Typography>
-        </Grid>
-      )}
+    <Grid container>
+      <Grid size={{ xs: 12 }}>
+        <TextField
+          fullWidth
+          variant='outlined'
+          name='product.productBody.careInstructions'
+          label='Care Instructions'
+          value={values.product?.productBody?.careInstructions || ''}
+          slotProps={{
+            input: {
+              readOnly: true,
+              endAdornment: (isAddingProduct || isEditMode) && (
+                <>
+                  <Button
+                    variant='outlined'
+                    onClick={handleClearInstructions}
+                    sx={{ mr: 1 }}
+                    disabled={!values.product?.productBody?.careInstructions}
+                  >
+                    Clear
+                  </Button>
+                  <Button variant='contained' onClick={handleOpenCareTable}>
+                    Select
+                  </Button>
+                </>
+              ),
+            },
+          }}
+        />
+      </Grid>
       <CareInstructions
         isCareTableOpen={isCareTableOpen}
         close={handleCloseCareTable}

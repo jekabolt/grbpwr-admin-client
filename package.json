@@ -103,6 +103,7 @@
     "react-text-truncate": "^0.19.0",
     "react-use-auth": "^2.1.0-14",
     "stream-browserify": "^3.0.0",
+    "swiper": "^11.1.14",
     "uuid": "^11.0.3",
     "yup": "^1.4.0"
   }
