@@ -3,7 +3,7 @@ import {
   Dialog,
   FormControl,
   FormControlLabel,
-  Grid,
+  Grid2 as Grid,
   IconButton,
   Radio,
   RadioGroup,
@@ -55,7 +55,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
           const isSelected = selectedInstructions[selectionKey] === code;
 
           return (
-            <Grid item xs={4} sm={1.5} key={code}>
+            <Grid size={{ xs: 4, sm: 1.5 }} key={code}>
               <Grid
                 container
                 onClick={() => onSelectCareInstruction(selectedCare!, method, code, subCategory)}
@@ -64,14 +64,14 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
               >
                 <Grid container className={styles['care-card']}>
                   {img && (
-                    <Grid item className={styles['care-card-img-container']}>
+                    <Grid className={styles['care-card-img-container']}>
                       <img src={img} alt={method} style={{ width: isMobile ? '25px' : '50px' }} />
                     </Grid>
                   )}
-                  <Grid item className={styles['care-card-text']}>
+                  <Grid className={styles['care-card-text']}>
                     <Typography
                       variant='overline'
-                      fontSize={isMobile ? '0.3rem' : '0.5rem'}
+                      fontSize={isMobile ? '0.4em' : '0.5em'}
                       className={styles.text}
                     >
                       {method}
@@ -83,9 +83,9 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
           );
         } else {
           return (
-            <Grid item xs={12} key={method}>
+            <Grid size={{ xs: 12 }} key={method}>
               <Typography variant='subtitle1' fontWeight='bold' sx={{ mb: 1 }}>
-                {method}
+                {method.toUpperCase()}
               </Typography>
               <Grid container spacing={2}>
                 {renderCareMethods(codeOrSubMethods, method)}
@@ -118,7 +118,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
         <CloseIcon />
       </IconButton>
       <Grid container spacing={2} sx={{ p: 2 }}>
-        <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'center' }}>
+        <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'center' }}>
           <FormControl>
             <RadioGroup
               row
@@ -138,7 +138,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
           </FormControl>
         </Grid>
         {selectedCare && (
-          <Grid item xs={12}>
+          <Grid size={{ xs: 12 }}>
             <Grid container spacing={2}>
               {renderCareMethods(
                 careInstruction.care_instructions[

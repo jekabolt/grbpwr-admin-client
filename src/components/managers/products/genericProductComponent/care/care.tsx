@@ -64,6 +64,11 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
     setIsCareTableOpen(false);
   };
 
+  const handleClearInstructions = () => {
+    setSelectedInstructions({});
+    setFieldValue('product.productBody.careInstructions', '');
+  };
+
   return (
     <Grid container>
       <Grid size={{ xs: 12 }}>
@@ -77,9 +82,19 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
             input: {
               readOnly: true,
               endAdornment: (isAddingProduct || isEditMode) && (
-                <Button variant='contained' onClick={handleOpenCareTable}>
-                  Select
-                </Button>
+                <>
+                  <Button
+                    variant='outlined'
+                    onClick={handleClearInstructions}
+                    sx={{ mr: 1 }}
+                    disabled={!values.product?.productBody?.careInstructions}
+                  >
+                    Clear
+                  </Button>
+                  <Button variant='contained' onClick={handleOpenCareTable}>
+                    Select
+                  </Button>
+                </>
               ),
             },
           }}
