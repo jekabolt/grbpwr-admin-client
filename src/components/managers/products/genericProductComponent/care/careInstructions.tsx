@@ -1,8 +1,10 @@
+import CloseIcon from '@mui/icons-material/Close';
 import {
   Dialog,
   FormControl,
   FormControlLabel,
   Grid,
+  IconButton,
   Radio,
   RadioGroup,
   Typography,
@@ -108,9 +110,13 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
           m: isMobile ? 0 : 2,
           height: isMobile ? '100%' : 'auto',
           maxHeight: isMobile ? '100%' : '90vh',
+          position: 'relative',
         },
       }}
     >
+      <IconButton onClick={close} sx={{ position: 'absolute', top: 0, right: 0, zIndex: 1 }}>
+        <CloseIcon />
+      </IconButton>
       <Grid container spacing={2} sx={{ p: 2 }}>
         <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'center' }}>
           <FormControl>
