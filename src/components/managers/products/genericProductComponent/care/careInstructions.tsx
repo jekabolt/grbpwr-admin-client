@@ -33,9 +33,9 @@ interface CareInstructionsProps {
 
 export const CareInstructions: FC<CareInstructionsProps> = ({
   isCareTableOpen,
+  selectedInstructions,
   close,
   onSelectCareInstruction,
-  selectedInstructions,
 }) => {
   const careCategories = Object.keys(careInstruction.care_instructions);
   const [selectedCare, setSelectedCare] = useState<string | null>('Washing');
@@ -55,7 +55,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
           const isSelected = selectedInstructions[selectionKey] === code;
 
           return (
-            <Grid size={{ xs: 4, sm: 1.5 }} key={code}>
+            <Grid size={{ xs: 4, sm: 1.7 }} key={code}>
               <Grid
                 container
                 onClick={() => onSelectCareInstruction(selectedCare!, method, code, subCategory)}
@@ -71,7 +71,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
                   <Grid className={styles['care-card-text']}>
                     <Typography
                       variant='overline'
-                      fontSize={isMobile ? '0.4em' : '0.5em'}
+                      fontSize={isMobile ? '0.4em' : '0.55em'}
                       className={styles.text}
                     >
                       {method}

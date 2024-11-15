@@ -1,4 +1,4 @@
-import { AppBar, Button, CircularProgress, Grid, Toolbar } from '@mui/material';
+import { AppBar, Button, CircularProgress, Grid2 as Grid, Toolbar } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
@@ -6,6 +6,7 @@ import { Field, Form, Formik, FormikHelpers } from 'formik';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { BasicFields } from './basicFields/basicFields';
 import { Care } from './care/care';
+import { Composition } from './composition/composition';
 import { GenericProductFormInterface } from './interface/interface';
 import { MediaView } from './mediaView/mediaView';
 import { SizesAndMeasurements } from './sizesAndMeasurements/sizesAndMeasurements';
@@ -125,7 +126,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
               </Toolbar>
             </AppBar>
             <Grid container justifyContent='center' padding='2%' spacing={2}>
-              <Grid item xs={12} sm={6}>
+              <Grid size={{ xs: 12, sm: 6 }}>
                 <Field
                   component={MediaView}
                   name='mediaIds'
@@ -138,23 +139,30 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                   }}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid size={{ xs: 12, sm: 6 }}>
                 <Grid container spacing={2}>
-                  <Grid item xs={12}>
+                  <Grid size={{ xs: 12 }}>
                     <Field
                       component={BasicFields}
                       name='product.productBody'
                       {...{ product, dictionary, isEditMode, isAddingProduct, isCopyMode }}
                     />
                   </Grid>
-                  <Grid item xs={12}>
+                  <Grid size={{ xs: 12 }}>
                     <Field
                       component={Care}
                       name='product.productBody'
                       {...{ isEditMode, isAddingProduct }}
                     />
                   </Grid>
-                  <Grid item xs={12}>
+                  <Grid size={{ xs: 12 }}>
+                    <Field
+                      component={Composition}
+                      name='product.productBody'
+                      {...{ isAddingProduct, isEditMode }}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12 }}>
                     <Field
                       component={Tags}
                       name='tags'
@@ -167,7 +175,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                   </Grid>
                 </Grid>
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Field
                   component={SizesAndMeasurements}
                   name='sizeMeasurements'

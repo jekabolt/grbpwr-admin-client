@@ -1,0 +1,36 @@
+.square-container {
+  position: relative;
+  width: 100%;
+  padding-top: 100%; // This creates a perfect square
+  border: 1px solid #000; // Optional: rounds the corners
+  cursor: pointer;
+
+  .square-content {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    padding: 1rem;
+    text-align: center;
+
+    .MuiTypography-root {
+      text-align: center;
+      word-break: break-word;
+      hyphens: auto;
+    }
+
+    .MuiTextField-root {
+      width: 100%;
+
+      input {
+        padding: 8px;
+        text-align: center;
+      }
+    }
+  }
+}
