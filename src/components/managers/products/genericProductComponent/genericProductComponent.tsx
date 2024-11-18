@@ -5,8 +5,6 @@ import { ROUTES } from 'constants/routes';
 import { Field, Form, Formik, FormikHelpers } from 'formik';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { BasicFields } from './basicFields/basicFields';
-import { Care } from './care/care';
-import { Composition } from './composition/composition';
 import { GenericProductFormInterface } from './interface/interface';
 import { MediaView } from './mediaView/mediaView';
 import { SizesAndMeasurements } from './sizesAndMeasurements/sizesAndMeasurements';
@@ -146,20 +144,6 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                       component={BasicFields}
                       name='product.productBody'
                       {...{ product, dictionary, isEditMode, isAddingProduct, isCopyMode }}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12 }}>
-                    <Field
-                      component={Care}
-                      name='product.productBody'
-                      {...{ isEditMode, isAddingProduct }}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12 }}>
-                    <Field
-                      component={Composition}
-                      name='product.productBody'
-                      {...{ isAddingProduct, isEditMode }}
                     />
                   </Grid>
                   <Grid size={{ xs: 12 }}>

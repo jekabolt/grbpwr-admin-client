@@ -10,7 +10,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { FC, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import { composition } from '../garment-composition/garment-composition';
 import styles from '../styles/composition.scss';
 
@@ -42,6 +42,37 @@ export const CompositionModal: FC<CompositionModalProps> = ({
     return !!localSelectedInstructions[key];
   };
 
+  useEffect(() => {
+    setLocalSelectedInstructions(selectedInstructions);
+  }, [selectedInstructions]);
+
+  const totalPercentage = useMemo(() => {
+    return Object.values(localSelectedInstructions).reduce((acc, curr) => acc + curr.percentage, 0);
+  }, [localSelectedInstructions]);
+
+  const handlePercentageChange = (key: string, value: string) => {
+    const percentage = parseInt(value) || 0;
+    if (percentage >= 0 && percentage <= 100) {
+      const newTotal =
+        totalPercentage - (localSelectedInstructions[key]?.percentage || 0) + percentage;
+      if (newTotal > 100) {
+        alert('Total percentage cannot exceed 100');
+        return;
+      }
+      setLocalSelectedInstructions((prev) => {
+        const newState = { ...prev };
+        if (newState[key]) {
+          newState[key] = {
+            ...newState[key],
+            percentage,
+          };
+        }
+        selectComposition(newState);
+        return newState;
+      });
+    }
+  };
+
   const handleSelectCategory = (category: string) => {
     setSelectedCategory(category);
   };
@@ -60,23 +91,6 @@ export const CompositionModal: FC<CompositionModalProps> = ({
       selectComposition(newState);
       return newState;
     });
-  };
-
-  const handlePercentageChange = (key: string, value: string) => {
-    const percentage = parseInt(value) || 0;
-    if (percentage >= 0 && percentage <= 100) {
-      setLocalSelectedInstructions((prev) => {
-        const newState = { ...prev };
-        if (newState[key]) {
-          newState[key] = {
-            ...newState[key],
-            percentage,
-          };
-        }
-        selectComposition(newState);
-        return newState;
-      });
-    }
   };
 
   return (
@@ -98,11 +112,10 @@ export const CompositionModal: FC<CompositionModalProps> = ({
               value={selectedCategory}
               onChange={(e) => handleSelectCategory(e.target.value)}
               sx={{
-                gap: 2,
-                // flexWrap: 'nowrap',
-                // '& .MuiFormControlLabel-root': {
-                //   minWidth: 'fit-content',
-                // },
+                gap: 1,
+                '& .MuiFormControlLabel-root': {
+                  minWidth: 'fit-content',
+                },
               }}
             >
               {compositionCategories.map((category) => (
@@ -126,20 +139,12 @@ export const CompositionModal: FC<CompositionModalProps> = ({
               <Grid key={key} size={{ xs: 6, sm: 2, md: 1.5 }}>
                 <Grid
                   className={`${styles['square-container']} ${isSelected(key) ? styles['selected'] : ''}`}
-                  sx={{
-                    cursor: 'pointer',
-                    '&.selected': {
-                      backgroundColor: 'primary.light',
-                      border: '2px solid',
-                      borderColor: 'primary.main',
-                    },
-                  }}
                 >
                   <Grid
                     className={styles['square-content']}
                     onClick={() => handleContainerClick(key, value)}
                   >
-                    <Typography variant='overline' fontSize='1em'>
+                    <Typography variant='overline' fontSize={isSelected(key) ? '0.6em' : '1em'}>
                       {key.toUpperCase()}
                     </Typography>
                     {isSelected(key) && (
