@@ -1,9 +1,9 @@
 .square-container {
-  position: relative;
-  width: 100%;
-  padding-top: 100%; // This creates a perfect square
-  border: 1px solid #000; // Optional: rounds the corners
   cursor: pointer;
+  border: 1px solid #000;
+  padding: 0.5rem;
+  position: relative;
+  transition: all 0.2s ease;
 
   .square-content {
     position: absolute;
@@ -32,5 +32,15 @@
         text-align: center;
       }
     }
+  }
+  &.selected {
+    border-color: var(--mui-primary-main, #000);
+    border-width: 4px;
+  }
+
+  &:before {
+    content: '';
+    display: block;
+    padding-top: 100%;
   }
 }

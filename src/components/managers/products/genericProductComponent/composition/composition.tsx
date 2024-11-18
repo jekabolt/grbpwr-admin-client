@@ -3,6 +3,7 @@ import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
 import { CompositionModal } from './composition-modal/composition-modal';
+import { composition } from './garment-composition/garment-composition';
 
 interface CompositionProps {
   isAddingProduct: boolean;
@@ -18,30 +19,51 @@ interface SelectedInstructions {
 export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const [isCompositionModalOpen, setIsCompositionModalOpen] = useState(false);
-  const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>(() => {
-    const composition = values.product?.productBody?.composition || '';
-    const instructions = composition.split(',').filter(Boolean);
-    return instructions.reduce((acc, item) => {
-      const [code, percentage] = item.split(':');
-      if (code) {
-        acc[code] = {
-          code,
-          percentage: parseInt(percentage) || 0,
-        };
-      }
-      return acc;
-    }, {} as SelectedInstructions);
-  });
+  const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>({});
 
   const handleSelectComposition = (newInstructions: SelectedInstructions) => {
-    setSelectedInstructions(newInstructions);
-    const formattedValue = Object.values(newInstructions)
+    let updatedInstructions: SelectedInstructions;
+    updatedInstructions = newInstructions;
+
+    setSelectedInstructions(updatedInstructions);
+
+    const formattedValue = Object.values(updatedInstructions)
+      .filter((item) => item.percentage > 0)
       .map((item) => `${item.code}:${item.percentage}`)
       .join(',');
+
     setFieldValue('product.productBody.composition', formattedValue);
   };
 
   const handleOpenCompositionModal = () => {
+    const currentComposition = values.product?.productBody?.composition || '';
+    const instructions = currentComposition
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const currentInstructions = instructions.reduce((acc, item) => {
+      const [code, percentage] = item.split(':').map((s) => s.trim());
+      if (code) {
+        let foundKey = '';
+        Object.values(composition.garment_composition).forEach((category) => {
+          Object.entries(category).forEach(([key, value]) => {
+            if (value === code) {
+              foundKey = key;
+            }
+          });
+        });
+
+        if (foundKey) {
+          acc[foundKey] = {
+            code,
+            percentage: parseInt(percentage) || 0,
+          };
+        }
+      }
+      return acc;
+    }, {} as SelectedInstructions);
+    setSelectedInstructions(currentInstructions);
     setIsCompositionModalOpen(true);
   };
 
