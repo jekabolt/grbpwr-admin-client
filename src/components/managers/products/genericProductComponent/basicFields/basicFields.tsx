@@ -3,7 +3,7 @@ import {
   FormControl,
   FormControlLabel,
   FormHelperText,
-  Grid,
+  Grid2 as Grid,
   InputLabel,
   MenuItem,
   Select,
@@ -20,6 +20,8 @@ import { ErrorMessage, Field, getIn, useFormikContext } from 'formik';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { v4 as uuidv4 } from 'uuid';
+import { Care } from '../care/care';
+import { Composition } from '../composition/composition';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 import { handleKeyDown } from '../utility/brandNameRegExp';
 import { genderOptions } from '../utility/dictionaryConst';
@@ -146,7 +148,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         {!isAddingProduct && (
           <>
             {['id', 'createdAt', 'updatedAt'].map((field) => (
-              <Grid item xs={12} key={field}>
+              <Grid size={{ xs: 12 }} key={field}>
                 <TextField
                   label={
                     field === 'id'
@@ -167,7 +169,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           </>
         )}
 
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Field
             as={TextField}
             variant='outlined'
@@ -188,7 +190,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             onKeyDown={handleKeyDown}
           />
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Field
             as={TextField}
             variant='outlined'
@@ -210,7 +212,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             disabled={disableFields}
           />
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <FormControl
             required
             fullWidth
@@ -242,7 +244,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               )}
           </FormControl>
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <FormControl
             required
             fullWidth
@@ -274,7 +276,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               )}
           </FormControl>
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <FormControl
             fullWidth
             required
@@ -306,7 +308,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               )}
           </FormControl>
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Field
             as={TextField}
             type='color'
@@ -318,7 +320,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             disabled={disableFields}
           />
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <FormControl
             fullWidth
             required
@@ -350,7 +352,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               )}
           </FormControl>
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Field
             as={TextField}
             variant='outlined'
@@ -383,7 +385,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         </Grid>
 
         {showSales && (
-          <Grid item xs={12}>
+          <Grid size={{ xs: 12 }}>
             <Field
               as={TextField}
               label={'sale percentage'.toUpperCase()}
@@ -403,7 +405,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         )}
 
         {showPreorder && (
-          <Grid item xs={12}>
+          <Grid size={{ xs: 12 }}>
             <DatePicker
               label={'preorder'.toUpperCase()}
               value={parseDate(values.product?.productBody?.preorder)}
@@ -420,7 +422,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             />
           </Grid>
         )}
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Field
             as={TextField}
             label={'description'.toUpperCase()}
@@ -441,7 +443,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           />
         </Grid>
 
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Field
             as={TextField}
             label={'sku'.toUpperCase()}
@@ -453,7 +455,17 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             disabled={disableFields}
           />
         </Grid>
-        <Grid item>
+        <Grid size={{ xs: 12 }}>
+          <Field component={Care} name='product.productBody' {...{ isEditMode, isAddingProduct }} />
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <Field
+            component={Composition}
+            name='product.productBody'
+            {...{ isAddingProduct, isEditMode }}
+          />
+        </Grid>
+        <Grid size={{ xs: 12 }}>
           <FormControlLabel
             control={
               <Field
