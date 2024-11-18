@@ -2,6 +2,7 @@ import { Button, Grid2 as Grid, TextField } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
+import { careInstruction } from './careInstruction';
 import { CareInstructions } from './careInstructions';
 
 interface SelectedInstructions {
@@ -16,16 +17,8 @@ interface CareInterface {
 export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
   const [isCareTableOpen, setIsCareTableOpen] = useState(false);
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
-  const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>(() => {
-    const careInstructions = values.product?.productBody?.careInstructions || '';
-    const instructions = careInstructions.split(',').filter(Boolean);
-    return instructions.reduce((acc, code) => {
-      acc[code] = code;
-      return acc;
-    }, {} as SelectedInstructions);
-  });
+  const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>({});
 
-  // ... existing code ...
   const handleSelectCareInstruction = (
     category: string,
     method: string,
@@ -57,6 +50,30 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
   };
 
   const handleOpenCareTable = () => {
+    if (values.product?.productBody?.careInstructions) {
+      const codes = values.product.productBody.careInstructions.split(',');
+      const newSelectedInstructions: SelectedInstructions = {};
+
+      Object.entries(careInstruction.care_instructions).forEach(([category, methods]) => {
+        if (category === 'Professional Care') {
+          Object.entries(methods).forEach(([subCategory, subMethods]) => {
+            Object.values(subMethods).forEach((method: any) => {
+              if (codes.includes(method.code)) {
+                newSelectedInstructions[`${category}-${subCategory}`] = method.code;
+              }
+            });
+          });
+        } else {
+          Object.values(methods).forEach((method: any) => {
+            if (codes.includes(method.code)) {
+              newSelectedInstructions[category] = method.code;
+            }
+          });
+        }
+      });
+
+      setSelectedInstructions(newSelectedInstructions);
+    }
     setIsCareTableOpen(true);
   };
 
