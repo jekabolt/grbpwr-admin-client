@@ -9,8 +9,11 @@ import {
   RadioGroup,
   TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import { FC, useEffect, useMemo, useState } from 'react';
+import SwipeableViews from 'react-swipeable-views';
 import { composition } from '../garment-composition/garment-composition';
 import styles from '../styles/composition.scss';
 
@@ -41,6 +44,9 @@ export const CompositionModal: FC<CompositionModalProps> = ({
   const isSelected = (key: string) => {
     return !!localSelectedInstructions[key];
   };
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const currentCategoryIndex = compositionCategories.indexOf(selectedCategory);
 
   useEffect(() => {
     setLocalSelectedInstructions(selectedInstructions);
@@ -49,6 +55,10 @@ export const CompositionModal: FC<CompositionModalProps> = ({
   const totalPercentage = useMemo(() => {
     return Object.values(localSelectedInstructions).reduce((acc, curr) => acc + curr.percentage, 0);
   }, [localSelectedInstructions]);
+
+  const handleCategorySwipe = (index: number) => {
+    setSelectedCategory(compositionCategories[index]);
+  };
 
   const handlePercentageChange = (key: string, value: string) => {
     const percentage = parseInt(value) || 0;
@@ -97,6 +107,7 @@ export const CompositionModal: FC<CompositionModalProps> = ({
     <Dialog
       open={isOpen}
       onClose={onClose}
+      fullScreen={isMobile}
       fullWidth
       maxWidth='xl'
       PaperProps={{ sx: { p: 2, position: 'relative' } }}
@@ -105,29 +116,54 @@ export const CompositionModal: FC<CompositionModalProps> = ({
         <CloseIcon />
       </IconButton>
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
-          <FormControl>
-            <RadioGroup
-              row
-              value={selectedCategory}
-              onChange={(e) => handleSelectCategory(e.target.value)}
-              sx={{
-                gap: 1,
-                '& .MuiFormControlLabel-root': {
-                  minWidth: 'fit-content',
-                },
-              }}
+        <Grid
+          size={{ xs: 12 }}
+          sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', p: 1 }}
+        >
+          {isMobile ? (
+            <SwipeableViews
+              index={currentCategoryIndex}
+              onChangeIndex={handleCategorySwipe}
+              enableMouseEvents
+              resistance
+              style={{ width: '100%' }}
             >
               {compositionCategories.map((category) => (
-                <FormControlLabel
+                <Typography
                   key={category}
-                  value={category}
-                  control={<Radio />}
-                  label={category}
-                />
+                  variant='h6'
+                  textTransform='uppercase'
+                  align='center'
+                  sx={{ p: 1 }}
+                >
+                  {category}
+                </Typography>
               ))}
-            </RadioGroup>
-          </FormControl>
+            </SwipeableViews>
+          ) : (
+            <FormControl>
+              <RadioGroup
+                value={selectedCategory}
+                onChange={(e) => handleSelectCategory(e.target.value)}
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, 1fr)',
+                  '& .MuiFormControlLabel-root': {
+                    minWidth: 'fit-content',
+                  },
+                }}
+              >
+                {compositionCategories.map((category) => (
+                  <FormControlLabel
+                    key={category}
+                    value={category}
+                    control={<Radio />}
+                    label={category.toUpperCase()}
+                  />
+                ))}
+              </RadioGroup>
+            </FormControl>
+          )}
         </Grid>
         <Grid size={{ xs: 12 }}>
           <Grid container spacing={2}>
