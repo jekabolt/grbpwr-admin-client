@@ -12,6 +12,7 @@ import {
   useTheme,
 } from '@mui/material';
 import { FC, useState } from 'react';
+import SwipeableViews from 'react-swipeable-views';
 import styles from './care.scss';
 import { careInstruction } from './careInstruction';
 
@@ -41,6 +42,11 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
   const [selectedCare, setSelectedCare] = useState<string | null>('Washing');
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const currentCategoryIndex = careCategories.indexOf(selectedCare!);
+
+  const handleCategorySwipe = (index: number) => {
+    setSelectedCare(careCategories[index]);
+  };
 
   const handleSelectCare = (category: string) => {
     setSelectedCare(category);
@@ -65,16 +71,23 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
                 <Grid container className={styles['care-card']}>
                   {img && (
                     <Grid className={styles['care-card-img-container']}>
-                      <img src={img} alt={method} style={{ width: isMobile ? '25px' : '50px' }} />
+                      <img
+                        src={img}
+                        alt={method}
+                        style={{
+                          width: isMobile ? '30px' : '50px',
+                          ...(isSelected && { width: '80%' }),
+                        }}
+                      />
                     </Grid>
                   )}
                   <Grid className={styles['care-card-text']}>
                     <Typography
                       variant='overline'
-                      fontSize={isMobile ? '0.4em' : '0.55em'}
+                      fontSize={isMobile ? '0.4em' : '0.58em'}
                       className={styles.text}
                     >
-                      {method}
+                      {isSelected ? code : method}
                     </Typography>
                   </Grid>
                 </Grid>
@@ -119,23 +132,45 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
       </IconButton>
       <Grid container spacing={2} sx={{ p: 2 }}>
         <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'center' }}>
-          <FormControl>
-            <RadioGroup
-              row
-              value={selectedCare}
-              onChange={(e) => handleSelectCare(e.target.value)}
-              sx={{ gap: 4 }}
+          {isMobile ? (
+            <SwipeableViews
+              index={currentCategoryIndex}
+              onChangeIndex={handleCategorySwipe}
+              enableMouseEvents
+              resistance
+              style={{ width: '100%' }}
             >
               {careCategories.map((category) => (
-                <FormControlLabel
+                <Typography
                   key={category}
-                  value={category}
-                  control={<Radio />}
-                  label={category}
-                />
+                  variant='h6'
+                  textTransform='uppercase'
+                  align='center'
+                  sx={{ p: 1 }}
+                >
+                  {category}
+                </Typography>
               ))}
-            </RadioGroup>
-          </FormControl>
+            </SwipeableViews>
+          ) : (
+            <FormControl>
+              <RadioGroup
+                row
+                value={selectedCare}
+                onChange={(e) => handleSelectCare(e.target.value)}
+                sx={{ gap: 4 }}
+              >
+                {careCategories.map((category) => (
+                  <FormControlLabel
+                    key={category}
+                    value={category}
+                    control={<Radio />}
+                    label={category.toUpperCase()}
+                  />
+                ))}
+              </RadioGroup>
+            </FormControl>
+          )}
         </Grid>
         {selectedCare && (
           <Grid size={{ xs: 12 }}>
