@@ -13,7 +13,6 @@ import {
   useTheme,
 } from '@mui/material';
 import { FC, useEffect, useMemo, useState } from 'react';
-import SwipeableViews from 'react-swipeable-views';
 import { composition } from '../garment-composition/garment-composition';
 import styles from '../styles/composition.scss';
 
@@ -112,58 +111,41 @@ export const CompositionModal: FC<CompositionModalProps> = ({
       maxWidth='xl'
       PaperProps={{ sx: { p: 2, position: 'relative' } }}
     >
-      <IconButton sx={{ position: 'absolute', right: 0, top: 0 }} onClick={onClose}>
+      <IconButton sx={{ position: 'absolute', right: 0, top: 0, zIndex: 1000 }} onClick={onClose}>
         <CloseIcon />
       </IconButton>
       <Grid container spacing={2}>
         <Grid
           size={{ xs: 12 }}
-          sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', p: 1 }}
+          sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}
         >
-          {isMobile ? (
-            <SwipeableViews
-              index={currentCategoryIndex}
-              onChangeIndex={handleCategorySwipe}
-              enableMouseEvents
-              resistance
-              style={{ width: '100%' }}
+          <FormControl>
+            <RadioGroup
+              row={!isMobile}
+              value={selectedCategory}
+              onChange={(e) => handleSelectCategory(e.target.value)}
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+                gridTemplateRows: isMobile ? 'auto' : 'repeat(2, 1fr)',
+              }}
             >
               {compositionCategories.map((category) => (
-                <Typography
+                <FormControlLabel
                   key={category}
-                  variant='h6'
-                  textTransform='uppercase'
-                  align='center'
-                  sx={{ p: 1 }}
-                >
-                  {category}
-                </Typography>
+                  value={category}
+                  control={<Radio />}
+                  label={category.toUpperCase()}
+                  sx={{
+                    '& .MuiFormControlLabel-label': {
+                      fontSize: isMobile ? '0.8rem' : '1rem',
+                      fontWeight: 'bold',
+                    },
+                  }}
+                />
               ))}
-            </SwipeableViews>
-          ) : (
-            <FormControl>
-              <RadioGroup
-                value={selectedCategory}
-                onChange={(e) => handleSelectCategory(e.target.value)}
-                sx={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(2, 1fr)',
-                  '& .MuiFormControlLabel-root': {
-                    minWidth: 'fit-content',
-                  },
-                }}
-              >
-                {compositionCategories.map((category) => (
-                  <FormControlLabel
-                    key={category}
-                    value={category}
-                    control={<Radio />}
-                    label={category.toUpperCase()}
-                  />
-                ))}
-              </RadioGroup>
-            </FormControl>
-          )}
+            </RadioGroup>
+          </FormControl>
         </Grid>
         <Grid size={{ xs: 12 }}>
           <Grid container spacing={2}>
