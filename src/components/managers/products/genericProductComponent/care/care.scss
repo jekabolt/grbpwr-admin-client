@@ -14,10 +14,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: space-between;
+    display: grid;
 
     .care-card-img-container {
       display: flex;
@@ -30,13 +27,21 @@
       align-items: center;
       justify-content: center;
       text-align: center;
-      max-width: 90%;
-      overflow-wrap: break-word;
+      max-width: 100%;
+      padding: 0 2px;
+      min-height: 24px;
+      margin-bottom: 4px;
 
       .text {
         word-break: break-word;
         hyphens: auto;
         width: 100%;
+        line-height: 1.1;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
       }
     }
   }
