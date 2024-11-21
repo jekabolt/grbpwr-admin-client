@@ -12,7 +12,6 @@ import {
   useTheme,
 } from '@mui/material';
 import { FC, useState } from 'react';
-import SwipeableViews from 'react-swipeable-views';
 import styles from './care.scss';
 import { careInstruction } from './careInstruction';
 
@@ -75,8 +74,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
                         src={img}
                         alt={method}
                         style={{
-                          width: isMobile ? '30px' : '50px',
-                          ...(isSelected && { width: '80%' }),
+                          width: isSelected ? '80%' : isMobile ? '26px' : '50px',
                         }}
                       />
                     </Grid>
@@ -131,46 +129,40 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
         <CloseIcon />
       </IconButton>
       <Grid container spacing={2} sx={{ p: 2 }}>
-        <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'center' }}>
-          {isMobile ? (
-            <SwipeableViews
-              index={currentCategoryIndex}
-              onChangeIndex={handleCategorySwipe}
-              enableMouseEvents
-              resistance
-              style={{ width: '100%' }}
+        <Grid
+          size={{ xs: 12 }}
+          sx={{
+            display: 'flex',
+            justifyContent: isMobile ? 'flex-start' : 'center',
+          }}
+        >
+          <FormControl>
+            <RadioGroup
+              row={!isMobile}
+              value={selectedCare}
+              onChange={(e) => handleSelectCare(e.target.value)}
+              sx={{
+                gap: isMobile ? 1 : 4,
+                display: isMobile ? 'grid' : 'flex',
+                gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'none',
+              }}
             >
               {careCategories.map((category) => (
-                <Typography
+                <FormControlLabel
                   key={category}
-                  variant='h6'
-                  textTransform='uppercase'
-                  align='center'
-                  sx={{ p: 1 }}
-                >
-                  {category}
-                </Typography>
+                  value={category}
+                  control={<Radio />}
+                  label={category.toUpperCase()}
+                  sx={{
+                    '& .MuiFormControlLabel-label': {
+                      fontSize: isMobile ? '0.8rem' : '1rem',
+                      fontWeight: 'bold',
+                    },
+                  }}
+                />
               ))}
-            </SwipeableViews>
-          ) : (
-            <FormControl>
-              <RadioGroup
-                row
-                value={selectedCare}
-                onChange={(e) => handleSelectCare(e.target.value)}
-                sx={{ gap: 4 }}
-              >
-                {careCategories.map((category) => (
-                  <FormControlLabel
-                    key={category}
-                    value={category}
-                    control={<Radio />}
-                    label={category.toUpperCase()}
-                  />
-                ))}
-              </RadioGroup>
-            </FormControl>
-          )}
+            </RadioGroup>
+          </FormControl>
         </Grid>
         {selectedCare && (
           <Grid size={{ xs: 12 }}>
