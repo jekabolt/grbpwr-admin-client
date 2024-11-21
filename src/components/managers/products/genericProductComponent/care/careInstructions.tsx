@@ -74,7 +74,8 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
                         src={img}
                         alt={method}
                         style={{
-                          width: isSelected ? '80%' : isMobile ? '26px' : '50px',
+                          width: isSelected ? '80%' : '50%',
+                          height: 'auto',
                         }}
                       />
                     </Grid>
