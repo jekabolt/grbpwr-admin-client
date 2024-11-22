@@ -23,7 +23,7 @@ interface HeroProductTableData {
 export const HeroProductTable: FC<
   HeroProductTableData & {
     id: number;
-    onReorder: (newOrder: common_Product[]) => void;
+    onReorder?: (newOrder: common_Product[]) => void;
   }
 > = ({ products, id, onReorder }) => {
   const { setFieldValue } = useFormikContext<common_HeroFullInsert>();
@@ -52,7 +52,7 @@ export const HeroProductTable: FC<
         const item = newData.splice(fromIndex, 1)[0];
         newData.splice(toIndex, 0, item);
         setData(newData);
-        onReorder(newData);
+        onReorder?.(newData);
         setFieldValue(
           `entities.${id}.featuredProducts.productIds`,
           newData.map((product) => product.id),
@@ -161,7 +161,7 @@ export const HeroProductTable: FC<
               event.stopPropagation(); // Prevent row click event
               const newData = data.filter((_, index) => index !== row.index);
               setData(newData);
-              onReorder(newData);
+              onReorder?.(newData);
               setFieldValue(
                 `entities.${id}.featuredProducts.productIds`,
                 newData.map((p) => p.id),
@@ -194,7 +194,7 @@ export const HeroProductTable: FC<
             data.splice(draggingRow.index, 1)[0],
           );
           setData([...data]);
-          onReorder(data);
+          onReorder?.(data);
         }
       },
     }),

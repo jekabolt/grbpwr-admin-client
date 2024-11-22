@@ -1,4 +1,4 @@
-import { Button, Divider, Grid } from '@mui/material';
+import { Button, Divider, Grid2 as Grid } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_HeroEntity } from 'api/proto-http/frontend';
 import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
@@ -9,6 +9,7 @@ import { removeEntityIndex } from '../utility/arrayHelpers';
 import { getAllowedRatios } from '../utility/getAllowedRatios';
 import { DoubleAdd } from './doubleAdd/doubleAdd';
 import { FeaturedProduct } from './featuredProducts/featuredProduct';
+import { FeaturedProductTag } from './featuredProductTag/featured-product-tag';
 import { MainAdd } from './mainAdd/mainAdd';
 import { SingleAdd } from './singleAdd/singleAdd';
 
@@ -25,6 +26,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     [key: number]: { left: string | undefined; right: string | undefined };
   }>({});
   const [product, setProduct] = useState<{ [key: number]: common_Product[] }>({});
+  const [productTags, setProductTags] = useState<{ [key: number]: common_Product[] }>({});
   const [currentEntityIndex, setCurrentEntityIndex] = useState<number | null>(null);
   const [allowedRatios, setAllowedRatios] = useState<{ [key: number]: string[] }>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -61,6 +63,11 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
       {},
     );
 
+    const productTagsForEntities = entities.reduce(
+      (acc, e, i) => ({ ...acc, [i]: e.featuredProductsTag?.products?.products || [] }),
+      {},
+    );
+
     const calculatedAllowedRatios = entities.reduce<{ [key: number]: string[] }>((acc, e, i) => {
       const allowedRatios = getAllowedRatios(e);
       if (allowedRatios.length > 0) {
@@ -73,6 +80,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     setSingle(singleEntities);
     setDoubleAdd(doubleAddEntities);
     setProduct(productsForEntities);
+    setProductTags(productTagsForEntities);
     setAllowedRatios(calculatedAllowedRatios);
   };
 
@@ -157,6 +165,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     setSingle((prevSingle) => removeEntityIndex(prevSingle, index));
     setDoubleAdd((prevDoubleAdd) => removeEntityIndex(prevDoubleAdd, index));
     setProduct((prevProduct) => removeEntityIndex(prevProduct, index));
+    setProductTags((prevProductTags) => removeEntityIndex(prevProductTags, index));
 
     arrayHelpers.remove(index);
   };
@@ -165,7 +174,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     <Grid container spacing={2} marginTop={5}>
       {values.entities &&
         values.entities.map((entity, index) => (
-          <Grid item xs={12} ref={(el) => (entityRefs.current[index] = el)}>
+          <Grid size={{ xs: 12 }} ref={(el) => (entityRefs.current[index] = el)}>
             <Grid container spacing={2} className={styles.entity_container}>
               {entity.type === 'HERO_TYPE_MAIN_ADD' && (
                 <MainAdd index={index} entity={entity} link={main} saveMedia={saveMainMedia} />
@@ -200,7 +209,10 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                   handleOpenProductSelection={handleOpenProductSelection}
                 />
               )}
-              <Grid item xs={12} md={10}>
+              {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' && (
+                <FeaturedProductTag index={index} entity={entity} productTags={productTags} />
+              )}
+              <Grid size={{ xs: 12 }}>
                 <Button
                   variant='contained'
                   color='error'
@@ -211,7 +223,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                   Remove Entity
                 </Button>
               </Grid>
-              <Grid item xs={12} md={10} className={styles.divider_container}>
+              <Grid size={{ xs: 12 }} className={styles.divider_container}>
                 <Divider className={styles.divider} />
               </Grid>
             </Grid>

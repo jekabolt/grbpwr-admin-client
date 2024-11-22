@@ -6,7 +6,8 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
     { value: 'HERO_TYPE_MAIN_ADD', label: 'main add' },
     { value: 'HERO_TYPE_SINGLE_ADD', label: 'single add' },
     { value: 'HERO_TYPE_DOUBLE_ADD', label: 'double add' },
-    { value: 'HERO_TYPE_FEATURED_PRODUCTS', label: 'featured products' }
+    { value: 'HERO_TYPE_FEATURED_PRODUCTS', label: 'featured products' },
+    { value: 'HERO_TYPE_FEATURED_PRODUCTS_TAG', label: 'featured products tag' }
 ]
 
 export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_HeroFullInsert => {
@@ -50,7 +51,7 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
                 tag: entity.featuredProductsTag?.tag,
                 title: entity.featuredProductsTag?.products?.title,
                 exploreLink: entity.featuredProductsTag?.products?.exploreLink,
-                exploreText: entity.featuredProductsTag?.products?.exploreText
+                exploreText: entity.featuredProductsTag?.products?.exploreText,
             }
         })),
     };

@@ -24,7 +24,6 @@ const urlValidation = Yup.string().nullable()
     });
 
 export const heroValidationSchema = Yup.object().shape({
-
     entities: Yup.array().of(
         Yup.lazy((entity) => {
             switch (entity?.type) {
@@ -74,6 +73,18 @@ export const heroValidationSchema = Yup.object().shape({
                             productIds: Yup.array()
                                 .of(Yup.number().min(1))
                                 .min(1, 'At least one product is required'),
+                            title: Yup.string().nullable(),
+                            exploreLink: urlValidation,
+                            exploreText: Yup.string().nullable(),
+                        }),
+                    });
+
+
+                case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
+                    return Yup.object().shape({
+                        type: Yup.string().required('Hero type is required'),
+                        featuredProductsTag: Yup.object().shape({
+                            tag: Yup.string().required('Tag is required'),
                             title: Yup.string().nullable(),
                             exploreLink: urlValidation,
                             exploreText: Yup.string().nullable(),
