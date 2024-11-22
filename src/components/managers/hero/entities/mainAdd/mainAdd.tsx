@@ -1,4 +1,4 @@
-import { Box, Grid, TextField, Typography } from '@mui/material';
+import { Box, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
 import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
@@ -12,12 +12,12 @@ export const MainAdd: FC<HeroMediaEntityInterface> = ({ index, entity, link, sav
   const errorEntities = (errors?.entities || []) as any[];
   return (
     <>
-      <Grid item xs={12} md={10}>
+      <Grid size={{ xs: 12 }}>
         <Typography variant='h4' textTransform='uppercase'>
           main
         </Typography>
       </Grid>
-      <Grid item xs={12} md={10}>
+      <Grid size={{ xs: 12 }}>
         <SingleMediaViewAndSelect
           link={link}
           aspectRatio={['4:5', '5:4', '1:1', '16:9', '9:16']}

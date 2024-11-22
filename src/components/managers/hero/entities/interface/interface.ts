@@ -25,3 +25,9 @@ export interface HeroProductEntityInterface {
     handleCloseModal: () => void;
     handleSaveNewSelection: (selectedProduct: common_Product[], index: number) => void;
 }
+
+export interface HeroProductTagEntityInterface {
+    index: number;
+    entity: any;
+    productTags: { [key: number]: common_Product[] };
+}

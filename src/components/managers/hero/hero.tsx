@@ -1,4 +1,4 @@
-import { Alert, Button, Grid, Snackbar } from '@mui/material';
+import { Alert, Button, Grid2 as Grid, Snackbar } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { common_HeroEntity } from 'api/proto-http/frontend';
@@ -43,6 +43,7 @@ export const Hero: FC = () => {
     try {
       await addHero({ hero: values });
       showMessage('HERO SAVED SUCCESSFULLY', 'success');
+      fetchHero();
     } catch {
       showMessage("HERO CAN'T BE SAVED", 'error');
     }
@@ -68,7 +69,7 @@ export const Hero: FC = () => {
                     entityRefs={entityRefs}
                     arrayHelpers={arrayHelpers}
                   />
-                  <Grid item xs={12} md={10}>
+                  <Grid size={{ xs: 12 }}>
                     <Field
                       component={SelectHeroType}
                       arrayHelpers={arrayHelpers}

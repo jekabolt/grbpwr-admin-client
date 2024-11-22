@@ -1,4 +1,4 @@
-import { Box, Button, Grid, TextField, Typography } from '@mui/material';
+import { Box, Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { ProductPickerModal } from 'components/common/productPickerModal';
 import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
@@ -23,12 +23,12 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
   const errorEntities = (errors?.entities || []) as any[];
   return (
     <>
-      <Grid item xs={12} md={10}>
+      <Grid size={{ xs: 12 }}>
         <Typography variant='h4' textTransform='uppercase'>
           featured products
         </Typography>
       </Grid>
-      <Grid item xs={12} md={10}>
+      <Grid size={{ xs: 12 }}>
         <Box component='div' className={styles.fields}>
           <Field
             as={TextField}
