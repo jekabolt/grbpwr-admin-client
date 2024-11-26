@@ -88,7 +88,12 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
               readOnly: true,
               endAdornment: (isEditMode || isAddingProduct) && (
                 <>
-                  <Button variant='outlined' sx={{ mr: 1 }} onClick={handleClearCompositionField}>
+                  <Button
+                    variant='outlined'
+                    sx={{ mr: 1 }}
+                    onClick={handleClearCompositionField}
+                    disabled={!values.product?.productBody?.composition}
+                  >
                     Clean
                   </Button>
                   <Button variant='contained' onClick={handleOpenCompositionModal}>
