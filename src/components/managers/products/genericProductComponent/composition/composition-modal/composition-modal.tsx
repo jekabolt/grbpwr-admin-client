@@ -1,10 +1,7 @@
-import CloseIcon from '@mui/icons-material/Close';
 import {
-  Dialog,
   FormControl,
   FormControlLabel,
   Grid2 as Grid,
-  IconButton,
   Radio,
   RadioGroup,
   TextField,
@@ -12,6 +9,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
+import { Dialog } from 'components/common/dialog';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { composition } from '../garment-composition/garment-composition';
 import styles from '../styles/composition.scss';
@@ -45,7 +43,6 @@ export const CompositionModal: FC<CompositionModalProps> = ({
   };
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const currentCategoryIndex = compositionCategories.indexOf(selectedCategory);
 
   useEffect(() => {
     setLocalSelectedInstructions(selectedInstructions);
@@ -54,10 +51,6 @@ export const CompositionModal: FC<CompositionModalProps> = ({
   const totalPercentage = useMemo(() => {
     return Object.values(localSelectedInstructions).reduce((acc, curr) => acc + curr.percentage, 0);
   }, [localSelectedInstructions]);
-
-  const handleCategorySwipe = (index: number) => {
-    setSelectedCategory(compositionCategories[index]);
-  };
 
   const handlePercentageChange = (key: string, value: string) => {
     const percentage = parseInt(value) || 0;
@@ -103,17 +96,7 @@ export const CompositionModal: FC<CompositionModalProps> = ({
   };
 
   return (
-    <Dialog
-      open={isOpen}
-      onClose={onClose}
-      fullScreen={isMobile}
-      fullWidth
-      maxWidth='xl'
-      PaperProps={{ sx: { p: 2, position: 'relative' } }}
-    >
-      <IconButton sx={{ position: 'absolute', right: 0, top: 0, zIndex: 1000 }} onClick={onClose}>
-        <CloseIcon />
-      </IconButton>
+    <Dialog open={isOpen} onClose={onClose}>
       <Grid container spacing={2}>
         <Grid
           size={{ xs: 12 }}
