@@ -1,6 +1,6 @@
 import { Grid } from '@mui/material';
+import { MediaSelector } from 'components/common/mediaSelector/layout/mediaSelector';
 import { Layout } from 'components/login/layout';
-import { MediaSelector } from 'features/mediaSelector/mediaSelector';
 import { FC } from 'react';
 
 export const MediaManager: FC = () => {

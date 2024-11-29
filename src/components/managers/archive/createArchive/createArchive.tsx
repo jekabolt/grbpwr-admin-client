@@ -9,8 +9,8 @@ import {
 } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { Dialog } from 'components/common/dialog';
+import { MediaSelectorLayout } from 'components/common/mediaSelector/layout';
 import { TruncateText } from 'components/common/truncateText';
-import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useState } from 'react';
 import styles from 'styles/archive.scss';
 import { ArchiveModal } from '../archiveModal/archiveModal';
