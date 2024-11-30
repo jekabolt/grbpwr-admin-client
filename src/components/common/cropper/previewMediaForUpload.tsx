@@ -1,5 +1,5 @@
 import { Button, Grid } from '@mui/material';
-import { PreviewMediaForUploadInterface } from 'components/common/mediaSelector/interfaces/mediaSelectorInterfaces';
+import { PreviewMediaForUploadInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
 import { isBase64Video } from 'features/utilitty/filterContentType';
 import { getBase64ImageFromUrl } from 'features/utilitty/getBase64';

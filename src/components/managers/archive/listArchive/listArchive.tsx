@@ -3,7 +3,7 @@ import { Box, Button, Grid, TextField, Typography } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveItemFull } from 'api/proto-http/frontend';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
-import { MediaSelectorLayout } from 'components/common/mediaSelector/layout';
+import { MediaSelectorLayout } from 'components/common/media-selector-layout/layout';
 import { TruncateText } from 'components/common/truncateText';
 import { isValidURL } from 'features/utilitty/isValidUrl';
 import { FC, useEffect, useState } from 'react';
