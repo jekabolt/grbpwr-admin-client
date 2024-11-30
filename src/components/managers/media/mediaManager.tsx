@@ -1,5 +1,5 @@
 import { Grid } from '@mui/material';
-import { MediaSelector } from 'components/common/mediaSelector/layout/mediaSelector';
+import { MediaSelector } from 'components/common/media-selector-layout/mediaSelector';
 import { Layout } from 'components/login/layout';
 import { FC } from 'react';
 

@@ -1,9 +1,9 @@
 import { Grid } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
-import { MediaSelectorLayout } from 'components/common/mediaSelector/layout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
 import styles from 'styles/product-id-media.scss';
+import { MediaSelectorLayout } from '../layout';
 
 interface SingleMediaView {
   link: string | undefined;

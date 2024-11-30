@@ -1,7 +1,7 @@
 import { Button, Grid } from '@mui/material';
-import { MediaSelectorLayoutProps } from 'components/common/mediaSelector/interfaces/mediaSelectorInterfaces';
 import { FC, useState } from 'react';
-import { MediaSelectorModal } from './layout/mediaSelectorModal';
+import { MediaSelectorLayoutProps } from './interfaces/mediaSelectorInterfaces';
+import { MediaSelectorModal } from './media-selector-components/mediaSelectorModal';
 
 export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   label,

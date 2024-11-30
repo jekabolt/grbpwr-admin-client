@@ -1,6 +1,6 @@
 import { Box, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
+import { SingleMediaViewAndSelect } from 'components/common/media-selector-layout/media-selector-components/singleMediaViewAndSelect';
 import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import { FC } from 'react';
