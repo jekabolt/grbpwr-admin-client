@@ -1,7 +1,8 @@
 import { Box, Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { ProductPickerModal } from 'components/common/productPickerModal';
-import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
+import { isValidUrl } from 'components/managers/archive/utility/isValidUrl';
+import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import { FC } from 'react';
 import styles from 'styles/hero.scss';
@@ -14,6 +15,7 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
   product,
   isModalOpen,
   currentEntityIndex,
+  showMessage,
   handleProductsReorder,
   handleOpenProductSelection,
   handleCloseModal,
@@ -41,13 +43,15 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
             name={`entities.${index}.featuredProducts.exploreLink`}
             label='EXPLORE LINK'
             error={
-              Boolean(errorEntities?.[index]?.featuredProducts?.exploreLink) ||
               (entity?.featuredProducts.exploreLink &&
-                !isValidUrlForHero(entity.featuredProducts.exploreLink))
+                !isValidUrlForHero(entity.featuredProducts.exploreLink)) ||
+              (entity?.featuredProducts.exploreLink &&
+                !isValidUrl(entity.featuredProducts.exploreLink))
             }
             helperText={
-              errorEntities?.[index]?.featuredProducts?.exploreLink
-                ? errorEntities[index].featuredProducts.exploreLink
+              entity?.featuredProducts.exploreLink &&
+              !isValidURL(entity.featuredProducts.exploreLink)
+                ? 'Invalid URL format'
                 : entity?.featuredProducts.exploreLink &&
                     !isValidUrlForHero(entity.featuredProducts.exploreLink)
                   ? 'URL is not from the allowed domain but will be saved with a warning'

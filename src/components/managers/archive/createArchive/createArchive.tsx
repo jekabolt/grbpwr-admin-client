@@ -1,5 +1,5 @@
 import ClearIcon from '@mui/icons-material/Clear';
-import { Button, Dialog, Grid, IconButton, TextField, Typography } from '@mui/material';
+import { Grid2 as Grid, IconButton, TextField } from '@mui/material';
 import { addArchive } from 'api/archive';
 import {
   common_ArchiveItemInsert,
@@ -8,8 +8,9 @@ import {
   common_MediaItem,
 } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
+import { Dialog } from 'components/common/dialog';
+import { MediaSelectorLayout } from 'components/common/mediaSelector/layout';
 import { TruncateText } from 'components/common/truncateText';
-import { MediaSelectorLayout } from 'features/mediaSelector/mediaSelectorLayout';
 import { FC, useState } from 'react';
 import styles from 'styles/archive.scss';
 import { ArchiveModal } from '../archiveModal/archiveModal';
@@ -180,17 +181,17 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
     }
   };
   return (
-    <Dialog open={open} onClose={close} fullWidth maxWidth='xl'>
-      <Button onClick={close} sx={{ position: 'absolute', right: 0, top: 0 }}>
-        <ClearIcon />
-      </Button>
+    <Dialog
+      open={open}
+      onClose={close}
+      title='create new archive'
+      isSaveButton
+      save={createArchive}
+    >
       <Grid container spacing={2} padding={4} alignItems='center'>
-        <Grid item xs={12}>
-          <Typography variant='h5' textTransform='uppercase'>
-            create new archive
-          </Typography>
+        <Grid size={{ xs: 12 }}>
           <Grid container className={styles.scroll_container} wrap='nowrap'>
-            <Grid item xs={12} md={3} className={styles.media_item_add}>
+            <Grid size={{ xs: 12, md: 3 }} className={styles.media_item_add}>
               <MediaSelectorLayout
                 label='add media'
                 allowMultiple={false}
@@ -201,9 +202,9 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
               />
             </Grid>
             {mediaItem.map((media, id) => (
-              <Grid item key={id} xs={12} md={3}>
+              <Grid size={{ xs: 12, md: 3 }} key={id}>
                 <Grid container>
-                  <Grid item xs={12} className={styles.media_item}>
+                  <Grid size={{ xs: 12 }} className={styles.media_item}>
                     <img
                       src={media.media?.fullSize?.mediaUrl}
                       alt=''
@@ -213,7 +214,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
                       <ClearIcon fontSize='small' />
                     </IconButton>
                   </Grid>
-                  <Grid item xs={12}>
+                  <Grid size={{ xs: 12 }}>
                     <TruncateText text={archive.itemsInsert?.[id].name} length={60} />
                     {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
                       <CopyToClipboard
@@ -228,7 +229,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
           </Grid>
 
           <Grid container spacing={2}>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <TextField
                 type='text'
                 name='heading'
@@ -236,20 +237,24 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
                 value={archive.archive?.heading}
                 onChange={handleTextFieldChange}
                 label='TITLE'
-                InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+                slotProps={{
+                  inputLabel: { shrink: true, style: { textTransform: 'uppercase' } },
+                }}
                 size='small'
                 required
               />
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <TextField
                 type='text'
                 name='description'
                 value={archive.archive?.text}
                 onChange={handleTextFieldChange}
                 label='DESCRIPTION'
-                InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
-                inputProps={{ maxLength: 255 }}
+                slotProps={{
+                  inputLabel: { shrink: true, style: { textTransform: 'uppercase' } },
+                  htmlInput: { maxLength: 255 },
+                }}
                 size='small'
                 fullWidth
                 multiline
@@ -257,17 +262,6 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
             </Grid>
           </Grid>
         </Grid>
-
-        <Grid item xs={12}>
-          <Button
-            onClick={() => createArchive()}
-            variant='contained'
-            disabled={mediaItem.length === 0 || archive.archive?.heading?.trim() === ''}
-          >
-            submit
-          </Button>
-        </Grid>
-
         <ArchiveModal
           open={isModalOpen}
           isEditMode={selectedItemIndex !== null}

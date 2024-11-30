@@ -1,6 +1,6 @@
 import { Box, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
+import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { Field, useFormikContext } from 'formik';
 import { FC } from 'react';
 import { HeroProductTable } from '../featuredProducts/heroProductsTable';
@@ -49,15 +49,15 @@ export const FeaturedProductTag: FC<HeroProductTagEntityInterface> = ({
               as={TextField}
               label='Explore Link'
               error={
-                (Boolean(errorEntities[index]?.featuredProductsTag?.exploreLink) &&
-                  Boolean(touchedEntities[index]?.featuredProductsTag?.exploreLink)) ||
                 (entity?.featuredProductsTag?.exploreLink &&
-                  !isValidUrlForHero(entity.featuredProductsTag?.exploreLink))
+                  !isValidUrlForHero(entity.featuredProductsTag?.exploreLink)) ||
+                (entity?.featuredProductsTag?.exploreLink &&
+                  !isValidURL(entity.featuredProductsTag?.exploreLink))
               }
               helperText={
-                errorEntities[index]?.featuredProductsTag?.exploreLink &&
-                touchedEntities[index]?.featuredProductsTag?.exploreLink
-                  ? errorEntities[index].featuredProductsTag.exploreLink
+                entity?.featuredProductsTag?.exploreLink &&
+                !isValidURL(entity.featuredProductsTag?.exploreLink)
+                  ? 'Invalid URL format'
                   : entity?.featuredProductsTag?.exploreLink &&
                       !isValidUrlForHero(entity.featuredProductsTag?.exploreLink)
                     ? 'URL is not from the allowed domain but will be saved with a warning'

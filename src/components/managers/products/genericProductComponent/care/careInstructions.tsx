@@ -1,16 +1,14 @@
-import CloseIcon from '@mui/icons-material/Close';
 import {
-  Dialog,
   FormControl,
   FormControlLabel,
   Grid2 as Grid,
-  IconButton,
   Radio,
   RadioGroup,
   Typography,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
+import { Dialog } from 'components/common/dialog';
 import { FC, useState } from 'react';
 import styles from './care.scss';
 import { careInstruction } from './careInstruction';
@@ -41,11 +39,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
   const [selectedCare, setSelectedCare] = useState<string | null>('Washing');
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const currentCategoryIndex = careCategories.indexOf(selectedCare!);
-
-  const handleCategorySwipe = (index: number) => {
-    setSelectedCare(careCategories[index]);
-  };
+  // const currentCategoryIndex = careCategories.indexOf(selectedCare!);
 
   const handleSelectCare = (category: string) => {
     setSelectedCare(category);
@@ -111,24 +105,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
   };
 
   return (
-    <Dialog
-      open={isCareTableOpen}
-      onClose={close}
-      maxWidth='xl'
-      fullScreen={isMobile}
-      fullWidth
-      PaperProps={{
-        sx: {
-          m: isMobile ? 0 : 2,
-          height: isMobile ? '100%' : 'auto',
-          maxHeight: isMobile ? '100%' : '90vh',
-          position: 'relative',
-        },
-      }}
-    >
-      <IconButton onClick={close} sx={{ position: 'absolute', top: 0, right: 0, zIndex: 1 }}>
-        <CloseIcon />
-      </IconButton>
+    <Dialog open={isCareTableOpen} onClose={close}>
       <Grid container spacing={2} sx={{ p: 2 }}>
         <Grid
           size={{ xs: 12 }}

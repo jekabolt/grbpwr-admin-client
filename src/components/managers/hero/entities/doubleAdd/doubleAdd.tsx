@@ -1,7 +1,7 @@
 import { Box, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
-import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
+import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import { FC } from 'react';
 import styles from 'styles/hero.scss';
@@ -45,13 +45,13 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
             name={`entities.${index}.doubleAdd.left.exploreLink`}
             label='EXPLORE LINK'
             error={
-              Boolean(errorEntities?.[index]?.doubleAdd?.left?.exploreLink) ||
               (entity?.doubleAdd.left.exploreLink &&
-                !isValidUrlForHero(entity.doubleAdd.left.exploreLink))
+                !isValidUrlForHero(entity.doubleAdd.left.exploreLink)) ||
+              (entity?.doubleAdd.left.exploreLink && !isValidURL(entity.doubleAdd.left.exploreLink))
             }
             helperText={
-              errorEntities?.[index]?.doubleAdd?.left?.exploreLink
-                ? errorEntities[index].doubleAdd.left.exploreLink
+              entity?.doubleAdd.left.exploreLink && !isValidURL(entity.doubleAdd.left.exploreLink)
+                ? 'Invalid URL format'
                 : entity?.doubleAdd?.left?.exploreLink &&
                     !isValidUrlForHero(entity.doubleAdd.left.exploreLink)
                   ? 'URL is not from the allowed domain but will be saved with a warning'
@@ -89,13 +89,14 @@ export const DoubleAdd: FC<HeroMediaEntityInterface> = ({
             name={`entities.${index}.doubleAdd.right.exploreLink`}
             label='EXPLORE LINK'
             error={
-              Boolean(errorEntities?.[index]?.doubleAdd?.right?.exploreLink) ||
               (entity?.doubleAdd.right.exploreLink &&
-                !isValidUrlForHero(entity.doubleAdd.right.exploreLink))
+                !isValidUrlForHero(entity.doubleAdd.right.exploreLink)) ||
+              (entity?.doubleAdd.right.exploreLink &&
+                !isValidURL(entity.doubleAdd.right.exploreLink))
             }
             helperText={
-              errorEntities?.[index]?.doubleAdd?.right?.exploreLink
-                ? errorEntities[index].doubleAdd.right.exploreLink
+              entity?.doubleAdd.right.exploreLink && !isValidURL(entity.doubleAdd.right.exploreLink)
+                ? 'Invalid URL format'
                 : entity?.doubleAdd?.right?.exploreLink &&
                     !isValidUrlForHero(entity.doubleAdd.right.exploreLink)
                   ? 'URL is not from the allowed domain but will be saved with a warning'

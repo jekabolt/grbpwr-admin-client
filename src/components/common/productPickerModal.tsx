@@ -1,4 +1,4 @@
-import { Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle } from '@mui/material';
+import { Button, Checkbox } from '@mui/material';
 import { getDictionary, getProductsPaged } from 'api/admin';
 
 import { GetProductsPagedRequest, common_Category, common_Product } from 'api/proto-http/admin';
@@ -9,6 +9,7 @@ import {
   type MRT_ColumnDef,
 } from 'material-react-table';
 import { FC, useEffect, useMemo, useState } from 'react';
+import { Dialog } from './dialog';
 
 interface ProductsPickerData {
   open: boolean;
@@ -186,16 +187,9 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   });
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth='xl' fullWidth sx={{ width: 'auto' }}>
-      <DialogTitle>Select Products</DialogTitle>
-      <DialogContent>
-        <MaterialReactTable table={table} />
-        <Button onClick={loadMore}>Load more</Button>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button onClick={handleSave}>Save</Button>
-      </DialogActions>
+    <Dialog open={open} onClose={onClose} title='select products' isSaveButton save={handleSave}>
+      <MaterialReactTable table={table} />
+      <Button onClick={loadMore}>Load more</Button>
     </Dialog>
   );
 };
