@@ -1,7 +1,7 @@
 import { Box, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/singleMediaViewAndSelect';
-import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
+import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import { FC } from 'react';
 import styles from 'styles/hero.scss';
@@ -37,13 +37,15 @@ export const MainAdd: FC<HeroMediaEntityInterface> = ({ index, entity, link, sav
             name={`entities.${index}.mainAdd.singleAdd.exploreLink`}
             label='EXPLORE LINK'
             error={
-              Boolean(errorEntities?.[index]?.mainAdd?.singleAdd?.exploreLink) ||
               (entity?.mainAdd?.singleAdd?.exploreLink &&
-                !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink))
+                !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)) ||
+              (entity.mainAdd?.singleAdd?.exploreLink &&
+                isValidURL(entity.mainAdd?.singleAdd?.exploreLink))
             }
             helperText={
-              errorEntities?.[index]?.mainAdd?.singleAdd?.exploreLink
-                ? errorEntities[index].mainAdd.singleAdd.exploreLink
+              entity?.mainAdd?.singleAdd?.exploreLink &&
+              !isValidURL(entity.mainAdd?.singleAdd?.exploreLink)
+                ? 'Invalid URL format'
                 : entity?.mainAdd?.singleAdd?.exploreLink &&
                     !isValidUrlForHero(entity.mainAdd?.singleAdd?.exploreLink)
                   ? 'URL is not from the allowed domain but will be saved with a warning'

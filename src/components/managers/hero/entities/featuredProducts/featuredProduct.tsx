@@ -2,7 +2,7 @@ import { Box, Button, Grid2 as Grid, TextField, Typography } from '@mui/material
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { ProductPickerModal } from 'components/common/productPickerModal';
 import { isValidUrl } from 'components/managers/archive/utility/isValidUrl';
-import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
+import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import { FC } from 'react';
 import styles from 'styles/hero.scss';
@@ -50,9 +50,12 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
             }
             helperText={
               entity?.featuredProducts.exploreLink &&
-              !isValidUrlForHero(entity.featuredProducts.exploreLink)
-                ? 'URL is not from the allowed domain but will be saved with a warning'
-                : 'is not valid'
+              !isValidURL(entity.featuredProducts.exploreLink)
+                ? 'Invalid URL format'
+                : entity?.featuredProducts.exploreLink &&
+                    !isValidUrlForHero(entity.featuredProducts.exploreLink)
+                  ? 'URL is not from the allowed domain but will be saved with a warning'
+                  : ''
             }
             fullWidth
           />
