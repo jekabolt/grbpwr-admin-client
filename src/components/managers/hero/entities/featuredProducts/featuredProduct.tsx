@@ -1,6 +1,7 @@
 import { Box, Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { ProductPickerModal } from 'components/common/productPickerModal';
+import { isValidUrl } from 'components/managers/archive/utility/isValidUrl';
 import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import { FC } from 'react';
@@ -14,6 +15,7 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
   product,
   isModalOpen,
   currentEntityIndex,
+  showMessage,
   handleProductsReorder,
   handleOpenProductSelection,
   handleCloseModal,
@@ -41,17 +43,16 @@ export const FeaturedProduct: FC<HeroProductEntityInterface> = ({
             name={`entities.${index}.featuredProducts.exploreLink`}
             label='EXPLORE LINK'
             error={
-              Boolean(errorEntities?.[index]?.featuredProducts?.exploreLink) ||
               (entity?.featuredProducts.exploreLink &&
-                !isValidUrlForHero(entity.featuredProducts.exploreLink))
+                !isValidUrlForHero(entity.featuredProducts.exploreLink)) ||
+              (entity?.featuredProducts.exploreLink &&
+                !isValidUrl(entity.featuredProducts.exploreLink))
             }
             helperText={
-              errorEntities?.[index]?.featuredProducts?.exploreLink
-                ? errorEntities[index].featuredProducts.exploreLink
-                : entity?.featuredProducts.exploreLink &&
-                    !isValidUrlForHero(entity.featuredProducts.exploreLink)
-                  ? 'URL is not from the allowed domain but will be saved with a warning'
-                  : ''
+              entity?.featuredProducts.exploreLink &&
+              !isValidUrlForHero(entity.featuredProducts.exploreLink)
+                ? 'URL is not from the allowed domain but will be saved with a warning'
+                : 'is not valid'
             }
             fullWidth
           />

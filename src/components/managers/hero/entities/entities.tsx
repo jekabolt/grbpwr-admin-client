@@ -17,8 +17,14 @@ interface EntitiesProps {
   entities: common_HeroEntity[];
   entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
   arrayHelpers: FieldArrayRenderProps;
+  showMessage: (message: string, severity: 'success' | 'error') => void;
 }
-export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers }) => {
+export const Entities: FC<EntitiesProps> = ({
+  entityRefs,
+  entities,
+  arrayHelpers,
+  showMessage,
+}) => {
   const { values, setFieldValue } = useFormikContext<common_HeroFullInsert>();
   const [main, setMain] = useState<string>('');
   const [single, setSingle] = useState<{ [key: number]: string }>({});
@@ -177,40 +183,51 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
           <Grid size={{ xs: 12 }} ref={(el) => (entityRefs.current[index] = el)}>
             <Grid container spacing={2} className={styles.entity_container}>
               {entity.type === 'HERO_TYPE_MAIN_ADD' && (
-                <MainAdd index={index} entity={entity} link={main} saveMedia={saveMainMedia} />
+                <Grid size={{ xs: 12 }}>
+                  <MainAdd index={index} entity={entity} link={main} saveMedia={saveMainMedia} />
+                </Grid>
               )}
               {entity.type === 'HERO_TYPE_SINGLE_ADD' && (
-                <SingleAdd
-                  index={index}
-                  entity={entity}
-                  singleLink={single}
-                  saveMedia={saveSingleMedia}
-                />
+                <Grid size={{ xs: 12 }}>
+                  <SingleAdd
+                    index={index}
+                    entity={entity}
+                    singleLink={single}
+                    saveMedia={saveSingleMedia}
+                  />
+                </Grid>
               )}
               {entity.type === 'HERO_TYPE_DOUBLE_ADD' && (
-                <DoubleAdd
-                  index={index}
-                  entity={entity}
-                  doubleLinks={doubleAdd}
-                  allowedRatios={allowedRatios}
-                  saveDoubleMedia={saveDoubleMedia}
-                />
+                <Grid size={{ xs: 12 }}>
+                  <DoubleAdd
+                    index={index}
+                    entity={entity}
+                    doubleLinks={doubleAdd}
+                    allowedRatios={allowedRatios}
+                    saveDoubleMedia={saveDoubleMedia}
+                  />
+                </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
-                <FeaturedProduct
-                  index={index}
-                  entity={entity}
-                  product={product}
-                  isModalOpen={isModalOpen}
-                  currentEntityIndex={currentEntityIndex}
-                  handleCloseModal={handleCloseModal}
-                  handleSaveNewSelection={handleSaveNewSelection}
-                  handleProductsReorder={handleProductsReorder}
-                  handleOpenProductSelection={handleOpenProductSelection}
-                />
+                <Grid size={{ xs: 12 }}>
+                  <FeaturedProduct
+                    index={index}
+                    entity={entity}
+                    product={product}
+                    isModalOpen={isModalOpen}
+                    currentEntityIndex={currentEntityIndex}
+                    showMessage={showMessage}
+                    handleCloseModal={handleCloseModal}
+                    handleSaveNewSelection={handleSaveNewSelection}
+                    handleProductsReorder={handleProductsReorder}
+                    handleOpenProductSelection={handleOpenProductSelection}
+                  />
+                </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' && (
-                <FeaturedProductTag index={index} entity={entity} productTags={productTags} />
+                <Grid size={{ xs: 12 }}>
+                  <FeaturedProductTag index={index} entity={entity} productTags={productTags} />
+                </Grid>
               )}
               <Grid size={{ xs: 12 }}>
                 <Button

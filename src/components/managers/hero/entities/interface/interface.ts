@@ -20,6 +20,7 @@ export interface HeroProductEntityInterface {
     product: { [key: number]: common_Product[] };
     isModalOpen: boolean;
     currentEntityIndex: number | null;
+    showMessage: (message: string, severity: 'success' | 'error') => void;
     handleProductsReorder: (newProductsOrder: common_Product[], index: number) => void;
     handleOpenProductSelection: (index: number) => void;
     handleCloseModal: () => void;
