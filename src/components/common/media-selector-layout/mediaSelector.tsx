@@ -1,9 +1,9 @@
 import { Grid, Theme, useMediaQuery } from '@mui/material';
-import { MediaSelectorInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
 import 'react-advanced-cropper/dist/style.css';
 import { PreviewMediaForUpload } from '../cropper/previewMediaForUpload';
+import { MediaSelectorInterface } from '../interfaces/mediaSelectorInterfaces';
 import { ByUrl } from './media-selector-components/byUrl';
 import { DragDrop } from './media-selector-components/dragDrop';
 import { FilterMedias } from './media-selector-components/filterMedias';
