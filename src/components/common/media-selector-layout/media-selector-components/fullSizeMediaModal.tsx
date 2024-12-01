@@ -1,11 +1,11 @@
 import { Grid2 as Grid, Snackbar, Theme, Typography, useMediaQuery } from '@mui/material';
 import { common_MediaInfo, common_MediaItem } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
+import { PreviewMediaForUpload } from 'components/common/cropper/previewMediaForUpload';
+import { Dialog } from 'components/common/dialog';
 import { FullSizeMediaModalInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useEffect, useState } from 'react';
-import { PreviewMediaForUpload } from '../cropper/previewMediaForUpload';
-import { Dialog } from '../dialog';
 
 type MediaKey = keyof common_MediaItem;
 type VideoDimensions = {
