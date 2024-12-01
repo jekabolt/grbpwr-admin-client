@@ -18,13 +18,16 @@ export interface HeroProductEntityInterface {
     index: number;
     entity: any;
     product: { [key: number]: common_Product[] };
-    isModalOpen: boolean;
-    currentEntityIndex: number | null;
-    showMessage: (message: string, severity: 'success' | 'error') => void;
-    handleProductsReorder: (newProductsOrder: common_Product[], index: number) => void;
-    handleOpenProductSelection: (index: number) => void;
-    handleCloseModal: () => void;
-    handleSaveNewSelection: (selectedProduct: common_Product[], index: number) => void;
+    title: string;
+    prefix?: string;
+    isModalOpen?: boolean;
+    showProductPicker?: boolean;
+    currentEntityIndex?: number | null;
+    showMessage?: (message: string, severity: 'success' | 'error') => void;
+    handleProductsReorder?: (newProductsOrder: common_Product[], index: number) => void;
+    handleOpenProductSelection?: (index: number) => void;
+    handleCloseModal?: () => void;
+    handleSaveNewSelection?: (selectedProduct: common_Product[], index: number) => void;
 }
 
 export interface HeroProductTagEntityInterface {

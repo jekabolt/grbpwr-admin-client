@@ -2,6 +2,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import {
   AppBar,
   Button,
+  DialogActions,
   DialogContent,
   DialogProps,
   DialogTitle,
@@ -42,9 +43,14 @@ export function Dialog({ open, children, isSaveButton, title, onClose, save, ...
       }}
       {...props}
     >
-      <IconButton onClick={onClose} sx={{ position: 'absolute', top: '0', right: '0' }}>
-        <CloseIcon />
-      </IconButton>
+      <DialogActions>
+        <IconButton
+          onClick={onClose}
+          sx={{ position: 'absolute', top: '0', right: '0', zIndex: 1000 }}
+        >
+          <CloseIcon />
+        </IconButton>
+      </DialogActions>
       {title && <DialogTitle>{title.toUpperCase()}</DialogTitle>}
       <DialogContent>{children}</DialogContent>
       {isSaveButton && (

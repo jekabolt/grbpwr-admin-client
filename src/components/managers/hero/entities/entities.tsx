@@ -8,8 +8,7 @@ import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';
 import { getAllowedRatios } from '../utility/getAllowedRatios';
 import { DoubleAdd } from './doubleAdd/doubleAdd';
-import { FeaturedProduct } from './featuredProducts/featuredProduct';
-import { FeaturedProductTag } from './featuredProductTag/featured-product-tag';
+import { FeaturedProductBase } from './featured-products-(tags)/featured-prduct-base';
 import { MainAdd } from './mainAdd/mainAdd';
 import { SingleAdd } from './singleAdd/singleAdd';
 
@@ -94,11 +93,22 @@ export const Entities: FC<EntitiesProps> = ({
     fetchEntities();
   }, [entities]);
 
-  const handleProductsReorder = (newProductsOrder: common_Product[], index: number) => {
-    setProduct((prevState) => ({
-      ...prevState,
-      [index]: newProductsOrder,
-    }));
+  const handleProductsReorder = (
+    newProductsOrder: common_Product[],
+    index: number,
+    isProductTag: boolean = false,
+  ) => {
+    if (isProductTag) {
+      setProductTags((prevState) => ({
+        ...prevState,
+        [index]: newProductsOrder,
+      }));
+    } else {
+      setProduct((prevState) => ({
+        ...prevState,
+        [index]: newProductsOrder,
+      }));
+    }
   };
 
   const handleSaveNewSelection = (newSelectedProducts: common_Product[], index: number) => {
@@ -210,23 +220,32 @@ export const Entities: FC<EntitiesProps> = ({
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
                 <Grid size={{ xs: 12 }}>
-                  <FeaturedProduct
+                  <FeaturedProductBase
                     index={index}
                     entity={entity}
                     product={product}
-                    isModalOpen={isModalOpen}
                     currentEntityIndex={currentEntityIndex}
-                    showMessage={showMessage}
+                    isModalOpen={isModalOpen}
+                    showProductPicker={true}
+                    title='featured products'
+                    prefix='featuredProducts'
+                    handleOpenProductSelection={handleOpenProductSelection}
                     handleCloseModal={handleCloseModal}
                     handleSaveNewSelection={handleSaveNewSelection}
                     handleProductsReorder={handleProductsReorder}
-                    handleOpenProductSelection={handleOpenProductSelection}
                   />
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' && (
                 <Grid size={{ xs: 12 }}>
-                  <FeaturedProductTag index={index} entity={entity} productTags={productTags} />
+                  <FeaturedProductBase
+                    index={index}
+                    entity={entity}
+                    product={productTags}
+                    title='featured products tag'
+                    prefix='featuredProductsTag'
+                    handleProductsReorder={(e, i) => handleProductsReorder(e, i, true)}
+                  />
                 </Grid>
               )}
               <Grid size={{ xs: 12 }}>
