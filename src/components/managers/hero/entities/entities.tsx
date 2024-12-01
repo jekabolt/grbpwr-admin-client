@@ -16,14 +16,8 @@ interface EntitiesProps {
   entities: common_HeroEntity[];
   entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
   arrayHelpers: FieldArrayRenderProps;
-  showMessage: (message: string, severity: 'success' | 'error') => void;
 }
-export const Entities: FC<EntitiesProps> = ({
-  entityRefs,
-  entities,
-  arrayHelpers,
-  showMessage,
-}) => {
+export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers }) => {
   const { values, setFieldValue } = useFormikContext<common_HeroFullInsert>();
   const [main, setMain] = useState<string>('');
   const [single, setSingle] = useState<{ [key: number]: string }>({});

@@ -9,7 +9,7 @@ import { HeroMediaEntityInterface } from '../interface/interface';
 
 export const MainAdd: FC<HeroMediaEntityInterface> = ({ index, entity, link, saveMedia }) => {
   const { errors } = useFormikContext<common_HeroFullInsert>();
-  const errorEntities = (errors?.entities || []) as any[];
+
   return (
     <>
       <Grid size={{ xs: 12 }}>

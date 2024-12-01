@@ -14,7 +14,6 @@ export const SingleAdd: FC<HeroMediaEntityInterface> = ({
   saveMedia,
 }) => {
   const { errors } = useFormikContext<common_HeroFullInsert>();
-  const errorEntities = (errors?.entities || []) as any[];
 
   return (
     <Grid container>

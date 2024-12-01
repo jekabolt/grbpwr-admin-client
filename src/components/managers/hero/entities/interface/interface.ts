@@ -23,15 +23,8 @@ export interface HeroProductEntityInterface {
     isModalOpen?: boolean;
     showProductPicker?: boolean;
     currentEntityIndex?: number | null;
-    showMessage?: (message: string, severity: 'success' | 'error') => void;
     handleProductsReorder?: (newProductsOrder: common_Product[], index: number) => void;
     handleOpenProductSelection?: (index: number) => void;
     handleCloseModal?: () => void;
     handleSaveNewSelection?: (selectedProduct: common_Product[], index: number) => void;
-}
-
-export interface HeroProductTagEntityInterface {
-    index: number;
-    entity: any;
-    productTags: { [key: number]: common_Product[] };
 }

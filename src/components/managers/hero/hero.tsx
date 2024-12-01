@@ -133,7 +133,6 @@ export const Hero: FC = () => {
                       entities={entities}
                       entityRefs={entityRefs}
                       arrayHelpers={arrayHelpers}
-                      showMessage={showMessage}
                     />
                   </Grid>
                   <Grid size={{ xs: 12 }}>
