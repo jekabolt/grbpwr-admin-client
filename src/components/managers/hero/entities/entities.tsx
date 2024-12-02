@@ -7,10 +7,9 @@ import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';
 import { getAllowedRatios } from '../utility/getAllowedRatios';
-import { DoubleAdd } from './doubleAdd/doubleAdd';
+import { createMediaSaveConfigs } from '../utility/save-media-config';
+import { CommonEntity } from './common-entity/common-entity';
 import { FeaturedProductBase } from './featured-products-(tags)/featured-prduct-base';
-import { MainAdd } from './mainAdd/mainAdd';
-import { SingleAdd } from './singleAdd/singleAdd';
 
 interface EntitiesProps {
   entities: common_HeroEntity[];
@@ -29,6 +28,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   const [currentEntityIndex, setCurrentEntityIndex] = useState<number | null>(null);
   const [allowedRatios, setAllowedRatios] = useState<{ [key: number]: string[] }>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const mediaSaveConfigs = createMediaSaveConfigs(setMain, setSingle, setDoubleAdd);
 
   const handleOpenProductSelection = (index: number) => {
     setCurrentEntityIndex(index);
@@ -39,41 +39,29 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   const fetchEntities = () => {
     const mainAdd =
       entities.find((e) => e.mainAdd)?.mainAdd?.singleAdd?.media?.media?.thumbnail?.mediaUrl || '';
-    const singleEntities = entities.reduce(
-      (acc, e, i) => ({ ...acc, [i]: e.singleAdd?.media?.media?.thumbnail?.mediaUrl || '' }),
-      {},
-    );
-    const doubleAddEntities = entities.reduce<{
-      [key: number]: { left: string; right: string };
-    }>(
-      (acc, e, i) => ({
-        ...acc,
-        [i]: e.doubleAdd
-          ? {
-              left: e.doubleAdd.left?.media?.media?.thumbnail?.mediaUrl || '',
-              right: e.doubleAdd.right?.media?.media?.thumbnail?.mediaUrl || '',
-            }
-          : { left: '', right: '' },
-      }),
-      {},
-    );
-    const productsForEntities = entities.reduce(
-      (acc, e, i) => ({ ...acc, [i]: e.featuredProducts?.products || [] }),
-      {},
-    );
 
-    const productTagsForEntities = entities.reduce(
-      (acc, e, i) => ({ ...acc, [i]: e.featuredProductsTag?.products?.products || [] }),
-      {},
-    );
+    const singleEntities: { [key: number]: string } = {};
+    const doubleAddEntities: { [key: number]: { left: string; right: string } } = {};
+    const productsForEntities: { [key: number]: common_Product[] } = {};
+    const productTagsForEntities: { [key: number]: common_Product[] } = {};
+    const calculatedAllowedRatios: { [key: number]: string[] } = {};
 
-    const calculatedAllowedRatios = entities.reduce<{ [key: number]: string[] }>((acc, e, i) => {
+    entities.forEach((e, i) => {
+      singleEntities[i] = e.singleAdd?.media?.media?.thumbnail?.mediaUrl || '';
+
+      doubleAddEntities[i] = {
+        left: e.doubleAdd?.left?.media?.media?.thumbnail?.mediaUrl || '',
+        right: e.doubleAdd?.right?.media?.media?.thumbnail?.mediaUrl || '',
+      };
+
+      productsForEntities[i] = e.featuredProducts?.products || [];
+      productTagsForEntities[i] = e.featuredProductsTag?.products?.products || [];
+
       const allowedRatios = getAllowedRatios(e);
       if (allowedRatios.length > 0) {
-        acc[i] = allowedRatios;
+        calculatedAllowedRatios[i] = allowedRatios;
       }
-      return acc;
-    }, {});
+    });
 
     setMain(mainAdd);
     setSingle(singleEntities);
@@ -116,56 +104,34 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     handleCloseModal();
   };
 
-  const saveMainMedia = (selectedMedia: common_MediaFull[], index: number) => {
-    const newMainMedia = selectedMedia[0];
-    setFieldValue(`entities.${index}.mainAdd.singleAdd.mediaId`, newMainMedia.id);
-    setMain(newMainMedia.media?.thumbnail?.mediaUrl || '');
-  };
-
-  const saveSingleMedia = (selectedMedia: common_MediaFull[], index: number) => {
-    const newSingleMedia = selectedMedia[0];
-    setFieldValue(`entities.${index}.singleAdd.mediaId`, newSingleMedia.id);
-    setSingle((prev) => ({
-      ...prev,
-      [index]: newSingleMedia.media?.thumbnail?.mediaUrl || '',
-    }));
-  };
-
-  const saveDoubleMedia = (
+  const saveMedia = (
     selectedMedia: common_MediaFull[],
-    side: 'left' | 'right',
+    type: 'main' | 'single' | 'doubleLeft' | 'doubleRight',
     index: number,
   ) => {
     if (!selectedMedia.length) return;
 
-    const newDoubleMediaUrl = selectedMedia[0].media?.thumbnail?.mediaUrl;
-    const doubleAddMediaId = selectedMedia[0].id;
-    const ratio = calculateAspectRatio(
-      selectedMedia[0].media?.thumbnail?.width,
-      selectedMedia[0].media?.thumbnail?.height,
-    );
+    const media = selectedMedia[0];
+    const config = mediaSaveConfigs[type](index);
+    const thumbnailURL = media.media?.thumbnail?.mediaUrl || '';
 
-    let newAllowedRatios = ['4:5', '1:1'];
-    if (ratio === '4:5') {
-      newAllowedRatios = ['4:5'];
-    } else if (ratio === '1:1') {
-      newAllowedRatios = ['1:1'];
+    setFieldValue(config.fieldPath, media.id);
+    config.state(thumbnailURL);
+
+    if (type === 'doubleLeft' || type === 'doubleRight') {
+      const ratio = calculateAspectRatio(
+        media.media?.thumbnail?.width,
+        media.media?.thumbnail?.height,
+      );
+
+      const newAllowedRatios =
+        ratio === '4:5' ? ['4:5'] : ratio === '1:1' ? ['1:1'] : ['4:5', '1:1'];
+
+      setAllowedRatios((prevRatios) => ({
+        ...prevRatios,
+        [index]: newAllowedRatios,
+      }));
     }
-
-    setDoubleAdd((prevDoubleAdd) => ({
-      ...prevDoubleAdd,
-      [index]: {
-        ...prevDoubleAdd[index],
-        [side]: newDoubleMediaUrl,
-      },
-    }));
-
-    setAllowedRatios((prevRatios) => ({
-      ...prevRatios,
-      [index]: newAllowedRatios,
-    }));
-
-    setFieldValue(`entities.${index}.doubleAdd.${side}.mediaId`, doubleAddMediaId);
   };
 
   const handleRemoveEntity = (index: number, arrayHelpers: any, values: any) => {
@@ -188,28 +154,60 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
             <Grid container spacing={2} className={styles.entity_container}>
               {entity.type === 'HERO_TYPE_MAIN_ADD' && (
                 <Grid size={{ xs: 12 }}>
-                  <MainAdd index={index} entity={entity} link={main} saveMedia={saveMainMedia} />
+                  <CommonEntity
+                    title='main add'
+                    prefix={`entities.${index}.mainAdd.singleAdd`}
+                    link={main}
+                    exploreLink={entity.mainAdd?.singleAdd?.exploreLink}
+                    size={{ xs: 12 }}
+                    aspectRatio={['16:9']}
+                    onSaveMedia={(media: common_MediaFull[]) => saveMedia(media, 'main', index)}
+                  />
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_SINGLE_ADD' && (
                 <Grid size={{ xs: 12 }}>
-                  <SingleAdd
-                    index={index}
-                    entity={entity}
-                    singleLink={single}
-                    saveMedia={saveSingleMedia}
+                  <CommonEntity
+                    title='single add'
+                    prefix={`entities.${index}.singleAdd`}
+                    link={single[index]}
+                    exploreLink={entity.singleAdd?.exploreLink}
+                    size={{ xs: 12 }}
+                    aspectRatio={allowedRatios[index]}
+                    onSaveMedia={(media: common_MediaFull[]) => saveMedia(media, 'single', index)}
                   />
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_DOUBLE_ADD' && (
                 <Grid size={{ xs: 12 }}>
-                  <DoubleAdd
-                    index={index}
-                    entity={entity}
-                    doubleLinks={doubleAdd}
-                    allowedRatios={allowedRatios}
-                    saveDoubleMedia={saveDoubleMedia}
-                  />
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <CommonEntity
+                        title='double add'
+                        prefix={`entities.${index}.doubleAdd.left`}
+                        link={doubleAdd[index]?.left || ''}
+                        exploreLink={entity.doubleAdd?.left?.exploreLink}
+                        size={{ xs: 12 }}
+                        aspectRatio={allowedRatios[index] || ['4:5', '1:1']}
+                        onSaveMedia={(media: common_MediaFull[]) =>
+                          saveMedia(media, 'doubleLeft', index)
+                        }
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 6 }} sx={{ marginTop: '42px' }}>
+                      <CommonEntity
+                        title=''
+                        prefix={`entities.${index}.doubleAdd.right`}
+                        link={doubleAdd[index]?.right || ''}
+                        exploreLink={entity.doubleAdd?.right?.exploreLink}
+                        size={{ xs: 12 }}
+                        aspectRatio={allowedRatios[index] || ['4:5', '1:1']}
+                        onSaveMedia={(media: common_MediaFull[]) =>
+                          saveMedia(media, 'doubleRight', index)
+                        }
+                      />
+                    </Grid>
+                  </Grid>
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
