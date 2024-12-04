@@ -1,8 +1,7 @@
 import { Button, Divider, Grid2 as Grid } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
-import { common_HeroEntity } from 'api/proto-http/frontend';
 import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
-import { FieldArrayRenderProps, useFormikContext } from 'formik';
+import { useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';
@@ -10,12 +9,8 @@ import { getAllowedRatios } from '../utility/getAllowedRatios';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity/common-entity';
 import { FeaturedProductBase } from './featured-products-(tags)/featured-prduct-base';
+import { EntitiesProps } from './interface/interface';
 
-interface EntitiesProps {
-  entities: common_HeroEntity[];
-  entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
-  arrayHelpers: FieldArrayRenderProps;
-}
 export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers }) => {
   const { values, setFieldValue } = useFormikContext<common_HeroFullInsert>();
   const [main, setMain] = useState<string>('');

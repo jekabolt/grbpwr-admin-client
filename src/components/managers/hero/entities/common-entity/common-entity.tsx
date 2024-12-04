@@ -1,19 +1,10 @@
 import { Box, Grid2 as Grid, TextField, Typography } from '@mui/material';
-import { common_HeroFullInsert, common_MediaFull } from 'api/proto-http/admin';
+import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/common/media-selector-layout/media-selector-components/singleMediaViewAndSelect';
 import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import styles from 'styles/hero.scss';
-
-interface Props {
-  title: string;
-  prefix: string;
-  link: string;
-  exploreLink: string | undefined;
-  size: { xs: number; md?: number };
-  aspectRatio: string[];
-  onSaveMedia: (selectedMedia: common_MediaFull[]) => void;
-}
+import { Props } from '../interface/interface';
 
 export function CommonEntity({
   title,
