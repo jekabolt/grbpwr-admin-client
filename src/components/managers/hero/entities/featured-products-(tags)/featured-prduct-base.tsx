@@ -86,6 +86,7 @@ export function FeaturedProductBase({
           component={HeroProductTable}
           products={product[index] || []}
           id={index}
+          isFeaturedProducts={prefix === 'featuredProducts'}
           onReorder={(e: any) => handleProductsReorder?.(e, index)}
         />
       </Grid>
