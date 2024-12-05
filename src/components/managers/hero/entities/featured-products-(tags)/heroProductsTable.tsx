@@ -18,6 +18,7 @@ import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 
 interface HeroProductTableData {
   products: common_Product[];
+  isFeaturedProducts?: boolean;
 }
 
 export const HeroProductTable: FC<
@@ -25,7 +26,7 @@ export const HeroProductTable: FC<
     id: number;
     onReorder?: (newOrder: common_Product[]) => void;
   }
-> = ({ products, id, onReorder }) => {
+> = ({ products, id, onReorder, isFeaturedProducts }) => {
   const { setFieldValue } = useFormikContext<common_HeroFullInsert>();
   const [categories, setCategories] = useState<common_Category[]>([]);
 
@@ -63,34 +64,37 @@ export const HeroProductTable: FC<
   );
 
   const columns = useMemo<MRT_ColumnDef<common_Product>[]>(
-    //column definitions...
     () => [
-      {
-        id: 'actions',
-        header: 'Order',
-        Cell: ({ row }) => (
-          <div>
-            <IconButton
-              onClick={(event) => {
-                event.stopPropagation();
-                moveRow(row.index, row.index - 1);
-              }}
-              disabled={row.index === 0}
-            >
-              <ArrowUpwardIcon fontSize='small' />
-            </IconButton>
-            <IconButton
-              onClick={(event) => {
-                event.stopPropagation();
-                moveRow(row.index, row.index + 1);
-              }}
-              disabled={row.index === data.length - 1}
-            >
-              <ArrowDownwardIcon fontSize='small' />
-            </IconButton>
-          </div>
-        ),
-      },
+      ...(isFeaturedProducts
+        ? [
+            {
+              id: 'actions',
+              header: 'Order',
+              Cell: ({ row }: { row: MRT_Row<common_Product> }) => (
+                <div>
+                  <IconButton
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      moveRow(row.index, row.index - 1);
+                    }}
+                    disabled={row.index === 0}
+                  >
+                    <ArrowUpwardIcon fontSize='small' />
+                  </IconButton>
+                  <IconButton
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      moveRow(row.index, row.index + 1);
+                    }}
+                    disabled={row.index === data.length - 1}
+                  >
+                    <ArrowDownwardIcon fontSize='small' />
+                  </IconButton>
+                </div>
+              ),
+            },
+          ]
+        : []),
       {
         accessorKey: 'id',
         header: 'Id',
@@ -151,31 +155,34 @@ export const HeroProductTable: FC<
           return <span>{category ? category.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>; // return the category name or 'Unknown'
         },
       },
-      {
-        id: 'delete',
-        header: 'Delete',
-
-        Cell: ({ row }) => (
-          <IconButton
-            onClick={(event) => {
-              event.stopPropagation(); // Prevent row click event
-              const newData = data.filter((_, index) => index !== row.index);
-              setData(newData);
-              onReorder?.(newData);
-              setFieldValue(
-                `entities.${id}.featuredProducts.productIds`,
-                newData.map((p) => p.id),
-              );
-            }}
-            aria-label='delete'
-            size='small'
-          >
-            <DeleteIcon fontSize='small' />
-          </IconButton>
-        ),
-      },
+      ...(isFeaturedProducts
+        ? [
+            {
+              id: 'delete',
+              header: 'Delete',
+              Cell: ({ row }: { row: MRT_Row<common_Product> }) => (
+                <IconButton
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const newData = data.filter((_, index) => index !== row.index);
+                    setData(newData);
+                    onReorder?.(newData);
+                    setFieldValue(
+                      `entities.${id}.featuredProducts.productIds`,
+                      newData.map((p) => p.id),
+                    );
+                  }}
+                  aria-label='delete'
+                  size='small'
+                >
+                  <DeleteIcon fontSize='small' />
+                </IconButton>
+              ),
+            },
+          ]
+        : []),
     ],
-    [categories, moveRow, setData, onReorder],
+    [categories, moveRow, setData, onReorder, isFeaturedProducts],
   );
 
   const table = useMaterialReactTable({
@@ -183,7 +190,7 @@ export const HeroProductTable: FC<
     columns,
     data,
     enableSorting: false,
-    enableRowOrdering: true,
+    enableRowOrdering: isFeaturedProducts,
     muiRowDragHandleProps: ({ table }) => ({
       onDragEnd: () => {
         const { draggingRow, hoveredRow } = table.getState();
@@ -198,14 +205,6 @@ export const HeroProductTable: FC<
         }
       },
     }),
-    // muiTableBodyRowProps: ({ row }) => ({
-    //   onClick: () => {
-    //     navigate({ to: `${ROUTES.singleProduct}/${row.original.id}` });
-    //   },
-    //   sx: {
-    //     cursor: 'pointer',
-    //   },
-    // }),
   });
 
   return <MRT_TableContainer table={table} />;
