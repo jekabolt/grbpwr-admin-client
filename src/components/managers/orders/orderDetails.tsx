@@ -585,12 +585,12 @@ export const OrderDetails = () => {
         {/* <Grid item xs={12} className={styles.hide_cell}>
           {payment}
         </Grid> */}
-        <Grid item xs={12}>
+        {/* <Grid item xs={12}>
           {shipping}
-        </Grid>
-        <Grid item xs={12} className={styles.hide_cell}>
+        </Grid> */}
+        {/* <Grid item xs={12} className={styles.hide_cell}>
           {billing}
-        </Grid>
+        </Grid> */}
         <Grid item xs={12} className={styles.hide_cell}>
           {trackingNumberSection}
         </Grid>

@@ -5,6 +5,7 @@ import { Layout } from 'components/login/layout';
 import { useState } from 'react';
 import { DisplayState, OrderDetailsPathProps } from '../interfaces/interface';
 import { useOrderDetails } from '../utility/use-order-details';
+import { Billing } from './components/billing';
 import { Description } from './components/description';
 import { OrderDetailsData } from './components/order-details-data';
 import { Payment } from './components/payment';
@@ -93,6 +94,9 @@ export function OrderDetails() {
             handleTrackingNumberChange={handleTrackingNumberChange}
             saveTrackingNumber={saveTrackingNumber}
           />
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <Billing orderDetails={orderDetails} />
         </Grid>
       </Grid>
     </Layout>

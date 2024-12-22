@@ -38,7 +38,11 @@ export function ShippingBuyer({
         </Typography>
       </Grid>
       {shipping && (
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, md: 6 }} spacing={2}>
+          <Shipping shipping={shipping} />
+          <Typography variant='overline' textTransform='uppercase'>
+            {`cost: ${orderDetails?.shipment?.cost?.value} ${dictionary?.baseCurrency}`}
+          </Typography>
           <TrackingNumber
             isEdit={isEdit}
             isPrinting={isPrinting}
@@ -49,7 +53,6 @@ export function ShippingBuyer({
             handleTrackingNumberChange={handleTrackingNumberChange}
             saveTrackingNumber={saveTrackingNumber}
           />
-          <Shipping shipping={shipping} orderDetails={orderDetails} dictionary={dictionary} />
         </Grid>
       )}
       {buyer && (
