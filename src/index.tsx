@@ -14,7 +14,7 @@ import { Main } from 'components/managers/MainContent';
 import { Archive } from 'components/managers/archive/archive';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
-import { OrderDetails } from 'components/managers/orders/orderDetails';
+import { OrderDetails } from 'components/managers/orders/order-details/page';
 import { Orders } from 'components/managers/orders/orders';
 import { ProductForm } from 'components/managers/products/productForm/productForm';
 import { Product } from 'components/managers/products/products';

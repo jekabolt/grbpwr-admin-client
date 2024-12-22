@@ -275,10 +275,7 @@ export const ListArchive: FC<ListArchiveInterface> = ({
                       <Grid item xs={12}>
                         <TruncateText text={item.archiveItem?.name} length={60} />
                         {item.archiveItem?.url && (
-                          <CopyToClipboard
-                            text={item.archiveItem?.url}
-                            displayText={`${item.archiveItem?.url.slice(0, 5)}...${item.archiveItem?.url.slice(-7)}`}
-                          />
+                          <CopyToClipboard text={item.archiveItem?.url} cutText={true} />
                         )}
                       </Grid>
                     </Grid>

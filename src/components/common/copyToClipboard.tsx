@@ -6,10 +6,10 @@ import { FC, useEffect, useState } from 'react';
 
 interface CopyToClipboardProps {
   text: string;
-  displayText?: string;
+  cutText?: boolean;
 }
 
-export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, displayText }) => {
+export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, cutText }) => {
   const [copied, setCopied] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
@@ -38,7 +38,7 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, displayText })
 
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
-      <div>{displayText || text}</div>
+      <div>{cutText ? text.slice(0, 4) + '...' + text.slice(-4) : text}</div>
       <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
         <IconButton
           onClick={handleCopy}
@@ -46,7 +46,11 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, displayText })
           size='small'
           style={{ padding: 0, paddingLeft: '5px', visibility: isPrinting ? 'hidden' : 'visible' }}
         >
-          {copied ? <CheckCircleOutlineIcon /> : <ContentCopyIcon />}
+          {copied ? (
+            <CheckCircleOutlineIcon fontSize='small' />
+          ) : (
+            <ContentCopyIcon fontSize='small' />
+          )}
         </IconButton>
       </Tooltip>
     </div>

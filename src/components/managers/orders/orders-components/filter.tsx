@@ -70,6 +70,9 @@ export function Filter({ dictionary, loading, onSearch }: FilterProps) {
           value={orderId}
           onChange={(e) => setOrderId(e.target.value)}
           fullWidth
+          slotProps={{
+            inputLabel: { style: { textTransform: 'uppercase' } },
+          }}
         />
       </Grid>
       <Grid size={{ xs: 12, md: 5 }}>
@@ -78,6 +81,9 @@ export function Filter({ dictionary, loading, onSearch }: FilterProps) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           fullWidth
+          slotProps={{
+            inputLabel: { style: { textTransform: 'uppercase' } },
+          }}
         />
       </Grid>
       <Grid size={{ xs: 12, md: 1 }} display='flex' justifyContent='center'>

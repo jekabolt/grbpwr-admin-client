@@ -1,8 +1,7 @@
 import EditIcon from '@mui/icons-material/Edit';
-import { Button, Grid, TextField, Typography } from '@mui/material';
+import { Button, Grid, TextField } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
-import { DataGrid, GridColDef, GridPaginationModel } from '@mui/x-data-grid';
 import { MakeGenerics, useMatch } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
 import {
@@ -12,16 +11,15 @@ import {
   setTrackingNumberUpdate,
 } from 'api/orders';
 import { common_Dictionary } from 'api/proto-http/admin';
-import { common_OrderFull, common_OrderItem } from 'api/proto-http/frontend';
+import { common_OrderFull } from 'api/proto-http/frontend';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { Layout } from 'components/login/layout';
-import { ROUTES } from 'constants/routes';
 import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
 import styles from 'styles/order.scss';
-import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
+import { getOrderStatusName } from './utility';
 
-const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
+// const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
 
 export type OrderDetailsPathProps = MakeGenerics<{
   Params: {
@@ -37,8 +35,8 @@ export const OrderDetails = () => {
   const [orderDetails, setOrderDetails] = useState<common_OrderFull | undefined>();
   const [isLoading, setIsLoading] = useState(false);
   const [dictionary, setDictionary] = useState<common_Dictionary>();
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(5);
+  // const [page, setPage] = useState(0);
+  // const [pageSize, setPageSize] = useState(5);
   const [showBilling, setShowBilling] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState('');
   const [orderStatus, setOrderStatus] = useState<string | undefined>('');
@@ -99,106 +97,106 @@ export const OrderDetails = () => {
     setOrderStatus(getOrderStatusName(dictionary, orderDetails?.order?.orderStatusId));
   }, [orderDetails, dictionary]);
 
-  const orderItemsColumns: GridColDef<common_OrderItem>[] = [
-    {
-      field: 'thumbnail',
-      headerName: '',
-      align: 'center',
-      width: 200,
-      renderCell: (params: any) => (
-        <a
-          href={`${BASE_PATH}/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`}
-          target='_blank'
-          style={{
-            cursor: 'pointer',
-          }}
-        >
-          <img src={params.value} alt='product' style={{ height: '100px', width: 'auto' }} />
-        </a>
-      ),
-    },
-    {
-      field: 'sku',
-      headerName: 'SKU',
-      align: 'center',
-      width: isPrinting ? 150 : 300,
-      renderCell: (params: any) => (
-        <div
-          style={{
-            whiteSpace: isPrinting ? 'normal' : 'nowrap',
-            wordWrap: isPrinting ? 'break-word' : 'normal',
-            overflow: isPrinting ? 'visible' : 'auto',
-            display: isPrinting ? 'block' : 'flex',
-            alignItems: 'center',
-            lineHeight: isPrinting ? '1.5' : 'normal',
-            height: '100%',
-            width: '100%',
-            margin: isPrinting ? '30% auto' : '0',
-          }}
-        >
-          {params.value}
-        </div>
-      ),
-    },
-    {
-      field: 'productName',
-      align: 'center',
-      headerAlign: 'center',
-      headerName: 'PRODUCT NAME',
-      width: 150,
-    },
-    {
-      field: 'quantity',
-      headerName: 'QUANTITY',
-      headerAlign: 'center',
-      align: 'center',
-      width: isPrinting ? 100 : 200,
-      valueGetter: (_params: any, row: any) => {
-        return row.orderItem.quantity;
-      },
-    },
-    {
-      field: 'size',
-      headerName: 'SIZE',
-      align: 'center',
-      headerAlign: 'center',
-      width: 200,
-      cellClassName: styles.hide_cell,
-      valueGetter: (_params: any, row: any) => {
-        return dictionary?.sizes
-          ?.find((x) => x.id === row.orderItem.sizeId)
-          ?.name?.replace('SIZE_ENUM_', '');
-      },
-    },
-    {
-      field: 'productPrice',
-      headerName: 'PRICE',
-      align: 'center',
-      headerAlign: 'center',
-      width: isPrinting ? 90 : 200,
-      valueGetter: (params: any, row: any) =>
-        `${params * row.orderItem.quantity} ${dictionary?.baseCurrency}`,
-    },
-    {
-      field: 'productSalePercentage',
-      headerName: 'SALE',
-      align: 'center',
-      headerAlign: 'center',
-      width: isPrinting ? 90 : 200,
-    },
-    {
-      field: 'productPriceWithSale',
-      align: 'center',
-      headerAlign: 'center',
-      headerName: isPrinting ? 'PWS' : 'PRICE WITH SALE',
-      width: isPrinting ? 100 : 200,
-    },
-  ];
+  // const orderItemsColumns: GridColDef<common_OrderItem>[] = [
+  //   {
+  //     field: 'thumbnail',
+  //     headerName: '',
+  //     align: 'center',
+  //     width: 200,
+  //     renderCell: (params: any) => (
+  //       <a
+  //         href={`${BASE_PATH}/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`}
+  //         target='_blank'
+  //         style={{
+  //           cursor: 'pointer',
+  //         }}
+  //       >
+  //         <img src={params.value} alt='product' style={{ height: '100px', width: 'auto' }} />
+  //       </a>
+  //     ),
+  //   },
+  //   {
+  //     field: 'sku',
+  //     headerName: 'SKU',
+  //     align: 'center',
+  //     width: isPrinting ? 150 : 300,
+  //     renderCell: (params: any) => (
+  //       <div
+  //         style={{
+  //           whiteSpace: isPrinting ? 'normal' : 'nowrap',
+  //           wordWrap: isPrinting ? 'break-word' : 'normal',
+  //           overflow: isPrinting ? 'visible' : 'auto',
+  //           display: isPrinting ? 'block' : 'flex',
+  //           alignItems: 'center',
+  //           lineHeight: isPrinting ? '1.5' : 'normal',
+  //           height: '100%',
+  //           width: '100%',
+  //           margin: isPrinting ? '30% auto' : '0',
+  //         }}
+  //       >
+  //         {params.value}
+  //       </div>
+  //     ),
+  //   },
+  //   {
+  //     field: 'productName',
+  //     align: 'center',
+  //     headerAlign: 'center',
+  //     headerName: 'PRODUCT NAME',
+  //     width: 150,
+  //   },
+  //   {
+  //     field: 'quantity',
+  //     headerName: 'QUANTITY',
+  //     headerAlign: 'center',
+  //     align: 'center',
+  //     width: isPrinting ? 100 : 200,
+  //     valueGetter: (_params: any, row: any) => {
+  //       return row.orderItem.quantity;
+  //     },
+  //   },
+  //   {
+  //     field: 'size',
+  //     headerName: 'SIZE',
+  //     align: 'center',
+  //     headerAlign: 'center',
+  //     width: 200,
+  //     cellClassName: styles.hide_cell,
+  //     valueGetter: (_params: any, row: any) => {
+  //       return dictionary?.sizes
+  //         ?.find((x) => x.id === row.orderItem.sizeId)
+  //         ?.name?.replace('SIZE_ENUM_', '');
+  //     },
+  //   },
+  //   {
+  //     field: 'productPrice',
+  //     headerName: 'PRICE',
+  //     align: 'center',
+  //     headerAlign: 'center',
+  //     width: isPrinting ? 90 : 200,
+  //     valueGetter: (params: any, row: any) =>
+  //       `${params * row.orderItem.quantity} ${dictionary?.baseCurrency}`,
+  //   },
+  //   {
+  //     field: 'productSalePercentage',
+  //     headerName: 'SALE',
+  //     align: 'center',
+  //     headerAlign: 'center',
+  //     width: isPrinting ? 90 : 200,
+  //   },
+  //   {
+  //     field: 'productPriceWithSale',
+  //     align: 'center',
+  //     headerAlign: 'center',
+  //     headerName: isPrinting ? 'PWS' : 'PRICE WITH SALE',
+  //     width: isPrinting ? 100 : 200,
+  //   },
+  // ];
 
-  const onPaginationChange = (model: GridPaginationModel) => {
-    setPage(model.page);
-    setPageSize(model.pageSize);
-  };
+  // const onPaginationChange = (model: GridPaginationModel) => {
+  //   setPage(model.page);
+  //   setPageSize(model.pageSize);
+  // };
 
   const showBillingButtonClick = () => {
     setShowBilling(true);
@@ -241,97 +239,97 @@ export const OrderDetails = () => {
     }
   };
 
-  const promoApplied = (() => {
-    const promoCode = orderDetails?.promoCode?.promoCodeInsert;
-    return (
-      promoCode && (
-        <div>
-          PROMO APPLIED: {promoCode.code} - {promoCode.discount?.value}%
-          {promoCode.freeShipping && ', FREE SHIP'}
-          {promoCode.voucher && ', VOUCHER'}
-        </div>
-      )
-    );
-  })();
+  // const promoApplied = (() => {
+  //   const promoCode = orderDetails?.promoCode?.promoCodeInsert;
+  //   return (
+  //     promoCode && (
+  //       <div>
+  //         PROMO APPLIED: {promoCode.code} - {promoCode.discount?.value}%
+  //         {promoCode.freeShipping && ', FREE SHIP'}
+  //         {promoCode.voucher && ', VOUCHER'}
+  //       </div>
+  //     )
+  //   );
+  // })();
 
-  const payment = (() => {
-    const payment = orderDetails?.payment;
-    return (
-      payment && (
-        <div>
-          <div>PAYMENT:</div>
-          <div style={{ display: 'flex' }}>
-            STATUS:&nbsp;
-            {payment.paymentInsert?.isTransactionDone ? (
-              <div style={{ backgroundColor: '#008f0080' }}>PAID</div>
-            ) : (
-              <div style={{ backgroundColor: '#fc000080' }}>UNPAID</div>
-            )}
-          </div>
-          {payment.modifiedAt && <div>MADE AT: {formatDateTime(payment.modifiedAt)}</div>}
-          {payment.paymentInsert?.paymentMethod && (
-            <div>
-              PAYMENT METHOD:{' '}
-              {payment.paymentInsert?.paymentMethod.replace('PAYMENT_METHOD_NAME_ENUM_', '')}
-            </div>
-          )}
-          {payment.paymentInsert?.transactionAmount && (
-            <div style={{ display: 'flex' }}>
-              AMOUNT:&nbsp;
-              {payment.paymentInsert.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD' ||
-              payment.paymentInsert.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ? (
-                <p>{payment.paymentInsert?.transactionAmountPaymentCurrency?.value}</p>
-              ) : (
-                <p>{payment.paymentInsert?.transactionAmount.value}</p>
-              )}
-            </div>
-          )}
-          {payment.paymentInsert?.payer && (
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              PAYER:&nbsp;
-              <CopyToClipboard text={payment.paymentInsert?.payer} />
-            </div>
-          )}
-          {payment.paymentInsert?.payee && (
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              PAYEE:&nbsp;
-              <CopyToClipboard text={payment.paymentInsert?.payee} />
-            </div>
-          )}
-          {payment.paymentInsert?.isTransactionDone && (
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              {payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ||
-              payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD' ? (
-                <>
-                  CLIENT SECRET:&nbsp;
-                  <CopyToClipboard
-                    text={payment.paymentInsert?.clientSecret || ''}
-                    displayText={
-                      payment.paymentInsert?.clientSecret
-                        ? `${payment.paymentInsert?.clientSecret.slice(0, 4)}...${payment.paymentInsert?.clientSecret.slice(-4)}`
-                        : ''
-                    }
-                  />
-                </>
-              ) : (
-                <>
-                  TXID:&nbsp;
-                  <CopyToClipboard
-                    text={payment?.paymentInsert?.transactionId || ''}
-                    displayText={
-                      payment?.paymentInsert?.transactionId
-                        ? `${payment?.paymentInsert?.transactionId.slice(0, 4)}...${payment?.paymentInsert?.transactionId.slice(-4)}`
-                        : ''
-                    }
-                  />
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )
-    );
-  })();
+  // const payment = (() => {
+  //   const payment = orderDetails?.payment;
+  //   return (
+  //     payment && (
+  //       <div>
+  //         <div>PAYMENT:</div>
+  //         <div style={{ display: 'flex' }}>
+  //           STATUS:&nbsp;
+  //           {payment.paymentInsert?.isTransactionDone ? (
+  //             <div style={{ backgroundColor: '#008f0080' }}>PAID</div>
+  //           ) : (
+  //             <div style={{ backgroundColor: '#fc000080' }}>UNPAID</div>
+  //           )}
+  //         </div>
+  //         {payment.modifiedAt && <div>MADE AT: {formatDateTime(payment.modifiedAt)}</div>}
+  //         {payment.paymentInsert?.paymentMethod && (
+  //           <div>
+  //             PAYMENT METHOD:{' '}
+  //             {payment.paymentInsert?.paymentMethod.replace('PAYMENT_METHOD_NAME_ENUM_', '')}
+  //           </div>
+  //         )}
+  //         {payment.paymentInsert?.transactionAmount && (
+  //           <div style={{ display: 'flex' }}>
+  //             AMOUNT:&nbsp;
+  //             {payment.paymentInsert.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD' ||
+  //             payment.paymentInsert.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ? (
+  //               <p>{payment.paymentInsert?.transactionAmountPaymentCurrency?.value}</p>
+  //             ) : (
+  //               <p>{payment.paymentInsert?.transactionAmount.value}</p>
+  //             )}
+  //           </div>
+  //         )}
+  //         {payment.paymentInsert?.payer && (
+  //           <div style={{ display: 'flex', alignItems: 'center' }}>
+  //             PAYER:&nbsp;
+  //             <CopyToClipboard text={payment.paymentInsert?.payer} />
+  //           </div>
+  //         )}
+  //         {payment.paymentInsert?.payee && (
+  //           <div style={{ display: 'flex', alignItems: 'center' }}>
+  //             PAYEE:&nbsp;
+  //             <CopyToClipboard text={payment.paymentInsert?.payee} />
+  //           </div>
+  //         )}
+  //         {payment.paymentInsert?.isTransactionDone && (
+  //           <div style={{ display: 'flex', alignItems: 'center' }}>
+  //             {payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ||
+  //             payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD' ? (
+  //               <>
+  //                 CLIENT SECRET:&nbsp;
+  //                 <CopyToClipboard
+  //                   text={payment.paymentInsert?.clientSecret || ''}
+  //                   // displayText={
+  //                   //   payment.paymentInsert?.clientSecret
+  //                   //     ? `${payment.paymentInsert?.clientSecret.slice(0, 4)}...${payment.paymentInsert?.clientSecret.slice(-4)}`
+  //                   //     : ''
+  //                   // }
+  //                 />
+  //               </>
+  //             ) : (
+  //               <>
+  //                 TXID:&nbsp;
+  //                 <CopyToClipboard
+  //                   text={payment?.paymentInsert?.transactionId || ''}
+  //                   // displayText={
+  //                   //   payment?.paymentInsert?.transactionId
+  //                   //     ? `${payment?.paymentInsert?.transactionId.slice(0, 4)}...${payment?.paymentInsert?.transactionId.slice(-4)}`
+  //                   //     : ''
+  //                   // }
+  //                 />
+  //               </>
+  //             )}
+  //           </div>
+  //         )}
+  //       </div>
+  //     )
+  //   );
+  // })();
 
   const shipping = (() => {
     const shipping = orderDetails?.shipping?.addressInsert;
@@ -492,13 +490,13 @@ export const OrderDetails = () => {
     );
   })();
 
-  const orderStatusColored = (() => {
-    return (
-      <div style={{ backgroundColor: getStatusColor(orderStatus), height: 'fit-content' }}>
-        {orderStatus}
-      </div>
-    );
-  })();
+  // const orderStatusColored = (() => {
+  //   return (
+  //     <div style={{ backgroundColor: getStatusColor(orderStatus), height: 'fit-content' }}>
+  //       {orderStatus}
+  //     </div>
+  //   );
+  // })();
 
   if (isLoading)
     return (
@@ -520,12 +518,12 @@ export const OrderDetails = () => {
 
         <Grid item xs={12}>
           <Grid container justifyContent='flex-start' alignItems='center'>
-            <Grid item xs={12} md={2} className={styles.hide_cell}>
+            {/* <Grid item xs={12} md={2} className={styles.hide_cell}>
               <Typography fontWeight='bold' textTransform='uppercase'>
                 order id: {orderDetails?.order?.id}
               </Typography>
-            </Grid>
-            <Grid
+            </Grid> */}
+            {/* <Grid
               item
               xs={12}
               md={2}
@@ -536,34 +534,34 @@ export const OrderDetails = () => {
               </Typography>
               <CopyToClipboard
                 text={orderDetails?.order?.uuid || ''}
-                displayText={
-                  orderDetails?.order?.uuid
-                    ? `${orderDetails.order.uuid?.slice(0, 4)}...${orderDetails.order.uuid?.slice(-4)}`
-                    : 'NO UUID'
-                }
+                // displayText={
+                //   orderDetails?.order?.uuid
+                //     ? `${orderDetails.order.uuid?.slice(0, 4)}...${orderDetails.order.uuid?.slice(-4)}`
+                //     : 'NO UUID'
+                // }
               />
-            </Grid>
-            <Grid
+            </Grid> */}
+            {/* <Grid
               item
               xs={12}
               md={2}
               className={isPrinting ? styles.hide_cell : styles.non_print_state}
             >
               STATUS:&nbsp;{orderStatusColored}
-            </Grid>
-            <Grid item xs={12} className={styles.support}>
+            </Grid> */}
+            {/* <Grid item xs={12} className={styles.support}>
               COMPANY ADRESS: ADRESS ADRESS ADRESS
-            </Grid>
-            <Grid item xs={12} md={3}>
+            </Grid> */}
+            {/* <Grid item xs={12} md={3}>
               PLACED: {formatDateTime(orderDetails?.order?.placed)}
-            </Grid>
-            <Grid item className={styles.hide_cell} xs={12} md={3}>
+            </Grid> */}
+            {/* <Grid item className={styles.hide_cell} xs={12} md={3}>
               MODIFIED: {formatDateTime(orderDetails?.order?.modified)}
-            </Grid>
+            </Grid> */}
           </Grid>
         </Grid>
 
-        <Grid item xs={12}>
+        {/* <Grid item xs={12}>
           <DataGrid
             rows={orderDetails?.orderItems || []}
             columns={orderItemsColumns}
@@ -580,13 +578,13 @@ export const OrderDetails = () => {
             hideFooterPagination={isPrinting}
             hideFooter={isPrinting}
           />
-        </Grid>
-        <Grid item xs={12} className={styles.hide_cell}>
+        </Grid> */}
+        {/* <Grid item xs={12} className={styles.hide_cell}>
           {promoApplied}
-        </Grid>
-        <Grid item xs={12} className={styles.hide_cell}>
+        </Grid> */}
+        {/* <Grid item xs={12} className={styles.hide_cell}>
           {payment}
-        </Grid>
+        </Grid> */}
         <Grid item xs={12}>
           {shipping}
         </Grid>
