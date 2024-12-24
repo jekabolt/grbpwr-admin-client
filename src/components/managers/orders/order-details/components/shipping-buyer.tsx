@@ -31,7 +31,10 @@ export function ShippingBuyer({
   const buyer = orderDetails?.buyer?.buyerInsert;
 
   return (
-    <Grid container sx={{ '@media print': { display: 'grid', gridTemplateColumns: '1fr 1fr' } }}>
+    <Grid
+      container
+      sx={{ '@media print': { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 } }}
+    >
       {shipping && (
         <Grid size={{ xs: 12, md: 6 }} sx={{ pageBreakInside: 'avoid' }} spacing={2}>
           <Typography variant='overline' fontSize={14} fontWeight='bold' textTransform='uppercase'>

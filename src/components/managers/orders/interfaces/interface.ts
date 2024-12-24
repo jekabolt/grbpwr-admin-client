@@ -31,6 +31,7 @@ export interface OrderDetailsState {
 export interface OrderDescriptionProps {
     orderDetails: common_OrderFull | undefined;
     orderStatus: string | undefined;
+    isPrinting: boolean;
 }
 
 export interface DisplayState {

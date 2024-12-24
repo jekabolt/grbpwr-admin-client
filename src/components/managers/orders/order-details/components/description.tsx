@@ -4,15 +4,15 @@ import styles from 'styles/order.scss';
 import { OrderDescriptionProps } from '../../interfaces/interface';
 import { formatDateTime, getStatusColor } from '../../utility';
 
-export function Description({ orderDetails, orderStatus }: OrderDescriptionProps) {
+export function Description({ orderDetails, orderStatus, isPrinting }: OrderDescriptionProps) {
   return (
     <Grid container justifyContent='flex-start'>
-      <Grid size={{ xs: 12, md: 2 }}>
+      <Grid size={{ xs: 12, md: 2 }} className={styles.hide_cell}>
         <Typography variant='overline' fontSize={14} textTransform='uppercase'>
           {`order id: ${orderDetails?.order?.id}`}
         </Typography>
       </Grid>
-      <Grid size={{ xs: 12, md: 2 }}>
+      <Grid size={{ xs: 12, md: 2 }} className={isPrinting ? styles.hide_cell : ''}>
         <Typography
           style={{ display: 'flex', alignItems: 'center' }}
           variant='overline'
@@ -31,6 +31,7 @@ export function Description({ orderDetails, orderStatus }: OrderDescriptionProps
           fontSize={14}
           textTransform='uppercase'
           style={{ backgroundColor: getStatusColor(orderStatus) }}
+          className={isPrinting ? styles.hide_cell : styles.non_print_state}
         >
           {`status: ${orderStatus}`}
         </Typography>
@@ -45,7 +46,7 @@ export function Description({ orderDetails, orderStatus }: OrderDescriptionProps
           {`placed: ${formatDateTime(orderDetails?.order?.placed)}`}
         </Typography>
       </Grid>
-      <Grid size={{ xs: 12, md: 3 }}>
+      <Grid size={{ xs: 12, md: 3 }} className={styles.hide_cell}>
         <Typography whiteSpace='nowrap' variant='overline' fontSize={14} textTransform='uppercase'>
           {`modified: ${formatDateTime(orderDetails?.order?.modified)}`}
         </Typography>

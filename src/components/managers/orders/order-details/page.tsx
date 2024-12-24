@@ -2,6 +2,7 @@ import { Button, Grid2 as Grid, Typography } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { useMatch } from '@tanstack/react-location';
 import { Layout } from 'components/login/layout';
+import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
 import styles from 'styles/order.scss';
 import { DisplayState, OrderDetailsPathProps } from '../interfaces/interface';
@@ -64,8 +65,13 @@ export function OrderDetails() {
         justifyContent='center'
         alignItems='center'
       >
+        {isPrinting && (
+          <Grid size={{ xs: 12 }}>
+            <img src={logo} alt='logo' style={{ width: '30px', height: 'auto' }} />
+          </Grid>
+        )}
         <Grid size={{ xs: 12 }}>
-          <Description orderDetails={orderDetails} orderStatus={orderStatus} />
+          <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
         </Grid>
         <Grid size={{ xs: 12 }}>
           <DataGrid
@@ -140,6 +146,11 @@ export function OrderDetails() {
         <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Typography variant='overline' textTransform='uppercase' fontSize={16} fontWeight='bold'>
             {`Total: ${orderDetails?.order?.totalPrice?.value} ${dictionary?.baseCurrency}`}
+          </Typography>
+        </Grid>
+        <Grid size={{ xs: 12 }} className={styles.support}>
+          <Typography variant='overline' textTransform='uppercase' fontWeight='bold'>
+            If you have any questions, please send an email to customercare@grbpwr.com
           </Typography>
         </Grid>
       </Grid>
