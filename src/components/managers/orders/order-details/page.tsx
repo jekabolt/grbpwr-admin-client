@@ -2,7 +2,8 @@ import { Button, Grid2 as Grid, Typography } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { useMatch } from '@tanstack/react-location';
 import { Layout } from 'components/login/layout';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import styles from 'styles/order.scss';
 import { DisplayState, OrderDetailsPathProps } from '../interfaces/interface';
 import { useOrderDetails } from '../utility/use-order-details';
 import { Billing } from './components/billing';
@@ -23,10 +24,8 @@ export function OrderDetails() {
     dictionary,
     orderStatus,
     isPrinting,
-    isLoading,
     isEdit,
     trackingNumber,
-    fetchOrderDetails,
     toggleTrackNumber,
     handleTrackingNumberChange,
     saveTrackingNumber,
@@ -44,6 +43,13 @@ export function OrderDetails() {
     },
   });
 
+  useEffect(() => {
+    setDisplayState((prev) => ({
+      ...prev,
+      columnVisibility: { thumbnail: !isPrinting, size: !isPrinting },
+    }));
+  }, [isPrinting]);
+
   return (
     <Layout>
       <Grid
@@ -53,7 +59,7 @@ export function OrderDetails() {
           '& .MuiTypography-root': {
             lineHeight: 0,
           },
-          p: 1,
+          p: isPrinting ? 0 : 2,
         }}
         justifyContent='center'
         alignItems='center'
@@ -81,10 +87,10 @@ export function OrderDetails() {
             hideFooter={isPrinting}
           />
         </Grid>
-        <Grid size={{ xs: 12 }}>
+        <Grid size={{ xs: 12 }} className={styles.hide_cell}>
           <PromoApplied orderDetails={orderDetails} />
         </Grid>
-        <Grid size={{ xs: 12 }}>
+        <Grid size={{ xs: 12 }} className={styles.hide_cell}>
           <Payment orderDetails={orderDetails} />
         </Grid>
         <Grid size={{ xs: 12 }}>
@@ -100,11 +106,11 @@ export function OrderDetails() {
             saveTrackingNumber={saveTrackingNumber}
           />
         </Grid>
-        <Grid size={{ xs: 12 }}>
+        <Grid size={{ xs: 12 }} className={styles.hide_cell}>
           <Billing orderDetails={orderDetails} />
         </Grid>
         {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
-          <Grid size={{ xs: 12 }}>
+          <Grid size={{ xs: 12 }} className={styles.hide_cell}>
             <NewTrackCode
               trackingNumber={trackingNumber}
               handleTrackingNumberChange={handleTrackingNumberChange}
@@ -113,7 +119,7 @@ export function OrderDetails() {
           </Grid>
         )}
         {orderStatus === 'SHIPPED' && (
-          <Grid size={{ xs: 12 }}>
+          <Grid size={{ xs: 12 }} className={styles.hide_cell}>
             <Button
               onClick={markAsDelivered}
               variant='contained'
@@ -125,15 +131,14 @@ export function OrderDetails() {
         )}
         {orderStatus === 'CONFIRMED' ||
           (orderStatus === 'DELIVERED' && (
-            <Grid size={{ xs: 12 }}>
+            <Grid size={{ xs: 12 }} className={styles.hide_cell}>
               <Button onClick={refundOrder} variant='contained' sx={{ textTransform: 'uppercase' }}>
                 refund order
               </Button>
             </Grid>
           ))}
-
         <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Typography variant='overline' textTransform='uppercase' fontSize={14} fontWeight='bold'>
+          <Typography variant='overline' textTransform='uppercase' fontSize={16} fontWeight='bold'>
             {`Total: ${orderDetails?.order?.totalPrice?.value} ${dictionary?.baseCurrency}`}
           </Typography>
         </Grid>

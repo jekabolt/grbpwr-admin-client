@@ -106,7 +106,6 @@ export const useOrderDetails = (uuid: string) => {
         isEdit,
         trackingNumber,
         saveTrackingNumber,
-        fetchOrderDetails,
         toggleTrackNumber,
         handleTrackingNumberChange,
         markAsDelivered,

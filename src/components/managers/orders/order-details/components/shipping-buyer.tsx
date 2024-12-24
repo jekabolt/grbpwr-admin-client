@@ -31,14 +31,12 @@ export function ShippingBuyer({
   const buyer = orderDetails?.buyer?.buyerInsert;
 
   return (
-    <Grid container>
-      <Grid size={{ xs: 12 }}>
-        <Typography variant='overline' fontSize={14} fontWeight='bold' textTransform='uppercase'>
-          shipping:
-        </Typography>
-      </Grid>
+    <Grid container sx={{ '@media print': { display: 'grid', gridTemplateColumns: '1fr 1fr' } }}>
       {shipping && (
-        <Grid size={{ xs: 12, md: 6 }} spacing={2}>
+        <Grid size={{ xs: 12, md: 6 }} sx={{ pageBreakInside: 'avoid' }} spacing={2}>
+          <Typography variant='overline' fontSize={14} fontWeight='bold' textTransform='uppercase'>
+            shipping:
+          </Typography>
           <Shipping shipping={shipping} />
           <Typography variant='overline' textTransform='uppercase'>
             {`cost: ${orderDetails?.shipment?.cost?.value} ${dictionary?.baseCurrency}`}
@@ -56,8 +54,8 @@ export function ShippingBuyer({
         </Grid>
       )}
       {buyer && (
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Buyer buyer={buyer} />
+        <Grid size={{ xs: 12, md: 6 }} sx={{ pageBreakInside: 'avoid' }}>
+          <Buyer buyer={buyer} isPrinting />
         </Grid>
       )}
     </Grid>
