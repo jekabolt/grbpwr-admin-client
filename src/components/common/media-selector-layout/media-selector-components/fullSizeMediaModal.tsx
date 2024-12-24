@@ -107,11 +107,7 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
                 <Grid>
                   <CopyToClipboard
                     text={(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl || ''}
-                    displayText={
-                      (clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl
-                        ? `${(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl?.slice(0, 5)}...${(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl?.slice(-14)}`
-                        : 'NO UUID'
-                    }
+                    cutText={true}
                   />
                 </Grid>
                 <Grid>

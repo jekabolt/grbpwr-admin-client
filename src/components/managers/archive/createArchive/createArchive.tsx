@@ -217,10 +217,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
                   <Grid size={{ xs: 12 }}>
                     <TruncateText text={archive.itemsInsert?.[id].name} length={60} />
                     {archive.itemsInsert?.[id]?.url && isValidUrl(archive.itemsInsert[id].url) && (
-                      <CopyToClipboard
-                        text={archive.itemsInsert[id].url || ''}
-                        displayText={`${archive.itemsInsert[id].url?.slice(0, 5)}...${archive.itemsInsert[id].url?.slice(-7)}`}
-                      />
+                      <CopyToClipboard text={archive.itemsInsert[id].url || ''} cutText={true} />
                     )}
                   </Grid>
                 </Grid>
@@ -236,7 +233,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
                 fullWidth
                 value={archive.archive?.heading}
                 onChange={handleTextFieldChange}
-                label='TITLE'
+                label='title'
                 slotProps={{
                   inputLabel: { shrink: true, style: { textTransform: 'uppercase' } },
                 }}
@@ -250,7 +247,7 @@ export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, o
                 name='description'
                 value={archive.archive?.text}
                 onChange={handleTextFieldChange}
-                label='DESCRIPTION'
+                label='description'
                 slotProps={{
                   inputLabel: { shrink: true, style: { textTransform: 'uppercase' } },
                   htmlInput: { maxLength: 255 },

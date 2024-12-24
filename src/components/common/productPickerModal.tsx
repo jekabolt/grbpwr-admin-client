@@ -160,9 +160,9 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         accessorKey: 'productDisplay.productBody.categoryId',
         header: 'Category',
         Cell: ({ cell }) => {
-          const categoryId = cell.getValue() as number; // get the current row's categoryId
-          const category = categories.find((c) => c.id === categoryId); // find the category in the state
-          return <span>{category ? category.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>; // return the category name or 'Unknown'
+          const categoryId = cell.getValue() as number;
+          const category = categories.find((c) => c.id === categoryId);
+          return <span>{category ? category.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>;
         },
       },
     ],
