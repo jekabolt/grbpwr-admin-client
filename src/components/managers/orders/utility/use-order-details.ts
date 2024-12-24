@@ -1,5 +1,5 @@
 import { getDictionary } from "api/admin";
-import { getOrderByUUID, setTrackingNumberUpdate } from "api/orders";
+import { deliveredOrderUpdate, getOrderByUUID, refundOrderUpdate, setTrackingNumberUpdate } from "api/orders";
 import { useEffect, useState } from "react";
 import { OrderDetailsState } from "../interfaces/interface";
 import { getOrderStatusName } from "../utility";
@@ -82,6 +82,24 @@ export const useOrderDetails = (uuid: string) => {
         }
     };
 
+    async function markAsDelivered() {
+        const response = await deliveredOrderUpdate({
+            orderUuid: state.orderDetails?.order?.uuid,
+        });
+        if (response) {
+            fetchOrderDetails();
+        }
+    }
+
+    async function refundOrder() {
+        const response = await refundOrderUpdate({
+            orderUuid: state.orderDetails?.order?.uuid,
+        });
+        if (response) {
+            fetchOrderDetails();
+        }
+    }
+
     return {
         ...state,
         isPrinting,
@@ -91,5 +109,7 @@ export const useOrderDetails = (uuid: string) => {
         fetchOrderDetails,
         toggleTrackNumber,
         handleTrackingNumberChange,
+        markAsDelivered,
+        refundOrder,
     }
 }

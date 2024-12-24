@@ -6,7 +6,7 @@ import { formatDateTime, getStatusColor } from '../../utility';
 
 export function Description({ orderDetails, orderStatus }: OrderDescriptionProps) {
   return (
-    <Grid container justifyContent='center'>
+    <Grid container justifyContent='flex-start'>
       <Grid size={{ xs: 12, md: 2 }}>
         <Typography variant='overline' fontSize={14} textTransform='uppercase'>
           {`order id: ${orderDetails?.order?.id}`}
@@ -46,7 +46,7 @@ export function Description({ orderDetails, orderStatus }: OrderDescriptionProps
         </Typography>
       </Grid>
       <Grid size={{ xs: 12, md: 3 }}>
-        <Typography variant='overline' fontSize={14} textTransform='uppercase'>
+        <Typography whiteSpace='nowrap' variant='overline' fontSize={14} textTransform='uppercase'>
           {`modified: ${formatDateTime(orderDetails?.order?.modified)}`}
         </Typography>
       </Grid>

@@ -4,12 +4,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import { MakeGenerics, useMatch } from '@tanstack/react-location';
 import { getDictionary } from 'api/admin';
-import {
-  deliveredOrderUpdate,
-  getOrderByUUID,
-  refundOrderUpdate,
-  setTrackingNumberUpdate,
-} from 'api/orders';
+import { getOrderByUUID, setTrackingNumberUpdate } from 'api/orders';
 import { common_Dictionary } from 'api/proto-http/admin';
 import { common_OrderFull } from 'api/proto-http/frontend';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
@@ -221,23 +216,23 @@ export const OrderDetails = () => {
     }
   };
 
-  const markAsDelivered = async () => {
-    const response = await deliveredOrderUpdate({
-      orderUuid: orderDetails?.order?.uuid,
-    });
-    if (response) {
-      fetchOrderDetails();
-    }
-  };
+  // const markAsDelivered = async () => {
+  //   const response = await deliveredOrderUpdate({
+  //     orderUuid: orderDetails?.order?.uuid,
+  //   });
+  //   if (response) {
+  //     fetchOrderDetails();
+  //   }
+  // };
 
-  const refundOrder = async () => {
-    const response = await refundOrderUpdate({
-      orderUuid: orderDetails?.order?.uuid,
-    });
-    if (response) {
-      fetchOrderDetails();
-    }
-  };
+  // const refundOrder = async () => {
+  //   const response = await refundOrderUpdate({
+  //     orderUuid: orderDetails?.order?.uuid,
+  //   });
+  //   if (response) {
+  //     fetchOrderDetails();
+  //   }
+  // };
 
   // const promoApplied = (() => {
   //   const promoCode = orderDetails?.promoCode?.promoCodeInsert;
@@ -444,51 +439,51 @@ export const OrderDetails = () => {
     );
   })();
 
-  const trackingNumberSection = (() => {
-    return (
-      orderStatus === 'CONFIRMED' &&
-      !orderDetails?.shipment?.trackingCode && (
-        <div>
-          <TextField
-            id='tracking-number-input'
-            label='Tracking number'
-            variant='outlined'
-            onChange={handleTrackingNumberChange}
-            size='small'
-          />
-          <Button
-            onClick={saveTrackingNumber}
-            variant='contained'
-            style={{ marginLeft: '1rem' }}
-            disabled={!trackingNumber}
-          >
-            SAVE
-          </Button>
-        </div>
-      )
-    );
-  })();
+  // const trackingNumberSection = (() => {
+  //   return (
+  //     orderStatus === 'CONFIRMED' &&
+  //     !orderDetails?.shipment?.trackingCode && (
+  //       <div>
+  //         <TextField
+  //           id='tracking-number-input'
+  //           label='Tracking number'
+  //           variant='outlined'
+  //           onChange={handleTrackingNumberChange}
+  //           size='small'
+  //         />
+  //         <Button
+  //           onClick={saveTrackingNumber}
+  //           variant='contained'
+  //           style={{ marginLeft: '1rem' }}
+  //           disabled={!trackingNumber}
+  //         >
+  //           SAVE
+  //         </Button>
+  //       </div>
+  //     )
+  //   );
+  // })();
 
-  const markAsDeliveredSection = (() => {
-    return (
-      orderStatus === 'SHIPPED' && (
-        <Button onClick={markAsDelivered} variant='contained'>
-          MARK AS DELIVERED
-        </Button>
-      )
-    );
-  })();
+  // const markAsDeliveredSection = (() => {
+  //   return (
+  //     orderStatus === 'SHIPPED' && (
+  //       <Button onClick={markAsDelivered} variant='contained'>
+  //         MARK AS DELIVERED
+  //       </Button>
+  //     )
+  //   );
+  // })();
 
-  const refundOrderSection = (() => {
-    const criteriaMet = orderStatus === 'CONFIRMED' || orderStatus === 'DELIVERED';
-    return (
-      criteriaMet && (
-        <Button onClick={refundOrder} variant='contained'>
-          REFUND ORDER
-        </Button>
-      )
-    );
-  })();
+  // const refundOrderSection = (() => {
+  //   const criteriaMet = orderStatus === 'CONFIRMED' || orderStatus === 'DELIVERED';
+  //   return (
+  //     criteriaMet && (
+  //       <Button onClick={refundOrder} variant='contained'>
+  //         REFUND ORDER
+  //       </Button>
+  //     )
+  //   );
+  // })();
 
   // const orderStatusColored = (() => {
   //   return (
@@ -591,15 +586,15 @@ export const OrderDetails = () => {
         {/* <Grid item xs={12} className={styles.hide_cell}>
           {billing}
         </Grid> */}
-        <Grid item xs={12} className={styles.hide_cell}>
+        {/* <Grid item xs={12} className={styles.hide_cell}>
           {trackingNumberSection}
-        </Grid>
-        <Grid item xs={12} className={styles.hide_cell}>
+        </Grid> */}
+        {/* <Grid item xs={12} className={styles.hide_cell}>
           {markAsDeliveredSection}
-        </Grid>
-        <Grid item xs={12} className={styles.hide_cell}>
+        </Grid> */}
+        {/* <Grid item xs={12} className={styles.hide_cell}>
           {refundOrderSection}
-        </Grid>
+        </Grid> */}
         <Grid item xs={12} className={styles.total}>
           Total: {orderDetails?.order?.totalPrice?.value}&nbsp;{dictionary?.baseCurrency}
         </Grid>

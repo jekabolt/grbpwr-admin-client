@@ -1,4 +1,4 @@
-import { Grid2 as Grid } from '@mui/material';
+import { Button, Grid2 as Grid, Typography } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { useMatch } from '@tanstack/react-location';
 import { Layout } from 'components/login/layout';
@@ -11,6 +11,7 @@ import { OrderDetailsData } from './components/order-details-data';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
 import { ShippingBuyer } from './components/shipping-buyer';
+import { NewTrackCode } from './components/shipping-buyer-information/new-track-code';
 
 export function OrderDetails() {
   const {
@@ -29,6 +30,8 @@ export function OrderDetails() {
     toggleTrackNumber,
     handleTrackingNumberChange,
     saveTrackingNumber,
+    markAsDelivered,
+    refundOrder,
   } = useOrderDetails(uuid);
 
   const [displayState, setDisplayState] = useState<DisplayState>({
@@ -50,8 +53,10 @@ export function OrderDetails() {
           '& .MuiTypography-root': {
             lineHeight: 0,
           },
+          p: 1,
         }}
         justifyContent='center'
+        alignItems='center'
       >
         <Grid size={{ xs: 12 }}>
           <Description orderDetails={orderDetails} orderStatus={orderStatus} />
@@ -97,6 +102,40 @@ export function OrderDetails() {
         </Grid>
         <Grid size={{ xs: 12 }}>
           <Billing orderDetails={orderDetails} />
+        </Grid>
+        {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
+          <Grid size={{ xs: 12 }}>
+            <NewTrackCode
+              trackingNumber={trackingNumber}
+              handleTrackingNumberChange={handleTrackingNumberChange}
+              saveTrackingNumber={saveTrackingNumber}
+            />
+          </Grid>
+        )}
+        {orderStatus === 'SHIPPED' && (
+          <Grid size={{ xs: 12 }}>
+            <Button
+              onClick={markAsDelivered}
+              variant='contained'
+              sx={{ textTransform: 'uppercase' }}
+            >
+              mark as delivered
+            </Button>
+          </Grid>
+        )}
+        {orderStatus === 'CONFIRMED' ||
+          (orderStatus === 'DELIVERED' && (
+            <Grid size={{ xs: 12 }}>
+              <Button onClick={refundOrder} variant='contained' sx={{ textTransform: 'uppercase' }}>
+                refund order
+              </Button>
+            </Grid>
+          ))}
+
+        <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Typography variant='overline' textTransform='uppercase' fontSize={14} fontWeight='bold'>
+            {`Total: ${orderDetails?.order?.totalPrice?.value} ${dictionary?.baseCurrency}`}
+          </Typography>
         </Grid>
       </Grid>
     </Layout>
