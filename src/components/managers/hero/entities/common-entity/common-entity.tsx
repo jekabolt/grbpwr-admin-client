@@ -7,6 +7,7 @@ import styles from 'styles/hero.scss';
 import { Props } from '../interface/interface';
 
 export function CommonEntity({
+  type,
   title,
   prefix,
   link,
@@ -34,10 +35,11 @@ export function CommonEntity({
           <ErrorMessage name={`${prefix}.mediaId`} component='div' />
         )}
         <Box component='div' className={styles.fields}>
+          <Field as={TextField} name={`${prefix}.headline`} label='headline' fullWidth />
           <Field
             as={TextField}
             name={`${prefix}.exploreLink`}
-            label='EXPLORE LINK'
+            label='explore link'
             error={
               (exploreLink && !isValidUrlForHero(exploreLink)) ||
               (exploreLink && !isValidURL(exploreLink))

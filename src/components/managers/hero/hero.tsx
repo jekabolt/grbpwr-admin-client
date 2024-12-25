@@ -66,15 +66,15 @@ export const Hero: FC = () => {
           nonAllowedDomainUrls.push(`${type} URL is not from allowed domain`);
         }
       };
-      if (entity.singleAdd) {
-        checkUrl(entity.singleAdd.exploreLink, 'Single Add');
+      if (entity.single) {
+        checkUrl(entity.single.exploreLink, 'Single Add');
       }
-      if (entity.mainAdd?.singleAdd) {
-        checkUrl(entity.mainAdd.singleAdd.exploreLink, 'Main Add');
+      if (entity.main) {
+        checkUrl(entity.main.single?.exploreLink, 'Main Add');
       }
-      if (entity.doubleAdd) {
-        checkUrl(entity.doubleAdd.left?.exploreLink, 'Double Add Left');
-        checkUrl(entity.doubleAdd.right?.exploreLink, 'Double Add Right');
+      if (entity.double) {
+        checkUrl(entity.double.left?.exploreLink, 'Double Add Left');
+        checkUrl(entity.double.right?.exploreLink, 'Double Add Right');
       }
       if (entity.featuredProducts) {
         checkUrl(entity.featuredProducts.exploreLink, 'Featured Products');

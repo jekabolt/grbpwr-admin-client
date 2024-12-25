@@ -3,9 +3,9 @@ import { common_HeroFull } from 'api/proto-http/frontend';
 
 
 export const heroTypes: { value: common_HeroType; label: string }[] = [
-    { value: 'HERO_TYPE_MAIN_ADD', label: 'main add' },
-    { value: 'HERO_TYPE_SINGLE_ADD', label: 'single add' },
-    { value: 'HERO_TYPE_DOUBLE_ADD', label: 'double add' },
+    { value: 'HERO_TYPE_MAIN', label: 'main add' },
+    { value: 'HERO_TYPE_SINGLE', label: 'single add' },
+    { value: 'HERO_TYPE_DOUBLE', label: 'double add' },
     { value: 'HERO_TYPE_FEATURED_PRODUCTS', label: 'featured products' },
     { value: 'HERO_TYPE_FEATURED_PRODUCTS_TAG', label: 'featured products tag' }
 ]
@@ -14,28 +14,34 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
     return {
         entities: hero?.entities?.map((entity) => ({
             type: entity.type,
-            mainAdd: {
-                singleAdd: {
-                    mediaId: entity.mainAdd?.singleAdd?.media?.id,
-                    exploreLink: entity.mainAdd?.singleAdd?.exploreLink,
-                    exploreText: entity.mainAdd?.singleAdd?.exploreText,
+            main: {
+                single: {
+                    headline: entity.main?.single?.headline,
+                    mediaId: entity.main?.single?.media?.id,
+                    exploreLink: entity.main?.single?.exploreLink,
+                    exploreText: entity.main?.single?.exploreText,
                 },
+                tag: entity.main?.tag,
+                description: entity.main?.description,
             },
-            singleAdd: {
-                mediaId: entity.singleAdd?.media?.id,
-                exploreLink: entity.singleAdd?.exploreLink,
-                exploreText: entity.singleAdd?.exploreText,
+            single: {
+                headline: entity.single?.headline,
+                mediaId: entity.single?.media?.id,
+                exploreLink: entity.single?.exploreLink,
+                exploreText: entity.single?.exploreText,
             },
-            doubleAdd: {
+            double: {
                 left: {
-                    mediaId: entity.doubleAdd?.left?.media?.id,
-                    exploreLink: entity.doubleAdd?.left?.exploreLink,
-                    exploreText: entity.doubleAdd?.left?.exploreText,
+                    headline: entity.double?.left?.headline,
+                    mediaId: entity.double?.left?.media?.id,
+                    exploreLink: entity.double?.left?.exploreLink,
+                    exploreText: entity.double?.left?.exploreText,
                 },
                 right: {
-                    mediaId: entity.doubleAdd?.right?.media?.id,
-                    exploreLink: entity.doubleAdd?.right?.exploreLink,
-                    exploreText: entity.doubleAdd?.right?.exploreText,
+                    headline: entity.double?.right?.headline,
+                    mediaId: entity.double?.right?.media?.id,
+                    exploreLink: entity.double?.right?.exploreLink,
+                    exploreText: entity.double?.right?.exploreText,
                 },
             },
             featuredProducts: {
@@ -43,13 +49,13 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
                     entity.featuredProducts?.products
                         ?.map((product) => product.id)
                         .filter((id): id is number => id !== undefined) || [],
-                title: entity.featuredProducts?.title,
+                headline: entity.featuredProducts?.headline,
                 exploreLink: entity.featuredProducts?.exploreLink,
                 exploreText: entity.featuredProducts?.exploreText,
             },
             featuredProductsTag: {
                 tag: entity.featuredProductsTag?.tag,
-                title: entity.featuredProductsTag?.products?.title,
+                headline: entity.featuredProductsTag?.products?.headline,
                 exploreLink: entity.featuredProductsTag?.products?.exploreLink,
                 exploreText: entity.featuredProductsTag?.products?.exploreText,
             }
@@ -61,25 +67,31 @@ export const emptyHeroForm: common_HeroFullInsert = {
     entities: [
         {
             type: 'HERO_TYPE_UNKNOWN' as common_HeroType,
-            mainAdd: {
-                singleAdd: {
+            main: {
+                single: {
                     mediaId: 0,
+                    headline: '',
                     exploreLink: '',
                     exploreText: ''
-                }
+                },
+                tag: '',
+                description: ''
             },
-            singleAdd: {
+            single: {
+                headline: '',
                 mediaId: 0,
                 exploreLink: '',
                 exploreText: ''
             },
-            doubleAdd: {
+            double: {
                 left: {
+                    headline: '',
                     mediaId: 0,
                     exploreLink: '',
                     exploreText: ''
                 },
                 right: {
+                    headline: '',
                     mediaId: 0,
                     exploreLink: '',
                     exploreText: ''
@@ -87,13 +99,13 @@ export const emptyHeroForm: common_HeroFullInsert = {
             },
             featuredProducts: {
                 productIds: [],
-                title: '',
+                headline: '',
                 exploreLink: '',
                 exploreText: ''
             },
             featuredProductsTag: {
                 tag: '',
-                title: '',
+                headline: '',
                 exploreLink: '',
                 exploreText: ''
             }
