@@ -9,7 +9,6 @@ export interface EntitiesProps {
 }
 
 export interface Props {
-    type?: any;
     title: string;
     prefix: string;
     link: string;

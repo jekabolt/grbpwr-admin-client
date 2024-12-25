@@ -1,8 +1,9 @@
 import { Button, Checkbox } from '@mui/material';
-import { getDictionary, getProductsPaged } from 'api/admin';
+import { getProductsPaged } from 'api/admin';
 
-import { GetProductsPagedRequest, common_Category, common_Product } from 'api/proto-http/admin';
+import { GetProductsPagedRequest, common_Product } from 'api/proto-http/admin';
 import { defaultProductFilterSettings } from 'constants/initialFilterStates';
+import { useDictionaryStore } from 'lib/stores/store';
 import {
   MaterialReactTable,
   useMaterialReactTable,
@@ -29,7 +30,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   const [allProducts, setAllProducts] = useState<common_Product[]>([]);
   const [selectedProducts, setSelectedProducts] = useState<common_Product[]>([]);
   const [data, setData] = useState(allProducts);
-  const [categories, setCategories] = useState<common_Category[]>([]);
+  const categories = useDictionaryStore((state) => state.dictionary?.categories || []);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [filter, setFilter] = useState<GetProductsPagedRequest>(defaultProductFilterSettings);
@@ -60,14 +61,6 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       fetchProducts();
     }
   }, [open, currentPage, filter, newLimit, offset]);
-
-  useEffect(() => {
-    const fetchDictionary = async () => {
-      const response = await getDictionary({});
-      setCategories(response.dictionary?.categories ? response.dictionary?.categories : []);
-    };
-    fetchDictionary();
-  }, []);
 
   useEffect(() => {
     // Filter allProducts based on selectedProductIds

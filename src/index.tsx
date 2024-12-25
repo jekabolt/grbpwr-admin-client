@@ -22,6 +22,7 @@ import { Promo } from 'components/managers/promo/promo';
 import { Settings } from 'components/managers/settings/settings';
 import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
+import { StoreProvider } from 'lib/stores/store-provider';
 import { createRoot } from 'react-dom/client';
 import 'styles/global.scss';
 
@@ -155,12 +156,14 @@ const theme = createTheme({
 
 root.render(
   <ThemeProvider theme={theme}>
-    <ContextProvider>
-      <QueryClientProvider client={queryClient}>
-        <Router location={location} routes={routes}>
-          <Outlet />
-        </Router>
-      </QueryClientProvider>
-    </ContextProvider>
+    <StoreProvider>
+      <ContextProvider>
+        <QueryClientProvider client={queryClient}>
+          <Router location={location} routes={routes}>
+            <Outlet />
+          </Router>
+        </QueryClientProvider>
+      </ContextProvider>
+    </StoreProvider>
   </ThemeProvider>,
 );

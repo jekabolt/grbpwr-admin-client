@@ -157,7 +157,6 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                     size={{ xs: 12 }}
                     aspectRatio={['16:9']}
                     onSaveMedia={(media: common_MediaFull[]) => saveMedia(media, 'main', index)}
-                    type={entity.type}
                   />
                   <Box component='div' className={styles.fields}>
                     <Field
