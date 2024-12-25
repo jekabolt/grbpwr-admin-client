@@ -1,13 +1,9 @@
 import { Alert, Snackbar } from '@mui/material';
 import { MakeGenerics, useMatch } from '@tanstack/react-location';
-import { getDictionary, getProductByID, upsertProduct } from 'api/admin';
-import {
-  UpsertProductRequest,
-  common_Dictionary,
-  common_ProductFull,
-  common_ProductNew,
-} from 'api/proto-http/admin';
+import { getProductByID, upsertProduct } from 'api/admin';
+import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
+import { useDictionaryStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
 import { productInitialValues } from '../genericProductComponent/utility/productInitialValues';
@@ -19,13 +15,13 @@ type ProductFormProps = MakeGenerics<{
 }>;
 
 export const ProductForm: FC = () => {
+  const { dictionary } = useDictionaryStore();
   const {
     params: { id },
     pathname,
   } = useMatch<ProductFormProps>();
   const isCopyMode = pathname.includes('/copy');
   const [product, setProduct] = useState<common_ProductFull | undefined>();
-  const [dictionary, setDictionary] = useState<common_Dictionary | undefined>();
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
   const [initialValues, setInitialValues] = useState<common_ProductNew>(productInitialValues());
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
@@ -37,14 +33,6 @@ export const ProductForm: FC = () => {
     setSnackBarSeverity(severity);
     setIsSnackBarOpen(true);
   };
-
-  useEffect(() => {
-    const fetchDictionary = async () => {
-      const response = await getDictionary({});
-      setDictionary(response.dictionary);
-    };
-    fetchDictionary();
-  }, []);
 
   const fetchProduct = async () => {
     if (id) {
@@ -117,7 +105,6 @@ export const ProductForm: FC = () => {
         isAddingProduct={isCopyMode || !id}
         isCopyMode={isCopyMode}
         product={product}
-        dictionary={dictionary}
         onSubmit={handleFormSubmit}
         onEditModeChange={setIsEditMode}
       />

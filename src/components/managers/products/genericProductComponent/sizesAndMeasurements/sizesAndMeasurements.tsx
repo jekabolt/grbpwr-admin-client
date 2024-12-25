@@ -18,6 +18,7 @@ import {
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { useFormikContext } from 'formik';
+import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useState } from 'react';
 import styles from 'styles/addProd.scss';
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
@@ -26,8 +27,8 @@ import { categoryMeasurementsMapping } from './mappingMeasurementsForCategories'
 export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   isEditMode = true,
   isAddingProduct,
-  dictionary,
 }) => {
+  const { dictionary } = useDictionaryStore();
   const { values, setFieldValue, errors, touched } = useFormikContext<common_ProductNew>();
   const [lastSizeNonZero, setLastSizeNonZero] = useState(false);
   const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
