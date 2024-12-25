@@ -12,16 +12,18 @@ import { FC, useEffect, useState } from 'react';
 import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
 import { productInitialValues } from '../genericProductComponent/utility/productInitialValues';
 
-export type ProductIdProps = MakeGenerics<{
+type ProductFormProps = MakeGenerics<{
   Params: {
     id?: string;
   };
 }>;
 
 export const ProductForm: FC = () => {
-  const match = useMatch<ProductIdProps>();
-  const { id } = match.params;
-  const isCopyMode = match.pathname.includes('/copy');
+  const {
+    params: { id },
+    pathname,
+  } = useMatch<ProductFormProps>();
+  const isCopyMode = pathname.includes('/copy');
   const [product, setProduct] = useState<common_ProductFull | undefined>();
   const [dictionary, setDictionary] = useState<common_Dictionary | undefined>();
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
