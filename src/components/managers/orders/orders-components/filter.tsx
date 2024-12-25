@@ -9,10 +9,12 @@ import {
   TextField,
 } from '@mui/material';
 import { common_OrderStatusEnum, common_PaymentMethodNameEnum } from 'api/proto-http/admin';
+import { useDictionaryStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { FilterProps } from '../interfaces/interface';
 
-export function Filter({ dictionary, loading, onSearch }: FilterProps) {
+export function Filter({ loading, onSearch }: FilterProps) {
+  const { dictionary } = useDictionaryStore();
   const [status, setStatus] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [orderId, setOrderId] = useState('');

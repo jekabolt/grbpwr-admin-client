@@ -10,7 +10,6 @@ export interface SearchFilters {
 }
 
 export interface FilterProps {
-    dictionary: common_Dictionary | undefined;
     loading: boolean;
     onSearch: (filters: SearchFilters) => void;
 }

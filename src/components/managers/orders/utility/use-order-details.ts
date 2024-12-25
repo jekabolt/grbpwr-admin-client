@@ -1,10 +1,11 @@
-import { getDictionary } from "api/admin";
 import { deliveredOrderUpdate, getOrderByUUID, refundOrderUpdate, setTrackingNumberUpdate } from "api/orders";
+import { useDictionaryStore } from "lib/stores/store";
 import { useEffect, useState } from "react";
 import { OrderDetailsState } from "../interfaces/interface";
 import { getOrderStatusName } from "../utility";
 
 export const useOrderDetails = (uuid: string) => {
+    const { dictionary } = useDictionaryStore();
     const [state, setState] = useState<OrderDetailsState>({
         orderDetails: undefined,
         dictionary: undefined,
@@ -19,16 +20,12 @@ export const useOrderDetails = (uuid: string) => {
     async function fetchOrderDetails() {
         setState(prev => ({ ...prev, isLoading: true }));
         try {
-            const [order, dictionary] = await Promise.all([
-                getOrderByUUID({ orderUuid: uuid }),
-                getDictionary({})
-            ])
-
+            const order = await getOrderByUUID({ orderUuid: uuid });
             setState(prev => ({
                 ...prev,
                 orderDetails: order.order,
-                dictionary: dictionary.dictionary,
-                orderStatus: getOrderStatusName(dictionary.dictionary, order.order?.order?.orderStatusId)
+                dictionary: dictionary,
+                orderStatus: getOrderStatusName(dictionary, order.order?.order?.orderStatusId)
             }))
         } catch (error) {
             console.error('Error fetching order details:', error);
@@ -39,7 +36,7 @@ export const useOrderDetails = (uuid: string) => {
 
     useEffect(() => {
         fetchOrderDetails()
-    }, [uuid])
+    }, [uuid, dictionary])
 
     useEffect(() => {
         const beforePrint = () => setIsPrinting(true);
