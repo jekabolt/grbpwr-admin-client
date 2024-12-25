@@ -1,12 +1,12 @@
 import { Grid2 as Grid, Typography } from '@mui/material';
-import { common_Dictionary, common_OrderFull } from 'api/proto-http/frontend';
+import { common_OrderFull } from 'api/proto-http/frontend';
+import { useDictionaryStore } from 'lib/stores/store';
 import { Buyer } from './shipping-buyer-information/buyer';
 import { Shipping } from './shipping-buyer-information/shipping';
 import { TrackingNumber } from './shipping-buyer-information/tracking-number';
 
 interface Props {
   orderDetails: common_OrderFull | undefined;
-  dictionary: common_Dictionary | undefined;
   isPrinting: boolean;
   orderStatus: string | undefined;
   isEdit: boolean;
@@ -18,7 +18,6 @@ interface Props {
 
 export function ShippingBuyer({
   orderDetails,
-  dictionary,
   isPrinting,
   orderStatus,
   isEdit,
@@ -27,6 +26,7 @@ export function ShippingBuyer({
   handleTrackingNumberChange,
   saveTrackingNumber,
 }: Props) {
+  const { dictionary } = useDictionaryStore();
   const shipping = orderDetails?.shipping?.addressInsert;
   const buyer = orderDetails?.buyer?.buyerInsert;
 

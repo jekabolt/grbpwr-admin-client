@@ -102,7 +102,6 @@ export function OrderDetails() {
         <Grid size={{ xs: 12 }}>
           <ShippingBuyer
             orderDetails={orderDetails}
-            dictionary={dictionary}
             isPrinting={isPrinting}
             orderStatus={orderStatus}
             isEdit={isEdit}

@@ -4,10 +4,10 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { Checkbox } from '@mui/material';
 import IconButton from '@mui/material/IconButton';
 import { useNavigate } from '@tanstack/react-location';
-import { getDictionary } from 'api/admin';
-import { common_Category, common_HeroFullInsert, common_Product } from 'api/proto-http/admin';
+import { common_HeroFullInsert, common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useFormikContext } from 'formik';
+import { useDictionaryStore } from 'lib/stores/store';
 import {
   MRT_TableContainer,
   useMaterialReactTable,
@@ -28,8 +28,7 @@ export const HeroProductTable: FC<
   }
 > = ({ products, id, onReorder, isFeaturedProducts }) => {
   const { setFieldValue } = useFormikContext<common_HeroFullInsert>();
-  const [categories, setCategories] = useState<common_Category[]>([]);
-
+  const categories = useDictionaryStore((state) => state.dictionary?.categories || []);
   const navigate = useNavigate();
 
   const [data, setData] = useState(products);
@@ -37,14 +36,6 @@ export const HeroProductTable: FC<
   useEffect(() => {
     setData(products);
   }, [products]);
-
-  useEffect(() => {
-    const fetchDictionary = async () => {
-      const response = await getDictionary({});
-      setCategories(response.dictionary?.categories ? response.dictionary?.categories : []);
-    };
-    fetchDictionary();
-  }, []);
 
   const moveRow = useCallback(
     (fromIndex: number, toIndex: number) => {
@@ -151,7 +142,7 @@ export const HeroProductTable: FC<
         enableResizing: true,
         Cell: ({ cell }) => {
           const categoryId = cell.getValue() as number; // get the current row's categoryId
-          const category = categories.find((c) => c.id === categoryId); // find the category in the state
+          const category = categories?.find((c) => c.id === categoryId); // find the category in the state
           return <span>{category ? category.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>; // return the category name or 'Unknown'
         },
       },

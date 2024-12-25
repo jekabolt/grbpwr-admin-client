@@ -7,7 +7,6 @@ import styles from 'styles/hero.scss';
 import { Props } from '../interface/interface';
 
 export function CommonEntity({
-  type,
   title,
   prefix,
   link,

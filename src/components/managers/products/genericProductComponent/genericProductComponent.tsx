@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-location';
 import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { Field, Form, Formik, FormikHelpers } from 'formik';
+import { useDictionaryStore } from 'lib/stores/store';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { BasicFields } from './basicFields/basicFields';
 import { GenericProductFormInterface } from './interface/interface';
@@ -17,11 +18,11 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
   isEditMode = false,
   isAddingProduct = false,
   isCopyMode,
-  dictionary,
   product,
   onSubmit,
   onEditModeChange,
 }) => {
+  const { dictionary } = useDictionaryStore();
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
   const initialValues = useMemo(() => initialProductState, [initialProductState]);
@@ -143,7 +144,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                     <Field
                       component={BasicFields}
                       name='product.productBody'
-                      {...{ product, dictionary, isEditMode, isAddingProduct, isCopyMode }}
+                      {...{ product, isEditMode, isAddingProduct, isCopyMode }}
                     />
                   </Grid>
                   <Grid size={{ xs: 12 }}>

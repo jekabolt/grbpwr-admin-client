@@ -10,19 +10,21 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { getDictionary } from 'api/admin';
-import { UpdateSettingsRequest, common_Dictionary } from 'api/proto-http/admin';
+import { UpdateSettingsRequest } from 'api/proto-http/admin';
 import { updateSettings } from 'api/settings';
 import { Layout } from 'components/login/layout';
 import { Field, FieldProps, Formik } from 'formik';
+import { useDictionaryStore } from 'lib/stores/store';
 import debounce from 'lodash/debounce';
 import { FC, useCallback, useEffect, useState } from 'react';
 import { defaultSettingsStates } from './defaultSettingsStates';
-import { mapPaymentMethods, mapShipmentCarriers } from './mappingFunctions';
+import { usePaymentMethodsMapping, useShipmentCarriersMapping } from './mappingFunctions';
 
 export const Settings: FC = () => {
+  const { dictionary } = useDictionaryStore();
   const [settings, setSettings] = useState<UpdateSettingsRequest>(defaultSettingsStates);
-  const [dictionary, setDictionary] = useState<common_Dictionary>();
+  const shipmentCarriers = useShipmentCarriersMapping();
+  const paymentMethods = usePaymentMethodsMapping();
   const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
   const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
@@ -35,19 +37,14 @@ export const Settings: FC = () => {
   };
 
   useEffect(() => {
-    const fetchDictionary = async () => {
-      const response = await getDictionary({}, true);
-      setDictionary(response.dictionary);
-      setSettings((prev) => ({
-        ...prev,
-        shipmentCarriers: mapShipmentCarriers(response.dictionary?.shipmentCarriers),
-        paymentMethods: mapPaymentMethods(response.dictionary?.paymentMethods),
-        maxOrderItems: response.dictionary?.maxOrderItems,
-        siteAvailable: response.dictionary?.siteEnabled,
-      }));
-    };
-    fetchDictionary();
-  }, []);
+    setSettings((prev) => ({
+      ...prev,
+      shipmentCarriers,
+      paymentMethods,
+      maxOrderItems: dictionary?.maxOrderItems,
+      siteAvailable: dictionary?.siteEnabled,
+    }));
+  }, [shipmentCarriers, paymentMethods]);
 
   const handleFieldChange = async (values: UpdateSettingsRequest) => {
     try {

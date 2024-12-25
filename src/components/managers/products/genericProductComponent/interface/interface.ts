@@ -1,4 +1,4 @@
-import { common_Dictionary, common_ProductFull, common_ProductNew } from "api/proto-http/admin";
+import { common_ProductFull, common_ProductNew } from "api/proto-http/admin";
 
 export interface Country {
     value: string;
@@ -11,8 +11,6 @@ export interface GenericProductFormInterface {
     isEditMode?: boolean;
     isAddingProduct?: boolean;
     isCopyMode: boolean;
-    dictionary?: common_Dictionary;
-
     onSubmit: (
         values: common_ProductNew,
         actions: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
@@ -21,7 +19,6 @@ export interface GenericProductFormInterface {
 }
 
 export interface BasicProductFieldsInterface {
-    dictionary?: common_Dictionary;
     product?: common_ProductFull;
     isEditMode?: boolean;
     isAddingProduct: boolean;
@@ -38,7 +35,6 @@ export interface MediaViewInterface {
 
 export interface ProductSizesAndMeasurementsInterface {
     isEditMode?: boolean;
-    dictionary?: common_Dictionary;
     isAddingProduct: boolean;
 }
 

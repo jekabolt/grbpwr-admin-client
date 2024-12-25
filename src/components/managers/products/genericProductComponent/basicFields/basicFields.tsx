@@ -17,6 +17,7 @@ import { colors } from 'constants/colors';
 import { generateOrUpdateSKU, generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { ErrorMessage, Field, getIn, useFormikContext } from 'formik';
+import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,12 +29,12 @@ import { genderOptions } from '../utility/dictionaryConst';
 import { formatWellKnownTimestamp, parseWellKnownTimestamp } from '../utility/preorderTime';
 
 export const BasicFields: FC<BasicProductFieldsInterface> = ({
-  dictionary,
   product,
   isEditMode,
   isAddingProduct,
   isCopyMode,
 }) => {
+  const { dictionary } = useDictionaryStore();
   const { values, setFieldValue, errors, touched } = useFormikContext<common_ProductNew>();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
   const [showPreorder, setShowPreorder] = useState(true);

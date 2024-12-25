@@ -1,11 +1,10 @@
 import { Button, Grid2 as Grid } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { useNavigate } from '@tanstack/react-location';
-import { getDictionary } from 'api/admin';
-import { common_Dictionary } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
 import { ROUTES } from 'constants/routes';
-import { FC, useEffect, useState } from 'react';
+import { useDictionaryStore } from 'lib/stores/store';
+import { FC, useEffect } from 'react';
 import { SearchFilters } from './interfaces/interface';
 import { Filter } from './orders-components/filter';
 import { orderData } from './orders-components/orders-data';
@@ -20,16 +19,10 @@ const searchFilters: SearchFilters = {
 
 export const Orders: FC = () => {
   const { rows, loading, newSearch, loadMore, loadMoreVisible } = useOrders();
-  const [dictionary, setDictionary] = useState<common_Dictionary>();
+  const { dictionary } = useDictionaryStore();
   const navigate = useNavigate();
 
   useEffect(() => {
-    const initializeData = async () => {
-      const response = await getDictionary({});
-      setDictionary(response.dictionary);
-    };
-
-    initializeData();
     newSearch(searchFilters);
   }, [searchFilters]);
 
@@ -41,7 +34,7 @@ export const Orders: FC = () => {
     <Layout>
       <Grid container spacing={2} marginTop='2%'>
         <Grid size={{ xs: 12 }} justifyContent='center'>
-          <Filter dictionary={dictionary} loading={loading} onSearch={newSearch} />
+          <Filter loading={loading} onSearch={newSearch} />
         </Grid>
         <Grid size={{ xs: 12 }}>
           <DataGrid

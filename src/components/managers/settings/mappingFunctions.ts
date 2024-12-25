@@ -1,10 +1,11 @@
-import { PaymentMethodAllowance, ShipmentCarrierAllowancePrice, common_PaymentMethod, common_ShipmentCarrier } from "api/proto-http/admin";
+import { PaymentMethodAllowance, ShipmentCarrierAllowancePrice } from "api/proto-http/admin";
+import { useDictionaryStore } from "lib/stores/store";
 
-export function mapShipmentCarriers(
-    carriers: common_ShipmentCarrier[] | undefined,
-): ShipmentCarrierAllowancePrice[] {
+export function useShipmentCarriersMapping(): ShipmentCarrierAllowancePrice[] {
+    const { dictionary } = useDictionaryStore();
+
     return (
-        carriers?.map((carrier) => ({
+        dictionary?.shipmentCarriers?.map((carrier) => ({
             carrier: carrier.shipmentCarrier?.carrier,
             allow: carrier.shipmentCarrier?.allowed,
             price: carrier.shipmentCarrier?.price
@@ -15,11 +16,13 @@ export function mapShipmentCarriers(
     );
 }
 
-export function mapPaymentMethods(
-    payments: common_PaymentMethod[] | undefined,
-): PaymentMethodAllowance[] | undefined {
-    return payments?.map((payment) => ({
-        paymentMethod: payment.name,
-        allow: payment.allowed,
-    }));
+export function usePaymentMethodsMapping(): PaymentMethodAllowance[] {
+    const { dictionary } = useDictionaryStore();
+
+    return (
+        dictionary?.paymentMethods?.map((payment) => ({
+            paymentMethod: payment.name,
+            allow: payment.allowed,
+        })) || []
+    );
 }
