@@ -51,7 +51,12 @@ export function FeaturedProductBase({
         </Grid>
       )}
       <Grid size={{ xs: 12 }}>
-        <Field as={TextField} name={`entities.${index}.${prefix}.title`} label='title' fullWidth />
+        <Field
+          as={TextField}
+          name={`entities.${index}.${prefix}.headline`}
+          label='headline'
+          fullWidth
+        />
       </Grid>
       <Grid size={{ xs: 12 }}>
         <Field

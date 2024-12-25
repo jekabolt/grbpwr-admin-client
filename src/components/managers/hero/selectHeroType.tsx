@@ -15,12 +15,10 @@ interface SelectHeroType {
 export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, entityRefs }) => {
   const { values } = useFormikContext<common_HeroFullInsert>();
   const [entityType, setEntityType] = useState<string>('');
-  const isOtherEntitiesExist = values.entities?.some(
-    (entity) => entity.type !== 'HERO_TYPE_MAIN_ADD',
-  );
+  const isOtherEntitiesExist = values.entities?.some((entity) => entity.type !== 'HERO_TYPE_MAIN');
   const [addedEntityIndex, setAddedEntityIndex] = useState<number | null>(null);
 
-  const isMainAddExists = values.entities?.some((entity) => entity.type === 'HERO_TYPE_MAIN_ADD');
+  const isMainAddExists = values.entities?.some((entity) => entity.type === 'HERO_TYPE_MAIN');
 
   const isEntityIncomplete = values.entities?.some((entity) => {
     const validateEntity = validationForSelectHeroType[entity.type as common_HeroType];
@@ -57,10 +55,10 @@ export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, entityRefs })
         >
           {heroTypes
             .filter((type) => {
-              if (type.value === 'HERO_TYPE_MAIN_ADD' && isOtherEntitiesExist) {
+              if (type.value === 'HERO_TYPE_MAIN' && isOtherEntitiesExist) {
                 return false;
               }
-              if (type.value === 'HERO_TYPE_MAIN_ADD' && isMainAddExists) {
+              if (type.value === 'HERO_TYPE_MAIN' && isMainAddExists) {
                 return false;
               }
               return true;
