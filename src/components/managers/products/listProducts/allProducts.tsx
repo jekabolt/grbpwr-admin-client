@@ -19,7 +19,7 @@ export const AllProducts: FC = () => {
   const navigate = useNavigate();
 
   const handleProductClick = (id: number | undefined) => {
-    navigate({ to: `${ROUTES.singleProduct}/${id}` });
+    navigate({ to: `${ROUTES.product}/${id}`, replace: true });
   };
 
   const handleCopyProductClick = (id: number | undefined) => {

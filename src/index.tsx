@@ -54,6 +54,14 @@ const routes: Route<DefaultGenerics>[] = [
     ),
   },
   {
+    path: ROUTES.singleProduct,
+    element: (
+      <ProtectedRoute>
+        <ProductForm />
+      </ProtectedRoute>
+    ),
+  },
+  {
     path: ROUTES.product,
     element: (
       <ProtectedRoute>
@@ -71,14 +79,6 @@ const routes: Route<DefaultGenerics>[] = [
   },
   {
     path: `${ROUTES.copyProduct}/:id`,
-    element: (
-      <ProtectedRoute>
-        <ProductForm />
-      </ProtectedRoute>
-    ),
-  },
-  {
-    path: `${ROUTES.singleProduct}/:id`,
     element: (
       <ProtectedRoute>
         <ProductForm />
