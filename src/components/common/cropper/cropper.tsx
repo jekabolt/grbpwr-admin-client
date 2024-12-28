@@ -51,7 +51,7 @@ export const MediaCropper: FC<CropperInterface> = ({
     }
   }, [selectedFile, aspect]);
 
-  const onCropComplete = useCallback((croppedAreaPixels: Area) => {
+  const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
     setCroppedAreaPixels(croppedAreaPixels);
   }, []);
 
