@@ -1,16 +1,15 @@
 import {
-  Alert,
   Box,
   Button,
   CircularProgress,
   Grid,
   Paper,
-  Snackbar,
   Theme,
   Typography,
   useMediaQuery,
 } from '@mui/material';
 import { getBase64File } from 'features/utilitty/getBase64';
+import { useSnackBarStore } from 'lib/stores/store';
 import React, { Dispatch, FC, SetStateAction, useState } from 'react';
 
 interface DragDropProps {
@@ -28,21 +27,9 @@ export const DragDrop: FC<DragDropProps> = ({
   setSelectedFiles,
   loading,
 }) => {
+  const { showMessage } = useSnackBarStore();
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
-  const [snackbarMessage, setSnackbarMessage] = useState<string>('');
-  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
   const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
-
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
-  };
-
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    setSnackbarMessage(message);
-    setSnackBarSeverity(severity);
-    setSnackbarOpen(true);
-  };
 
   const processFiles = async (files: FileList) => {
     if (files && files.length > 0) {
@@ -69,7 +56,7 @@ export const DragDrop: FC<DragDropProps> = ({
     if (files && files.length > 0) {
       processFiles(files);
     } else {
-      showMessage('NO SELECTED FILES', 'error');
+      showMessage('no files selected', 'error');
     }
     if ('dataTransfer' in e) {
       setIsDragging(false);
@@ -123,9 +110,6 @@ export const DragDrop: FC<DragDropProps> = ({
           </Paper>
           {loading && <CircularProgress />}
         </Box>
-        <Snackbar open={snackbarOpen} autoHideDuration={6000} onClose={handleSnackbarClose}>
-          <Alert severity={snackBarSeverity}>{snackbarMessage}</Alert>
-        </Snackbar>
       </Grid>
     </Grid>
   );

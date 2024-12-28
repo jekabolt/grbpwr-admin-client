@@ -1,4 +1,4 @@
-import { Grid2 as Grid, Snackbar, Theme, Typography, useMediaQuery } from '@mui/material';
+import { Grid2 as Grid, Theme, Typography, useMediaQuery } from '@mui/material';
 import { common_MediaInfo, common_MediaItem } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { PreviewMediaForUpload } from 'components/common/cropper/previewMediaForUpload';
@@ -20,8 +20,6 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   setCroppedImage,
   handleUploadMedia,
 }) => {
-  const [snackBarOpen, setSnackbarOpen] = useState(false);
-  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
   const [videoDimensions, setVideoDimensions] = useState<VideoDimensions>({});
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(true);
@@ -53,11 +51,6 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
       });
     }
   }, [clickedMedia]);
-
-  const showMessage = (message: string) => {
-    setSnackBarMessage(message);
-    setSnackbarOpen(true);
-  };
 
   const clearDragDropSelector = () => {
     setCroppedImage('');
@@ -120,12 +113,6 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
           ))}
         </Grid>
       </Dialog>
-      <Snackbar
-        open={snackBarOpen}
-        autoHideDuration={6000}
-        onClose={() => setSnackbarOpen(false)}
-        message={snackBarMessage}
-      />
     </>
   );
 };
