@@ -10,11 +10,11 @@ import {
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_PromoCodeInsert } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useState } from 'react';
 
 interface CreatePromoInterface {
   createNewPromo: (newPromo: common_PromoCodeInsert) => void;
-  showMessage: (message: string, severity: 'success' | 'error') => void;
 }
 
 const addMonths = (date: Date, months: number) => {
@@ -23,7 +23,8 @@ const addMonths = (date: Date, months: number) => {
   return newDate;
 };
 
-export const CreatePromo: FC<CreatePromoInterface> = ({ showMessage, createNewPromo }) => {
+export const CreatePromo: FC<CreatePromoInterface> = ({ createNewPromo }) => {
+  const { showMessage } = useSnackBarStore();
   const defaultDate = addMonths(new Date(), 3);
   const initialPromoStates: common_PromoCodeInsert = {
     code: '',

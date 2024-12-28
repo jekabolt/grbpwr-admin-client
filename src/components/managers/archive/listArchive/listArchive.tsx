@@ -6,6 +6,7 @@ import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { MediaSelectorLayout } from 'components/common/media-selector-layout/layout';
 import { TruncateText } from 'components/common/truncateText';
 import { isValidURL } from 'features/utilitty/isValidUrl';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/archiveList.scss';
 import { ArchiveModal } from '../archiveModal/archiveModal';
@@ -18,8 +19,8 @@ export const ListArchive: FC<ListArchiveInterface> = ({
   deleteArchiveFromList,
   deleteItemFromArchive,
   updateArchiveInformation,
-  showMessage,
 }) => {
+  const { showMessage } = useSnackBarStore();
   const [media, setMedia] = useState('');
   const [mediaId, setMediaId] = useState<number>();
   const [title, setTitle] = useState('');

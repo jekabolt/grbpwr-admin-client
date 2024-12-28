@@ -17,7 +17,6 @@ export interface createArchives {
     open: boolean;
     close: () => void;
     fetchArchive: (limit: number, offset: number) => void;
-    showMessage: (message: string, severity: 'success' | 'error') => void;
 }
 
 export interface ListArchiveInterface {
@@ -26,5 +25,4 @@ export interface ListArchiveInterface {
     deleteArchiveFromList: (id: number | undefined) => void
     deleteItemFromArchive: (archiveId: number | undefined, itemId: number | undefined) => void;
     updateArchiveInformation: (archiveId: number | undefined, items: common_ArchiveFull) => void
-    showMessage: (message: string, severity: 'success' | 'error') => void;
 }

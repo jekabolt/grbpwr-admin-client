@@ -12,16 +12,12 @@ import {
   Select,
   TextField,
 } from '@mui/material';
-import { getDictionary } from 'api/admin';
-import {
-  GetProductsPagedRequest,
-  common_Dictionary,
-  common_FilterConditions,
-} from 'api/proto-http/admin';
+import { GetProductsPagedRequest, common_FilterConditions } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { Field, FieldProps, Form, Formik } from 'formik';
-import { FC, useEffect, useState } from 'react';
+import { useDictionaryStore } from 'lib/stores/store';
+import { FC, useState } from 'react';
 import {
   genderOptions,
   orderFactors,
@@ -34,16 +30,8 @@ interface FilterProps {
 }
 
 export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
-  const [dictionary, setDictionary] = useState<common_Dictionary>();
+  const { dictionary } = useDictionaryStore();
   const [isOpen, setIsOpen] = useState(true);
-
-  useEffect(() => {
-    const fetchDictionary = async () => {
-      const response = await getDictionary({});
-      setDictionary(response.dictionary);
-    };
-    fetchDictionary();
-  }, []);
 
   const handleFieldChange = (setFieldValue: Function, fieldName: string, value: any) => {
     setFieldValue(fieldName, value);

@@ -1,9 +1,8 @@
-import { Alert, Snackbar } from '@mui/material';
 import { MakeGenerics, useMatch } from '@tanstack/react-location';
 import { getProductByID, upsertProduct } from 'api/admin';
 import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/login/layout';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
 import { productInitialValues } from '../genericProductComponent/utility/productInitialValues';
@@ -15,7 +14,7 @@ type ProductFormProps = MakeGenerics<{
 }>;
 
 export const ProductForm: FC = () => {
-  const { dictionary } = useDictionaryStore();
+  const { showMessage } = useSnackBarStore();
   const {
     params: { id },
     pathname,
@@ -24,15 +23,6 @@ export const ProductForm: FC = () => {
   const [product, setProduct] = useState<common_ProductFull | undefined>();
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
   const [initialValues, setInitialValues] = useState<common_ProductNew>(productInitialValues());
-  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
-  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
-
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    setSnackBarMessage(message);
-    setSnackBarSeverity(severity);
-    setIsSnackBarOpen(true);
-  };
 
   const fetchProduct = async () => {
     if (id) {
@@ -70,14 +60,14 @@ export const ProductForm: FC = () => {
       };
 
       if (parseFloat(values.product?.productBody?.price?.value || '') <= 0) {
-        showMessage('PRICE CANNOT BE ZERO', 'error');
+        showMessage('price cannot be zero', 'error');
         setSubmitting(false);
         return;
       }
 
       await upsertProduct(productToSubmit);
 
-      showMessage(id && !isCopyMode ? 'PRODUCT UPDATED' : 'PRODUCT UPLOADED', 'success');
+      showMessage(id && !isCopyMode ? 'product updated' : 'product uploaded', 'success');
       setSubmitting(false);
 
       if (!id || (!isCopyMode && !id)) {
@@ -88,7 +78,7 @@ export const ProductForm: FC = () => {
       if (!isCopyMode) fetchProduct();
     } catch (error) {
       showMessage(
-        id && !isCopyMode ? "PRODUCT CAN'T BE UPDATED" : "PRODUCT CAN'T BE UPLOADED",
+        id && !isCopyMode ? "product can't be updated" : "product can't be uploaded",
         'error',
       );
     } finally {
@@ -108,13 +98,6 @@ export const ProductForm: FC = () => {
         onSubmit={handleFormSubmit}
         onEditModeChange={setIsEditMode}
       />
-      <Snackbar
-        open={isSnackBarOpen}
-        autoHideDuration={6000}
-        onClose={() => setIsSnackBarOpen(false)}
-      >
-        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
-      </Snackbar>
     </Layout>
   );
 };

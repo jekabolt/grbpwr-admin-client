@@ -11,13 +11,15 @@ import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { Dialog } from 'components/common/dialog';
 import { MediaSelectorLayout } from 'components/common/media-selector-layout/layout';
 import { TruncateText } from 'components/common/truncateText';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useState } from 'react';
 import styles from 'styles/archive.scss';
 import { ArchiveModal } from '../archiveModal/archiveModal';
 import { createArchives } from '../interfaces/interfaces';
 import { isValidUrl } from '../utility/isValidUrl';
 
-export const CreateArchive: FC<createArchives> = ({ fetchArchive, showMessage, open, close }) => {
+export const CreateArchive: FC<createArchives> = ({ fetchArchive, open, close }) => {
+  const { showMessage } = useSnackBarStore();
   const initialArchiveState: common_ArchiveNew = {
     archive: {
       heading: '',

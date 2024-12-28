@@ -1,7 +1,7 @@
 
 import { getDictionary } from "api/admin";
 import { create } from "zustand";
-import { DictionaryStore } from "./store-types";
+import { DictionaryStore, SnackBarStore } from "./store-types";
 
 export const useDictionaryStore = create<DictionaryStore>((set, get) => ({
     dictionary: undefined,
@@ -19,3 +19,24 @@ export const useDictionaryStore = create<DictionaryStore>((set, get) => ({
         }
     }
 }))
+
+
+export const useSnackBarStore = create<SnackBarStore>((set) => ({
+    alerts: [],
+    showMessage: (message: string, severity: 'success' | 'error') => {
+        const newAlert = {
+            message,
+            severity,
+            id: Date.now(),
+        };
+        set((state) => ({ alerts: [...state.alerts, newAlert] }));
+    },
+    closeMessage: (id: number) => {
+        set((state) => ({
+            alerts: state.alerts.filter((alert) => alert.id !== id)
+        }));
+    },
+    clearAll: () => {
+        set({ alerts: [] });
+    }
+}));

@@ -3,15 +3,17 @@ import { Grid, IconButton } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { deletePromo } from 'api/promo';
 import { common_PromoCode } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useCallback } from 'react';
 
 interface ListPromosInterface {
   promos: common_PromoCode[];
   fetchPromos: (limit: number, offset: number) => void;
-  showMessage: (message: string, severity: 'success' | 'error') => void;
 }
 
-export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos, showMessage }) => {
+export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos }) => {
+  const { showMessage } = useSnackBarStore();
+
   const transformPromoForDataGrid = promos.map((promo, index) => ({
     id: index,
     code: promo.promoCodeInsert?.code,

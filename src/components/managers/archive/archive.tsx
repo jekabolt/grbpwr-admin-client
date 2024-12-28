@@ -1,4 +1,4 @@
-import { Alert, AppBar, Button, Grid, Snackbar, Toolbar } from '@mui/material';
+import { AppBar, Button, Grid, Toolbar } from '@mui/material';
 import { Layout } from 'components/login/layout';
 import { FC, useEffect, useState } from 'react';
 import { CreateArchive } from './createArchive/createArchive';
@@ -11,11 +11,6 @@ export const Archive: FC = () => {
     isLoading,
     hasMore,
     fetchArchive,
-    showMessage,
-    snackBarMessage,
-    snackBarSeverity,
-    isSnackBarOpen,
-    setIsSnackBarOpen,
     deleteArchiveFromList,
     deleteItemFromArchive,
     setArchive,
@@ -68,7 +63,6 @@ export const Archive: FC = () => {
             open={isCreateArchiveModalOpen}
             close={handleCloseCreateArchiveModal}
             fetchArchive={fetchArchive}
-            showMessage={showMessage}
           />
         </Grid>
         <Grid item xs={12}>
@@ -78,16 +72,8 @@ export const Archive: FC = () => {
             deleteArchiveFromList={deleteArchiveFromList}
             deleteItemFromArchive={deleteItemFromArchive}
             updateArchiveInformation={updateArchiveInformation}
-            showMessage={showMessage}
           />
         </Grid>
-        <Snackbar
-          open={isSnackBarOpen}
-          autoHideDuration={6000}
-          onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
-        >
-          <Alert severity={snackBarSeverity}>{snackBarMessage.toUpperCase()}</Alert>
-        </Snackbar>
       </Grid>
     </Layout>
   );

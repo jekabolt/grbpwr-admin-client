@@ -1,8 +1,9 @@
-import { Grid, Snackbar } from '@mui/material';
+import { Grid } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { deleteProductByID } from 'api/admin';
 import { GetProductsPagedRequest } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
+import { useSnackBarStore } from 'lib/stores/store';
 import debounce from 'lodash/debounce';
 import { FC, MouseEvent, useCallback, useEffect, useState } from 'react';
 import { Filter } from './filterProducts/filterProducts';
@@ -10,12 +11,11 @@ import { ListProducts } from './listProducts';
 import useListProduct from './useListProduct/useListProduct';
 
 export const AllProducts: FC = () => {
+  const { showMessage } = useSnackBarStore();
   const { products, setProducts, filter, setFilter, isLoading, hasMore, fetchProducts } =
     useListProduct();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const [deletingProductId, setDeletingProductId] = useState<number | undefined>(undefined);
-  const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
-  const [snackbarMessage, setSnackbarMessage] = useState<string>('');
   const navigate = useNavigate();
 
   const handleProductClick = (id: number | undefined) => {
@@ -41,16 +41,11 @@ export const AllProducts: FC = () => {
         setProducts((prevProducts) => prevProducts?.filter((product) => product.id !== productId));
         setTimeout(() => setDeletingProductId(undefined), 1000);
       } catch (error) {
-        setSnackbarMessage('THE PRODUCT CANNOT BE REMOVED');
-        setSnackbarOpen(true);
+        showMessage('the product cannot be removed', 'error');
       } finally {
         setConfirmDelete(undefined);
       }
     }
-  };
-
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
   };
 
   const debouncedFetchProducts = useCallback(
@@ -100,12 +95,6 @@ export const AllProducts: FC = () => {
           showHidden={filter.showHidden}
         />
       </Grid>
-      <Snackbar
-        open={snackbarOpen}
-        message={snackbarMessage}
-        autoHideDuration={6000}
-        onClose={handleSnackbarClose}
-      />
     </Grid>
   );
 };
