@@ -7,7 +7,8 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
     { value: 'HERO_TYPE_SINGLE', label: 'single add' },
     { value: 'HERO_TYPE_DOUBLE', label: 'double add' },
     { value: 'HERO_TYPE_FEATURED_PRODUCTS', label: 'featured products' },
-    { value: 'HERO_TYPE_FEATURED_PRODUCTS_TAG', label: 'featured products tag' }
+    { value: 'HERO_TYPE_FEATURED_PRODUCTS_TAG', label: 'featured products tag' },
+    { value: 'HERO_TYPE_FEATURED_ARCHIVE', label: 'featured archive' }
 ]
 
 export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_HeroFullInsert => {
@@ -58,6 +59,12 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
                 headline: entity.featuredProductsTag?.products?.headline,
                 exploreLink: entity.featuredProductsTag?.products?.exploreLink,
                 exploreText: entity.featuredProductsTag?.products?.exploreText,
+            },
+            featuredArchive: {
+                archiveId: entity.featuredArchive?.archive?.items?.[0].archiveId,
+                tag: entity.featuredArchive?.tag,
+                headline: entity.featuredArchive?.headline,
+                exploreText: entity.featuredArchive?.exploreText,
             }
         })),
     };
@@ -107,6 +114,12 @@ export const emptyHeroForm: common_HeroFullInsert = {
                 tag: '',
                 headline: '',
                 exploreLink: '',
+                exploreText: ''
+            },
+            featuredArchive: {
+                archiveId: 0,
+                tag: '',
+                headline: '',
                 exploreText: ''
             }
         }

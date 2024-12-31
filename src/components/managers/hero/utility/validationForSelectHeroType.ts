@@ -17,5 +17,8 @@ export const validationForSelectHeroType: Record<common_HeroType, (entity: commo
     HERO_TYPE_FEATURED_PRODUCTS_TAG: (entity: common_HeroEntityInsert) =>
         !entity.featuredProductsTag?.tag,
 
+    HERO_TYPE_FEATURED_ARCHIVE: (entity: common_HeroEntityInsert) =>
+        !entity.featuredArchive?.archiveId,
+
     HERO_TYPE_UNKNOWN: (entity: common_HeroEntityInsert) => false,
 }

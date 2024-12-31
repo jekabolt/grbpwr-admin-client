@@ -1,5 +1,6 @@
 import { Box, Button, Divider, Grid2 as Grid, TextField } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
+import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
 import { Field, useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
@@ -8,6 +9,7 @@ import { removeEntityIndex } from '../utility/arrayHelpers';
 import { getAllowedRatios } from '../utility/getAllowedRatios';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity/common-entity';
+import { FeaturedArchive } from './featured-archive/featured-archive';
 import { FeaturedProductBase } from './featured-products-(tags)/featured-prduct-base';
 import { EntitiesProps } from './interface/interface';
 
@@ -20,6 +22,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   }>({});
   const [product, setProduct] = useState<{ [key: number]: common_Product[] }>({});
   const [productTags, setProductTags] = useState<{ [key: number]: common_Product[] }>({});
+  const [archive, setArchive] = useState<{ [key: number]: common_ArchiveFull[] }>({});
   const [currentEntityIndex, setCurrentEntityIndex] = useState<number | null>(null);
   const [allowedRatios, setAllowedRatios] = useState<{ [key: number]: string[] }>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,6 +42,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     const doubleAddEntities: { [key: number]: { left: string; right: string } } = {};
     const productsForEntities: { [key: number]: common_Product[] } = {};
     const productTagsForEntities: { [key: number]: common_Product[] } = {};
+    const archiveForEntities: { [key: number]: common_ArchiveFull[] } = {};
     const calculatedAllowedRatios: { [key: number]: string[] } = {};
 
     entities.forEach((e, i) => {
@@ -51,6 +55,12 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
 
       productsForEntities[i] = e.featuredProducts?.products || [];
       productTagsForEntities[i] = e.featuredProductsTag?.products?.products || [];
+      archiveForEntities[i] = [
+        {
+          archive: e.featuredArchive?.archive?.archive,
+          items: e.featuredArchive?.archive?.items || [],
+        },
+      ];
 
       const allowedRatios = getAllowedRatios(e);
       if (allowedRatios.length > 0) {
@@ -64,6 +74,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     setProduct(productsForEntities);
     setProductTags(productTagsForEntities);
     setAllowedRatios(calculatedAllowedRatios);
+    setArchive(archiveForEntities);
   };
 
   useEffect(() => {
@@ -139,6 +150,16 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     setProductTags((prevProductTags) => removeEntityIndex(prevProductTags, index));
 
     arrayHelpers.remove(index);
+  };
+
+  const handleOpenArchiveSelection = (index: number) => {
+    setCurrentEntityIndex(index);
+    setIsModalOpen(true);
+  };
+
+  const handleSaveArchive = (newSelectedArchive: common_ArchiveFull[], index: number) => {
+    setFieldValue(`entities.${index}.featuredArchive.archiveId`, newSelectedArchive[0].archive?.id);
+    handleCloseModal();
   };
 
   return (
@@ -246,6 +267,20 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                     title='featured products tag'
                     prefix='featuredProductsTag'
                     handleProductsReorder={(e, i) => handleProductsReorder(e, i, true)}
+                  />
+                </Grid>
+              )}
+              {entity.type === 'HERO_TYPE_FEATURED_ARCHIVE' && (
+                <Grid size={{ xs: 12 }}>
+                  <Field
+                    component={FeaturedArchive}
+                    archive={archive}
+                    index={index}
+                    currentEntityIndex={currentEntityIndex}
+                    handleOpenArchiveSelection={handleOpenArchiveSelection}
+                    handleSaveArchiveSelection={handleSaveArchive}
+                    open={isModalOpen}
+                    onClose={handleCloseModal}
                   />
                 </Grid>
               )}
