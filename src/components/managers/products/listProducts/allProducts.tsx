@@ -1,5 +1,5 @@
 import { Grid2 as Grid } from '@mui/material';
-import { useNavigate } from '@tanstack/react-location';
+import { useNavigate, useSearch } from '@tanstack/react-location';
 import { deleteProductByID } from 'api/admin';
 import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
@@ -16,6 +16,29 @@ export const AllProducts: FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const [deletingProductId, setDeletingProductId] = useState<number | undefined>(undefined);
   const navigate = useNavigate();
+  const search = useSearch();
+
+  const debouncedFetchProducts = useCallback(
+    debounce((values: GetProductsPagedRequest) => {
+      fetchProducts(50, 0, values);
+    }, 500),
+    [fetchProducts],
+  );
+
+  useEffect(() => {
+    if (search.filter) {
+      try {
+        const filterFromUrl =
+          typeof search.filter === 'string' ? JSON.parse(search.filter) : search.filter;
+        updateFilter(filterFromUrl);
+        fetchProducts(50, 0, filterFromUrl);
+      } catch (error) {
+        console.error('Failed to parse filter from URL:', error);
+      }
+    } else {
+      debouncedFetchProducts(filter);
+    }
+  }, [search.filter]);
 
   const handleProductClick = (id: number | undefined) => {
     navigate({ to: `${ROUTES.product}/${id}`, replace: true });
@@ -49,13 +72,6 @@ export const AllProducts: FC = () => {
     }
   };
 
-  const debouncedFetchProducts = useCallback(
-    debounce((values: GetProductsPagedRequest) => {
-      fetchProducts(50, 0);
-    }, 500),
-    [fetchProducts],
-  );
-
   useEffect(() => {
     const handleScroll = () => {
       if (
@@ -70,10 +86,6 @@ export const AllProducts: FC = () => {
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, [isLoading, hasMore, products.length, fetchProducts]);
-
-  useEffect(() => {
-    debouncedFetchProducts(filter);
-  }, [filter, debouncedFetchProducts]);
 
   const handleFilterChange = (values: GetProductsPagedRequest) => {
     updateFilter(values);

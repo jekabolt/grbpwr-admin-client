@@ -67,13 +67,13 @@ export const useProductStore = create<ProductStore>((set, get) => ({
             },
         }));
     },
-    fetchProducts: async (limit: number, offset: number) => {
+    fetchProducts: async (limit: number, offset: number, filterValues?: GetProductsPagedRequest) => {
         const { filter } = get();
         set({ isLoading: true, error: null });
 
         try {
             const response = await getProductsPaged({
-                ...filter,
+                ...(filterValues || filter),
                 limit,
                 offset,
             })

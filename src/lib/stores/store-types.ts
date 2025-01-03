@@ -33,7 +33,7 @@ export interface ProductStore {
         filterConditions?: Partial<common_FilterConditions>;
         [key: string]: any;
     }) => void;
-    fetchProducts: (limit: number, offset: number) => Promise<void>;
+    fetchProducts: (limit: number, offset: number, filterValues?: GetProductsPagedRequest) => Promise<void>;
     setProducts: (products: common_Product[] | ((prev: common_Product[]) => common_Product[])) => void;
     appendProducts: (newProducts: common_Product[]) => void;
     clearProducts: () => void;

@@ -1,15 +1,17 @@
 import { Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
+import { useNavigate } from '@tanstack/react-location';
+import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { CopyToClipboard } from 'components/common/copyToClipboard';
 import { TruncateText } from 'components/common/truncateText';
-import { Field } from 'formik';
+import { defaultProductFilterSettings } from 'constants/initialFilterStates';
+import { ROUTES } from 'constants/routes';
+import { Field, useFormikContext } from 'formik';
 import styles from 'styles/archiveList.scss';
-import { HeroProductTable } from '../featured-products-(tags)/heroProductsTable';
 import { FeatureArchiveProps } from '../interface/interface';
 import { ArchivePicker } from './archive-picker';
 
 export function FeaturedArchive({
   archive,
-  product,
   index,
   currentEntityIndex,
   open,
@@ -17,6 +19,28 @@ export function FeaturedArchive({
   handleSaveArchiveSelection,
   handleOpenArchiveSelection,
 }: FeatureArchiveProps) {
+  const navigate = useNavigate();
+  const { values } = useFormikContext<common_HeroFullInsert>();
+
+  const handleTagClick = () => {
+    const tag = values.entities?.[index]?.featuredArchive?.tag;
+    if (tag) {
+      const filterSettings = {
+        ...defaultProductFilterSettings,
+        filterConditions: {
+          ...defaultProductFilterSettings.filterConditions,
+          byTag: tag,
+        },
+      };
+      navigate({
+        to: `${ROUTES.product}`,
+        search: (old) => ({
+          ...old,
+          filter: filterSettings,
+        }),
+      });
+    }
+  };
   return (
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, md: 6 }}>
@@ -112,16 +136,23 @@ export function FeaturedArchive({
           name={`entities.${index}.featuredArchive.tag`}
           label='tag'
           fullWidth
+          InputProps={{
+            endAdornment: (
+              <Button onClick={handleTagClick} size='small' sx={{ ml: 1 }}>
+                View Products
+              </Button>
+            ),
+          }}
         />
       </Grid>
-      <Grid size={{ xs: 12 }}>
+      {/* <Grid size={{ xs: 12 }}>
         <Field
           component={HeroProductTable}
           products={product[index] || []}
           id={index}
           isFeaturedProducts={false}
         />
-      </Grid>
+      </Grid> */}
     </Grid>
   );
 }
