@@ -1,5 +1,6 @@
 import { deleteArchive, getArchive, updateArchive } from 'api/archive';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useState } from 'react';
 import { convertArchiveFullToNew } from './utility/convertArchiveFromFullToNew';
 
@@ -10,13 +11,8 @@ export const fetchArchives = (
     archive: common_ArchiveFull[];
     isLoading: boolean;
     hasMore: boolean;
-    snackBarMessage: string;
-    snackBarSeverity: 'success' | 'error';
-    isSnackBarOpen: boolean;
     setArchive: React.Dispatch<React.SetStateAction<common_ArchiveFull[]>>;
     fetchArchive: (limit: number, offset: number) => Promise<void>;
-    setIsSnackBarOpen: (value: boolean) => void;
-    showMessage: (message: string, severity: 'success' | 'error') => void;
     deleteArchiveFromList: (id: number | undefined) => void;
     deleteItemFromArchive: (archiveId: number | undefined, itemId: number | undefined) => void;
     updateArchiveInformation: (archiveId: number | undefined, items: common_ArchiveFull) => void;
@@ -24,15 +20,7 @@ export const fetchArchives = (
     const [archive, setArchive] = useState<common_ArchiveFull[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialLoading);
     const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
-    const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-    const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
-    const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
-
-    const showMessage = (message: string, severity: 'success' | 'error') => {
-        setSnackBarMessage(message);
-        setSnackBarSeverity(severity);
-        setIsSnackBarOpen(!isSnackBarOpen);
-    };
+    const { showMessage } = useSnackBarStore();
 
     const fetchArchive = useCallback(async (limit: number, offset: number) => {
         setIsLoading(true);
@@ -109,13 +97,8 @@ export const fetchArchives = (
         archive,
         isLoading,
         hasMore,
-        snackBarMessage,
-        snackBarSeverity,
-        isSnackBarOpen,
         setArchive,
         fetchArchive,
-        showMessage,
-        setIsSnackBarOpen,
         deleteArchiveFromList,
         deleteItemFromArchive,
         updateArchiveInformation,

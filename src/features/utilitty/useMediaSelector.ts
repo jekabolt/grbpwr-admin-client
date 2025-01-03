@@ -4,6 +4,7 @@ import {
     uploadContentVideo
 } from 'api/admin';
 import { common_MediaFull } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { Dispatch, SetStateAction, useCallback, useState } from 'react';
 import { checkIsHttpHttpsMediaLink } from './checkIsHttpHttpsLink';
 import { isVideo } from './filterContentType';
@@ -30,10 +31,7 @@ const useMediaSelector = (
     croppedImage: string | null,
     filterByType: string;
     sortByDate: string;
-    snackBarMessage: string;
-    snackBarSeverity: 'success' | 'error';
     isLoading: boolean;
-    isSnackBarOpen: boolean;
     loading: boolean,
     setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
     setUrl: React.Dispatch<React.SetStateAction<string>>;
@@ -44,34 +42,20 @@ const useMediaSelector = (
     setFilterByType: React.Dispatch<React.SetStateAction<string>>;
     setSortByDate: React.Dispatch<React.SetStateAction<string>>;
     sortedAndFilteredMedia: () => common_MediaFull[];
-    showMessage: (message: string, severity: 'success' | 'error') => void;
-    closeSnackBar: () => void;
     setSelectedFileUrl: (url: string) => void;
     setCroppedImage: (img: string | null) => void;
 } => {
+    const { showMessage } = useSnackBarStore();
     const [media, setMedia] = useState<common_MediaFull[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(initialIsLoading);
     const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
     const [url, setUrl] = useState<string>('');
     const [filterByType, setFilterByType] = useState('');
     const [sortByDate, setSortByDate] = useState('desc');
-    const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-    const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
-    const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
     const [loading, setLoading] = useState<boolean>(false);
     const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
     const [croppedImage, setCroppedImage] = useState<string | null>(null);
     const [selectedFileUrl, setSelectedFileUrl] = useState<string>('');
-
-    const showMessage = (message: string, severity: 'success' | 'error') => {
-        setSnackBarMessage(message);
-        setSnackBarSeverity(severity);
-        setIsSnackBarOpen(!isSnackBarOpen);
-    };
-
-    const closeSnackBar = () => {
-        setIsSnackBarOpen(!isSnackBarOpen);
-    };
 
     const sortedAndFilteredMedia = useCallback(() => {
         return media
@@ -160,12 +144,9 @@ const useMediaSelector = (
         url,
         selectedFileUrl,
         croppedImage,
-        snackBarSeverity,
-        snackBarMessage,
         filterByType,
         sortByDate,
         isLoading,
-        isSnackBarOpen,
         loading,
         fetchFiles,
         reload,
@@ -174,8 +155,6 @@ const useMediaSelector = (
         setFilterByType,
         setSortByDate,
         sortedAndFilteredMedia,
-        showMessage,
-        closeSnackBar,
         setSelectedFileUrl,
         setCroppedImage,
         setSelectedFiles,

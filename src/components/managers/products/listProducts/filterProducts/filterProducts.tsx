@@ -12,16 +12,12 @@ import {
   Select,
   TextField,
 } from '@mui/material';
-import { getDictionary } from 'api/admin';
-import {
-  GetProductsPagedRequest,
-  common_Dictionary,
-  common_FilterConditions,
-} from 'api/proto-http/admin';
+import { GetProductsPagedRequest } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { Field, FieldProps, Form, Formik } from 'formik';
-import { FC, useEffect, useState } from 'react';
+import { useDictionaryStore, useProductStore } from 'lib/stores/store';
+import { FC, useState } from 'react';
 import {
   genderOptions,
   orderFactors,
@@ -29,49 +25,48 @@ import {
 } from '../../genericProductComponent/utility/dictionaryConst';
 
 interface FilterProps {
-  filter: GetProductsPagedRequest;
+  // filter: GetProductsPagedRequest;
   onFilterChange: (values: GetProductsPagedRequest) => void;
 }
 
-export const Filter: FC<FilterProps> = ({ filter, onFilterChange }) => {
-  const [dictionary, setDictionary] = useState<common_Dictionary>();
+export const Filter: FC<FilterProps> = ({ onFilterChange }) => {
+  const { filter, updateFilter } = useProductStore();
+  const { dictionary } = useDictionaryStore();
   const [isOpen, setIsOpen] = useState(true);
-
-  useEffect(() => {
-    const fetchDictionary = async () => {
-      const response = await getDictionary({});
-      setDictionary(response.dictionary);
-    };
-    fetchDictionary();
-  }, []);
 
   const handleFieldChange = (setFieldValue: Function, fieldName: string, value: any) => {
     setFieldValue(fieldName, value);
-    const updatedFilter = { ...filter };
 
+    let updatedFilter = {};
     if (fieldName.includes('filterConditions')) {
       const keys = fieldName.split('.');
       if (keys[1] === 'categoryIds') {
-        updatedFilter.filterConditions = {
-          ...filter.filterConditions,
-          categoryIds: Array.isArray(value) ? value : [value],
-        } as common_FilterConditions;
+        updatedFilter = {
+          filterConditions: {
+            categoryIds: Array.isArray(value) ? value : [value],
+          },
+        };
       } else if (keys[1] === 'sizesIds' && value.includes('')) {
-        updatedFilter.filterConditions = {
-          ...filter.filterConditions,
-          sizesIds: [],
-        } as common_FilterConditions;
+        updatedFilter = {
+          filterConditions: {
+            sizesIds: [],
+          },
+        };
       } else {
-        updatedFilter.filterConditions = {
-          ...filter.filterConditions,
-          [keys[1]]: value,
-        } as common_FilterConditions;
+        updatedFilter = {
+          filterConditions: {
+            [keys[1]]: value,
+          },
+        };
       }
     } else {
-      updatedFilter[fieldName as keyof GetProductsPagedRequest] = value;
+      updatedFilter = {
+        [fieldName]: value,
+      };
     }
 
-    onFilterChange(updatedFilter);
+    updateFilter(updatedFilter);
+    onFilterChange({ ...filter, ...updatedFilter });
   };
 
   return (

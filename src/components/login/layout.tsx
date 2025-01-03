@@ -2,6 +2,7 @@ import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { AppBar, Box, Button, Container, IconButton, Toolbar, styled } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
+import { SnackBar } from 'components/common/snackbar';
 import { ROUTES } from 'constants/routes';
 import logo from 'img/tex-text.png';
 import { FC, ReactNode } from 'react';
@@ -60,6 +61,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
       <Container component='main' sx={{ flexGrow: 1, overflowY: 'auto' }}>
         {children}
       </Container>
+      <SnackBar />
     </Box>
   );
 };

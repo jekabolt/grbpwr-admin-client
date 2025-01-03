@@ -1,10 +1,8 @@
 import {
-  Alert,
   Box,
   Checkbox,
   FormControlLabel,
   Grid,
-  Snackbar,
   TextField,
   Theme,
   Typography,
@@ -14,27 +12,19 @@ import { UpdateSettingsRequest } from 'api/proto-http/admin';
 import { updateSettings } from 'api/settings';
 import { Layout } from 'components/login/layout';
 import { Field, FieldProps, Formik } from 'formik';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionaryStore, useSnackBarStore } from 'lib/stores/store';
 import debounce from 'lodash/debounce';
 import { FC, useCallback, useEffect, useState } from 'react';
 import { defaultSettingsStates } from './defaultSettingsStates';
 import { usePaymentMethodsMapping, useShipmentCarriersMapping } from './mappingFunctions';
 
 export const Settings: FC = () => {
+  const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionaryStore();
   const [settings, setSettings] = useState<UpdateSettingsRequest>(defaultSettingsStates);
   const shipmentCarriers = useShipmentCarriersMapping();
   const paymentMethods = usePaymentMethodsMapping();
-  const [snackBarMessage, setSnackBarMessage] = useState<string>('');
-  const [isSnackBarOpen, setIsSnackBarOpen] = useState<boolean>(false);
-  const [snackBarSeverity, setSnackBarSeverity] = useState<'success' | 'error'>('success');
   const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
-
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    setSnackBarMessage(message);
-    setSnackBarSeverity(severity);
-    setIsSnackBarOpen(true);
-  };
 
   useEffect(() => {
     setSettings((prev) => ({
@@ -222,13 +212,6 @@ export const Settings: FC = () => {
           </form>
         )}
       </Formik>
-      <Snackbar
-        open={isSnackBarOpen}
-        autoHideDuration={6000}
-        onClose={() => setIsSnackBarOpen(!isSnackBarOpen)}
-      >
-        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
-      </Snackbar>
     </Layout>
   );
 };

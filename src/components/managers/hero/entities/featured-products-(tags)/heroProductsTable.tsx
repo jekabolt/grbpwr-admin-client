@@ -30,7 +30,6 @@ export const HeroProductTable: FC<
   const { setFieldValue } = useFormikContext<common_HeroFullInsert>();
   const categories = useDictionaryStore((state) => state.dictionary?.categories || []);
   const navigate = useNavigate();
-
   const [data, setData] = useState(products);
 
   useEffect(() => {

@@ -1,10 +1,11 @@
-import { Alert, Button, Grid2 as Grid, Snackbar } from '@mui/material';
+import { Button, Grid2 as Grid } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { common_HeroEntity } from 'api/proto-http/frontend';
 import { Layout } from 'components/login/layout';
 import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { Field, FieldArray, Form, Formik } from 'formik';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useRef, useState } from 'react';
 import styles from 'styles/hero.scss';
 import { isValidUrl } from '../archive/utility/isValidUrl';
@@ -14,29 +15,10 @@ import { heroValidationSchema } from './utility/heroValidationShema';
 import { mapHeroFunction } from './utility/mapHeroFunction';
 
 export const Hero: FC = () => {
+  const { showMessage, clearAll } = useSnackBarStore();
   const [hero, setHero] = useState<common_HeroFullInsert>(mapHeroFunction());
   const [entities, setEntities] = useState<common_HeroEntity[]>([]);
-  const [alerts, setAlerts] = useState<
-    Array<{
-      message: string;
-      severity: 'success' | 'error';
-      id: number;
-    }>
-  >([]);
   const entityRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
-
-  const showMessage = (message: string, severity: 'success' | 'error') => {
-    const newAlert = {
-      message,
-      severity,
-      id: Date.now(),
-    };
-    setAlerts((prev) => [...prev, newAlert]);
-  };
-
-  const handleCloseAlert = (id: number) => {
-    setAlerts((prev) => prev.filter((alert) => alert.id !== id));
-  };
 
   const fetchHero = async () => {
     const response = await getHero({});
@@ -90,7 +72,7 @@ export const Hero: FC = () => {
   const saveHero = async (values: common_HeroFullInsert) => {
     const { invalidUrls, nonAllowedDomainUrls } = validateExploreLinks(values);
 
-    setAlerts([]);
+    clearAll();
 
     invalidUrls.forEach((message) => {
       showMessage(message, 'error');
@@ -106,10 +88,10 @@ export const Hero: FC = () => {
 
     try {
       await addHero({ hero: values });
-      showMessage('HERO SAVED SUCCESSFULLY', 'success');
+      showMessage('hero saved successfully', 'success');
       fetchHero();
     } catch {
-      showMessage("HERO CAN'T BE SAVED", 'error');
+      showMessage('hero can not be saved', 'error');
     }
   };
 
@@ -159,25 +141,6 @@ export const Hero: FC = () => {
           </Form>
         )}
       </Formik>
-      {alerts.map((alert, index) => (
-        <Snackbar
-          key={alert.id}
-          open={true}
-          autoHideDuration={6000}
-          onClose={() => handleCloseAlert(alert.id)}
-          anchorOrigin={{
-            vertical: 'bottom',
-            horizontal: 'left',
-          }}
-          style={{
-            bottom: `${index * 60 + 20}px`,
-          }}
-        >
-          <Alert severity={alert.severity} onClose={() => handleCloseAlert(alert.id)}>
-            {alert.message.toUpperCase()}
-          </Alert>
-        </Snackbar>
-      ))}
     </Layout>
   );
 };

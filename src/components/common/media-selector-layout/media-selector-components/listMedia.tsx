@@ -1,14 +1,12 @@
 import CheckIcon from '@mui/icons-material/Check';
 import ClearIcon from '@mui/icons-material/Clear';
 import {
-  Alert,
   Box,
   Grid,
   IconButton,
   ImageList,
   ImageListItem,
   InputLabel,
-  Snackbar,
   Typography,
   useMediaQuery,
   useTheme,
@@ -18,7 +16,7 @@ import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'components/common/interfaces/mediaSelectorInterfaces';
 import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
 import { isVideo } from 'features/utilitty/filterContentType';
-import useMediaSelector from 'features/utilitty/useMediaSelector';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useCallback, useEffect, useState } from 'react';
 import styles from 'styles/media-selector.scss';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
@@ -37,8 +35,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   sortedAndFilteredMedia,
   handleUploadMedia,
 }) => {
-  const { isSnackBarOpen, snackBarMessage, snackBarSeverity, showMessage, closeSnackBar } =
-    useMediaSelector();
+  const { showMessage } = useSnackBarStore();
   const [openModal, setOpenModal] = useState(false);
   const [clickedMedia, setClickedMedia] = useState<common_MediaItem | undefined>();
   const theme = useTheme();
@@ -223,9 +220,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
         setCroppedImage={setCroppedImage}
         handleUploadMedia={handleUploadMedia}
       />
-      <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
-        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
-      </Snackbar>
     </Grid>
   );
 };

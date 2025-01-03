@@ -1,8 +1,7 @@
-import { Alert, Snackbar } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { Dialog } from 'components/common/dialog';
 import { MediaSelectorModalProps } from 'components/common/interfaces/mediaSelectorInterfaces';
-import useMediaSelector from 'features/utilitty/useMediaSelector';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useState } from 'react';
 import { MediaSelector } from './mediaSelector';
 
@@ -14,8 +13,7 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
   closeMediaSelector,
   saveSelectedMedia,
 }) => {
-  const { snackBarMessage, closeSnackBar, isSnackBarOpen, showMessage, snackBarSeverity } =
-    useMediaSelector();
+  const { showMessage } = useSnackBarStore();
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [open, setOpen] = useState(true);
 
@@ -53,9 +51,6 @@ export const MediaSelectorModal: FC<MediaSelectorModalProps> = ({
         selectedMedia={selectedMedia}
         select={select}
       />
-      <Snackbar open={isSnackBarOpen} autoHideDuration={3000} onClose={closeSnackBar}>
-        <Alert severity={snackBarSeverity}>{snackBarMessage}</Alert>
-      </Snackbar>
     </Dialog>
   );
 };
