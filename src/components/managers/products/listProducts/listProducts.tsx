@@ -1,14 +1,13 @@
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import { Button, Grid2 as Grid, IconButton, Typography } from '@mui/material';
-import { common_Product } from 'api/proto-http/admin';
 import { TruncateText } from 'components/common/truncateText';
 import { isVideo } from 'features/utilitty/filterContentType';
+import { useProductStore } from 'lib/stores/store';
 import React, { FC, useState } from 'react';
 import styles from 'styles/paged.scss';
 
 interface ProductProps {
-  products: common_Product[] | undefined;
   confirmDeleteProductId: number | undefined;
   deletingProductId: number | undefined;
   showHidden: boolean | undefined;
@@ -18,7 +17,6 @@ interface ProductProps {
 }
 
 export const ListProducts: FC<ProductProps> = ({
-  products,
   confirmDeleteProductId,
   deletingProductId,
   showHidden,
@@ -26,6 +24,7 @@ export const ListProducts: FC<ProductProps> = ({
   copy,
   deleteProduct,
 }) => {
+  const products = useProductStore((state) => state.products);
   const [hoveredProductId, setHoveredProductId] = useState<number | undefined>(undefined);
 
   return (
