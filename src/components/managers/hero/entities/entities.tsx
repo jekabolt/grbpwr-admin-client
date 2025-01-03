@@ -148,6 +148,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     setDoubleAdd((prevDoubleAdd) => removeEntityIndex(prevDoubleAdd, index));
     setProduct((prevProduct) => removeEntityIndex(prevProduct, index));
     setProductTags((prevProductTags) => removeEntityIndex(prevProductTags, index));
+    setArchive((prevArchive) => removeEntityIndex(prevArchive, index));
 
     arrayHelpers.remove(index);
   };
@@ -159,6 +160,10 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
 
   const handleSaveArchive = (newSelectedArchive: common_ArchiveFull[], index: number) => {
     setFieldValue(`entities.${index}.featuredArchive.archiveId`, newSelectedArchive[0].archive?.id);
+    setArchive((prevState) => ({
+      ...prevState,
+      [index]: newSelectedArchive,
+    }));
     handleCloseModal();
   };
 
@@ -275,6 +280,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                   <Field
                     component={FeaturedArchive}
                     archive={archive}
+                    product={product}
                     index={index}
                     currentEntityIndex={currentEntityIndex}
                     handleOpenArchiveSelection={handleOpenArchiveSelection}

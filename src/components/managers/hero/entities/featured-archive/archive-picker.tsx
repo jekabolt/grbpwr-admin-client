@@ -1,8 +1,8 @@
-import { Button, Checkbox } from '@mui/material';
+import { Checkbox } from '@mui/material';
 import { getArchive } from 'api/archive';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { Dialog } from 'components/common/dialog';
-import { MaterialReactTable, MRT_ColumnDef } from 'material-react-table';
+import { MaterialReactTable, MRT_ColumnDef, useMaterialReactTable } from 'material-react-table';
 import { useEffect, useMemo, useState } from 'react';
 
 interface Props {
@@ -44,10 +44,6 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
     setData(archives);
   }, [archives]);
 
-  const loadMore = () => {
-    setCurrentPage((prevCurrentPage) => prevCurrentPage + 1);
-  };
-
   function handleSave() {
     if (!selectedArchive) return;
     onSave([selectedArchive]);
@@ -86,17 +82,36 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
         enableGlobalFilter: false,
       },
       {
-        accessorKey: 'archive.archiveBody.description',
-        header: 'Description',
+        accessorKey: 'items',
+        header: 'Items quantity',
+        Cell: ({ row }) => {
+          return row.original.items?.length;
+        },
       },
     ],
     [selectedArchive],
   );
 
+  const table = useMaterialReactTable({
+    autoResetPageIndex: false,
+    columns,
+    data,
+    initialState: {
+      pagination: {
+        pageSize: 50,
+        pageIndex: 1,
+      },
+    },
+    muiPaginationProps: {
+      rowsPerPageOptions: [50, 100, 200],
+      showFirstButton: false,
+      showLastButton: false,
+    },
+  });
+
   return (
     <Dialog open={open} onClose={onClose} title='select archive' isSaveButton save={handleSave}>
-      <MaterialReactTable columns={columns} data={data} />
-      <Button onClick={loadMore}>Load more</Button>
+      <MaterialReactTable table={table} />
     </Dialog>
   );
 }
