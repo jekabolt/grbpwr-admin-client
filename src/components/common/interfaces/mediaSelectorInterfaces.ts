@@ -1,5 +1,6 @@
 
 import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
+import { FormikProps } from 'formik';
 import { Dispatch, SetStateAction } from 'react';
 
 export interface MediaSelectorLayoutProps {
@@ -27,7 +28,8 @@ export interface MediaSelectorInterface {
     aspectRatio?: string[]
     hideVideos?: boolean
     isDeleteAccepted?: boolean;
-    select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void
+    hideNavBar?: boolean
+    select: (imageUrl: common_MediaFull, allowMultiple: boolean, formik?: FormikProps<any>) => void
 
 }
 

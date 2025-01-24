@@ -29,7 +29,7 @@ export function Dialog({ open, children, isSaveButton, title, onClose, save, ...
       open={open}
       onClose={onClose}
       fullWidth
-      fullScreen={isMobile}
+      fullScreen={props.fullScreen || isMobile}
       maxWidth='xl'
       scroll='paper'
       sx={{
@@ -39,6 +39,7 @@ export function Dialog({ open, children, isSaveButton, title, onClose, save, ...
           },
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
+          overflowY: props.fullScreen ? 'hidden' : 'auto',
         },
       }}
       {...props}

@@ -1,16 +1,12 @@
-import { AppBar, Button, Grid, Toolbar } from '@mui/material';
+import { AppBar, Button, Toolbar } from '@mui/material';
 import { Layout } from 'components/login/layout';
-import { FC, useState } from 'react';
+import { useState } from 'react';
 import { CreateArchive } from './createArchive/createArchive';
-// import { fetchArchives } from './fetcharchive';
-// import { ListArchive } from './listArchive/listArchive';
 
-export const Archive: FC = () => {
-  const [isCreateArchiveModalOpen, setIsCreateArchiveModalOpen] = useState(false);
-
-  const handleOpenCreateArchiveModal = () => setIsCreateArchiveModalOpen(true);
-  const handleCloseCreateArchiveModal = () => setIsCreateArchiveModalOpen(false);
-
+export function Archive() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const openModal = () => setIsModalOpen(true);
+  const closeModal = () => setIsModalOpen(false);
   return (
     <Layout>
       <AppBar
@@ -23,25 +19,12 @@ export const Archive: FC = () => {
         }}
       >
         <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant='contained' onClick={handleOpenCreateArchiveModal}>
-            add
+          <Button variant='contained' onClick={openModal}>
+            add new archive
           </Button>
         </Toolbar>
       </AppBar>
-      <Grid container spacing={2} justifyContent='center'>
-        <Grid item xs={12}>
-          <CreateArchive />
-        </Grid>
-        {/* <Grid item xs={12}>
-          <ListArchive
-            archive={archive}
-            setArchive={setArchive}
-            deleteArchiveFromList={deleteArchiveFromList}
-            deleteItemFromArchive={deleteItemFromArchive}
-            updateArchiveInformation={updateArchiveInformation}
-          />
-        </Grid> */}
-      </Grid>
+      <CreateArchive open={isModalOpen} onClose={closeModal} />
     </Layout>
   );
-};
+}

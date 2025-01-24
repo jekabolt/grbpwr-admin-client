@@ -34,7 +34,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
       <HideOnScroll>
         <AppBar
-          position='sticky'
+          position='fixed'
           sx={{
             backgroundColor: 'transparent',
             boxShadow: 'none',
@@ -58,7 +58,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           </PrintHiddenToolbar>
         </AppBar>
       </HideOnScroll>
-      <Container component='main' sx={{ flexGrow: 1, overflowY: 'auto' }}>
+      <Container component='main' sx={{ paddingTop: '64px' }}>
         {children}
       </Container>
       <SnackBar />

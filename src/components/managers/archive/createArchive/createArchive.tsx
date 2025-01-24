@@ -1,131 +1,93 @@
+import { Button, Grid2 as Grid, TextField } from '@mui/material';
+import { addArchive } from 'api/archive';
+import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
+import { Dialog } from 'components/common/dialog';
+import { MediaSelector } from 'components/common/media-selector-layout/mediaSelector';
+import { Field, Form, Formik, FormikProps } from 'formik';
 import { useSnackBarStore } from 'lib/stores/store';
-import { FC } from 'react';
+import { useState } from 'react';
+import styles from 'styles/archive.scss';
 
-export const CreateArchive: FC = () => {
+const initialValue: common_ArchiveInsert = {
+  title: '',
+  description: '',
+  tag: '',
+  mediaIds: [],
+};
+
+export function CreateArchive({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { showMessage } = useSnackBarStore();
+  const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
 
-  // const addNewItem = () => {
-  //   if (url && !isValidUrl(url)) {
-  //     showMessage('invalid url', 'error');
-  //     return;
-  //   }
+  async function handleSubmit(values: common_ArchiveInsert) {
+    try {
+      const archiveData = {
+        ...values,
+      };
+      const response = await addArchive({ archiveInsert: archiveData });
+      if (response) showMessage('archive created', 'success');
+      setSelectedMedia([]);
+      onClose();
+    } catch (error) {
+      showMessage('failed to add archive:', 'error');
+    }
+  }
 
-  //   if (mediaId && selectedItemIndex === null) {
-  //     const isDuplicate = archive.mediaIds?.some((item) => item === mediaId);
-  //     if (isDuplicate) {
-  //       showMessage('This media is already in the archive', 'error');
-  //       return;
-  //     }
-  //   }
+  const handleMediaSelect = (
+    media: common_MediaFull,
+    allowMultiple: boolean,
+    formik?: FormikProps<any>,
+  ) => {
+    const newSelectedMedia = allowMultiple
+      ? selectedMedia.some((item) => item.id === media.id)
+        ? selectedMedia.filter((item) => item.id !== media.id)
+        : [...selectedMedia, media]
+      : [media];
 
-  //   // const newItem: common_ArchiveItemInsert = {
-  //   //   mediaId: mediaId,
-  //   //   url: url,
-  //   //   name: title,
-  //   // };
-
-  //   if (selectedItemIndex !== null) {
-  //     const updatedItems = [...(archive.mediaIds || [])];
-  //     updatedItems[selectedItemIndex] = newItem;
-  //     setArchive((prev) => ({
-  //       ...prev,
-  //       itemsInsert: updatedItems,
-  //     }));
-
-  //     const newMediaItem: common_MediaItem = {
-  //       fullSize: { mediaUrl: media, width: undefined, height: undefined },
-  //       thumbnail: undefined,
-  //       compressed: undefined,
-  //       blurhash: undefined,
-  //     };
-  //     const newMediaFull = {
-  //       media: newMediaItem,
-  //     } as common_MediaFull;
-
-  //     const updatedMediaItems = [...mediaItem];
-  //     updatedMediaItems[selectedItemIndex] = newMediaFull;
-
-  //     setMediaItem(updatedMediaItems);
-  //   } else {
-  //     setArchive((prev) => ({
-  //       ...prev,
-  //       itemsInsert: [...(prev.mediaIds ?? []), newItem],
-  //     }));
-
-  //     if (media) {
-  //       const newMediaItem: common_MediaItem = {
-  //         fullSize: { mediaUrl: media, width: undefined, height: undefined },
-  //         thumbnail: undefined,
-  //         compressed: undefined,
-  //         blurhash: undefined,
-  //       };
-
-  //       const newMediaFull = {
-  //         media: newMediaItem,
-  //       } as common_MediaFull;
-
-  //       setMediaItem((prevMediaItems) => [...prevMediaItems, newMediaFull]);
-  //     }
-  //   }
-
-  //   setMedia(undefined);
-  //   setTitle('');
-  //   setUrl('');
-  //   toggleModal();
-  //   showMessage('item added', 'success');
-  // };
-
-  // const handleTextFieldChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-  //   const { name, value } = event.target;
-  //   setArchive((prevArchive: common_ArchiveNew): common_ArchiveNew => {
-  //     return {
-  //       ...prevArchive,
-  //       archive: {
-  //         ...prevArchive.archive,
-  //         [name]: value,
-  //         heading: name === 'heading' ? value : prevArchive.archive?.heading || '',
-  //         text: name === 'description' ? value : prevArchive.archive?.text || '',
-  //       },
-  //       itemsInsert: prevArchive.itemsInsert,
-  //     };
-  //   });
-  // };
+    setSelectedMedia(newSelectedMedia);
+    formik?.setFieldValue(
+      'mediaIds',
+      newSelectedMedia.map((media) => media.id),
+    );
+  };
 
   return (
-    // <Dialog open={open} onClose={close} title='create new archive' isSaveButton>
-    //   <Grid container spacing={2} padding={4} alignItems='center'>
-    //     <Grid size={{ xs: 12 }}>
-    //       <Grid container className={styles.scroll_container} wrap='nowrap'>
-    //         <Grid size={{ xs: 12, md: 3 }} className={styles.media_item_add}>
-    //           {/* <MediaSelectorLayout
-    //             label='add media'
-    //             allowMultiple={false}
-    //             saveSelectedMedia={mediaPreview}
-    //             aspectRatio={['1:1', '3:4', '4:3']}
-    //             hideVideos={true}
-    //             isDeleteAccepted={false}
-    //           />*/}
-    //         </Grid>
-    //         {/* {mediaItem.map((media, id) => (
-    //           <Grid size={{ xs: 12, md: 3 }} key={id}>
-    //             <Grid container>
-    //               <Grid size={{ xs: 12 }} className={styles.media_item}>
-    //                 <img
-    //                   src={media.media?.fullSize?.mediaUrl}
-    //                   alt=''
-    //                   // onClick={() => toggleModal(id)}
-    //                 />
-    //                 <IconButton onClick={() => removeMediaItem(id)} className={styles.delete_item}>
-    //                   <ClearIcon fontSize='small' />
-    //                 </IconButton>
-    //               </Grid>
-    //             </Grid>
-    //           </Grid>
-    //         ))} */}
-    //       </Grid>
-    //     </Grid>
-    //   </Grid>
-    // </Dialog>
-    <div>create</div>
+    <Dialog open={open} onClose={onClose} fullScreen>
+      <Formik initialValues={initialValue} onSubmit={handleSubmit}>
+        {(formik: FormikProps<common_ArchiveInsert>) => (
+          <Form className={styles.form}>
+            <Grid container gap={1}>
+              <Grid size={{ xs: 12 }} display='flex' justifyContent='space-between'>
+                <Grid size={{ xs: 2 }}>
+                  <Field as={TextField} name='title' label='title' fullWidth />
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                  <Field as={TextField} name='description' label='description' fullWidth />
+                </Grid>
+                <Grid size={{ xs: 2 }}>
+                  <Field as={TextField} name='tag' label='tag' fullWidth />
+                </Grid>
+              </Grid>
+              <Grid size={{ xs: 12 }} className={styles.media_selector_wrapper}>
+                <MediaSelector
+                  select={(media, allowMultiple) => handleMediaSelect(media, allowMultiple, formik)}
+                  selectedMedia={selectedMedia}
+                  aspectRatio={['1:1', '3:4', '4:3']}
+                  isDeleteAccepted={false}
+                  allowMultiple
+                  hideVideos
+                  hideNavBar
+                />
+              </Grid>
+              <Grid size={{ xs: 12 }} display='flex' justifyContent='end'>
+                <Button type='submit' variant='contained' size='large' sx={{ width: '20%' }}>
+                  create archive
+                </Button>
+              </Grid>
+            </Grid>
+          </Form>
+        )}
+      </Formik>
+    </Dialog>
   );
-};
+}
