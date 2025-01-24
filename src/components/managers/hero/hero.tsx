@@ -61,9 +61,9 @@ export const Hero: FC = () => {
       if (entity.featuredProducts) {
         checkUrl(entity.featuredProducts.exploreLink, 'Featured Products');
       }
-      if (entity.featuredProductsTag) {
-        checkUrl(entity.featuredProductsTag.exploreLink, 'Featured Products Tag');
-      }
+      // if (entity.featuredProductsTag) {
+      //   checkUrl(entity.featuredProductsTag., 'Featured Products Tag');
+      // }
     });
 
     return { invalidUrls, nonAllowedDomainUrls };

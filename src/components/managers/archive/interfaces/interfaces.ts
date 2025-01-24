@@ -7,16 +7,10 @@ export interface ArchiveModalInterface {
     title: string;
     url: string;
     isEditMode?: boolean;
-    close: () => void;
+    close?: () => void;
     setTitle: (value: string) => void;
     setUrl: (value: string) => void;
-    addNewItem: (id?: number | undefined) => void;
-}
-
-export interface createArchives {
-    open: boolean;
-    close: () => void;
-    fetchArchive: (limit: number, offset: number) => void;
+    addNewItem?: (id?: number | undefined) => void;
 }
 
 export interface ListArchiveInterface {
