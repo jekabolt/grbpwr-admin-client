@@ -17,10 +17,6 @@ export function getArchive(request: GetArchivesPagedRequest): Promise<GetArchive
   return frontService.GetArchivesPaged(request);
 }
 
-export function addArchiveItem(request: UpdateArchiveRequest): Promise<UpdateArchiveResponse> {
-  return adminService.UpdateArchive(request);
-}
-
 export function deleteArchive(
   request: DeleteArchiveByIdRequest,
 ): Promise<DeleteArchiveByIdResponse> {

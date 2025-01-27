@@ -1,9 +1,10 @@
 
 import { getDictionary, getProductsPaged } from "api/admin";
+import { getArchive } from "api/archive";
 import { common_FilterConditions, GetProductsPagedRequest } from "api/proto-http/admin";
 import { defaultProductFilterSettings } from "constants/initialFilterStates";
 import { create } from "zustand";
-import { DictionaryStore, ProductStore, SnackBarStore } from "./store-types";
+import { ArchiveStore, DictionaryStore, ProductStore, SnackBarStore } from "./store-types";
 
 export const useDictionaryStore = create<DictionaryStore>((set, get) => ({
     dictionary: undefined,
@@ -99,6 +100,39 @@ export const useProductStore = create<ProductStore>((set, get) => ({
         products: [...state.products, ...newProducts]
     })),
     clearProducts: () => set({ products: [] })
+}))
+
+export const useArchiveStore = create<ArchiveStore>((set, get) => ({
+    archives: [],
+    isLoading: false,
+    hasMore: false,
+    error: null,
+    fetchArchives: async (limit: number, offset: number) => {
+        set({ isLoading: true, error: null });
+        try {
+            const response = await getArchive({
+                limit,
+                offset,
+                orderFactor: 'ORDER_FACTOR_DESC',
+            })
+            const fetchedArchives = response.archives || []
+            if (offset === 0) {
+                set({ archives: fetchedArchives })
+            } else {
+                set((state) => ({
+                    archives: [...state.archives, ...fetchedArchives]
+                }))
+            }
+            set({ hasMore: fetchedArchives.length === limit, isLoading: false })
+        } catch (error) {
+            set({ error: 'Failed to fetch archives', isLoading: false })
+        }
+    },
+    deleteArchive: async (id: string) => {
+        set({ isLoading: true, error: null });
+    },
+    addArchive: async (archive: any) => { },
+    updateArchive: async (id: string, data: any) => { },
 }))
 
 

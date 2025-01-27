@@ -2,11 +2,13 @@ import { AppBar, Button, Toolbar } from '@mui/material';
 import { Layout } from 'components/login/layout';
 import { useState } from 'react';
 import { CreateArchive } from './createArchive/createArchive';
+import { ListArchive } from './listArchive/list-archive';
 
 export function Archive() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const openModal = () => setIsModalOpen(true);
   const closeModal = () => setIsModalOpen(false);
+
   return (
     <Layout>
       <AppBar
@@ -25,6 +27,7 @@ export function Archive() {
         </Toolbar>
       </AppBar>
       <CreateArchive open={isModalOpen} onClose={closeModal} />
+      <ListArchive />
     </Layout>
   );
 }

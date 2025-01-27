@@ -1,4 +1,5 @@
 import { common_Dictionary, common_FilterConditions, common_Product, GetProductsPagedRequest } from "api/proto-http/admin";
+import { common_ArchiveFull } from "api/proto-http/frontend";
 
 export interface DictionaryStore {
     dictionary: common_Dictionary | undefined;
@@ -37,4 +38,15 @@ export interface ProductStore {
     setProducts: (products: common_Product[] | ((prev: common_Product[]) => common_Product[])) => void;
     appendProducts: (newProducts: common_Product[]) => void;
     clearProducts: () => void;
+}
+
+export interface ArchiveStore {
+    archives: common_ArchiveFull[];
+    isLoading: boolean;
+    hasMore: boolean;
+    error: string | null;
+    fetchArchives: (limit: number, offset: number) => Promise<void>;
+    deleteArchive: (id: string) => Promise<void>;
+    addArchive: (archive: any) => Promise<void>;
+    updateArchive: (id: string, data: any) => Promise<void>;
 }
