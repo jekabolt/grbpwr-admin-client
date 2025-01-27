@@ -7,7 +7,7 @@ import {
   UpdateArchiveRequest,
   UpdateArchiveResponse
 } from './proto-http/admin';
-import { GetArchivesPagedRequest, GetArchivesPagedResponse } from './proto-http/frontend';
+import { GetArchiveRequest, GetArchiveResponse, GetArchivesPagedRequest, GetArchivesPagedResponse } from './proto-http/frontend';
 
 export function addArchive(request: AddArchiveRequest): Promise<AddArchiveResponse> {
   return adminService.AddArchive(request);
@@ -15,6 +15,10 @@ export function addArchive(request: AddArchiveRequest): Promise<AddArchiveRespon
 
 export function getArchive(request: GetArchivesPagedRequest): Promise<GetArchivesPagedResponse> {
   return frontService.GetArchivesPaged(request);
+}
+
+export function getArchiveItems(request: GetArchiveRequest): Promise<GetArchiveResponse> {
+  return frontService.GetArchive(request);
 }
 
 export function deleteArchive(

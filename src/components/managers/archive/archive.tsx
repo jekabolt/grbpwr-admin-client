@@ -1,7 +1,7 @@
 import { AppBar, Button, Toolbar } from '@mui/material';
 import { Layout } from 'components/login/layout';
 import { useState } from 'react';
-import { CreateArchive } from './createArchive/createArchive';
+import { ArchiveForm } from './form/form';
 import { ListArchive } from './listArchive/list-archive';
 
 export function Archive() {
@@ -26,7 +26,7 @@ export function Archive() {
           </Button>
         </Toolbar>
       </AppBar>
-      <CreateArchive open={isModalOpen} onClose={closeModal} />
+      <ArchiveForm open={isModalOpen} onClose={closeModal} />
       <ListArchive />
     </Layout>
   );
