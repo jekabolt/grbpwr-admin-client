@@ -72,7 +72,7 @@ export function ListArchive() {
             >
               remove
             </Button>
-            <Grid size={{ xs: 2 }} sx={{ border: '1px solid red' }}>
+            <Grid size={{ xs: 2 }}>
               <Typography>{archive.title}</Typography>
             </Grid>
             <Grid size={{ xs: 8 }} sx={{ height: '100%' }}>
@@ -88,7 +88,7 @@ export function ListArchive() {
                 alt={archive.title}
               />
             </Grid>
-            <Grid size={{ xs: 2 }} sx={{ border: '1px solid red' }}>
+            <Grid size={{ xs: 2 }}>
               <Typography>{archive.tag}</Typography>
             </Grid>
           </Grid>

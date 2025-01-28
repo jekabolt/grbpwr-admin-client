@@ -33,6 +33,7 @@ export function ArchiveForm({
   const { showMessage } = useSnackBarStore();
   const { addArchive: addArchiveStore, updateArchive: updateArchiveStore } = useArchiveStore();
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
+  const [showMediaSelector, setShowMediaSelector] = useState(!archiveId);
 
   const handleMediaSelect = (
     media: common_MediaFull,
@@ -81,6 +82,22 @@ export function ArchiveForm({
     }
   }
 
+  const handleSaveMediaSelection = async (values: common_ArchiveInsert) => {
+    try {
+      const combinedMediaIds = [
+        ...(existingMedia?.map((media) => media.id) || []),
+        ...selectedMedia.map((media) => media.id),
+      ].filter((id): id is number => id !== undefined);
+
+      await updateArchiveStore(archiveId || 0, { ...values, mediaIds: combinedMediaIds });
+      setShowMediaSelector(false);
+      setSelectedMedia([]);
+      showMessage('Media items added successfully', 'success');
+    } catch (error) {
+      showMessage('Failed to add media items', 'error');
+    }
+  };
+
   return (
     <Dialog open={open} onClose={onClose} fullScreen>
       <Formik initialValues={initialValues} onSubmit={handleSubmit} enableReinitialize>
@@ -100,7 +117,7 @@ export function ArchiveForm({
               </Grid>
 
               <Grid size={{ xs: 12 }} className={styles.media_selector_wrapper}>
-                {archiveId ? (
+                {archiveId && !showMediaSelector ? (
                   <ArchiveMediaDisplay
                     remove={handleDeleteArchiveItem}
                     media={existingMedia || []}
@@ -121,10 +138,36 @@ export function ArchiveForm({
                 )}
               </Grid>
 
-              <Grid size={{ xs: 12 }} display='flex' justifyContent='end'>
-                <Button type='submit' variant='contained' size='large' sx={{ width: '20%' }}>
-                  {archiveId ? 'Update' : 'Create'} Archive
-                </Button>
+              <Grid
+                size={{ xs: 12 }}
+                display='flex'
+                justifyContent={archiveId ? 'space-between' : 'end'}
+                gap={2}
+              >
+                {archiveId && !showMediaSelector && (
+                  <Button
+                    variant='contained'
+                    size='large'
+                    sx={{ width: '20%' }}
+                    onClick={() => setShowMediaSelector(true)}
+                  >
+                    select new items
+                  </Button>
+                )}
+                {archiveId && showMediaSelector ? (
+                  <Button
+                    variant='contained'
+                    size='large'
+                    sx={{ width: '20%' }}
+                    onClick={() => handleSaveMediaSelection(formik.values)}
+                  >
+                    Save Selection
+                  </Button>
+                ) : (
+                  <Button type='submit' variant='contained' size='large' sx={{ width: '20%' }}>
+                    {archiveId ? 'Update' : 'Create'} Archive
+                  </Button>
+                )}
               </Grid>
             </Grid>
           </Form>
