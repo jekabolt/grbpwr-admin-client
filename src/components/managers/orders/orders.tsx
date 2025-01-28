@@ -1,7 +1,7 @@
 import { Button, Grid2 as Grid } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { useNavigate } from '@tanstack/react-location';
-import { Layout } from 'components/login/layout';
+import { Layout } from 'components/common/layout';
 import { ROUTES } from 'constants/routes';
 import { useDictionaryStore } from 'lib/stores/store';
 import { FC, useEffect } from 'react';

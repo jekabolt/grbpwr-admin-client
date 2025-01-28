@@ -2,7 +2,7 @@ import { Button, Grid2 as Grid } from '@mui/material';
 import { addHero, getHero } from 'api/hero';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { common_HeroEntity } from 'api/proto-http/frontend';
-import { Layout } from 'components/login/layout';
+import { Layout } from 'components/common/layout';
 import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { Field, FieldArray, Form, Formik } from 'formik';
 import { useSnackBarStore } from 'lib/stores/store';

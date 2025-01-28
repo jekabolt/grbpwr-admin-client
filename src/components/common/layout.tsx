@@ -2,11 +2,11 @@ import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { AppBar, Box, Button, Container, IconButton, Toolbar, styled } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
-import { SnackBar } from 'components/common/snackbar';
+import { SnackBar } from 'components/common/utility/snackbar';
+import { HideOnScroll } from 'components/login/scroll';
 import { ROUTES } from 'constants/routes';
 import logo from 'img/tex-text.png';
 import { FC, ReactNode } from 'react';
-import { HideOnScroll } from './scroll';
 
 interface LayoutProps {
   children: ReactNode;

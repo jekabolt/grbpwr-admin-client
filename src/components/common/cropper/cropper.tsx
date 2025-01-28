@@ -8,7 +8,7 @@ import {
   Slider,
   Typography,
 } from '@mui/material';
-import { Dialog } from 'components/common/dialog';
+import { Dialog } from 'components/common/utility/dialog';
 import getCroppedImg from 'features/utilitty/getCropped';
 import { FC, useCallback, useEffect, useState } from 'react';
 import Cropper, { Area } from 'react-easy-crop';

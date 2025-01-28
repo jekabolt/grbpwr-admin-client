@@ -1,4 +1,4 @@
-import { Button, Grid } from '@mui/material';
+import { Button, Grid2 as Grid } from '@mui/material';
 import { FC, useState } from 'react';
 import { MediaSelectorLayoutProps } from '../interfaces/mediaSelectorInterfaces';
 import { MediaSelectorModal } from './media-selector-components/mediaSelectorModal';
@@ -18,12 +18,12 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   };
   return (
     <Grid container justifyContent='center'>
-      <Grid item>
+      <Grid>
         <Button variant='contained' size='medium' onClick={handleMediaSelectorVisibility}>
           {label}
         </Button>
       </Grid>
-      <Grid item>
+      <Grid>
         {mediaSelectorVisibility && (
           <MediaSelectorModal
             aspectRatio={aspectRatio}
