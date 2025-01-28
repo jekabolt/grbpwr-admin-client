@@ -3,12 +3,11 @@ import { addHero, getHero } from 'api/hero';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { common_HeroEntity } from 'api/proto-http/frontend';
 import { Layout } from 'components/login/layout';
-import { isValidUrlForHero } from 'features/utilitty/isValidUrl';
+import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { Field, FieldArray, Form, Formik } from 'formik';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useRef, useState } from 'react';
 import styles from 'styles/hero.scss';
-import { isValidUrl } from '../archive/utility/isValidUrl';
 import { Entities } from './entities/entities';
 import { SelectHeroType } from './selectHeroType';
 import { heroValidationSchema } from './utility/heroValidationShema';
@@ -42,7 +41,7 @@ export const Hero: FC = () => {
       const checkUrl = (url: string | undefined, type: string) => {
         if (!url) return;
 
-        if (!isValidUrl(url)) {
+        if (!isValidURL(url)) {
           invalidUrls.push(`${type} URL is not valid`);
         } else if (!isValidUrlForHero(url)) {
           nonAllowedDomainUrls.push(`${type} URL is not from allowed domain`);
@@ -61,9 +60,9 @@ export const Hero: FC = () => {
       if (entity.featuredProducts) {
         checkUrl(entity.featuredProducts.exploreLink, 'Featured Products');
       }
-      if (entity.featuredProductsTag) {
-        checkUrl(entity.featuredProductsTag.exploreLink, 'Featured Products Tag');
-      }
+      // if (entity.featuredProductsTag) {
+      //   checkUrl(entity.featuredProductsTag., 'Featured Products Tag');
+      // }
     });
 
     return { invalidUrls, nonAllowedDomainUrls };

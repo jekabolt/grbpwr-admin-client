@@ -16,6 +16,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   aspectRatio,
   hideVideos,
   isDeleteAccepted,
+  hideNavBar = false,
   select,
 }) => {
   const {
@@ -68,31 +69,33 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   };
 
   return (
-    <Grid container justifyContent='center' spacing={2} padding='1%'>
-      <Grid item xs={12}>
-        <Grid container alignItems='center' spacing={2} marginTop={isMobile ? '3%' : '1%'}>
-          <Grid item xs={12} sm={4}>
-            <ByUrl url={url} setUrl={setUrl} isLoading={isLoading} />
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <DragDrop
-              loading={loading}
-              selectedFiles={selectedFiles}
-              setSelectedFiles={setSelectedFiles}
-              selectedFileUrl={selectedFileUrl}
-              setSelectedFileUrl={setSelectedFileUrl}
-            />
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <FilterMedias
-              filterByType={filterByType}
-              setFilterByType={setFilterByType}
-              sortByDate={sortByDate}
-              setSortByDate={setSortByDate}
-            />
+    <Grid container justifyContent='center'>
+      {!hideNavBar && (
+        <Grid item xs={12}>
+          <Grid container alignItems='center' spacing={2} marginTop={isMobile ? '3%' : '1%'}>
+            <Grid item xs={12} sm={4}>
+              <ByUrl url={url} setUrl={setUrl} isLoading={isLoading} />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <DragDrop
+                loading={loading}
+                selectedFiles={selectedFiles}
+                setSelectedFiles={setSelectedFiles}
+                selectedFileUrl={selectedFileUrl}
+                setSelectedFileUrl={setSelectedFileUrl}
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <FilterMedias
+                filterByType={filterByType}
+                setFilterByType={setFilterByType}
+                sortByDate={sortByDate}
+                setSortByDate={setSortByDate}
+              />
+            </Grid>
           </Grid>
         </Grid>
-      </Grid>
+      )}
       <Grid item xs={6}>
         <PreviewMediaForUpload
           croppedImage={croppedImage}

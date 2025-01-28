@@ -61,7 +61,7 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
                 exploreText: entity.featuredProductsTag?.products?.exploreText,
             },
             featuredArchive: {
-                archiveId: entity.featuredArchive?.archive?.items?.[0].archiveId,
+                archiveId: entity.featuredArchive?.archive?.id,
                 tag: entity.featuredArchive?.tag,
                 headline: entity.featuredArchive?.headline,
                 exploreText: entity.featuredArchive?.exploreText,
@@ -113,7 +113,6 @@ export const emptyHeroForm: common_HeroFullInsert = {
             featuredProductsTag: {
                 tag: '',
                 headline: '',
-                exploreLink: '',
                 exploreText: ''
             },
             featuredArchive: {
