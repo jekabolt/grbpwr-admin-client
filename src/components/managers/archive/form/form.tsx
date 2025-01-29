@@ -104,14 +104,20 @@ export function ArchiveForm({
         {(formik: FormikProps<common_ArchiveInsert>) => (
           <Form className={styles.form}>
             <Grid container gap={1}>
-              <Grid size={{ xs: 12 }} display='flex' justifyContent='space-between'>
-                <Grid size={{ xs: 2 }}>
+              <Grid
+                size={{ xs: 12 }}
+                border='1px solid #000'
+                display={{ xs: 'grid', lg: 'flex' }}
+                justifyContent={{ xs: '', lg: 'space-between' }}
+                gap={{ xs: 2 }}
+              >
+                <Grid size={{ xs: 12, lg: 2 }}>
                   <Field as={TextField} name='title' label='title' fullWidth />
                 </Grid>
-                <Grid size={{ xs: 6 }}>
+                <Grid size={{ xs: 12, lg: 6 }}>
                   <Field as={TextField} name='description' label='description' fullWidth />
                 </Grid>
-                <Grid size={{ xs: 2 }}>
+                <Grid size={{ xs: 12, lg: 2 }}>
                   <Field as={TextField} name='tag' label='tag' fullWidth />
                 </Grid>
               </Grid>

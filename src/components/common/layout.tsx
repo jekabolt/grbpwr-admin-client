@@ -60,7 +60,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
         </HideOnScroll>
       </Box>
       <Grid container px={2} display='flex' justifyContent='center'>
-        <Grid>{children}</Grid>
+        <Grid size={{ xs: 12 }}>{children}</Grid>
       </Grid>
       <SnackBar />
     </Box>

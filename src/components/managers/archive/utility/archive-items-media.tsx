@@ -1,5 +1,7 @@
-import { Button, ImageList, ImageListItem } from '@mui/material';
+import ClearIcon from '@mui/icons-material/Clear';
+import { IconButton, ImageList, ImageListItem, useMediaQuery, useTheme } from '@mui/material';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
+import styles from 'styles/archive.scss';
 
 export function ArchiveMediaDisplay({
   media,
@@ -10,31 +12,19 @@ export function ArchiveMediaDisplay({
   values: common_ArchiveInsert;
   remove: (id: number, values: common_ArchiveInsert) => void;
 }) {
+  const theme = useTheme();
+  const isSm = useMediaQuery(theme.breakpoints.down('sm'));
   return (
-    <ImageList cols={4} gap={8} rowHeight={200}>
+    <ImageList cols={isSm ? 2 : 4} gap={8} rowHeight={200} className={styles.image_list}>
       {media.map((item) => (
-        <ImageListItem key={item.id} sx={{ position: 'relative' }}>
+        <ImageListItem key={item.id} className={styles.image_list_item}>
           <img
             src={item.media?.fullSize?.mediaUrl}
-            alt={'Archive media'}
-            loading='lazy'
-            style={{ height: '200px', objectFit: 'cover' }}
+            style={{ objectFit: isSm ? 'scale-down' : 'cover' }}
           />
-          <Button
-            onClick={() => remove(item.id || 0, values)}
-            variant='contained'
-            color='error'
-            size='small'
-            style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              minWidth: 'auto',
-              padding: '4px 8px',
-            }}
-          >
-            ×
-          </Button>
+          <IconButton onClick={() => remove(item.id || 0, values)} className={styles.remove_btn}>
+            <ClearIcon />
+          </IconButton>
         </ImageListItem>
       ))}
     </ImageList>

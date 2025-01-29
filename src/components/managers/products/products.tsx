@@ -1,4 +1,4 @@
-import { Button, Grid } from '@mui/material';
+import { Button, Grid2 as Grid } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
 import { Layout } from 'components/common/layout';
 import { ROUTES } from 'constants/routes';
@@ -14,13 +14,13 @@ export const Product: FC = () => {
 
   return (
     <Layout>
-      <Grid container spacing={2} justifyContent='center'>
-        <Grid item position='fixed' right={10} bottom={10}>
+      <Grid container spacing={2}>
+        <Grid position='fixed' right={10} bottom={10}>
           <Button onClick={navigateAddProduct} sx={{ backgroundColor: '#000', color: '#fff' }}>
             add
           </Button>
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <AllProducts />
         </Grid>
       </Grid>

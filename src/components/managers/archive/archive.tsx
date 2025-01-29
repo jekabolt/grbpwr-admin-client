@@ -23,12 +23,12 @@ export function Archive() {
       >
         <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button variant='contained' onClick={openModal}>
-            add new archive
+            new
           </Button>
         </Toolbar>
       </AppBar>
-      <ArchiveForm open={isModalOpen} onClose={closeModal} />
       <ListArchive />
+      <ArchiveForm open={isModalOpen} onClose={closeModal} />
     </Layout>
   );
 }
