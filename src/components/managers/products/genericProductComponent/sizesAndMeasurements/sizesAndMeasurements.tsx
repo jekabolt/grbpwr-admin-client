@@ -10,19 +10,14 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import {
-  common_CategoryEnum,
-  common_MeasurementNameEnum,
-  common_ProductNew,
-} from 'api/proto-http/admin';
+import { common_ProductNew } from 'api/proto-http/admin';
 import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
 import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { useFormikContext } from 'formik';
 import { useDictionaryStore } from 'lib/stores/store';
-import React, { FC, useCallback, useEffect, useState } from 'react';
+import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import styles from 'styles/addProd.scss';
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
-import { categoryMeasurementsMapping } from './mappingMeasurementsForCategories';
 
 export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   isEditMode = true,
@@ -33,24 +28,33 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const [lastSizeNonZero, setLastSizeNonZero] = useState(false);
   const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
   const [hasConfirmedSizeChange, setHasConfirmedSizeChange] = useState(false);
-  const sortedSizes = dictionary && dictionary.sizes ? sortItems(dictionary.sizes) : [];
+
+  const filteredSizes = useMemo(() => {
+    if (!dictionary?.sizes) return [];
+
+    const isShoeCategory = values.product?.productBody?.topCategoryId === 7;
+    const defaultSizes = sortItems(dictionary.sizes).filter((size) => {
+      return size.id && size.id >= 1 && size.id <= 8;
+    });
+
+    if (!values.product?.productBody?.topCategoryId) {
+      return defaultSizes;
+    }
+
+    return sortItems(dictionary.sizes).filter((size) => {
+      if (isShoeCategory) {
+        return size.id && size.id > 8;
+      }
+      return size.id && size.id >= 1 && size.id <= 8;
+    });
+  }, [dictionary?.sizes, values.product?.productBody?.topCategoryId]);
+
   const sortedMeasurements =
     dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
-  const disableFields = isAddingProduct ? false : !isEditMode;
-
-  const selectedCategory = dictionary?.categories?.find(
-    (category) => category.id === values.product?.productBody?.categoryId,
-  );
-  const relevantMeasurements = selectedCategory
-    ? categoryMeasurementsMapping[selectedCategory.name as common_CategoryEnum] ?? []
-    : [];
-  const measurementsToDisplay = sortedMeasurements.filter((m) =>
-    relevantMeasurements.includes(m.name as common_MeasurementNameEnum),
-  );
 
   useEffect(() => {
-    if (sortedSizes.length > 0) {
-      const lastSize = sortedSizes[sortedSizes.length - 1];
+    if (filteredSizes.length > 0) {
+      const lastSize = filteredSizes[filteredSizes.length - 1];
       const lastSizeMeasurement = values.sizeMeasurements?.find(
         (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === lastSize.id,
       );
@@ -74,7 +78,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
         setFieldValue('sizeMeasurements', updatedSizeMeasurements);
       }
     }
-  }, [values.sizeMeasurements, sortedSizes, setFieldValue]);
+  }, [values.sizeMeasurements, filteredSizes, setFieldValue]);
 
   const handleSizeChange = useCallback(
     (
@@ -112,12 +116,12 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
         setFieldValue(quantityPath, value);
       }
 
-      const lastSizeId = sortedSizes[sortedSizes.length - 1].id;
+      const lastSizeId = filteredSizes[filteredSizes.length - 1].id;
       if (sizeId === lastSizeId) {
         setLastSizeNonZero(value !== '0' && value !== '');
       }
     },
-    [values.sizeMeasurements, setFieldValue, sortedSizes, isEditMode, hasChangedSize],
+    [values.sizeMeasurements, setFieldValue, filteredSizes, isEditMode, hasChangedSize],
   );
 
   const handleMeasurementChange = useCallback(
@@ -174,7 +178,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
             <TableRow>
               <TableCell>Size Name</TableCell>
               <TableCell className={styles.table_cell}>Quantity</TableCell>
-              {measurementsToDisplay.map((m) => (
+              {sortedMeasurements.map((m) => (
                 <TableCell key={m.id}>
                   {findInDictionary(dictionary, m.id, 'measurement')}
                 </TableCell>
@@ -182,13 +186,13 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
             </TableRow>
           </TableHead>
           <TableBody>
-            {sortedSizes.map((size, index) => {
+            {filteredSizes.map((size, index) => {
               const sizeIndex =
                 values.sizeMeasurements?.findIndex(
                   (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === size.id,
                 ) ?? -1;
 
-              const isLastSize = index === sortedSizes.length - 1;
+              const isLastSize = index === filteredSizes.length - 1;
 
               if (!isLastSize && lastSizeNonZero) {
                 return null;
@@ -216,11 +220,11 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                           }
                         }}
                         style={{ width: '80px' }}
-                        disabled={disableFields || (!isLastSize && lastSizeNonZero)}
+                        disabled={!isLastSize && lastSizeNonZero}
                       />
                     </Box>
                   </TableCell>
-                  {measurementsToDisplay.map((measurement) => (
+                  {/* {measurementsToDisplay.map((measurement) => (
                     <TableCell key={measurement.id}>
                       <TextField
                         type='text'
@@ -239,7 +243,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                         disabled={disableFields || (!isLastSize && lastSizeNonZero)}
                       />
                     </TableCell>
-                  ))}
+                  ))} */}
                 </TableRow>
               );
             })}

@@ -15,7 +15,6 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
 import { generateOrUpdateSKU, generateSKU } from 'features/utilitty/dynamicGenerationOfSku';
-import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { ErrorMessage, Field, getIn, useFormikContext } from 'formik';
 import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
@@ -25,6 +24,7 @@ import { Care } from '../care/care';
 import { Composition } from '../composition/composition';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 import { handleKeyDown } from '../utility/brandNameRegExp';
+import { processCategories } from '../utility/categories';
 import { genderOptions } from '../utility/dictionaryConst';
 import { formatWellKnownTimestamp, parseWellKnownTimestamp } from '../utility/preorderTime';
 
@@ -41,16 +41,39 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   const [showSales, setShowSales] = useState(true);
   const disableFields = isAddingProduct ? false : !isEditMode;
 
+  const categories = useMemo(
+    () => processCategories(dictionary?.categories || []),
+    [dictionary?.categories],
+  );
+
+  const selectedSubCategories = useMemo(() => {
+    const topCategory = categories.find(
+      (cat) => cat.id === values.product?.productBody?.topCategoryId,
+    );
+    return topCategory?.subCategories || [];
+  }, [categories, values.product?.productBody?.topCategoryId]);
+
+  const selectedTypes = useMemo(() => {
+    const subCategory = selectedSubCategories.find(
+      (sub) => sub.id === values.product?.productBody?.subCategoryId,
+    );
+    return subCategory?.types || [];
+  }, [selectedSubCategories, values.product?.productBody?.subCategoryId]);
+
   useEffect(() => {
     if (
       isCopyMode &&
       values.product?.productBody?.sku === product?.product?.productDisplay?.productBody?.sku
     ) {
       const newUuid = uuidv4();
+      const selectedCategory = categories.find(
+        (cat) => cat.id === values.product?.productBody?.topCategoryId,
+      );
+
       const newSKU = generateSKU(
         values.product?.productBody?.brand,
         values.product?.productBody?.targetGender,
-        findInDictionary(dictionary, values.product?.productBody?.categoryId, 'category'),
+        selectedCategory?.name,
         values.product?.productBody?.color,
         values.product?.productBody?.countryOfOrigin,
         newUuid.slice(-4),
@@ -65,6 +88,16 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       field: string,
     ) => {
       let newValue = e.target.value;
+
+      if (field === 'topCategoryId') {
+        setFieldValue('product.productBody.subCategoryId', '', false);
+        setFieldValue('product.productBody.typeId', '', false);
+      }
+
+      if (field === 'subCategoryId') {
+        setFieldValue('product.productBody.typeId', '', false);
+      }
+
       if (field === 'color' && typeof newValue === 'string') {
         newValue = newValue.toLowerCase().replace(/\s/g, '_');
         const selectedColor = colors.find(
@@ -76,22 +109,25 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           false,
         );
       }
+
       setFieldValue(`product.productBody.${field}`, newValue);
-      setFieldValue(
-        'product.productBody.sku',
-        generateOrUpdateSKU(
-          values.product?.productBody?.sku,
-          { ...values.product?.productBody, [field]: newValue },
-          dictionary,
-        ),
-      );
+
+      const categoryId =
+        field === 'topCategoryId' ? newValue : values.product?.productBody?.topCategoryId;
+      const selectedCategory = categories.find((cat) => cat.id === categoryId);
+      const updatedProductBody = {
+        ...values.product?.productBody,
+        [field]: newValue,
+        categoryName: selectedCategory?.name,
+      };
+      const newSku = generateOrUpdateSKU(values.product?.productBody?.sku, updatedProductBody);
+      setFieldValue('product.productBody.sku', newSku);
     },
-    [values.product?.productBody, setFieldValue, dictionary],
+    [values.product?.productBody, setFieldValue, dictionary, categories],
   );
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
     const { name, value } = e.target;
-
     let formattedValue = value;
 
     if (name === 'product.productBody.salePercentage.value') {
@@ -250,29 +286,93 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             required
             fullWidth
             error={Boolean(
-              getIn(errors, 'product.productBody.categoryId') &&
-                getIn(touched, 'product.productBody.categoryId'),
+              getIn(errors, 'product.productBody.topCategoryId') &&
+                getIn(touched, 'product.productBody.topCategoryId'),
             )}
           >
             <InputLabel shrink>{'category'.toUpperCase()}</InputLabel>
             <Select
-              name='product.productBody.categoryId'
-              onChange={(e) => handleFieldChange(e, 'categoryId')}
-              value={values.product?.productBody?.categoryId || ''}
+              name='product.productBody.topCategoryId'
+              onChange={(e) => handleFieldChange(e, 'topCategoryId')}
+              value={values.product?.productBody?.topCategoryId || ''}
               label={'category'.toUpperCase()}
               displayEmpty
               disabled={disableFields}
             >
-              {dictionary?.categories?.map((category) => (
+              {categories.map((category) => (
                 <MenuItem value={category.id} key={category.id}>
-                  {findInDictionary(dictionary, category.id, 'category')}
+                  {category.name}
                 </MenuItem>
               ))}
             </Select>
-            {getIn(touched, 'product.productBody.categoryId') &&
-              getIn(errors, 'product.productBody.categoryId') && (
+            {getIn(touched, 'product.productBody.topCategoryId') &&
+              getIn(errors, 'product.productBody.topCategoryId') && (
                 <FormHelperText>
-                  <ErrorMessage name='product.productBody.categoryId' />
+                  <ErrorMessage name='product.productBody.topCategoryId' />
+                </FormHelperText>
+              )}
+          </FormControl>
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <FormControl
+            required
+            fullWidth
+            error={Boolean(
+              getIn(errors, 'product.productBody.subCategoryId') &&
+                getIn(touched, 'product.productBody.subCategoryId'),
+            )}
+          >
+            <InputLabel shrink>{'subcategory'.toUpperCase()}</InputLabel>
+            <Select
+              name='product.productBody.subCategoryId'
+              onChange={(e) => handleFieldChange(e, 'subCategoryId')}
+              value={values.product?.productBody?.subCategoryId || ''}
+              label={'subcategory'.toUpperCase()}
+              displayEmpty
+              disabled={disableFields || !values.product?.productBody?.topCategoryId}
+            >
+              {selectedSubCategories.map((category) => (
+                <MenuItem value={category.id} key={category.id}>
+                  {category.name}
+                </MenuItem>
+              ))}
+            </Select>
+            {getIn(touched, 'product.productBody.subCategoryId') &&
+              getIn(errors, 'product.productBody.subCategoryId') && (
+                <FormHelperText>
+                  <ErrorMessage name='product.productBody.subCategoryId' />
+                </FormHelperText>
+              )}
+          </FormControl>
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <FormControl
+            required
+            fullWidth
+            error={Boolean(
+              getIn(errors, 'product.productBody.typeId') &&
+                getIn(touched, 'product.productBody.typeId'),
+            )}
+          >
+            <InputLabel shrink>{'type'.toUpperCase()}</InputLabel>
+            <Select
+              name='product.productBody.typeId'
+              onChange={(e) => handleFieldChange(e, 'typeId')}
+              value={values.product?.productBody?.typeId || ''}
+              label={'type'.toUpperCase()}
+              displayEmpty
+              disabled={disableFields || !values.product?.productBody?.subCategoryId}
+            >
+              {selectedTypes.map((type) => (
+                <MenuItem value={type.id} key={type.id}>
+                  {type.name}
+                </MenuItem>
+              ))}
+            </Select>
+            {getIn(touched, 'product.productBody.typeId') &&
+              getIn(errors, 'product.productBody.typeId') && (
+                <FormHelperText>
+                  <ErrorMessage name='product.productBody.typeId' />
                 </FormHelperText>
               )}
           </FormControl>
@@ -443,7 +543,46 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             disabled={disableFields}
           />
         </Grid>
-
+        <Grid size={{ xs: 12 }}>
+          <Field
+            as={TextField}
+            label={'model wears height'.toUpperCase()}
+            name='product.productBody.modelWearsHeightCm'
+            error={Boolean(
+              getIn(errors, 'product.productBody.modelWearsHeightCm') &&
+                getIn(touched, 'product.productBody.modelWearsHeightCm'),
+            )}
+            helperText={
+              getIn(touched, 'product.productBody.modelWearsHeightCm') &&
+              getIn(errors, 'product.productBody.modelWearsHeightCm')
+            }
+            onChange={(e: any) => handleFieldChange(e, 'modelWearsHeightCm')}
+            InputLabelProps={{ shrink: true }}
+            required
+            fullWidth
+            disabled={disableFields}
+          />
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <Field
+            as={TextField}
+            label={'model wears size'.toUpperCase()}
+            name='product.productBody.modelWearsSizeId'
+            error={Boolean(
+              getIn(errors, 'product.productBody.modelWearsSizeId') &&
+                getIn(touched, 'product.productBody.modelWearsSizeId'),
+            )}
+            helperText={
+              getIn(touched, 'product.productBody.modelWearsSizeId') &&
+              getIn(errors, 'product.productBody.modelWearsSizeId')
+            }
+            onChange={(e: any) => handleFieldChange(e, 'modelWearsSizeId')}
+            InputLabelProps={{ shrink: true }}
+            required
+            fullWidth
+            disabled={disableFields}
+          />
+        </Grid>
         <Grid size={{ xs: 12 }}>
           <Field
             as={TextField}
@@ -456,6 +595,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             disabled={disableFields}
           />
         </Grid>
+
         <Grid size={{ xs: 12 }}>
           <Field component={Care} name='product.productBody' {...{ isEditMode, isAddingProduct }} />
         </Grid>
