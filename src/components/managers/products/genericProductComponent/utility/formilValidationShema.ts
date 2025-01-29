@@ -10,7 +10,9 @@ export const validationSchema = Yup.object().shape({
                 .required('Brand is required')
                 .matches(/^(?![_\.\-]+$)/, 'Brand cannot consist only of special symbols'),
             targetGender: Yup.string().required('Gender is required'),
-            categoryId: Yup.number().required('Category is required'),
+            topCategoryId: Yup.number().required('Category is required'),
+            subCategoryId: Yup.number().required('Subcategory is required'),
+            typeId: Yup.number().required('Type is required'),
             color: Yup.string().required('Color is required'),
             countryOfOrigin: Yup.string().required('Country is required'),
             price: Yup.object().shape({

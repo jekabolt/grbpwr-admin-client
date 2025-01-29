@@ -1,5 +1,4 @@
 import { common_GenderEnum } from 'api/proto-http/admin';
-import { findInDictionary } from './findInDictionary';
 
 const getCurrentSeasonCode = () => {
     const date = new Date();
@@ -27,13 +26,13 @@ const getColorCode = (color: string | undefined) => {
     return words.length >= 2 ? words[0][0] + words[1][0] : color?.substring(0, 2);
 };
 
-const formatCategory = (categoryId: string | undefined) => {
-    if (!categoryId) return;
-    const cleanCategory = categoryId.replace('CATEGORY_ENUM_', '').replace(/_/g, '');
-    if (cleanCategory.length < 4) {
-        return cleanCategory.padEnd(4, '0');
+const formatCategory = (categoryName: string | undefined) => {
+    if (!categoryName) return;
+    const cleanCategory = categoryName.replace(/\s/g, '');
+    if (cleanCategory.length < 6) {
+        return cleanCategory.padEnd(6, '0');
     }
-    return cleanCategory.substring(0, 4);
+    return cleanCategory.substring(0, 6);
 };
 
 const sanitizeBrand = (brand: string) => {
@@ -54,7 +53,7 @@ const formatBrand = (brand: string) => {
 export const generateSKU = (
     brand: string | undefined,
     gender: common_GenderEnum | undefined,
-    categoryId: string | undefined,
+    categoryName: string | undefined,
     color: string | undefined,
     country: string | undefined,
     existingUuid?: string,
@@ -65,7 +64,7 @@ export const generateSKU = (
         const date = getCurrentSeasonCode();
         const randomNumbers = existingUuid || generateNumbers();
         const formattedGender = gender?.replace('GENDER_ENUM_', '').charAt(0);
-        const formattedCategory = formatCategory(categoryId);
+        const formattedCategory = formatCategory(categoryName);
         return `${formattedBrand}${formattedGender}${formattedCategory}${colorCode}${country}${date}${randomNumbers}`.toUpperCase();
     }
 };
@@ -73,14 +72,14 @@ export const generateSKU = (
 export const generateOrUpdateSKU = (
     currentSKU: string | undefined,
     productBody: any,
-    dictionary: any
 ): string | undefined => {
     const existingUuid = currentSKU ? currentSKU.slice(-4) : generateNumbers();
+    const categoryName = productBody.categoryName;
 
     return generateSKU(
         productBody.brand,
         productBody.targetGender,
-        findInDictionary(dictionary, productBody.categoryId, 'category'),
+        categoryName,
         productBody.color,
         productBody.countryOfOrigin,
         existingUuid
