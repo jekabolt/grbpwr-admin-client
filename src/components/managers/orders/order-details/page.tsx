@@ -1,7 +1,7 @@
 import { Button, Grid2 as Grid, Typography } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { useMatch } from '@tanstack/react-location';
-import { Layout } from 'components/login/layout';
+import { Layout } from 'components/common/layout';
 import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
 import styles from 'styles/order.scss';

@@ -1,6 +1,6 @@
 import { Button, Grid } from '@mui/material';
 import { useNavigate } from '@tanstack/react-location';
-import { Layout } from 'components/login/layout';
+import { Layout } from 'components/common/layout';
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
 

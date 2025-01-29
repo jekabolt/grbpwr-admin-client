@@ -1,5 +1,6 @@
 import { AppBar, Button, Toolbar } from '@mui/material';
-import { Layout } from 'components/login/layout';
+
+import { Layout } from 'components/common/layout';
 import { useState } from 'react';
 import { ArchiveForm } from './form/form';
 import { ListArchive } from './listArchive/list-archive';
@@ -22,12 +23,12 @@ export function Archive() {
       >
         <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button variant='contained' onClick={openModal}>
-            add new archive
+            new
           </Button>
         </Toolbar>
       </AppBar>
-      <ArchiveForm open={isModalOpen} onClose={closeModal} />
       <ListArchive />
+      <ArchiveForm open={isModalOpen} onClose={closeModal} />
     </Layout>
   );
 }

@@ -1,6 +1,6 @@
 import { Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { ProductPickerModal } from 'components/common/productPickerModal';
+import { ProductPickerModal } from 'components/common/utility/productPickerModal';
 import { isValidURL, isValidUrlForHero } from 'features/utilitty/isValidUrl';
 import { ErrorMessage, Field, useFormikContext } from 'formik';
 import { HeroProductEntityInterface } from '../interface/interface';

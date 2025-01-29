@@ -34,6 +34,7 @@ export function Dialog({ open, children, isSaveButton, title, onClose, save, ...
       scroll='paper'
       sx={{
         '& .MuiDialogContent-root': {
+          padding: { xs: '30px 0 8px', sm: 2, md: 3 }, // Add responsive padding
           '&::-webkit-scrollbar': {
             display: 'none',
           },

@@ -9,7 +9,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { Dialog } from 'components/common/dialog';
+import { Dialog } from 'components/common/utility/dialog';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { composition } from '../garment-composition/garment-composition';
 import styles from '../styles/composition.scss';

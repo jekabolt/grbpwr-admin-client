@@ -49,11 +49,12 @@ export function ListArchive() {
       >
         {archives.map((archive, id) => (
           <Grid
+            size={{ xs: 12 }}
             key={archive.id}
             onClick={() => setSelectedArchive(archive.id)}
-            display='flex'
+            display={{ xs: 'grid', lg: 'flex' }}
             alignItems='center'
-            justifyContent='space-between'
+            justifyContent={{ xs: 'center', lg: 'space-between' }}
             height='70vh'
             sx={{
               scrollSnapAlign: 'center',
@@ -72,24 +73,24 @@ export function ListArchive() {
             >
               remove
             </Button>
-            <Grid size={{ xs: 2 }}>
-              <Typography>{archive.title}</Typography>
+            <Grid size={{ xs: 12, lg: 2 }}>
+              <Typography textAlign='center'>{archive.title}</Typography>
             </Grid>
-            <Grid size={{ xs: 8 }} sx={{ height: '100%' }}>
+            <Grid size={{ xs: 12, lg: 8 }} sx={{ height: '100%' }}>
               <img
                 src={archive.media?.[0].media?.fullSize?.mediaUrl}
                 style={{
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
-                  transform: mediaId === id ? 'scale(0.8)' : 'scale(0.6)',
+                  transform: mediaId === id ? 'scale(1)' : 'scale(0.6)',
                   transition: 'transform 0.3s ease',
                 }}
                 alt={archive.title}
               />
             </Grid>
-            <Grid size={{ xs: 2 }}>
-              <Typography>{archive.tag}</Typography>
+            <Grid size={{ xs: 12, lg: 2 }}>
+              <Typography textAlign='center'>{archive.tag}</Typography>
             </Grid>
           </Grid>
         ))}

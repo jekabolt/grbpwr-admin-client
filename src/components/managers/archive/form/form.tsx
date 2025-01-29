@@ -1,7 +1,7 @@
 import { Button, Grid2 as Grid, TextField } from '@mui/material';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
-import { Dialog } from 'components/common/dialog';
 import { MediaSelector } from 'components/common/media-selector-layout/mediaSelector';
+import { Dialog } from 'components/common/utility/dialog';
 import { Field, Form, Formik, FormikProps } from 'formik';
 import { useArchiveStore, useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
@@ -104,14 +104,19 @@ export function ArchiveForm({
         {(formik: FormikProps<common_ArchiveInsert>) => (
           <Form className={styles.form}>
             <Grid container gap={1}>
-              <Grid size={{ xs: 12 }} display='flex' justifyContent='space-between'>
-                <Grid size={{ xs: 2 }}>
+              <Grid
+                size={{ xs: 12 }}
+                display={{ xs: 'grid', lg: 'flex' }}
+                justifyContent={{ xs: '', lg: 'space-between' }}
+                gap={{ xs: 2 }}
+              >
+                <Grid size={{ xs: 12, lg: 2 }}>
                   <Field as={TextField} name='title' label='title' fullWidth />
                 </Grid>
-                <Grid size={{ xs: 6 }}>
+                <Grid size={{ xs: 12, lg: 6 }}>
                   <Field as={TextField} name='description' label='description' fullWidth />
                 </Grid>
-                <Grid size={{ xs: 2 }}>
+                <Grid size={{ xs: 12, lg: 2 }}>
                   <Field as={TextField} name='tag' label='tag' fullWidth />
                 </Grid>
               </Grid>
