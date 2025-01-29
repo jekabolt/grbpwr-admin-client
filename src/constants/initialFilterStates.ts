@@ -1,4 +1,4 @@
-import { GetProductsPagedRequest, common_GenderEnum } from "api/proto-http/admin";
+import { GetProductsPagedRequest } from "api/proto-http/admin";
 
 export const defaultProductFilterSettings: GetProductsPagedRequest = {
     limit: undefined,
@@ -10,11 +10,13 @@ export const defaultProductFilterSettings: GetProductsPagedRequest = {
         to: undefined,
         onSale: undefined,
         color: undefined,
-        categoryIds: undefined,
+        topCategoryIds: undefined,
+        subCategoryIds: undefined,
+        typeIds: undefined,
         sizesIds: undefined,
         preorder: undefined,
         byTag: undefined,
-        gender: '' as common_GenderEnum
+        gender: []
     },
     showHidden: true,
 };

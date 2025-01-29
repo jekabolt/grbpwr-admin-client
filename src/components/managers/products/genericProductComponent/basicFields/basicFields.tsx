@@ -50,7 +50,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       const newSKU = generateSKU(
         values.product?.productBody?.brand,
         values.product?.productBody?.targetGender,
-        findInDictionary(dictionary, values.product?.productBody?.categoryId, 'category'),
+        findInDictionary(dictionary, values.product?.productBody?.topCategoryId, 'category'),
         values.product?.productBody?.color,
         values.product?.productBody?.countryOfOrigin,
         newUuid.slice(-4),
@@ -258,7 +258,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             <Select
               name='product.productBody.categoryId'
               onChange={(e) => handleFieldChange(e, 'categoryId')}
-              value={values.product?.productBody?.categoryId || ''}
+              value={values.product?.productBody?.topCategoryId || ''}
               label={'category'.toUpperCase()}
               displayEmpty
               disabled={disableFields}
