@@ -106,7 +106,6 @@ export function ArchiveForm({
             <Grid container gap={1}>
               <Grid
                 size={{ xs: 12 }}
-                border='1px solid #000'
                 display={{ xs: 'grid', lg: 'flex' }}
                 justifyContent={{ xs: '', lg: 'space-between' }}
                 gap={{ xs: 2 }}

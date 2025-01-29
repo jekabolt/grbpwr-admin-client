@@ -57,7 +57,6 @@ export function ListArchive() {
             justifyContent={{ xs: 'center', lg: 'space-between' }}
             height='70vh'
             sx={{
-              border: '1px solid red',
               scrollSnapAlign: 'center',
               opacity: mediaId === id ? 1 : 0.3,
               transition: 'opacity 0.3s ease',
@@ -74,10 +73,10 @@ export function ListArchive() {
             >
               remove
             </Button>
-            <Grid size={{ xs: 12, lg: 2 }} border='1px solid blue'>
+            <Grid size={{ xs: 12, lg: 2 }}>
               <Typography textAlign='center'>{archive.title}</Typography>
             </Grid>
-            <Grid size={{ xs: 12, lg: 8 }} sx={{ height: '100%' }} border='1px solid blue'>
+            <Grid size={{ xs: 12, lg: 8 }} sx={{ height: '100%' }}>
               <img
                 src={archive.media?.[0].media?.fullSize?.mediaUrl}
                 style={{
@@ -90,7 +89,7 @@ export function ListArchive() {
                 alt={archive.title}
               />
             </Grid>
-            <Grid size={{ xs: 12, lg: 2 }} border='1px solid blue'>
+            <Grid size={{ xs: 12, lg: 2 }}>
               <Typography textAlign='center'>{archive.tag}</Typography>
             </Grid>
           </Grid>
