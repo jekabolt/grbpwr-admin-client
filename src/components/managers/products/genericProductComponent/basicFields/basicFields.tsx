@@ -26,6 +26,7 @@ import { BasicProductFieldsInterface, Country } from '../interface/interface';
 import { handleKeyDown } from '../utility/brandNameRegExp';
 import { processCategories } from '../utility/categories';
 import { genderOptions } from '../utility/dictionaryConst';
+import { getFilteredSizes } from '../utility/filtered-sizes';
 import { formatWellKnownTimestamp, parseWellKnownTimestamp } from '../utility/preorderTime';
 
 export const BasicFields: FC<BasicProductFieldsInterface> = ({
@@ -40,7 +41,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
   const disableFields = isAddingProduct ? false : !isEditMode;
-
   const categories = processCategories(dictionary?.categories || []);
 
   const selectedSubCategories = (() => {
@@ -56,6 +56,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
     );
     return subCategory?.types || [];
   })();
+
+  const filteredSizes = getFilteredSizes(
+    dictionary,
+    values.product?.productBody?.topCategoryId || 0,
+  );
 
   useEffect(() => {
     if (
@@ -561,24 +566,36 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           />
         </Grid>
         <Grid size={{ xs: 12 }}>
-          <Field
-            as={TextField}
-            label={'model wears size'.toUpperCase()}
-            name='product.productBody.modelWearsSizeId'
+          <FormControl
+            fullWidth
+            required
             error={Boolean(
               getIn(errors, 'product.productBody.modelWearsSizeId') &&
                 getIn(touched, 'product.productBody.modelWearsSizeId'),
             )}
-            helperText={
-              getIn(touched, 'product.productBody.modelWearsSizeId') &&
-              getIn(errors, 'product.productBody.modelWearsSizeId')
-            }
-            onChange={(e: any) => handleFieldChange(e, 'modelWearsSizeId')}
-            InputLabelProps={{ shrink: true }}
-            required
-            fullWidth
-            disabled={disableFields}
-          />
+          >
+            <InputLabel shrink>{'model wears size'.toUpperCase()}</InputLabel>
+            <Select
+              name='product.productBody.modelWearsSizeId'
+              value={values.product?.productBody?.modelWearsSizeId || ''}
+              onChange={(e) => handleFieldChange(e, 'modelWearsSizeId')}
+              label={'model wears size'.toUpperCase()}
+              displayEmpty
+              disabled={disableFields || !values.product?.productBody?.topCategoryId}
+            >
+              {filteredSizes.map((size) => (
+                <MenuItem key={size.id} value={size.id}>
+                  {size.name}
+                </MenuItem>
+              ))}
+            </Select>
+            {getIn(touched, 'product.productBody.modelWearsSizeId') &&
+              getIn(errors, 'product.productBody.modelWearsSizeId') && (
+                <FormHelperText>
+                  <ErrorMessage name='product.productBody.modelWearsSizeId' />
+                </FormHelperText>
+              )}
+          </FormControl>
         </Grid>
         <Grid size={{ xs: 12 }}>
           <Field
