@@ -1,95 +1,108 @@
-// import { common_CategoryEnum, common_MeasurementNameEnum } from "api/proto-http/admin";
+import { common_Category } from "api/proto-http/admin";
+import { processCategories } from "../utility/categories";
 
-// export const categoryMeasurementsMapping: { [key in common_CategoryEnum]?: common_MeasurementNameEnum[] } = {
-//     CATEGORY_ENUM_T_SHIRT: [
-//         "MEASUREMENT_NAME_ENUM_SHOULDERS",
-//         "MEASUREMENT_NAME_ENUM_SLEEVE",
-//         "MEASUREMENT_NAME_ENUM_WAIST",
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//     ],
-//     CATEGORY_ENUM_JEANS: [
-//         "MEASUREMENT_NAME_ENUM_WAIST",
-//         "MEASUREMENT_NAME_ENUM_INSEAM",
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_RISE",
-//         "MEASUREMENT_NAME_ENUM_HIPS",
-//     ],
-//     CATEGORY_ENUM_DRESS: [
-//         "MEASUREMENT_NAME_ENUM_SHOULDERS",
-//         "MEASUREMENT_NAME_ENUM_BUST",
-//         'MEASUREMENT_NAME_ENUM_WAIST',
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_SLEEVE"
-//     ],
-//     CATEGORY_ENUM_JACKET: [
-//         "MEASUREMENT_NAME_ENUM_SHOULDERS",
-//         "MEASUREMENT_NAME_ENUM_BUST",
-//         'MEASUREMENT_NAME_ENUM_WAIST',
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_SLEEVE"
-//     ],
-//     CATEGORY_ENUM_SWEATER: [
-//         "MEASUREMENT_NAME_ENUM_SHOULDERS",
-//         "MEASUREMENT_NAME_ENUM_BUST",
-//         'MEASUREMENT_NAME_ENUM_WAIST',
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_SLEEVE"
-//     ],
-//     CATEGORY_ENUM_PANT: [
-//         'MEASUREMENT_NAME_ENUM_WAIST',
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_RISE",
-//         "MEASUREMENT_NAME_ENUM_HIPS",
-//         "MEASUREMENT_NAME_ENUM_INSEAM"
-//     ],
-//     CATEGORY_ENUM_SKIRT: [
-//         'MEASUREMENT_NAME_ENUM_WAIST',
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_HIPS",
-//     ],
-//     CATEGORY_ENUM_SHORT: [
-//         'MEASUREMENT_NAME_ENUM_WAIST',
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_RISE",
-//         "MEASUREMENT_NAME_ENUM_HIPS",
-//         "MEASUREMENT_NAME_ENUM_INSEAM"
-//     ],
-//     CATEGORY_ENUM_BLAZER: [
-//         "MEASUREMENT_NAME_ENUM_SHOULDERS",
-//         "MEASUREMENT_NAME_ENUM_BUST",
-//         'MEASUREMENT_NAME_ENUM_WAIST',
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_SLEEVE"
-//     ],
-//     CATEGORY_ENUM_COAT: [
-//         "MEASUREMENT_NAME_ENUM_SHOULDERS",
-//         "MEASUREMENT_NAME_ENUM_BUST",
-//         'MEASUREMENT_NAME_ENUM_WAIST',
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_SLEEVE"
-//     ],
-//     CATEGORY_ENUM_UNDERWEAR: [
-//         "MEASUREMENT_NAME_ENUM_WAIST",
-//         "MEASUREMENT_NAME_ENUM_HIPS"
-//     ],
-//     CATEGORY_ENUM_BRA: [
-//         "MEASUREMENT_NAME_ENUM_BUST"
-//     ],
-//     CATEGORY_ENUM_SCARF: [
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_WIDTH"
-//     ],
-//     CATEGORY_ENUM_BELT: [
-//         "MEASUREMENT_NAME_ENUM_WAIST",
-//         "MEASUREMENT_NAME_ENUM_LENGTH"
-//     ],
-//     CATEGORY_ENUM_OTHER: [
-//         "MEASUREMENT_NAME_ENUM_LENGTH",
-//         "MEASUREMENT_NAME_ENUM_WIDTH"
-//     ],
-//     CATEGORY_ENUM_BAG: [
-//         "MEASUREMENT_NAME_ENUM_HEIGHT",
-//         "MEASUREMENT_NAME_ENUM_WIDTH"
-//     ]
+interface MeasurementMapping {
+    measurements: string[];
+}
 
-// };
+export const CATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
+    'outerwear': {
+        measurements: ['shoulders', 'sleeve', 'bust', 'waist', 'length']
+    },
+    'bottoms': {
+        measurements: ['waist', 'length', 'inseam']
+    },
+    'dresses': {
+        measurements: ['shoulders', 'bust', 'waist', 'length']
+    },
+    'accessories': {
+        measurements: ['width', 'length']
+    },
+    'bags': {
+        measurements: ['width', 'length']
+    },
+    'shoes': {
+        measurements: []
+    },
+    'home': {
+        measurements: []
+    },
+    'body': {
+        measurements: []
+    }
+};
+
+export const SUBCATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
+    'shirts': {
+        measurements: ['shoulders', 'bust', 'length', 'sleeve']
+    },
+    'tshirts': {
+        measurements: ['shoulders', 'sleeve', 'waist', 'length']
+    },
+    'tanks': {
+        measurements: ['shoulders', 'waist', 'length']
+    },
+    'crop': {
+        measurements: ['waist', 'length', 'hips']
+    },
+    'sweaters_knits': {
+        measurements: ['shoulders', 'sleeve', 'waist', 'length', 'bust']
+    },
+    'hoodies_sweatshirts': {
+        measurements: ['shoulders', 'sleeve', 'waist', 'length', 'bust']
+    },
+    'shorts': {
+        measurements: ['waist', 'length', 'inseam', 'hips']
+    },
+    'skirts': {
+        measurements: ['waist', 'length', 'hips']
+    },
+    'bralettes': {
+        measurements: ['bust']
+    },
+    'gloves': {
+        measurements: []
+    },
+    'socks': {
+        measurements: []
+    },
+    'hats': {
+        measurements: []
+    },
+
+};
+
+export const getMeasurementsForCategory = (categoryName: string | undefined, isSubCategory: boolean = false): string[] => {
+    if (!categoryName) return [];
+
+    if (categoryName.toLowerCase() === 'shoes') return [];
+
+    const mapping = isSubCategory
+        ? SUBCATEGORY_MEASUREMENTS[categoryName]
+        : CATEGORY_MEASUREMENTS[categoryName];
+
+    return mapping?.measurements || [];
+};
+
+export const getCategoryStructure = (categories: common_Category[]) => {
+    const processedCategories = processCategories(categories);
+
+    return processedCategories.map(topCategory => ({
+        topCategory: topCategory.name,
+        measurements: getMeasurementsForCategory(topCategory.name),
+        subCategories: topCategory.subCategories.map(sub => ({
+            name: sub.name,
+            measurements: getMeasurementsForCategory(sub.name, true)
+        }))
+    }));
+};
+
+export const isMeasurementRequiredForCategory = (
+    measurementName: string,
+    categoryName: string,
+    isSubCategory: boolean = false
+): boolean => {
+    const requiredMeasurements = getMeasurementsForCategory(categoryName, isSubCategory);
+    return requiredMeasurements.includes(measurementName.toLowerCase());
+};
+
