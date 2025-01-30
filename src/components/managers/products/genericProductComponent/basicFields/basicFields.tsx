@@ -41,24 +41,21 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   const [showSales, setShowSales] = useState(true);
   const disableFields = isAddingProduct ? false : !isEditMode;
 
-  const categories = useMemo(
-    () => processCategories(dictionary?.categories || []),
-    [dictionary?.categories],
-  );
+  const categories = processCategories(dictionary?.categories || []);
 
-  const selectedSubCategories = useMemo(() => {
+  const selectedSubCategories = (() => {
     const topCategory = categories.find(
       (cat) => cat.id === values.product?.productBody?.topCategoryId,
     );
     return topCategory?.subCategories || [];
-  }, [categories, values.product?.productBody?.topCategoryId]);
+  })();
 
-  const selectedTypes = useMemo(() => {
+  const selectedTypes = (() => {
     const subCategory = selectedSubCategories.find(
       (sub) => sub.id === values.product?.productBody?.subCategoryId,
     );
     return subCategory?.types || [];
-  }, [selectedSubCategories, values.product?.productBody?.subCategoryId]);
+  })();
 
   useEffect(() => {
     if (
