@@ -104,14 +104,13 @@ export const MediaView: FC<MediaViewInterface> = ({
                 ) : (
                   <img src={mediaUrl} alt='' className={styles.media} />
                 )}
-                {(isEditMode || isCopyMode) && (
-                  <IconButton
-                    onClick={() => removeSelectedMedia(media.id as number)}
-                    className={styles.delete_btn}
-                  >
-                    <ClearIcon />
-                  </IconButton>
-                )}
+
+                <IconButton
+                  onClick={() => removeSelectedMedia(media.id as number)}
+                  className={styles.delete_btn}
+                >
+                  <ClearIcon />
+                </IconButton>
               </Grid>
             );
           })}
@@ -120,7 +119,7 @@ export const MediaView: FC<MediaViewInterface> = ({
               <div className={styles.select_media}>
                 <MediaSelectorLayout
                   label='select media'
-                  aspectRatio={['3:4']}
+                  aspectRatio={['4:5']}
                   isDeleteAccepted={false}
                   allowMultiple={true}
                   saveSelectedMedia={uploadMediasInProduct}

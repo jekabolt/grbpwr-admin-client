@@ -1,4 +1,4 @@
-import { Grid, Theme, useMediaQuery } from '@mui/material';
+import { Grid2 as Grid, Theme, useMediaQuery } from '@mui/material';
 import { MediaSelectorInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
@@ -68,13 +68,13 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   };
 
   return (
-    <Grid container justifyContent='center'>
-      <Grid item xs={12}>
-        <Grid container alignItems='center'>
-          <Grid item xs={12} sm={4}>
+    <Grid container justifyContent='center' spacing={2}>
+      <Grid size={{ xs: 12 }}>
+        <Grid container alignItems='center' spacing={2}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <ByUrl url={url} setUrl={setUrl} isLoading={isLoading} />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <DragDrop
               loading={loading}
               selectedFiles={selectedFiles}
@@ -83,7 +83,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
               setSelectedFileUrl={setSelectedFileUrl}
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <FilterMedias
               filterByType={filterByType}
               setFilterByType={setFilterByType}
@@ -93,7 +93,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
           </Grid>
         </Grid>
       </Grid>
-      <Grid item xs={6}>
+      <Grid size={{ xs: 6 }}>
         <PreviewMediaForUpload
           croppedImage={croppedImage}
           isCropperOpen={isCropperOpen}
@@ -105,7 +105,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
           handleUploadMedia={handleMediaUpload}
         />
       </Grid>
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <MediaList
           media={media}
           allowMultiple={allowMultiple}

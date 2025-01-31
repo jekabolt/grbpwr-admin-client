@@ -92,7 +92,13 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       let newValue = e.target.value;
 
       if (field === 'topCategoryId') {
-        setFieldValue('product.productBody.subCategoryId', '', false);
+        const selectedCategory = categories.find((cat) => cat.id === newValue);
+
+        if (selectedCategory?.subCategories.length === 0) {
+          setFieldValue('product.productBody.subCategoryId', newValue, false);
+        } else {
+          setFieldValue('product.productBody.subCategoryId', '', false);
+        }
         setFieldValue('product.productBody.typeId', '', false);
       }
 
@@ -363,7 +369,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               value={values.product?.productBody?.typeId || ''}
               label={'type'.toUpperCase()}
               displayEmpty
-              disabled={disableFields || !values.product?.productBody?.subCategoryId}
+              disabled={disableFields}
             >
               {selectedTypes.map((type) => (
                 <MenuItem value={type.id} key={type.id}>

@@ -21,6 +21,27 @@ export const processCategories = (categories: common_Category[]): ProcessedCateg
             cat.level === 'sub_category' && cat.parentId === topCat.id!
         );
 
+        // If there are no subcategories, check for direct types under top category
+        if (subCategories.length === 0) {
+            const directTypes = categories.filter(cat =>
+                cat.level === 'type' && cat.parentId === topCat.id!
+            );
+
+            return {
+                id: topCat.id!,
+                name: topCat.name!,
+                subCategories: [{
+                    id: topCat.id!,
+                    name: topCat.name!,
+                    types: directTypes.map(type => ({
+                        id: type.id!,
+                        name: type.name!
+                    }))
+                }]
+            };
+        }
+
+        // Original logic for categories with subcategories
         const processedSubCategories = subCategories.map(subCat => {
             const types = categories.filter(cat =>
                 cat.level === 'type' && cat.parentId === subCat.id!
