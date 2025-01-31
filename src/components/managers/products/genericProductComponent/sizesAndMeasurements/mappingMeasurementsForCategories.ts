@@ -33,6 +33,9 @@ export const CATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
 };
 
 export const SUBCATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
+    'vests': {
+        measurements: ['shoulders', 'waist', 'length', 'bust']
+    },
     'shirts': {
         measurements: ['shoulders', 'bust', 'length', 'sleeve']
     },
@@ -90,7 +93,7 @@ export const getCategoryStructure = (categories: common_Category[]) => {
     return processedCategories.map(topCategory => ({
         topCategory: topCategory.name,
         measurements: getMeasurementsForCategory(topCategory.name),
-        subCategories: topCategory.subCategories.map(sub => ({
+        subCategories: topCategory.subCategories?.map(sub => ({
             name: sub.name,
             measurements: getMeasurementsForCategory(sub.name, true)
         }))
@@ -105,4 +108,3 @@ export const isMeasurementRequiredForCategory = (
     const requiredMeasurements = getMeasurementsForCategory(categoryName, isSubCategory);
     return requiredMeasurements.includes(measurementName.toLowerCase());
 };
-
