@@ -9,7 +9,7 @@
     overflow-y: auto;
 
     @media (max-width: 600px) {
-      height: 60vh;
+      height: 58vh;
     }
 
     &::-webkit-scrollbar {
@@ -18,17 +18,18 @@
   }
 }
 
-.image_list {
+.media_list {
   height: 100%;
 
-  .image_list_item {
+  .media_list_item {
     border: 2px solid #000;
     position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
 
-    img {
+    img,
+    video {
       width: 100%;
       height: 100%;
     }

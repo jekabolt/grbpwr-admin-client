@@ -27,11 +27,18 @@ export function ArchiveItem({ archiveData, close }: Props) {
   }
 
   const initialValues = {
-    title: archiveItems?.title || '',
+    heading: archiveItems?.heading || '',
     description: archiveItems?.description || '',
     tag: archiveItems?.tag || '',
     mediaIds: archiveItems?.media?.map((m) => m.id).filter((id): id is number => id !== undefined),
+    videoId: archiveItems?.video?.id,
   };
+
+  const existingMedia = [
+    ...(archiveItems?.media || []),
+    ...(archiveItems?.video ? [archiveItems.video] : []),
+  ];
+
   if (!archiveData) return null;
 
   return (
@@ -40,7 +47,7 @@ export function ArchiveItem({ archiveData, close }: Props) {
       onClose={() => handleClose()}
       initialValues={initialValues}
       archiveId={archiveData.id}
-      existingMedia={archiveItems?.media}
+      existingMedia={existingMedia}
     />
   );
 }

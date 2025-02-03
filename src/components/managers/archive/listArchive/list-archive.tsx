@@ -1,10 +1,11 @@
 import { Button, Grid2 as Grid, Typography } from '@mui/material';
-import { useArchiveStore } from 'lib/stores/store';
+import { useArchiveStore, useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { ArchiveItem } from './archive-item';
 
 export function ListArchive() {
   const { archives, fetchArchives, deleteArchive } = useArchiveStore();
+  const { showMessage } = useSnackBarStore();
   const [mediaId, setMediaId] = useState<number>(0);
   const mediaRef = useRef<HTMLDivElement>(null);
   const [selectedArchive, setSelectedArchive] = useState<number>();
@@ -25,11 +26,16 @@ export function ListArchive() {
     return () => media.removeEventListener('scroll', handleScroll);
   }, []);
 
-  function handleDeleteArchive(e: React.MouseEvent, id: number) {
+  async function handleDeleteArchive(e: React.MouseEvent, id: number) {
     e.preventDefault();
     e.stopPropagation();
-    deleteArchive(id);
-    setSelectedArchive(undefined);
+    try {
+      await deleteArchive(id);
+      setSelectedArchive(undefined);
+      showMessage('archive deleted', 'success');
+    } catch (error) {
+      showMessage('failed to delete archive', 'error');
+    }
   }
 
   return (
@@ -74,7 +80,15 @@ export function ListArchive() {
               remove
             </Button>
             <Grid size={{ xs: 12, lg: 2 }}>
-              <Typography textAlign='center'>{archive.title}</Typography>
+              <Typography
+                textAlign='center'
+                variant='overline'
+                fontWeight='bold'
+                fontSize='1.2rem'
+                textTransform='uppercase'
+              >
+                {archive.heading}
+              </Typography>
             </Grid>
             <Grid size={{ xs: 12, lg: 8 }} sx={{ height: '100%' }}>
               <img
@@ -86,11 +100,19 @@ export function ListArchive() {
                   transform: mediaId === id ? 'scale(1)' : 'scale(0.6)',
                   transition: 'transform 0.3s ease',
                 }}
-                alt={archive.title}
+                alt={archive.heading}
               />
             </Grid>
             <Grid size={{ xs: 12, lg: 2 }}>
-              <Typography textAlign='center'>{archive.tag}</Typography>
+              <Typography
+                textAlign='center'
+                variant='overline'
+                fontWeight='bold'
+                fontSize='1.2rem'
+                textTransform='uppercase'
+              >
+                {archive.tag}
+              </Typography>
             </Grid>
           </Grid>
         ))}

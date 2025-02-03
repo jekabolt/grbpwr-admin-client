@@ -17,10 +17,18 @@ interface ArchiveFormProps {
 }
 
 const defaultInitialValues: common_ArchiveInsert = {
-  title: '',
+  heading: '',
   description: '',
   tag: '',
   mediaIds: [],
+  videoId: undefined,
+};
+
+export const isVideo = (media: common_MediaFull) => {
+  const videoExtensions = ['.mp4', '.mov', '.avi', '.wmv', '.webm'];
+  return media.media?.fullSize?.mediaUrl
+    ? videoExtensions.some((ext) => media.media?.fullSize?.mediaUrl?.toLowerCase().endsWith(ext))
+    : false;
 };
 
 export function ArchiveForm({
@@ -40,6 +48,19 @@ export function ArchiveForm({
     allowMultiple: boolean,
     formik?: FormikProps<any>,
   ) => {
+    if (isVideo(media)) {
+      const newSelectedMedia = selectedMedia.filter((item) => !isVideo(item));
+
+      if (formik?.values.videoId !== media.id) {
+        formik?.setFieldValue('videoId', media.id);
+        setSelectedMedia([...newSelectedMedia, media]);
+      } else {
+        formik?.setFieldValue('videoId', undefined);
+        setSelectedMedia(newSelectedMedia);
+      }
+      return;
+    }
+
     const newSelectedMedia = allowMultiple
       ? selectedMedia.some((item) => item.id === media.id)
         ? selectedMedia.filter((item) => item.id !== media.id)
@@ -49,7 +70,7 @@ export function ArchiveForm({
     setSelectedMedia(newSelectedMedia);
     formik?.setFieldValue(
       'mediaIds',
-      newSelectedMedia.map((media) => media.id),
+      newSelectedMedia.filter((item) => !isVideo(item)).map((media) => media.id),
     );
   };
 
@@ -111,7 +132,7 @@ export function ArchiveForm({
                 gap={{ xs: 2 }}
               >
                 <Grid size={{ xs: 12, lg: 2 }}>
-                  <Field as={TextField} name='title' label='title' fullWidth />
+                  <Field as={TextField} name='heading' label='heading' fullWidth />
                 </Grid>
                 <Grid size={{ xs: 12, lg: 6 }}>
                   <Field as={TextField} name='description' label='description' fullWidth />
@@ -137,7 +158,7 @@ export function ArchiveForm({
                     aspectRatio={['1:1', '3:4', '4:3']}
                     isDeleteAccepted={false}
                     allowMultiple
-                    hideVideos
+                    hideVideos={false}
                     hideNavBar
                   />
                 )}
@@ -146,14 +167,21 @@ export function ArchiveForm({
               <Grid
                 size={{ xs: 12 }}
                 display='flex'
-                justifyContent={archiveId ? 'space-between' : 'end'}
+                flexDirection={{
+                  xs: 'column',
+                  lg: 'row',
+                }}
+                justifyContent={{
+                  xs: 'center',
+                  lg: archiveId ? 'space-between' : 'end',
+                }}
                 gap={2}
               >
                 {archiveId && !showMediaSelector && (
                   <Button
                     variant='contained'
                     size='large'
-                    sx={{ width: '20%' }}
+                    sx={{ width: { xs: '100%', lg: '20%' } }}
                     onClick={() => setShowMediaSelector(true)}
                   >
                     select new items
@@ -163,14 +191,19 @@ export function ArchiveForm({
                   <Button
                     variant='contained'
                     size='large'
-                    sx={{ width: '20%' }}
+                    sx={{ width: { xs: '100%', lg: '20%' } }}
                     onClick={() => handleSaveMediaSelection(formik.values)}
                   >
-                    Save Selection
+                    save Selection
                   </Button>
                 ) : (
-                  <Button type='submit' variant='contained' size='large' sx={{ width: '20%' }}>
-                    {archiveId ? 'Update' : 'Create'} Archive
+                  <Button
+                    type='submit'
+                    variant='contained'
+                    size='large'
+                    sx={{ width: { xs: '100%', lg: '20%' } }}
+                  >
+                    {archiveId ? 'update' : 'create'} archive
                   </Button>
                 )}
               </Grid>
