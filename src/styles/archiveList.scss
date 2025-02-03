@@ -3,11 +3,11 @@
   justify-content: center;
   align-items: center;
   position: relative;
-  width: 396px;
-  height: 243px;
-  flex: 0 0 auto;
+  width: 100%;
+  height: 100%;
 
-  img {
+  img,
+  video {
     border: 1px solid #000;
     width: 100%;
     height: 100%;
