@@ -61,16 +61,19 @@ export function ArchiveForm({
       return;
     }
 
+    const existingImages = selectedMedia.filter((item) => !isVideo(item));
     const newSelectedMedia = allowMultiple
-      ? selectedMedia.some((item) => item.id === media.id)
-        ? selectedMedia.filter((item) => item.id !== media.id)
-        : [...selectedMedia, media]
+      ? existingImages.some((item) => item.id === media.id)
+        ? existingImages.filter((item) => item.id !== media.id)
+        : [...existingImages, media]
       : [media];
 
-    setSelectedMedia(newSelectedMedia);
+    const existingVideo = selectedMedia.find((item) => isVideo(item));
+    setSelectedMedia(existingVideo ? [...newSelectedMedia, existingVideo] : newSelectedMedia);
+
     formik?.setFieldValue(
       'mediaIds',
-      newSelectedMedia.filter((item) => !isVideo(item)).map((media) => media.id),
+      newSelectedMedia.map((media) => media.id),
     );
   };
 
@@ -90,13 +93,29 @@ export function ArchiveForm({
     }
   }
 
-  async function handleDeleteArchiveItem(id: number, values: common_ArchiveInsert) {
+  async function handleDeleteArchiveItem(
+    id: number,
+    values: common_ArchiveInsert,
+    isVideo?: boolean,
+  ) {
     if (!id) return;
     try {
-      const updatedItems = values.mediaIds
-        ?.filter((mediaId) => mediaId !== id)
-        .filter((id): id is number => id !== undefined);
-      await updateArchiveStore(archiveId || 0, { ...values, mediaIds: updatedItems });
+      if (isVideo) {
+        // Handle video deletion
+        await updateArchiveStore(archiveId || 0, {
+          ...values,
+          videoId: undefined,
+        });
+      } else {
+        // Handle image deletion
+        const updatedItems = values.mediaIds
+          ?.filter((mediaId) => mediaId !== id)
+          .filter((id): id is number => id !== undefined);
+        await updateArchiveStore(archiveId || 0, {
+          ...values,
+          mediaIds: updatedItems,
+        });
+      }
       showMessage('Archive item deleted', 'success');
     } catch (e) {
       showMessage('Failed to delete archive item', 'error');
@@ -105,12 +124,23 @@ export function ArchiveForm({
 
   const handleSaveMediaSelection = async (values: common_ArchiveInsert) => {
     try {
+      const existingImages = existingMedia?.filter((media) => !isVideo(media)) || [];
+      const selectedImages = selectedMedia.filter((media) => !isVideo(media));
+
       const combinedMediaIds = [
-        ...(existingMedia?.map((media) => media.id) || []),
-        ...selectedMedia.map((media) => media.id),
+        ...existingImages.map((media) => media.id),
+        ...selectedImages.map((media) => media.id),
       ].filter((id): id is number => id !== undefined);
 
-      await updateArchiveStore(archiveId || 0, { ...values, mediaIds: combinedMediaIds });
+      const selectedVideo = selectedMedia.find((media) => isVideo(media));
+      const videoId = selectedVideo?.id;
+
+      await updateArchiveStore(archiveId || 0, {
+        ...values,
+        mediaIds: combinedMediaIds,
+        videoId: videoId || values.videoId,
+      });
+
       setShowMediaSelector(false);
       setSelectedMedia([]);
       showMessage('Media items added successfully', 'success');
@@ -145,7 +175,7 @@ export function ArchiveForm({
               <Grid size={{ xs: 12 }} className={styles.media_selector_wrapper}>
                 {archiveId && !showMediaSelector ? (
                   <ArchiveMediaDisplay
-                    remove={handleDeleteArchiveItem}
+                    remove={(id, values, isVideo) => handleDeleteArchiveItem(id, values, isVideo)}
                     media={existingMedia || []}
                     values={formik.values}
                   />

@@ -18,18 +18,17 @@ export function ArchiveMediaDisplay({
 }: {
   media: common_MediaFull[];
   values: common_ArchiveInsert;
-  remove: (id: number, values: common_ArchiveInsert) => void;
+  remove: (id: number, values: common_ArchiveInsert, isVideo?: boolean) => void;
 }) {
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // Separate videos and images
   const images = media.filter((item) => !isVideo(item));
-  const videos = media.filter((item) => isVideo(item));
+  const video = media.find((item) => isVideo(item) && item.id === values.videoId);
 
   return (
     <div>
-      {videos.length > 0 && (
+      {video && (
         <div>
           <Typography
             variant='overline'
@@ -41,21 +40,19 @@ export function ArchiveMediaDisplay({
             video
           </Typography>
           <ImageList cols={1} gap={8} className={styles.media_list}>
-            {videos.map((item) => (
-              <ImageListItem key={item.id} className={styles.media_list_item}>
-                <video
-                  src={item.media?.fullSize?.mediaUrl}
-                  style={{ width: '100%', maxHeight: '400px' }}
-                  controls
-                />
-                <IconButton
-                  onClick={() => remove(item.id || 0, values)}
-                  className={styles.remove_btn}
-                >
-                  <ClearIcon />
-                </IconButton>
-              </ImageListItem>
-            ))}
+            <ImageListItem key={video.id} className={styles.media_list_item}>
+              <video
+                src={video.media?.fullSize?.mediaUrl}
+                style={{ objectFit: isSm ? 'scale-down' : 'cover' }}
+                controls
+              />
+              <IconButton
+                onClick={() => remove(video.id || 0, values, true)}
+                className={styles.remove_btn}
+              >
+                <ClearIcon />
+              </IconButton>
+            </ImageListItem>
           </ImageList>
         </div>
       )}

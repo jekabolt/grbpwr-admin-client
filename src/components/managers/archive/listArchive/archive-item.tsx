@@ -35,8 +35,8 @@ export function ArchiveItem({ archiveData, close }: Props) {
   };
 
   const existingMedia = [
-    ...(archiveItems?.media || []),
-    ...(archiveItems?.video ? [archiveItems.video] : []),
+    ...(archiveItems?.media?.filter((m) => m && m.id) || []),
+    ...(archiveItems?.video && archiveItems.video.id ? [archiveItems.video] : []),
   ];
 
   if (!archiveData) return null;

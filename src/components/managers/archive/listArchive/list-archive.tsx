@@ -86,6 +86,7 @@ export function ListArchive() {
                 fontWeight='bold'
                 fontSize='1.2rem'
                 textTransform='uppercase'
+                border='1px solid red'
               >
                 {archive.heading}
               </Typography>
@@ -100,7 +101,6 @@ export function ListArchive() {
                   transform: mediaId === id ? 'scale(1)' : 'scale(0.6)',
                   transition: 'transform 0.3s ease',
                 }}
-                alt={archive.heading}
               />
             </Grid>
             <Grid size={{ xs: 12, lg: 2 }}>
@@ -110,6 +110,7 @@ export function ListArchive() {
                 fontWeight='bold'
                 fontSize='1.2rem'
                 textTransform='uppercase'
+                border='1px solid red'
               >
                 {archive.tag}
               </Typography>
