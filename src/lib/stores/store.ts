@@ -136,7 +136,7 @@ export const useArchiveStore = create<ArchiveStore>((set, get) => ({
         set({ isLoading: true, error: null });
         try {
             const archive = get().archives.find((a) => a.id === id);
-            const response = await getArchiveItems({ id, title: archive?.title || 'string', tag: archive?.tag || 'string' });
+            const response = await getArchiveItems({ id, heading: archive?.heading || 'string', tag: archive?.tag || 'string' });
             set({ archiveItems: response.archive, isLoading: false })
         } catch (error) {
             set({ error: 'Failed to fetch archive items', isLoading: false })
@@ -145,7 +145,13 @@ export const useArchiveStore = create<ArchiveStore>((set, get) => ({
     addArchive: async (archiveInsert: common_ArchiveInsert) => {
         set({ isLoading: true, error: null });
         try {
-            await addArchive({ archiveInsert });
+            const trimmedArchive = {
+                ...archiveInsert,
+                heading: archiveInsert.heading?.trim(),
+                description: archiveInsert.description?.trim(),
+                tag: archiveInsert.tag?.trim(),
+            };
+            await addArchive({ archiveInsert: trimmedArchive });
             await get().fetchArchives(10, 0);
             set({ isLoading: false });
         } catch (error) {
@@ -156,7 +162,13 @@ export const useArchiveStore = create<ArchiveStore>((set, get) => ({
     updateArchive: async (id: number, archiveInsert: common_ArchiveInsert) => {
         set({ isLoading: true, error: null });
         try {
-            await updateArchive({ id, archiveInsert });
+            const trimmedArchive = {
+                ...archiveInsert,
+                heading: archiveInsert.heading?.trim(),
+                description: archiveInsert.description?.trim(),
+                tag: archiveInsert.tag?.trim(),
+            };
+            await updateArchive({ id, archiveInsert: trimmedArchive });
             await get().fetchArchives(10, 0);
             set({ isLoading: false });
         } catch (error) {

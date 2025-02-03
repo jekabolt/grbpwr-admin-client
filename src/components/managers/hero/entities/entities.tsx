@@ -9,6 +9,7 @@ import { removeEntityIndex } from '../utility/arrayHelpers';
 import { getAllowedRatios } from '../utility/getAllowedRatios';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity/common-entity';
+import { FeaturedArchive } from './featured-archive/featured-archive';
 import { FeaturedProductBase } from './featured-products-(tags)/featured-prduct-base';
 import { EntitiesProps } from './interface/interface';
 
@@ -54,12 +55,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
 
       productsForEntities[i] = e.featuredProducts?.products || [];
       productTagsForEntities[i] = e.featuredProductsTag?.products?.products || [];
-      // archiveForEntities[i] = [
-      //   {
-      //     archive: e.featuredArchive?.archive?.archive,
-      //     items: e.featuredArchive?.archive?.items || [],
-      //   },
-      // ];
+      archiveForEntities[i] = e.featuredArchive?.archive ? [e.featuredArchive.archive] : [];
 
       const allowedRatios = getAllowedRatios(e);
       if (allowedRatios.length > 0) {
@@ -157,14 +153,14 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     setIsModalOpen(true);
   };
 
-  // const handleSaveArchive = (newSelectedArchive: common_ArchiveFull[], index: number) => {
-  //   setFieldValue(`entities.${index}.featuredArchive.archiveId`, newSelectedArchive[0].archive?.id);
-  //   setArchive((prevState) => ({
-  //     ...prevState,
-  //     [index]: newSelectedArchive,
-  //   }));
-  //   handleCloseModal();
-  // };
+  const handleSaveArchive = (newSelectedArchive: common_ArchiveFull[], index: number) => {
+    setFieldValue(`entities.${index}.featuredArchive.archiveId`, newSelectedArchive[0].id);
+    setArchive((prevState) => ({
+      ...prevState,
+      [index]: newSelectedArchive,
+    }));
+    handleCloseModal();
+  };
 
   return (
     <Grid container spacing={2} marginTop={5}>
@@ -274,12 +270,11 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                   />
                 </Grid>
               )}
-              {/* {entity.type === 'HERO_TYPE_FEATURED_ARCHIVE' && (
+              {entity.type === 'HERO_TYPE_FEATURED_ARCHIVE' && (
                 <Grid size={{ xs: 12 }}>
                   <Field
                     component={FeaturedArchive}
                     archive={archive}
-                    product={product}
                     index={index}
                     currentEntityIndex={currentEntityIndex}
                     handleOpenArchiveSelection={handleOpenArchiveSelection}
@@ -288,7 +283,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                     onClose={handleCloseModal}
                   />
                 </Grid>
-              )} */}
+              )}
               <Grid size={{ xs: 12 }}>
                 <Button
                   variant='contained'

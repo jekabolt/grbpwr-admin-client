@@ -1,117 +1,107 @@
-// import { Checkbox } from '@mui/material';
-// import { getArchive } from 'api/archive';
-// import { common_ArchiveFull } from 'api/proto-http/frontend';
-// import { Dialog } from 'components/common/dialog';
-// import { MaterialReactTable, MRT_ColumnDef, useMaterialReactTable } from 'material-react-table';
-// import { useEffect, useMemo, useState } from 'react';
+import { Checkbox } from '@mui/material';
+import { common_ArchiveFull } from 'api/proto-http/frontend';
+import { Dialog } from 'components/common/utility/dialog';
+import { useArchiveStore } from 'lib/stores/store';
 
-// interface Props {
-//   open: boolean;
-//   onClose: () => void;
-//   onSave: (newSelectedArchive: common_ArchiveFull[]) => void;
-//   selectedArchiveId: number;
-// }
+import { MaterialReactTable, MRT_ColumnDef, useMaterialReactTable } from 'material-react-table';
+import { useEffect, useMemo, useState } from 'react';
 
-// const calculateOffset = (page: number, limit: number) => (page - 1) * limit;
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  onSave: (newSelectedArchive: common_ArchiveFull[]) => void;
+  selectedArchiveId: number;
+}
 
-// export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Props) {
-//   const [archives, setArchives] = useState<common_ArchiveFull[]>([]);
-//   const [data, setData] = useState(archives);
-//   const [selectedArchive, setSelectedArchive] = useState<common_ArchiveFull | undefined>(undefined);
-//   const limit = 50;
-//   const [currentPage, setCurrentPage] = useState(1);
-//   const offset = calculateOffset(currentPage, limit);
+export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Props) {
+  const { archives, fetchArchives } = useArchiveStore();
 
-//   useEffect(() => {
-//     if (open) {
-//       const fetchArchives = async () => {
-//         const response = await getArchive({
-//           limit: limit,
-//           offset: offset,
-//           orderFactor: 'ORDER_FACTOR_DESC',
-//         });
-//         setArchives(response.archives || []);
-//         const initialSelection = response.archives?.find(
-//           (archive) => archive.archive?.id === selectedArchiveId,
-//         );
-//         setSelectedArchive(initialSelection);
-//       };
-//       fetchArchives();
-//     }
-//   }, [open, currentPage, offset, limit]);
+  const [data, setData] = useState(archives);
+  const [selectedArchive, setSelectedArchive] = useState<common_ArchiveFull | undefined>(undefined);
+  const [currentPage, setCurrentPage] = useState(1);
 
-//   useEffect(() => {
-//     setData(archives);
-//   }, [archives]);
+  useEffect(() => {
+    if (open) {
+      const initialSelection = archives?.find((archive) => archive.id === selectedArchiveId);
+      setSelectedArchive(initialSelection);
+      fetchArchives(50, 0);
+    }
+  }, [open, currentPage]);
 
-//   function handleSave() {
-//     if (!selectedArchive) return;
-//     onSave([selectedArchive]);
-//     onClose();
-//   }
+  useEffect(() => {
+    setData(archives);
+  }, [archives]);
 
-//   const columns = useMemo<MRT_ColumnDef<common_ArchiveFull>[]>(
-//     () => [
-//       {
-//         id: 'selection',
-//         header: 'Select',
-//         Cell: ({ row }) => {
-//           const isSelected = selectedArchive?.archive?.id === row.original.archive?.id;
-//           return (
-//             <Checkbox
-//               checked={isSelected}
-//               onChange={() => setSelectedArchive(isSelected ? undefined : row.original)}
-//             />
-//           );
-//         },
-//       },
-//       {
-//         accessorKey: 'archive.id',
-//         header: 'ID',
-//       },
-//       {
-//         accessorKey: 'items',
-//         header: 'Thumbnail',
-//         Cell: ({ row }) => {
-//           const item = row.original.items?.[0];
-//           const thumbnail = item?.archiveItem?.media?.media?.thumbnail?.mediaUrl;
-//           return thumbnail ? (
-//             <img src={thumbnail} alt='Thumbnail' style={{ width: '100px', height: 'auto' }} />
-//           ) : null;
-//         },
-//         enableGlobalFilter: false,
-//       },
-//       {
-//         accessorKey: 'items',
-//         header: 'Items quantity',
-//         Cell: ({ row }) => {
-//           return row.original.items?.length;
-//         },
-//       },
-//     ],
-//     [selectedArchive],
-//   );
+  function handleSave() {
+    if (!selectedArchive) return;
+    onSave([selectedArchive]);
+    onClose();
+  }
 
-//   const table = useMaterialReactTable({
-//     autoResetPageIndex: false,
-//     columns,
-//     data,
-//     initialState: {
-//       pagination: {
-//         pageSize: 50,
-//         pageIndex: 1,
-//       },
-//     },
-//     muiPaginationProps: {
-//       rowsPerPageOptions: [50, 100, 200],
-//       showFirstButton: false,
-//       showLastButton: false,
-//     },
-//   });
+  const columns = useMemo<MRT_ColumnDef<common_ArchiveFull>[]>(
+    () => [
+      {
+        id: 'selection',
+        header: 'Select',
+        Cell: ({ row }) => {
+          const isSelected = selectedArchive?.id === row.original.id;
+          return (
+            <Checkbox
+              checked={isSelected}
+              onChange={() => setSelectedArchive(isSelected ? undefined : row.original)}
+            />
+          );
+        },
+      },
+      {
+        accessorKey: 'id',
+        header: 'ID',
+      },
+      {
+        accessorKey: 'media',
+        header: 'Thumbnail',
+        Cell: ({ row }) => {
+          const item = row.original.media?.[0];
+          const thumbnail = item?.media?.fullSize?.mediaUrl;
+          return thumbnail ? (
+            <img src={thumbnail} alt='Thumbnail' style={{ width: '100px', height: 'auto' }} />
+          ) : null;
+        },
+        enableGlobalFilter: false,
+      },
 
-//   return (
-//     <Dialog open={open} onClose={onClose} title='select archive' isSaveButton save={handleSave}>
-//       <MaterialReactTable table={table} />
-//     </Dialog>
-//   );
-// }
+      {
+        accessorKey: 'tag',
+        header: 'Tag',
+      },
+      {
+        accessorKey: 'heading',
+        header: 'Heading',
+      },
+    ],
+    [selectedArchive],
+  );
+
+  const table = useMaterialReactTable({
+    autoResetPageIndex: false,
+    columns,
+    data,
+    initialState: {
+      pagination: {
+        pageSize: 50,
+        pageIndex: 1,
+      },
+    },
+    muiPaginationProps: {
+      rowsPerPageOptions: [50, 100, 200],
+      showFirstButton: false,
+      showLastButton: false,
+    },
+  });
+
+  return (
+    <Dialog open={open} onClose={onClose} title='select archive' isSaveButton save={handleSave}>
+      <MaterialReactTable table={table} />
+    </Dialog>
+  );
+}
