@@ -5,7 +5,6 @@ import { defaultProductFilterSettings } from 'constants/initialFilterStates';
 import { ROUTES } from 'constants/routes';
 import { Field, useFormikContext } from 'formik';
 import styles from 'styles/archiveList.scss';
-import { HeroProductTable } from '../featured-products-(tags)/heroProductsTable';
 import { FeatureArchiveProps } from '../interface/interface';
 import { ArchivePicker } from './archive-picker';
 
@@ -14,7 +13,6 @@ export function FeaturedArchive({
   index,
   currentEntityIndex,
   open,
-  product,
   onClose,
   handleSaveArchiveSelection,
   handleOpenArchiveSelection,
@@ -163,14 +161,14 @@ export function FeaturedArchive({
           }}
         />
       </Grid>
-      <Grid size={{ xs: 12 }}>
+      {/* <Grid size={{ xs: 12 }}>
         <Field
           component={HeroProductTable}
           products={product[index] || []}
           id={index}
           isFeaturedProducts={false}
         />
-      </Grid>
+      </Grid> */}
     </Grid>
   );
 }

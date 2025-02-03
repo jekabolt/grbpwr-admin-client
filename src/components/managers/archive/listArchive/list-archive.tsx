@@ -79,14 +79,13 @@ export function ListArchive() {
             >
               remove
             </Button>
-            <Grid size={{ xs: 12, lg: 2 }}>
+            <Grid size={{ xs: 12, lg: 2 }} display='flex' justifyContent='center'>
               <Typography
                 textAlign='center'
                 variant='overline'
                 fontWeight='bold'
                 fontSize='1.2rem'
                 textTransform='uppercase'
-                border='1px solid red'
               >
                 {archive.heading}
               </Typography>
@@ -103,14 +102,13 @@ export function ListArchive() {
                 }}
               />
             </Grid>
-            <Grid size={{ xs: 12, lg: 2 }}>
+            <Grid size={{ xs: 12, lg: 2 }} display='flex' justifyContent='center'>
               <Typography
                 textAlign='center'
                 variant='overline'
                 fontWeight='bold'
                 fontSize='1.2rem'
                 textTransform='uppercase'
-                border='1px solid red'
               >
                 {archive.tag}
               </Typography>

@@ -275,7 +275,6 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                   <Field
                     component={FeaturedArchive}
                     archive={archive}
-                    product={product}
                     index={index}
                     currentEntityIndex={currentEntityIndex}
                     handleOpenArchiveSelection={handleOpenArchiveSelection}

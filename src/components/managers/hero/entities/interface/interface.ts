@@ -36,7 +36,7 @@ export interface HeroProductEntityInterface {
 
 export interface FeatureArchiveProps {
     archive: { [key: number]: common_ArchiveFull[] };
-    product: { [key: number]: common_Product[] }
+    // product: { [key: number]: common_Product[] }
     index: number;
     currentEntityIndex: number | null;
     open: boolean;
