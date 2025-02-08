@@ -18,7 +18,8 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
             main: {
                 single: {
                     headline: entity.main?.single?.headline,
-                    mediaId: entity.main?.single?.media?.id,
+                    mediaLandscapeId: entity.main?.single?.mediaLandscape?.id,
+                    mediaPortraitId: entity.main?.single?.mediaPortrait?.id,
                     exploreLink: entity.main?.single?.exploreLink,
                     exploreText: entity.main?.single?.exploreText,
                 },
@@ -27,20 +28,23 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
             },
             single: {
                 headline: entity.single?.headline,
-                mediaId: entity.single?.media?.id,
+                mediaLandscapeId: entity.single?.mediaLandscape?.id,
+                mediaPortraitId: entity.single?.mediaPortrait?.id,
                 exploreLink: entity.single?.exploreLink,
                 exploreText: entity.single?.exploreText,
             },
             double: {
                 left: {
                     headline: entity.double?.left?.headline,
-                    mediaId: entity.double?.left?.media?.id,
+                    mediaLandscapeId: entity.double?.left?.mediaLandscape?.id,
+                    mediaPortraitId: entity.double?.left?.mediaPortrait?.id,
                     exploreLink: entity.double?.left?.exploreLink,
                     exploreText: entity.double?.left?.exploreText,
                 },
                 right: {
                     headline: entity.double?.right?.headline,
-                    mediaId: entity.double?.right?.media?.id,
+                    mediaLandscapeId: entity.double?.right?.mediaLandscape?.id,
+                    mediaPortraitId: entity.double?.right?.mediaPortrait?.id,
                     exploreLink: entity.double?.right?.exploreLink,
                     exploreText: entity.double?.right?.exploreText,
                 },
@@ -67,6 +71,20 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
                 exploreText: entity.featuredArchive?.exploreText,
             }
         })),
+        navFeatured: {
+            men: {
+                mediaId: undefined,
+                exploreText: undefined,
+                featuredTag: undefined,
+                featuredArchiveId: undefined
+            },
+            women: {
+                mediaId: undefined,
+                exploreText: undefined,
+                featuredTag: undefined,
+                featuredArchiveId: undefined
+            }
+        }
     };
 };
 
@@ -76,7 +94,8 @@ export const emptyHeroForm: common_HeroFullInsert = {
             type: 'HERO_TYPE_UNKNOWN' as common_HeroType,
             main: {
                 single: {
-                    mediaId: 0,
+                    mediaLandscapeId: 0,
+                    mediaPortraitId: 0,
                     headline: '',
                     exploreLink: '',
                     exploreText: ''
@@ -86,20 +105,23 @@ export const emptyHeroForm: common_HeroFullInsert = {
             },
             single: {
                 headline: '',
-                mediaId: 0,
+                mediaLandscapeId: 0,
+                mediaPortraitId: 0,
                 exploreLink: '',
                 exploreText: ''
             },
             double: {
                 left: {
                     headline: '',
-                    mediaId: 0,
+                    mediaLandscapeId: 0,
+                    mediaPortraitId: 0,
                     exploreLink: '',
                     exploreText: ''
                 },
                 right: {
                     headline: '',
-                    mediaId: 0,
+                    mediaLandscapeId: 0,
+                    mediaPortraitId: 0,
                     exploreLink: '',
                     exploreText: ''
                 }
@@ -122,7 +144,8 @@ export const emptyHeroForm: common_HeroFullInsert = {
                 exploreText: ''
             }
         }
-    ]
+    ],
+    navFeatured: undefined
 }
 
 

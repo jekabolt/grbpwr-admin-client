@@ -1,7 +1,7 @@
 import { Box, Button, Divider, Grid2 as Grid, TextField } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
-import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
+import { calculateAspectRatio } from 'features/utilitty/aspect-ratio';
 import { Field, useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
@@ -36,7 +36,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
 
   const fetchEntities = () => {
     const mainAdd =
-      entities.find((e) => e.main)?.main?.single?.media?.media?.thumbnail?.mediaUrl || '';
+      entities.find((e) => e.main)?.main?.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '';
 
     const singleEntities: { [key: number]: string } = {};
     const doubleAddEntities: { [key: number]: { left: string; right: string } } = {};
@@ -46,11 +46,11 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     const calculatedAllowedRatios: { [key: number]: string[] } = {};
 
     entities.forEach((e, i) => {
-      singleEntities[i] = e.single?.media?.media?.thumbnail?.mediaUrl || '';
+      singleEntities[i] = e.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '';
 
       doubleAddEntities[i] = {
-        left: e.double?.left?.media?.media?.thumbnail?.mediaUrl || '',
-        right: e.double?.right?.media?.media?.thumbnail?.mediaUrl || '',
+        left: e.double?.left?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
+        right: e.double?.right?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
       };
 
       productsForEntities[i] = e.featuredProducts?.products || [];

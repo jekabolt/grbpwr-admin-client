@@ -2,14 +2,18 @@ import { common_HeroEntityInsert, common_HeroType } from "api/proto-http/admin";
 
 export const validationForSelectHeroType: Record<common_HeroType, (entity: common_HeroEntityInsert) => boolean> = {
     HERO_TYPE_MAIN: (entity: common_HeroEntityInsert) =>
-        !entity.main?.single?.mediaId,
+        !entity.main?.single?.mediaLandscapeId ||
+        !entity.main?.single?.mediaPortraitId,
 
     HERO_TYPE_SINGLE: (entity: common_HeroEntityInsert) =>
-        !entity.single?.mediaId,
+        !entity.single?.mediaLandscapeId ||
+        !entity.single?.mediaPortraitId,
 
     HERO_TYPE_DOUBLE: (entity: common_HeroEntityInsert) =>
-        !entity.double?.left?.mediaId ||
-        !entity.double?.right?.mediaId,
+        !entity.double?.left?.mediaLandscapeId ||
+        !entity.double?.left?.mediaPortraitId ||
+        !entity.double?.right?.mediaLandscapeId ||
+        !entity.double?.right?.mediaPortraitId,
 
     HERO_TYPE_FEATURED_PRODUCTS: (entity: common_HeroEntityInsert) =>
         !entity.featuredProducts?.productIds || entity.featuredProducts.productIds.length === 0,

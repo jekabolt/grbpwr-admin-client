@@ -1,9 +1,6 @@
-import CheckIcon from '@mui/icons-material/Check';
-import ClearIcon from '@mui/icons-material/Clear';
 import {
   Box,
   Grid,
-  IconButton,
   ImageList,
   ImageListItem,
   InputLabel,
@@ -11,13 +8,16 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { deleteFiles } from 'api/admin';
 import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'components/common/interfaces/mediaSelectorInterfaces';
-import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
+import {
+  aspectRatioColor,
+  fetchVideoSizes,
+  mediaAspectRatio,
+} from 'features/utilitty/aspect-ratio';
 import { isVideo } from 'features/utilitty/filterContentType';
-import { useSnackBarStore } from 'lib/stores/store';
-import { FC, useCallback, useEffect, useState } from 'react';
+import { useMediaSelectorStore, useSnackBarStore } from 'lib/stores/store';
+import { FC, useEffect, useState } from 'react';
 import styles from 'styles/media-selector.scss';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
 
@@ -31,11 +31,11 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   isDeleteAccepted = true,
   setCroppedImage,
   select,
-  setMedia,
-  sortedAndFilteredMedia,
   handleUploadMedia,
 }) => {
   const { showMessage } = useSnackBarStore();
+  const { getSortedMedia } = useMediaSelectorStore();
+  const sortedMedia = getSortedMedia();
   const [openModal, setOpenModal] = useState(false);
   const [clickedMedia, setClickedMedia] = useState<common_MediaItem | undefined>();
   const theme = useTheme();
@@ -43,81 +43,16 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const [videoSizes, setVideoSizes] = useState<Record<number, { width: number; height: number }>>(
     {},
   );
-  const [confirmDeletionId, setConfirmDeletionId] = useState<number | undefined>(undefined);
-  const [deletingMedia, setDeletingMedia] = useState<number | undefined>(undefined);
-  const [hoveredMediaId, setHoveredMediaId] = useState<number | undefined>(undefined);
-  const [filteredMedia, setFilteredMedia] = useState<common_MediaFull[]>([]);
   const handleCloseModal = () => setOpenModal(false);
 
-  const mediaAspectRatio = useCallback(
-    (media: common_MediaFull) => {
-      const width = media.media?.thumbnail?.width || videoSizes[media.id || 0]?.width;
-      const height = media.media?.thumbnail?.height || videoSizes[media.id || 0]?.height;
-      return calculateAspectRatio(width, height);
-    },
-    [calculateAspectRatio, videoSizes],
-  );
-
   useEffect(() => {
-    const applyFilter = () => {
-      const filtered = sortedAndFilteredMedia().filter((media) => {
-        if (hideVideos && isVideo(media.media?.thumbnail?.mediaUrl)) return false;
-
-        if (!aspectRatio || aspectRatio.length === 0) {
-          return true;
-        }
-
-        const mediaRatio = mediaAspectRatio(media);
-        return mediaRatio && aspectRatio.includes(mediaRatio);
-      });
-      setFilteredMedia(filtered);
-    };
-    applyFilter();
-  }, [aspectRatio, hideVideos, sortedAndFilteredMedia, mediaAspectRatio]);
-
-  useEffect(() => {
-    const fetchVideoSizes = async () => {
-      const sizes: Record<number, { width: number; height: number }> = {};
-
-      for (const media of sortedAndFilteredMedia()) {
-        const mediaUrl = media.media?.thumbnail?.mediaUrl;
-        if (isVideo(mediaUrl)) {
-          const video = document.createElement('video');
-          video.src = mediaUrl || '';
-
-          await new Promise((resolve) => {
-            video.onloadedmetadata = () => {
-              sizes[media.id || 0] = { width: video.videoWidth, height: video.videoHeight };
-              resolve(true);
-            };
-          });
-        }
-      }
-
+    const loadVideoSizes = async () => {
+      const sizes = await fetchVideoSizes(sortedMedia);
       setVideoSizes(sizes);
     };
 
-    fetchVideoSizes();
-  }, [sortedAndFilteredMedia]);
-
-  const handleDeleteFile = async (id: number | undefined, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (confirmDeletionId === id) {
-      setDeletingMedia(id);
-      try {
-        await deleteFiles({ id });
-        setMedia((currentFiles) => currentFiles?.filter((file) => file.id !== id));
-        showMessage('MEDIA WAS SUCCESSFULLY DELETED', 'success');
-      } catch {
-        showMessage('MEDIA CANNOT BE REMOVED', 'error');
-      } finally {
-        setConfirmDeletionId(undefined);
-        setDeletingMedia(undefined);
-      }
-    } else {
-      setConfirmDeletionId(id);
-    }
-  };
+    loadVideoSizes();
+  }, [sortedMedia]);
 
   const handleSelect = (media: common_MediaFull | undefined, event: React.MouseEvent) => {
     event.stopPropagation();
@@ -129,18 +64,17 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
     }
   };
 
-  const aspectRatioColor = useCallback((aspectRatio?: string) => {
-    const colorMap: Record<string, string> = {
-      '16:9': '#cc0000',
-      '4:3': '#e69138',
-      '1:1': '#f1c232',
-      '4:5': '#6aa84f',
-      '3:4': '#45818e',
-      '5:4': '#3d85c6',
-      '9:16': '#674ea7',
-    };
-    return colorMap[aspectRatio || ''] || '#808080';
-  }, []);
+  const filteredMedia = sortedMedia.filter((media) => {
+    if (hideVideos && isVideo(media.media?.thumbnail?.mediaUrl)) {
+      return false;
+    }
+
+    if (aspectRatio) {
+      const mediaRatio = mediaAspectRatio(media, videoSizes);
+      return mediaRatio && aspectRatio.includes(mediaRatio);
+    }
+    return true;
+  });
 
   return (
     <Grid container justifyContent='center'>
@@ -156,17 +90,17 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             <Box key={media.id}>
               <ImageListItem
                 onClick={(event) => handleSelect(media, event)}
-                onMouseEnter={() => setHoveredMediaId(media.id)}
-                onMouseLeave={() => setHoveredMediaId(undefined)}
+                // onMouseEnter={() => setHoveredMediaId(media.id)}
+                // onMouseLeave={() => setHoveredMediaId(undefined)}
                 className={styles.list_media_item}
               >
                 <InputLabel htmlFor={`${media.id}`}>
                   {selectedMedia?.some((item) => item.id === media.id) && (
                     <span className={styles.selected_flag}>selected</span>
                   )}
-                  {deletingMedia === media.id ? (
-                    <Typography variant='h5'>media removed</Typography>
-                  ) : isVideo(media.media?.thumbnail?.mediaUrl) ? (
+                  {/* { {deletingMedia === media.id ? (
+                    <Typography variant='h5'>media removed</Typography> */}
+                  {isVideo(media.media?.thumbnail?.mediaUrl) ? (
                     <video
                       src={media.media?.thumbnail?.mediaUrl}
                       className={
@@ -188,7 +122,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                     />
                   )}
                 </InputLabel>
-                {hoveredMediaId === media.id && isDeleteAccepted && (
+                {/* {hoveredMediaId === media.id && isDeleteAccepted && (
                   <IconButton
                     size='small'
                     onClick={(e) => handleDeleteFile(media.id, e)}
@@ -196,17 +130,19 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                   >
                     {confirmDeletionId === media.id ? <CheckIcon /> : <ClearIcon />}
                   </IconButton>
-                )}
+                )} */}
               </ImageListItem>
               <Typography
                 variant='overline'
                 style={{
-                  backgroundColor: mediaAspectRatio(media)
-                    ? aspectRatioColor(mediaAspectRatio(media))
+                  backgroundColor: mediaAspectRatio(media, videoSizes)
+                    ? aspectRatioColor(mediaAspectRatio(media, videoSizes))
                     : '#808080',
                 }}
               >
-                {mediaAspectRatio(media) ? `RATIO: ${mediaAspectRatio(media)}` : 'RATIO: UNKNOWN'}
+                {mediaAspectRatio(media, videoSizes)
+                  ? `RATIO: ${mediaAspectRatio(media, videoSizes)}`
+                  : 'RATIO: UNKNOWN'}
               </Typography>
             </Box>
           ))}
