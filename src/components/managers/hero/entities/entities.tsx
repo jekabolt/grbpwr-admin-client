@@ -2,18 +2,19 @@ import { Box, Button, Divider, Grid2 as Grid, TextField } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { Field, useFormikContext } from 'formik';
+import { useHeroStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';
-import { getAllowedRatios } from '../utility/getAllowedRatios';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity/common-entity';
 import { FeaturedArchive } from './featured-archive/featured-archive';
 import { FeaturedProductBase } from './featured-products-(tags)/featured-prduct-base';
 import { EntitiesProps } from './interface/interface';
 
-export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers }) => {
+export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
   const { values, setFieldValue } = useFormikContext<common_HeroFullInsert>();
+  const { entities } = useHeroStore();
   const [main, setMain] = useState<string>('');
   const [mainPortrait, setMainPortrait] = useState<string>('');
   const [single, setSingle] = useState<{ [key: number]: string }>({});
@@ -35,46 +36,58 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   const handleCloseModal = () => setIsModalOpen(false);
 
   const fetchEntities = () => {
-    const mainLandscape =
-      entities.find((e) => e.main)?.main?.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '';
-    const mainPortraitUrl =
-      entities.find((e) => e.main)?.main?.single?.mediaPortrait?.media?.thumbnail?.mediaUrl || '';
+    const mainEntity = entities.find((e) => e.main);
+    setMain(mainEntity?.main?.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '');
+    setMainPortrait(mainEntity?.main?.single?.mediaPortrait?.media?.thumbnail?.mediaUrl || '');
 
-    const singleEntities: { [key: number]: string } = {};
-    const singlePortraitEntities: { [key: number]: string } = {};
-    const doubleAddEntities: { [key: number]: { left: string; right: string } } = {};
-    const productsForEntities: { [key: number]: common_Product[] } = {};
-    const productTagsForEntities: { [key: number]: common_Product[] } = {};
-    const archiveForEntities: { [key: number]: common_ArchiveFull[] } = {};
-    const calculatedAllowedRatios: { [key: number]: string[] } = {};
+    const entityMappings = entities.reduce(
+      (acc, entity, index) => {
+        return {
+          single: {
+            ...acc.single,
+            [index]: entity.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
+          },
+          singlePortrait: {
+            ...acc.singlePortrait,
+            [index]: entity.single?.mediaPortrait?.media?.thumbnail?.mediaUrl || '',
+          },
+          doubleAdd: {
+            ...acc.doubleAdd,
+            [index]: {
+              left: entity.double?.left?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
+              right: entity.double?.right?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
+            },
+          },
+          products: {
+            ...acc.products,
+            [index]: entity.featuredProducts?.products || [],
+          },
+          productTags: {
+            ...acc.productTags,
+            [index]: entity.featuredProductsTag?.products?.products || [],
+          },
+          archive: {
+            ...acc.archive,
+            [index]: entity.featuredArchive?.archive ? [entity.featuredArchive.archive] : [],
+          },
+        };
+      },
+      {
+        single: {},
+        singlePortrait: {},
+        doubleAdd: {},
+        products: {},
+        productTags: {},
+        archive: {},
+      },
+    );
 
-    entities.forEach((e, i) => {
-      singleEntities[i] = e.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '';
-      singlePortraitEntities[i] = e.single?.mediaPortrait?.media?.thumbnail?.mediaUrl || '';
-
-      doubleAddEntities[i] = {
-        left: e.double?.left?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
-        right: e.double?.right?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
-      };
-
-      productsForEntities[i] = e.featuredProducts?.products || [];
-      productTagsForEntities[i] = e.featuredProductsTag?.products?.products || [];
-      archiveForEntities[i] = e.featuredArchive?.archive ? [e.featuredArchive.archive] : [];
-
-      const allowedRatios = getAllowedRatios(e);
-      if (allowedRatios.length > 0) {
-        calculatedAllowedRatios[i] = allowedRatios;
-      }
-    });
-
-    setMain(mainLandscape);
-    setMainPortrait(mainPortraitUrl);
-    setSingle(singleEntities);
-    setSinglePortrait(singlePortraitEntities);
-    setDoubleAdd(doubleAddEntities);
-    setProduct(productsForEntities);
-    setProductTags(productTagsForEntities);
-    setArchive(archiveForEntities);
+    setSingle(entityMappings.single);
+    setSinglePortrait(entityMappings.singlePortrait);
+    setDoubleAdd(entityMappings.doubleAdd);
+    setProduct(entityMappings.products);
+    setProductTags(entityMappings.productTags);
+    setArchive(entityMappings.archive);
   };
 
   useEffect(() => {
@@ -135,7 +148,6 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
       setFieldValue(config.fieldPath, media.id);
     }
 
-    // Update both portrait and landscape states based on orientation
     if (type === 'main') {
       if (orientation === 'Portrait') {
         setMainPortrait(thumbnailURL);
@@ -187,13 +199,12 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
           <Grid size={{ xs: 12 }} ref={(el) => (entityRefs.current[index] = el)}>
             <Grid container spacing={2} className={styles.entity_container}>
               {entity.type === 'HERO_TYPE_MAIN' && (
-                <Grid size={{ xs: 7 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <CommonEntity
                     title='main add'
                     prefix={`entities.${index}.main.single`}
                     landscapeLink={main}
                     portraitLink={mainPortrait}
-                    exploreLink={entity.main?.single?.exploreLink}
                     size={{ xs: 12 }}
                     aspectRatio={{
                       Portrait: ['9:16'],
@@ -210,24 +221,25 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                       name={`entities.${index}.main.tag`}
                       label='tag'
                       fullWidth
+                      InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
                     />
                     <Field
                       as={TextField}
                       name={`entities.${index}.main.description`}
                       label='description'
                       fullWidth
+                      InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
                     />
                   </Box>
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_SINGLE' && (
-                <Grid size={{ xs: 7 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <CommonEntity
                     title='single add'
                     prefix={`entities.${index}.single`}
                     landscapeLink={single[index]}
                     portraitLink={singlePortrait[index]}
-                    exploreLink={entity.single?.exploreLink}
                     size={{ xs: 12 }}
                     aspectRatio={{
                       Portrait: ['9:16'],
@@ -241,7 +253,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_DOUBLE' && (
-                <Grid size={{ xs: 7 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <Grid container spacing={2}>
                     <Grid size={{ xs: 12, md: 6 }}>
                       <CommonEntity
@@ -249,7 +261,6 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                         prefix={`entities.${index}.double.left`}
                         landscapeLink={doubleAdd[index]?.left || ''}
                         portraitLink={doubleAdd[index]?.left || ''}
-                        exploreLink={entity.double?.left?.exploreLink}
                         size={{ xs: 12 }}
                         aspectRatio={['1:1']}
                         isDoubleAd={true}
@@ -265,7 +276,6 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                         prefix={`entities.${index}.double.right`}
                         landscapeLink={doubleAdd[index]?.right || ''}
                         portraitLink={doubleAdd[index]?.right || ''}
-                        exploreLink={entity.double?.right?.exploreLink}
                         size={{ xs: 12 }}
                         aspectRatio={['1:1']}
                         isDoubleAd
@@ -278,7 +288,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
-                <Grid size={{ xs: 7 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <FeaturedProductBase
                     index={index}
                     entity={entity}
@@ -296,7 +306,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' && (
-                <Grid size={{ xs: 7 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <FeaturedProductBase
                     index={index}
                     entity={entity}
@@ -308,7 +318,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_ARCHIVE' && (
-                <Grid size={{ xs: 7 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <Field
                     component={FeaturedArchive}
                     archive={archive}
@@ -321,7 +331,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                   />
                 </Grid>
               )}
-              <Grid size={{ xs: 7 }}>
+              <Grid size={{ xs: 12, md: 7 }}>
                 <Button
                   variant='contained'
                   color='error'

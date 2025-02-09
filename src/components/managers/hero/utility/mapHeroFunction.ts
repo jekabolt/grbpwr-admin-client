@@ -73,16 +73,16 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
         })),
         navFeatured: {
             men: {
-                mediaId: undefined,
-                exploreText: undefined,
-                featuredTag: undefined,
-                featuredArchiveId: undefined
+                mediaId: hero?.navFeatured?.men?.media?.id,
+                exploreText: hero?.navFeatured?.men?.exploreText,
+                featuredTag: hero?.navFeatured?.men?.featuredTag,
+                featuredArchiveId: hero?.navFeatured?.men?.featuredArchiveId ? Number(hero.navFeatured.men.featuredArchiveId) : undefined
             },
             women: {
-                mediaId: undefined,
-                exploreText: undefined,
-                featuredTag: undefined,
-                featuredArchiveId: undefined
+                mediaId: hero?.navFeatured?.women?.media?.id,
+                exploreText: hero?.navFeatured?.women?.exploreText,
+                featuredTag: hero?.navFeatured?.women?.featuredTag,
+                featuredArchiveId: hero?.navFeatured?.women?.featuredArchiveId ? Number(hero.navFeatured.women.featuredArchiveId) : undefined
             }
         }
     };
@@ -145,7 +145,20 @@ export const emptyHeroForm: common_HeroFullInsert = {
             }
         }
     ],
-    navFeatured: undefined
+    navFeatured: {
+        men: {
+            mediaId: 0,
+            exploreText: '',
+            featuredTag: '',
+            featuredArchiveId: 0
+        },
+        women: {
+            mediaId: 0,
+            exploreText: '',
+            featuredTag: '',
+            featuredArchiveId: 0
+        }
+    }
 }
 
 

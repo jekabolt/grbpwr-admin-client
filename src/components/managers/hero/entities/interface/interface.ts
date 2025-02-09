@@ -14,7 +14,6 @@ export interface Props {
     prefix: string;
     landscapeLink: string;
     portraitLink: string;
-    exploreLink: string | undefined;
     size: { xs: number; md?: number };
     aspectRatio: string[] | { Portrait: string[], Landscape: string[] };
     isDoubleAd?: boolean;

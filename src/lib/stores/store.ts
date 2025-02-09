@@ -1,10 +1,11 @@
 import { getAllUploadedFiles, getDictionary, getProductsPaged } from "api/admin";
 import { addArchive, deleteArchive, getArchive, getArchiveItems, updateArchive } from "api/archive";
+import { addHero, getHero } from "api/hero";
 import { common_ArchiveInsert, common_FilterConditions, GetProductsPagedRequest } from "api/proto-http/admin";
 import { defaultProductFilterSettings } from "constants/initialFilterStates";
 import { isVideo } from "features/utilitty/filterContentType";
 import { create } from "zustand";
-import { ArchiveStore, DictionaryStore, MediaSelectorStore, ProductStore, SnackBarStore } from "./store-types";
+import { ArchiveStore, DictionaryStore, HeroStore, MediaSelectorStore, ProductStore, SnackBarStore } from "./store-types";
 
 export const useDictionaryStore = create<DictionaryStore>((set, get) => ({
     dictionary: undefined,
@@ -189,7 +190,6 @@ export const useArchiveStore = create<ArchiveStore>((set, get) => ({
     }
 }))
 
-
 export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
     media: [],
     type: '',
@@ -230,5 +230,26 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
                 const bOrder = new Date(b.createdAt || 0).getTime();
                 return order === 'asc' ? aOrder - bOrder : bOrder - aOrder;
             })
+    },
+}))
+
+export const useHeroStore = create<HeroStore>((set, get) => ({
+    hero: undefined,
+    entities: [],
+    fetchHero: async () => {
+        const response = await getHero({});
+        if (!response) return;
+
+        const heroEntities = response.hero?.entities || [];
+        set({ hero: response.hero, entities: heroEntities });
+    },
+    saveHero: async (values) => {
+        try {
+            await addHero({ hero: values });
+            await useHeroStore.getState().fetchHero();
+            return { success: true, invalidUrls: [], nonAllowedDomainUrls: [] };
+        } catch (error) {
+            return { success: false, invalidUrls: [], nonAllowedDomainUrls: [] };
+        }
     },
 }))
