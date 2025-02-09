@@ -1,9 +1,11 @@
-import { getDictionary, getProductsPaged } from "api/admin";
+import { getAllUploadedFiles, getDictionary, getProductsPaged } from "api/admin";
 import { addArchive, deleteArchive, getArchive, getArchiveItems, updateArchive } from "api/archive";
+import { addHero, getHero } from "api/hero";
 import { common_ArchiveInsert, common_FilterConditions, GetProductsPagedRequest } from "api/proto-http/admin";
 import { defaultProductFilterSettings } from "constants/initialFilterStates";
+import { isVideo } from "features/utilitty/filterContentType";
 import { create } from "zustand";
-import { ArchiveStore, DictionaryStore, ProductStore, SnackBarStore } from "./store-types";
+import { ArchiveStore, DictionaryStore, HeroStore, MediaSelectorStore, ProductStore, SnackBarStore } from "./store-types";
 
 export const useDictionaryStore = create<DictionaryStore>((set, get) => ({
     dictionary: undefined,
@@ -188,4 +190,66 @@ export const useArchiveStore = create<ArchiveStore>((set, get) => ({
     }
 }))
 
+export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
+    media: [],
+    type: '',
+    order: 'desc',
+    isLoading: false,
+    error: null,
+    setType: (type: string) => set({ type }),
+    setOrder: (order: string) => set({ order }),
+    fetchFiles: async (limit: number, offset: number) => {
+        set({ isLoading: true, error: null });
+        const response = await getAllUploadedFiles({
+            limit,
+            offset,
+            orderFactor: 'ORDER_FACTOR_DESC',
+        });
+        const fetchedFiles = response.list || [];
+        if (offset === 0) {
+            set({ media: fetchedFiles })
+        } else {
+            set((state) => ({
+                media: [...state.media, ...fetchedFiles]
+            }))
+        }
+        set({ isLoading: false });
+    },
+    getSortedMedia: () => {
+        const { media, type, order } = get();
+        return media
+            ?.filter((m) => {
+                const matchType =
+                    type === '' ||
+                    (type === 'video' && isVideo(m.media?.fullSize?.mediaUrl)) ||
+                    (type === 'image' && !isVideo(m.media?.fullSize?.mediaUrl))
+                return matchType;
+            })
+            .sort((a, b) => {
+                const aOrder = new Date(a.createdAt || 0).getTime();
+                const bOrder = new Date(b.createdAt || 0).getTime();
+                return order === 'asc' ? aOrder - bOrder : bOrder - aOrder;
+            })
+    },
+}))
 
+export const useHeroStore = create<HeroStore>((set, get) => ({
+    hero: undefined,
+    entities: [],
+    fetchHero: async () => {
+        const response = await getHero({});
+        if (!response) return;
+
+        const heroEntities = response.hero?.entities || [];
+        set({ hero: response.hero, entities: heroEntities });
+    },
+    saveHero: async (values) => {
+        try {
+            await addHero({ hero: values });
+            await useHeroStore.getState().fetchHero();
+            return { success: true, invalidUrls: [], nonAllowedDomainUrls: [] };
+        } catch (error) {
+            return { success: false, invalidUrls: [], nonAllowedDomainUrls: [] };
+        }
+    },
+}))

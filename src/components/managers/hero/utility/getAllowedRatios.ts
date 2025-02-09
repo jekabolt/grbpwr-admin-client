@@ -1,4 +1,4 @@
-import { calculateAspectRatio } from "features/utilitty/calculateAspectRatio";
+import { calculateAspectRatio } from "features/utilitty/aspect-ratio";
 
 export const getAllowedRatios = (entity: any) => {
     if (!entity.doubleAdd) return [];

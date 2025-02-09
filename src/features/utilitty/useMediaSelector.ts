@@ -1,13 +1,10 @@
 import {
-    getAllUploadedFiles,
     uploadContentImage,
     uploadContentVideo
 } from 'api/admin';
-import { common_MediaFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Dispatch, SetStateAction, useCallback, useState } from 'react';
 import { checkIsHttpHttpsMediaLink } from './checkIsHttpHttpsLink';
-import { isVideo } from './filterContentType';
 import { filterExtensionToContentType } from './filterExtentions';
 import { getBase64ImageFromUrl } from './getBase64';
 
@@ -24,31 +21,22 @@ const useMediaSelector = (
     initialIsLoading = false,
     initialHasMore = true,
 ): {
-    media: common_MediaFull[];
     selectedFiles: File[];
     url: string;
     selectedFileUrl: string;
     croppedImage: string | null,
     filterByType: string;
     sortByDate: string;
-    isLoading: boolean;
     loading: boolean,
-    setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
     setUrl: React.Dispatch<React.SetStateAction<string>>;
     setSelectedFiles: Dispatch<SetStateAction<File[]>>;
     handleMediaUpload: () => Promise<void>
-    fetchFiles: (limit: number, startOffset: number) => Promise<void>;
-    reload: () => Promise<void>;
     setFilterByType: React.Dispatch<React.SetStateAction<string>>;
     setSortByDate: React.Dispatch<React.SetStateAction<string>>;
-    sortedAndFilteredMedia: () => common_MediaFull[];
     setSelectedFileUrl: (url: string) => void;
     setCroppedImage: (img: string | null) => void;
 } => {
     const { showMessage } = useSnackBarStore();
-    const [media, setMedia] = useState<common_MediaFull[]>([]);
-    const [isLoading, setIsLoading] = useState<boolean>(initialIsLoading);
-    const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
     const [url, setUrl] = useState<string>('');
     const [filterByType, setFilterByType] = useState('');
     const [sortByDate, setSortByDate] = useState('desc');
@@ -56,41 +44,6 @@ const useMediaSelector = (
     const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
     const [croppedImage, setCroppedImage] = useState<string | null>(null);
     const [selectedFileUrl, setSelectedFileUrl] = useState<string>('');
-
-    const sortedAndFilteredMedia = useCallback(() => {
-        return media
-            ?.filter((m) => {
-                const matchesType =
-                    filterByType === '' ||
-                    (filterByType === 'video' && isVideo(m.media?.fullSize?.mediaUrl)) ||
-                    (filterByType === 'image' && !isVideo(m.media?.fullSize?.mediaUrl));
-
-                return matchesType;
-            })
-            .sort((a, b) => {
-                const dateA = new Date(a.createdAt || 0).getTime();
-                const dateB = new Date(b.createdAt || 0).getTime();
-                return sortByDate === 'asc' ? dateA - dateB : dateB - dateA;
-            });
-    }, [media, filterByType, sortByDate]);
-
-    const fetchFiles = useCallback(async (limit: number, startOffset: number) => {
-        setIsLoading(true);
-        const response = await getAllUploadedFiles({
-            limit,
-            offset: startOffset,
-            orderFactor: 'ORDER_FACTOR_DESC',
-        });
-        const fetchedFiles: common_MediaFull[] = response.list || [];
-        setMedia((prev) => (startOffset === 0 ? fetchedFiles : [...prev, ...fetchedFiles]));
-        setIsLoading(false);
-        setHasMore(fetchedFiles.length === limit);
-    }, []);
-
-    const reload = useCallback(async () => {
-        setMedia([]);
-        await fetchFiles(50, 0);
-    }, [fetchFiles]);
 
     const processAndUpload = async (baseData64: string, contentType: string) => {
         try {
@@ -109,7 +62,6 @@ const useMediaSelector = (
             setSelectedFileUrl('');
             setCroppedImage(null);
             setUrl('')
-            reload();
         }
     };
 
@@ -135,26 +87,20 @@ const useMediaSelector = (
             showMessage('NO MEDIA FOR UPLOAD', 'error');
             setLoading(false);
         }
-    }, [url, croppedImage, selectedFiles, reload]);
+    }, [url, croppedImage, selectedFiles]);
 
 
     return {
-        media,
         selectedFiles,
         url,
         selectedFileUrl,
         croppedImage,
         filterByType,
         sortByDate,
-        isLoading,
         loading,
-        fetchFiles,
-        reload,
-        setMedia,
         setUrl,
         setFilterByType,
         setSortByDate,
-        sortedAndFilteredMedia,
         setSelectedFileUrl,
         setCroppedImage,
         setSelectedFiles,

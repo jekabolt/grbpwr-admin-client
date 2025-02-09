@@ -1,22 +1,24 @@
 import { Box, Button, Divider, Grid2 as Grid, TextField } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
-import { calculateAspectRatio } from 'features/utilitty/calculateAspectRatio';
 import { Field, useFormikContext } from 'formik';
+import { useHeroStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';
-import { getAllowedRatios } from '../utility/getAllowedRatios';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity/common-entity';
 import { FeaturedArchive } from './featured-archive/featured-archive';
 import { FeaturedProductBase } from './featured-products-(tags)/featured-prduct-base';
 import { EntitiesProps } from './interface/interface';
 
-export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers }) => {
+export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
   const { values, setFieldValue } = useFormikContext<common_HeroFullInsert>();
+  const { entities } = useHeroStore();
   const [main, setMain] = useState<string>('');
+  const [mainPortrait, setMainPortrait] = useState<string>('');
   const [single, setSingle] = useState<{ [key: number]: string }>({});
+  const [singlePortrait, setSinglePortrait] = useState<{ [key: number]: string }>({});
   const [doubleAdd, setDoubleAdd] = useState<{
     [key: number]: { left: string | undefined; right: string | undefined };
   }>({});
@@ -24,7 +26,6 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   const [productTags, setProductTags] = useState<{ [key: number]: common_Product[] }>({});
   const [archive, setArchive] = useState<{ [key: number]: common_ArchiveFull[] }>({});
   const [currentEntityIndex, setCurrentEntityIndex] = useState<number | null>(null);
-  const [allowedRatios, setAllowedRatios] = useState<{ [key: number]: string[] }>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
   const mediaSaveConfigs = createMediaSaveConfigs(setMain, setSingle, setDoubleAdd);
 
@@ -35,41 +36,58 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
   const handleCloseModal = () => setIsModalOpen(false);
 
   const fetchEntities = () => {
-    const mainAdd =
-      entities.find((e) => e.main)?.main?.single?.media?.media?.thumbnail?.mediaUrl || '';
+    const mainEntity = entities.find((e) => e.main);
+    setMain(mainEntity?.main?.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '');
+    setMainPortrait(mainEntity?.main?.single?.mediaPortrait?.media?.thumbnail?.mediaUrl || '');
 
-    const singleEntities: { [key: number]: string } = {};
-    const doubleAddEntities: { [key: number]: { left: string; right: string } } = {};
-    const productsForEntities: { [key: number]: common_Product[] } = {};
-    const productTagsForEntities: { [key: number]: common_Product[] } = {};
-    const archiveForEntities: { [key: number]: common_ArchiveFull[] } = {};
-    const calculatedAllowedRatios: { [key: number]: string[] } = {};
+    const entityMappings = entities.reduce(
+      (acc, entity, index) => {
+        return {
+          single: {
+            ...acc.single,
+            [index]: entity.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
+          },
+          singlePortrait: {
+            ...acc.singlePortrait,
+            [index]: entity.single?.mediaPortrait?.media?.thumbnail?.mediaUrl || '',
+          },
+          doubleAdd: {
+            ...acc.doubleAdd,
+            [index]: {
+              left: entity.double?.left?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
+              right: entity.double?.right?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
+            },
+          },
+          products: {
+            ...acc.products,
+            [index]: entity.featuredProducts?.products || [],
+          },
+          productTags: {
+            ...acc.productTags,
+            [index]: entity.featuredProductsTag?.products?.products || [],
+          },
+          archive: {
+            ...acc.archive,
+            [index]: entity.featuredArchive?.archive ? [entity.featuredArchive.archive] : [],
+          },
+        };
+      },
+      {
+        single: {},
+        singlePortrait: {},
+        doubleAdd: {},
+        products: {},
+        productTags: {},
+        archive: {},
+      },
+    );
 
-    entities.forEach((e, i) => {
-      singleEntities[i] = e.single?.media?.media?.thumbnail?.mediaUrl || '';
-
-      doubleAddEntities[i] = {
-        left: e.double?.left?.media?.media?.thumbnail?.mediaUrl || '',
-        right: e.double?.right?.media?.media?.thumbnail?.mediaUrl || '',
-      };
-
-      productsForEntities[i] = e.featuredProducts?.products || [];
-      productTagsForEntities[i] = e.featuredProductsTag?.products?.products || [];
-      archiveForEntities[i] = e.featuredArchive?.archive ? [e.featuredArchive.archive] : [];
-
-      const allowedRatios = getAllowedRatios(e);
-      if (allowedRatios.length > 0) {
-        calculatedAllowedRatios[i] = allowedRatios;
-      }
-    });
-
-    setMain(mainAdd);
-    setSingle(singleEntities);
-    setDoubleAdd(doubleAddEntities);
-    setProduct(productsForEntities);
-    setProductTags(productTagsForEntities);
-    setAllowedRatios(calculatedAllowedRatios);
-    setArchive(archiveForEntities);
+    setSingle(entityMappings.single);
+    setSinglePortrait(entityMappings.singlePortrait);
+    setDoubleAdd(entityMappings.doubleAdd);
+    setProduct(entityMappings.products);
+    setProductTags(entityMappings.productTags);
+    setArchive(entityMappings.archive);
   };
 
   useEffect(() => {
@@ -109,29 +127,41 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
     selectedMedia: common_MediaFull[],
     type: 'main' | 'single' | 'doubleLeft' | 'doubleRight',
     index: number,
+    orientation: 'Portrait' | 'Landscape',
   ) => {
     if (!selectedMedia.length) return;
 
     const media = selectedMedia[0];
-    const config = mediaSaveConfigs[type](index);
+    const config = mediaSaveConfigs[type](index, orientation);
     const thumbnailURL = media.media?.thumbnail?.mediaUrl || '';
 
-    setFieldValue(config.fieldPath, media.id);
-    config.state(thumbnailURL);
-
     if (type === 'doubleLeft' || type === 'doubleRight') {
-      const ratio = calculateAspectRatio(
-        media.media?.thumbnail?.width,
-        media.media?.thumbnail?.height,
+      setFieldValue(
+        `entities.${index}.double.${type === 'doubleLeft' ? 'left' : 'right'}.mediaLandscapeId`,
+        media.id,
       );
+      setFieldValue(
+        `entities.${index}.double.${type === 'doubleLeft' ? 'left' : 'right'}.mediaPortraitId`,
+        media.id,
+      );
+    } else {
+      setFieldValue(config.fieldPath, media.id);
+    }
 
-      const newAllowedRatios =
-        ratio === '4:5' ? ['4:5'] : ratio === '1:1' ? ['1:1'] : ['4:5', '1:1'];
-
-      setAllowedRatios((prevRatios) => ({
-        ...prevRatios,
-        [index]: newAllowedRatios,
-      }));
+    if (type === 'main') {
+      if (orientation === 'Portrait') {
+        setMainPortrait(thumbnailURL);
+      } else {
+        setMain(thumbnailURL);
+      }
+    } else if (type === 'single') {
+      if (orientation === 'Portrait') {
+        setSinglePortrait((prev) => ({ ...prev, [index]: thumbnailURL }));
+      } else {
+        setSingle((prev) => ({ ...prev, [index]: thumbnailURL }));
+      }
+    } else {
+      config.state(thumbnailURL);
     }
   };
 
@@ -169,15 +199,21 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
           <Grid size={{ xs: 12 }} ref={(el) => (entityRefs.current[index] = el)}>
             <Grid container spacing={2} className={styles.entity_container}>
               {entity.type === 'HERO_TYPE_MAIN' && (
-                <Grid size={{ xs: 12 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <CommonEntity
                     title='main add'
                     prefix={`entities.${index}.main.single`}
-                    link={main}
-                    exploreLink={entity.main?.single?.exploreLink}
+                    landscapeLink={main}
+                    portraitLink={mainPortrait}
                     size={{ xs: 12 }}
-                    aspectRatio={['16:9']}
-                    onSaveMedia={(media: common_MediaFull[]) => saveMedia(media, 'main', index)}
+                    aspectRatio={{
+                      Portrait: ['9:16'],
+                      Landscape: ['2:1'],
+                    }}
+                    onSaveMedia={(
+                      media: common_MediaFull[],
+                      orientation: 'Portrait' | 'Landscape',
+                    ) => saveMedia(media, 'main', index, orientation)}
                   />
                   <Box component='div' className={styles.fields}>
                     <Field
@@ -185,55 +221,66 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                       name={`entities.${index}.main.tag`}
                       label='tag'
                       fullWidth
+                      InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
                     />
                     <Field
                       as={TextField}
                       name={`entities.${index}.main.description`}
                       label='description'
                       fullWidth
+                      InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
                     />
                   </Box>
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_SINGLE' && (
-                <Grid size={{ xs: 12 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <CommonEntity
                     title='single add'
                     prefix={`entities.${index}.single`}
-                    link={single[index]}
-                    exploreLink={entity.single?.exploreLink}
+                    landscapeLink={single[index]}
+                    portraitLink={singlePortrait[index]}
                     size={{ xs: 12 }}
-                    aspectRatio={allowedRatios[index]}
-                    onSaveMedia={(media: common_MediaFull[]) => saveMedia(media, 'single', index)}
+                    aspectRatio={{
+                      Portrait: ['9:16'],
+                      Landscape: ['2:1'],
+                    }}
+                    onSaveMedia={(
+                      media: common_MediaFull[],
+                      orientation: 'Portrait' | 'Landscape',
+                    ) => saveMedia(media, 'single', index, orientation)}
                   />
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_DOUBLE' && (
-                <Grid size={{ xs: 12 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <Grid container spacing={2}>
                     <Grid size={{ xs: 12, md: 6 }}>
                       <CommonEntity
                         title='double add'
                         prefix={`entities.${index}.double.left`}
-                        link={doubleAdd[index]?.left || ''}
-                        exploreLink={entity.double?.left?.exploreLink}
+                        landscapeLink={doubleAdd[index]?.left || ''}
+                        portraitLink={doubleAdd[index]?.left || ''}
                         size={{ xs: 12 }}
-                        aspectRatio={allowedRatios[index] || ['4:5', '1:1']}
-                        onSaveMedia={(media: common_MediaFull[]) =>
-                          saveMedia(media, 'doubleLeft', index)
-                        }
+                        aspectRatio={['1:1']}
+                        isDoubleAd={true}
+                        onSaveMedia={(
+                          media: common_MediaFull[],
+                          orientation: 'Portrait' | 'Landscape',
+                        ) => saveMedia(media, 'doubleLeft', index, orientation)}
                       />
                     </Grid>
                     <Grid size={{ xs: 12, md: 6 }} sx={{ marginTop: '42px' }}>
                       <CommonEntity
                         title=''
                         prefix={`entities.${index}.double.right`}
-                        link={doubleAdd[index]?.right || ''}
-                        exploreLink={entity.double?.right?.exploreLink}
+                        landscapeLink={doubleAdd[index]?.right || ''}
+                        portraitLink={doubleAdd[index]?.right || ''}
                         size={{ xs: 12 }}
-                        aspectRatio={allowedRatios[index] || ['4:5', '1:1']}
+                        aspectRatio={['1:1']}
+                        isDoubleAd
                         onSaveMedia={(media: common_MediaFull[]) =>
-                          saveMedia(media, 'doubleRight', index)
+                          saveMedia(media, 'doubleRight', index, 'Landscape')
                         }
                       />
                     </Grid>
@@ -241,7 +288,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
-                <Grid size={{ xs: 12 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <FeaturedProductBase
                     index={index}
                     entity={entity}
@@ -259,7 +306,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' && (
-                <Grid size={{ xs: 12 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <FeaturedProductBase
                     index={index}
                     entity={entity}
@@ -271,7 +318,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                 </Grid>
               )}
               {entity.type === 'HERO_TYPE_FEATURED_ARCHIVE' && (
-                <Grid size={{ xs: 12 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <Field
                     component={FeaturedArchive}
                     archive={archive}
@@ -284,7 +331,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, entities, arrayHelpers
                   />
                 </Grid>
               )}
-              <Grid size={{ xs: 12 }}>
+              <Grid size={{ xs: 12, md: 7 }}>
                 <Button
                   variant='contained'
                   color='error'

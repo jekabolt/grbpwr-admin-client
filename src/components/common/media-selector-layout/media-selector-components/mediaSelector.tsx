@@ -1,4 +1,4 @@
-import { Grid2 as Grid, Theme, useMediaQuery } from '@mui/material';
+import { Grid2 as Grid } from '@mui/material';
 import { MediaSelectorInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
@@ -19,32 +19,18 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   select,
 }) => {
   const {
-    media,
     url,
     selectedFiles,
     selectedFileUrl,
     croppedImage,
-    filterByType,
-    sortByDate,
-    isLoading,
     loading,
-    fetchFiles,
-    setMedia,
     setUrl,
     handleMediaUpload,
-    sortedAndFilteredMedia,
-    setFilterByType,
-    setSortByDate,
     setSelectedFileUrl,
     setSelectedFiles,
     setCroppedImage,
   } = useMediaSelector();
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
-
-  useEffect(() => {
-    fetchFiles(50, 0);
-  }, [fetchFiles]);
 
   useEffect(() => {
     if (url) {
@@ -72,7 +58,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
       <Grid size={{ xs: 12 }}>
         <Grid container alignItems='center' spacing={2}>
           <Grid size={{ xs: 12, sm: 4 }}>
-            <ByUrl url={url} setUrl={setUrl} isLoading={isLoading} />
+            <ByUrl url={url} setUrl={setUrl} />
           </Grid>
           <Grid size={{ xs: 12, sm: 4 }}>
             <DragDrop
@@ -84,12 +70,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
             />
           </Grid>
           <Grid size={{ xs: 12, sm: 4 }}>
-            <FilterMedias
-              filterByType={filterByType}
-              setFilterByType={setFilterByType}
-              sortByDate={sortByDate}
-              setSortByDate={setSortByDate}
-            />
+            <FilterMedias />
           </Grid>
         </Grid>
       </Grid>
@@ -107,7 +88,6 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
       </Grid>
       <Grid size={{ xs: 12 }}>
         <MediaList
-          media={media}
           allowMultiple={allowMultiple}
           selectedMedia={selectedMedia}
           enableModal={enableModal}
@@ -117,9 +97,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
           isDeleteAccepted={isDeleteAccepted}
           setCroppedImage={setCroppedImage}
           select={select}
-          setMedia={setMedia}
           handleUploadMedia={handleMediaUpload}
-          sortedAndFilteredMedia={sortedAndFilteredMedia}
         />
       </Grid>
     </Grid>

@@ -161,14 +161,6 @@ export function FeaturedArchive({
           }}
         />
       </Grid>
-      {/* <Grid size={{ xs: 12 }}>
-        <Field
-          component={HeroProductTable}
-          products={product[index] || []}
-          id={index}
-          isFeaturedProducts={false}
-        />
-      </Grid> */}
     </Grid>
   );
 }

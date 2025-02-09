@@ -1,5 +1,5 @@
-import { common_ArchiveInsert, common_Dictionary, common_FilterConditions, common_Product, GetProductsPagedRequest } from "api/proto-http/admin";
-import { common_ArchiveFull } from "api/proto-http/frontend";
+import { common_ArchiveInsert, common_Dictionary, common_FilterConditions, common_HeroFullInsert, common_MediaFull, common_Product, GetProductsPagedRequest } from "api/proto-http/admin";
+import { common_ArchiveFull, common_HeroEntity, common_HeroFull } from "api/proto-http/frontend";
 
 export interface DictionaryStore {
     dictionary: common_Dictionary | undefined;
@@ -52,4 +52,23 @@ export interface ArchiveStore {
     addArchive: (archiveInsert: common_ArchiveInsert) => Promise<void>;
     updateArchive: (id: number, archiveInsert: common_ArchiveInsert) => Promise<void>;
     deleteArchive: (id: number | undefined) => Promise<void>;
+}
+
+export interface MediaSelectorStore {
+    media: common_MediaFull[];
+    type: string;
+    order: string;
+    isLoading: boolean;
+    error: string | null;
+    fetchFiles: (limit: number, offset: number) => Promise<void>;
+    setType: (type: string) => void;
+    setOrder: (order: string) => void;
+    getSortedMedia: () => common_MediaFull[];
+}
+
+export interface HeroStore {
+    hero: common_HeroFull | undefined;
+    entities: common_HeroEntity[];
+    fetchHero: () => Promise<void>;
+    saveHero: (values: common_HeroFullInsert) => Promise<{ success: boolean, invalidUrls: string[], nonAllowedDomainUrls: string[] }>;
 }

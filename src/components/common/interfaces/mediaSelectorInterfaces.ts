@@ -34,7 +34,6 @@ export interface MediaSelectorInterface {
 }
 
 export interface MediaSelectorMediaListProps {
-    media: common_MediaFull[] | undefined;
     allowMultiple: boolean;
     selectedMedia: common_MediaFull[] | undefined;
     height?: string | number;
@@ -45,22 +44,12 @@ export interface MediaSelectorMediaListProps {
     isDeleteAccepted?: boolean;
     setCroppedImage: (img: string | null) => void
     select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
-    setMedia: React.Dispatch<React.SetStateAction<common_MediaFull[]>>;
-    sortedAndFilteredMedia: () => common_MediaFull[];
     handleUploadMedia: () => Promise<void>
 }
 
 export interface UploadMediaByUrlProps {
     url: string;
-    isLoading: boolean;
     setUrl: React.Dispatch<React.SetStateAction<string>>;
-}
-
-export interface FilterMediasInterface {
-    filterByType: string;
-    sortByDate: string;
-    setFilterByType: React.Dispatch<React.SetStateAction<string>>;
-    setSortByDate: React.Dispatch<React.SetStateAction<string>>;
 }
 
 export interface FullSizeMediaModalInterface {

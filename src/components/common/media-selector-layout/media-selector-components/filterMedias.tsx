@@ -1,24 +1,15 @@
 import { FormControl, Grid, InputLabel, MenuItem, Select } from '@mui/material';
-import { FilterMediasInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
+import { useMediaSelectorStore } from 'lib/stores/store';
 import { FC } from 'react';
 
-export const FilterMedias: FC<FilterMediasInterface> = ({
-  filterByType,
-  setFilterByType,
-  sortByDate,
-  setSortByDate,
-}) => {
+export const FilterMedias: FC = ({}) => {
+  const { type, order, setType, setOrder } = useMediaSelectorStore();
   return (
     <Grid container justifyContent='center' spacing={2}>
       <Grid item xs={12} sm={6}>
         <FormControl size='small' fullWidth>
           <InputLabel shrink>TYPE</InputLabel>
-          <Select
-            value={filterByType}
-            displayEmpty
-            onChange={(e) => setFilterByType(e.target.value)}
-            label='TYPE'
-          >
+          <Select value={type} displayEmpty onChange={(e) => setType(e.target.value)} label='TYPE'>
             <MenuItem value=''>ALL</MenuItem>
             <MenuItem value='image'>IMAGE</MenuItem>
             <MenuItem value='video'>VIDEO</MenuItem>
@@ -28,7 +19,7 @@ export const FilterMedias: FC<FilterMediasInterface> = ({
       <Grid item xs={12} sm={6}>
         <FormControl size='small' fullWidth>
           <InputLabel>ORDER</InputLabel>
-          <Select value={sortByDate} onChange={(e) => setSortByDate(e.target.value)} label='ORDER'>
+          <Select value={order} onChange={(e) => setOrder(e.target.value)} label='ORDER'>
             <MenuItem value='desc'>DESCENDING</MenuItem>
             <MenuItem value='asc'>ASCENDING</MenuItem>
           </Select>

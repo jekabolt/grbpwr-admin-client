@@ -1,9 +1,9 @@
-import { Box, CircularProgress, Grid, TextField, Theme, useMediaQuery } from '@mui/material';
+import { Box, Grid, TextField, Theme, useMediaQuery } from '@mui/material';
 import { UploadMediaByUrlProps } from 'components/common/interfaces/mediaSelectorInterfaces';
 import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
 import { FC } from 'react';
 
-export const ByUrl: FC<UploadMediaByUrlProps> = ({ url, setUrl, isLoading }) => {
+export const ByUrl: FC<UploadMediaByUrlProps> = ({ url, setUrl }) => {
   const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const isValidUrl = (urlString: string) => {
     try {
@@ -26,7 +26,6 @@ export const ByUrl: FC<UploadMediaByUrlProps> = ({ url, setUrl, isLoading }) => 
             error={!isValidUrl(url) && url.length > 0}
             fullWidth={isMobile}
           />
-          {isLoading && <CircularProgress />}
         </Box>
       </Grid>
     </Grid>
