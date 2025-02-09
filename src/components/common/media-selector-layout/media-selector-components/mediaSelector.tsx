@@ -1,7 +1,6 @@
 import { Grid2 as Grid } from '@mui/material';
 import { MediaSelectorInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
-import { useMediaSelectorStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import 'react-advanced-cropper/dist/style.css';
 import { PreviewMediaForUpload } from '../../cropper/previewMediaForUpload';
@@ -31,12 +30,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
     setSelectedFiles,
     setCroppedImage,
   } = useMediaSelector();
-  const { fetchFiles } = useMediaSelectorStore();
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
-
-  useEffect(() => {
-    fetchFiles(50, 0);
-  }, [fetchFiles]);
 
   useEffect(() => {
     if (url) {

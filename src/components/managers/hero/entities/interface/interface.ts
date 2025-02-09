@@ -2,6 +2,7 @@ import { common_MediaFull, common_Product } from "api/proto-http/admin";
 import { common_ArchiveFull, common_HeroEntity } from "api/proto-http/frontend";
 import { FieldArrayRenderProps } from "formik";
 
+
 export interface EntitiesProps {
     entities: common_HeroEntity[];
     entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
@@ -11,11 +12,13 @@ export interface EntitiesProps {
 export interface Props {
     title: string;
     prefix: string;
-    link: string;
+    landscapeLink: string;
+    portraitLink: string;
     exploreLink: string | undefined;
     size: { xs: number; md?: number };
-    aspectRatio: string[];
-    onSaveMedia: (selectedMedia: common_MediaFull[]) => void;
+    aspectRatio: string[] | { Portrait: string[], Landscape: string[] };
+    isDoubleAd?: boolean;
+    onSaveMedia: (selectedMedia: common_MediaFull[], orientation: 'Portrait' | 'Landscape') => void;
 }
 
 export interface HeroProductEntityInterface {

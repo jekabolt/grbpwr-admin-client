@@ -10,11 +10,7 @@ import {
 } from '@mui/material';
 import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'components/common/interfaces/mediaSelectorInterfaces';
-import {
-  aspectRatioColor,
-  fetchVideoSizes,
-  mediaAspectRatio,
-} from 'features/utilitty/aspect-ratio';
+import { aspectRatioColor, mediaAspectRatio } from 'features/utilitty/aspect-ratio';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { useMediaSelectorStore, useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
@@ -34,7 +30,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   handleUploadMedia,
 }) => {
   const { showMessage } = useSnackBarStore();
-  const { getSortedMedia } = useMediaSelectorStore();
+  const { getSortedMedia, fetchFiles, media } = useMediaSelectorStore();
   const sortedMedia = getSortedMedia();
   const [openModal, setOpenModal] = useState(false);
   const [clickedMedia, setClickedMedia] = useState<common_MediaItem | undefined>();
@@ -46,13 +42,8 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const handleCloseModal = () => setOpenModal(false);
 
   useEffect(() => {
-    const loadVideoSizes = async () => {
-      const sizes = await fetchVideoSizes(sortedMedia);
-      setVideoSizes(sizes);
-    };
-
-    loadVideoSizes();
-  }, [sortedMedia]);
+    fetchFiles(50, 0);
+  }, [fetchFiles]);
 
   const handleSelect = (media: common_MediaFull | undefined, event: React.MouseEvent) => {
     event.stopPropagation();
@@ -62,6 +53,17 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
     } else if (media) {
       select(media, allowMultiple);
     }
+  };
+
+  const handleVideoLoad = (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const video = event.target as HTMLVideoElement;
+    setVideoSizes((prev) => ({
+      ...prev,
+      [mediaId]: {
+        width: video.videoWidth,
+        height: video.videoHeight,
+      },
+    }));
   };
 
   const filteredMedia = sortedMedia.filter((media) => {
@@ -90,16 +92,12 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             <Box key={media.id}>
               <ImageListItem
                 onClick={(event) => handleSelect(media, event)}
-                // onMouseEnter={() => setHoveredMediaId(media.id)}
-                // onMouseLeave={() => setHoveredMediaId(undefined)}
                 className={styles.list_media_item}
               >
                 <InputLabel htmlFor={`${media.id}`}>
                   {selectedMedia?.some((item) => item.id === media.id) && (
                     <span className={styles.selected_flag}>selected</span>
                   )}
-                  {/* { {deletingMedia === media.id ? (
-                    <Typography variant='h5'>media removed</Typography> */}
                   {isVideo(media.media?.thumbnail?.mediaUrl) ? (
                     <video
                       src={media.media?.thumbnail?.mediaUrl}
@@ -109,6 +107,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                           : ''
                       }
                       controls
+                      onLoadedMetadata={(e) => handleVideoLoad(media.id || 0, e)}
                     />
                   ) : (
                     <img
@@ -122,15 +121,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                     />
                   )}
                 </InputLabel>
-                {/* {hoveredMediaId === media.id && isDeleteAccepted && (
-                  <IconButton
-                    size='small'
-                    onClick={(e) => handleDeleteFile(media.id, e)}
-                    className={styles.delete_btn}
-                  >
-                    {confirmDeletionId === media.id ? <CheckIcon /> : <ClearIcon />}
-                  </IconButton>
-                )} */}
               </ImageListItem>
               <Typography
                 variant='overline'

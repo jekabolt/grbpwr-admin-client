@@ -45,6 +45,7 @@ export const aspectRatioColor = (aspectRatio?: string) => {
     const colorMap: Record<string, string> = {
         '16:9': '#cc0000',
         '4:3': '#e69138',
+        '2:1': '#c0c0c0',
         '1:1': '#f1c232',
         '4:5': '#6aa84f',
         '3:4': '#45818e',

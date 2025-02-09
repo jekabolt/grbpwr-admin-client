@@ -25,6 +25,7 @@ interface CropperInterface {
 const aspectRatios = [
   { label: '16:9', value: 1.7778, color: '#cc0000' },
   { label: '4:3', value: 1.3333, color: '#e69138' },
+  { label: '2:1', value: 2, color: '#c0c0c0' },
   { label: '1:1', value: 1.0, color: '#f1c232' },
   { label: '4:5', value: 0.8, color: '#6aa84f' },
   { label: '3:4', value: 0.75, color: '#45818e' },
