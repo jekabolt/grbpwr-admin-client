@@ -45,6 +45,16 @@ export function NavbarHero() {
   ) => {
     if (selectedArchive.length > 0) {
       setFieldValue(`navFeatured.${type}.featuredArchiveId`, selectedArchive[0].id);
+      setFieldValue(`navFeatured.${type}.featuredTag`, '');
+    } else {
+      setFieldValue(`navFeatured.${type}.featuredArchiveId`, 0);
+    }
+  };
+
+  const handleTagChange = (type: 'men' | 'women', value: string) => {
+    setFieldValue(`navFeatured.${type}.featuredTag`, value);
+    if (value) {
+      setFieldValue(`navFeatured.${type}.featuredArchiveId`, 0);
     }
   };
 
@@ -78,13 +88,19 @@ export function NavbarHero() {
               name={`navFeatured.men.featuredTag`}
               label='featured tag'
               fullWidth
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                handleTagChange('men', e.target.value)
+              }
               InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+              sx={{ display: values.navFeatured?.men?.featuredArchiveId ? 'none' : 'block' }}
             />
             <Field
               as={TextField}
               name={`navFeatured.men.featuredArchiveId`}
               label='featured archive'
               fullWidth
+              disabled={!!values.navFeatured?.men?.featuredTag}
+              sx={{ display: values.navFeatured?.men?.featuredTag ? 'none' : 'block' }}
               InputProps={{
                 endAdornment: (
                   <Button onClick={() => setOpenArchivePicker('men')} size='small' sx={{ ml: 1 }}>
@@ -116,13 +132,19 @@ export function NavbarHero() {
               name={`navFeatured.women.featuredTag`}
               label='featured tag'
               fullWidth
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                handleTagChange('women', e.target.value)
+              }
               InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+              sx={{ display: values.navFeatured?.women?.featuredArchiveId ? 'none' : 'block' }}
             />
             <Field
               as={TextField}
               name={`navFeatured.women.featuredArchiveId`}
               label='featured archive'
               fullWidth
+              disabled={!!values.navFeatured?.women?.featuredTag}
+              sx={{ display: values.navFeatured?.women?.featuredTag ? 'none' : 'block' }}
               InputProps={{
                 endAdornment: (
                   <Button onClick={() => setOpenArchivePicker('women')} size='small' sx={{ ml: 1 }}>

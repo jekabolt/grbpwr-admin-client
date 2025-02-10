@@ -186,7 +186,7 @@ export function ArchiveForm({
                       handleMediaSelect(media, allowMultiple, formik)
                     }
                     selectedMedia={selectedMedia}
-                    aspectRatio={['1:1', '3:4', '4:3']}
+                    aspectRatio={['3:4']}
                     isDeleteAccepted={false}
                     allowMultiple
                     hideVideos={false}

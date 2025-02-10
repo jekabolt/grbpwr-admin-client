@@ -1,4 +1,4 @@
-import { getAllUploadedFiles, getDictionary, getProductsPaged } from "api/admin";
+import { deleteFiles, getAllUploadedFiles, getDictionary, getProductsPaged } from "api/admin";
 import { addArchive, deleteArchive, getArchive, getArchiveItems, updateArchive } from "api/archive";
 import { addHero, getHero } from "api/hero";
 import { common_ArchiveInsert, common_FilterConditions, GetProductsPagedRequest } from "api/proto-http/admin";
@@ -231,9 +231,24 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
                 return order === 'asc' ? aOrder - bOrder : bOrder - aOrder;
             })
     },
+    deleteFile: async (id: number | undefined) => {
+        if (!id) return { success: false };
+        set({ isLoading: true });
+        try {
+            await deleteFiles({ id });
+            set(state => ({
+                media: state.media.filter(file => file.id !== id),
+                isLoading: false
+            }));
+            return { success: true };
+        } catch (error) {
+            set({ isLoading: false, error: 'Failed to delete media' });
+            return { success: false };
+        }
+    },
 }))
 
-export const useHeroStore = create<HeroStore>((set, get) => ({
+export const useHeroStore = create<HeroStore>((set) => ({
     hero: undefined,
     entities: [],
     fetchHero: async () => {

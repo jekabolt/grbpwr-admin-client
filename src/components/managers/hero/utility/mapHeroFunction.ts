@@ -76,13 +76,13 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
                 mediaId: hero?.navFeatured?.men?.media?.id,
                 exploreText: hero?.navFeatured?.men?.exploreText,
                 featuredTag: hero?.navFeatured?.men?.featuredTag,
-                featuredArchiveId: hero?.navFeatured?.men?.featuredArchiveId ? Number(hero.navFeatured.men.featuredArchiveId) : undefined
+                featuredArchiveId: parseInt(hero?.navFeatured?.men?.featuredArchiveId || '0')
             },
             women: {
                 mediaId: hero?.navFeatured?.women?.media?.id,
                 exploreText: hero?.navFeatured?.women?.exploreText,
                 featuredTag: hero?.navFeatured?.women?.featuredTag,
-                featuredArchiveId: hero?.navFeatured?.women?.featuredArchiveId ? Number(hero.navFeatured.women.featuredArchiveId) : undefined
+                featuredArchiveId: parseInt(hero?.navFeatured?.women?.featuredArchiveId || '0')
             }
         }
     };

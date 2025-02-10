@@ -1,6 +1,9 @@
+import CheckIcon from '@mui/icons-material/Check';
+import ClearIcon from '@mui/icons-material/Clear';
 import {
   Box,
-  Grid,
+  Grid2 as Grid,
+  IconButton,
   ImageList,
   ImageListItem,
   InputLabel,
@@ -30,10 +33,12 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   handleUploadMedia,
 }) => {
   const { showMessage } = useSnackBarStore();
-  const { getSortedMedia, fetchFiles, media } = useMediaSelectorStore();
+  const { getSortedMedia, fetchFiles, deleteFile } = useMediaSelectorStore();
   const sortedMedia = getSortedMedia();
   const [openModal, setOpenModal] = useState(false);
   const [clickedMedia, setClickedMedia] = useState<common_MediaItem | undefined>();
+  const [hoverMedia, setHoverMedia] = useState<number | undefined>();
+  const [confirmDeletionId, setConfirmDeletionId] = useState<number | undefined>();
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const [videoSizes, setVideoSizes] = useState<Record<number, { width: number; height: number }>>(
@@ -78,9 +83,25 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
     return true;
   });
 
+  const handleDeleteFile = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (confirmDeletionId === id) {
+      const { success } = await deleteFile(id);
+      if (success) {
+        showMessage('MEDIA WAS SUCCESSFULLY DELETED', 'success');
+      } else {
+        showMessage('MEDIA CANNOT BE REMOVED', 'error');
+      }
+      setConfirmDeletionId(undefined);
+    } else {
+      setConfirmDeletionId(id);
+    }
+  };
+
   return (
     <Grid container justifyContent='center'>
-      <Grid item xs={12}>
+      <Grid size={{ xs: 12 }}>
         <ImageList
           variant='standard'
           sx={{ width: '100%' }}
@@ -92,6 +113,8 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
             <Box key={media.id}>
               <ImageListItem
                 onClick={(event) => handleSelect(media, event)}
+                onMouseEnter={() => setHoverMedia(media.id)}
+                onMouseLeave={() => setHoverMedia(undefined)}
                 className={styles.list_media_item}
               >
                 <InputLabel htmlFor={`${media.id}`}>
@@ -121,6 +144,15 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                     />
                   )}
                 </InputLabel>
+                {hoverMedia === media.id && isDeleteAccepted && (
+                  <IconButton
+                    size='small'
+                    onClick={(e) => handleDeleteFile(media.id || 0, e)}
+                    className={styles.delete_btn}
+                  >
+                    {confirmDeletionId === media.id ? <CheckIcon /> : <ClearIcon />}
+                  </IconButton>
+                )}
               </ImageListItem>
               <Typography
                 variant='overline'
