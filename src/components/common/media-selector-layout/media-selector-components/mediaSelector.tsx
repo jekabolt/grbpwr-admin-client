@@ -15,6 +15,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   enableModal,
   aspectRatio,
   hideVideos,
+  hideNavBar,
   isDeleteAccepted,
   select,
 }) => {
@@ -56,23 +57,25 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   return (
     <Grid container justifyContent='center' spacing={2}>
       <Grid size={{ xs: 12 }}>
-        <Grid container alignItems='center' spacing={2}>
-          <Grid size={{ xs: 12, sm: 4 }}>
-            <ByUrl url={url} setUrl={setUrl} />
+        {!hideNavBar && (
+          <Grid container alignItems='center' spacing={2}>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <ByUrl url={url} setUrl={setUrl} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <DragDrop
+                loading={loading}
+                selectedFiles={selectedFiles}
+                setSelectedFiles={setSelectedFiles}
+                selectedFileUrl={selectedFileUrl}
+                setSelectedFileUrl={setSelectedFileUrl}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <FilterMedias />
+            </Grid>
           </Grid>
-          <Grid size={{ xs: 12, sm: 4 }}>
-            <DragDrop
-              loading={loading}
-              selectedFiles={selectedFiles}
-              setSelectedFiles={setSelectedFiles}
-              selectedFileUrl={selectedFileUrl}
-              setSelectedFileUrl={setSelectedFileUrl}
-            />
-          </Grid>
-          <Grid size={{ xs: 12, sm: 4 }}>
-            <FilterMedias />
-          </Grid>
-        </Grid>
+        )}
       </Grid>
       <Grid size={{ xs: 6 }}>
         <PreviewMediaForUpload
