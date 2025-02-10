@@ -64,6 +64,7 @@ export interface MediaSelectorStore {
     setType: (type: string) => void;
     setOrder: (order: string) => void;
     getSortedMedia: () => common_MediaFull[];
+    deleteFile: (id: number | undefined) => Promise<{ success: boolean }>;
 }
 
 export interface HeroStore {
