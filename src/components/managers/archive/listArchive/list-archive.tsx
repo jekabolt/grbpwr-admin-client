@@ -1,5 +1,6 @@
 import { Button, Grid2 as Grid, Typography } from '@mui/material';
-import { useArchiveStore, useSnackBarStore } from 'lib/stores/store';
+import { useArchiveStore } from 'lib/stores/archive/store';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { ArchiveItem } from './archive-item';
 

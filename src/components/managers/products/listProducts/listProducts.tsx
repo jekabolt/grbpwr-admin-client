@@ -3,7 +3,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { Button, Grid2 as Grid, IconButton, Typography } from '@mui/material';
 import { TruncateText } from 'components/common/utility/truncateText';
 import { isVideo } from 'features/utilitty/filterContentType';
-import { useProductStore } from 'lib/stores/store';
+import { useProductStore } from 'lib/stores/product/store';
 import React, { FC, useState } from 'react';
 import styles from 'styles/paged.scss';
 

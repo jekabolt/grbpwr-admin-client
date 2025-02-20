@@ -2,7 +2,7 @@ import { Box, Button, Divider, Grid2 as Grid, TextField } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { Field, useFormikContext } from 'formik';
-import { useHeroStore } from 'lib/stores/store';
+import { useHeroStore } from 'lib/stores/hero/store';
 import { FC, useEffect, useState } from 'react';
 import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';

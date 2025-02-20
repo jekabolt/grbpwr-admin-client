@@ -1,5 +1,5 @@
 import { FormControl, Grid, InputLabel, MenuItem, Select } from '@mui/material';
-import { useMediaSelectorStore } from 'lib/stores/store';
+import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC } from 'react';
 
 export const FilterMedias: FC = ({}) => {
