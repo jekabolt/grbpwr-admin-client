@@ -1,24 +1,20 @@
-import { MakeGenerics, useMatch } from '@tanstack/react-location';
 import { getProductByID, upsertProduct } from 'api/admin';
 import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { Layout } from 'components/common/layout';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
+import { useLocation, useParams } from 'react-router-dom';
 import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
 import { productInitialValues } from '../genericProductComponent/utility/productInitialValues';
 
-type ProductFormProps = MakeGenerics<{
-  Params: {
-    id?: string;
-  };
-}>;
+type ProductFormProps = {
+  id?: string;
+};
 
 export const ProductForm: FC = () => {
   const { showMessage } = useSnackBarStore();
-  const {
-    params: { id },
-    pathname,
-  } = useMatch<ProductFormProps>();
+  const { id } = useParams();
+  const { pathname } = useLocation();
   const isCopyMode = pathname.includes('/copy');
   const [product, setProduct] = useState<common_ProductFull | undefined>();
   const [isEditMode, setIsEditMode] = useState<boolean>(false);

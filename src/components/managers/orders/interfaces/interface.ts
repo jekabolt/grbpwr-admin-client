@@ -1,4 +1,3 @@
-import { MakeGenerics } from "@tanstack/react-location";
 import { common_Dictionary, common_OrderStatusEnum, common_PaymentMethodNameEnum } from "api/proto-http/admin";
 import { common_OrderFull } from "api/proto-http/frontend";
 
@@ -14,11 +13,11 @@ export interface FilterProps {
     onSearch: (filters: SearchFilters) => void;
 }
 
-export type OrderDetailsPathProps = MakeGenerics<{
+export type OrderDetailsPathProps = {
     Params: {
         uuid: string;
     };
-}>;
+};
 
 export interface OrderDetailsState {
     orderDetails: common_OrderFull | undefined;

@@ -1,5 +1,6 @@
 import { Grid2 as Grid } from '@mui/material';
-import { useNavigate, useSearch } from '@tanstack/react-location';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+
 import { deleteProductByID } from 'api/admin';
 import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
@@ -17,7 +18,7 @@ export const AllProducts: FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const [deletingProductId, setDeletingProductId] = useState<number | undefined>(undefined);
   const navigate = useNavigate();
-  const search = useSearch();
+  const [searchParams] = useSearchParams();
 
   const debouncedFetchProducts = useCallback(
     debounce((values: GetProductsPagedRequest) => {
@@ -27,10 +28,12 @@ export const AllProducts: FC = () => {
   );
 
   useEffect(() => {
-    if (search.filter) {
+    if (searchParams.get('filter')) {
       try {
         const filterFromUrl =
-          typeof search.filter === 'string' ? JSON.parse(search.filter) : search.filter;
+          typeof searchParams.get('filter') === 'string'
+            ? JSON.parse(searchParams.get('filter')!)
+            : searchParams.get('filter');
         updateFilter(filterFromUrl);
         fetchProducts(50, 0, filterFromUrl);
       } catch (error) {
@@ -39,14 +42,14 @@ export const AllProducts: FC = () => {
     } else {
       debouncedFetchProducts(filter);
     }
-  }, [search.filter]);
+  }, [searchParams.get('filter')]);
 
   const handleProductClick = (id: number | undefined) => {
-    navigate({ to: `${ROUTES.product}/${id}`, replace: true });
+    navigate(`${ROUTES.product}/${id}`, { replace: true });
   };
 
   const handleCopyProductClick = (id: number | undefined) => {
-    navigate({ to: `${ROUTES.copyProduct}/${id}` });
+    navigate(`${ROUTES.copyProduct}/${id}`);
   };
 
   const handleDeleteClick = async (

@@ -1,38 +1,38 @@
 import { Button, Grid } from '@mui/material';
-import { useNavigate } from '@tanstack/react-location';
 import { Layout } from 'components/common/layout';
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 export const Main: FC = () => {
   const navigate = useNavigate();
 
   const navigateMediaManager = () => {
-    navigate({ to: ROUTES.media });
+    navigate(ROUTES.media);
   };
 
   const navigateProductManager = () => {
-    navigate({ to: ROUTES.product });
+    navigate(ROUTES.product);
   };
 
   const navigateHero = () => {
-    navigate({ to: ROUTES.hero });
+    navigate(ROUTES.hero);
   };
 
   const navigatePromo = () => {
-    navigate({ to: ROUTES.promo });
+    navigate(ROUTES.promo);
   };
 
   const navigateArchive = () => {
-    navigate({ to: ROUTES.archive });
+    navigate(ROUTES.archive);
   };
 
   const navigateSettings = () => {
-    navigate({ to: ROUTES.settings });
+    navigate(ROUTES.settings);
   };
 
   const navigateOrders = () => {
-    navigate({ to: ROUTES.orders });
+    navigate(ROUTES.orders);
   };
 
   return (

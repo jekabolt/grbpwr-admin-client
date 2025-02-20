@@ -1,9 +1,9 @@
 import { Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
-import { useNavigate } from '@tanstack/react-location';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { defaultProductFilterSettings } from 'constants/initialFilterStates';
 import { ROUTES } from 'constants/routes';
 import { Field, useFormikContext } from 'formik';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 // import styles from 'styles/archiveList.scss';
 import { FeatureArchiveProps } from '../interface/interface';
 import { ArchivePicker } from './archive-picker';
@@ -18,6 +18,7 @@ export function FeaturedArchive({
   handleOpenArchiveSelection,
 }: FeatureArchiveProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { values } = useFormikContext<common_HeroFullInsert>();
 
   const handleTagClick = () => {
@@ -30,13 +31,8 @@ export function FeaturedArchive({
           byTag: tag,
         },
       };
-      navigate({
-        to: `${ROUTES.product}`,
-        search: (old) => ({
-          ...old,
-          filter: filterSettings,
-        }),
-      });
+      setSearchParams({ filter: JSON.stringify(filterSettings) });
+      navigate(`${ROUTES.product}`);
     }
   };
   return (

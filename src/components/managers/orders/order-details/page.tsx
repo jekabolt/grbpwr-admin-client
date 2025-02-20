@@ -1,10 +1,10 @@
 import { Button, Grid2 as Grid, Typography } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
-import { useMatch } from '@tanstack/react-location';
 import { Layout } from 'components/common/layout';
 import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
-import { DisplayState, OrderDetailsPathProps } from '../interfaces/interface';
+import { useParams } from 'react-router-dom';
+import { DisplayState } from '../interfaces/interface';
 import { useOrderDetails } from '../utility/use-order-details';
 import { Billing } from './components/billing';
 import { Description } from './components/description';
@@ -15,9 +15,7 @@ import { ShippingBuyer } from './components/shipping-buyer';
 import { NewTrackCode } from './components/shipping-buyer-information/new-track-code';
 
 export function OrderDetails() {
-  const {
-    params: { uuid },
-  } = useMatch<OrderDetailsPathProps>();
+  const { uuid } = useParams<{ uuid: string }>();
 
   const {
     orderDetails,
@@ -31,7 +29,7 @@ export function OrderDetails() {
     saveTrackingNumber,
     markAsDelivered,
     refundOrder,
-  } = useOrderDetails(uuid);
+  } = useOrderDetails(uuid || '');
 
   const [displayState, setDisplayState] = useState<DisplayState>({
     showBilling: false,

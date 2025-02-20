@@ -1,12 +1,12 @@
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { AppBar, Box, Button, Grid2 as Grid, IconButton, Toolbar, styled } from '@mui/material';
-import { useNavigate } from '@tanstack/react-location';
 import { SnackBar } from 'components/common/utility/snackbar';
 import { HideOnScroll } from 'components/login/scroll';
 import { ROUTES } from 'constants/routes';
 import logo from 'img/tex-text.png';
 import { FC, ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface LayoutProps {
   children: ReactNode;
@@ -23,11 +23,11 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
-    navigate({ to: ROUTES.login, replace: true });
+    navigate(ROUTES.login, { replace: true });
   };
 
   const navigateMainPage = () => {
-    navigate({ to: ROUTES.main, replace: true });
+    navigate(ROUTES.main, { replace: true });
   };
 
   return (

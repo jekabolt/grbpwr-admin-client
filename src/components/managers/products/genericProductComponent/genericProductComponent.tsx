@@ -1,10 +1,10 @@
 import { AppBar, Button, CircularProgress, Grid2 as Grid, Toolbar } from '@mui/material';
-import { useNavigate } from '@tanstack/react-location';
 import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { Field, Form, Formik, FormikHelpers } from 'formik';
 import { useDictionaryStore } from 'lib/stores/store';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { BasicFields } from './basicFields/basicFields';
 import { GenericProductFormInterface } from './interface/interface';
 import { MediaView } from './mediaView/mediaView';
@@ -61,7 +61,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
       setClearMediaPreview(true);
       setTimeout(() => setClearMediaPreview(false), 0);
     } else if (isCopyMode) {
-      navigate({ to: ROUTES.product, replace: true });
+      navigate(ROUTES.product, { replace: true });
     }
   };
 
@@ -72,7 +72,7 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
   );
 
   const handleCopyProductClick = (id: number | undefined) => {
-    navigate({ to: `${ROUTES.copyProduct}/${id}` });
+    navigate(`${ROUTES.copyProduct}/${id}`);
   };
 
   return (

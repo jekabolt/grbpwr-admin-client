@@ -1,15 +1,15 @@
 import { Button, Grid2 as Grid } from '@mui/material';
-import { useNavigate } from '@tanstack/react-location';
 import { Layout } from 'components/common/layout';
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AllProducts } from './listProducts/allProducts';
 
 export const Product: FC = () => {
   const navigate = useNavigate();
 
   const navigateAddProduct = () => {
-    navigate({ to: ROUTES.addProduct });
+    navigate(ROUTES.addProduct);
   };
 
   return (
