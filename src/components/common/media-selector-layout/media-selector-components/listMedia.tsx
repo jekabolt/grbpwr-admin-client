@@ -18,7 +18,7 @@ import { isVideo } from 'features/utilitty/filterContentType';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/media-selector.scss';
+// import styles from 'styles/media-selector.scss';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
@@ -116,20 +116,24 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                 onClick={(event) => handleSelect(media, event)}
                 onMouseEnter={() => setHoverMedia(media.id)}
                 onMouseLeave={() => setHoverMedia(undefined)}
-                className={styles.list_media_item}
+                // className={styles.list_media_item}
               >
                 <InputLabel htmlFor={`${media.id}`}>
                   {selectedMedia?.some((item) => item.id === media.id) && (
-                    <span className={styles.selected_flag}>selected</span>
+                    <span
+                    // className={styles.selected_flag}
+                    >
+                      selected
+                    </span>
                   )}
                   {isVideo(media.media?.thumbnail?.mediaUrl) ? (
                     <video
                       src={media.media?.thumbnail?.mediaUrl}
-                      className={
-                        selectedMedia?.some((item) => item.id === media.id)
-                          ? styles.selected_media
-                          : ''
-                      }
+                      // className={
+                      //   selectedMedia?.some((item) => item.id === media.id)
+                      //     ? styles.selected_media
+                      //     : ''
+                      // }
                       controls
                       onLoadedMetadata={(e) => handleVideoLoad(media.id || 0, e)}
                     />
@@ -137,11 +141,11 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                     <img
                       src={media.media?.thumbnail?.mediaUrl}
                       alt='media'
-                      className={
-                        selectedMedia?.some((item) => item.id === media.id)
-                          ? styles.selected_media
-                          : ''
-                      }
+                      // className={
+                      //   selectedMedia?.some((item) => item.id === media.id)
+                      //     ? styles.selected_media
+                      //     : ''
+                      // }
                     />
                   )}
                 </InputLabel>
@@ -149,7 +153,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                   <IconButton
                     size='small'
                     onClick={(e) => handleDeleteFile(media.id || 0, e)}
-                    className={styles.delete_btn}
+                    // className={styles.delete_btn}
                   >
                     {confirmDeletionId === media.id ? <CheckIcon /> : <ClearIcon />}
                   </IconButton>

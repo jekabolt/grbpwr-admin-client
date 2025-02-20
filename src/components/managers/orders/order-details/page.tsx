@@ -4,7 +4,6 @@ import { useMatch } from '@tanstack/react-location';
 import { Layout } from 'components/common/layout';
 import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
-import styles from 'styles/order.scss';
 import { DisplayState, OrderDetailsPathProps } from '../interfaces/interface';
 import { useOrderDetails } from '../utility/use-order-details';
 import { Billing } from './components/billing';
@@ -93,10 +92,16 @@ export function OrderDetails() {
             hideFooter={isPrinting}
           />
         </Grid>
-        <Grid size={{ xs: 12 }} className={styles.hide_cell}>
+        <Grid
+          size={{ xs: 12 }}
+          // className={styles.hide_cell}
+        >
           <PromoApplied orderDetails={orderDetails} />
         </Grid>
-        <Grid size={{ xs: 12 }} className={styles.hide_cell}>
+        <Grid
+          size={{ xs: 12 }}
+          // className={styles.hide_cell}
+        >
           <Payment orderDetails={orderDetails} />
         </Grid>
         <Grid size={{ xs: 12 }}>
@@ -111,11 +116,17 @@ export function OrderDetails() {
             saveTrackingNumber={saveTrackingNumber}
           />
         </Grid>
-        <Grid size={{ xs: 12 }} className={styles.hide_cell}>
+        <Grid
+          size={{ xs: 12 }}
+          // className={styles.hide_cell}
+        >
           <Billing orderDetails={orderDetails} />
         </Grid>
         {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
-          <Grid size={{ xs: 12 }} className={styles.hide_cell}>
+          <Grid
+            size={{ xs: 12 }}
+            // className={styles.hide_cell}
+          >
             <NewTrackCode
               trackingNumber={trackingNumber}
               handleTrackingNumberChange={handleTrackingNumberChange}
@@ -124,7 +135,10 @@ export function OrderDetails() {
           </Grid>
         )}
         {orderStatus === 'SHIPPED' && (
-          <Grid size={{ xs: 12 }} className={styles.hide_cell}>
+          <Grid
+            size={{ xs: 12 }}
+            // className={styles.hide_cell}
+          >
             <Button
               onClick={markAsDelivered}
               variant='contained'
@@ -136,7 +150,10 @@ export function OrderDetails() {
         )}
         {orderStatus === 'CONFIRMED' ||
           (orderStatus === 'DELIVERED' && (
-            <Grid size={{ xs: 12 }} className={styles.hide_cell}>
+            <Grid
+              size={{ xs: 12 }}
+              // className={styles.hide_cell}
+            >
               <Button onClick={refundOrder} variant='contained' sx={{ textTransform: 'uppercase' }}>
                 refund order
               </Button>
@@ -147,7 +164,10 @@ export function OrderDetails() {
             {`Total: ${orderDetails?.order?.totalPrice?.value} ${dictionary?.baseCurrency}`}
           </Typography>
         </Grid>
-        <Grid size={{ xs: 12 }} className={styles.support}>
+        <Grid
+          size={{ xs: 12 }}
+          // className={styles.support}
+        >
           <Typography variant='overline' textTransform='uppercase' fontWeight='bold'>
             If you have any questions, please send an email to customercare@grbpwr.com
           </Typography>

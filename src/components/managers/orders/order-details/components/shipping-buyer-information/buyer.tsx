@@ -2,7 +2,7 @@ import { Grid2 as Grid, Typography } from '@mui/material';
 import { common_BuyerInsert } from 'api/proto-http/frontend';
 import { CopyToClipboard } from 'components/common/utility/copyToClipboard';
 import { STATUS } from 'components/managers/orders/interfaces/interface';
-import styles from 'styles/order.scss';
+// import styles from 'styles/order.scss';
 
 interface Props {
   buyer: common_BuyerInsert | undefined;
@@ -41,7 +41,10 @@ export function Buyer({ buyer, isPrinting }: Props) {
           {`phone: ${buyer?.phone}`}
         </Typography>
       </Grid>
-      <Grid size={{ xs: 12 }} className={isPrinting ? styles.hide_cell : styles.non_print_state}>
+      <Grid
+        size={{ xs: 12 }}
+        // className={isPrinting ? styles.hide_cell : styles.non_print_state}
+      >
         <Typography variant='overline' textTransform='uppercase'>
           {[
             `receive promo emails: `,

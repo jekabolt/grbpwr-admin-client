@@ -5,7 +5,7 @@ import { login } from 'api/auth';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/login-block.scss';
+// import styles from 'styles/login-block.scss';
 import * as Yup from 'yup';
 import { isTokenExpired } from './protectedRoute';
 
@@ -60,7 +60,9 @@ export const LoginBlock: FC = () => {
               alignItems='center'
               spacing={2}
             >
-              <div className={styles.logo}></div>
+              <div
+              // className={styles.logo}
+              ></div>
               <Grid item xs={12}>
                 <Field
                   as={TextField}
@@ -69,7 +71,7 @@ export const LoginBlock: FC = () => {
                   size='medium'
                   fullWidth
                   error={touched.username && Boolean(errors.username)}
-                  className={styles.input}
+                  // className={styles.input}
                   InputProps={{ style: { fontSize: '1.5em', width: '300px' } }}
                 />
               </Grid>
@@ -82,7 +84,7 @@ export const LoginBlock: FC = () => {
                   size='medium'
                   fullWidth
                   error={touched.password && Boolean(errors.password)}
-                  className={styles.input}
+                  // className={styles.input}
                   InputProps={{
                     style: { fontSize: '1.5em', width: '300px' },
                     endAdornment: (

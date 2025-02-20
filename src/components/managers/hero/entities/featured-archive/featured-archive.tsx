@@ -4,7 +4,7 @@ import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { defaultProductFilterSettings } from 'constants/initialFilterStates';
 import { ROUTES } from 'constants/routes';
 import { Field, useFormikContext } from 'formik';
-import styles from 'styles/archiveList.scss';
+// import styles from 'styles/archiveList.scss';
 import { FeatureArchiveProps } from '../interface/interface';
 import { ArchivePicker } from './archive-picker';
 
@@ -105,7 +105,10 @@ export function FeaturedArchive({
                   minWidth: '300px',
                 }}
               >
-                <Grid size={{ xs: 12 }} className={styles.item}>
+                <Grid
+                  size={{ xs: 12 }}
+                  // className={styles.item}
+                >
                   <img src={item.media?.thumbnail?.mediaUrl} />
                 </Grid>
               </Grid>
@@ -119,7 +122,10 @@ export function FeaturedArchive({
                 minWidth: '300px',
               }}
             >
-              <Grid size={{ xs: 12 }} className={styles.item}>
+              <Grid
+                size={{ xs: 12 }}
+                // className={styles.item}
+              >
                 <video
                   src={archive[index]?.[0].video?.media?.fullSize?.mediaUrl}
                   controls

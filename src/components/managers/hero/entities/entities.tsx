@@ -4,7 +4,7 @@ import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { Field, useFormikContext } from 'formik';
 import { useHeroStore } from 'lib/stores/hero/store';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/hero.scss';
+// import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity/common-entity';
@@ -197,7 +197,11 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
       {values.entities &&
         values.entities.map((entity, index) => (
           <Grid size={{ xs: 12 }} ref={(el) => (entityRefs.current[index] = el)}>
-            <Grid container spacing={2} className={styles.entity_container}>
+            <Grid
+              container
+              spacing={2}
+              // className={styles.entity_container}
+            >
               {entity.type === 'HERO_TYPE_MAIN' && (
                 <Grid size={{ xs: 12, md: 7 }}>
                   <CommonEntity
@@ -215,7 +219,10 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
                       orientation: 'Portrait' | 'Landscape',
                     ) => saveMedia(media, 'main', index, orientation)}
                   />
-                  <Box component='div' className={styles.fields}>
+                  <Box
+                    component='div'
+                    // className={styles.fields}
+                  >
                     <Field
                       as={TextField}
                       name={`entities.${index}.main.tag`}
@@ -342,8 +349,13 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
                   Remove Entity
                 </Button>
               </Grid>
-              <Grid size={{ xs: 12 }} className={styles.divider_container}>
-                <Divider className={styles.divider} />
+              <Grid
+                size={{ xs: 12 }}
+                // className={styles.divider_container}
+              >
+                <Divider
+                // className={styles.divider}
+                />
               </Grid>
             </Grid>
           </Grid>

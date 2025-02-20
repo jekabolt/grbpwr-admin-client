@@ -12,7 +12,7 @@ import {
 import { Dialog } from 'components/common/utility/dialog';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { composition } from '../garment-composition/garment-composition';
-import styles from '../styles/composition.scss';
+// import styles from '../styles/composition.scss';
 
 interface SelectedInstructions {
   [key: string]: {
@@ -139,10 +139,10 @@ export const CompositionModal: FC<CompositionModalProps> = ({
             ).map(([key, value]) => (
               <Grid key={key} size={{ xs: 6, sm: 2, md: 1.5 }}>
                 <Grid
-                  className={`${styles['square-container']} ${isSelected(key) ? styles['selected'] : ''}`}
+                // className={`${styles['square-container']} ${isSelected(key) ? styles['selected'] : ''}`}
                 >
                   <Grid
-                    className={styles['square-content']}
+                    // className={styles['square-content']}
                     onClick={() => handleContainerClick(key, value)}
                   >
                     <Typography variant='overline' fontSize={isSelected(key) ? '0.6em' : '1em'}>

@@ -5,7 +5,7 @@ import { Field, FieldArray, Form, Formik } from 'formik';
 import { useHeroStore } from 'lib/stores/hero/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useRef } from 'react';
-import styles from 'styles/hero.scss';
+// import styles from 'styles/hero.scss';
 import { Entities } from './entities/entities';
 import { NavbarHero } from './navbar-hero';
 import { SelectHeroType } from './selectHeroType';
@@ -59,7 +59,11 @@ export const Hero: FC = () => {
             <FieldArray
               name='entities'
               render={(arrayHelpers) => (
-                <Grid container spacing={2} className={styles.entities_container}>
+                <Grid
+                  container
+                  spacing={2}
+                  // className={styles.entities_container}
+                >
                   <Grid size={{ xs: 12, md: 7 }}>
                     <Field component={NavbarHero} />
                   </Grid>

@@ -37,15 +37,8 @@ module.exports = {
         test: /\.(scss|css)$/,
         use: [
           { loader: MiniCssExtractPlugin.loader },
-          { 
-            loader: 'css-loader', 
-            options: { 
-              modules: {
-                exportLocalsConvention: 'camelCase',
-                namedExport: false
-              } 
-            }
-          },
+          { loader: 'css-loader' },
+          { loader: 'postcss-loader' },
           { loader: 'sass-loader' },
         ],
       },

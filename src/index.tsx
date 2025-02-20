@@ -24,7 +24,7 @@ import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { StoreProvider } from 'lib/stores/store-provider';
 import { createRoot } from 'react-dom/client';
-import 'styles/global.scss';
+import './global.css';
 
 const container = document.getElementById('root') ?? document.body;
 const root = createRoot(container);

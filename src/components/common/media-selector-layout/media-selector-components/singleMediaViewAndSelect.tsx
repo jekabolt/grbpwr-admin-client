@@ -2,7 +2,6 @@ import { Grid } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC } from 'react';
-import styles from 'styles/product-id-media.scss';
 import { MediaSelectorLayout } from '../layout';
 
 interface SingleMediaView {
@@ -26,7 +25,7 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
 }) => {
   return (
     <Grid container>
-      <Grid item xs={12} className={styles.thumbnail_container}>
+      <Grid item xs={12}>
         {link &&
           (isVideo(link) ? (
             <video src={link} controls></video>
@@ -34,7 +33,7 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
             <img src={link} alt='thumbnail' />
           ))}
         {(isEditMode === undefined || isEditMode || isAddingProduct) && (
-          <Grid item className={link ? styles.media_selector : styles.empty_media_selector}>
+          <Grid item>
             <MediaSelectorLayout
               label={link ? 'edit' : 'select media'}
               allowMultiple={false}
@@ -49,3 +48,7 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
     </Grid>
   );
 };
+
+// className={styles.thumbnail_container}
+
+// className={link ? styles.media_selector : styles.empty_media_selector}

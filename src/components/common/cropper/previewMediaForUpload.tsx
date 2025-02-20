@@ -4,7 +4,7 @@ import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLin
 import { isBase64Video } from 'features/utilitty/filterContentType';
 import { getBase64ImageFromUrl } from 'features/utilitty/getBase64';
 import { FC, useEffect } from 'react';
-import styles from 'styles/media-selector.scss';
+// import styles from 'styles/media-selector.scss';
 import { MediaCropper } from './cropper';
 
 export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
@@ -32,7 +32,11 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
     <Grid container padding='2%' spacing={2}>
       {b64Media && (
         <>
-          <Grid item xs={12} className={styles.preview_media_to_upload}>
+          <Grid
+            item
+            xs={12}
+            // className={styles.preview_media_to_upload}
+          >
             {isBase64Video(b64Media) ? (
               <video src={b64Media} controls></video>
             ) : isMediaSelector ? (

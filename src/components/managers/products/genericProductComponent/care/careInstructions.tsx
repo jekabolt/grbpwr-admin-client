@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import { Dialog } from 'components/common/utility/dialog';
 import { FC, useState } from 'react';
-import styles from './care.scss';
+// import styles from './care.scss';
 import { careInstruction } from './careInstruction';
 
 interface SelectedInstructions {
@@ -58,12 +58,17 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
               <Grid
                 container
                 onClick={() => onSelectCareInstruction(selectedCare!, method, code, subCategory)}
-                className={styles['care-instructions-container']}
+                // className={styles['care-instructions-container']}
                 data-selected={isSelected}
               >
-                <Grid container className={styles['care-card']}>
+                <Grid
+                  container
+                  // className={styles['care-card']}
+                >
                   {img && (
-                    <Grid className={styles['care-card-img-container']}>
+                    <Grid
+                    // className={styles['care-card-img-container']}
+                    >
                       <img
                         src={img}
                         alt={method}
@@ -74,11 +79,13 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
                       />
                     </Grid>
                   )}
-                  <Grid className={styles['care-card-text']}>
+                  <Grid
+                  // className={styles['care-card-text']}
+                  >
                     <Typography
                       variant='overline'
                       fontSize={isMobile ? '0.4em' : '0.58em'}
-                      className={styles.text}
+                      // className={styles.text}
                     >
                       {isSelected ? code : method}
                     </Typography>

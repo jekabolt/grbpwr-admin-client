@@ -5,7 +5,7 @@ import { TruncateText } from 'components/common/utility/truncateText';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { useProductStore } from 'lib/stores/product/store';
 import React, { FC, useState } from 'react';
-import styles from 'styles/paged.scss';
+// import styles from 'styles/paged.scss';
 
 interface ProductProps {
   confirmDeleteProductId: number | undefined;
@@ -38,7 +38,7 @@ export const ListProducts: FC<ProductProps> = ({
               onMouseEnter={() => setHoveredProductId(product.id)}
               onMouseLeave={() => setHoveredProductId(undefined)}
               onClick={() => productClick(product.id)}
-              className={`${styles.product} ${product.productDisplay?.productBody?.hidden && showHidden ? styles.hidden_product : ''}`}
+              // className={`${styles.product} ${product.productDisplay?.productBody?.hidden && showHidden ? styles.hidden_product : ''}`}
             >
               {deletingProductId === product.id ? (
                 <Typography variant='h4'>product removed</Typography>
@@ -59,7 +59,7 @@ export const ListProducts: FC<ProductProps> = ({
                     e.stopPropagation();
                     deleteProduct(e, product.id);
                   }}
-                  className={styles.delete_btn}
+                  // className={styles.delete_btn}
                 >
                   {confirmDeleteProductId === product.id ? <CheckIcon /> : <CloseIcon />}
                 </IconButton>
@@ -69,7 +69,7 @@ export const ListProducts: FC<ProductProps> = ({
                   e.stopPropagation();
                   copy(product.id);
                 }}
-                className={styles.copy_btn}
+                // className={styles.copy_btn}
                 size='small'
                 variant='contained'
               >

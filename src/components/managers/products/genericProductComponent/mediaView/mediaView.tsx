@@ -6,7 +6,7 @@ import { SingleMediaViewAndSelect } from 'components/common/media-selector-layou
 import { isVideo } from 'features/utilitty/filterContentType';
 import { ErrorMessage, useFormikContext } from 'formik';
 import { FC, useEffect, useMemo, useState } from 'react';
-import styles from 'styles/addProd.scss';
+// import styles from 'styles/addProduct.scss';
 import { MediaViewInterface } from '../interface/interface';
 
 export const MediaView: FC<MediaViewInterface> = ({
@@ -98,16 +98,30 @@ export const MediaView: FC<MediaViewInterface> = ({
           {selectedMedia.map((media) => {
             const mediaUrl = media.media?.fullSize?.mediaUrl ?? '';
             return (
-              <Grid item key={media.id} className={styles.media_item} xs={12} md={6}>
+              <Grid
+                item
+                key={media.id}
+                // className={styles.media_item}
+                xs={12}
+                md={6}
+              >
                 {isVideo(mediaUrl) ? (
-                  <video src={mediaUrl} controls className={styles.media}></video>
+                  <video
+                    src={mediaUrl}
+                    controls
+                    //  className={styles.media}
+                  />
                 ) : (
-                  <img src={mediaUrl} alt='' className={styles.media} />
+                  <img
+                    src={mediaUrl}
+                    alt=''
+                    // className={styles.media}
+                  />
                 )}
 
                 <IconButton
                   onClick={() => removeSelectedMedia(media.id as number)}
-                  className={styles.delete_btn}
+                  // className={styles.delete_btn}
                 >
                   <ClearIcon />
                 </IconButton>
@@ -116,7 +130,9 @@ export const MediaView: FC<MediaViewInterface> = ({
           })}
           {(isAddingProduct || isEditMode) && (
             <Grid item xs={12} md={6}>
-              <div className={styles.select_media}>
+              <div
+              // className={styles.select_media}
+              >
                 <MediaSelectorLayout
                   label='select media'
                   aspectRatio={['4:5']}

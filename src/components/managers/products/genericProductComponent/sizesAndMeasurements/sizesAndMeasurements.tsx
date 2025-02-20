@@ -16,7 +16,7 @@ import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { useFormikContext } from 'formik';
 import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useState } from 'react';
-import styles from 'styles/addProd.scss';
+// import styles from 'styles/addProd.scss';
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
 import { getFilteredSizes } from '../utility/filtered-sizes';
 import {
@@ -214,7 +214,11 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
           <TableHead>
             <TableRow>
               <TableCell>Size Name</TableCell>
-              <TableCell className={styles.table_cell}>Quantity</TableCell>
+              <TableCell
+              // className={styles.table_cell}
+              >
+                Quantity
+              </TableCell>
               {measurementsToDisplay.map((m) => (
                 <TableCell key={m.id}>
                   {findInDictionary(dictionary, m.id, 'measurement')}
