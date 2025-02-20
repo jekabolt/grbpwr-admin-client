@@ -1,5 +1,8 @@
-import { Button, Grid, TextField, Typography } from '@mui/material';
 import { login } from 'api/auth';
+import { Button } from 'components/ui/button';
+import { Logo } from 'components/ui/icons/logo';
+import Input from 'components/ui/input';
+import Text from 'components/ui/text';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
@@ -15,7 +18,6 @@ interface LoginFormValues {
 export const LoginBlock: FC = () => {
   const navigate = useNavigate();
   const [generalError, setGeneralError] = useState<string | null>(null);
-  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const authToken = localStorage.getItem('authToken');
@@ -43,56 +45,40 @@ export const LoginBlock: FC = () => {
   });
 
   return (
-    <div className='border border-red-500 h-screen flex items-center justify-center'>
+    <div className='h-screen flex items-center justify-center'>
       <Formik
         initialValues={{ username: '', password: '' }}
         validationSchema={LoginSchema}
         onSubmit={handleLoginSubmit}
       >
-        {({ isSubmitting, errors, touched, handleSubmit }) => (
-          <form onSubmit={handleSubmit} className='border border-blue-500 flex flex-col gap-4'>
-            <Grid item xs={12}>
+        {({ isSubmitting, handleSubmit }) => (
+          <form onSubmit={handleSubmit} className='items-center flex flex-col gap-4 w-64'>
+            <div className='w-1/5 flex justify-center'>
+              <Logo />
+            </div>
+            <div className='w-full space-y-3'>
+              <Field as={Input} name='username' placeholder='username' className='h-10' />
+
               <Field
-                as={TextField}
-                name='username'
-                placeholder='USERNAME'
-                // size='medium'
-                fullWidth
-                error={touched.username && Boolean(errors.username)}
-                // className={styles.input}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <Field
-                as={TextField}
+                as={Input}
                 name='password'
-                placeholder='PASSWORD'
-                type={showPassword ? 'text' : 'password'}
-                // size='medium'
-                fullWidth
-                error={touched.password && Boolean(errors.password)}
-                // className={styles.input}
-                // InputProps={{
-                //   style: { fontSize: '1.5em', width: '300px' },
-                //   endAdornment: (
-                //     <IconButton onClick={() => setShowPassword(!showPassword)}>
-                //       {showPassword ? <VisibilityOff /> : <Visibility />}
-                //     </IconButton>
-                //   ),
-                // }}
+                placeholder='password'
+                className='h-10 text-base'
+                type='password'
               />
-            </Grid>
+            </div>
+
             {generalError && (
-              <Grid item xs={12}>
-                <Typography variant='overline' color='error' align='center'>
-                  {generalError}
-                </Typography>
-              </Grid>
+              <Text variant='error' size='small' className='text-center'>
+                {generalError}
+              </Text>
             )}
 
-            <Button size='medium' variant='contained' type='submit' disabled={isSubmitting}>
-              Login
-            </Button>
+            <div className='w-full flex justify-center'>
+              <Button size='lg' type='submit' className='uppercase' disabled={isSubmitting}>
+                Login
+              </Button>
+            </div>
           </form>
         )}
       </Formik>
