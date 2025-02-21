@@ -196,7 +196,6 @@ export function ArchiveForm({
                     isDeleteAccepted={false}
                     allowMultiple
                     hideVideos={false}
-                    hideNavBar
                   />
                 )}
               </Grid>

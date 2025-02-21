@@ -52,14 +52,12 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
       </div>
-
       <button
         onClick={toggleSidebar}
         className='fixed left-0 top-4 z-50 ml-2 rounded-md bg-white p-2 text-gray-600 shadow-md hover:bg-gray-100 print:hidden'
       >
         <MenuIcon />
       </button>
-
       <div className={cn('transition-all duration-300 w-full', { 'pl-[240px]': isSidebarOpen })}>
         <div className='border-2 border-red-500 h-full pt-20 px-2'>{children}</div>
         <SnackBar />
