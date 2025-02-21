@@ -5,6 +5,7 @@ const textVariants = cva('', {
     variant: {
       default: ['text-text'],
       error: ['text-error', 'uppercase'],
+      selected: ['text-bgColor', 'bg-text', 'uppercase'],
       uppercase: ['text-text', 'uppercase'],
       underlined: ['underline', 'text-text'],
       strikethrough: ['line-through', 'text-text'],

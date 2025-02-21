@@ -1,4 +1,4 @@
-import { Button, Grid2 as Grid } from '@mui/material';
+import { Button } from 'components/ui/button';
 import { FC, useState } from 'react';
 import { MediaSelectorLayoutProps } from '../interfaces/mediaSelectorInterfaces';
 import { MediaSelectorModal } from './media-selector-components/mediaSelectorModal';
@@ -9,6 +9,7 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
   aspectRatio,
   hideVideos,
   isDeleteAccepted,
+  className,
   saveSelectedMedia,
 }) => {
   const [mediaSelectorVisibility, setMediaSelectorVisibility] = useState(false);
@@ -17,24 +18,20 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
     setMediaSelectorVisibility(!mediaSelectorVisibility);
   };
   return (
-    <Grid container justifyContent='center'>
-      <Grid>
-        <Button variant='contained' size='medium' onClick={handleMediaSelectorVisibility}>
-          {label}
-        </Button>
-      </Grid>
-      <Grid>
-        {mediaSelectorVisibility && (
-          <MediaSelectorModal
-            aspectRatio={aspectRatio}
-            hideVideos={hideVideos}
-            allowMultiple={allowMultiple}
-            isDeleteAccepted={isDeleteAccepted}
-            saveSelectedMedia={saveSelectedMedia}
-            closeMediaSelector={handleMediaSelectorVisibility}
-          />
-        )}
-      </Grid>
-    </Grid>
+    <div className={className}>
+      <Button size='lg' onClick={handleMediaSelectorVisibility}>
+        {label}
+      </Button>
+      {mediaSelectorVisibility && (
+        <MediaSelectorModal
+          aspectRatio={aspectRatio}
+          hideVideos={hideVideos}
+          allowMultiple={allowMultiple}
+          isDeleteAccepted={isDeleteAccepted}
+          saveSelectedMedia={saveSelectedMedia}
+          closeMediaSelector={handleMediaSelectorVisibility}
+        />
+      )}
+    </div>
   );
 };

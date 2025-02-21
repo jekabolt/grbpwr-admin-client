@@ -1,6 +1,7 @@
-import { Grid } from '@mui/material';
 import { common_MediaFull } from 'api/proto-http/admin';
+import Media from 'components/ui/media';
 import { isVideo } from 'features/utilitty/filterContentType';
+import { cn } from 'lib/utility';
 import { FC } from 'react';
 import { MediaSelectorLayout } from '../layout';
 
@@ -18,37 +19,37 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   link,
   isEditMode,
   isAddingProduct,
-  aspectRatio,
+  aspectRatio = ['4/3'],
   hideVideos,
   isDeleteAccepted,
   saveSelectedMedia,
 }) => {
   return (
-    <Grid container>
-      <Grid item xs={12}>
-        {link &&
-          (isVideo(link) ? (
-            <video src={link} controls></video>
-          ) : (
-            <img src={link} alt='thumbnail' />
-          ))}
-        {(isEditMode === undefined || isEditMode || isAddingProduct) && (
-          <Grid item>
-            <MediaSelectorLayout
-              label={link ? 'edit' : 'select media'}
-              allowMultiple={false}
-              aspectRatio={aspectRatio}
-              hideVideos={hideVideos}
-              isDeleteAccepted={isDeleteAccepted}
-              saveSelectedMedia={saveSelectedMedia}
-            />
-          </Grid>
+    <div className='flex items-center justify-center relative group'>
+      <div className='w-full'>
+        {link && (
+          <Media
+            alt={link}
+            src={link}
+            type={isVideo(link) ? 'video' : 'image'}
+            controls={isVideo(link)}
+          />
         )}
-      </Grid>
-    </Grid>
+        {(isEditMode === undefined || isEditMode || isAddingProduct) && (
+          <MediaSelectorLayout
+            label={link ? 'edit' : 'select media'}
+            allowMultiple={false}
+            aspectRatio={aspectRatio}
+            hideVideos={hideVideos}
+            isDeleteAccepted={isDeleteAccepted}
+            className={cn('hidden', {
+              'group-hover:block absolute top-0 right-0': link,
+              block: !link,
+            })}
+            saveSelectedMedia={saveSelectedMedia}
+          />
+        )}
+      </div>
+    </div>
   );
 };
-
-// className={styles.thumbnail_container}
-
-// className={link ? styles.media_selector : styles.empty_media_selector}

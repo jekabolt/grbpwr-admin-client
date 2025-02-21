@@ -7,10 +7,6 @@ import { useLocation, useParams } from 'react-router-dom';
 import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
 import { productInitialValues } from '../genericProductComponent/utility/productInitialValues';
 
-type ProductFormProps = {
-  id?: string;
-};
-
 export const ProductForm: FC = () => {
   const { showMessage } = useSnackBarStore();
   const { id } = useParams();
@@ -22,6 +18,7 @@ export const ProductForm: FC = () => {
 
   const fetchProduct = async () => {
     if (id) {
+      console.log(id);
       const response = await getProductByID({ id: parseInt(id) });
       setProduct(response.product);
       setInitialValues(productInitialValues(response.product));

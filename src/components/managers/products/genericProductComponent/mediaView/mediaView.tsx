@@ -7,6 +7,7 @@ import { isVideo } from 'features/utilitty/filterContentType';
 import { ErrorMessage, useFormikContext } from 'formik';
 import { FC, useEffect, useMemo, useState } from 'react';
 // import styles from 'styles/addProduct.scss';
+import Media from 'components/ui/media';
 import { MediaViewInterface } from '../interface/interface';
 
 export const MediaView: FC<MediaViewInterface> = ({
@@ -105,19 +106,12 @@ export const MediaView: FC<MediaViewInterface> = ({
                 xs={12}
                 md={6}
               >
-                {isVideo(mediaUrl) ? (
-                  <video
-                    src={mediaUrl}
-                    controls
-                    //  className={styles.media}
-                  />
-                ) : (
-                  <img
-                    src={mediaUrl}
-                    alt=''
-                    // className={styles.media}
-                  />
-                )}
+                <Media
+                  alt={mediaUrl}
+                  type={isVideo(mediaUrl) ? 'video' : 'image'}
+                  src={mediaUrl}
+                  controls={isVideo(mediaUrl)}
+                />
 
                 <IconButton
                   onClick={() => removeSelectedMedia(media.id as number)}

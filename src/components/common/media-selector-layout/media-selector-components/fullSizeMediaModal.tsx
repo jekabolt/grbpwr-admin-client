@@ -1,16 +1,16 @@
-import { Grid2 as Grid, Theme, Typography, useMediaQuery } from '@mui/material';
-import { common_MediaInfo, common_MediaItem } from 'api/proto-http/admin';
+import { common_MediaInfo } from 'api/proto-http/admin';
 import { PreviewMediaForUpload } from 'components/common/cropper/previewMediaForUpload';
 import { FullSizeMediaModalInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import { CopyToClipboard } from 'components/common/utility/copyToClipboard';
 import { Dialog } from 'components/common/utility/dialog';
+import Text from 'components/ui/text';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { FC, useEffect, useState } from 'react';
 
-type MediaKey = keyof common_MediaItem;
-type VideoDimensions = {
-  [key: string]: string | undefined;
-};
+type MediaType = 'fullSize' | 'compressed' | 'thumbnail';
+type VideoDimensions = Record<MediaType, string>;
+
+const mediaTypes: MediaType[] = ['fullSize', 'compressed', 'thumbnail'];
 
 export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   open,
@@ -20,13 +20,11 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   setCroppedImage,
   handleUploadMedia,
 }) => {
-  const [videoDimensions, setVideoDimensions] = useState<VideoDimensions>({});
+  const [videoDimensions, setVideoDimensions] = useState<Partial<VideoDimensions>>({});
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(true);
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
-  const mediaTypes = ['fullSize', 'compressed', 'thumbnail'];
 
-  const loadVideoDimensions = (url: string | undefined, type: string) => {
+  const loadVideoDimensions = (url: string | undefined, type: MediaType) => {
     if (!url) return;
     const video = document.createElement('video');
     video.addEventListener('loadedmetadata', () => {
@@ -41,12 +39,10 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
 
   useEffect(() => {
     if (clickedMedia) {
-      ['fullSize', 'compressed', 'thumbnail'].forEach((type) => {
-        if (
-          (clickedMedia[type as MediaKey] as common_MediaInfo)?.mediaUrl &&
-          isVideo((clickedMedia[type as MediaKey] as common_MediaInfo)?.mediaUrl)
-        ) {
-          loadVideoDimensions((clickedMedia[type as MediaKey] as common_MediaInfo)?.mediaUrl, type);
+      mediaTypes.forEach((type) => {
+        const mediaInfo = clickedMedia[type] as common_MediaInfo | undefined;
+        if (mediaInfo?.mediaUrl && isVideo(mediaInfo.mediaUrl)) {
+          loadVideoDimensions(mediaInfo.mediaUrl, type);
         }
       });
     }
@@ -63,56 +59,32 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   };
 
   return (
-    <>
-      <Dialog open={open} onClose={closePreviewAndModal}>
-        <Grid container gap={2}>
-          <Grid size={{ xs: 12 }} container justifyContent='center'>
-            {clickedMedia &&
-              (isVideo(clickedMedia.thumbnail?.mediaUrl) ? (
-                <a href={clickedMedia.thumbnail?.mediaUrl} target='_blank'>
-                  <video src={clickedMedia.thumbnail?.mediaUrl} controls></video>
-                </a>
-              ) : (
-                <PreviewMediaForUpload
-                  b64Media={clickedMedia.thumbnail?.mediaUrl || ''}
-                  croppedImage={croppedImage}
-                  isCropperOpen={isCropperOpen}
-                  isMediaSelector={false}
-                  setCroppedImage={setCroppedImage}
-                  setIsCropperOpen={setIsCropperOpen}
-                  clear={clearDragDropSelector}
-                  handleUploadMedia={handleUploadMedia}
-                />
-              ))}
-          </Grid>
+    <Dialog open={open} onClose={closePreviewAndModal}>
+      <div className='flex flex-col items-center w-96 gap-4'>
+        <PreviewMediaForUpload
+          b64Media={clickedMedia?.thumbnail?.mediaUrl || ''}
+          croppedImage={croppedImage}
+          isCropperOpen={isCropperOpen}
+          isMediaSelector={false}
+          setCroppedImage={setCroppedImage}
+          setIsCropperOpen={setIsCropperOpen}
+          clear={clearDragDropSelector}
+          handleUploadMedia={handleUploadMedia}
+        />
+
+        <div className='w-full'>
           {mediaTypes.map((type) => (
-            <Grid size={{ xs: 12 }} key={type}>
-              <Grid container gap={isMobile ? 'auto' : 2}>
-                <Grid size={{ xs: isMobile ? 4 : 'auto' }}>
-                  <Typography variant='body1'>
-                    {(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl ? (
-                      <>{`${type.charAt(0).toUpperCase() + type.slice(1)}`}</>
-                    ) : (
-                      `No ${type} available`
-                    )}
-                  </Typography>
-                </Grid>
-                <Grid>
-                  <CopyToClipboard
-                    text={(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.mediaUrl || ''}
-                    cutText={true}
-                  />
-                </Grid>
-                <Grid>
-                  <Typography
-                    key={type}
-                  >{` ${videoDimensions[type] || `${(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.width || 'N/A'}px x ${(clickedMedia?.[type as MediaKey] as common_MediaInfo)?.height || 'N/A'}px`}`}</Typography>
-                </Grid>
-              </Grid>
-            </Grid>
+            <div key={type} className='flex gap-3 items-start'>
+              <Text variant='uppercase'>{type}</Text>
+              <CopyToClipboard text={clickedMedia?.[type]?.mediaUrl || ''} cutText={true} />
+              <Text>
+                {videoDimensions[type] ||
+                  `${clickedMedia?.[type]?.width || 'N/A'}px x ${clickedMedia?.[type]?.height || 'N/A'}px`}
+              </Text>
+            </div>
           ))}
-        </Grid>
-      </Dialog>
-    </>
+        </div>
+      </div>
+    </Dialog>
   );
 };

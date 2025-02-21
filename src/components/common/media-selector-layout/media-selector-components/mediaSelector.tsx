@@ -1,9 +1,8 @@
-import { Grid2 as Grid } from '@mui/material';
+import { PreviewMediaForUpload } from 'components/common/cropper/previewMediaForUpload';
 import { MediaSelectorInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import useMediaSelector from 'features/utilitty/useMediaSelector';
 import { FC, useEffect, useState } from 'react';
 import 'react-advanced-cropper/dist/style.css';
-import { PreviewMediaForUpload } from '../../cropper/previewMediaForUpload';
 import { ByUrl } from './byUrl';
 import { DragDrop } from './dragDrop';
 import { FilterMedias } from './filterMedias';
@@ -15,7 +14,6 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   enableModal,
   aspectRatio,
   hideVideos,
-  hideNavBar,
   isDeleteAccepted,
   select,
 }) => {
@@ -55,54 +53,44 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
   };
 
   return (
-    <Grid container justifyContent='center' spacing={2}>
-      <Grid size={{ xs: 12 }}>
-        {!hideNavBar && (
-          <Grid container alignItems='center' spacing={2}>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <ByUrl url={url} setUrl={setUrl} />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <DragDrop
-                loading={loading}
-                selectedFiles={selectedFiles}
-                setSelectedFiles={setSelectedFiles}
-                selectedFileUrl={selectedFileUrl}
-                setSelectedFileUrl={setSelectedFileUrl}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <FilterMedias />
-            </Grid>
-          </Grid>
-        )}
-      </Grid>
-      <Grid size={{ xs: 6 }}>
-        <PreviewMediaForUpload
-          croppedImage={croppedImage}
-          isCropperOpen={isCropperOpen}
-          b64Media={selectedFileUrl || url}
-          isMediaSelector={true}
-          setIsCropperOpen={setIsCropperOpen}
-          clear={clearDragDropSelector}
-          setCroppedImage={setCroppedImage}
-          handleUploadMedia={handleMediaUpload}
+    <div className='space-y-10'>
+      <div className='flex justify-between items-center w-full'>
+        <ByUrl url={url} setUrl={setUrl} />
+
+        <DragDrop
+          loading={loading}
+          selectedFiles={selectedFiles}
+          setSelectedFiles={setSelectedFiles}
+          selectedFileUrl={selectedFileUrl}
+          setSelectedFileUrl={setSelectedFileUrl}
         />
-      </Grid>
-      <Grid size={{ xs: 12 }}>
-        <MediaList
-          allowMultiple={allowMultiple}
-          selectedMedia={selectedMedia}
-          enableModal={enableModal}
-          croppedImage={croppedImage}
-          aspectRatio={aspectRatio}
-          hideVideos={hideVideos}
-          isDeleteAccepted={isDeleteAccepted}
-          setCroppedImage={setCroppedImage}
-          select={select}
-          handleUploadMedia={handleMediaUpload}
-        />
-      </Grid>
-    </Grid>
+
+        <FilterMedias />
+      </div>
+
+      <PreviewMediaForUpload
+        croppedImage={croppedImage}
+        isCropperOpen={isCropperOpen}
+        b64Media={selectedFileUrl || url}
+        isMediaSelector={true}
+        setIsCropperOpen={setIsCropperOpen}
+        clear={clearDragDropSelector}
+        setCroppedImage={setCroppedImage}
+        handleUploadMedia={handleMediaUpload}
+      />
+
+      <MediaList
+        allowMultiple={allowMultiple}
+        selectedMedia={selectedMedia}
+        enableModal={enableModal}
+        croppedImage={croppedImage}
+        aspectRatio={aspectRatio}
+        hideVideos={hideVideos}
+        isDeleteAccepted={isDeleteAccepted}
+        setCroppedImage={setCroppedImage}
+        select={select}
+        handleUploadMedia={handleMediaUpload}
+      />
+    </div>
   );
 };

@@ -1,14 +1,8 @@
 import Rotate90DegreesCwIcon from '@mui/icons-material/Rotate90DegreesCw';
-import {
-  Box,
-  Button,
-  DialogContent,
-  Grid2 as Grid,
-  IconButton,
-  Slider,
-  Typography,
-} from '@mui/material';
+import { Slider } from '@mui/material';
 import { Dialog } from 'components/common/utility/dialog';
+import { Button } from 'components/ui/button';
+import Text from 'components/ui/text';
 import getCroppedImg from 'features/utilitty/getCropped';
 import { FC, useCallback, useEffect, useState } from 'react';
 import Cropper, { Area } from 'react-easy-crop';
@@ -80,71 +74,69 @@ export const MediaCropper: FC<CropperInterface> = ({
   };
 
   return (
-    <Dialog open={selectedFile ? open : false} onClose={close}>
-      <Grid container justifyContent='center' spacing={2}>
-        <Grid size={{ xs: 12, md: 7 }}>
-          <DialogContent
-            style={{
-              height: '500px',
-              position: 'relative',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
-          >
-            <Cropper
-              onCropChange={setCrop}
-              image={selectedFile || ''}
-              zoom={zoom}
-              crop={crop}
-              aspect={aspect}
-              onCropComplete={onCropComplete}
-              onZoomChange={setZoom}
-              onRotationChange={setRotation}
-              rotation={rotation}
-              restrictPosition={true}
-            />
-          </DialogContent>
-          <Grid container alignItems='center' spacing={4}>
-            <Grid size={{ xs: 11 }}>
-              <Slider
-                value={zoom}
-                min={1}
-                max={3}
-                step={0.1}
-                aria-labelledby='Zoom'
-                onChange={(_, zoom) => setZoom(Number(zoom))}
-                size='small'
+    <Dialog open={selectedFile ? open : false} onClose={close} isSaveButton save={handleSave}>
+      <div className='w-[700px] flex h-[480px] items-start justify-between'>
+        <div className=' w-1/2 h-[450px] space-y-4'>
+          <div className='relative w-full h-full'>
+            <div className='absolute inset-0'>
+              <Cropper
+                onCropChange={setCrop}
+                image={selectedFile || ''}
+                zoom={zoom}
+                crop={crop}
+                aspect={aspect}
+                onCropComplete={onCropComplete}
+                onZoomChange={setZoom}
+                onRotationChange={setRotation}
+                rotation={rotation}
+                restrictPosition={true}
+                objectFit='contain'
               />
-            </Grid>
-            <Grid size={{ xs: 1 }}>
-              <IconButton onClick={rotateRight}>
-                <Rotate90DegreesCwIcon />
-              </IconButton>
-            </Grid>
-          </Grid>
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <Box position='relative'>
-            <Typography variant='h6'>Select Aspect Ratio</Typography>
-            <Box display='grid' gap='5px'>
-              {aspectRatios.map((ratio) => (
-                <Button
-                  key={ratio.label}
-                  onClick={() => handleAspectRatioChange(ratio.value)}
-                  variant={aspect === ratio.value ? 'contained' : 'outlined'}
-                  style={{
-                    backgroundColor: aspect === ratio.value ? ratio.color : 'transparent',
-                  }}
-                >
-                  {ratio.label}
-                </Button>
-              ))}
-              <Button onClick={handleSave}>save crop</Button>
-            </Box>
-          </Box>
-        </Grid>
-      </Grid>
+            </div>
+          </div>
+          <div className='flex items-center gap-2 mb-4'>
+            <Slider
+              value={zoom}
+              min={1}
+              max={3}
+              step={0.1}
+              aria-labelledby='Zoom'
+              onChange={(_, zoom) => setZoom(Number(zoom))}
+              size='small'
+            />
+            <Button onClick={rotateRight}>
+              <Rotate90DegreesCwIcon />
+            </Button>
+          </div>
+        </div>
+
+        <div className='space-y-5 w-56'>
+          <Text variant='uppercase' className='text-xl font-bold'>
+            select Aspect Ratio
+          </Text>
+          <div className='flex flex-col items-start gap-4'>
+            {aspectRatios.map((ratio) => (
+              <Button
+                key={ratio.label}
+                size='lg'
+                onClick={() => handleAspectRatioChange(ratio.value)}
+                className={`w-full transition-all ${
+                  aspect === ratio.value
+                    ? `outline outline-2 outline-offset-2 outline-${ratio.color}`
+                    : ''
+                }`}
+                style={{
+                  backgroundColor: ratio.color,
+                  color: '#ffffff',
+                  opacity: aspect === ratio.value ? 1 : 0.8,
+                }}
+              >
+                {ratio.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </div>
     </Dialog>
   );
 };

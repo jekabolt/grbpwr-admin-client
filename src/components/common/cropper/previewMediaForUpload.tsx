@@ -1,17 +1,17 @@
-import { Button, Grid } from '@mui/material';
 import { PreviewMediaForUploadInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
+import { Button } from 'components/ui/button';
+import Media from 'components/ui/media';
 import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
-import { isBase64Video } from 'features/utilitty/filterContentType';
+import { isBase64Video, isVideo } from 'features/utilitty/filterContentType';
 import { getBase64ImageFromUrl } from 'features/utilitty/getBase64';
 import { FC, useEffect } from 'react';
-// import styles from 'styles/media-selector.scss';
 import { MediaCropper } from './cropper';
 
 export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
   b64Media,
   croppedImage,
   isCropperOpen,
-  isMediaSelector,
+  isMediaSelector = false,
   handleUploadMedia,
   setCroppedImage,
   setIsCropperOpen,
@@ -29,58 +29,50 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
   };
 
   return (
-    <Grid container padding='2%' spacing={2}>
+    <div className='w-full flex justify-center'>
       {b64Media && (
-        <>
-          <Grid
-            item
-            xs={12}
-            // className={styles.preview_media_to_upload}
-          >
-            {isBase64Video(b64Media) ? (
-              <video src={b64Media} controls></video>
-            ) : isMediaSelector ? (
-              <img src={croppedImage || b64Media} alt='' />
+        <div className='w-96 space-y-4'>
+          <div className='w-full'>
+            {isMediaSelector ? (
+              <Media
+                src={croppedImage || b64Media || ''}
+                alt={b64Media}
+                type={isBase64Video(b64Media) ? 'video' : 'image'}
+                aspectRatio={croppedImage ? 'auto' : '4/5'}
+                controls={isBase64Video(b64Media)}
+              />
             ) : (
-              <a href={b64Media} target='_blank'>
-                <img src={croppedImage || b64Media} alt='' />
+              <a href={b64Media} target='_blank' rel='noopener noreferrer'>
+                <Media
+                  src={croppedImage || b64Media || ''}
+                  alt=''
+                  aspectRatio={croppedImage ? 'auto' : '4/5'}
+                  type={isVideo(b64Media) ? 'video' : 'image'}
+                  controls={isVideo(b64Media)}
+                />
               </a>
             )}
-          </Grid>
-          <Grid item xs={4}>
+          </div>
+          <div className='grid grid-cols-3 gap-3'>
             <Button
-              variant='contained'
-              fullWidth
-              size='small'
+              size='lg'
               onClick={() => setIsCropperOpen(true)}
               disabled={isBase64Video(b64Media)}
             >
               crop
             </Button>
-          </Grid>
-          <Grid item xs={4}>
             <Button
-              variant='contained'
-              fullWidth
-              size='small'
+              size='lg'
               disabled={!croppedImage && !isMediaSelector}
               onClick={uploadCroppedMediaAndCloseModal}
             >
               upload
             </Button>
-          </Grid>
-          <Grid item xs={4}>
-            <Button
-              variant='contained'
-              fullWidth
-              disabled={!croppedImage && !isMediaSelector}
-              size='small'
-              onClick={clear}
-            >
+            <Button size='lg' disabled={!croppedImage && !isMediaSelector} onClick={clear}>
               clear
             </Button>
-          </Grid>
-        </>
+          </div>
+        </div>
       )}
 
       <MediaCropper
@@ -92,6 +84,6 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
           setIsCropperOpen(false);
         }}
       />
-    </Grid>
+    </div>
   );
 };

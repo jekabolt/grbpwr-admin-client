@@ -1,24 +1,16 @@
 import CheckIcon from '@mui/icons-material/Check';
 import ClearIcon from '@mui/icons-material/Clear';
-import {
-  Box,
-  Grid2 as Grid,
-  IconButton,
-  ImageList,
-  ImageListItem,
-  InputLabel,
-  Typography,
-  useMediaQuery,
-  useTheme,
-} from '@mui/material';
 import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'components/common/interfaces/mediaSelectorInterfaces';
+import { Button } from 'components/ui/button';
+import Media from 'components/ui/media';
+import Text from 'components/ui/text';
 import { aspectRatioColor, mediaAspectRatio } from 'features/utilitty/aspect-ratio';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { FC, useEffect, useState } from 'react';
-// import styles from 'styles/media-selector.scss';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
@@ -40,12 +32,12 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const [clickedMedia, setClickedMedia] = useState<common_MediaItem | undefined>();
   const [hoverMedia, setHoverMedia] = useState<number | undefined>();
   const [confirmDeletionId, setConfirmDeletionId] = useState<number | undefined>();
-  const theme = useTheme();
-  const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const [videoSizes, setVideoSizes] = useState<Record<number, { width: number; height: number }>>(
     {},
   );
   const handleCloseModal = () => setOpenModal(false);
+
+  const isSelected = (id: number) => selectedMedia?.some((item) => item.id === id);
 
   useEffect(() => {
     fetchFiles(50, 0);
@@ -101,80 +93,68 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   };
 
   return (
-    <Grid container justifyContent='center'>
-      <Grid size={{ xs: 12 }}>
-        <ImageList
-          variant='standard'
-          sx={{ width: '100%' }}
-          cols={isSmallScreen ? 2 : 6}
-          gap={8}
-          rowHeight={200}
-        >
-          {filteredMedia.map((media) => (
-            <Box key={media.id}>
-              <ImageListItem
-                onClick={(event) => handleSelect(media, event)}
-                onMouseEnter={() => setHoverMedia(media.id)}
-                onMouseLeave={() => setHoverMedia(undefined)}
-                // className={styles.list_media_item}
-              >
-                <InputLabel htmlFor={`${media.id}`}>
-                  {selectedMedia?.some((item) => item.id === media.id) && (
-                    <span
-                    // className={styles.selected_flag}
-                    >
-                      selected
-                    </span>
+    <div className='w-full'>
+      <div className='grid grid-cols-2 md:grid-cols-6 gap-2'>
+        {filteredMedia.map((media) => (
+          <div key={media.id} className='flex flex-col gap-1'>
+            <div
+              className='relative cursor-pointer group'
+              onClick={(event) => handleSelect(media, event)}
+              onMouseEnter={() => setHoverMedia(media.id)}
+              onMouseLeave={() => setHoverMedia(undefined)}
+            >
+              <label htmlFor={`${media.id}`} className='block'>
+                <Text
+                  variant='selected'
+                  component='span'
+                  className={cn(
+                    'absolute hidden top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 p-2 bg-black/50',
+                    {
+                      block: isSelected(media.id || 0),
+                    },
                   )}
-                  {isVideo(media.media?.thumbnail?.mediaUrl) ? (
-                    <video
-                      src={media.media?.thumbnail?.mediaUrl}
-                      // className={
-                      //   selectedMedia?.some((item) => item.id === media.id)
-                      //     ? styles.selected_media
-                      //     : ''
-                      // }
-                      controls
-                      onLoadedMetadata={(e) => handleVideoLoad(media.id || 0, e)}
-                    />
-                  ) : (
-                    <img
-                      src={media.media?.thumbnail?.mediaUrl}
-                      alt='media'
-                      // className={
-                      //   selectedMedia?.some((item) => item.id === media.id)
-                      //     ? styles.selected_media
-                      //     : ''
-                      // }
-                    />
-                  )}
-                </InputLabel>
-                {hoverMedia === media.id && isDeleteAccepted && (
-                  <IconButton
-                    size='small'
-                    onClick={(e) => handleDeleteFile(media.id || 0, e)}
-                    // className={styles.delete_btn}
-                  >
-                    {confirmDeletionId === media.id ? <CheckIcon /> : <ClearIcon />}
-                  </IconButton>
-                )}
-              </ImageListItem>
-              <Typography
-                variant='overline'
-                style={{
-                  backgroundColor: mediaAspectRatio(media, videoSizes)
-                    ? aspectRatioColor(mediaAspectRatio(media, videoSizes))
-                    : '#808080',
-                }}
-              >
-                {mediaAspectRatio(media, videoSizes)
-                  ? `RATIO: ${mediaAspectRatio(media, videoSizes)}`
-                  : 'RATIO: UNKNOWN'}
-              </Typography>
-            </Box>
-          ))}
-        </ImageList>
-      </Grid>
+                >
+                  selected
+                </Text>
+
+                <Media
+                  alt={media.media?.thumbnail?.mediaUrl || ''}
+                  src={media.media?.thumbnail?.mediaUrl || ''}
+                  type={isVideo(media.media?.thumbnail?.mediaUrl) ? 'video' : 'image'}
+                  controls={isVideo(media.media?.thumbnail?.mediaUrl)}
+                  onLoadedMetadata={
+                    isVideo(media.media?.thumbnail?.mediaUrl)
+                      ? (e: any) => handleVideoLoad(media.id || 0, e)
+                      : undefined
+                  }
+                />
+              </label>
+
+              {hoverMedia === media.id && isDeleteAccepted && (
+                <Button
+                  className='absolute top-0 right-0'
+                  onClick={(e: any) => handleDeleteFile(media.id || 0, e)}
+                >
+                  {confirmDeletionId === media.id ? <CheckIcon /> : <ClearIcon />}
+                </Button>
+              )}
+            </div>
+            <Text
+              variant='uppercase'
+              className='text-center'
+              style={{
+                backgroundColor: mediaAspectRatio(media, videoSizes)
+                  ? aspectRatioColor(mediaAspectRatio(media, videoSizes))
+                  : '#808080',
+              }}
+            >
+              {mediaAspectRatio(media, videoSizes)
+                ? `ratio: ${mediaAspectRatio(media, videoSizes)}`
+                : 'ratio: unknown'}
+            </Text>
+          </div>
+        ))}
+      </div>
       <FullSizeMediaModal
         open={openModal}
         clickedMedia={clickedMedia}
@@ -183,6 +163,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
         setCroppedImage={setCroppedImage}
         handleUploadMedia={handleUploadMedia}
       />
-    </Grid>
+    </div>
   );
 };

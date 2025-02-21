@@ -9,6 +9,7 @@ export interface MediaSelectorLayoutProps {
     aspectRatio?: string[];
     hideVideos?: boolean;
     isDeleteAccepted?: boolean;
+    className?: string;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
 
@@ -28,7 +29,6 @@ export interface MediaSelectorInterface {
     aspectRatio?: string[]
     hideVideos?: boolean
     isDeleteAccepted?: boolean;
-    hideNavBar?: boolean
     select: (imageUrl: common_MediaFull, allowMultiple: boolean, formik?: FormikProps<any>) => void
 
 }

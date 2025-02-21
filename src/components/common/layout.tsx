@@ -1,9 +1,10 @@
-import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import MenuIcon from '@mui/icons-material/Menu';
 import { SnackBar } from 'components/common/utility/snackbar';
 import { SideBarItems } from 'components/managers/sidebar-items';
+import { Button } from 'components/ui/button';
 import { Logo } from 'components/ui/icons/logo';
 import { ROUTES } from 'constants/routes';
+import { cn } from 'lib/utility';
 import { FC, ReactNode, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -40,18 +41,14 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
             <Logo onClick={navigateMainPage} />
           </div>
 
-          <div className='overflow-y-auto border border-red-500 h-full flex items-center justify-center'>
+          <div className='overflow-y-auto h-full flex items-center justify-center'>
             <SideBarItems />
           </div>
 
           <div className='w-full border-t border-gray-200 p-4'>
-            <button
-              onClick={handleLogout}
-              className='flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50'
-            >
-              <ExitToAppIcon fontSize='small' />
-              <span>Logout</span>
-            </button>
+            <Button onClick={handleLogout} size='lg'>
+              Logout
+            </Button>
           </div>
         </div>
       </div>
@@ -63,10 +60,8 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
         <MenuIcon />
       </button>
 
-      <div
-        className={`flex-1 transition-all duration-300 ${isSidebarOpen ? 'pl-[240px]' : 'pl-0'}`}
-      >
-        <div className='container mx-auto p-6'>{children}</div>
+      <div className={cn('transition-all duration-300 w-full', { 'pl-[240px]': isSidebarOpen })}>
+        <div className='border-2 border-red-500 h-full pt-20 px-2'>{children}</div>
         <SnackBar />
       </div>
     </div>
