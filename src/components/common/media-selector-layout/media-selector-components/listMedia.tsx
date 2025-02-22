@@ -11,19 +11,18 @@ import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { FC, useEffect, useState } from 'react';
+import { FilterMedias } from './filterMedias';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
   allowMultiple,
   selectedMedia,
   enableModal = false,
-  croppedImage,
   aspectRatio,
   hideVideos = false,
   isDeleteAccepted = true,
-  setCroppedImage,
   select,
-  handleUploadMedia,
+  onModalStateChange,
 }) => {
   const { showMessage } = useSnackBarStore();
   const { getSortedMedia, fetchFiles, deleteFile } = useMediaSelectorStore();
@@ -42,6 +41,12 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   useEffect(() => {
     fetchFiles(50, 0);
   }, [fetchFiles]);
+
+  useEffect(() => {
+    if (onModalStateChange) {
+      onModalStateChange(openModal);
+    }
+  }, [openModal, onModalStateChange]);
 
   const handleSelect = (media: common_MediaFull | undefined, event: React.MouseEvent) => {
     event.stopPropagation();
@@ -94,6 +99,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
 
   return (
     <div className='w-full'>
+      <FilterMedias />
       <div className='grid grid-cols-2 md:grid-cols-6 gap-2'>
         {filteredMedia.map((media) => (
           <div key={media.id} className='flex flex-col gap-1'>
@@ -155,14 +161,7 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
           </div>
         ))}
       </div>
-      <FullSizeMediaModal
-        open={openModal}
-        clickedMedia={clickedMedia}
-        croppedImage={croppedImage}
-        close={handleCloseModal}
-        setCroppedImage={setCroppedImage}
-        handleUploadMedia={handleUploadMedia}
-      />
+      <FullSizeMediaModal open={openModal} clickedMedia={clickedMedia} close={handleCloseModal} />
     </div>
   );
 };

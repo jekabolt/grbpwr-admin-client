@@ -1,43 +1,22 @@
-import {
-  Box,
-  Button,
-  CircularProgress,
-  Grid,
-  Paper,
-  Theme,
-  Typography,
-  useMediaQuery,
-} from '@mui/material';
+import Input from 'components/ui/input';
+import Text from 'components/ui/text';
 import { getBase64File } from 'features/utilitty/getBase64';
+import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { useSnackBarStore } from 'lib/stores/store';
-import React, { Dispatch, FC, SetStateAction, useState } from 'react';
+import React, { FC, useState } from 'react';
 
-interface DragDropProps {
-  selectedFileUrl: string;
-  setSelectedFileUrl: (url: string) => void;
-  selectedFiles: File[];
-  setSelectedFiles: Dispatch<SetStateAction<File[]>>;
-  loading: boolean;
-}
-
-export const DragDrop: FC<DragDropProps> = ({
-  selectedFileUrl,
-  setSelectedFileUrl,
-  selectedFiles,
-  setSelectedFiles,
-  loading,
-}) => {
+export const DragDrop: FC = () => {
   const { showMessage } = useSnackBarStore();
+  const { uploadState, prepareUpload, status } = useMediaSelectorStore();
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
 
   const processFiles = async (files: FileList) => {
     if (files && files.length > 0) {
       const file = files[0];
-      setSelectedFiles([file]);
-      const b64 = await getBase64File(file);
-      setSelectedFileUrl(b64);
-      console.log(selectedFileUrl);
+      prepareUpload({
+        selectedFiles: [file],
+        selectedFileUrl: await getBase64File(file),
+      });
     }
   };
 
@@ -71,46 +50,39 @@ export const DragDrop: FC<DragDropProps> = ({
     event.stopPropagation();
     setIsDragging(dragging);
   };
+
   return (
-    <Grid container>
-      <Grid item xs={12}>
-        <Box
+    <div className='w-full'>
+      <div className='w-full'>
+        <div
+          className='flex items-center justify-center w-full'
           onDragOver={(e) => handleDrag(e, true)}
           onDragEnter={(e) => handleDrag(e, true)}
           onDragLeave={(e) => handleDrag(e, false)}
           onDrop={handleFileChange}
-          display='flex'
-          alignItems='center'
         >
-          <Paper
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              width: isMobile ? '100%' : 'auto',
-            }}
-          >
-            {!selectedFiles.length && (
-              <Button
-                variant='outlined'
-                component='label'
-                sx={{ width: isMobile ? '100%' : 'auto' }}
-              >
+          <div className='flex items-center justify-center w-full h-40 p-4 bg-inactive'>
+            {!uploadState.selectedFiles.length && (
+              <label className='cursor-pointer border border-text rounded px-4 py-2 hover:bg-gray-50 w-full sm:w-auto text-center'>
                 DRAG AND DROP YOUR MEDIA HERE
-                <input
-                  id='files'
+                <Input
+                  name='files'
                   type='file'
                   accept='image/*, video/*'
                   onChange={handleFileChange}
-                  style={{ display: 'none' }}
+                  className='hidden'
                 />
-              </Button>
+              </label>
             )}
-            {selectedFiles.length > 0 && <Typography>Media is selected</Typography>}
-          </Paper>
-          {loading && <CircularProgress />}
-        </Box>
-      </Grid>
-    </Grid>
+            {uploadState.selectedFiles.length > 0 && (
+              <Text variant='uppercase'>Media is selected</Text>
+            )}
+          </div>
+          {status.isLoading && (
+            <div className='ml-4 animate-spin w-10 h-10 border-2 border-gray-300 border-t-text-600 rounded-full' />
+          )}
+        </div>
+      </div>
+    </div>
   );
 };

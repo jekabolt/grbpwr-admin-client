@@ -1,4 +1,3 @@
-
 import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 import { FormikProps } from 'formik';
 import { Dispatch, SetStateAction } from 'react';
@@ -38,27 +37,17 @@ export interface MediaSelectorMediaListProps {
     selectedMedia: common_MediaFull[] | undefined;
     height?: string | number;
     enableModal?: boolean;
-    croppedImage: string | null
     aspectRatio?: string[]
     hideVideos?: boolean
     isDeleteAccepted?: boolean;
-    setCroppedImage: (img: string | null) => void
     select: (imageUrl: common_MediaFull, allowMultiple: boolean) => void;
-    handleUploadMedia: () => Promise<void>
-}
-
-export interface UploadMediaByUrlProps {
-    url: string;
-    setUrl: React.Dispatch<React.SetStateAction<string>>;
+    onModalStateChange?: (isOpen: boolean) => void;
 }
 
 export interface FullSizeMediaModalInterface {
     open: boolean;
-    croppedImage: string | null
     clickedMedia: common_MediaItem | undefined
-    setCroppedImage: (img: string | null) => void
     close: () => void;
-    handleUploadMedia: () => Promise<void>
 }
 
 export interface PreviewMediaForUploadInterface {

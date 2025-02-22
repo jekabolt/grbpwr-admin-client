@@ -1,33 +1,33 @@
-import { Box, Grid, TextField, Theme, useMediaQuery } from '@mui/material';
-import { UploadMediaByUrlProps } from 'components/common/interfaces/mediaSelectorInterfaces';
+import Input from 'components/ui/input';
 import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
+import { useMediaSelectorStore } from 'lib/stores/media/store';
+import { cn } from 'lib/utility';
 import { FC } from 'react';
 
-export const ByUrl: FC<UploadMediaByUrlProps> = ({ url, setUrl }) => {
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
+export const ByUrl: FC = () => {
+  const { uploadState, prepareUpload } = useMediaSelectorStore();
+
   const isValidUrl = (urlString: string) => {
+    if (!urlString) return true;
     try {
       new URL(urlString);
       return checkIsHttpHttpsMediaLink(urlString);
     } catch (e) {
-      setUrl('');
       return false;
     }
   };
+
   return (
-    <Grid container>
-      <Grid item xs={12}>
-        <Box display='flex' gap='5px'>
-          <TextField
-            size='small'
-            label='upload media by url'
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            error={!isValidUrl(url) && url.length > 0}
-            fullWidth={isMobile}
-          />
-        </Box>
-      </Grid>
-    </Grid>
+    <div className='w-full'>
+      <Input
+        name='url'
+        placeholder='Enter URL to upload media'
+        value={uploadState.url}
+        onChange={(e: any) => prepareUpload({ url: e.target.value })}
+        className={cn('w-full', {
+          'focus:border-red-500': !isValidUrl(uploadState.url),
+        })}
+      />
+    </div>
   );
 };

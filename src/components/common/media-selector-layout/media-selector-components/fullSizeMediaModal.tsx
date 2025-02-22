@@ -5,6 +5,7 @@ import { CopyToClipboard } from 'components/common/utility/copyToClipboard';
 import { Dialog } from 'components/common/utility/dialog';
 import Text from 'components/ui/text';
 import { isVideo } from 'features/utilitty/filterContentType';
+import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC, useEffect, useState } from 'react';
 
 type MediaType = 'fullSize' | 'compressed' | 'thumbnail';
@@ -15,14 +16,12 @@ const mediaTypes: MediaType[] = ['fullSize', 'compressed', 'thumbnail'];
 export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   open,
   clickedMedia,
-  croppedImage,
   close,
-  setCroppedImage,
-  handleUploadMedia,
 }) => {
+  const { prepareUpload } = useMediaSelectorStore();
   const [videoDimensions, setVideoDimensions] = useState<Partial<VideoDimensions>>({});
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(true);
+  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
 
   const loadVideoDimensions = (url: string | undefined, type: MediaType) => {
     if (!url) return;
@@ -49,7 +48,6 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
   }, [clickedMedia]);
 
   const clearDragDropSelector = () => {
-    setCroppedImage('');
     setIsPreviewOpen(!isPreviewOpen);
   };
 
@@ -63,15 +61,11 @@ export const FullSizeMediaModal: FC<FullSizeMediaModalInterface> = ({
       <div className='flex flex-col items-center w-96 gap-4'>
         <PreviewMediaForUpload
           b64Media={clickedMedia?.thumbnail?.mediaUrl || ''}
-          croppedImage={croppedImage}
           isCropperOpen={isCropperOpen}
           isMediaSelector={false}
-          setCroppedImage={setCroppedImage}
           setIsCropperOpen={setIsCropperOpen}
           clear={clearDragDropSelector}
-          handleUploadMedia={handleUploadMedia}
         />
-
         <div className='w-full'>
           {mediaTypes.map((type) => (
             <div key={type} className='flex gap-3 items-start'>

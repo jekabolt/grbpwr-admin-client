@@ -1,31 +1,32 @@
-import { PreviewMediaForUploadInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
+import { common_MediaItem } from 'api/proto-http/admin';
 import { Button } from 'components/ui/button';
 import Media from 'components/ui/media';
-import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
 import { isBase64Video, isVideo } from 'features/utilitty/filterContentType';
-import { getBase64ImageFromUrl } from 'features/utilitty/getBase64';
-import { FC, useEffect } from 'react';
+import { useMediaSelectorStore } from 'lib/stores/media/store';
+import { FC } from 'react';
 import { MediaCropper } from './cropper';
 
-export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
+interface PreviewMediaForUploadProps {
+  b64Media: string;
+  isCropperOpen: boolean;
+  isMediaSelector?: boolean;
+  clickedMedia?: common_MediaItem;
+  setIsCropperOpen: (open: boolean) => void;
+  clear?: () => void;
+}
+
+export const PreviewMediaForUpload: FC<PreviewMediaForUploadProps> = ({
   b64Media,
-  croppedImage,
   isCropperOpen,
   isMediaSelector = false,
-  handleUploadMedia,
-  setCroppedImage,
   setIsCropperOpen,
   clear,
 }) => {
-  useEffect(() => {
-    if (checkIsHttpHttpsMediaLink(b64Media)) {
-      getBase64ImageFromUrl(b64Media);
-    }
-  }, [b64Media]);
+  const { uploadState, uploadMedia, prepareUpload } = useMediaSelectorStore();
 
-  const uploadCroppedMediaAndCloseModal = () => {
-    handleUploadMedia();
-    clear();
+  const uploadCroppedMediaAndCloseModal = async () => {
+    await uploadMedia();
+    clear?.();
   };
 
   return (
@@ -35,18 +36,18 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
           <div className='w-full'>
             {isMediaSelector ? (
               <Media
-                src={croppedImage || b64Media || ''}
+                src={uploadState.croppedImage || b64Media || ''}
                 alt={b64Media}
                 type={isBase64Video(b64Media) ? 'video' : 'image'}
-                aspectRatio={croppedImage ? 'auto' : '4/5'}
+                aspectRatio={uploadState.croppedImage ? 'auto' : '4/5'}
                 controls={isBase64Video(b64Media)}
               />
             ) : (
               <a href={b64Media} target='_blank' rel='noopener noreferrer'>
                 <Media
-                  src={croppedImage || b64Media || ''}
-                  alt=''
-                  aspectRatio={croppedImage ? 'auto' : '4/5'}
+                  src={uploadState.croppedImage || b64Media || ''}
+                  alt={b64Media}
+                  aspectRatio={uploadState.croppedImage ? 'auto' : '4/5'}
                   type={isVideo(b64Media) ? 'video' : 'image'}
                   controls={isVideo(b64Media)}
                 />
@@ -63,12 +64,16 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
             </Button>
             <Button
               size='lg'
-              disabled={!croppedImage && !isMediaSelector}
+              disabled={!uploadState.croppedImage && !isMediaSelector}
               onClick={uploadCroppedMediaAndCloseModal}
             >
               upload
             </Button>
-            <Button size='lg' disabled={!croppedImage && !isMediaSelector} onClick={clear}>
+            <Button
+              size='lg'
+              disabled={!uploadState.croppedImage && !isMediaSelector}
+              onClick={clear}
+            >
               clear
             </Button>
           </div>
@@ -80,7 +85,7 @@ export const PreviewMediaForUpload: FC<PreviewMediaForUploadInterface> = ({
         open={isCropperOpen}
         close={() => setIsCropperOpen(false)}
         saveCroppedImage={(croppedImageUrl: string) => {
-          setCroppedImage(croppedImageUrl);
+          prepareUpload({ croppedImage: croppedImageUrl });
           setIsCropperOpen(false);
         }}
       />
