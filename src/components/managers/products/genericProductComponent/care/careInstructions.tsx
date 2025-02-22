@@ -8,8 +8,8 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { Dialog } from 'components/ui/components/dialog';
 import { FC, useState } from 'react';
+import { Dialog } from 'ui/components/dialog';
 // import styles from './care.scss';
 import { careInstruction } from './careInstruction';
 

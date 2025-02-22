@@ -1,7 +1,7 @@
 import { Checkbox } from '@mui/material';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
-import { Dialog } from 'components/ui/components/dialog';
 import { useArchiveStore } from 'lib/stores/archive/store';
+import { Dialog } from 'ui/components/dialog';
 
 import { MaterialReactTable, MRT_ColumnDef, useMaterialReactTable } from 'material-react-table';
 import { useEffect, useMemo, useState } from 'react';

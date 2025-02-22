@@ -9,9 +9,9 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { Dialog } from 'components/ui/components/dialog';
 import { FC, useEffect, useMemo, useState } from 'react';
-import { composition } from '../garment-composition/garment-composition';
+import { Dialog } from 'ui/components/dialog';
+import { composition } from '../../../../../../constants/garment-composition';
 // import styles from '../styles/composition.scss';
 
 interface SelectedInstructions {

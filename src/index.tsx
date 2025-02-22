@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
 import { Archive } from 'components/managers/archive/archive';
-import { Analitic } from 'components/managers/base-page';
+import { Analitic } from 'components/managers/page';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
 import { OrderDetails } from 'components/managers/orders/order-details/page';

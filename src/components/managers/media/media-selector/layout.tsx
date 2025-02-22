@@ -1,5 +1,5 @@
-import { Button } from 'components/ui/components/button';
 import { FC, useState } from 'react';
+import { Button } from 'ui/components/button';
 import { MediaSelectorModal } from './components/mediaSelectorModal';
 import { MediaSelectorLayoutProps } from './interfaces/mediaSelectorInterfaces';
 

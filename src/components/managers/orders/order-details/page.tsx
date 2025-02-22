@@ -1,9 +1,9 @@
 import { Button, Grid2 as Grid, Typography } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
-import { Layout } from 'components/ui/layout';
-import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { Logo } from 'ui/icons/logo';
+import { Layout } from 'ui/layout';
 import { DisplayState } from '../interfaces/interface';
 import { useOrderDetails } from '../utility/use-order-details';
 import { Billing } from './components/billing';
@@ -64,7 +64,7 @@ export function OrderDetails() {
       >
         {isPrinting && (
           <Grid size={{ xs: 12 }}>
-            <img src={logo} alt='logo' style={{ width: '30px', height: 'auto' }} />
+            <Logo />
           </Grid>
         )}
         <Grid size={{ xs: 12 }}>

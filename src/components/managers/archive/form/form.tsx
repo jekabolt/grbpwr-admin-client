@@ -2,11 +2,11 @@ import { Button, Grid2 as Grid, TextField } from '@mui/material';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
 
 import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
-import { Dialog } from 'components/ui/components/dialog';
 import { Field, Form, Formik, FormikProps } from 'formik';
 import { useArchiveStore } from 'lib/stores/archive/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
+import { Dialog } from 'ui/components/dialog';
 // import styles from 'styles/archive.scss';
 import { ArchiveMediaDisplay } from '../utility/archive-items-media';
 

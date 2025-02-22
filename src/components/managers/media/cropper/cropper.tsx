@@ -1,13 +1,13 @@
 import Rotate90DegreesCwIcon from '@mui/icons-material/Rotate90DegreesCw';
 import { Slider } from '@mui/material';
-import { Button } from 'components/ui/components/button';
-import { Dialog } from 'components/ui/components/dialog';
-import Text from 'components/ui/components/text';
 import getCroppedImg from 'lib/features/getCropped';
 import { FC, useCallback, useEffect, useState } from 'react';
 import Cropper, { Area } from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
 import { Point } from 'react-easy-crop/types';
+import { Button } from 'ui/components/button';
+import { Dialog } from 'ui/components/dialog';
+import Text from 'ui/components/text';
 
 interface CropperInterface {
   selectedFile: string | undefined;

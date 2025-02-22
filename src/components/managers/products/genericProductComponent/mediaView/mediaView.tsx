@@ -7,7 +7,7 @@ import { ErrorMessage, useFormikContext } from 'formik';
 import { isVideo } from 'lib/features/filterContentType';
 import { FC, useEffect, useMemo, useState } from 'react';
 // import styles from 'styles/addProduct.scss';
-import Media from 'components/ui/components/media';
+import Media from 'ui/components/media';
 import { MediaViewInterface } from '../interface/interface';
 
 export const MediaView: FC<MediaViewInterface> = ({

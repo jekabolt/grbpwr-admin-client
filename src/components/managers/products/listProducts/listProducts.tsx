@@ -1,10 +1,10 @@
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import { Button, Grid2 as Grid, IconButton, Typography } from '@mui/material';
-import { TruncateText } from 'components/ui/components/truncateText';
 import { isVideo } from 'lib/features/filterContentType';
 import { useProductStore } from 'lib/stores/product/store';
 import React, { FC, useState } from 'react';
+import { TruncateText } from 'ui/components/truncateText';
 // import styles from 'styles/paged.scss';
 
 interface ProductProps {
