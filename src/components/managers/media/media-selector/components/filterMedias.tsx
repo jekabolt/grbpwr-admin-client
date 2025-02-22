@@ -1,9 +1,9 @@
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC } from 'react';
-import SelectField from 'ui/components/selector';
+import Selector from 'ui/components/selector';
 
 const TYPE_OPTIONS = [
-  { value: '', label: 'ALL' },
+  { value: 'all', label: 'ALL' },
   { value: 'image', label: 'IMAGE' },
   { value: 'video', label: 'VIDEO' },
 ];
@@ -19,7 +19,7 @@ export const FilterMedias: FC = () => {
   return (
     <div className='flex flex-col lg:flex-row gap-4'>
       <div className='lg:w-1/2 w-full'>
-        <SelectField
+        <Selector
           label='TYPE'
           value={filters.type}
           options={TYPE_OPTIONS}
@@ -28,7 +28,7 @@ export const FilterMedias: FC = () => {
       </div>
 
       <div className='lg:w-1/2 w-full'>
-        <SelectField
+        <Selector
           label='ORDER'
           value={filters.order}
           options={ORDER_OPTIONS}

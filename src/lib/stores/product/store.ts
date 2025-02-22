@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { getProductsPaged } from "api/admin";
+import { deleteProductByID, getProductsPaged } from "api/admin";
 import { common_FilterConditions, GetProductsPagedRequest } from "api/proto-http/admin";
 import { defaultProductFilterSettings } from "constants/initialFilterStates";
 import { ProductStore } from "./store-types";
@@ -28,6 +28,24 @@ export const useProductStore = create<ProductStore>((set, get) => ({
                 } as common_FilterConditions,
             },
         }));
+    },
+    deleteProduct: async (id: number | undefined) => {
+        if (!id) return { success: false };
+
+        set({ isLoading: true, error: null });
+
+        try {
+            await deleteProductByID({ id });
+            set(state => ({
+                products: state.products.filter(product => product.id !== id),
+                isLoading: false,
+                error: null
+            }));
+            return { success: true };
+        } catch (error) {
+            set({ isLoading: false, error: 'Failed to delete product' });
+            return { success: false };
+        }
     },
     fetchProducts: async (limit: number, offset: number, filterValues?: GetProductsPagedRequest) => {
         const { filter } = get();

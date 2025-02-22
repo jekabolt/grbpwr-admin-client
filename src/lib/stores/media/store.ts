@@ -4,6 +4,7 @@ import {
     uploadContentImage,
     uploadContentVideo
 } from "api/admin";
+import { common_MediaFull } from "api/proto-http/admin";
 import { checkIsHttpHttpsMediaLink } from 'lib/features/checkIsHttpHttpsLink';
 import { isVideo } from "lib/features/filterContentType";
 import { filterExtensionToContentType } from 'lib/features/filterExtentions';
@@ -114,7 +115,7 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
         }
     },
 
-    fetchFiles: async (limit: number, offset: number) => {
+    fetchFiles: async (limit: number, offset: number): Promise<common_MediaFull[]> => {
         set({ status: { isLoading: true, error: null } });
         try {
             const response = await getAllUploadedFiles({
@@ -128,8 +129,11 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
                 media: offset === 0 ? fetchedFiles : [...state.media, ...fetchedFiles],
                 status: { isLoading: false, error: null }
             }));
+
+            return fetchedFiles;
         } catch (error) {
             set({ status: { isLoading: false, error: 'Failed to fetch media' } });
+            return [];
         }
     },
 

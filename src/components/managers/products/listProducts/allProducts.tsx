@@ -1,22 +1,14 @@
-import { Grid2 as Grid } from '@mui/material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-import { deleteProductByID } from 'api/admin';
-import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
-import { ROUTES } from 'constants/routes';
+import { GetProductsPagedRequest } from 'api/proto-http/admin';
 import { useProductStore } from 'lib/stores/product/store';
-import { useSnackBarStore } from 'lib/stores/store';
 import debounce from 'lodash/debounce';
-import { FC, MouseEvent, useCallback, useEffect, useState } from 'react';
+import { FC, useCallback, useEffect } from 'react';
 import { Filter } from './filterProducts/filterProducts';
 import { ListProducts } from './listProducts';
 
 export const AllProducts: FC = () => {
-  const { showMessage } = useSnackBarStore();
-  const { updateFilter, products, setProducts, isLoading, hasMore, filter, fetchProducts } =
-    useProductStore();
-  const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
-  const [deletingProductId, setDeletingProductId] = useState<number | undefined>(undefined);
+  const { products, isLoading, hasMore, filter, fetchProducts, updateFilter } = useProductStore();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -44,37 +36,13 @@ export const AllProducts: FC = () => {
     }
   }, [searchParams.get('filter')]);
 
-  const handleProductClick = (id: number | undefined) => {
-    navigate(`${ROUTES.product}/${id}`, { replace: true });
-  };
+  // const handleProductClick = (id: number | undefined) => {
+  //   navigate(`${ROUTES.product}/${id}`, { replace: true });
+  // };
 
-  const handleCopyProductClick = (id: number | undefined) => {
-    navigate(`${ROUTES.copyProduct}/${id}`);
-  };
-
-  const handleDeleteClick = async (
-    e: MouseEvent<HTMLButtonElement>,
-    productId: number | undefined,
-  ) => {
-    e.stopPropagation();
-
-    if (confirmDelete !== productId) {
-      setConfirmDelete(productId);
-    } else {
-      setDeletingProductId(productId);
-      try {
-        await deleteProductByID({ id: productId });
-        setProducts((prevProducts: common_Product[]) =>
-          prevProducts?.filter((product) => product.id !== productId),
-        );
-        setTimeout(() => setDeletingProductId(undefined), 1000);
-      } catch (error) {
-        showMessage('the product cannot be removed', 'error');
-      } finally {
-        setConfirmDelete(undefined);
-      }
-    }
-  };
+  // const handleCopyProductClick = (id: number | undefined) => {
+  //   navigate(`${ROUTES.copyProduct}/${id}`);
+  // };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -97,20 +65,14 @@ export const AllProducts: FC = () => {
   };
 
   return (
-    <Grid container spacing={2} overflow='hidden' justifyContent='center'>
-      <Grid size={12}>
-        <Filter onFilterChange={handleFilterChange} />
-      </Grid>
-      <Grid size={12}>
-        <ListProducts
-          productClick={handleProductClick}
-          deleteProduct={handleDeleteClick}
-          copy={handleCopyProductClick}
-          confirmDeleteProductId={confirmDelete}
-          deletingProductId={deletingProductId}
-          showHidden={filter.showHidden}
-        />
-      </Grid>
-    </Grid>
+    <div className='w-full flex flex-col gap-10'>
+      <Filter onFilterChange={handleFilterChange} />
+
+      <ListProducts
+      // productClick={handleProductClick}
+      // copy={handleCopyProductClick}
+      // showHidden={filter.showHidden}
+      />
+    </div>
   );
 };

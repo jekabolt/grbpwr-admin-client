@@ -1,3 +1,4 @@
+import { common_MediaFull } from "api/proto-http/admin";
 
 export interface MediaSelectorStore {
     // State
@@ -21,7 +22,7 @@ export interface MediaSelectorStore {
     prepareUpload: (uploadData: Partial<MediaSelectorStore['uploadState']>) => void;
     resetUpload: () => void;
     uploadMedia: () => Promise<void>;
-    fetchFiles: (limit: number, offset: number) => Promise<void>;
+    fetchFiles: (limit: number, offset: number) => Promise<common_MediaFull[]>;
     getSortedMedia: () => any[];
     deleteFile: (id: number | undefined) => Promise<{ success: boolean }>;
 }

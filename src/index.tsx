@@ -9,7 +9,7 @@ import { MediaManager } from 'components/managers/media/mediaManager';
 import { OrderDetails } from 'components/managers/orders/order-details/page';
 import { Orders } from 'components/managers/orders/orders';
 import { ProductForm } from 'components/managers/products/productForm/productForm';
-import { Product } from 'components/managers/products/products';
+import { Product } from 'components/managers/products/page';
 import { Promo } from 'components/managers/promo/promo';
 import { Settings } from 'components/managers/settings/settings';
 import { ROUTES } from 'constants/routes';
