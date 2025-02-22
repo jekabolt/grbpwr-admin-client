@@ -63,7 +63,6 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   }, [open, currentPage, filter, newLimit, offset]);
 
   useEffect(() => {
-    // Filter allProducts based on selectedProductIds
     setData(allProducts);
     const newSelectedProducts = allProducts.filter((product) =>
       selectedProductIds.includes(product.id!),
@@ -92,7 +91,6 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   };
 
   const columns = useMemo<MRT_ColumnDef<common_Product>[]>(
-    //column definitions...
     () => [
       {
         id: 'selection',
@@ -135,7 +133,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
           return (
             <Checkbox
               checked={hidden}
-              disabled={true} // Makes the checkbox read-only
+              disabled={true}
               inputProps={{ 'aria-label': 'hidden checkbox' }}
             />
           );

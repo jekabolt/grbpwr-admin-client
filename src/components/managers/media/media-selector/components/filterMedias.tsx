@@ -1,6 +1,6 @@
-import SelectField from 'components/ui/selector';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC } from 'react';
+import SelectField from 'ui/components/selector';
 
 const TYPE_OPTIONS = [
   { value: '', label: 'ALL' },

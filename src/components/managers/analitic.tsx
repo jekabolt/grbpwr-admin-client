@@ -1,4 +1,4 @@
-import { Layout } from 'components/common/layout';
+import { Layout } from 'ui/layout';
 
 export function Analitic() {
   return (

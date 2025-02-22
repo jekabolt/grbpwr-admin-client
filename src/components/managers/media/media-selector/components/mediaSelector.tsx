@@ -1,9 +1,9 @@
 import { PreviewMediaForUpload } from 'components/managers/media/cropper/previewMediaForUpload';
 import { MediaSelectorInterface } from 'components/managers/media/media-selector/interfaces/mediaSelectorInterfaces';
-import Text from 'components/ui/text';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC, useState } from 'react';
 import 'react-advanced-cropper/dist/style.css';
+import Text from 'ui/components/text';
 import { ByUrl } from './byUrl';
 import { DragDrop } from './dragDrop';
 import { MediaList } from './listMedia';

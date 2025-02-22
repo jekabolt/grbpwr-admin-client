@@ -1,9 +1,9 @@
-import Input from 'components/ui/input';
-import Text from 'components/ui/text';
-import { getBase64File } from 'features/utilitty/getBase64';
+import { getBase64File } from 'lib/features/getBase64';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import React, { FC, useState } from 'react';
+import Input from 'ui/components/input';
+import Text from 'ui/components/text';
 
 export const DragDrop: FC = () => {
   const { showMessage } = useSnackBarStore();

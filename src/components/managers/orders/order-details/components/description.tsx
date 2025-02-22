@@ -1,5 +1,5 @@
 import { Grid2 as Grid, Typography } from '@mui/material';
-import { CopyToClipboard } from 'components/common/utility/copyToClipboard';
+import { CopyToClipboard } from 'components/ui/components/copyToClipboard';
 // import styles from 'styles/order.scss';
 import { OrderDescriptionProps } from '../../interfaces/interface';
 import { formatDateTime, getStatusColor } from '../../utility';

@@ -1,12 +1,12 @@
 import { common_MediaInfo } from 'api/proto-http/admin';
-import { CopyToClipboard } from 'components/common/utility/copyToClipboard';
-import { Dialog } from 'components/common/utility/dialog';
 import { PreviewMediaForUpload } from 'components/managers/media/cropper/previewMediaForUpload';
 import { FullSizeMediaModalInterface } from 'components/managers/media/media-selector/interfaces/mediaSelectorInterfaces';
-import Text from 'components/ui/text';
-import { isVideo } from 'features/utilitty/filterContentType';
+import { isVideo } from 'lib/features/filterContentType';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC, useEffect, useState } from 'react';
+import { CopyToClipboard } from 'ui/components/copyToClipboard';
+import { Dialog } from 'ui/components/dialog';
+import Text from 'ui/components/text';
 
 type MediaType = 'fullSize' | 'compressed' | 'thumbnail';
 type VideoDimensions = Record<MediaType, string>;

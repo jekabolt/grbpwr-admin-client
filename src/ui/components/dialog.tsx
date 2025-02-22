@@ -10,7 +10,7 @@ import {
   Toolbar,
   useMediaQuery,
 } from '@mui/material';
-import { Button } from 'components/ui/button';
+import { Button } from 'components/ui/components/button';
 
 interface Props extends DialogProps {
   open: boolean;

@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
 import { updateSettings } from 'api/settings';
-import { Layout } from 'components/common/layout';
+import { Layout } from 'components/ui/layout';
 import { Field, FieldProps, Formik } from 'formik';
 import { useDictionaryStore, useSnackBarStore } from 'lib/stores/store';
 import debounce from 'lodash/debounce';

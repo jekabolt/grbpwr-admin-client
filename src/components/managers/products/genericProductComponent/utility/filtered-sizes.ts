@@ -1,5 +1,5 @@
 import { common_Dictionary } from "api/proto-http/admin";
-import { sortItems } from "features/filterForSizesAndMeasurements/filter";
+import { sortItems } from "lib/features/filter-size-measurements";
 
 export function getFilteredSizes(dictionary: common_Dictionary | undefined, topCategoryId: number) {
     if (!dictionary?.sizes) return [];

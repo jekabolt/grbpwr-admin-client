@@ -1,6 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import Media from 'components/ui/media';
-import { isVideo } from 'features/utilitty/filterContentType';
+import Media from 'components/ui/components/media';
+import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { FC } from 'react';
 import { MediaSelectorLayout } from '../layout';

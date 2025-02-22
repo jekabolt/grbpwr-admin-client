@@ -1,6 +1,6 @@
 import { Button, Grid2 as Grid } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { Layout } from 'components/common/layout';
+import { Layout } from 'components/ui/layout';
 import { Field, FieldArray, Form, Formik } from 'formik';
 import { useHeroStore } from 'lib/stores/hero/store';
 import { useSnackBarStore } from 'lib/stores/store';

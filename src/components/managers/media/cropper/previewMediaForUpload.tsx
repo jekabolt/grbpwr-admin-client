@@ -1,9 +1,10 @@
 import { common_MediaItem } from 'api/proto-http/admin';
-import { Button } from 'components/ui/button';
-import Media from 'components/ui/media';
-import { isBase64Video, isVideo } from 'features/utilitty/filterContentType';
+
+import { isBase64Video, isVideo } from 'lib/features/filterContentType';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC } from 'react';
+import { Button } from 'ui/components/button';
+import Media from 'ui/components/media';
 import { MediaCropper } from './cropper';
 
 interface PreviewMediaForUploadProps {

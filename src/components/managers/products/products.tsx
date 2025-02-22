@@ -1,5 +1,5 @@
 import { Button, Grid2 as Grid } from '@mui/material';
-import { Layout } from 'components/common/layout';
+import { Layout } from 'components/ui/layout';
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';

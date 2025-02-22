@@ -11,9 +11,9 @@ import {
   Typography,
 } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
-import { sortItems } from 'features/filterForSizesAndMeasurements/filter';
-import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { useFormikContext } from 'formik';
+import { sortItems } from 'lib/features/filter-size-measurements';
+import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useState } from 'react';
 // import styles from 'styles/addProd.scss';

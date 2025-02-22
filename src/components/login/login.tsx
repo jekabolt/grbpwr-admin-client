@@ -1,8 +1,8 @@
 import { login } from 'api/auth';
-import { Button } from 'components/ui/button';
+import { Button } from 'components/ui/components/button';
+import Input from 'components/ui/components/input';
+import Text from 'components/ui/components/text';
 import { Logo } from 'components/ui/icons/logo';
-import Input from 'components/ui/input';
-import Text from 'components/ui/text';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';

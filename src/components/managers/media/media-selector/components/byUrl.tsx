@@ -1,8 +1,8 @@
-import Input from 'components/ui/input';
-import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
+import { checkIsHttpHttpsMediaLink } from 'lib/features/checkIsHttpHttpsLink';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { cn } from 'lib/utility';
 import { FC } from 'react';
+import Input from 'ui/components/input';
 
 export const ByUrl: FC = () => {
   const { uploadState, prepareUpload } = useMediaSelectorStore();

@@ -1,7 +1,7 @@
 import MenuIcon from '@mui/icons-material/Menu';
-import { SnackBar } from 'components/common/utility/snackbar';
 import { SideBarItems } from 'components/managers/sidebar-items';
-import { Button } from 'components/ui/button';
+import { Button } from 'components/ui/components/button';
+import { SnackBar } from 'components/ui/components/snackbar';
 import { Logo } from 'components/ui/icons/logo';
 import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';

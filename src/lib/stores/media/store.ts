@@ -4,10 +4,10 @@ import {
     uploadContentImage,
     uploadContentVideo
 } from "api/admin";
-import { checkIsHttpHttpsMediaLink } from 'features/utilitty/checkIsHttpHttpsLink';
-import { isVideo } from "features/utilitty/filterContentType";
-import { filterExtensionToContentType } from 'features/utilitty/filterExtentions';
-import { getBase64ImageFromUrl } from 'features/utilitty/getBase64';
+import { checkIsHttpHttpsMediaLink } from 'lib/features/checkIsHttpHttpsLink';
+import { isVideo } from "lib/features/filterContentType";
+import { filterExtensionToContentType } from 'lib/features/filterExtentions';
+import { getBase64ImageFromUrl } from 'lib/features/getBase64';
 import { useSnackBarStore } from 'lib/stores/store';
 import { create } from "zustand";
 import { MediaSelectorStore } from "./store-types";

@@ -14,8 +14,8 @@ import {
 } from '@mui/material';
 import { GetProductsPagedRequest } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
-import { findInDictionary } from 'features/utilitty/findInDictionary';
 import { Field, FieldProps, Form, Formik } from 'formik';
+import { findInDictionary } from 'lib/features/findInDictionary';
 import { useProductStore } from 'lib/stores/product/store';
 import { useDictionaryStore } from 'lib/stores/store';
 import { FC, useState } from 'react';

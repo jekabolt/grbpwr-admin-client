@@ -1,6 +1,6 @@
 import { Button, Grid2 as Grid, Typography } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
-import { Layout } from 'components/common/layout';
+import { Layout } from 'components/ui/layout';
 import logo from 'img/tex-text.png';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';

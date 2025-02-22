@@ -3,11 +3,11 @@ import { Grid, IconButton, Typography } from '@mui/material';
 import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
-import { isVideo } from 'features/utilitty/filterContentType';
 import { ErrorMessage, useFormikContext } from 'formik';
+import { isVideo } from 'lib/features/filterContentType';
 import { FC, useEffect, useMemo, useState } from 'react';
 // import styles from 'styles/addProduct.scss';
-import Media from 'components/ui/media';
+import Media from 'components/ui/components/media';
 import { MediaViewInterface } from '../interface/interface';
 
 export const MediaView: FC<MediaViewInterface> = ({

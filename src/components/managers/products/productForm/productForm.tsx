@@ -1,6 +1,6 @@
 import { getProductByID, upsertProduct } from 'api/admin';
 import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
-import { Layout } from 'components/common/layout';
+import { Layout } from 'components/ui/layout';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
