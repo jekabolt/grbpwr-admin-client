@@ -1,5 +1,5 @@
-import { PreviewMediaForUpload } from 'components/common/cropper/previewMediaForUpload';
-import { MediaSelectorInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
+import { PreviewMediaForUpload } from 'components/managers/media/cropper/previewMediaForUpload';
+import { MediaSelectorInterface } from 'components/managers/media/media-selector/interfaces/mediaSelectorInterfaces';
 import Text from 'components/ui/text';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC, useState } from 'react';

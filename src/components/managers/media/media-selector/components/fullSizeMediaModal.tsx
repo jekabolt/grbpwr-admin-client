@@ -1,8 +1,8 @@
 import { common_MediaInfo } from 'api/proto-http/admin';
-import { PreviewMediaForUpload } from 'components/common/cropper/previewMediaForUpload';
-import { FullSizeMediaModalInterface } from 'components/common/interfaces/mediaSelectorInterfaces';
 import { CopyToClipboard } from 'components/common/utility/copyToClipboard';
 import { Dialog } from 'components/common/utility/dialog';
+import { PreviewMediaForUpload } from 'components/managers/media/cropper/previewMediaForUpload';
+import { FullSizeMediaModalInterface } from 'components/managers/media/media-selector/interfaces/mediaSelectorInterfaces';
 import Text from 'components/ui/text';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { useMediaSelectorStore } from 'lib/stores/media/store';

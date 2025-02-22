@@ -1,5 +1,5 @@
 import { Layout } from 'components/common/layout';
-import { MediaSelector } from 'components/common/media-selector-layout/media-selector-components/mediaSelector';
+import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
 
 import { FC } from 'react';
 

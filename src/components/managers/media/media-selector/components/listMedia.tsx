@@ -1,7 +1,7 @@
 import CheckIcon from '@mui/icons-material/Check';
 import ClearIcon from '@mui/icons-material/Clear';
 import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
-import { MediaSelectorMediaListProps } from 'components/common/interfaces/mediaSelectorInterfaces';
+import { MediaSelectorMediaListProps } from 'components/managers/media/media-selector/interfaces/mediaSelectorInterfaces';
 import { Button } from 'components/ui/button';
 import Media from 'components/ui/media';
 import Text from 'components/ui/text';

@@ -1,6 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { MediaSelectorModalProps } from 'components/common/interfaces/mediaSelectorInterfaces';
 import { Dialog } from 'components/common/utility/dialog';
+import { MediaSelectorModalProps } from 'components/managers/media/media-selector/interfaces/mediaSelectorInterfaces';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useState } from 'react';
 import { MediaSelector } from './mediaSelector';

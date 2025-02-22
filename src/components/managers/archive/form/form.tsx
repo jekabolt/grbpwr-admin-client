@@ -1,8 +1,8 @@
 import { Button, Grid2 as Grid, TextField } from '@mui/material';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
 
-import { MediaSelector } from 'components/common/media-selector-layout/media-selector-components/mediaSelector';
 import { Dialog } from 'components/common/utility/dialog';
+import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
 import { Field, Form, Formik, FormikProps } from 'formik';
 import { useArchiveStore } from 'lib/stores/archive/store';
 import { useSnackBarStore } from 'lib/stores/store';

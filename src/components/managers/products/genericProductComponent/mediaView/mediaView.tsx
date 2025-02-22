@@ -1,8 +1,8 @@
 import ClearIcon from '@mui/icons-material/Clear';
 import { Grid, IconButton, Typography } from '@mui/material';
 import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
-import { MediaSelectorLayout } from 'components/common/media-selector-layout/layout';
-import { SingleMediaViewAndSelect } from 'components/common/media-selector-layout/media-selector-components/singleMediaViewAndSelect';
+import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
+import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
 import { isVideo } from 'features/utilitty/filterContentType';
 import { ErrorMessage, useFormikContext } from 'formik';
 import { FC, useEffect, useMemo, useState } from 'react';
