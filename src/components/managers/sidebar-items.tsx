@@ -1,7 +1,7 @@
-import { Button } from 'components/ui/components/button';
 import { sideBarItems } from 'constants/side-bar';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Button } from 'ui/components/button';
 
 export const SideBarItems: FC = () => {
   const navigate = useNavigate();
