@@ -1,12 +1,12 @@
 import MenuIcon from '@mui/icons-material/Menu';
-import { SideBarItems } from 'components/managers/sidebar-items';
-import { Button } from 'components/ui/components/button';
-import { SnackBar } from 'components/ui/components/snackbar';
-import { Logo } from 'components/ui/icons/logo';
 import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { FC, ReactNode, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Button } from 'ui/components/button';
+import { SideBarItems } from 'ui/components/sidebar-items';
+import { SnackBar } from 'ui/components/snackbar';
+import { Logo } from 'ui/icons/logo';
 
 interface LayoutProps {
   children: ReactNode;
