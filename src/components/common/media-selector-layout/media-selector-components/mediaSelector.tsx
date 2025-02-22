@@ -19,10 +19,15 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
 }) => {
   const [isCropperOpen, setIsCropperOpen] = useState<boolean>(false);
   const [isFullSizeModalOpen, setIsFullSizeModalOpen] = useState(false);
-  const { uploadState, resetUpload } = useMediaSelectorStore();
+  const { uploadState, status, resetUpload } = useMediaSelectorStore();
 
   return (
     <div className='gap-10 flex items-center flex-col'>
+      {status.isLoading && (
+        <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50'>
+          <div className='animate-spin w-10 h-10 border-2 border-gray-300 border-t-text rounded-full' />
+        </div>
+      )}
       <div className='flex flex-col gap-4 justify-between items-center py-4 border border-text w-1/2'>
         <div className='w-1/2'>
           <ByUrl />
@@ -32,7 +37,6 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
           <DragDrop />
         </div>
       </div>
-
       {(uploadState.selectedFileUrl || uploadState.url) && !isFullSizeModalOpen && (
         <PreviewMediaForUpload
           b64Media={uploadState.selectedFileUrl || uploadState.url || ''}
@@ -42,7 +46,6 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
           clear={resetUpload}
         />
       )}
-
       <MediaList
         allowMultiple={allowMultiple}
         selectedMedia={selectedMedia}

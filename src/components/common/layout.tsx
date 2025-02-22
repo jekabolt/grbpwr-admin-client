@@ -32,12 +32,12 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
   return (
     <div className='flex h-screen'>
       <div
-        className={`fixed h-full border-r border-green-500 w-[240px] border-r border-gray-200 bg-white print:hidden transition-transform duration-300 ${
+        className={`fixed h-full w-[240px] border-r border-text bg-white print:hidden transition-transform duration-300 ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <div className='flex flex-col h-full'>
-          <div className='flex h-16 items-center justify-center border-b border-inactive'>
+          <div className='flex h-16 items-center justify-center border-b border-text'>
             <Logo onClick={navigateMainPage} />
           </div>
 
@@ -45,7 +45,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
             <SideBarItems />
           </div>
 
-          <div className='w-full border-t border-gray-200 p-4'>
+          <div className='w-full border-t border-text p-4'>
             <Button onClick={handleLogout} size='lg'>
               Logout
             </Button>
@@ -59,7 +59,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
         <MenuIcon />
       </button>
       <div className={cn('transition-all duration-300 w-full', { 'pl-[240px]': isSidebarOpen })}>
-        <div className='border-2 border-red-500 h-full pt-20 px-2'>{children}</div>
+        <div className='h-full pt-20 px-2'>{children}</div>
         <SnackBar />
       </div>
     </div>

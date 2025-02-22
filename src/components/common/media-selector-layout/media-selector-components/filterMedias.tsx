@@ -1,39 +1,40 @@
-import { FormControl, Grid, InputLabel, MenuItem, Select } from '@mui/material';
+import SelectField from 'components/ui/selector';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { FC } from 'react';
 
+const TYPE_OPTIONS = [
+  { value: '', label: 'ALL' },
+  { value: 'image', label: 'IMAGE' },
+  { value: 'video', label: 'VIDEO' },
+];
+
+const ORDER_OPTIONS = [
+  { value: 'desc', label: 'DESCENDING' },
+  { value: 'asc', label: 'ASCENDING' },
+];
+
 export const FilterMedias: FC = () => {
   const { filters, updateFilters } = useMediaSelectorStore();
+
   return (
-    <Grid container justifyContent='center' spacing={2}>
-      <Grid item xs={12} sm={6}>
-        <FormControl size='small' fullWidth>
-          <InputLabel shrink>TYPE</InputLabel>
-          <Select
-            value={filters.type}
-            displayEmpty
-            onChange={(e) => updateFilters({ type: e.target.value })}
-            label='TYPE'
-          >
-            <MenuItem value=''>ALL</MenuItem>
-            <MenuItem value='image'>IMAGE</MenuItem>
-            <MenuItem value='video'>VIDEO</MenuItem>
-          </Select>
-        </FormControl>
-      </Grid>
-      <Grid item xs={12} sm={6}>
-        <FormControl size='small' fullWidth>
-          <InputLabel>ORDER</InputLabel>
-          <Select
-            value={filters.order}
-            onChange={(e) => updateFilters({ order: e.target.value })}
-            label='ORDER'
-          >
-            <MenuItem value='desc'>DESCENDING</MenuItem>
-            <MenuItem value='asc'>ASCENDING</MenuItem>
-          </Select>
-        </FormControl>
-      </Grid>
-    </Grid>
+    <div className='flex flex-col lg:flex-row gap-4'>
+      <div className='lg:w-1/2 w-full'>
+        <SelectField
+          label='TYPE'
+          value={filters.type}
+          options={TYPE_OPTIONS}
+          onChange={(value: string) => updateFilters({ type: value })}
+        />
+      </div>
+
+      <div className='lg:w-1/2 w-full'>
+        <SelectField
+          label='ORDER'
+          value={filters.order}
+          options={ORDER_OPTIONS}
+          onChange={(value: string) => updateFilters({ order: value })}
+        />
+      </div>
+    </div>
   );
 };

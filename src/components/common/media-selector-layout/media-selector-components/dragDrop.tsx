@@ -7,7 +7,7 @@ import React, { FC, useState } from 'react';
 
 export const DragDrop: FC = () => {
   const { showMessage } = useSnackBarStore();
-  const { uploadState, prepareUpload, status } = useMediaSelectorStore();
+  const { uploadState, prepareUpload } = useMediaSelectorStore();
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
   const processFiles = async (files: FileList) => {
@@ -78,9 +78,6 @@ export const DragDrop: FC = () => {
               <Text variant='uppercase'>Media is selected</Text>
             )}
           </div>
-          {status.isLoading && (
-            <div className='ml-4 animate-spin w-10 h-10 border-2 border-gray-300 border-t-text-600 rounded-full' />
-          )}
         </div>
       </div>
     </div>

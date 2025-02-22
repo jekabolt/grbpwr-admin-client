@@ -98,8 +98,10 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   };
 
   return (
-    <div className='w-full'>
-      <FilterMedias />
+    <div className='w-full space-y-4'>
+      <div className='lg:w-96 w-full'>
+        <FilterMedias />
+      </div>
       <div className='grid grid-cols-2 md:grid-cols-6 gap-2'>
         {filteredMedia.map((media) => (
           <div key={media.id} className='flex flex-col gap-1'>
