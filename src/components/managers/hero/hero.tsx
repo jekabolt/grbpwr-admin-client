@@ -1,10 +1,10 @@
 import { Button, Grid2 as Grid } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { Layout } from 'components/ui/layout';
 import { Field, FieldArray, Form, Formik } from 'formik';
 import { useHeroStore } from 'lib/stores/hero/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useRef } from 'react';
+import { Layout } from 'ui/layout';
 // import styles from 'styles/hero.scss';
 import { Entities } from './entities/entities';
 import { NavbarHero } from './navbar-hero';

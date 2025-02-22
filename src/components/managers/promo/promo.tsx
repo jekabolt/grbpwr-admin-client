@@ -1,6 +1,6 @@
 import { Grid } from '@mui/material';
-import { Layout } from 'components/ui/layout';
 import { FC, useEffect } from 'react';
+import { Layout } from 'ui/layout';
 import { CreatePromo } from './createPromo';
 import { ListPromo } from './listPromo';
 import usePromo from './usePromo';

@@ -1,10 +1,10 @@
 import { Button, Grid2 as Grid } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
-import { Layout } from 'components/ui/layout';
 import { ROUTES } from 'constants/routes';
 import { useDictionaryStore } from 'lib/stores/store';
 import { FC, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Layout } from 'ui/layout';
 import { SearchFilters } from './interfaces/interface';
 import { Filter } from './orders-components/filter';
 import { orderData } from './orders-components/orders-data';

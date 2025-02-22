@@ -1,12 +1,12 @@
 import { login } from 'api/auth';
-import { Button } from 'components/ui/components/button';
-import Input from 'components/ui/components/input';
-import Text from 'components/ui/components/text';
-import { Logo } from 'components/ui/icons/logo';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Button } from 'ui/components/button';
+import Input from 'ui/components/input';
+import Text from 'ui/components/text';
+import { Logo } from 'ui/icons/logo';
 import * as Yup from 'yup';
 import { isTokenExpired } from './protectedRoute';
 
