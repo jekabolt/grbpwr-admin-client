@@ -1,48 +1,16 @@
 import { getProductByID, upsertProduct } from 'api/admin';
-import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
+import { common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { productInitialValues } from 'constants/product/initial-values';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { Layout } from 'ui/layout';
-import { GenericProductForm } from './components/genericProductComponent';
+import { ProductForm } from './components/product-form';
+import { createProductPayload, handleFormReset } from './utility/form';
 
 const validatePrice = (values: common_ProductNew): boolean => {
   const price = parseFloat(values.product?.productBody?.price?.value || '');
   return price > 0;
-};
-
-const getNonEmptySizeMeasurements = (values: common_ProductNew) => {
-  return values.sizeMeasurements?.filter(
-    (sizeMeasurement) =>
-      sizeMeasurement &&
-      sizeMeasurement.productSize &&
-      sizeMeasurement.productSize.quantity !== null,
-  );
-};
-
-const createProductPayload = (
-  values: common_ProductNew,
-  id: string | undefined,
-  isCopyMode: boolean,
-): UpsertProductRequest => ({
-  id: isCopyMode ? undefined : id ? parseInt(id) : undefined,
-  product: {
-    ...values,
-    sizeMeasurements: getNonEmptySizeMeasurements(values),
-  } as common_ProductNew,
-});
-
-const handleFormReset = (
-  id: string | undefined,
-  isCopyMode: boolean,
-  resetForm: () => void,
-  setInitialValues: (values: common_ProductNew) => void,
-) => {
-  if (!id || (!isCopyMode && !id)) {
-    resetForm();
-    setInitialValues(productInitialValues());
-  }
 };
 
 export const Product: FC = () => {
@@ -103,7 +71,7 @@ export const Product: FC = () => {
 
   return (
     <Layout>
-      <GenericProductForm
+      <ProductForm
         initialProductState={initialValues}
         isEditMode={isEditMode}
         isAddingProduct={isCopyMode || !id}

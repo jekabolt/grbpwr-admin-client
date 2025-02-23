@@ -17,8 +17,8 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useState } from 'react';
 // import styles from 'styles/addProd.scss';
+import { getFilteredSizes } from '../../utility/sizes';
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
-import { getFilteredSizes } from '../utility/filtered-sizes';
 import {
   isMeasurementRequiredForCategory,
   SUBCATEGORY_MEASUREMENTS,

@@ -1,4 +1,4 @@
-import { common_Dictionary } from "api/proto-http/admin";
+import { common_Dictionary, common_ProductNew } from "api/proto-http/admin";
 import { sortItems } from "lib/features/filter-size-measurements";
 
 export function getFilteredSizes(dictionary: common_Dictionary | undefined, topCategoryId: number) {
@@ -20,3 +20,12 @@ export function getFilteredSizes(dictionary: common_Dictionary | undefined, topC
         return size.id && size.id >= 1 && size.id <= 8;
     });
 }
+
+export const getNonEmptySizeMeasurements = (values: common_ProductNew) => {
+    return values.sizeMeasurements?.filter(
+        (sizeMeasurement) =>
+            sizeMeasurement &&
+            sizeMeasurement.productSize &&
+            sizeMeasurement.productSize.quantity !== null,
+    );
+};

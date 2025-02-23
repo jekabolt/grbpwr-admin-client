@@ -1,19 +1,19 @@
-import { AppBar, Button, CircularProgress, Grid2 as Grid, Toolbar } from '@mui/material';
 import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { Field, Form, Formik, FormikHelpers } from 'formik';
 import { useDictionaryStore } from 'lib/stores/store';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Button } from 'ui/components/button';
+import { comparisonOfInitialProductValues } from '../utility/deepComparisonOfInitialProductValues';
+import { validationSchema } from '../utility/formilValidationShema';
 import { BasicFields } from './basicFields/basicFields';
 import { GenericProductFormInterface } from './interface/interface';
 import { MediaView } from './mediaView/mediaView';
 import { SizesAndMeasurements } from './sizesAndMeasurements/sizesAndMeasurements';
 import { Tags } from './tags/tags';
-import { comparisonOfInitialProductValues } from './utility/deepComparisonOfInitialProductValues';
-import { validationSchema } from './utility/formilValidationShema';
 
-export const GenericProductForm: FC<GenericProductFormInterface> = ({
+export const ProductForm: FC<GenericProductFormInterface> = ({
   initialProductState,
   isEditMode = false,
   isAddingProduct = false,
@@ -26,7 +26,6 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
   const initialValues = useMemo(() => initialProductState, [initialProductState]);
-
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -79,53 +78,36 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
     <Formik
       initialValues={initialValues}
       onSubmit={handleFormSubmit}
-      enableReinitialize={true}
+      enableReinitialize
       validationSchema={validationSchema}
     >
-      {({ handleSubmit, isSubmitting, values }) => {
+      {({ handleSubmit, values }) => {
         useEffect(() => checkChanges(values), [checkChanges, values]);
         return (
-          <Form>
-            <AppBar
-              position='fixed'
-              sx={{ top: 'auto', bottom: 0, backgroundColor: 'transparent', boxShadow: 'none' }}
-            >
-              <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                {!isAddingProduct && (
-                  <Button
-                    onClick={() => handleCopyProductClick(product?.product?.id)}
-                    size='small'
-                    variant='contained'
-                  >
-                    copy
-                  </Button>
-                )}
-                <Button
-                  size='small'
-                  variant='contained'
-                  type='button'
-                  onClick={() => {
-                    if (isEditMode || isAddingProduct || isCopyMode) {
-                      handleSubmit();
-                    } else if (onEditModeChange) {
-                      onEditModeChange(true);
-                    }
-                  }}
-                  disabled={isEditMode && !isFormChanged}
-                  style={{ position: 'absolute', right: '30px' }}
-                >
-                  {isSubmitting ? (
-                    <CircularProgress size={24} />
-                  ) : isAddingProduct || isEditMode ? (
-                    'save'
-                  ) : (
-                    'edit'
-                  )}
+          <Form className='h-full flex flex-col gap-10'>
+            <div className='w-full flex justify-between'>
+              {!isAddingProduct && (
+                <Button onClick={() => handleCopyProductClick(product?.product?.id)} size='lg'>
+                  copy
                 </Button>
-              </Toolbar>
-            </AppBar>
-            <Grid container justifyContent='center' padding='2%' spacing={2}>
-              <Grid size={{ xs: 12, sm: 6 }}>
+              )}
+              <Button
+                size='lg'
+                disabled={isEditMode && !isFormChanged}
+                onClick={() => {
+                  if (isEditMode || isAddingProduct || isCopyMode) {
+                    handleSubmit();
+                  } else if (onEditModeChange) {
+                    onEditModeChange(true);
+                  }
+                }}
+              >
+                {isAddingProduct || isEditMode ? 'save' : 'edit'}
+              </Button>
+            </div>
+
+            <div className='flex flex-col lg:flex-row gap-10'>
+              <div className='w-full lg:w-1/2'>
                 <Field
                   component={MediaView}
                   name='mediaIds'
@@ -137,37 +119,31 @@ export const GenericProductForm: FC<GenericProductFormInterface> = ({
                     clearMediaPreview,
                   }}
                 />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <Grid container spacing={2}>
-                  <Grid size={{ xs: 12 }}>
-                    <Field
-                      component={BasicFields}
-                      name='product.productBody'
-                      {...{ product, isEditMode, isAddingProduct, isCopyMode }}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12 }}>
-                    <Field
-                      component={Tags}
-                      name='tags'
-                      {...{
-                        isEditMode,
-                        isAddingProduct,
-                        isCopyMode,
-                      }}
-                    />
-                  </Grid>
-                </Grid>
-              </Grid>
-              <Grid size={{ xs: 12 }}>
+              </div>
+              <div className='w-full lg:w-1/2'>
                 <Field
-                  component={SizesAndMeasurements}
-                  name='sizeMeasurements'
-                  {...{ dictionary, isEditMode, isAddingProduct }}
+                  component={BasicFields}
+                  name='product.productBody'
+                  {...{ product, isEditMode, isAddingProduct, isCopyMode }}
                 />
-              </Grid>
-            </Grid>
+                <Field
+                  component={Tags}
+                  name='tags'
+                  {...{
+                    isEditMode,
+                    isAddingProduct,
+                    isCopyMode,
+                  }}
+                />
+              </div>
+            </div>
+            <div className='w-full'>
+              <Field
+                component={SizesAndMeasurements}
+                name='sizeMeasurements'
+                {...{ dictionary, isEditMode, isAddingProduct }}
+              />
+            </div>
           </Form>
         );
       }}

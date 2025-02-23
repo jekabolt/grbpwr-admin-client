@@ -1,5 +1,5 @@
 import { common_Category } from "api/proto-http/admin";
-import { processCategories } from "../utility/categories";
+import { processCategories } from "../../utility/categories";
 
 interface MeasurementMapping {
     measurements: string[];

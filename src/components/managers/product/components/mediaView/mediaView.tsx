@@ -1,13 +1,13 @@
-import ClearIcon from '@mui/icons-material/Clear';
-import { Grid, IconButton, Typography } from '@mui/material';
 import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
-import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
-import { ErrorMessage, useFormikContext } from 'formik';
-import { isVideo } from 'lib/features/filterContentType';
+import { useFormikContext } from 'formik';
 import { FC, useEffect, useMemo, useState } from 'react';
 // import styles from 'styles/addProduct.scss';
+import { Cross1Icon } from '@radix-ui/react-icons';
+import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
+import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
+import Text from 'ui/components/text';
 import { MediaViewInterface } from '../interface/interface';
 
 export const MediaView: FC<MediaViewInterface> = ({
@@ -15,7 +15,6 @@ export const MediaView: FC<MediaViewInterface> = ({
   isEditMode,
   isAddingProduct,
   product,
-  isCopyMode,
 }) => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
@@ -68,11 +67,8 @@ export const MediaView: FC<MediaViewInterface> = ({
   }, [product, values.mediaIds, mediaPreview]);
 
   return (
-    <Grid container spacing={2}>
-      <Grid item xs={12}>
-        <Typography variant='h4' textTransform='uppercase'>
-          Thumbnail
-        </Typography>
+    <div>
+      <div className='flex flex-col gap-4'>
         <SingleMediaViewAndSelect
           link={
             imagePreviewUrl ||
@@ -85,65 +81,36 @@ export const MediaView: FC<MediaViewInterface> = ({
           hideVideos={true}
           saveSelectedMedia={uploadThumbnailInProduct}
         />
-        {!values.product?.thumbnailMediaId && (
-          <Typography color='error' textTransform='uppercase' variant='overline'>
-            <ErrorMessage name='product.thumbnailMediaId' />
-          </Typography>
-        )}
-      </Grid>
-      <Grid item xs={12}>
-        <Typography variant='h4' textTransform='uppercase'>
-          Media
-        </Typography>
-        <Grid container alignItems='center' spacing={2}>
-          {selectedMedia.map((media) => {
-            const mediaUrl = media.media?.fullSize?.mediaUrl ?? '';
-            return (
-              <Grid
-                item
-                key={media.id}
-                // className={styles.media_item}
-                xs={12}
-                md={6}
-              >
-                <Media
-                  alt={mediaUrl}
-                  type={isVideo(mediaUrl) ? 'video' : 'image'}
-                  src={mediaUrl}
-                  controls={isVideo(mediaUrl)}
-                />
-
-                <IconButton
-                  onClick={() => removeSelectedMedia(media.id as number)}
-                  // className={styles.delete_btn}
-                >
-                  <ClearIcon />
-                </IconButton>
-              </Grid>
-            );
-          })}
-          {(isAddingProduct || isEditMode) && (
-            <Grid item xs={12} md={6}>
-              <div
-              // className={styles.select_media}
-              >
-                <MediaSelectorLayout
-                  label='select media'
-                  aspectRatio={['4:5']}
-                  isDeleteAccepted={false}
-                  allowMultiple={true}
-                  saveSelectedMedia={uploadMediasInProduct}
-                />
+        {!values.product?.thumbnailMediaId && <Text variant='error'>thumbnail is required</Text>}
+        <div className='grid grid-cols-2 gap-2'>
+          {selectedMedia.map((m) => (
+            <div key={m.id} className='relative'>
+              <Media
+                type='image'
+                src={m.media?.thumbnail?.mediaUrl || ''}
+                alt={m.media?.blurhash || ''}
+              />
+              <div className='absolute top-0 right-0'>
+                <Button onClick={() => removeSelectedMedia(m.id || 0)}>
+                  <Cross1Icon />
+                </Button>
               </div>
-            </Grid>
+            </div>
+          ))}
+          {(isAddingProduct || isEditMode) && (
+            <div className='w-full h-auto flex items-center justify-center border border-text'>
+              <MediaSelectorLayout
+                label='select media'
+                aspectRatio={['4:5']}
+                isDeleteAccepted={false}
+                allowMultiple={true}
+                saveSelectedMedia={uploadMediasInProduct}
+              />
+            </div>
           )}
-        </Grid>
-        {errors.mediaIds && (
-          <Typography color='error' textTransform='uppercase' variant='overline'>
-            {errors.mediaIds}
-          </Typography>
-        )}
-      </Grid>
-    </Grid>
+        </div>
+        {errors.mediaIds && <Text variant='error'>{errors.mediaIds}</Text>}
+      </div>
+    </div>
   );
 };
