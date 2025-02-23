@@ -1,8 +1,6 @@
 import { Button, Checkbox } from '@mui/material';
-import { getProductsPaged } from 'api/admin';
 
-import { GetProductsPagedRequest, common_Product } from 'api/proto-http/admin';
-import { defaultProductFilterSettings } from 'constants/initialFilterStates';
+import { common_Product } from 'api/proto-http/admin';
 import { useDictionaryStore } from 'lib/stores/store';
 import {
   MaterialReactTable,
@@ -33,34 +31,34 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   const categories = useDictionaryStore((state) => state.dictionary?.categories || []);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [filter, setFilter] = useState<GetProductsPagedRequest>(defaultProductFilterSettings);
+  // const [filter, setFilter] = useState<GetProductsPagedRequest>(undefined);
   const newLimit = 50;
   const offset = calculateOffset(currentPage, newLimit);
 
-  useEffect(() => {
-    if (open) {
-      const fetchProducts = async () => {
-        const response = await getProductsPaged({
-          ...filter,
-          limit: newLimit,
-          offset: offset,
-        });
-        if (Array.isArray(response.products)) {
-          setAllProducts((prevProducts) => {
-            const combinedProducts = [...prevProducts, ...(response.products || [])];
-            const uniqueProducts = combinedProducts.reduce<common_Product[]>((acc, current) => {
-              if (!acc.find((product) => product.id === current.id)) {
-                acc.push(current);
-              }
-              return acc;
-            }, []);
-            return uniqueProducts;
-          });
-        }
-      };
-      fetchProducts();
-    }
-  }, [open, currentPage, filter, newLimit, offset]);
+  // useEffect(() => {
+  //   if (open) {
+  //     const fetchProducts = async () => {
+  //       const response = await getProductsPaged({
+  //         ...filter,
+  //         limit: newLimit,
+  //         offset: offset,
+  //       });
+  //       if (Array.isArray(response.products)) {
+  //         setAllProducts((prevProducts) => {
+  //           const combinedProducts = [...prevProducts, ...(response.products || [])];
+  //           const uniqueProducts = combinedProducts.reduce<common_Product[]>((acc, current) => {
+  //             if (!acc.find((product) => product.id === current.id)) {
+  //               acc.push(current);
+  //             }
+  //             return acc;
+  //           }, []);
+  //           return uniqueProducts;
+  //         });
+  //       }
+  //     };
+  //     fetchProducts();
+  //   }
+  // }, [open, currentPage, filter, newLimit, offset]);
 
   useEffect(() => {
     setData(allProducts);

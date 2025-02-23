@@ -10,7 +10,8 @@ import { Orders } from 'components/managers/orders/orders';
 import { Analitic } from 'components/managers/page';
 
 import ProductsCatalog from 'components/managers/products-catalog/page';
-import { ProductForm } from 'components/managers/products/productForm/productForm';
+
+import { Product } from 'components/managers/product/page';
 import { Promo } from 'components/managers/promo/promo';
 import { Settings } from 'components/managers/settings/settings';
 import { ROUTES } from 'constants/routes';
@@ -69,7 +70,7 @@ root.render(
                 path={ROUTES.singleProduct}
                 element={
                   <ProtectedRoute>
-                    <ProductForm />
+                    <Product />
                   </ProtectedRoute>
                 }
               />
@@ -85,7 +86,7 @@ root.render(
                 path={ROUTES.addProduct}
                 element={
                   <ProtectedRoute>
-                    <ProductForm />
+                    <Product />
                   </ProtectedRoute>
                 }
               />
@@ -93,7 +94,7 @@ root.render(
                 path={`${ROUTES.copyProduct}/:id`}
                 element={
                   <ProtectedRoute>
-                    <ProductForm />
+                    <Product />
                   </ProtectedRoute>
                 }
               />

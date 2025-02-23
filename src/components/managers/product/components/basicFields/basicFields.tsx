@@ -14,6 +14,7 @@ import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { colors } from 'constants/colors';
+import { genderOptions } from 'constants/dictioanary';
 import { ErrorMessage, Field, getIn, useFormikContext } from 'formik';
 import { generateOrUpdateSKU, generateSKU } from 'lib/features/dynamicGenerationOfSku';
 import { useDictionaryStore } from 'lib/stores/store';
@@ -25,7 +26,6 @@ import { Composition } from '../composition/composition';
 import { BasicProductFieldsInterface, Country } from '../interface/interface';
 import { handleKeyDown } from '../utility/brandNameRegExp';
 import { processCategories } from '../utility/categories';
-import { genderOptions } from '../utility/dictionaryConst';
 import { getFilteredSizes } from '../utility/filtered-sizes';
 import { formatWellKnownTimestamp, parseWellKnownTimestamp } from '../utility/preorderTime';
 

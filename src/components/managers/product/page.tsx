@@ -1,13 +1,51 @@
 import { getProductByID, upsertProduct } from 'api/admin';
 import { UpsertProductRequest, common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
+import { productInitialValues } from 'constants/product/initial-values';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { Layout } from 'ui/layout';
-import { GenericProductForm } from '../genericProductComponent/genericProductComponent';
-import { productInitialValues } from '../genericProductComponent/utility/productInitialValues';
+import { GenericProductForm } from './components/genericProductComponent';
 
-export const ProductForm: FC = () => {
+const validatePrice = (values: common_ProductNew): boolean => {
+  const price = parseFloat(values.product?.productBody?.price?.value || '');
+  return price > 0;
+};
+
+const getNonEmptySizeMeasurements = (values: common_ProductNew) => {
+  return values.sizeMeasurements?.filter(
+    (sizeMeasurement) =>
+      sizeMeasurement &&
+      sizeMeasurement.productSize &&
+      sizeMeasurement.productSize.quantity !== null,
+  );
+};
+
+const createProductPayload = (
+  values: common_ProductNew,
+  id: string | undefined,
+  isCopyMode: boolean,
+): UpsertProductRequest => ({
+  id: isCopyMode ? undefined : id ? parseInt(id) : undefined,
+  product: {
+    ...values,
+    sizeMeasurements: getNonEmptySizeMeasurements(values),
+  } as common_ProductNew,
+});
+
+const handleFormReset = (
+  id: string | undefined,
+  isCopyMode: boolean,
+  resetForm: () => void,
+  setInitialValues: (values: common_ProductNew) => void,
+) => {
+  if (!id || (!isCopyMode && !id)) {
+    resetForm();
+    setInitialValues(productInitialValues());
+  }
+};
+
+export const Product: FC = () => {
   const { showMessage } = useSnackBarStore();
   const { id } = useParams();
   const { pathname } = useLocation();
@@ -18,7 +56,6 @@ export const ProductForm: FC = () => {
 
   const fetchProduct = async () => {
     if (id) {
-      console.log(id);
       const response = await getProductByID({ id: parseInt(id) });
       setProduct(response.product);
       setInitialValues(productInitialValues(response.product));
@@ -37,38 +74,20 @@ export const ProductForm: FC = () => {
     }: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
   ) => {
     try {
-      const nonEmptySizeMeasurements = values.sizeMeasurements?.filter(
-        (sizeMeasurement) =>
-          sizeMeasurement &&
-          sizeMeasurement.productSize &&
-          sizeMeasurement.productSize.quantity !== null,
-      );
-
-      const productToSubmit: UpsertProductRequest = {
-        id: isCopyMode ? undefined : id ? parseInt(id) : undefined,
-        product: {
-          ...values,
-          sizeMeasurements: nonEmptySizeMeasurements,
-        } as common_ProductNew,
-      };
-
-      if (parseFloat(values.product?.productBody?.price?.value || '') <= 0) {
+      if (!validatePrice(values)) {
         showMessage('price cannot be zero', 'error');
-        setSubmitting(false);
         return;
       }
 
-      await upsertProduct(productToSubmit);
+      const payload = createProductPayload(values, id, isCopyMode);
+      await upsertProduct(payload);
 
       showMessage(id && !isCopyMode ? 'product updated' : 'product uploaded', 'success');
-      setSubmitting(false);
+      handleFormReset(id, isCopyMode, resetForm, setInitialValues);
 
-      if (!id || (!isCopyMode && !id)) {
-        resetForm();
-        setInitialValues(productInitialValues());
+      if (!isCopyMode) {
+        fetchProduct();
       }
-
-      if (!isCopyMode) fetchProduct();
     } catch (error) {
       showMessage(
         id && !isCopyMode ? "product can't be updated" : "product can't be uploaded",
@@ -76,7 +95,9 @@ export const ProductForm: FC = () => {
       );
     } finally {
       setSubmitting(false);
-      if (id && !isCopyMode) setIsEditMode(false);
+      if (id && !isCopyMode) {
+        setIsEditMode(false);
+      }
     }
   };
 

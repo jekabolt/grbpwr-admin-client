@@ -1,7 +1,5 @@
 import { Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { defaultProductFilterSettings } from 'constants/initialFilterStates';
-import { ROUTES } from 'constants/routes';
 import { Field, useFormikContext } from 'formik';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 // import styles from 'styles/archiveList.scss';
@@ -21,20 +19,21 @@ export function FeaturedArchive({
   const [searchParams, setSearchParams] = useSearchParams();
   const { values } = useFormikContext<common_HeroFullInsert>();
 
-  const handleTagClick = () => {
-    const tag = values.entities?.[index]?.featuredArchive?.tag;
-    if (tag) {
-      const filterSettings = {
-        ...defaultProductFilterSettings,
-        filterConditions: {
-          ...defaultProductFilterSettings.filterConditions,
-          byTag: tag,
-        },
-      };
-      setSearchParams({ filter: JSON.stringify(filterSettings) });
-      navigate(`${ROUTES.product}`);
-    }
-  };
+  // const handleTagClick = () => {
+  //   const tag = values.entities?.[index]?.featuredArchive?.tag;
+  //   if (tag) {
+  //     const filterSettings = {
+  //       ...defaultProductFilterSettings,
+  //       filterConditions: {
+  //         ...defaultProductFilterSettings.filterConditions,
+  //         byTag: tag,
+  //       },
+  //     };
+  //     setSearchParams({ filter: JSON.stringify(filterSettings) });
+  //     navigate(`${ROUTES.product}`);
+  //   }
+  // };
+
   return (
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, md: 6 }}>
@@ -148,7 +147,7 @@ export function FeaturedArchive({
           fullWidth
         />
       </Grid>
-      <Grid size={{ xs: 12 }}>
+      {/* <Grid size={{ xs: 12 }}>
         <Field
           as={TextField}
           name={`entities.${index}.featuredArchive.tag`}
@@ -162,7 +161,7 @@ export function FeaturedArchive({
             ),
           }}
         />
-      </Grid>
+      </Grid> */}
     </Grid>
   );
 }
