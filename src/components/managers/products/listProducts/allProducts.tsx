@@ -1,4 +1,4 @@
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 
 import { GetProductsPagedRequest } from 'api/proto-http/admin';
 import { useProductStore } from 'lib/stores/product/store';
@@ -9,7 +9,6 @@ import { ListProducts } from './listProducts';
 
 export const AllProducts: FC = () => {
   const { products, isLoading, hasMore, filter, fetchProducts, updateFilter } = useProductStore();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   const debouncedFetchProducts = useCallback(
@@ -35,14 +34,6 @@ export const AllProducts: FC = () => {
       debouncedFetchProducts(filter);
     }
   }, [searchParams.get('filter')]);
-
-  // const handleProductClick = (id: number | undefined) => {
-  //   navigate(`${ROUTES.product}/${id}`, { replace: true });
-  // };
-
-  // const handleCopyProductClick = (id: number | undefined) => {
-  //   navigate(`${ROUTES.copyProduct}/${id}`);
-  // };
 
   useEffect(() => {
     const handleScroll = () => {

@@ -4,19 +4,54 @@ import { ROUTES } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
 import { useProductStore } from 'lib/stores/product/store';
 import { useSnackBarStore } from 'lib/stores/store';
-import { FC, useState } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
+import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 
+const ITEMS_PER_PAGE = 16;
+
 export const ListProducts: FC = () => {
   const { showMessage } = useSnackBarStore();
-  const { products, deleteProduct } = useProductStore();
+  const { products, deleteProduct, fetchProducts } = useProductStore();
   const navigate = useNavigate();
   const [confirmDeleteProductId, setConfirmDeleteProductId] = useState<number | undefined>(
     undefined,
   );
+  const [isLoading, setIsLoading] = useState(false);
+  const { ref, inView } = useInView();
+  const pageRef = useRef(2);
+  const hasMoreRef = useRef(true);
+
+  useEffect(() => {
+    const loadMoreProducts = async () => {
+      if (!hasMoreRef.current || isLoading) return;
+      setIsLoading(true);
+
+      try {
+        const newProducts = await fetchProducts(
+          ITEMS_PER_PAGE,
+          (pageRef.current - 1) * ITEMS_PER_PAGE,
+        );
+
+        pageRef.current += 1;
+
+        if (newProducts?.length < ITEMS_PER_PAGE) {
+          hasMoreRef.current = false;
+        }
+      } catch (error) {
+        console.error('Failed to fetch products:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (inView && hasMoreRef.current) {
+      loadMoreProducts();
+    }
+  }, [inView, isLoading]);
 
   async function handleDeleteProduct(id: number | undefined, e: React.MouseEvent) {
     e.stopPropagation();
@@ -77,6 +112,11 @@ export const ListProducts: FC = () => {
           >{`[${product.id}] ${product.productDisplay?.productBody?.brand} ${product.productDisplay?.productBody?.name}`}</Text>
         </div>
       ))}
+      {hasMoreRef.current && (
+        <div ref={ref} className='col-span-full text-center py-4'>
+          Loading...
+        </div>
+      )}
     </div>
   );
 };

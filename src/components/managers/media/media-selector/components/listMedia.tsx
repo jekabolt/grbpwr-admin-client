@@ -7,13 +7,15 @@ import { isVideo } from 'lib/features/filterContentType';
 import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { FC, useCallback, useEffect, useRef, useState } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { FilterMedias } from './filterMedias';
 import { FullSizeMediaModal } from './fullSizeMediaModal';
+
+const ITEMS_PER_PAGE = 16;
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
   allowMultiple,
@@ -35,7 +37,6 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   const [videoSizes, setVideoSizes] = useState<Record<number, { width: number; height: number }>>(
     {},
   );
-  const ITEMS_PER_PAGE = 16;
   const pageRef = useRef(2);
   const hasMoreRef = useRef(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -104,30 +105,33 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
     }
   };
 
-  const loadMoreData = useCallback(async () => {
-    if (!hasMoreRef.current || isLoading) return;
-    setIsLoading(true);
-
-    try {
-      const fetchedFiles = await fetchFiles(ITEMS_PER_PAGE, (pageRef.current - 1) * ITEMS_PER_PAGE);
-
-      pageRef.current += 1;
-
-      if (fetchedFiles?.length < ITEMS_PER_PAGE) {
-        hasMoreRef.current = false;
-      }
-    } catch (error) {
-      console.error('Failed to fetch media:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, fetchFiles]);
-
   useEffect(() => {
+    const loadMoreData = async () => {
+      if (!hasMoreRef.current || isLoading) return;
+      setIsLoading(true);
+
+      try {
+        const fetchedFiles = await fetchFiles(
+          ITEMS_PER_PAGE,
+          (pageRef.current - 1) * ITEMS_PER_PAGE,
+        );
+
+        pageRef.current += 1;
+
+        if (fetchedFiles?.length < ITEMS_PER_PAGE) {
+          hasMoreRef.current = false;
+        }
+      } catch (error) {
+        console.error('Failed to fetch media:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
     if (inView && hasMoreRef.current) {
       loadMoreData();
     }
-  }, [inView, loadMoreData]);
+  }, [inView, isLoading, fetchFiles]);
 
   return (
     <div className='w-full space-y-4'>

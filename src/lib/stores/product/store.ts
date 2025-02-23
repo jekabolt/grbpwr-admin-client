@@ -47,29 +47,22 @@ export const useProductStore = create<ProductStore>((set, get) => ({
             return { success: false };
         }
     },
-    fetchProducts: async (limit: number, offset: number, filterValues?: GetProductsPagedRequest) => {
-        const { filter } = get();
-        set({ isLoading: true, error: null });
-
+    fetchProducts: async (limit: number, offset: number) => {
         try {
             const response = await getProductsPaged({
-                ...(filterValues || filter),
+                ...get().filter,
                 limit,
                 offset,
-            })
-            const fetchedProducts = response.products || [];
+            });
+            const products = response.products || [];
 
-            if (offset === 0) {
-                set({ products: fetchedProducts })
-            } else {
-                set((state) => ({
-                    products: [...state.products, ...fetchedProducts],
-                }))
-            }
-
-            set({ hasMore: fetchedProducts.length === limit, isLoading: false })
+            set((state) => ({
+                products: offset === 0 ? products : [...state.products, ...products]
+            }));
+            return products;
         } catch (error) {
-            set({ error: 'Failed to fetch products', isLoading: false })
+            console.error('Failed to fetch products:', error);
+            return [];
         }
     },
     setProducts: (products) => set((state) => ({
