@@ -3,13 +3,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
 import { Archive } from 'components/managers/archive/archive';
-import { Analitic } from 'components/managers/page';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
 import { OrderDetails } from 'components/managers/orders/order-details/page';
 import { Orders } from 'components/managers/orders/orders';
+import { Analitic } from 'components/managers/page';
+
+import ProductsCatalog from 'components/managers/products-catalog/page';
 import { ProductForm } from 'components/managers/products/productForm/productForm';
-import { Product } from 'components/managers/products/page';
 import { Promo } from 'components/managers/promo/promo';
 import { Settings } from 'components/managers/settings/settings';
 import { ROUTES } from 'constants/routes';
@@ -76,7 +77,7 @@ root.render(
                 path={ROUTES.product}
                 element={
                   <ProtectedRoute>
-                    <Product />
+                    <ProductsCatalog />
                   </ProtectedRoute>
                 }
               />

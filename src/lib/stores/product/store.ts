@@ -29,24 +29,6 @@ export const useProductStore = create<ProductStore>((set, get) => ({
             },
         }));
     },
-    deleteProduct: async (id: number | undefined) => {
-        if (!id) return { success: false };
-
-        set({ isLoading: true, error: null });
-
-        try {
-            await deleteProductByID({ id });
-            set(state => ({
-                products: state.products.filter(product => product.id !== id),
-                isLoading: false,
-                error: null
-            }));
-            return { success: true };
-        } catch (error) {
-            set({ isLoading: false, error: 'Failed to delete product' });
-            return { success: false };
-        }
-    },
     fetchProducts: async (limit: number, offset: number) => {
         try {
             const response = await getProductsPaged({

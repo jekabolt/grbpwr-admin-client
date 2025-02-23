@@ -16,7 +16,6 @@ export interface ProductStore {
         filterConditions?: Partial<common_FilterConditions>;
         [key: string]: any;
     }) => void;
-    deleteProduct: (id: number | undefined) => Promise<{ success: boolean }>;
     fetchProducts: (
         limit: number,
         offset: number,
