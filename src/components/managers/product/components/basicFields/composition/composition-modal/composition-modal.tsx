@@ -1,19 +1,10 @@
-import {
-  FormControl,
-  FormControlLabel,
-  Grid2 as Grid,
-  Radio,
-  RadioGroup,
-  TextField,
-  Typography,
-  useMediaQuery,
-  useTheme,
-} from '@mui/material';
+import { FormControl, FormControlLabel, Radio, RadioGroup } from '@mui/material';
 import { composition } from 'constants/garment-composition';
+import { cn } from 'lib/utility';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { Dialog } from 'ui/components/dialog';
-
-// import styles from '../styles/composition.scss';
+import Input from 'ui/components/input';
+import Text from 'ui/components/text';
 
 interface SelectedInstructions {
   [key: string]: {
@@ -31,38 +22,40 @@ interface CompositionModalProps {
 
 export const CompositionModal: FC<CompositionModalProps> = ({
   isOpen,
-  onClose,
   selectedInstructions,
+  onClose,
   selectComposition,
 }) => {
   const compositionCategories = Object.keys(composition.garment_composition);
   const [selectedCategory, setSelectedCategory] = useState<string>('Natural Fibers');
-  const [localSelectedInstructions, setLocalSelectedInstructions] =
-    useState<SelectedInstructions>(selectedInstructions);
+  const [instructions, setInstructions] = useState<SelectedInstructions>(selectedInstructions);
+  const compositionGarment = Object.entries(
+    composition.garment_composition[
+      selectedCategory as keyof typeof composition.garment_composition
+    ],
+  );
+
   const isSelected = (key: string) => {
-    return !!localSelectedInstructions[key];
+    return !!instructions[key];
   };
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   useEffect(() => {
-    setLocalSelectedInstructions(selectedInstructions);
+    setInstructions(selectedInstructions);
   }, [selectedInstructions]);
 
   const totalPercentage = useMemo(() => {
-    return Object.values(localSelectedInstructions).reduce((acc, curr) => acc + curr.percentage, 0);
-  }, [localSelectedInstructions]);
+    return Object.values(instructions).reduce((acc, curr) => acc + curr.percentage, 0);
+  }, [instructions]);
 
   const handlePercentageChange = (key: string, value: string) => {
     const percentage = parseInt(value) || 0;
     if (percentage >= 0 && percentage <= 100) {
-      const newTotal =
-        totalPercentage - (localSelectedInstructions[key]?.percentage || 0) + percentage;
+      const newTotal = totalPercentage - (instructions[key]?.percentage || 0) + percentage;
       if (newTotal > 100) {
         alert('Total percentage cannot exceed 100');
         return;
       }
-      setLocalSelectedInstructions((prev) => {
+      setInstructions((prev) => {
         const newState = { ...prev };
         if (newState[key]) {
           newState[key] = {
@@ -81,7 +74,7 @@ export const CompositionModal: FC<CompositionModalProps> = ({
   };
 
   const handleContainerClick = (key: string, value: string) => {
-    setLocalSelectedInstructions((prev) => {
+    setInstructions((prev) => {
       const newState = { ...prev };
       if (newState[key]) {
         delete newState[key];
@@ -98,20 +91,14 @@ export const CompositionModal: FC<CompositionModalProps> = ({
 
   return (
     <Dialog open={isOpen} onClose={onClose}>
-      <Grid container spacing={2}>
-        <Grid
-          size={{ xs: 12 }}
-          sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-        >
+      <div className='space-y-4 h-full'>
+        <div>
           <FormControl>
             <RadioGroup
-              row={!isMobile}
               value={selectedCategory}
               onChange={(e) => handleSelectCategory(e.target.value)}
               sx={{
                 display: 'grid',
-                gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-                gridTemplateRows: isMobile ? 'auto' : 'repeat(2, 1fr)',
               }}
             >
               {compositionCategories.map((category) => (
@@ -122,7 +109,6 @@ export const CompositionModal: FC<CompositionModalProps> = ({
                   label={category.toUpperCase()}
                   sx={{
                     '& .MuiFormControlLabel-label': {
-                      fontSize: isMobile ? '0.8rem' : '1rem',
                       fontWeight: 'bold',
                     },
                   }}
@@ -130,46 +116,37 @@ export const CompositionModal: FC<CompositionModalProps> = ({
               ))}
             </RadioGroup>
           </FormControl>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
-          <Grid container spacing={2}>
-            {Object.entries(
-              composition.garment_composition[
-                selectedCategory as keyof typeof composition.garment_composition
-              ],
-            ).map(([key, value]) => (
-              <Grid key={key} size={{ xs: 6, sm: 2, md: 1.5 }}>
-                <Grid
-                // className={`${styles['square-container']} ${isSelected(key) ? styles['selected'] : ''}`}
-                >
-                  <Grid
-                    // className={styles['square-content']}
-                    onClick={() => handleContainerClick(key, value)}
-                  >
-                    <Typography variant='overline' fontSize={isSelected(key) ? '0.6em' : '1em'}>
-                      {key.toUpperCase()}
-                    </Typography>
-                    {isSelected(key) && (
-                      <TextField
-                        size='small'
-                        type='number'
-                        value={localSelectedInstructions[key]?.percentage || ''}
-                        onChange={(e) => handlePercentageChange(key, e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        slotProps={{
-                          input: {
-                            style: { textAlign: 'center' },
-                          },
-                        }}
-                      />
-                    )}
-                  </Grid>
-                </Grid>
-              </Grid>
+        </div>
+        <div>
+          <div className='grid gap-2'>
+            {compositionGarment.map(([key, value]) => (
+              <div
+                key={key}
+                className={cn(
+                  'border border-text w-full h-20 flex gap-4 p-4 items-center justify-center hover:cursor-pointer',
+                  {
+                    'border-4': isSelected(key),
+                  },
+                )}
+                onClick={() => handleContainerClick(key, value)}
+              >
+                <Text>{key.toUpperCase()}</Text>
+                {isSelected(key) && (
+                  <Input
+                    name={key}
+                    type='number'
+                    value={instructions[key]?.percentage || ''}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      handlePercentageChange(key, e.target.value)
+                    }
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                  />
+                )}
+              </div>
             ))}
-          </Grid>
-        </Grid>
-      </Grid>
+          </div>
+        </div>
+      </div>
     </Dialog>
   );
 };

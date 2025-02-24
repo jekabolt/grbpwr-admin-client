@@ -1,8 +1,9 @@
-import { Button, Grid2 as Grid, TextField } from '@mui/material';
+import { TextField } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { composition } from 'constants/garment-composition';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
+import { Button } from 'ui/components/button';
 import { CompositionModal } from './composition-modal/composition-modal';
 
 interface CompositionProps {
@@ -76,8 +77,8 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
   };
 
   return (
-    <Grid container spacing={2}>
-      <Grid size={{ xs: 12 }}>
+    <div className='w-full'>
+      <div className='w-full'>
         <TextField
           fullWidth
           name='product.productBody.composition'
@@ -87,30 +88,29 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
             input: {
               readOnly: true,
               endAdornment: (isEditMode || isAddingProduct) && (
-                <>
+                <div className='flex gap-2'>
                   <Button
-                    variant='outlined'
-                    sx={{ mr: 1 }}
-                    onClick={handleClearCompositionField}
                     disabled={!values.product?.productBody?.composition}
+                    size='lg'
+                    onClick={handleClearCompositionField}
                   >
-                    Clean
+                    clear
                   </Button>
-                  <Button variant='contained' onClick={handleOpenCompositionModal}>
-                    Select
+                  <Button size='lg' onClick={handleOpenCompositionModal}>
+                    select
                   </Button>
-                </>
+                </div>
               ),
             },
           }}
         />
-      </Grid>
+      </div>
       <CompositionModal
         isOpen={isCompositionModalOpen}
         selectedInstructions={selectedInstructions}
         selectComposition={handleSelectComposition}
         onClose={handleCloseCompositionModal}
       />
-    </Grid>
+    </div>
   );
 };

@@ -6,10 +6,9 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
+import { cn } from 'lib/utility';
 import { FC, useState } from 'react';
 import { Dialog } from 'ui/components/dialog';
-// import styles from './care.scss';
-import { cn } from 'lib/utility';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { careInstruction } from './careInstruction';
