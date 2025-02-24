@@ -21,13 +21,13 @@ import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { v4 as uuidv4 } from 'uuid';
+import { BasicProductFieldsInterface, Country } from '../../interface/interface';
 import { handleKeyDown } from '../../utility/brandNameRegExp';
 import { processCategories } from '../../utility/categories';
 import { formatWellKnownTimestamp, parseWellKnownTimestamp } from '../../utility/preorderTime';
 import { getFilteredSizes } from '../../utility/sizes';
-import { Care } from '../care/care';
-import { Composition } from '../composition/composition';
-import { BasicProductFieldsInterface, Country } from '../interface/interface';
+import { Care } from './care/care';
+import { Composition } from './composition/composition';
 
 export const BasicFields: FC<BasicProductFieldsInterface> = ({
   product,

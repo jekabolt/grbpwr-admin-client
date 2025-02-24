@@ -10,6 +10,8 @@ export interface MediaSelectorLayoutProps {
     isDeleteAccepted?: boolean;
     className?: string;
     saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
+
+
 }
 
 export interface MediaSelectorModalProps {

@@ -1,8 +1,8 @@
 import { Button, Grid2 as Grid, TextField } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
+import { composition } from 'constants/garment-composition';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
-import { composition } from '../../../../../constants/garment-composition';
 import { CompositionModal } from './composition-modal/composition-modal';
 
 interface CompositionProps {

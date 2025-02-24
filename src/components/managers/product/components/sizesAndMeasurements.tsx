@@ -17,12 +17,13 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useState } from 'react';
 // import styles from 'styles/addProd.scss';
-import { getFilteredSizes } from '../../utility/sizes';
+
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
 import {
   isMeasurementRequiredForCategory,
   SUBCATEGORY_MEASUREMENTS,
-} from './mappingMeasurementsForCategories';
+} from '../utility/mappingMeasurementsForCategories';
+import { getFilteredSizes } from '../utility/sizes';
 
 export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   isEditMode = true,

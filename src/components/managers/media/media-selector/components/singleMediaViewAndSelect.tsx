@@ -19,7 +19,7 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   link,
   isEditMode,
   isAddingProduct,
-  aspectRatio = ['4/3'],
+  aspectRatio = ['4/5'],
   hideVideos,
   isDeleteAccepted,
   saveSelectedMedia,

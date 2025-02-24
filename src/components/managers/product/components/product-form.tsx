@@ -5,13 +5,13 @@ import { useDictionaryStore } from 'lib/stores/store';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { GenericProductFormInterface } from '../interface/interface';
 import { comparisonOfInitialProductValues } from '../utility/deepComparisonOfInitialProductValues';
 import { validationSchema } from '../utility/formilValidationShema';
 import { BasicFields } from './basicFields/basicFields';
-import { GenericProductFormInterface } from './interface/interface';
-import { MediaView } from './mediaView/mediaView';
-import { SizesAndMeasurements } from './sizesAndMeasurements/sizesAndMeasurements';
-import { Tags } from './tags/tags';
+import { MediaView } from './mediaView';
+import { SizesAndMeasurements } from './sizesAndMeasurements';
+import { Tags } from './tags';
 
 export const ProductForm: FC<GenericProductFormInterface> = ({
   initialProductState,
@@ -50,6 +50,8 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
     values: common_ProductNew,
     actions: FormikHelpers<common_ProductNew>,
   ) => {
+    if (!isFormChanged) return;
+
     await onSubmit(
       { ...values, sizeMeasurements: filterEmptySizes(values.sizeMeasurements) },
       actions,
@@ -94,7 +96,8 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
               <Button
                 size='lg'
                 disabled={isEditMode && !isFormChanged}
-                onClick={() => {
+                onClick={(e: React.MouseEvent) => {
+                  e.preventDefault();
                   if (isEditMode || isAddingProduct || isCopyMode) {
                     handleSubmit();
                   } else if (onEditModeChange) {

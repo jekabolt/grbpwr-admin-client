@@ -1,10 +1,9 @@
+import { Cross1Icon } from '@radix-ui/react-icons';
 import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
+import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
 import { useFormikContext } from 'formik';
 import { FC, useEffect, useMemo, useState } from 'react';
-// import styles from 'styles/addProduct.scss';
-import { Cross1Icon } from '@radix-ui/react-icons';
-import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
@@ -90,11 +89,13 @@ export const MediaView: FC<MediaViewInterface> = ({
                 src={m.media?.thumbnail?.mediaUrl || ''}
                 alt={m.media?.blurhash || ''}
               />
-              <div className='absolute top-0 right-0'>
-                <Button onClick={() => removeSelectedMedia(m.id || 0)}>
-                  <Cross1Icon />
-                </Button>
-              </div>
+              {(isEditMode || isAddingProduct) && (
+                <div className='absolute top-0 right-0'>
+                  <Button onClick={() => removeSelectedMedia(m.id || 0)}>
+                    <Cross1Icon />
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
           {(isAddingProduct || isEditMode) && (
