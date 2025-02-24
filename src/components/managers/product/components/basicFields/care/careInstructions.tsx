@@ -1,16 +1,17 @@
 import {
   FormControl,
   FormControlLabel,
-  Grid2 as Grid,
   Radio,
   RadioGroup,
-  Typography,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
 import { FC, useState } from 'react';
 import { Dialog } from 'ui/components/dialog';
 // import styles from './care.scss';
+import { cn } from 'lib/utility';
+import Media from 'ui/components/media';
+import Text from 'ui/components/text';
 import { careInstruction } from './careInstruction';
 
 interface SelectedInstructions {
@@ -39,6 +40,11 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
   const [selectedCare, setSelectedCare] = useState<string | null>('Washing');
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const nestedCareMethods = Object.values(
+    careInstruction.care_instructions[
+      selectedCare as keyof typeof careInstruction.care_instructions
+    ],
+  )[0]?.code;
   // const currentCategoryIndex = careCategories.indexOf(selectedCare!);
 
   const handleSelectCare = (category: string) => {
@@ -52,58 +58,32 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
           const { code, img } = codeOrSubMethods;
           const selectionKey = subCategory ? `${selectedCare!}-${subCategory}` : selectedCare!;
           const isSelected = selectedInstructions[selectionKey] === code;
+          console.log(isSelected);
 
           return (
-            <Grid size={{ xs: 4, sm: 1.7 }} key={code}>
-              <Grid
-                container
-                onClick={() => onSelectCareInstruction(selectedCare!, method, code, subCategory)}
-                // className={styles['care-instructions-container']}
-                data-selected={isSelected}
-              >
-                <Grid
-                  container
-                  // className={styles['care-card']}
-                >
-                  {img && (
-                    <Grid
-                    // className={styles['care-card-img-container']}
-                    >
-                      <img
-                        src={img}
-                        alt={method}
-                        style={{
-                          width: isSelected ? '80%' : '50%',
-                          height: 'auto',
-                        }}
-                      />
-                    </Grid>
-                  )}
-                  <Grid
-                  // className={styles['care-card-text']}
-                  >
-                    <Typography
-                      variant='overline'
-                      fontSize={isMobile ? '0.4em' : '0.58em'}
-                      // className={styles.text}
-                    >
-                      {isSelected ? code : method}
-                    </Typography>
-                  </Grid>
-                </Grid>
-              </Grid>
-            </Grid>
+            <div
+              key={`${method}-${code}`}
+              onClick={() => onSelectCareInstruction(selectedCare!, method, code, subCategory)}
+              className={cn('border rounded-md cursor-pointer flex flex-col items-center w-full', {
+                'bg-black/50': isSelected,
+              })}
+            >
+              <div className='w-full f-full'>
+                <Media src={img} alt={method} aspectRatio='1/1' fit='cover' />
+              </div>
+              <Text size='small'>{isSelected ? code : method}</Text>
+            </div>
           );
         } else {
           return (
-            <Grid size={{ xs: 12 }} key={method}>
-              <Typography variant='subtitle1' fontWeight='bold' sx={{ mb: 1 }}>
-                {method.toUpperCase()}
-              </Typography>
-              <Grid container spacing={2}>
+            <div key={`subcategory-${method}`} className='space-y-3'>
+              <Text variant='uppercase' className='font-bold'>
+                {method}
+              </Text>
+              <div className='grid grid-cols-2 lg:grid-cols-8 gap-2'>
                 {renderCareMethods(codeOrSubMethods, method)}
-              </Grid>
-            </Grid>
+              </div>
+            </div>
           );
         }
       }
@@ -112,15 +92,9 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
   };
 
   return (
-    <Dialog open={isCareTableOpen} onClose={close}>
-      <Grid container spacing={2} sx={{ p: 2 }}>
-        <Grid
-          size={{ xs: 12 }}
-          sx={{
-            display: 'flex',
-            justifyContent: isMobile ? 'flex-start' : 'center',
-          }}
-        >
+    <Dialog open={isCareTableOpen} onClose={close} fullWidth>
+      <div className='space-y-6'>
+        <div>
           <FormControl>
             <RadioGroup
               row={!isMobile}
@@ -148,19 +122,22 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
               ))}
             </RadioGroup>
           </FormControl>
-        </Grid>
+        </div>
         {selectedCare && (
-          <Grid size={{ xs: 12 }}>
-            <Grid container spacing={2}>
-              {renderCareMethods(
-                careInstruction.care_instructions[
-                  selectedCare as keyof typeof careInstruction.care_instructions
-                ],
-              )}
-            </Grid>
-          </Grid>
+          <div
+            className={cn('w-full', {
+              'flex flex-col space-y-4': !nestedCareMethods,
+              'grid grid-cols-2  lg:grid-cols-8 gap-2': nestedCareMethods,
+            })}
+          >
+            {renderCareMethods(
+              careInstruction.care_instructions[
+                selectedCare as keyof typeof careInstruction.care_instructions
+              ],
+            )}
+          </div>
         )}
-      </Grid>
+      </div>
     </Dialog>
   );
 };

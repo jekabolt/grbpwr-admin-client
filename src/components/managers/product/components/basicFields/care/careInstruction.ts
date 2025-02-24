@@ -29,7 +29,7 @@ import GPWC from 'ui/icons/laundrySymbols/professional-care/wet/Professionelle_r
 import VGPWC from 'ui/icons/laundrySymbols/professional-care/wet/Professionelle_reinigung_(W)ss.svg';
 import DNWC from 'ui/icons/laundrySymbols/professional-care/wet/Мокрая_чистка_запрещена.svg';
 import HW from 'ui/icons/laundrySymbols/washing/Handwäsche.svg';
-import MW95 from 'ui/icons/laundrySymbols/washing/ISO_7000_-_Ref-No_3097.svg';
+// import MW95 from 'ui/icons/laundrySymbols/washing/Laundry Symbol Wash 95 (1).svg';
 import GW from 'ui/icons/laundrySymbols/washing/Laundry_symbol_wash_delicate.svg';
 import VGW from 'ui/icons/laundrySymbols/washing/Laundry_symbol_wash_very_delicate.svg';
 import DNW from 'ui/icons/laundrySymbols/washing/Nicht_waschen.svg';
@@ -47,7 +47,7 @@ export const careInstruction = {
             "Machine Wash Warm (40°C)": { code: "MW40", img: MW40 },
             "Machine Wash Hot (50°C)": { code: "MW50", img: MW50 },
             "Machine Wash Very Hot (60°C)": { code: "MW60", img: MW60 },
-            "Machine Wash Boiling (95°C)": { code: "MW95", img: MW95 },
+            // "Machine Wash Boiling (95°C)": { code: "MW95", img: MW95 },
             "Gentle Wash": { code: "GW", img: GW },
             "Very Gentle Wash": { code: "VGW", img: VGW },
             "Hand Wash Only": { code: "HW", img: HW },

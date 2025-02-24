@@ -96,6 +96,7 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
               <Button
                 size='lg'
                 disabled={isEditMode && !isFormChanged}
+                className='fixed bottom-2 right-2 z-20'
                 onClick={(e: React.MouseEvent) => {
                   e.preventDefault();
                   if (isEditMode || isAddingProduct || isCopyMode) {

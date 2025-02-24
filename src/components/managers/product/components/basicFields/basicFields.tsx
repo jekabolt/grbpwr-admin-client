@@ -3,7 +3,6 @@ import {
   FormControl,
   FormControlLabel,
   FormHelperText,
-  Grid2 as Grid,
   InputLabel,
   MenuItem,
   Select,
@@ -189,11 +188,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Grid container spacing={2}>
+      <div className='space-y-4'>
         {!isAddingProduct && (
           <>
             {['id', 'createdAt', 'updatedAt'].map((field) => (
-              <Grid size={{ xs: 12 }} key={field}>
+              <div key={field} className='w-full'>
                 <TextField
                   label={
                     field === 'id'
@@ -209,12 +208,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                   InputProps={{ readOnly: true }}
                   fullWidth
                 />
-              </Grid>
+              </div>
             ))}
           </>
         )}
 
-        <Grid size={{ xs: 12 }}>
+        <div className='w-full'>
           <Field
             as={TextField}
             variant='outlined'
@@ -234,8 +233,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             disabled={disableFields}
             onKeyDown={handleKeyDown}
           />
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <Field
             as={TextField}
             variant='outlined'
@@ -256,8 +255,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             onKeyDown={handleKeyDown}
             disabled={disableFields}
           />
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <FormControl
             required
             fullWidth
@@ -288,8 +287,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </FormHelperText>
               )}
           </FormControl>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <FormControl
             required
             fullWidth
@@ -320,8 +319,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </FormHelperText>
               )}
           </FormControl>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <FormControl
             required
             fullWidth
@@ -352,8 +351,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </FormHelperText>
               )}
           </FormControl>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <FormControl
             required
             fullWidth
@@ -384,8 +383,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </FormHelperText>
               )}
           </FormControl>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <FormControl
             fullWidth
             required
@@ -416,8 +415,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </FormHelperText>
               )}
           </FormControl>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <Field
             as={TextField}
             type='color'
@@ -428,8 +427,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             fullWidth
             disabled={disableFields}
           />
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <FormControl
             fullWidth
             required
@@ -460,8 +459,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </FormHelperText>
               )}
           </FormControl>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <Field
             as={TextField}
             variant='outlined'
@@ -491,47 +490,48 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             }}
             disabled={disableFields}
           />
-        </Grid>
+        </div>
 
-        {showSales && (
-          <Grid size={{ xs: 12 }}>
-            <Field
-              as={TextField}
-              label={'sale percentage'.toUpperCase()}
-              name='product.productBody.salePercentage.value'
-              onChange={(e: any) => {
-                if (/^\d*$/.test(e.target.value)) {
-                  handlePriceChange(e, true);
-                }
-              }}
-              type='text'
-              inputProps={{ min: 0, max: 99 }}
-              InputLabelProps={{ shrink: true }}
-              fullWidth
-              disabled={disableFields}
-            />
-          </Grid>
-        )}
-
-        {showPreorder && (
-          <Grid size={{ xs: 12 }}>
-            <DatePicker
-              label={'preorder'.toUpperCase()}
-              value={parseDate(values.product?.productBody?.preorder)}
-              onChange={handlePreorderChange}
-              minDate={new Date()}
-              slotProps={{
-                textField: {
-                  fullWidth: true,
-                  InputLabelProps: { shrink: true },
-                },
-                field: { clearable: true },
-              }}
-              disabled={disableFields}
-            />
-          </Grid>
-        )}
-        <Grid size={{ xs: 12 }}>
+        <div className='flex gap-4 w-full'>
+          {showSales && (
+            <div className='w-1/2'>
+              <Field
+                as={TextField}
+                label={'sale percentage'.toUpperCase()}
+                name='product.productBody.salePercentage.value'
+                onChange={(e: any) => {
+                  if (/^\d*$/.test(e.target.value)) {
+                    handlePriceChange(e, true);
+                  }
+                }}
+                type='text'
+                inputProps={{ min: 0, max: 99 }}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+                disabled={disableFields}
+              />
+            </div>
+          )}
+          {showPreorder && (
+            <div className='w-1/2'>
+              <DatePicker
+                label={'preorder'.toUpperCase()}
+                value={parseDate(values.product?.productBody?.preorder)}
+                onChange={handlePreorderChange}
+                minDate={new Date()}
+                slotProps={{
+                  textField: {
+                    fullWidth: true,
+                    InputLabelProps: { shrink: true },
+                  },
+                  field: { clearable: true },
+                }}
+                disabled={disableFields}
+              />
+            </div>
+          )}
+        </div>
+        <div className='w-full'>
           <Field
             as={TextField}
             label={'description'.toUpperCase()}
@@ -550,8 +550,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             required
             disabled={disableFields}
           />
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <Field
             as={TextField}
             label={'model wears height'.toUpperCase()}
@@ -570,8 +570,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             fullWidth
             disabled={disableFields}
           />
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <FormControl
             fullWidth
             required
@@ -602,8 +602,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
                 </FormHelperText>
               )}
           </FormControl>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <Field
             as={TextField}
             label={'sku'.toUpperCase()}
@@ -614,19 +614,19 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             fullWidth
             disabled={disableFields}
           />
-        </Grid>
+        </div>
 
-        <Grid size={{ xs: 12 }}>
+        <div className='w-full'>
           <Field component={Care} name='product.productBody' {...{ isEditMode, isAddingProduct }} />
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <Field
             component={Composition}
             name='product.productBody'
             {...{ isAddingProduct, isEditMode }}
           />
-        </Grid>
-        <Grid size={{ xs: 12 }}>
+        </div>
+        <div className='w-full'>
           <FormControlLabel
             control={
               <Field
@@ -638,8 +638,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             }
             label={'hidden'.toUpperCase()}
           />
-        </Grid>
-      </Grid>
+        </div>
+      </div>
     </LocalizationProvider>
   );
 };

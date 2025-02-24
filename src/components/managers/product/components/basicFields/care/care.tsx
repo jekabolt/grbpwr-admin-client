@@ -1,7 +1,8 @@
-import { Button, Grid2 as Grid, TextField } from '@mui/material';
+import { TextField } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
+import { Button } from 'ui/components/button';
 import { careInstruction } from './careInstruction';
 import { CareInstructions } from './careInstructions';
 
@@ -43,13 +44,13 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
           newState[category] = code;
         }
       }
-
       setFieldValue('product.productBody.careInstructions', Object.values(newState).join(','));
       return newState;
     });
   };
 
-  const handleOpenCareTable = () => {
+  const handleOpenCareTable = (e: React.MouseEvent) => {
+    e.preventDefault();
     if (values.product?.productBody?.careInstructions) {
       const codes = values.product.productBody.careInstructions.split(',');
       const newSelectedInstructions: SelectedInstructions = {};
@@ -87,8 +88,8 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
   };
 
   return (
-    <Grid container>
-      <Grid size={{ xs: 12 }}>
+    <div className='w-full'>
+      <div className='w-full'>
         <TextField
           fullWidth
           variant='outlined'
@@ -99,30 +100,29 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
             input: {
               readOnly: true,
               endAdornment: (isAddingProduct || isEditMode) && (
-                <>
+                <div className='flex gap-2'>
                   <Button
-                    variant='outlined'
+                    size='lg'
                     onClick={handleClearInstructions}
-                    sx={{ mr: 1 }}
                     disabled={!values.product?.productBody?.careInstructions}
                   >
-                    Clear
+                    clear
                   </Button>
-                  <Button variant='contained' onClick={handleOpenCareTable}>
-                    Select
+                  <Button size='lg' onClick={(e: React.MouseEvent) => handleOpenCareTable(e)}>
+                    select
                   </Button>
-                </>
+                </div>
               ),
             },
           }}
         />
-      </Grid>
+      </div>
       <CareInstructions
         isCareTableOpen={isCareTableOpen}
         close={handleCloseCareTable}
         onSelectCareInstruction={handleSelectCareInstruction}
         selectedInstructions={selectedInstructions}
       />
-    </Grid>
+    </div>
   );
 };
