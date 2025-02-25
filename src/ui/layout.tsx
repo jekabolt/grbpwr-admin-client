@@ -4,9 +4,9 @@ import { cn } from 'lib/utility';
 import { FC, ReactNode, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { SideBarItems } from 'ui/components/sidebar-items';
 import { SnackBar } from 'ui/components/snackbar';
 import { Logo } from 'ui/icons/logo';
+import { SideBarItems } from './components/sidebar-items';
 
 interface LayoutProps {
   children: ReactNode;
