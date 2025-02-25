@@ -124,7 +124,7 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
                   }}
                 />
               </div>
-              <div className='w-full lg:w-1/2'>
+              <div className='w-full space-y-4 lg:w-1/2'>
                 <Field
                   component={BasicFields}
                   name='product.productBody'

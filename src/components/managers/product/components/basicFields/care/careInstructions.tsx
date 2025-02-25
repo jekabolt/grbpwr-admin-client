@@ -44,7 +44,6 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
       selectedCare as keyof typeof careInstruction.care_instructions
     ],
   )[0]?.code;
-  // const currentCategoryIndex = careCategories.indexOf(selectedCare!);
 
   const handleSelectCare = (category: string) => {
     setSelectedCare(category);
@@ -57,7 +56,6 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
           const { code, img } = codeOrSubMethods;
           const selectionKey = subCategory ? `${selectedCare!}-${subCategory}` : selectedCare!;
           const isSelected = selectedInstructions[selectionKey] === code;
-          console.log(isSelected);
 
           return (
             <div

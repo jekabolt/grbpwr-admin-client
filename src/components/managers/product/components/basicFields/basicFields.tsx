@@ -188,7 +188,18 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <div className='space-y-4'>
+      <div className='grid gap-4 w-full'>
+        <FormControlLabel
+          control={
+            <Field
+              as={Checkbox}
+              name='product.productBody.hidden'
+              disabled={disableFields}
+              checked={values.product?.productBody?.hidden || false}
+            />
+          }
+          label={'hidden'.toUpperCase()}
+        />
         {!isAddingProduct && (
           <>
             {['id', 'createdAt', 'updatedAt'].map((field) => (
@@ -213,432 +224,393 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           </>
         )}
 
-        <div className='w-full'>
-          <Field
-            as={TextField}
-            variant='outlined'
-            label={'name'.toUpperCase()}
-            name='product.productBody.name'
-            required
-            fullWidth
-            InputLabelProps={{ shrink: true }}
-            error={Boolean(
-              getIn(errors, 'product.productBody.name') &&
-                getIn(touched, 'product.productBody.name'),
-            )}
-            helperText={
-              getIn(touched, 'product.productBody.name') &&
-              getIn(errors, 'product.productBody.name')
-            }
+        <Field
+          as={TextField}
+          variant='outlined'
+          label={'name'.toUpperCase()}
+          name='product.productBody.name'
+          required
+          fullWidth
+          InputLabelProps={{ shrink: true }}
+          error={Boolean(
+            getIn(errors, 'product.productBody.name') && getIn(touched, 'product.productBody.name'),
+          )}
+          helperText={
+            getIn(touched, 'product.productBody.name') && getIn(errors, 'product.productBody.name')
+          }
+          disabled={disableFields}
+          onKeyDown={handleKeyDown}
+        />
+
+        <Field
+          as={TextField}
+          variant='outlined'
+          label={'brand'.toUpperCase()}
+          name='product.productBody.brand'
+          required
+          fullWidth
+          InputLabelProps={{ shrink: true }}
+          error={Boolean(
+            getIn(errors, 'product.productBody.brand') &&
+              getIn(touched, 'product.productBody.brand'),
+          )}
+          helperText={
+            getIn(touched, 'product.productBody.brand') &&
+            getIn(errors, 'product.productBody.brand')
+          }
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
+          onKeyDown={handleKeyDown}
+          disabled={disableFields}
+        />
+
+        <FormControl
+          required
+          fullWidth
+          error={Boolean(
+            getIn(errors, 'product.productBody.targetGender') &&
+              getIn(touched, 'product.productBody.targetGender'),
+          )}
+        >
+          <InputLabel shrink>{'gender'.toUpperCase()}</InputLabel>
+          <Select
+            value={values.product?.productBody?.targetGender || ''}
+            onChange={(e) => handleFieldChange(e, 'targetGender')}
+            label={'gender'.toUpperCase()}
+            displayEmpty
+            name='product.productBody.targetGender'
             disabled={disableFields}
-            onKeyDown={handleKeyDown}
-          />
-        </div>
-        <div className='w-full'>
-          <Field
-            as={TextField}
-            variant='outlined'
-            label={'brand'.toUpperCase()}
-            name='product.productBody.brand'
-            required
-            fullWidth
-            InputLabelProps={{ shrink: true }}
-            error={Boolean(
-              getIn(errors, 'product.productBody.brand') &&
-                getIn(touched, 'product.productBody.brand'),
+          >
+            {genderOptions.map((gender) => (
+              <MenuItem key={gender.id} value={gender.id}>
+                {gender.name?.toUpperCase()}
+              </MenuItem>
+            ))}
+          </Select>
+          {getIn(touched, 'product.productBody.targetGender') &&
+            getIn(errors, 'product.productBody.targetGender') && (
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.targetGender' />
+              </FormHelperText>
             )}
-            helperText={
-              getIn(touched, 'product.productBody.brand') &&
-              getIn(errors, 'product.productBody.brand')
-            }
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
-            onKeyDown={handleKeyDown}
+        </FormControl>
+
+        <FormControl
+          required
+          fullWidth
+          error={Boolean(
+            getIn(errors, 'product.productBody.topCategoryId') &&
+              getIn(touched, 'product.productBody.topCategoryId'),
+          )}
+        >
+          <InputLabel shrink>{'category'.toUpperCase()}</InputLabel>
+          <Select
+            name='product.productBody.topCategoryId'
+            onChange={(e) => handleFieldChange(e, 'topCategoryId')}
+            value={values.product?.productBody?.topCategoryId || ''}
+            label={'category'.toUpperCase()}
+            displayEmpty
             disabled={disableFields}
-          />
-        </div>
-        <div className='w-full'>
-          <FormControl
-            required
-            fullWidth
-            error={Boolean(
-              getIn(errors, 'product.productBody.targetGender') &&
-                getIn(touched, 'product.productBody.targetGender'),
-            )}
           >
-            <InputLabel shrink>{'gender'.toUpperCase()}</InputLabel>
-            <Select
-              value={values.product?.productBody?.targetGender || ''}
-              onChange={(e) => handleFieldChange(e, 'targetGender')}
-              label={'gender'.toUpperCase()}
-              displayEmpty
-              name='product.productBody.targetGender'
-              disabled={disableFields}
-            >
-              {genderOptions.map((gender) => (
-                <MenuItem key={gender.id} value={gender.id}>
-                  {gender.name?.toUpperCase()}
-                </MenuItem>
-              ))}
-            </Select>
-            {getIn(touched, 'product.productBody.targetGender') &&
-              getIn(errors, 'product.productBody.targetGender') && (
-                <FormHelperText>
-                  <ErrorMessage name='product.productBody.targetGender' />
-                </FormHelperText>
-              )}
-          </FormControl>
-        </div>
-        <div className='w-full'>
-          <FormControl
-            required
-            fullWidth
-            error={Boolean(
-              getIn(errors, 'product.productBody.topCategoryId') &&
-                getIn(touched, 'product.productBody.topCategoryId'),
+            {categories.map((category) => (
+              <MenuItem value={category.id} key={category.id}>
+                {category.name}
+              </MenuItem>
+            ))}
+          </Select>
+          {getIn(touched, 'product.productBody.topCategoryId') &&
+            getIn(errors, 'product.productBody.topCategoryId') && (
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.topCategoryId' />
+              </FormHelperText>
             )}
+        </FormControl>
+
+        <FormControl
+          required
+          fullWidth
+          error={Boolean(
+            getIn(errors, 'product.productBody.subCategoryId') &&
+              getIn(touched, 'product.productBody.subCategoryId'),
+          )}
+        >
+          <InputLabel shrink>{'subcategory'.toUpperCase()}</InputLabel>
+          <Select
+            name='product.productBody.subCategoryId'
+            onChange={(e) => handleFieldChange(e, 'subCategoryId')}
+            value={values.product?.productBody?.subCategoryId || ''}
+            label={'subcategory'.toUpperCase()}
+            displayEmpty
+            disabled={disableFields || !values.product?.productBody?.topCategoryId}
           >
-            <InputLabel shrink>{'category'.toUpperCase()}</InputLabel>
-            <Select
-              name='product.productBody.topCategoryId'
-              onChange={(e) => handleFieldChange(e, 'topCategoryId')}
-              value={values.product?.productBody?.topCategoryId || ''}
-              label={'category'.toUpperCase()}
-              displayEmpty
-              disabled={disableFields}
-            >
-              {categories.map((category) => (
-                <MenuItem value={category.id} key={category.id}>
-                  {category.name}
-                </MenuItem>
-              ))}
-            </Select>
-            {getIn(touched, 'product.productBody.topCategoryId') &&
-              getIn(errors, 'product.productBody.topCategoryId') && (
-                <FormHelperText>
-                  <ErrorMessage name='product.productBody.topCategoryId' />
-                </FormHelperText>
-              )}
-          </FormControl>
-        </div>
-        <div className='w-full'>
-          <FormControl
-            required
-            fullWidth
-            error={Boolean(
-              getIn(errors, 'product.productBody.subCategoryId') &&
-                getIn(touched, 'product.productBody.subCategoryId'),
+            {selectedSubCategories.map((category) => (
+              <MenuItem value={category.id} key={category.id}>
+                {category.name}
+              </MenuItem>
+            ))}
+          </Select>
+          {getIn(touched, 'product.productBody.subCategoryId') &&
+            getIn(errors, 'product.productBody.subCategoryId') && (
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.subCategoryId' />
+              </FormHelperText>
             )}
-          >
-            <InputLabel shrink>{'subcategory'.toUpperCase()}</InputLabel>
-            <Select
-              name='product.productBody.subCategoryId'
-              onChange={(e) => handleFieldChange(e, 'subCategoryId')}
-              value={values.product?.productBody?.subCategoryId || ''}
-              label={'subcategory'.toUpperCase()}
-              displayEmpty
-              disabled={disableFields || !values.product?.productBody?.topCategoryId}
-            >
-              {selectedSubCategories.map((category) => (
-                <MenuItem value={category.id} key={category.id}>
-                  {category.name}
-                </MenuItem>
-              ))}
-            </Select>
-            {getIn(touched, 'product.productBody.subCategoryId') &&
-              getIn(errors, 'product.productBody.subCategoryId') && (
-                <FormHelperText>
-                  <ErrorMessage name='product.productBody.subCategoryId' />
-                </FormHelperText>
-              )}
-          </FormControl>
-        </div>
-        <div className='w-full'>
-          <FormControl
-            required
-            fullWidth
-            error={Boolean(
-              getIn(errors, 'product.productBody.typeId') &&
-                getIn(touched, 'product.productBody.typeId'),
-            )}
-          >
-            <InputLabel shrink>{'type'.toUpperCase()}</InputLabel>
-            <Select
-              name='product.productBody.typeId'
-              onChange={(e) => handleFieldChange(e, 'typeId')}
-              value={values.product?.productBody?.typeId || ''}
-              label={'type'.toUpperCase()}
-              displayEmpty
-              disabled={disableFields}
-            >
-              {selectedTypes.map((type) => (
-                <MenuItem value={type.id} key={type.id}>
-                  {type.name}
-                </MenuItem>
-              ))}
-            </Select>
-            {getIn(touched, 'product.productBody.typeId') &&
-              getIn(errors, 'product.productBody.typeId') && (
-                <FormHelperText>
-                  <ErrorMessage name='product.productBody.typeId' />
-                </FormHelperText>
-              )}
-          </FormControl>
-        </div>
-        <div className='w-full'>
-          <FormControl
-            fullWidth
-            required
-            error={Boolean(
-              getIn(errors, 'product.productBody.color') &&
-                getIn(touched, 'product.productBody.color'),
-            )}
-          >
-            <InputLabel shrink>{'color'.toUpperCase()}</InputLabel>
-            <Select
-              value={values.product?.productBody?.color || ''}
-              onChange={(e) => handleFieldChange(e, 'color')}
-              label={'color'.toUpperCase()}
-              displayEmpty
-              name='product.productBody.color'
-              disabled={disableFields}
-            >
-              {colors.map((color, id) => (
-                <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
-                  {color.name.toLowerCase().replace(/\s/g, '_')}
-                </MenuItem>
-              ))}
-            </Select>
-            {getIn(touched, 'product.productBody.color') &&
-              getIn(errors, 'product.productBody.color') && (
-                <FormHelperText>
-                  <ErrorMessage name='product.productBody.color' />
-                </FormHelperText>
-              )}
-          </FormControl>
-        </div>
-        <div className='w-full'>
-          <Field
-            as={TextField}
-            type='color'
-            label='COLOR HEX'
-            name='product.productBody.colorHex'
-            InputLabelProps={{ shrink: true }}
-            required
-            fullWidth
+        </FormControl>
+
+        <FormControl
+          required
+          fullWidth
+          error={Boolean(
+            getIn(errors, 'product.productBody.typeId') &&
+              getIn(touched, 'product.productBody.typeId'),
+          )}
+        >
+          <InputLabel shrink>{'type'.toUpperCase()}</InputLabel>
+          <Select
+            name='product.productBody.typeId'
+            onChange={(e) => handleFieldChange(e, 'typeId')}
+            value={values.product?.productBody?.typeId || ''}
+            label={'type'.toUpperCase()}
+            displayEmpty
             disabled={disableFields}
-          />
-        </div>
-        <div className='w-full'>
-          <FormControl
-            fullWidth
-            required
-            error={Boolean(
-              getIn(errors, 'product.productBody.countryOfOrigin') &&
-                getIn(touched, 'product.productBody.countryOfOrigin'),
-            )}
           >
-            <InputLabel shrink>{'country'.toUpperCase()}</InputLabel>
-            <Select
-              name='product.productBody.countryOfOrigin'
-              value={values.product?.productBody?.countryOfOrigin || ''}
-              onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
-              label={'country'.toUpperCase()}
-              displayEmpty
-              disabled={disableFields}
-            >
-              {countries.map((country) => (
-                <MenuItem key={country.value} value={country.value}>
-                  {country.label}, {country.value}
-                </MenuItem>
-              ))}
-            </Select>
-            {getIn(touched, 'product.productBody.countryOfOrigin') &&
-              getIn(errors, 'product.productBody.countryOfOrigin') && (
-                <FormHelperText>
-                  <ErrorMessage name='product.productBody.countryOfOrigin' />
-                </FormHelperText>
-              )}
-          </FormControl>
-        </div>
-        <div className='w-full'>
+            {selectedTypes.map((type) => (
+              <MenuItem value={type.id} key={type.id}>
+                {type.name}
+              </MenuItem>
+            ))}
+          </Select>
+          {getIn(touched, 'product.productBody.typeId') &&
+            getIn(errors, 'product.productBody.typeId') && (
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.typeId' />
+              </FormHelperText>
+            )}
+        </FormControl>
+
+        <FormControl
+          fullWidth
+          required
+          error={Boolean(
+            getIn(errors, 'product.productBody.color') &&
+              getIn(touched, 'product.productBody.color'),
+          )}
+        >
+          <InputLabel shrink>{'color'.toUpperCase()}</InputLabel>
+          <Select
+            value={values.product?.productBody?.color || ''}
+            onChange={(e) => handleFieldChange(e, 'color')}
+            label={'color'.toUpperCase()}
+            displayEmpty
+            name='product.productBody.color'
+            disabled={disableFields}
+          >
+            {colors.map((color, id) => (
+              <MenuItem key={id} value={color.name.toLowerCase().replace(/\s/g, '_')}>
+                {color.name.toLowerCase().replace(/\s/g, '_')}
+              </MenuItem>
+            ))}
+          </Select>
+          {getIn(touched, 'product.productBody.color') &&
+            getIn(errors, 'product.productBody.color') && (
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.color' />
+              </FormHelperText>
+            )}
+        </FormControl>
+
+        <Field
+          as={TextField}
+          type='color'
+          label='COLOR HEX'
+          name='product.productBody.colorHex'
+          InputLabelProps={{ shrink: true }}
+          required
+          fullWidth
+          disabled={disableFields}
+        />
+
+        <FormControl
+          fullWidth
+          required
+          error={Boolean(
+            getIn(errors, 'product.productBody.countryOfOrigin') &&
+              getIn(touched, 'product.productBody.countryOfOrigin'),
+          )}
+        >
+          <InputLabel shrink>{'country'.toUpperCase()}</InputLabel>
+          <Select
+            name='product.productBody.countryOfOrigin'
+            value={values.product?.productBody?.countryOfOrigin || ''}
+            onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
+            label={'country'.toUpperCase()}
+            displayEmpty
+            disabled={disableFields}
+          >
+            {countries.map((country) => (
+              <MenuItem key={country.value} value={country.value}>
+                {country.label}, {country.value}
+              </MenuItem>
+            ))}
+          </Select>
+          {getIn(touched, 'product.productBody.countryOfOrigin') &&
+            getIn(errors, 'product.productBody.countryOfOrigin') && (
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.countryOfOrigin' />
+              </FormHelperText>
+            )}
+        </FormControl>
+
+        <Field
+          as={TextField}
+          variant='outlined'
+          label={'price'.toUpperCase()}
+          name='product.productBody.price.value'
+          type='text'
+          inputProps={{ min: 0, step: '0.01' }}
+          required
+          fullWidth
+          error={Boolean(
+            getIn(errors, 'product.productBody.price.value') &&
+              getIn(touched, 'product.productBody.price.value'),
+          )}
+          helperText={
+            getIn(touched, 'product.productBody.price.value') &&
+            getIn(errors, 'product.productBody.price.value')
+          }
+          InputLabelProps={{ shrink: true }}
+          onChange={(e: any) => {
+            if (/^\d*\.?\d{0,2}$/.test(e.target.value)) {
+              handlePriceChange(e);
+            }
+          }}
+          onBlur={(e: any) => {
+            const formattedValue = parseFloat(e.target.value).toFixed(2);
+            setFieldValue('product.productBody.price.value', formattedValue);
+          }}
+          disabled={disableFields}
+        />
+
+        {showSales && (
           <Field
             as={TextField}
-            variant='outlined'
-            label={'price'.toUpperCase()}
-            name='product.productBody.price.value'
-            type='text'
-            inputProps={{ min: 0, step: '0.01' }}
-            required
-            fullWidth
-            error={Boolean(
-              getIn(errors, 'product.productBody.price.value') &&
-                getIn(touched, 'product.productBody.price.value'),
-            )}
-            helperText={
-              getIn(touched, 'product.productBody.price.value') &&
-              getIn(errors, 'product.productBody.price.value')
-            }
-            InputLabelProps={{ shrink: true }}
+            label={'sale percentage'.toUpperCase()}
+            name='product.productBody.salePercentage.value'
             onChange={(e: any) => {
-              if (/^\d*\.?\d{0,2}$/.test(e.target.value)) {
-                handlePriceChange(e);
+              if (/^\d*$/.test(e.target.value)) {
+                handlePriceChange(e, true);
               }
             }}
-            onBlur={(e: any) => {
-              const formattedValue = parseFloat(e.target.value).toFixed(2);
-              setFieldValue('product.productBody.price.value', formattedValue);
+            type='text'
+            inputProps={{ min: 0, max: 99 }}
+            InputLabelProps={{ shrink: true }}
+            fullWidth
+            disabled={disableFields}
+          />
+        )}
+        {showPreorder && (
+          <DatePicker
+            label={'preorder'.toUpperCase()}
+            value={parseDate(values.product?.productBody?.preorder)}
+            onChange={handlePreorderChange}
+            minDate={new Date()}
+            slotProps={{
+              textField: {
+                fullWidth: true,
+                InputLabelProps: { shrink: true },
+              },
+              field: { clearable: true },
             }}
             disabled={disableFields}
           />
-        </div>
+        )}
 
-        <div className='flex gap-4 w-full'>
-          {showSales && (
-            <div className='w-1/2'>
-              <Field
-                as={TextField}
-                label={'sale percentage'.toUpperCase()}
-                name='product.productBody.salePercentage.value'
-                onChange={(e: any) => {
-                  if (/^\d*$/.test(e.target.value)) {
-                    handlePriceChange(e, true);
-                  }
-                }}
-                type='text'
-                inputProps={{ min: 0, max: 99 }}
-                InputLabelProps={{ shrink: true }}
-                fullWidth
-                disabled={disableFields}
-              />
-            </div>
+        <Field
+          as={TextField}
+          label={'description'.toUpperCase()}
+          name='product.productBody.description'
+          error={Boolean(
+            getIn(errors, 'product.productBody.description') &&
+              getIn(touched, 'product.productBody.description'),
           )}
-          {showPreorder && (
-            <div className='w-1/2'>
-              <DatePicker
-                label={'preorder'.toUpperCase()}
-                value={parseDate(values.product?.productBody?.preorder)}
-                onChange={handlePreorderChange}
-                minDate={new Date()}
-                slotProps={{
-                  textField: {
-                    fullWidth: true,
-                    InputLabelProps: { shrink: true },
-                  },
-                  field: { clearable: true },
-                }}
-                disabled={disableFields}
-              />
-            </div>
+          helperText={
+            getIn(touched, 'product.productBody.description') &&
+            getIn(errors, 'product.productBody.description')
+          }
+          InputLabelProps={{ shrink: true }}
+          fullWidth
+          multiline
+          required
+          disabled={disableFields}
+        />
+
+        <Field
+          as={TextField}
+          label={'model wears height'.toUpperCase()}
+          name='product.productBody.modelWearsHeightCm'
+          error={Boolean(
+            getIn(errors, 'product.productBody.modelWearsHeightCm') &&
+              getIn(touched, 'product.productBody.modelWearsHeightCm'),
           )}
-        </div>
-        <div className='w-full'>
-          <Field
-            as={TextField}
-            label={'description'.toUpperCase()}
-            name='product.productBody.description'
-            error={Boolean(
-              getIn(errors, 'product.productBody.description') &&
-                getIn(touched, 'product.productBody.description'),
-            )}
-            helperText={
-              getIn(touched, 'product.productBody.description') &&
-              getIn(errors, 'product.productBody.description')
-            }
-            InputLabelProps={{ shrink: true }}
-            fullWidth
-            multiline
-            required
-            disabled={disableFields}
-          />
-        </div>
-        <div className='w-full'>
-          <Field
-            as={TextField}
-            label={'model wears height'.toUpperCase()}
-            name='product.productBody.modelWearsHeightCm'
-            error={Boolean(
-              getIn(errors, 'product.productBody.modelWearsHeightCm') &&
-                getIn(touched, 'product.productBody.modelWearsHeightCm'),
-            )}
-            helperText={
-              getIn(touched, 'product.productBody.modelWearsHeightCm') &&
-              getIn(errors, 'product.productBody.modelWearsHeightCm')
-            }
-            onChange={(e: any) => handleFieldChange(e, 'modelWearsHeightCm')}
-            InputLabelProps={{ shrink: true }}
-            required
-            fullWidth
-            disabled={disableFields}
-          />
-        </div>
-        <div className='w-full'>
-          <FormControl
-            fullWidth
-            required
-            error={Boolean(
-              getIn(errors, 'product.productBody.modelWearsSizeId') &&
-                getIn(touched, 'product.productBody.modelWearsSizeId'),
-            )}
+          helperText={
+            getIn(touched, 'product.productBody.modelWearsHeightCm') &&
+            getIn(errors, 'product.productBody.modelWearsHeightCm')
+          }
+          onChange={(e: any) => handleFieldChange(e, 'modelWearsHeightCm')}
+          InputLabelProps={{ shrink: true }}
+          required
+          fullWidth
+          disabled={disableFields}
+        />
+
+        <FormControl
+          fullWidth
+          required
+          error={Boolean(
+            getIn(errors, 'product.productBody.modelWearsSizeId') &&
+              getIn(touched, 'product.productBody.modelWearsSizeId'),
+          )}
+        >
+          <InputLabel shrink>{'model wears size'.toUpperCase()}</InputLabel>
+          <Select
+            name='product.productBody.modelWearsSizeId'
+            value={values.product?.productBody?.modelWearsSizeId || ''}
+            onChange={(e) => handleFieldChange(e, 'modelWearsSizeId')}
+            label={'model wears size'.toUpperCase()}
+            displayEmpty
+            disabled={disableFields || !values.product?.productBody?.topCategoryId}
           >
-            <InputLabel shrink>{'model wears size'.toUpperCase()}</InputLabel>
-            <Select
-              name='product.productBody.modelWearsSizeId'
-              value={values.product?.productBody?.modelWearsSizeId || ''}
-              onChange={(e) => handleFieldChange(e, 'modelWearsSizeId')}
-              label={'model wears size'.toUpperCase()}
-              displayEmpty
-              disabled={disableFields || !values.product?.productBody?.topCategoryId}
-            >
-              {filteredSizes.map((size) => (
-                <MenuItem key={size.id} value={size.id}>
-                  {size.name}
-                </MenuItem>
-              ))}
-            </Select>
-            {getIn(touched, 'product.productBody.modelWearsSizeId') &&
-              getIn(errors, 'product.productBody.modelWearsSizeId') && (
-                <FormHelperText>
-                  <ErrorMessage name='product.productBody.modelWearsSizeId' />
-                </FormHelperText>
-              )}
-          </FormControl>
-        </div>
-        <div className='w-full'>
-          <Field
-            as={TextField}
-            label={'sku'.toUpperCase()}
-            name='product.productBody.sku'
-            InputProps={{ readOnly: true }}
-            InputLabelProps={{ shrink: true }}
-            required
-            fullWidth
-            disabled={disableFields}
-          />
-        </div>
+            {filteredSizes.map((size) => (
+              <MenuItem key={size.id} value={size.id}>
+                {size.name}
+              </MenuItem>
+            ))}
+          </Select>
+          {getIn(touched, 'product.productBody.modelWearsSizeId') &&
+            getIn(errors, 'product.productBody.modelWearsSizeId') && (
+              <FormHelperText>
+                <ErrorMessage name='product.productBody.modelWearsSizeId' />
+              </FormHelperText>
+            )}
+        </FormControl>
 
-        <div className='w-full'>
-          <Field component={Care} name='product.productBody' {...{ isEditMode, isAddingProduct }} />
-        </div>
-        <div className='w-full'>
-          <Field
-            component={Composition}
-            name='product.productBody'
-            {...{ isAddingProduct, isEditMode }}
-          />
-        </div>
-        <div className='w-full'>
-          <FormControlLabel
-            control={
-              <Field
-                as={Checkbox}
-                name='product.productBody.hidden'
-                disabled={disableFields}
-                checked={values.product?.productBody?.hidden || false}
-              />
-            }
-            label={'hidden'.toUpperCase()}
-          />
-        </div>
+        <Field
+          as={TextField}
+          label={'sku'.toUpperCase()}
+          name='product.productBody.sku'
+          InputProps={{ readOnly: true }}
+          InputLabelProps={{ shrink: true }}
+          required
+          fullWidth
+          disabled={disableFields}
+        />
+
+        <Field component={Care} name='product.productBody' {...{ isEditMode, isAddingProduct }} />
+
+        <Field
+          component={Composition}
+          name='product.productBody'
+          {...{ isAddingProduct, isEditMode }}
+        />
       </div>
     </LocalizationProvider>
   );

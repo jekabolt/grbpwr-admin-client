@@ -1,7 +1,11 @@
-import { Box, Button, Chip, TextField, Typography } from '@mui/material';
+import { TextField } from '@mui/material';
+import { Cross2Icon } from '@radix-ui/react-icons';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
+import { cn } from 'lib/utility';
 import { FC, useEffect, useMemo, useState } from 'react';
+import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import { ProductTagsInterface } from '../interface/interface';
 
 export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, isCopyMode }) => {
@@ -48,7 +52,8 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
     }
   }, [isEditMode]);
 
-  const handleAddTag = () => {
+  const handleAddTag = (e: React.MouseEvent) => {
+    e.preventDefault();
     if (tag.trim() !== '' && !localTags.includes(tag)) {
       const newTags = [...localTags, tag];
       if (isAddingProduct) {
@@ -65,7 +70,8 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
     }
   };
 
-  const handleDeleteTag = (tagToDelete: string) => {
+  const handleDeleteTag = (tagToDelete: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     let updatedTags = [];
     if (isAddingProduct) {
       const newTags = localTags.filter((t) => t !== tagToDelete);
@@ -122,54 +128,63 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
   }, [isCopyMode, copiedTags, isAddingProduct, localTags, editedTags, isEditMode, values.tags]);
 
   return (
-    <Box display='grid' alignItems='center' gap='10px'>
-      {(isAddingProduct || isCopyMode) && !showAddTagField && (
-        <Button variant='contained' onClick={() => setShowAddTagField(true)}>
-          Add new tag
+    <div className='grid items-center gap-2'>
+      {(isAddingProduct || isCopyMode) && !showAddTagField && !isEditMode && (
+        <Button size='lg' onClick={() => setShowAddTagField(true)}>
+          add new tag
         </Button>
       )}
-      {(isEditMode || showAddTagField) && (
-        <Box display='flex' alignItems='center' gap='5px'>
-          <TextField
-            type='text'
-            value={tag}
-            placeholder='Upload new tag'
-            size='small'
-            label='TAG'
-            InputLabelProps={{ shrink: true }}
-            onChange={(e) => setTag(e.target.value)}
-          />
-          <Button variant='contained' onClick={handleAddTag}>
-            Upload
-          </Button>
-        </Box>
+      {(isEditMode || (showAddTagField && (isAddingProduct || isCopyMode))) && (
+        <TextField
+          type='text'
+          value={tag}
+          placeholder='Upload new tag'
+          fullWidth
+          label='TAG'
+          InputLabelProps={{ shrink: true }}
+          onChange={(e) => setTag(e.target.value)}
+          slotProps={{
+            input: {
+              endAdornment: (
+                <Button size='lg' onClick={(e: React.MouseEvent) => handleAddTag(e)}>
+                  upload
+                </Button>
+              ),
+            },
+          }}
+        />
       )}
-      {!isEditMode && !isAddingProduct && (
-        <Typography textTransform='uppercase' variant='h5'>
-          list of tags
-        </Typography>
-      )}
-      <Box display='grid' gridTemplateColumns='repeat(2, 1fr)' gap='5px'>
+      {!isEditMode && !isAddingProduct && <Text variant='uppercase'>list of tags</Text>}
+      <div className='grid grid-cols-2 lg:grid-cols-4 gap-1'>
         {displayedTags.map((tag, index) => (
-          <Chip
+          <div
             key={index}
-            label={tag}
-            color={selectedTags.includes(tag || '') ? 'primary' : 'default'}
-            onClick={() => handleTagClick(tag || '')}
-            disabled={!isEditMode && !isAddingProduct && !isCopyMode}
-            onDelete={
-              isEditMode || isAddingProduct || isCopyMode
-                ? () => handleDeleteTag(tag || '')
-                : undefined
+            className={cn(
+              'flex justify-center items-center gap-2 p-2 rounded-full border border-text group',
+              {
+                'border-3': selectedTags.includes(tag || ''),
+                'hover:cursor-pointer': isEditMode || isAddingProduct,
+              },
+            )}
+            onClick={() =>
+              (isEditMode || isAddingProduct || isCopyMode) && handleTagClick(tag || '')
             }
-          />
+          >
+            <Text size='small'>{tag}</Text>
+            {(isEditMode || isAddingProduct || isCopyMode) && (
+              <Button
+                className='rounded-full lg:hidden lg:group-hover:block'
+                onClick={(e: React.MouseEvent) => {
+                  handleDeleteTag(tag || '', e);
+                }}
+              >
+                <Cross2Icon />
+              </Button>
+            )}
+          </div>
         ))}
-      </Box>
-      {touched.tags && errors.tags && (
-        <Typography color='error' variant='overline'>
-          {errors.tags}
-        </Typography>
-      )}
-    </Box>
+      </div>
+      {touched.tags && errors.tags && <Text variant='error'>{errors.tags}</Text>}
+    </div>
   );
 };
