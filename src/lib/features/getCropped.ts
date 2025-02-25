@@ -76,8 +76,8 @@ export default async function getCroppedImg(
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
-    const scaleX = rotatedImage.width / rotatedImage.width;
-    const scaleY = rotatedImage.height / rotatedImage.height;
+    const scaleX = rotatedImage.naturalWidth / rotatedImage.width;
+    const scaleY = rotatedImage.naturalHeight / rotatedImage.height;
 
     const { bestWidth, bestHeight } = findBestCrop(crop.width, crop.height, aspect);
 
@@ -85,15 +85,19 @@ export default async function getCroppedImg(
     canvas.height = bestHeight;
 
     if (ctx) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.imageSmoothingQuality = 'high';
+        ctx.imageSmoothingEnabled = true;
 
         ctx.drawImage(
             rotatedImage,
-            crop.x * scaleX,
-            crop.y * scaleY,
-            crop.width * scaleX,
-            crop.height * scaleY,
+            crop.x,
+            crop.y,
+            crop.width,
+            crop.height,
             0,
             0,
             bestWidth,
@@ -101,5 +105,6 @@ export default async function getCroppedImg(
         );
     }
 
-    return canvas.toDataURL(format);
+    const quality = format === 'image/webp' ? 1.0 : 0.95;
+    return canvas.toDataURL(format, quality);
 }
