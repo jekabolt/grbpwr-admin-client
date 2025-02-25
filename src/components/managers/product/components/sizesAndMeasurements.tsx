@@ -1,5 +1,4 @@
 import {
-  Box,
   Paper,
   Table,
   TableBody,
@@ -8,7 +7,6 @@ import {
   TableHead,
   TableRow,
   TextField,
-  Typography,
 } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
@@ -16,7 +14,7 @@ import { sortItems } from 'lib/features/filter-size-measurements';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useState } from 'react';
-// import styles from 'styles/addProd.scss';
+import Text from 'ui/components/text';
 
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
 import {
@@ -202,26 +200,16 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
 
   return (
     <>
-      <TableContainer
-        component={Paper}
-        sx={{
-          border:
-            touched.sizeMeasurements && errors.sizeMeasurements
-              ? '2px solid red'
-              : '1px solid black',
-        }}
-      >
+      <TableContainer component={Paper} className='border-2 border-text'>
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Size Name</TableCell>
-              <TableCell
-              // className={styles.table_cell}
-              >
+              <TableCell className='uppercase'>Size Name</TableCell>
+              <TableCell align='center' className='uppercase'>
                 Quantity
               </TableCell>
               {measurementsToDisplay.map((m) => (
-                <TableCell key={m.id}>
+                <TableCell align='center' className='uppercase' key={m.id}>
                   {findInDictionary(dictionary, m.id, 'measurement')}
                 </TableCell>
               ))}
@@ -245,29 +233,26 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                   <TableCell component='th' scope='row'>
                     {findInDictionary(dictionary, size.id, 'size')}
                   </TableCell>
-                  <TableCell align='center' sx={{ bgcolor: '#f0f0f0' }}>
-                    <Box display='flex' alignItems='center'>
-                      <TextField
-                        name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
-                        type='text'
-                        value={
-                          values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value === '0'
-                            ? ''
-                            : values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value ||
-                              ''
+                  <TableCell align='center' className='bg-inactive'>
+                    <TextField
+                      name={`sizeMeasurements[${sizeIndex}].productSize.sizeId`}
+                      type='text'
+                      value={
+                        values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value === '0'
+                          ? ''
+                          : values.sizeMeasurements?.[sizeIndex]?.productSize?.quantity?.value || ''
+                      }
+                      onChange={(e) => {
+                        if (e.target.value === '' || /^\d+$/.test(e.target.value)) {
+                          handleSizeChange(e, size.id);
                         }
-                        onChange={(e) => {
-                          if (e.target.value === '' || /^\d+$/.test(e.target.value)) {
-                            handleSizeChange(e, size.id);
-                          }
-                        }}
-                        style={{ width: '80px' }}
-                        disabled={!isLastSize && lastSizeNonZero}
-                      />
-                    </Box>
+                      }}
+                      className='w-20'
+                      disabled={!isLastSize && lastSizeNonZero}
+                    />
                   </TableCell>
                   {measurementsToDisplay.map((measurement) => (
-                    <TableCell key={measurement.id}>
+                    <TableCell align='center' key={measurement.id}>
                       <TextField
                         type='text'
                         value={
@@ -281,7 +266,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
                           }
                         }}
                         inputProps={{ min: 0 }}
-                        style={{ width: '80px' }}
+                        className='w-20'
                         disabled={!isLastSize && lastSizeNonZero}
                       />
                     </TableCell>
@@ -293,9 +278,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
         </Table>
       </TableContainer>
       {touched.sizeMeasurements && errors.sizeMeasurements && (
-        <Typography color='error' variant='overline'>
-          {errors.sizeMeasurements}
-        </Typography>
+        <Text>{errors.sizeMeasurements}</Text>
       )}
     </>
   );
