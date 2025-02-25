@@ -5,7 +5,7 @@ export interface DictionaryStore {
     loading: boolean;
     error: string | null;
     initialized: boolean;
-    fetchDictionary: () => Promise<void>;
+    fetchDictionary: (bypassCache?: boolean) => Promise<void>;
 }
 
 interface Alert {

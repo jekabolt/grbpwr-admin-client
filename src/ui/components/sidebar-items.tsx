@@ -1,4 +1,4 @@
-import { sideBarItems } from 'constants/side-bar';
+import { sideBarItems } from 'constants/routes';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';

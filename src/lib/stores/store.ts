@@ -7,11 +7,11 @@ export const useDictionaryStore = create<DictionaryStore>((set, get) => ({
     loading: false,
     error: null,
     initialized: false,
-    fetchDictionary: async () => {
-        if (get().initialized || get().loading) return;
+    fetchDictionary: async (bypassCache = false) => {
+        if (get().initialized && !bypassCache) return;
         set({ loading: true, error: null })
         try {
-            const response = await getDictionary({})
+            const response = await getDictionary({}, bypassCache)
             set({ dictionary: response.dictionary, loading: false, initialized: true })
         } catch (error) {
             set({ error: 'Failed to fetch dictionary', loading: false, initialized: false })
