@@ -1,6 +1,6 @@
 import Checkbox from 'ui/components/checkbox';
 import Text from 'ui/components/text';
-import useFilter from './useFilter';
+import useFilter from '../../../../lib/useFilter';
 
 export default function PreorderSaleHidden() {
   const { defaultValue: preorder, handleFilterChange: handlePreorderChange } =

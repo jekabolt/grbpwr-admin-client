@@ -1,12 +1,6 @@
-import { common_GenderEnum } from 'api/proto-http/admin';
+import { genderOptions } from 'constants/filter';
 import Selector from 'ui/components/selector';
-import useFilter from './useFilter';
-
-const genderOptions: Array<{ value: common_GenderEnum; label: string }> = [
-  { value: 'GENDER_ENUM_FEMALE', label: 'women' },
-  { value: 'GENDER_ENUM_MALE', label: 'men' },
-  { value: 'GENDER_ENUM_UNISEX', label: 'unisex' },
-];
+import useFilter from '../../../../lib/useFilter';
 
 export default function Gender() {
   const { defaultValue, handleFilterChange } = useFilter('gender');

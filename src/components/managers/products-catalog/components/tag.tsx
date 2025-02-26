@@ -1,5 +1,5 @@
 import Input from 'ui/components/input';
-import useFilter from './useFilter';
+import useFilter from '../../../../lib/useFilter';
 export default function Tag() {
   const { defaultValue, handleFilterChange } = useFilter('tag');
 

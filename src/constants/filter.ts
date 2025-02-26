@@ -1,9 +1,29 @@
+import { common_GenderEnum, common_OrderFactor, common_SortFactor } from "api/proto-http/admin";
 
 interface Colors {
     name: string;
     hex: string;
 }
 
+export const PAGE_SIZE = 16;
+
+export const sortOptions: Array<{ value: common_SortFactor; label: string }> = [
+    { value: 'SORT_FACTOR_CREATED_AT', label: 'Created At' },
+    { value: 'SORT_FACTOR_PRICE', label: 'Price' },
+    { value: 'SORT_FACTOR_UPDATED_AT', label: 'Updated At' },
+    { value: 'SORT_FACTOR_NAME', label: 'Name' },
+];
+
+export const orderOptions: Array<{ value: common_OrderFactor; label: string }> = [
+    { value: 'ORDER_FACTOR_ASC', label: 'Ascending' },
+    { value: 'ORDER_FACTOR_DESC', label: 'Descending' },
+];
+
+export const genderOptions: Array<{ value: common_GenderEnum; label: string }> = [
+    { value: 'GENDER_ENUM_FEMALE', label: 'women' },
+    { value: 'GENDER_ENUM_MALE', label: 'men' },
+    { value: 'GENDER_ENUM_UNISEX', label: 'unisex' },
+];
 
 export const colors: Colors[] = [
     { "name": "Black", "hex": "#000000" },

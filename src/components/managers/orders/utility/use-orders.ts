@@ -7,7 +7,7 @@ export const useOrders = () => {
     const [rows, setRows] = useState<common_Order[]>([]);
     const [loading, setLoading] = useState(false);
     const [page, setPage] = useState(0);
-    const pageSize = 10;
+    const pageSize = 1;
     const [loadMoreVisible, setLoadMoreVisible] = useState(true);
     const [currentFilters, setCurrentFilters] = useState<SearchFilters>({
         status: undefined,

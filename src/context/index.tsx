@@ -2,7 +2,6 @@ import { Dispatch, FC, ReactNode, createContext, useReducer } from 'react';
 
 const initialContextValue = {};
 
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
 interface IState {}
 type ActionsType = '';
 

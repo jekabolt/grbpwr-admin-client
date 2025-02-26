@@ -1,6 +1,6 @@
-import { colors } from 'constants/colors';
+import { colors } from 'constants/filter';
 import Selector from 'ui/components/selector';
-import useFilter from './useFilter';
+import useFilter from '../../../../lib/useFilter';
 
 export default function Color() {
   const { defaultValue, handleFilterChange } = useFilter('color');

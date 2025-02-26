@@ -1,6 +1,6 @@
 import { useCategories } from 'lib/features/useCategories';
 import Selector from 'ui/components/selector';
-import useFilter from './useFilter';
+import useFilter from '../../../../lib/useFilter';
 
 export default function Categories() {
   const { defaultValue: topCategory, handleFilterChange: handleTopCategoryChange } = useFilter(

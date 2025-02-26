@@ -90,7 +90,7 @@ export const MediaCropper: FC<CropperInterface> = ({
                 onRotationChange={setRotation}
                 rotation={rotation}
                 restrictPosition={true}
-                objectFit='cover'
+                objectFit='contain'
               />
             </div>
           </div>

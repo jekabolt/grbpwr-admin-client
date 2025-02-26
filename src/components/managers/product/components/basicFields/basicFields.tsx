@@ -12,8 +12,7 @@ import {
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_ProductNew } from 'api/proto-http/admin';
-import { colors } from 'constants/colors';
-import { genderOptions } from 'constants/dictioanary';
+import { colors, genderOptions } from 'constants/filter';
 import { ErrorMessage, Field, getIn, useFormikContext } from 'formik';
 import { generateOrUpdateSKU, generateSKU } from 'lib/features/dynamicGenerationOfSku';
 import { useCategories } from 'lib/features/useCategories';
@@ -269,8 +268,8 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             disabled={disableFields}
           >
             {genderOptions.map((gender) => (
-              <MenuItem key={gender.id} value={gender.id}>
-                {gender.name?.toUpperCase()}
+              <MenuItem key={gender.value} value={gender.value}>
+                {gender.label?.toUpperCase()}
               </MenuItem>
             ))}
           </Select>

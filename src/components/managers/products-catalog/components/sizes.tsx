@@ -1,6 +1,6 @@
 import { useDictionaryStore } from 'lib/stores/store';
 import Selector from 'ui/components/selector';
-import useFilter from './useFilter';
+import useFilter from '../../../../lib/useFilter';
 
 export default function Sizes() {
   const { dictionary } = useDictionaryStore();
