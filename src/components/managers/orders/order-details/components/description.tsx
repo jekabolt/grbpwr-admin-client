@@ -1,8 +1,8 @@
 import { Grid2 as Grid, Typography } from '@mui/material';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 // import styles from 'styles/order.scss';
+import { formatDateTime, getStatusColor } from '../../../orders-catalog/components/utility';
 import { OrderDescriptionProps } from '../../interfaces/interface';
-import { formatDateTime, getStatusColor } from '../../utility';
 
 export function Description({ orderDetails, orderStatus, isPrinting }: OrderDescriptionProps) {
   return (

@@ -1,7 +1,7 @@
 import { cn } from 'lib/utility';
 
 interface Props {
-  type?: 'text' | 'password' | 'number' | 'file';
+  type?: 'text' | 'password' | 'number' | 'file' | 'email';
   name: string;
   className?: string;
   [k: string]: any;

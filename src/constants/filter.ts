@@ -1,4 +1,4 @@
-import { common_GenderEnum, common_OrderFactor, common_SortFactor } from "api/proto-http/admin";
+import { common_GenderEnum, common_OrderFactor, common_OrderStatusEnum, common_SortFactor } from "api/proto-http/admin";
 
 interface Colors {
     name: string;
@@ -19,11 +19,20 @@ export const orderOptions: Array<{ value: common_OrderFactor; label: string }> =
     { value: 'ORDER_FACTOR_DESC', label: 'Descending' },
 ];
 
+
 export const genderOptions: Array<{ value: common_GenderEnum; label: string }> = [
     { value: 'GENDER_ENUM_FEMALE', label: 'women' },
     { value: 'GENDER_ENUM_MALE', label: 'men' },
     { value: 'GENDER_ENUM_UNISEX', label: 'unisex' },
 ];
+
+export const statusOptions: Array<{ value: common_OrderStatusEnum, label: string }> = [
+    { value: 'ORDER_STATUS_ENUM_PLACED', label: 'placed' },
+    { value: 'ORDER_STATUS_ENUM_CONFIRMED', label: 'confirmed' },
+    { value: 'ORDER_STATUS_ENUM_SHIPPED', label: 'shipped' },
+    { value: 'ORDER_STATUS_ENUM_DELIVERED', label: 'delivered' },
+    { value: 'ORDER_STATUS_ENUM_CANCELLED', label: 'cancelled' },
+]
 
 export const colors: Colors[] = [
     { "name": "Black", "hex": "#000000" },

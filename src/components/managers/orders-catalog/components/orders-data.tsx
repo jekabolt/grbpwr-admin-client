@@ -1,5 +1,5 @@
 import { common_Dictionary } from 'api/proto-http/admin';
-import { formatDateTime, getOrderStatusName, getStatusColor } from '../utility';
+import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 
 export const orderData = (dictionary: common_Dictionary | undefined) => [
   { field: 'id', headerName: 'Order ID', width: 120 },

@@ -5,13 +5,11 @@ import ProtectedRoute from 'components/login/protectedRoute';
 import { Archive } from 'components/managers/archive/archive';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
-import { OrderDetails } from 'components/managers/orders/order-details/page';
-import { Orders } from 'components/managers/orders/orders';
+import { OrdersCatalog } from 'components/managers/orders-catalog/page';
+import { OrderDetails } from 'components/managers/orders/page';
 import { Analitic } from 'components/managers/page';
-
-import ProductsCatalog from 'components/managers/products-catalog/page';
-
 import { Product } from 'components/managers/product/page';
+import ProductsCatalog from 'components/managers/products-catalog/page';
 import { Promo } from 'components/managers/promo/promo';
 import { Settings } from 'components/managers/settings/settings';
 import { ROUTES } from 'constants/routes';
@@ -142,7 +140,7 @@ root.render(
                 path={ROUTES.orders}
                 element={
                   <ProtectedRoute>
-                    <Orders />
+                    <OrdersCatalog />
                   </ProtectedRoute>
                 }
               />
