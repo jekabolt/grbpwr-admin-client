@@ -1,5 +1,4 @@
-import { ChevronDownIcon } from '@radix-ui/react-icons'; // Optional, for the trigger icon
-import * as Select from '@radix-ui/react-select';
+import { FormControl, InputLabel, MenuItem, Select as MuiSelect } from '@mui/material';
 
 interface Option {
   value: string | number;
@@ -10,10 +9,12 @@ interface SelectFieldProps {
   label: string;
   value: string | number | (string | number)[];
   options: Option[];
-  onChange: (value: any) => void;
   placeholder?: string;
-  multiple?: boolean;
   fullWidth?: boolean;
+  showAll?: boolean;
+  multiple?: boolean;
+  disabled?: boolean;
+  onChange: (value: any) => void;
   [k: string]: any;
 }
 
@@ -21,62 +22,70 @@ export default function Selector({
   label,
   value,
   options,
-  onChange,
   placeholder = 'Select an option...',
-  multiple = false,
   fullWidth = false,
+  showAll = false,
+  multiple = false,
+  disabled = false,
+  onChange,
   ...props
 }: SelectFieldProps) {
-  const selectedLabels =
-    multiple && Array.isArray(value)
-      ? value
-          .map((v) => options.find((opt) => opt.value === v)?.label)
-          .filter(Boolean)
-          .join(', ')
-      : options.find((opt) => opt.value === value)?.label;
+  const allOptions = showAll ? [{ value: 'all', label: 'All' }, ...options] : options;
+
+  const handleChange = (event: any) => {
+    const newValue = event.target.value;
+
+    if (multiple) {
+      if (Array.isArray(newValue)) {
+        if (newValue.includes('all')) {
+          onChange([]);
+        } else {
+          onChange(newValue.filter((v) => v !== 'all'));
+        }
+      }
+    } else {
+      onChange(newValue === 'all' ? '' : newValue);
+    }
+  };
+
+  const displayValue = multiple
+    ? Array.isArray(value)
+      ? value.includes('all')
+        ? ['all']
+        : value
+      : []
+    : value || (showAll ? 'all' : '');
 
   return (
-    <div className={`relative ${fullWidth ? 'w-full' : ''}`}>
-      <label className='block text-sm font-medium text-gray-700'>{label}</label>
-      <Select.Root
-        value={Array.isArray(value) ? value[0]?.toString() : value?.toString()}
-        onValueChange={onChange}
-        {...(multiple ? { multiple: true } : {})}
+    <FormControl size='small' disabled={disabled} className='w-full'>
+      <InputLabel shrink id={`select-label-${label}`} className='uppercase'>
+        {label}
+      </InputLabel>
+      <MuiSelect
+        labelId={`select-label-${label}`}
+        value={displayValue}
+        label={label}
+        onChange={handleChange}
+        multiple={multiple}
+        displayEmpty
+        renderValue={(selected) => {
+          if (multiple) {
+            if (!selected || (Array.isArray(selected) && !selected.length)) return placeholder;
+            if (Array.isArray(selected) && selected.includes('all')) return 'All';
+            return (Array.isArray(selected) ? selected : [selected])
+              .map((val) => allOptions.find((opt) => opt.value === val)?.label)
+              .join(', ');
+          }
+          return allOptions.find((opt) => opt.value === selected)?.label || placeholder;
+        }}
+        {...props}
       >
-        <Select.Trigger
-          className='inline-flex items-center justify-between rounded-md px-4 py-2 text-sm border w-full bg-white'
-          {...props}
-        >
-          <Select.Value>{selectedLabels || placeholder}</Select.Value>
-          <Select.Icon>
-            <ChevronDownIcon />
-          </Select.Icon>
-        </Select.Trigger>
-
-        <Select.Portal>
-          <Select.Content className='overflow-hidden border bg-white rounded-md shadow-lg z-50'>
-            <Select.Viewport>
-              {multiple && (
-                <Select.Item
-                  value='any'
-                  className='relative flex items-center pl-4 py-2 cursor-default hover:bg-gray-100'
-                >
-                  <Select.ItemText>ANY</Select.ItemText>
-                </Select.Item>
-              )}
-              {options.map((option) => (
-                <Select.Item
-                  key={option.value}
-                  value={option.value.toString()}
-                  className='relative flex items-center pl-4 py-2 cursor-default hover:bg-gray-100'
-                >
-                  <Select.ItemText>{option.label}</Select.ItemText>
-                </Select.Item>
-              ))}
-            </Select.Viewport>
-          </Select.Content>
-        </Select.Portal>
-      </Select.Root>
-    </div>
+        {allOptions.map((option) => (
+          <MenuItem key={option.value} value={option.value} className='uppercase'>
+            {option.label}
+          </MenuItem>
+        ))}
+      </MuiSelect>
+    </FormControl>
   );
 }

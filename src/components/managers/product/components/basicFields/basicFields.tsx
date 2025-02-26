@@ -16,13 +16,13 @@ import { colors } from 'constants/colors';
 import { genderOptions } from 'constants/dictioanary';
 import { ErrorMessage, Field, getIn, useFormikContext } from 'formik';
 import { generateOrUpdateSKU, generateSKU } from 'lib/features/dynamicGenerationOfSku';
+import { useCategories } from 'lib/features/useCategories';
 import { useDictionaryStore } from 'lib/stores/store';
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import CountryList from 'react-select-country-list';
 import { v4 as uuidv4 } from 'uuid';
 import { BasicProductFieldsInterface, Country } from '../../interface/interface';
 import { handleKeyDown } from '../../utility/brandNameRegExp';
-import { processCategories } from '../../utility/categories';
 import { formatWellKnownTimestamp, parseWellKnownTimestamp } from '../../utility/preorderTime';
 import { getFilteredSizes } from '../../utility/sizes';
 import { Care } from './care/care';
@@ -40,21 +40,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   const [showPreorder, setShowPreorder] = useState(true);
   const [showSales, setShowSales] = useState(true);
   const disableFields = isAddingProduct ? false : !isEditMode;
-  const categories = processCategories(dictionary?.categories || []);
 
-  const selectedSubCategories = (() => {
-    const topCategory = categories.find(
-      (cat) => cat.id === values.product?.productBody?.topCategoryId,
+  const { topCategoryOptions, subCategoryOptions, typeOptions, selectedTopCategoryName } =
+    useCategories(
+      values.product?.productBody?.topCategoryId?.toString() || '',
+      values.product?.productBody?.subCategoryId?.toString() || '',
     );
-    return topCategory?.subCategories || [];
-  })();
-
-  const selectedTypes = (() => {
-    const subCategory = selectedSubCategories.find(
-      (sub) => sub.id === values.product?.productBody?.subCategoryId,
-    );
-    return subCategory?.types || [];
-  })();
 
   const filteredSizes = getFilteredSizes(
     dictionary,
@@ -67,14 +58,11 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       values.product?.productBody?.sku === product?.product?.productDisplay?.productBody?.sku
     ) {
       const newUuid = uuidv4();
-      const selectedCategory = categories.find(
-        (cat) => cat.id === values.product?.productBody?.topCategoryId,
-      );
 
       const newSKU = generateSKU(
         values.product?.productBody?.brand,
         values.product?.productBody?.targetGender,
-        selectedCategory?.name,
+        selectedTopCategoryName,
         values.product?.productBody?.color,
         values.product?.productBody?.countryOfOrigin,
         newUuid.slice(-4),
@@ -91,9 +79,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       let newValue = e.target.value;
 
       if (field === 'topCategoryId') {
-        const selectedCategory = categories.find((cat) => cat.id === newValue);
+        const selectedCategory = topCategoryOptions.find((cat) => cat.value === newValue);
 
-        if (selectedCategory?.subCategories.length === 0) {
+        if (selectedCategory) {
           setFieldValue('product.productBody.subCategoryId', newValue, false);
         } else {
           setFieldValue('product.productBody.subCategoryId', '', false);
@@ -121,16 +109,16 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
 
       const categoryId =
         field === 'topCategoryId' ? newValue : values.product?.productBody?.topCategoryId;
-      const selectedCategory = categories.find((cat) => cat.id === categoryId);
+      const selectedCategory = topCategoryOptions.find((cat) => cat.value === categoryId);
       const updatedProductBody = {
         ...values.product?.productBody,
         [field]: newValue,
-        categoryName: selectedCategory?.name,
+        categoryName: selectedCategory?.label,
       };
       const newSku = generateOrUpdateSKU(values.product?.productBody?.sku, updatedProductBody);
       setFieldValue('product.productBody.sku', newSku);
     },
-    [values.product?.productBody, setFieldValue, dictionary, categories],
+    [values.product?.productBody, setFieldValue, dictionary, topCategoryOptions],
   );
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
@@ -311,9 +299,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             displayEmpty
             disabled={disableFields}
           >
-            {categories.map((category) => (
-              <MenuItem value={category.id} key={category.id}>
-                {category.name}
+            {topCategoryOptions.map((category) => (
+              <MenuItem value={category.value} key={category.value}>
+                {category.label}
               </MenuItem>
             ))}
           </Select>
@@ -342,9 +330,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             displayEmpty
             disabled={disableFields || !values.product?.productBody?.topCategoryId}
           >
-            {selectedSubCategories.map((category) => (
-              <MenuItem value={category.id} key={category.id}>
-                {category.name}
+            {subCategoryOptions.map((category) => (
+              <MenuItem value={category.value} key={category.value}>
+                {category.label}
               </MenuItem>
             ))}
           </Select>
@@ -373,9 +361,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             displayEmpty
             disabled={disableFields}
           >
-            {selectedTypes.map((type) => (
-              <MenuItem value={type.id} key={type.id}>
-                {type.name}
+            {typeOptions.map((type) => (
+              <MenuItem value={type.value} key={type.value}>
+                {type.label}
               </MenuItem>
             ))}
           </Select>
