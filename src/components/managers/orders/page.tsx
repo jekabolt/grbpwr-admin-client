@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Logo } from 'ui/icons/logo';
 import { Layout } from 'ui/layout';
-import { DisplayState } from '../interfaces/interface';
-import { useOrderDetails } from '../utility/use-order-details';
 import { Billing } from './components/billing';
 import { Description } from './components/description';
 import { OrderDetailsData } from './components/order-details-data';
@@ -13,6 +11,8 @@ import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
 import { ShippingBuyer } from './components/shipping-buyer';
 import { NewTrackCode } from './components/shipping-buyer-information/new-track-code';
+import { DisplayState } from './interface';
+import { useOrderDetails } from './utility';
 
 export function OrderDetails() {
   const { uuid } = useParams<{ uuid: string }>();

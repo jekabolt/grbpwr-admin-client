@@ -1,8 +1,8 @@
 import { Grid2 as Grid, Typography } from '@mui/material';
 import { common_OrderFull } from 'api/proto-http/frontend';
+import { formatDateTime } from 'components/managers/orders-catalog/components/utility';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import { formatDateTime } from '../../../orders-catalog/components/utility';
-import { STATUS } from '../../interfaces/interface';
+import { STATUS } from '../interface';
 
 interface Props {
   orderDetails: common_OrderFull | undefined;
