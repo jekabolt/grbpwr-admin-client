@@ -13,7 +13,7 @@ module.exports = {
   output: {
     filename: isProduction ? '[name].[contenthash].js' : '[name].js',
     path: path.resolve(__dirname, 'dist/'),
-    publicPath: '/',
+    publicPath: isProduction ? './' : '/',
     clean: true,
   },
   resolve: {
