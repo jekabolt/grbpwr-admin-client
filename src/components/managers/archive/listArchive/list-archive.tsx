@@ -1,7 +1,9 @@
-import { Button, Grid2 as Grid, Typography } from '@mui/material';
+import { Grid2 as Grid, Typography } from '@mui/material';
+import { Cross1Icon } from '@radix-ui/react-icons';
 import { useArchiveStore } from 'lib/stores/archive/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
+import { Button } from 'ui/components/button';
 import { ArchiveItem } from './archive-item';
 
 export function ListArchive() {
@@ -74,11 +76,10 @@ export function ListArchive() {
           >
             <Button
               onClick={(e: React.MouseEvent) => handleDeleteArchive(e, archive.id || 0)}
-              color='error'
-              size='large'
-              sx={{ position: 'absolute', top: 0, right: 0 }}
+              size='lg'
+              className='absolute top-0 right-0'
             >
-              remove
+              <Cross1Icon />
             </Button>
             <Grid size={{ xs: 12, lg: 2 }} display='flex' justifyContent='center'>
               <Typography

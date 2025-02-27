@@ -25,7 +25,7 @@ export const MediaSelector: FC<MediaSelectorInterface> = ({
     <div className='gap-10 flex items-center flex-col'>
       {status.isLoading && (
         <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50'>
-          <div className='animate-spin w-10 h-10 border-2 border-gray-300 border-t-text rounded-full' />
+          <div className='animate-spin w-10 h-10 border-2 border-gray-300 border-t-text rounded-full z-50' />
         </div>
       )}
       <div className='flex flex-col gap-4 justify-between items-center py-4 border border-text w-1/2'>
