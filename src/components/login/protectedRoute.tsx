@@ -1,6 +1,6 @@
-import { useNavigate } from '@tanstack/react-location';
 import { ROUTES } from 'constants/routes';
 import { ReactNode, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LoginBlock } from './login';
 
 interface ProtectedRouteProps {
@@ -26,7 +26,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   useEffect(() => {
     const token = localStorage.getItem('authToken');
     if (isTokenExpired(token)) {
-      navigate({ to: ROUTES.login });
+      navigate(ROUTES.login);
     }
   }, [navigate]);
 

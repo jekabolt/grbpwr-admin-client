@@ -1,5 +1,5 @@
 import { Box, Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
-import { SingleMediaViewAndSelect } from 'components/common/media-selector-layout/media-selector-components/singleMediaViewAndSelect';
+import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { Field } from 'formik';
 import { useState } from 'react';
 import { Props } from '../interface/interface';

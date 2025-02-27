@@ -1,10 +1,8 @@
 import { Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
-import { useNavigate } from '@tanstack/react-location';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { defaultProductFilterSettings } from 'constants/initialFilterStates';
-import { ROUTES } from 'constants/routes';
 import { Field, useFormikContext } from 'formik';
-import styles from 'styles/archiveList.scss';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+// import styles from 'styles/archiveList.scss';
 import { FeatureArchiveProps } from '../interface/interface';
 import { ArchivePicker } from './archive-picker';
 
@@ -18,27 +16,24 @@ export function FeaturedArchive({
   handleOpenArchiveSelection,
 }: FeatureArchiveProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { values } = useFormikContext<common_HeroFullInsert>();
 
-  const handleTagClick = () => {
-    const tag = values.entities?.[index]?.featuredArchive?.tag;
-    if (tag) {
-      const filterSettings = {
-        ...defaultProductFilterSettings,
-        filterConditions: {
-          ...defaultProductFilterSettings.filterConditions,
-          byTag: tag,
-        },
-      };
-      navigate({
-        to: `${ROUTES.product}`,
-        search: (old) => ({
-          ...old,
-          filter: filterSettings,
-        }),
-      });
-    }
-  };
+  // const handleTagClick = () => {
+  //   const tag = values.entities?.[index]?.featuredArchive?.tag;
+  //   if (tag) {
+  //     const filterSettings = {
+  //       ...defaultProductFilterSettings,
+  //       filterConditions: {
+  //         ...defaultProductFilterSettings.filterConditions,
+  //         byTag: tag,
+  //       },
+  //     };
+  //     setSearchParams({ filter: JSON.stringify(filterSettings) });
+  //     navigate(`${ROUTES.product}`);
+  //   }
+  // };
+
   return (
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, md: 6 }}>
@@ -105,7 +100,10 @@ export function FeaturedArchive({
                   minWidth: '300px',
                 }}
               >
-                <Grid size={{ xs: 12 }} className={styles.item}>
+                <Grid
+                  size={{ xs: 12 }}
+                  // className={styles.item}
+                >
                   <img src={item.media?.thumbnail?.mediaUrl} />
                 </Grid>
               </Grid>
@@ -119,7 +117,10 @@ export function FeaturedArchive({
                 minWidth: '300px',
               }}
             >
-              <Grid size={{ xs: 12 }} className={styles.item}>
+              <Grid
+                size={{ xs: 12 }}
+                // className={styles.item}
+              >
                 <video
                   src={archive[index]?.[0].video?.media?.fullSize?.mediaUrl}
                   controls
@@ -146,7 +147,7 @@ export function FeaturedArchive({
           fullWidth
         />
       </Grid>
-      <Grid size={{ xs: 12 }}>
+      {/* <Grid size={{ xs: 12 }}>
         <Field
           as={TextField}
           name={`entities.${index}.featuredArchive.tag`}
@@ -160,7 +161,7 @@ export function FeaturedArchive({
             ),
           }}
         />
-      </Grid>
+      </Grid> */}
     </Grid>
   );
 }

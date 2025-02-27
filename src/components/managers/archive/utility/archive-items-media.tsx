@@ -8,7 +8,7 @@ import {
   useTheme,
 } from '@mui/material';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
-import styles from 'styles/archive.scss';
+// import styles from 'styles/archive.scss';
 import { isVideo } from '../form/form';
 
 export function ArchiveMediaDisplay({
@@ -39,8 +39,15 @@ export function ArchiveMediaDisplay({
           >
             video
           </Typography>
-          <ImageList cols={1} gap={8} className={styles.media_list}>
-            <ImageListItem key={video.id} className={styles.media_list_item}>
+          <ImageList
+            cols={1}
+            gap={8}
+            // className={styles.media_list}
+          >
+            <ImageListItem
+              key={video.id}
+              // className={styles.media_list_item}
+            >
               <video
                 src={video.media?.fullSize?.mediaUrl}
                 style={{ objectFit: isSm ? 'scale-down' : 'cover' }}
@@ -48,7 +55,7 @@ export function ArchiveMediaDisplay({
               />
               <IconButton
                 onClick={() => remove(video.id || 0, values, true)}
-                className={styles.remove_btn}
+                // className={styles.remove_btn}
               >
                 <ClearIcon />
               </IconButton>
@@ -67,9 +74,17 @@ export function ArchiveMediaDisplay({
           >
             images
           </Typography>
-          <ImageList cols={isSm ? 2 : 4} gap={8} rowHeight={200} className={styles.media_list}>
+          <ImageList
+            cols={isSm ? 2 : 4}
+            gap={8}
+            rowHeight={200}
+            // className={styles.media_list}
+          >
             {images.map((item) => (
-              <ImageListItem key={item.id} className={styles.media_list_item}>
+              <ImageListItem
+                key={item.id}
+                //  className={styles.media_list_item}
+              >
                 <img
                   src={item.media?.fullSize?.mediaUrl}
                   style={{ objectFit: isSm ? 'scale-down' : 'cover' }}
@@ -77,7 +92,7 @@ export function ArchiveMediaDisplay({
                 />
                 <IconButton
                   onClick={() => remove(item.id || 0, values)}
-                  className={styles.remove_btn}
+                  // className={styles.remove_btn}
                 >
                   <ClearIcon />
                 </IconButton>

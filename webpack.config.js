@@ -13,6 +13,7 @@ module.exports = {
   output: {
     filename: isProduction ? '[name].[contenthash].js' : '[name].js',
     path: path.resolve(__dirname, 'dist/'),
+    publicPath: '/',
     clean: true,
   },
   resolve: {
@@ -36,17 +37,10 @@ module.exports = {
       {
         test: /\.(scss|css)$/,
         use: [
-          { loader: MiniCssExtractPlugin.loader },
-          { 
-            loader: 'css-loader', 
-            options: { 
-              modules: {
-                exportLocalsConvention: 'camelCase',
-                namedExport: false
-              } 
-            }
-          },
-          { loader: 'sass-loader' },
+          MiniCssExtractPlugin.loader,
+          'css-loader',
+          'postcss-loader',
+          'sass-loader',
         ],
       },
       {

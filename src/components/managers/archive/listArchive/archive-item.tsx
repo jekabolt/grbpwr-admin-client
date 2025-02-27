@@ -1,5 +1,5 @@
 import { common_ArchiveFull } from 'api/proto-http/frontend';
-import { useArchiveStore } from 'lib/stores/store';
+import { useArchiveStore } from 'lib/stores/archive/store';
 import { useEffect } from 'react';
 import { ArchiveForm } from '../form/form';
 

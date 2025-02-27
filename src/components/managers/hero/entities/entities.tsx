@@ -2,9 +2,9 @@ import { Box, Button, Divider, Grid2 as Grid, TextField } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { Field, useFormikContext } from 'formik';
-import { useHeroStore } from 'lib/stores/store';
+import { useHeroStore } from 'lib/stores/hero/store';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/hero.scss';
+// import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity/common-entity';
@@ -196,156 +196,162 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
     <Grid container spacing={2} marginTop={5}>
       {values.entities &&
         values.entities.map((entity, index) => (
-          <Grid size={{ xs: 12 }} ref={(el) => (entityRefs.current[index] = el)}>
-            <Grid container spacing={2} className={styles.entity_container}>
-              {entity.type === 'HERO_TYPE_MAIN' && (
-                <Grid size={{ xs: 12, md: 7 }}>
-                  <CommonEntity
-                    title='main add'
-                    prefix={`entities.${index}.main.single`}
-                    landscapeLink={main}
-                    portraitLink={mainPortrait}
-                    size={{ xs: 12 }}
-                    aspectRatio={{
-                      Portrait: ['9:16'],
-                      Landscape: ['2:1'],
-                    }}
-                    onSaveMedia={(
-                      media: common_MediaFull[],
-                      orientation: 'Portrait' | 'Landscape',
-                    ) => saveMedia(media, 'main', index, orientation)}
-                  />
-                  <Box component='div' className={styles.fields}>
-                    <Field
-                      as={TextField}
-                      name={`entities.${index}.main.tag`}
-                      label='tag'
-                      fullWidth
-                      InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+          <Grid size={{ xs: 12 }} key={index}>
+            <div
+              ref={(el: HTMLDivElement | null) => {
+                entityRefs.current[index] = el;
+              }}
+            >
+              <Grid container spacing={2}>
+                {entity.type === 'HERO_TYPE_MAIN' && (
+                  <Grid size={{ xs: 12, md: 7 }}>
+                    <CommonEntity
+                      title='main add'
+                      prefix={`entities.${index}.main.single`}
+                      landscapeLink={main}
+                      portraitLink={mainPortrait}
+                      size={{ xs: 12 }}
+                      aspectRatio={{
+                        Portrait: ['9:16'],
+                        Landscape: ['2:1'],
+                      }}
+                      onSaveMedia={(
+                        media: common_MediaFull[],
+                        orientation: 'Portrait' | 'Landscape',
+                      ) => saveMedia(media, 'main', index, orientation)}
                     />
-                    <Field
-                      as={TextField}
-                      name={`entities.${index}.main.description`}
-                      label='description'
-                      fullWidth
-                      InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+                    <Box component='div'>
+                      <Field
+                        as={TextField}
+                        name={`entities.${index}.main.tag`}
+                        label='tag'
+                        fullWidth
+                        InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+                      />
+                      <Field
+                        as={TextField}
+                        name={`entities.${index}.main.description`}
+                        label='description'
+                        fullWidth
+                        InputLabelProps={{ shrink: true, style: { textTransform: 'uppercase' } }}
+                      />
+                    </Box>
+                  </Grid>
+                )}
+                {entity.type === 'HERO_TYPE_SINGLE' && (
+                  <Grid size={{ xs: 12, md: 7 }}>
+                    <CommonEntity
+                      title='single add'
+                      prefix={`entities.${index}.single`}
+                      landscapeLink={single[index]}
+                      portraitLink={singlePortrait[index]}
+                      size={{ xs: 12 }}
+                      aspectRatio={{
+                        Portrait: ['9:16'],
+                        Landscape: ['2:1'],
+                      }}
+                      onSaveMedia={(
+                        media: common_MediaFull[],
+                        orientation: 'Portrait' | 'Landscape',
+                      ) => saveMedia(media, 'single', index, orientation)}
                     />
-                  </Box>
-                </Grid>
-              )}
-              {entity.type === 'HERO_TYPE_SINGLE' && (
-                <Grid size={{ xs: 12, md: 7 }}>
-                  <CommonEntity
-                    title='single add'
-                    prefix={`entities.${index}.single`}
-                    landscapeLink={single[index]}
-                    portraitLink={singlePortrait[index]}
-                    size={{ xs: 12 }}
-                    aspectRatio={{
-                      Portrait: ['9:16'],
-                      Landscape: ['2:1'],
-                    }}
-                    onSaveMedia={(
-                      media: common_MediaFull[],
-                      orientation: 'Portrait' | 'Landscape',
-                    ) => saveMedia(media, 'single', index, orientation)}
-                  />
-                </Grid>
-              )}
-              {entity.type === 'HERO_TYPE_DOUBLE' && (
-                <Grid size={{ xs: 12, md: 7 }}>
-                  <Grid container spacing={2}>
-                    <Grid size={{ xs: 12, md: 6 }}>
-                      <CommonEntity
-                        title='double add'
-                        prefix={`entities.${index}.double.left`}
-                        landscapeLink={doubleAdd[index]?.left || ''}
-                        portraitLink={doubleAdd[index]?.left || ''}
-                        size={{ xs: 12 }}
-                        aspectRatio={['1:1']}
-                        isDoubleAd={true}
-                        onSaveMedia={(
-                          media: common_MediaFull[],
-                          orientation: 'Portrait' | 'Landscape',
-                        ) => saveMedia(media, 'doubleLeft', index, orientation)}
-                      />
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 6 }} sx={{ marginTop: '42px' }}>
-                      <CommonEntity
-                        title=''
-                        prefix={`entities.${index}.double.right`}
-                        landscapeLink={doubleAdd[index]?.right || ''}
-                        portraitLink={doubleAdd[index]?.right || ''}
-                        size={{ xs: 12 }}
-                        aspectRatio={['1:1']}
-                        isDoubleAd
-                        onSaveMedia={(media: common_MediaFull[]) =>
-                          saveMedia(media, 'doubleRight', index, 'Landscape')
-                        }
-                      />
+                  </Grid>
+                )}
+                {entity.type === 'HERO_TYPE_DOUBLE' && (
+                  <Grid size={{ xs: 12, md: 7 }}>
+                    <Grid container spacing={2}>
+                      <Grid size={{ xs: 12, md: 6 }}>
+                        <CommonEntity
+                          title='double add'
+                          prefix={`entities.${index}.double.left`}
+                          landscapeLink={doubleAdd[index]?.left || ''}
+                          portraitLink={doubleAdd[index]?.left || ''}
+                          size={{ xs: 12 }}
+                          aspectRatio={['1:1']}
+                          isDoubleAd={true}
+                          onSaveMedia={(
+                            media: common_MediaFull[],
+                            orientation: 'Portrait' | 'Landscape',
+                          ) => saveMedia(media, 'doubleLeft', index, orientation)}
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, md: 6 }} sx={{ marginTop: '42px' }}>
+                        <CommonEntity
+                          title=''
+                          prefix={`entities.${index}.double.right`}
+                          landscapeLink={doubleAdd[index]?.right || ''}
+                          portraitLink={doubleAdd[index]?.right || ''}
+                          size={{ xs: 12 }}
+                          aspectRatio={['1:1']}
+                          isDoubleAd
+                          onSaveMedia={(media: common_MediaFull[]) =>
+                            saveMedia(media, 'doubleRight', index, 'Landscape')
+                          }
+                        />
+                      </Grid>
                     </Grid>
                   </Grid>
-                </Grid>
-              )}
-              {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
+                )}
+                {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
+                  <Grid size={{ xs: 12, md: 7 }}>
+                    <FeaturedProductBase
+                      index={index}
+                      entity={entity}
+                      product={product}
+                      currentEntityIndex={currentEntityIndex}
+                      isModalOpen={isModalOpen}
+                      showProductPicker={true}
+                      title='featured products'
+                      prefix='featuredProducts'
+                      handleOpenProductSelection={handleOpenProductSelection}
+                      handleCloseModal={handleCloseModal}
+                      handleSaveNewSelection={handleSaveNewSelection}
+                      handleProductsReorder={handleProductsReorder}
+                    />
+                  </Grid>
+                )}
+                {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' && (
+                  <Grid size={{ xs: 12, md: 7 }}>
+                    <FeaturedProductBase
+                      index={index}
+                      entity={entity}
+                      product={productTags}
+                      title='featured products tag'
+                      prefix='featuredProductsTag'
+                      handleProductsReorder={(e, i) => handleProductsReorder(e, i, true)}
+                    />
+                  </Grid>
+                )}
+                {entity.type === 'HERO_TYPE_FEATURED_ARCHIVE' && (
+                  <Grid size={{ xs: 12, md: 7 }}>
+                    <Field
+                      component={FeaturedArchive}
+                      archive={archive}
+                      index={index}
+                      currentEntityIndex={currentEntityIndex}
+                      handleOpenArchiveSelection={handleOpenArchiveSelection}
+                      handleSaveArchiveSelection={handleSaveArchive}
+                      open={isModalOpen}
+                      onClose={handleCloseModal}
+                    />
+                  </Grid>
+                )}
                 <Grid size={{ xs: 12, md: 7 }}>
-                  <FeaturedProductBase
-                    index={index}
-                    entity={entity}
-                    product={product}
-                    currentEntityIndex={currentEntityIndex}
-                    isModalOpen={isModalOpen}
-                    showProductPicker={true}
-                    title='featured products'
-                    prefix='featuredProducts'
-                    handleOpenProductSelection={handleOpenProductSelection}
-                    handleCloseModal={handleCloseModal}
-                    handleSaveNewSelection={handleSaveNewSelection}
-                    handleProductsReorder={handleProductsReorder}
-                  />
+                  <Button
+                    variant='contained'
+                    color='error'
+                    onClick={() => {
+                      handleRemoveEntity(index, arrayHelpers, values);
+                    }}
+                  >
+                    Remove Entity
+                  </Button>
                 </Grid>
-              )}
-              {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' && (
-                <Grid size={{ xs: 12, md: 7 }}>
-                  <FeaturedProductBase
-                    index={index}
-                    entity={entity}
-                    product={productTags}
-                    title='featured products tag'
-                    prefix='featuredProductsTag'
-                    handleProductsReorder={(e, i) => handleProductsReorder(e, i, true)}
-                  />
+                <Grid size={{ xs: 12 }}>
+                  <Divider />
                 </Grid>
-              )}
-              {entity.type === 'HERO_TYPE_FEATURED_ARCHIVE' && (
-                <Grid size={{ xs: 12, md: 7 }}>
-                  <Field
-                    component={FeaturedArchive}
-                    archive={archive}
-                    index={index}
-                    currentEntityIndex={currentEntityIndex}
-                    handleOpenArchiveSelection={handleOpenArchiveSelection}
-                    handleSaveArchiveSelection={handleSaveArchive}
-                    open={isModalOpen}
-                    onClose={handleCloseModal}
-                  />
-                </Grid>
-              )}
-              <Grid size={{ xs: 12, md: 7 }}>
-                <Button
-                  variant='contained'
-                  color='error'
-                  onClick={() => {
-                    handleRemoveEntity(index, arrayHelpers, values);
-                  }}
-                >
-                  Remove Entity
-                </Button>
               </Grid>
-              <Grid size={{ xs: 12 }} className={styles.divider_container}>
-                <Divider className={styles.divider} />
-              </Grid>
-            </Grid>
+            </div>
           </Grid>
         ))}
     </Grid>

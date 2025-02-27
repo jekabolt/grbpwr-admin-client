@@ -1,10 +1,11 @@
 import { Button, Grid2 as Grid } from '@mui/material';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { Layout } from 'components/common/layout';
 import { Field, FieldArray, Form, Formik } from 'formik';
-import { useHeroStore, useSnackBarStore } from 'lib/stores/store';
+import { useHeroStore } from 'lib/stores/hero/store';
+import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useRef } from 'react';
-import styles from 'styles/hero.scss';
+import { Layout } from 'ui/layout';
+// import styles from 'styles/hero.scss';
 import { Entities } from './entities/entities';
 import { NavbarHero } from './navbar-hero';
 import { SelectHeroType } from './selectHeroType';
@@ -58,7 +59,11 @@ export const Hero: FC = () => {
             <FieldArray
               name='entities'
               render={(arrayHelpers) => (
-                <Grid container spacing={2} className={styles.entities_container}>
+                <Grid
+                  container
+                  spacing={2}
+                  // className={styles.entities_container}
+                >
                   <Grid size={{ xs: 12, md: 7 }}>
                     <Field component={NavbarHero} />
                   </Grid>

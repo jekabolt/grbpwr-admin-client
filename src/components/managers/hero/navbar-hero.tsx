@@ -1,9 +1,9 @@
 import { Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
-import { SingleMediaViewAndSelect } from 'components/common/media-selector-layout/media-selector-components/singleMediaViewAndSelect';
+import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { Field, useFormikContext } from 'formik';
-import { useHeroStore } from 'lib/stores/store';
+import { useHeroStore } from 'lib/stores/hero/store';
 import { useEffect, useState } from 'react';
 import { ArchivePicker } from './entities/featured-archive/archive-picker';
 

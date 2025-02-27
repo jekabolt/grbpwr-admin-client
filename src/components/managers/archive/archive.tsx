@@ -1,7 +1,7 @@
 import { AppBar, Button, Toolbar } from '@mui/material';
 
-import { Layout } from 'components/common/layout';
 import { useState } from 'react';
+import { Layout } from 'ui/layout';
 import { ArchiveForm } from './form/form';
 import { ListArchive } from './listArchive/list-archive';
 

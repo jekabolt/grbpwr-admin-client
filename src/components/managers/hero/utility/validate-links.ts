@@ -1,7 +1,7 @@
-import { isValidUrlForHero } from "features/utilitty/isValidUrl";
+import { isValidUrlForHero } from "lib/features/isValidUrl";
 
 import { common_HeroFullInsert } from "api/proto-http/admin";
-import { isValidURL } from "features/utilitty/isValidUrl";
+import { isValidURL } from "lib/features/isValidUrl";
 
 export const validateExploreLinks = (values: common_HeroFullInsert) => {
     const invalidUrls: string[] = [];

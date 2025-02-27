@@ -1,0 +1,17 @@
+@import 'tailwindcss';
+
+@theme {
+  /* COLORS */
+  --color-text: #000;
+  --color-bgColor: #fff;
+  --color-inactive: #cccccc;
+  --color-error: #ff0000;
+
+  /* TEXT */
+  --text-giant: 200px;
+  --text-giantSmall: 110px;
+  --text-small: 12px;
+  --text-base: 16px;
+}
+body {
+}

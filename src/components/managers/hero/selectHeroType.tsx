@@ -3,7 +3,7 @@ import { Button, Grid, MenuItem, TextField } from '@mui/material';
 import { common_HeroFullInsert, common_HeroType } from 'api/proto-http/admin';
 import { Field, FieldArrayRenderProps, useFormikContext } from 'formik';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/hero.scss';
+// import styles from 'styles/hero.scss';
 import { emptyHeroForm, heroTypes } from './utility/mapHeroFunction';
 import { validationForSelectHeroType } from './utility/validationForSelectHeroType';
 
@@ -41,7 +41,11 @@ export const SelectHeroType: FC<SelectHeroType> = ({ arrayHelpers, entityRefs })
   }, [values.entities?.length, addedEntityIndex, entityRefs]);
 
   return (
-    <Grid container className={styles.select} gap={2}>
+    <Grid
+      container
+      // className={styles.select}
+      gap={2}
+    >
       <Grid item>
         <Field
           name='entityType'

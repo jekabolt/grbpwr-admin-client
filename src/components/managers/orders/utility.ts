@@ -1,53 +1,112 @@
-import { common_Dictionary } from 'api/proto-http/admin';
+import { deliveredOrderUpdate, getOrderByUUID, refundOrderUpdate, setTrackingNumberUpdate } from "api/orders";
+import { useDictionaryStore } from "lib/stores/store";
+import { useEffect, useState } from "react";
+import { getOrderStatusName } from "../orders-catalog/components/utility";
+import { OrderDetailsState } from "./interface";
 
-export function formatDateTime(value: string | undefined): string {
-  if (!value) {
-    return '';
-  }
-  const date = new Date(value);
-  const formattedDate = date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const formattedTime = date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-  return `${formattedDate}, ${formattedTime}`;
-}
 
-export function getOrderStatusName(
-  dictionary: common_Dictionary | undefined,
-  orderStatusId: number | undefined,
-): string | undefined {
-  if (!orderStatusId) {
-    return undefined;
-  }
-  return dictionary?.orderStatuses
-    ?.find((x) => x.id === orderStatusId)
-    ?.name?.replace('ORDER_STATUS_ENUM_', '')
-    .replace('_', ' ');
-}
+export const useOrderDetails = (uuid: string) => {
+    const { dictionary } = useDictionaryStore();
+    const [state, setState] = useState<OrderDetailsState>({
+        orderDetails: undefined,
+        dictionary: undefined,
+        orderStatus: undefined,
+        isLoading: false,
+    });
 
-export function getStatusColor(status: string | undefined) {
-  switch (status) {
-    case 'PLACED':
-      return '#ffffff';
-    case 'AWAITING PAYMENT':
-      return '#73eaff80';
-    case 'CONFIRMED':
-      return '#0800ff80';
-    case 'SHIPPED':
-      return '#00ffa280';
-    case 'DELIVERED':
-      return '#008f0080';
-    case 'CANCELLED':
-      return '#fc000080';
-    case 'REFUNDED':
-      return '#29292980';
-    default:
-      return '#ffffff'; // Default color if status doesn't match
-  }
+    const [isPrinting, setIsPrinting] = useState(false);
+    const [isEdit, setIsEdit] = useState(false);
+    const [trackingNumber, setTrackingNumber] = useState('');
+
+    async function fetchOrderDetails() {
+        setState(prev => ({ ...prev, isLoading: true }));
+        try {
+            const order = await getOrderByUUID({ orderUuid: uuid });
+            setState(prev => ({
+                ...prev,
+                orderDetails: order.order,
+                dictionary: dictionary,
+                orderStatus: getOrderStatusName(dictionary, order.order?.order?.orderStatusId)
+            }))
+        } catch (error) {
+            console.error('Error fetching order details:', error);
+        } finally {
+            setState(prev => ({ ...prev, isLoading: false }));
+        }
+    }
+
+    useEffect(() => {
+        fetchOrderDetails()
+    }, [uuid, dictionary])
+
+    useEffect(() => {
+        const beforePrint = () => setIsPrinting(true);
+        const afterPrint = () => setIsPrinting(false);
+
+        window.addEventListener('beforeprint', beforePrint);
+        window.addEventListener('afterprint', afterPrint);
+
+        return () => {
+            window.removeEventListener('beforeprint', beforePrint);
+            window.removeEventListener('afterprint', afterPrint);
+        };
+    }, []);
+
+    const toggleTrackNumber = () => {
+        if (!isPrinting && state.orderStatus === 'SHIPPED') {
+            setIsEdit(!isEdit);
+            if (isEdit) {
+                setTrackingNumber(state.orderDetails?.shipment?.trackingCode || '');
+            }
+        }
+    };
+
+    function handleTrackingNumberChange(event: any) {
+        setTrackingNumber(event.target.value);
+    }
+
+    const saveTrackingNumber = async () => {
+        if (!trackingNumber.trim()) {
+            setIsEdit(false);
+            return;
+        }
+        const response = await setTrackingNumberUpdate({
+            orderUuid: state.orderDetails?.order?.uuid,
+            trackingCode: trackingNumber,
+        });
+        if (response) {
+            fetchOrderDetails();
+            setIsEdit(false);
+        }
+    };
+
+    async function markAsDelivered() {
+        const response = await deliveredOrderUpdate({
+            orderUuid: state.orderDetails?.order?.uuid,
+        });
+        if (response) {
+            fetchOrderDetails();
+        }
+    }
+
+    async function refundOrder() {
+        const response = await refundOrderUpdate({
+            orderUuid: state.orderDetails?.order?.uuid,
+        });
+        if (response) {
+            fetchOrderDetails();
+        }
+    }
+
+    return {
+        ...state,
+        isPrinting,
+        isEdit,
+        trackingNumber,
+        saveTrackingNumber,
+        toggleTrackNumber,
+        handleTrackingNumberChange,
+        markAsDelivered,
+        refundOrder,
+    }
 }

@@ -1,12 +1,13 @@
 import { Button, Grid2 as Grid, TextField } from '@mui/material';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
 
-import { MediaSelector } from 'components/common/media-selector-layout/media-selector-components/mediaSelector';
-import { Dialog } from 'components/common/utility/dialog';
+import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
 import { Field, Form, Formik, FormikProps } from 'formik';
-import { useArchiveStore, useSnackBarStore } from 'lib/stores/store';
+import { useArchiveStore } from 'lib/stores/archive/store';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import styles from 'styles/archive.scss';
+import { Dialog } from 'ui/components/dialog';
+// import styles from 'styles/archive.scss';
 import { ArchiveMediaDisplay } from '../utility/archive-items-media';
 
 interface ArchiveFormProps {
@@ -154,7 +155,9 @@ export function ArchiveForm({
     <Dialog open={open} onClose={onClose} fullScreen>
       <Formik initialValues={initialValues} onSubmit={handleSubmit} enableReinitialize>
         {(formik: FormikProps<common_ArchiveInsert>) => (
-          <Form className={styles.form}>
+          <Form
+          // className={styles.form}
+          >
             <Grid container gap={1}>
               <Grid
                 size={{ xs: 12 }}
@@ -173,7 +176,10 @@ export function ArchiveForm({
                 </Grid>
               </Grid>
 
-              <Grid size={{ xs: 12 }} className={styles.media_selector_wrapper}>
+              <Grid
+                size={{ xs: 12 }}
+                // className={styles.media_selector_wrapper}
+              >
                 {archiveId && !showMediaSelector ? (
                   <ArchiveMediaDisplay
                     remove={(id, values, isVideo) => handleDeleteArchiveItem(id, values, isVideo)}
@@ -190,7 +196,6 @@ export function ArchiveForm({
                     isDeleteAccepted={false}
                     allowMultiple
                     hideVideos={false}
-                    hideNavBar
                   />
                 )}
               </Grid>

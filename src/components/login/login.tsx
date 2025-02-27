@@ -1,11 +1,12 @@
-import { Visibility, VisibilityOff } from '@mui/icons-material';
-import { Button, Grid, IconButton, TextField, Typography } from '@mui/material';
-import { useNavigate } from '@tanstack/react-location';
 import { login } from 'api/auth';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
-import styles from 'styles/login-block.scss';
+import { useNavigate } from 'react-router-dom';
+import { Button } from 'ui/components/button';
+import Input from 'ui/components/input';
+import Text from 'ui/components/text';
+import { Logo } from 'ui/icons/logo';
 import * as Yup from 'yup';
 import { isTokenExpired } from './protectedRoute';
 
@@ -17,12 +18,11 @@ interface LoginFormValues {
 export const LoginBlock: FC = () => {
   const navigate = useNavigate();
   const [generalError, setGeneralError] = useState<string | null>(null);
-  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const authToken = localStorage.getItem('authToken');
     if (authToken && !isTokenExpired(authToken)) {
-      navigate({ to: ROUTES.main, replace: true });
+      navigate(ROUTES.main, { replace: true });
     }
   }, [navigate]);
 
@@ -31,7 +31,7 @@ export const LoginBlock: FC = () => {
       const response = await login(values);
       if (!response.authToken) throw new Error('Invalid credentials');
       localStorage.setItem('authToken', response.authToken);
-      navigate({ to: ROUTES.main, replace: true });
+      navigate(ROUTES.main, { replace: true });
     } catch {
       setGeneralError('Invalid username or password. Please try again.');
     } finally {
@@ -45,70 +45,43 @@ export const LoginBlock: FC = () => {
   });
 
   return (
-    <Grid container alignItems='center' justifyContent='center' sx={{ minHeight: '100vh' }}>
+    <div className='h-screen flex items-center justify-center'>
       <Formik
         initialValues={{ username: '', password: '' }}
         validationSchema={LoginSchema}
         onSubmit={handleLoginSubmit}
       >
-        {({ isSubmitting, errors, touched, handleSubmit }) => (
-          <form onSubmit={handleSubmit}>
-            <Grid
-              container
-              direction='column'
-              justifyContent='center'
-              alignItems='center'
-              spacing={2}
-            >
-              <div className={styles.logo}></div>
-              <Grid item xs={12}>
-                <Field
-                  as={TextField}
-                  name='username'
-                  placeholder='USERNAME'
-                  size='medium'
-                  fullWidth
-                  error={touched.username && Boolean(errors.username)}
-                  className={styles.input}
-                  InputProps={{ style: { fontSize: '1.5em', width: '300px' } }}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <Field
-                  as={TextField}
-                  name='password'
-                  placeholder='PASSWORD'
-                  type={showPassword ? 'text' : 'password'}
-                  size='medium'
-                  fullWidth
-                  error={touched.password && Boolean(errors.password)}
-                  className={styles.input}
-                  InputProps={{
-                    style: { fontSize: '1.5em', width: '300px' },
-                    endAdornment: (
-                      <IconButton onClick={() => setShowPassword(!showPassword)}>
-                        {showPassword ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    ),
-                  }}
-                />
-              </Grid>
-              {generalError && (
-                <Grid item xs={12}>
-                  <Typography variant='overline' color='error' align='center'>
-                    {generalError}
-                  </Typography>
-                </Grid>
-              )}
-              <Grid item xs={2} alignSelf='center'>
-                <Button size='medium' variant='contained' type='submit' disabled={isSubmitting}>
-                  Login
-                </Button>
-              </Grid>
-            </Grid>
+        {({ isSubmitting, handleSubmit }) => (
+          <form onSubmit={handleSubmit} className='items-center flex flex-col gap-4 w-64'>
+            <div className='w-1/5 flex justify-center'>
+              <Logo />
+            </div>
+            <div className='w-full space-y-3'>
+              <Field as={Input} name='username' placeholder='username' className='h-10' />
+
+              <Field
+                as={Input}
+                name='password'
+                placeholder='password'
+                className='h-10 text-base'
+                type='password'
+              />
+            </div>
+
+            {generalError && (
+              <Text variant='error' size='small' className='text-center'>
+                {generalError}
+              </Text>
+            )}
+
+            <div className='w-full flex justify-center'>
+              <Button size='lg' type='submit' className='uppercase' disabled={isSubmitting}>
+                Login
+              </Button>
+            </div>
           </form>
         )}
       </Formik>
-    </Grid>
+    </div>
   );
 };

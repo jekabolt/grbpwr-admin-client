@@ -3,7 +3,6 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { Checkbox } from '@mui/material';
 import IconButton from '@mui/material/IconButton';
-import { useNavigate } from '@tanstack/react-location';
 import { common_HeroFullInsert, common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useFormikContext } from 'formik';
@@ -15,7 +14,7 @@ import {
   type MRT_Row,
 } from 'material-react-table';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
-
+import { useNavigate } from 'react-router-dom';
 interface HeroProductTableData {
   products: common_Product[];
   isFeaturedProducts?: boolean;
@@ -91,7 +90,7 @@ export const HeroProductTable: FC<
         Cell: ({ cell, row }) => (
           <span
             style={{ color: 'blue', cursor: 'pointer', textDecoration: 'underline' }}
-            onClick={() => navigate({ to: `${ROUTES.singleProduct}/${row.original.id}` })}
+            onClick={() => navigate(`${ROUTES.singleProduct}/${row.original.id}`)}
           >
             {cell.getValue() as string}
           </span>

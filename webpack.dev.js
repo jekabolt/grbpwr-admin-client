@@ -5,9 +5,12 @@ module.exports = {
   mode: 'development',
   devtool: 'source-map',
   devServer: {
-    historyApiFallback: true,
+    historyApiFallback: {
+      index: '/index.html'
+    },
     static: {
-      directory: path.join(__dirname, 'public/'),
+      directory: path.join(__dirname, 'public'),
+      publicPath: '/'
     },
     compress: true,
     port: 4040,
