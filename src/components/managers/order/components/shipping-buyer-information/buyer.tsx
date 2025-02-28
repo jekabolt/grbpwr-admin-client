@@ -1,6 +1,6 @@
 import { Grid2 as Grid, Typography } from '@mui/material';
 import { common_BuyerInsert } from 'api/proto-http/frontend';
-import { STATUS } from 'components/managers/orders/interface';
+import { STATUS } from 'components/managers/order/interface';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 // import styles from 'styles/order.scss';
 

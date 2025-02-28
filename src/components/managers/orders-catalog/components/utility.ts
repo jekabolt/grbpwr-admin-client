@@ -31,23 +31,23 @@ export function getOrderStatusName(
     .replace('_', ' ');
 }
 
-export function getStatusColor(status: string | undefined) {
+export function getStatusColor(status: string | undefined): string {
   switch (status) {
     case 'PLACED':
-      return '#ffffff';
+      return 'bg-white';
     case 'AWAITING PAYMENT':
-      return '#73eaff80';
+      return 'bg-sky-200';
     case 'CONFIRMED':
-      return '#0800ff80';
+      return 'bg-blue-300';
     case 'SHIPPED':
-      return '#00ffa280';
+      return 'bg-teal-200';
     case 'DELIVERED':
-      return '#008f0080';
+      return 'bg-green-300';
     case 'CANCELLED':
-      return '#fc000080';
+      return 'bg-red-300';
     case 'REFUNDED':
-      return '#29292980';
+      return 'bg-gray-700';
     default:
-      return '#ffffff'; // Default color if status doesn't match
+      return 'bg-white';
   }
 }

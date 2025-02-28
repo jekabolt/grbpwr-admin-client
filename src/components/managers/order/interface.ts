@@ -27,6 +27,6 @@ export interface DisplayState {
 }
 
 export const STATUS = {
-    confirmed: '#008f0080',
-    denied: '#fc000080',
+    confirmed: 'bg-green-300',
+    denied: 'bg-red-300',
 };
