@@ -1,4 +1,5 @@
 import { common_Dictionary } from 'api/proto-http/admin';
+import { cn } from 'lib/utility';
 import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
 
 export const orderData = (dictionary: common_Dictionary | undefined) => [
@@ -9,17 +10,7 @@ export const orderData = (dictionary: common_Dictionary | undefined) => [
     width: 180,
     renderCell: (params: any) => {
       const status = getOrderStatusName(dictionary, params.value);
-      return (
-        <div
-          style={{
-            backgroundColor: getStatusColor(status),
-            width: '100%',
-            height: '100%',
-          }}
-        >
-          {status}
-        </div>
-      );
+      return <div className={cn(getStatusColor(status), 'w-full h-full')}>{status}</div>;
     },
   },
   {

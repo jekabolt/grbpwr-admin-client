@@ -58,8 +58,13 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
       >
         <DragHandleHorizontalIcon />
       </Button>
-      <div className={cn('transition-all duration-300 w-full', { 'pl-50': isSidebarOpen })}>
-        <div className='h-full pt-20 px-4 lg:px-2'>{children}</div>
+      <div
+        className={cn('transition-all duration-300 w-full', {
+          'pl-50': isSidebarOpen,
+          'print:pl-0': true,
+        })}
+      >
+        <div className='h-full print:pt-0 pt-20 px-4 lg:px-2'>{children}</div>
         <SnackBar />
       </div>
     </div>

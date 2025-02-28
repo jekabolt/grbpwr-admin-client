@@ -25,8 +25,3 @@ export interface DisplayState {
         size: boolean;
     };
 }
-
-export const STATUS = {
-    confirmed: '#008f0080',
-    denied: '#fc000080',
-};

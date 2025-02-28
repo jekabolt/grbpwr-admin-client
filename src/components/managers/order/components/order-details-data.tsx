@@ -1,10 +1,7 @@
 import { GridColDef } from '@mui/x-data-grid';
 import { common_Dictionary } from 'api/proto-http/admin';
 import { common_OrderItem } from 'api/proto-http/frontend';
-import { ROUTES } from 'constants/routes';
-// import styles from 'styles/order.scss';
-
-const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
+import { BASE_PATH, ROUTES } from 'constants/routes';
 
 export const OrderDetailsData = (
   dictionary: common_Dictionary | undefined,
@@ -73,7 +70,7 @@ export const OrderDetailsData = (
     align: 'center',
     headerAlign: 'center',
     width: 200,
-    // cellClassName: styles.hide_cell,
+    cellClassName: 'print:hidden',
     valueGetter: (_params: any, row: any) => {
       return dictionary?.sizes
         ?.find((x) => x.id === row.orderItem.sizeId)
