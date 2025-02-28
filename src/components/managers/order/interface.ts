@@ -25,8 +25,3 @@ export interface DisplayState {
         size: boolean;
     };
 }
-
-export const STATUS = {
-    confirmed: 'bg-green-300',
-    denied: 'bg-red-300',
-};
