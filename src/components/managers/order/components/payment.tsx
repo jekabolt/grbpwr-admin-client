@@ -11,11 +11,10 @@ interface Props {
 export function Payment({ orderDetails }: Props) {
   const payment = orderDetails?.payment;
   return (
-    <div className='flex flex-col gap-2'>
+    <div className='grid gap-2 w-full'>
       <Text variant='uppercase' className='font-bold'>
         payment:
       </Text>
-
       <Text variant='uppercase' size='small'>
         status:{' '}
         {payment?.paymentInsert?.isTransactionDone ? (
@@ -28,16 +27,13 @@ export function Payment({ orderDetails }: Props) {
           </Text>
         )}
       </Text>
-
       <Text variant='uppercase' size='small'>
         made at: {formatDateTime(payment?.modifiedAt)}
       </Text>
-
       <Text variant='uppercase' size='small'>
         payment method:{' '}
         {payment?.paymentInsert?.paymentMethod?.replace('PAYMENT_METHOD_NAME_ENUM_', '')}
       </Text>
-
       <Text variant='uppercase' size='small'>
         {[
           `amount: `,
@@ -49,7 +45,6 @@ export function Payment({ orderDetails }: Props) {
           ),
         ]}
       </Text>
-
       {payment?.paymentInsert?.payer && (
         <Text variant='uppercase' size='small' className='flex items-center gap-2'>
           {[`payer: `, <CopyToClipboard text={payment?.paymentInsert?.payer || ''} />]}

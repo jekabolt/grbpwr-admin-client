@@ -16,7 +16,7 @@ export function NewTrackCode({
       <Grid size={{ xs: 12 }} display='flex' alignItems='center' gap={1}>
         <TextField
           id='tracking-number-input'
-          label={trackingNumber ? '' : 'tracking number'}
+          // label={trackingNumber ? '' : 'tracking number'}
           variant='outlined'
           value={trackingNumber}
           onChange={handleTrackingNumberChange}

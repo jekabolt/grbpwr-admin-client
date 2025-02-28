@@ -1,9 +1,8 @@
-import { Grid2 as Grid, Typography } from '@mui/material';
 import { common_OrderFull } from 'api/proto-http/frontend';
 import { useDictionaryStore } from 'lib/stores/store';
-import { Buyer } from './shipping-buyer-information/buyer';
-import { Shipping } from './shipping-buyer-information/shipping';
-import { TrackingNumber } from './shipping-buyer-information/tracking-number';
+import Text from 'ui/components/text';
+import { Shipping } from './shipping-information/shipping';
+import { TrackingNumber } from './shipping-information/tracking-number';
 
 interface Props {
   orderDetails: common_OrderFull | undefined;
@@ -28,22 +27,18 @@ export function ShippingBuyer({
 }: Props) {
   const { dictionary } = useDictionaryStore();
   const shipping = orderDetails?.shipping?.addressInsert;
-  const buyer = orderDetails?.buyer?.buyerInsert;
 
   return (
-    <Grid
-      container
-      sx={{ '@media print': { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 } }}
-    >
+    <div className='w-full'>
       {shipping && (
-        <Grid size={{ xs: 12, md: 6 }} sx={{ pageBreakInside: 'avoid' }} spacing={2}>
-          <Typography variant='overline' fontSize={14} fontWeight='bold' textTransform='uppercase'>
+        <div className='grid gap-2 w-full'>
+          <Text variant='uppercase' className='font-bold'>
             shipping:
-          </Typography>
+          </Text>
           <Shipping shipping={shipping} />
-          <Typography variant='overline' textTransform='uppercase'>
+          <Text variant='uppercase' size='small'>
             {`cost: ${orderDetails?.shipment?.cost?.value} ${dictionary?.baseCurrency}`}
-          </Typography>
+          </Text>
           <TrackingNumber
             isEdit={isEdit}
             isPrinting={isPrinting}
@@ -54,13 +49,8 @@ export function ShippingBuyer({
             handleTrackingNumberChange={handleTrackingNumberChange}
             saveTrackingNumber={saveTrackingNumber}
           />
-        </Grid>
+        </div>
       )}
-      {buyer && (
-        <Grid size={{ xs: 12, md: 6 }} sx={{ pageBreakInside: 'avoid' }}>
-          <Buyer buyer={buyer} isPrinting />
-        </Grid>
-      )}
-    </Grid>
+    </div>
   );
 }

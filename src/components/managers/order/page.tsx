@@ -5,12 +5,13 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Layout } from 'ui/layout';
 import { Billing } from './components/billing';
+import { Buyer } from './components/buyer';
 import { Description } from './components/description';
 import { OrderDetailsData } from './components/order-details-data';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
-import { ShippingBuyer } from './components/shipping-buyer';
-import { NewTrackCode } from './components/shipping-buyer-information/new-track-code';
+import { ShippingBuyer } from './components/shipping';
+import { NewTrackCode } from './components/shipping-information/new-track-code';
 import { DisplayState } from './interface';
 import { useOrderDetails } from './utility';
 
@@ -83,14 +84,10 @@ export function OrderDetails() {
         >
           <PromoApplied orderDetails={orderDetails} />
         </div>
-        <div
-        // className={styles.hide_cell}
-        >
+        {/* className={styles.hide_cell} */}
+        <div className='flex flex-col lg:flex-row justify-between gap-4'>
           <Payment orderDetails={orderDetails} />
-        </div>
-        <div
-        // className={styles.hide_cell}
-        >
+          {/* className={styles.hide_cell} */}
           <ShippingBuyer
             orderDetails={orderDetails}
             isPrinting={isPrinting}
@@ -101,6 +98,7 @@ export function OrderDetails() {
             handleTrackingNumberChange={handleTrackingNumberChange}
             saveTrackingNumber={saveTrackingNumber}
           />
+          <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
         </div>
         <div
         // className={styles.hide_cell}
@@ -129,7 +127,7 @@ export function OrderDetails() {
             <Button onClick={refundOrder}>refund order</Button>
           ))}
 
-        <Text variant='uppercase' className='font-bold'>
+        <Text variant='uppercase' className='font-bold self-end'>
           {`Total: ${orderDetails?.order?.totalPrice?.value} ${dictionary?.baseCurrency}`}
         </Text>
 

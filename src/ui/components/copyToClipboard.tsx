@@ -3,6 +3,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import { FC, useEffect, useState } from 'react';
+import Text from './text';
 
 interface CopyToClipboardProps {
   text: string;
@@ -37,8 +38,8 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, cutText }) => 
   }, []);
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center' }}>
-      <div>{cutText ? text.slice(0, 4) + '...' + text.slice(-4) : text}</div>
+    <div className='flex items-center'>
+      <Text size='small'>{cutText ? text.slice(0, 4) + '...' + text.slice(-4) : text}</Text>
       <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
         <IconButton
           onClick={handleCopy}

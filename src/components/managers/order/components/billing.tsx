@@ -1,7 +1,8 @@
-import { Button, Grid2 as Grid, Typography } from '@mui/material';
 import { common_OrderFull } from 'api/proto-http/frontend';
 import { useState } from 'react';
-import { Shipping } from './shipping-buyer-information/shipping';
+import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
+import { Shipping } from './shipping-information/shipping';
 
 interface Props {
   orderDetails: common_OrderFull | undefined;
@@ -10,32 +11,20 @@ export function Billing({ orderDetails }: Props) {
   const billing = orderDetails?.billing?.addressInsert;
   const [showBilling, setShowBilling] = useState(false);
   return (
-    <Grid container>
+    <div>
       {showBilling ? (
-        <Grid container>
-          <Grid size={{ xs: 12 }}>
-            <Typography
-              variant='overline'
-              fontSize='14px'
-              fontWeight='bold'
-              textTransform='uppercase'
-            >
-              billing address:
-            </Typography>
-          </Grid>
-          <Grid size={{ xs: 12 }}>
-            <Shipping shipping={billing} />
-          </Grid>
-        </Grid>
+        <div className='space-y-2'>
+          <Text variant='uppercase' className='font-bold'>
+            billing address:
+          </Text>
+
+          <Shipping shipping={billing} />
+        </div>
       ) : (
-        <Button
-          onClick={() => setShowBilling(true)}
-          sx={{ textTransform: 'uppercase' }}
-          variant='contained'
-        >
+        <Button onClick={() => setShowBilling(!showBilling)} size='lg'>
           show billing info
         </Button>
       )}
-    </Grid>
+    </div>
   );
 }
