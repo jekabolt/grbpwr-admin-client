@@ -1,32 +1,39 @@
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { Grid2 as Grid, IconButton, TextField } from '@mui/material';
+import { CheckIcon } from '@radix-ui/react-icons';
+import { cn } from 'lib/utility';
+import { Button } from 'ui/components/button';
+import Input from 'ui/components/input';
+
 interface Props {
   trackingNumber: string;
+  isPrinting: boolean;
   handleTrackingNumberChange: (event: any) => void;
   saveTrackingNumber: () => void;
 }
 
 export function NewTrackCode({
   trackingNumber,
+  isPrinting,
   handleTrackingNumberChange,
   saveTrackingNumber,
 }: Props) {
   return (
-    <Grid container>
-      <Grid size={{ xs: 12 }} display='flex' alignItems='center' gap={1}>
-        <TextField
-          id='tracking-number-input'
-          // label={trackingNumber ? '' : 'tracking number'}
-          variant='outlined'
+    <div
+      className={cn('w-full lg:w-1/4', {
+        hidden: isPrinting,
+      })}
+    >
+      <div className='flex items-center gap-2'>
+        <Input
+          name='trackingNumber'
+          placeholder='tracking number'
           value={trackingNumber}
           onChange={handleTrackingNumberChange}
-          size='small'
-          slotProps={{ inputLabel: { shrink: false, style: { textTransform: 'uppercase' } } }}
+          className='h-10'
         />
-        <IconButton onClick={saveTrackingNumber}>
-          <CheckCircleIcon fontSize='large' />
-        </IconButton>
-      </Grid>
-    </Grid>
+        <Button onClick={saveTrackingNumber} size='lg'>
+          <CheckIcon />
+        </Button>
+      </div>
+    </div>
   );
 }

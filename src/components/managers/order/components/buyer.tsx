@@ -1,5 +1,6 @@
 import { common_BuyerInsert } from 'api/proto-http/frontend';
 import { STATUS } from 'components/managers/order/interface';
+import { cn } from 'lib/utility';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
 // import styles from 'styles/order.scss';
@@ -30,8 +31,13 @@ export function Buyer({ buyer, isPrinting }: Props) {
 
       <Text variant='uppercase' size='small'>{`phone: ${buyer?.phone}`}</Text>
 
-      {/*   // className={isPrinting ? styles.hide_cell : styles.non_print_state} */}
-      <Text variant='uppercase' size='small'>
+      <Text
+        variant='uppercase'
+        size='small'
+        className={cn({
+          hidden: isPrinting,
+        })}
+      >
         {[
           `receive promo emails: `,
           buyer?.receivePromoEmails ? (

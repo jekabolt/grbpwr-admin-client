@@ -1,8 +1,10 @@
 import { DataGrid } from '@mui/x-data-grid';
+import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { Logo } from 'ui/icons/logo';
 import { Layout } from 'ui/layout';
 import { Billing } from './components/billing';
 import { Buyer } from './components/buyer';
@@ -52,11 +54,11 @@ export function OrderDetails() {
   return (
     <Layout>
       <div className='flex flex-col gap-4'>
-        {/* {isPrinting && (
-          <Grid size={{ xs: 12 }}>
+        {isPrinting && (
+          <div className='h-10'>
             <Logo />
-          </Grid>
-        )} */}
+          </div>
+        )}
 
         <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
 
@@ -80,14 +82,19 @@ export function OrderDetails() {
         />
 
         <div
-        // className={styles.hide_cell}
+          className={cn('block', {
+            hidden: isPrinting,
+          })}
         >
           <PromoApplied orderDetails={orderDetails} />
         </div>
-        {/* className={styles.hide_cell} */}
-        <div className='flex flex-col lg:flex-row justify-between gap-4'>
-          <Payment orderDetails={orderDetails} />
-          {/* className={styles.hide_cell} */}
+
+        <div
+          className={cn('flex flex-col lg:flex-row justify-between gap-4', {
+            'flex-row items-start': isPrinting,
+          })}
+        >
+          <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
           <ShippingBuyer
             orderDetails={orderDetails}
             isPrinting={isPrinting}
@@ -100,22 +107,16 @@ export function OrderDetails() {
           />
           <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
         </div>
-        <div
-        // className={styles.hide_cell}
-        >
-          <Billing orderDetails={orderDetails} />
-        </div>
+
+        <Billing orderDetails={orderDetails} isPrinting={isPrinting} />
+
         {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
-          <div
-          // className={styles.hide_cell}
-          // className={styles.hide_cell}
-          >
-            <NewTrackCode
-              trackingNumber={trackingNumber}
-              handleTrackingNumberChange={handleTrackingNumberChange}
-              saveTrackingNumber={saveTrackingNumber}
-            />
-          </div>
+          <NewTrackCode
+            isPrinting={isPrinting}
+            trackingNumber={trackingNumber}
+            handleTrackingNumberChange={handleTrackingNumberChange}
+            saveTrackingNumber={saveTrackingNumber}
+          />
         )}
         {orderStatus === 'SHIPPED' && (
           // className={styles.hide_cell}

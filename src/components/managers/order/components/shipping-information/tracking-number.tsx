@@ -1,6 +1,7 @@
-import EditIcon from '@mui/icons-material/Edit';
-import { Grid2 as Grid, IconButton, Typography } from '@mui/material';
+import { Pencil2Icon } from '@radix-ui/react-icons';
 import { common_OrderFull } from 'api/proto-http/frontend';
+import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import { NewTrackCode } from './new-track-code';
 
 interface Props {
@@ -27,37 +28,29 @@ export function TrackingNumber({
   return (
     <>
       {orderDetails?.shipment?.trackingCode && (
-        <Grid container spacing={2}>
+        <div>
           {isEdit && !isPrinting ? (
-            <Grid size={{ xs: 12 }}>
-              <NewTrackCode
-                trackingNumber={trackingNumber}
-                handleTrackingNumberChange={handleTrackingNumberChange}
-                saveTrackingNumber={saveTrackingNumber}
-              />
-            </Grid>
+            <NewTrackCode
+              isPrinting={isPrinting}
+              trackingNumber={trackingNumber}
+              handleTrackingNumberChange={handleTrackingNumberChange}
+              saveTrackingNumber={saveTrackingNumber}
+            />
           ) : (
             !isPrinting && (
-              <Grid size={{ xs: 12 }}>
-                <Typography
-                  variant='overline'
-                  fontSize={14}
-                  fontWeight='bold'
-                  textTransform='uppercase'
-                >
-                  {[
-                    `tracking number: ${orderDetails?.shipment?.trackingCode} `,
-                    orderStatus === 'SHIPPED' && (
-                      <IconButton onClick={toggleTrackNumber} size='small'>
-                        <EditIcon style={{ fontSize: '14px' }} />
-                      </IconButton>
-                    ),
-                  ]}
-                </Typography>
-              </Grid>
+              <Text variant='uppercase' size='small'>
+                {[
+                  `tracking number: ${orderDetails?.shipment?.trackingCode} `,
+                  orderStatus === 'SHIPPED' && (
+                    <Button onClick={toggleTrackNumber} size='sm'>
+                      <Pencil2Icon />
+                    </Button>
+                  ),
+                ]}
+              </Text>
             )
           )}
-        </Grid>
+        </div>
       )}
     </>
   );

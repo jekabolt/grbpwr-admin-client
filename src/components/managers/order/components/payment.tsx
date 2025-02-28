@@ -1,17 +1,23 @@
 import { common_OrderFull } from 'api/proto-http/frontend';
 import { formatDateTime } from 'components/managers/orders-catalog/components/utility';
+import { cn } from 'lib/utility';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
 import { STATUS } from '../interface';
 
 interface Props {
   orderDetails: common_OrderFull | undefined;
+  isPrinting: boolean;
 }
 
-export function Payment({ orderDetails }: Props) {
+export function Payment({ orderDetails, isPrinting }: Props) {
   const payment = orderDetails?.payment;
   return (
-    <div className='grid gap-2 w-full'>
+    <div
+      className={cn('grid gap-2 w-full', {
+        hidden: isPrinting,
+      })}
+    >
       <Text variant='uppercase' className='font-bold'>
         payment:
       </Text>
