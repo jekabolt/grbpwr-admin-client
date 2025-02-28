@@ -6,7 +6,6 @@ import { cn } from 'lib/utility';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
 import { OrderDescriptionProps } from '../interface';
-// import styles from 'styles/order.scss';
 
 export function Description({ orderDetails, orderStatus, isPrinting }: OrderDescriptionProps) {
   const statusColor = getStatusColor(orderStatus);

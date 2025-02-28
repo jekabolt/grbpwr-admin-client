@@ -1,9 +1,9 @@
 import { common_OrderFull } from 'api/proto-http/frontend';
 import { formatDateTime } from 'components/managers/orders-catalog/components/utility';
+import { STATUS } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
-import { STATUS } from '../interface';
 
 interface Props {
   orderDetails: common_OrderFull | undefined;

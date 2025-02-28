@@ -1,9 +1,8 @@
 import { common_BuyerInsert } from 'api/proto-http/frontend';
-import { STATUS } from 'components/managers/order/interface';
+import { STATUS } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
-// import styles from 'styles/order.scss';
 
 interface Props {
   buyer: common_BuyerInsert | undefined;

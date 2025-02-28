@@ -73,3 +73,9 @@ export const colors: Colors[] = [
     { "name": "Off White", "hex": "#F8F8FF" },
     { "name": "Hot Pink", "hex": "#FF69B4" }
 ]
+
+
+export const STATUS = {
+    confirmed: 'bg-green-300',
+    denied: 'bg-red-300',
+};
