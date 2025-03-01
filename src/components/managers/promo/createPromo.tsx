@@ -1,17 +1,12 @@
-import {
-  Button,
-  Checkbox,
-  FormControlLabel,
-  Grid,
-  TextField,
-  Theme,
-  useMediaQuery,
-} from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { common_PromoCodeInsert } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useState } from 'react';
+import { Button } from 'ui/components/button';
+import CheckboxCommon from 'ui/components/checkbox';
+import Input from 'ui/components/input';
+import Text from 'ui/components/text';
 
 interface CreatePromoInterface {
   createNewPromo: (newPromo: common_PromoCodeInsert) => void;
@@ -29,7 +24,7 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ createNewPromo }) => {
   const initialPromoStates: common_PromoCodeInsert = {
     code: '',
     freeShipping: false,
-    discount: { value: '0' },
+    discount: { value: '' },
     expiration: defaultDate.toISOString(),
     allowed: true,
     voucher: false,
@@ -38,48 +33,49 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ createNewPromo }) => {
 
   const [promo, setPromo] = useState<common_PromoCodeInsert>(initialPromoStates);
   const [error, setError] = useState('');
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const [codeError, setCodeError] = useState('');
 
-  const handlePromoFieldsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type, checked } = e.target;
-    if (name === 'discount' && parseInt(value, 10) > 100) {
+  const handlePromoCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setPromo((prev) => ({
+      ...prev,
+      code: value,
+    }));
+    if (codeError) setCodeError('');
+  };
+
+  const handleDiscountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (!/^\d*$/.test(value)) return;
+
+    if (parseInt(value, 10) > 100) {
       setError('discount cannot exceed 100%');
     } else {
       setError('');
     }
-    setPromo((prevPromo: common_PromoCodeInsert): common_PromoCodeInsert => {
-      if (type === 'checkbox') {
-        return {
-          ...prevPromo,
-          [name]: checked,
-        };
-      } else {
-        if (name === 'discount') {
-          return {
-            ...prevPromo,
-            discount: { value },
-          };
-        }
-        return {
-          ...prevPromo,
-          [name]: value.trim(),
-        };
-      }
-    });
+    setPromo((prev) => ({
+      ...prev,
+      discount: { value },
+    }));
   };
 
-  const handleDateTimeChange = (newValue: Date | null) => {
-    const defaultTime = new Date();
-    defaultTime.setHours(12, 0, 0, 0);
-    const selectedDate = newValue ? new Date(newValue.setHours(12, 0, 0, 0)) : '';
+  const handleCheckboxChange = (name: string) => (checked: boolean) => {
+    setPromo((prev) => ({
+      ...prev,
+      [name]: checked,
+    }));
+  };
 
-    handlePromoFieldsChange({
-      target: {
-        name: 'expiration',
-        value: selectedDate ? selectedDate.toISOString() : '',
-      },
-    } as React.ChangeEvent<HTMLInputElement>);
+  const handleDateChange = (field: 'start' | 'expiration', newValue: Date | null) => {
+    if (!newValue) return;
+
+    const dateWithNoon = new Date(newValue);
+    dateWithNoon.setHours(12, 0, 0, 0);
+
+    setPromo((prev) => ({
+      ...prev,
+      [field]: dateWithNoon.toISOString(),
+    }));
   };
 
   const validatePromoCode = (code: string) => {
@@ -88,8 +84,9 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ createNewPromo }) => {
     const promoCodeRegex = /^[a-zA-Z0-9-_]+$/;
 
     if (!promoCodeRegex.test(trimmedCode)) {
-      setCodeError(
+      showMessage(
         'Promo code can only contain letters, numbers, hyphens, and underscores, and cannot contain spaces',
+        'error',
       );
       return false;
     }
@@ -120,116 +117,87 @@ export const CreatePromo: FC<CreatePromoInterface> = ({ createNewPromo }) => {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Grid container marginTop={4} justifyContent='center' spacing={2}>
-        <Grid item xs={12} sm={8} md={10}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={3}>
-              <TextField
-                name='code'
-                value={promo.code}
-                variant='outlined'
-                label='PROMO CODE'
-                size='small'
-                onChange={handlePromoFieldsChange}
-                fullWidth={true}
-                required
-                error={!!codeError}
-                helperText={codeError}
-                onKeyDown={(e) => {
-                  if (e.key === ' ') {
-                    e.preventDefault();
-                  }
-                }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={3}>
-              <TextField
-                error={!!error}
-                helperText={error}
-                name='discount'
-                value={promo.discount?.value}
-                type='text'
-                inputProps={{ min: 0, max: 99 }}
-                variant='outlined'
-                label='DISCOUNT'
-                size='small'
-                onChange={(e: any) => {
-                  if (/^\d*$/.test(e.target.value)) {
-                    handlePromoFieldsChange(e);
-                  }
-                }}
-                fullWidth={true}
-              />
-            </Grid>
-            <Grid item xs={12} sm={3}>
-              <DatePicker
-                value={promo.start ? new Date(promo.start) : null}
-                onChange={handleDateTimeChange}
-                label='START DATE'
-                slotProps={{ textField: { size: 'small', fullWidth: isMobile, required: true } }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={3}>
-              <DatePicker
-                value={promo.expiration ? new Date(promo.expiration) : null}
-                onChange={handleDateTimeChange}
-                minDate={new Date()}
-                label='EXPIRATION DATE'
-                slotProps={{ textField: { size: 'small', fullWidth: isMobile, required: true } }}
-              />
-            </Grid>
-          </Grid>
-          <Grid container>
-            <Grid item xs={12} sm={4}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    name='freeShipping'
-                    size='large'
-                    checked={promo.freeShipping}
-                    onChange={handlePromoFieldsChange}
-                  />
-                }
-                label='FREE SHIPPING'
-                labelPlacement='end'
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    name='allowed'
-                    size='large'
-                    checked={promo.allowed}
-                    onChange={handlePromoFieldsChange}
-                  />
-                }
-                label='ALLOWED'
-                labelPlacement='end'
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    name='voucher'
-                    size='large'
-                    checked={promo.voucher}
-                    onChange={handlePromoFieldsChange}
-                  />
-                }
-                label='VOUCHER'
-                labelPlacement='end'
-              />
-            </Grid>
-          </Grid>
-        </Grid>
-        <Grid item xs={12} sm={4} md={2} container alignItems='center'>
-          <Button variant='contained' size='large' onClick={uploadNewPromo}>
+      <div className='flex flex-col gap-2 items-start'>
+        <div className='flex lg:flex-row flex-col gap-2 items-center w-full order-2 sm:order-1'>
+          <div className='w-full'>
+            <Input
+              name='code'
+              placeholder='PROMO CODE'
+              value={promo.code || ''}
+              onChange={handlePromoCodeChange}
+              className='h-10'
+            />
+          </div>
+
+          <div className='space-y-1 w-full'>
+            <Input
+              name='discount'
+              placeholder='DISCOUNT'
+              value={promo.discount?.value}
+              onChange={handleDiscountChange}
+              className='h-10'
+            />
+            {error && <p className='text-red-500 text-sm mt-1'>{error}</p>}
+          </div>
+
+          <div className='flex gap-2 w-full'>
+            <DatePicker
+              value={promo.start ? new Date(promo.start) : null}
+              onChange={(newValue) => handleDateChange('start', newValue)}
+              label='START DATE'
+              slotProps={{ textField: { size: 'small', required: true } }}
+            />
+            <DatePicker
+              value={promo.expiration ? new Date(promo.expiration) : null}
+              onChange={(newValue) => handleDateChange('expiration', newValue)}
+              minDate={new Date()}
+              label='EXPIRATION DATE'
+              slotProps={{ textField: { size: 'small', required: true } }}
+            />
+          </div>
+          <Button size='lg' onClick={uploadNewPromo} className='lg:w-96 w-full'>
             Create Promo
           </Button>
-        </Grid>
-      </Grid>
+        </div>
+
+        <div className='flex gap-2 order-1 sm:order-2'>
+          <div className='flex items-center gap-2'>
+            <Text size='small' variant='uppercase'>
+              free shipping
+            </Text>
+            <CheckboxCommon
+              name='freeShipping'
+              size='large'
+              checked={promo.freeShipping}
+              onChange={handleCheckboxChange('freeShipping')}
+            />
+          </div>
+
+          <div className='flex items-center gap-2'>
+            <Text size='small' variant='uppercase'>
+              allowed
+            </Text>
+            <CheckboxCommon
+              name='allowed'
+              size='large'
+              checked={promo.allowed}
+              onChange={handleCheckboxChange('allowed')}
+            />
+          </div>
+
+          <div className='flex items-center gap-2'>
+            <Text size='small' variant='uppercase'>
+              voucher
+            </Text>
+            <CheckboxCommon
+              name='voucher'
+              size='large'
+              checked={promo.voucher}
+              onChange={handleCheckboxChange('voucher')}
+            />
+          </div>
+        </div>
+      </div>
     </LocalizationProvider>
   );
 };

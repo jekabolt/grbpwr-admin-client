@@ -1,5 +1,5 @@
 import DeleteIcon from '@mui/icons-material/Delete';
-import { Grid, IconButton } from '@mui/material';
+import { IconButton } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { deletePromo } from 'api/promo';
 import { common_PromoCode } from 'api/proto-http/admin';
@@ -69,21 +69,17 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos }) => {
   ];
 
   return (
-    <Grid container justifyContent='flex-start'>
-      <Grid item xs={12}>
-        <DataGrid
-          rowSelection={false}
-          rows={transformPromoForDataGrid}
-          columns={columns}
-          getRowId={(row) => row.id}
-          pageSizeOptions={[10, 25, 100]}
-          initialState={{
-            pagination: {
-              paginationModel: { pageSize: 10, page: 0 },
-            },
-          }}
-        />
-      </Grid>
-    </Grid>
+    <DataGrid
+      rowSelection={false}
+      rows={transformPromoForDataGrid}
+      columns={columns}
+      getRowId={(row) => row.id}
+      pageSizeOptions={[10, 25, 100]}
+      initialState={{
+        pagination: {
+          paginationModel: { pageSize: 10, page: 0 },
+        },
+      }}
+    />
   );
 };
