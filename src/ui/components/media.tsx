@@ -34,6 +34,7 @@ export default function MediaComponent({
   muted = true,
   loop = true,
   controls = false,
+
   ...props
 }: MediaProps) {
   return (
