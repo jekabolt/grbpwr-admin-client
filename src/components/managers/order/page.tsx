@@ -55,7 +55,7 @@ export function OrderDetails() {
     <Layout>
       <div className='flex flex-col gap-4'>
         {isPrinting && (
-          <div className='h-10'>
+          <div className='self-start h-10 pt-2'>
             <Logo />
           </div>
         )}

@@ -41,17 +41,17 @@ export function Dialog({
       fullScreen={props.fullScreen || isMobile}
       maxWidth='xl'
       scroll='paper'
-      sx={{
-        '& .MuiDialogContent-root': {
-          padding: { xs: '30px 0 8px', sm: 2, md: 3 },
-          '&::-webkit-scrollbar': {
-            display: 'none',
-          },
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-          overflowY: props.fullScreen ? 'hidden' : 'auto',
-        },
-      }}
+      // sx={{
+      //   '& .MuiDialogContent-root': {
+      //     padding: { xs: '30px 0 8px', sm: 2, md: 3 },
+      //     '&::-webkit-scrollbar': {
+      //       display: 'none',
+      //     },
+      //     scrollbarWidth: 'none',
+      //     msOverflowStyle: 'none',
+      //     overflowY: props.fullScreen ? 'hidden' : 'auto',
+      //   },
+      // }}
       {...props}
     >
       <DialogActions>

@@ -1,4 +1,5 @@
 import { Cross1Icon } from '@radix-ui/react-icons';
+import { isVideo } from 'lib/features/filterContentType';
 import { useArchiveStore } from 'lib/stores/archive/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -107,35 +108,35 @@ export function ListArchive() {
             className={`archive-item relative px-2 transition-transform duration-300 ease-in-out ${
               isHighlighted ? 'scale-100' : 'scale-95 opacity-30'
             }`}
-            onClick={() => setSelectedArchive(archive.id)}
+            onClick={() => isHighlighted && setSelectedArchive(archive.id)}
           >
             <Button
               onClick={(e: React.MouseEvent) => handleDeleteArchive(e, archive.id || 0)}
               size='lg'
+              disabled={!isHighlighted}
               className='absolute top-2 right-2 z-20'
             >
               <Cross1Icon />
             </Button>
             <div className='w-full h-full flex flex-col lg:flex-row items-center justify-between gap-4'>
-              <Text variant='uppercase' className='w-60'>
+              <Text variant='uppercase' className='w-60 text-center lg:text-left'>
                 {archive.heading}
               </Text>
 
               <div
-                className={cn(
-                  'lg:w-[34rem] w-full flex-shrink-0 transition-all duration-300 ease-in-out',
-                  {
-                    'lg:w-96': !isHighlighted,
-                  },
-                )}
+                className={cn('lg:w-[34rem] w-full transition-all duration-300 ease-in-out', {
+                  'lg:w-96': !isHighlighted,
+                })}
               >
                 <Media
-                  src={archive.media?.[0].media?.fullSize?.mediaUrl || ''}
+                  src={archive.media?.[0]?.media?.fullSize?.mediaUrl || ''}
+                  type={isVideo(archive.media?.[0]?.media?.fullSize?.mediaUrl) ? 'video' : 'image'}
+                  controls={false}
                   alt='archive media'
                 />
               </div>
 
-              <Text variant='uppercase' className='w-60 text-right'>
+              <Text variant='uppercase' className='w-60 text-center lg:text-right'>
                 {archive.tag}
               </Text>
             </div>

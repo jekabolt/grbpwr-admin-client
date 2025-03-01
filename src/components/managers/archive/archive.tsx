@@ -14,7 +14,7 @@ export function Archive() {
       <Button
         size='lg'
         onClick={openModal}
-        className='fixed bottom-4 right-4 lg:bottom-2 lg:right-2'
+        className='fixed bottom-4 right-4 lg:bottom-2 lg:right-2 z-30'
       >
         create new
       </Button>

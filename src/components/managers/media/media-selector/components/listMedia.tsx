@@ -82,10 +82,22 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
       return false;
     }
 
+    const isVideoMedia = isVideo(media.media?.thumbnail?.mediaUrl);
+
     if (aspectRatio) {
-      const mediaRatio = mediaAspectRatio(media, videoSizes);
-      return mediaRatio && aspectRatio.includes(mediaRatio);
+      if (isVideoMedia) {
+        if (!videoSizes[media.id || 0]) {
+          return true;
+        }
+
+        const mediaRatio = mediaAspectRatio(media, videoSizes);
+        return mediaRatio && aspectRatio.includes(mediaRatio);
+      } else {
+        const mediaRatio = mediaAspectRatio(media, videoSizes);
+        return mediaRatio && aspectRatio.includes(mediaRatio);
+      }
     }
+
     return true;
   });
 

@@ -106,6 +106,7 @@ export const MediaView: FC<MediaViewInterface> = ({
                 isDeleteAccepted={false}
                 allowMultiple={true}
                 saveSelectedMedia={uploadMediasInProduct}
+                hideVideos={false}
               />
             </div>
           )}
