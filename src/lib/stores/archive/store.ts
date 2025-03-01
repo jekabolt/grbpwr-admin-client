@@ -55,7 +55,6 @@ export const useArchiveStore = create<ArchiveStore>((set, get) => ({
                 tag: archiveInsert.tag?.trim(),
             };
             await addArchive({ archiveInsert: trimmedArchive });
-            await get().fetchArchives(10, 0);
             set({ isLoading: false });
         } catch (error) {
             set({ error: 'Failed to create archive', isLoading: false });

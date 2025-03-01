@@ -1,33 +1,88 @@
-import { Grid2 as Grid, Typography } from '@mui/material';
 import { Cross1Icon } from '@radix-ui/react-icons';
+import { isVideo } from 'lib/features/filterContentType';
 import { useArchiveStore } from 'lib/stores/archive/store';
 import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
+import Media from 'ui/components/media';
+import Text from 'ui/components/text';
 import { ArchiveItem } from './archive-item';
 
 export function ListArchive() {
   const { archives, fetchArchives, deleteArchive } = useArchiveStore();
   const { showMessage } = useSnackBarStore();
-  const [mediaId, setMediaId] = useState<number>(0);
-  const mediaRef = useRef<HTMLDivElement>(null);
   const [selectedArchive, setSelectedArchive] = useState<number>();
+  const [highlightedArchive, setHighlightedArchive] = useState<number | null>(null);
   const archiveData = archives.find((a) => a.id === selectedArchive);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchArchives(50, 0);
   }, [fetchArchives]);
 
   useEffect(() => {
-    const media = mediaRef.current;
-    if (!media) return;
     const handleScroll = () => {
-      const itemHeight = media.clientHeight * 0.7;
-      setMediaId(Math.round(media.scrollTop / itemHeight));
+      if (!containerRef.current) return;
+
+      const container = containerRef.current;
+      const containerRect = container.getBoundingClientRect();
+      const containerCenter = containerRect.top + containerRect.height / 2;
+
+      let closestItem: HTMLElement | null = null;
+      let closestDistance = Infinity;
+
+      container.querySelectorAll('.archive-item').forEach((item) => {
+        const itemElement = item as HTMLElement;
+        const itemRect = itemElement.getBoundingClientRect();
+        const itemCenter = itemRect.top + itemRect.height / 2;
+        const distance = Math.abs(containerCenter - itemCenter);
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestItem = itemElement;
+        }
+      });
+
+      if (closestItem) {
+        const archiveId = Number((closestItem as HTMLElement).getAttribute('data-archive-id'));
+        setHighlightedArchive(archiveId);
+      }
     };
-    media.addEventListener('scroll', handleScroll);
-    return () => media.removeEventListener('scroll', handleScroll);
-  }, []);
+
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      handleScroll();
+    }
+
+    return () => {
+      if (container) {
+        container.removeEventListener('scroll', handleScroll);
+      }
+    };
+  }, [archives]);
+
+  useEffect(() => {
+    if (highlightedArchive && containerRef.current) {
+      const highlightedElement = containerRef.current.querySelector(
+        `[data-archive-id="${highlightedArchive}"]`,
+      ) as HTMLElement;
+
+      if (highlightedElement) {
+        const container = containerRef.current;
+        const containerHeight = container.clientHeight;
+        const topOffset = containerHeight / 2;
+        const elementTop = highlightedElement.offsetTop;
+        const scrollPosition = elementTop - topOffset;
+
+        container.scrollTo({
+          top: scrollPosition,
+          behavior: 'smooth',
+        });
+      }
+    }
+  }, [highlightedArchive]);
 
   async function handleDeleteArchive(e: React.MouseEvent, id: number) {
     e.preventDefault();
@@ -42,83 +97,53 @@ export function ListArchive() {
   }
 
   return (
-    <>
-      <Grid
-        container
-        ref={mediaRef}
-        display='grid'
-        height='100vh'
-        spacing={2}
-        sx={{
-          overflowY: 'auto',
-          scrollSnapType: 'y mandatory',
-          '&::-webkit-scrollbar': { display: 'none' },
-          scrollbarWidth: 'none',
-        }}
-      >
-        {archives.map((archive, id) => (
-          <Grid
-            size={{ xs: 12 }}
+    <div className='h-full overflow-auto scroll-smooth no-scroll-bar' ref={containerRef}>
+      {archives.map((archive) => {
+        const isHighlighted = archive.id === highlightedArchive;
+
+        return (
+          <div
             key={archive.id}
-            onClick={() => setSelectedArchive(archive.id)}
-            display={{ xs: 'grid', lg: 'flex' }}
-            alignItems='center'
-            justifyContent={{ xs: 'center', lg: 'space-between' }}
-            height='70vh'
-            sx={{
-              scrollSnapAlign: 'center',
-              opacity: mediaId === id ? 1 : 0.3,
-              transition: 'opacity 0.3s ease',
-              position: 'relative',
-              zIndex: mediaId === id ? 2 : 1,
-              pointerEvents: mediaId === id ? 'auto' : 'none',
-            }}
+            data-archive-id={archive.id}
+            className={`archive-item relative px-2 transition-transform duration-300 ease-in-out ${
+              isHighlighted ? 'scale-100' : 'scale-95 opacity-30'
+            }`}
+            onClick={() => isHighlighted && setSelectedArchive(archive.id)}
           >
             <Button
               onClick={(e: React.MouseEvent) => handleDeleteArchive(e, archive.id || 0)}
               size='lg'
-              className='absolute top-0 right-0'
+              disabled={!isHighlighted}
+              className='absolute top-2 right-2 z-20'
             >
               <Cross1Icon />
             </Button>
-            <Grid size={{ xs: 12, lg: 2 }} display='flex' justifyContent='center'>
-              <Typography
-                textAlign='center'
-                variant='overline'
-                fontWeight='bold'
-                fontSize='1.2rem'
-                textTransform='uppercase'
-              >
+            <div className='w-full h-full flex flex-col lg:flex-row items-center justify-between gap-4'>
+              <Text variant='uppercase' className='w-60 text-center lg:text-left'>
                 {archive.heading}
-              </Typography>
-            </Grid>
-            <Grid size={{ xs: 12, lg: 8 }} sx={{ height: '100%' }}>
-              <img
-                src={archive.media?.[0].media?.fullSize?.mediaUrl}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                  transform: mediaId === id ? 'scale(1)' : 'scale(0.6)',
-                  transition: 'transform 0.3s ease',
-                }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, lg: 2 }} display='flex' justifyContent='center'>
-              <Typography
-                textAlign='center'
-                variant='overline'
-                fontWeight='bold'
-                fontSize='1.2rem'
-                textTransform='uppercase'
+              </Text>
+
+              <div
+                className={cn('lg:w-[34rem] w-full transition-all duration-300 ease-in-out', {
+                  'lg:w-96': !isHighlighted,
+                })}
               >
+                <Media
+                  src={archive.media?.[0]?.media?.fullSize?.mediaUrl || ''}
+                  type={isVideo(archive.media?.[0]?.media?.fullSize?.mediaUrl) ? 'video' : 'image'}
+                  controls={false}
+                  alt='archive media'
+                />
+              </div>
+
+              <Text variant='uppercase' className='w-60 text-center lg:text-right'>
                 {archive.tag}
-              </Typography>
-            </Grid>
-          </Grid>
-        ))}
-      </Grid>
+              </Text>
+            </div>
+          </div>
+        );
+      })}
       <ArchiveItem archiveData={archiveData} close={() => setSelectedArchive(undefined)} />
-    </>
+    </div>
   );
 }

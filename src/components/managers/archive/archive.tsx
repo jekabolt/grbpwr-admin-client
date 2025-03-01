@@ -1,6 +1,5 @@
-import { AppBar, Button, Toolbar } from '@mui/material';
-
 import { useState } from 'react';
+import { Button } from 'ui/components/button';
 import { Layout } from 'ui/layout';
 import { ArchiveForm } from './form/form';
 import { ListArchive } from './listArchive/list-archive';
@@ -12,21 +11,13 @@ export function Archive() {
 
   return (
     <Layout>
-      <AppBar
-        position='fixed'
-        sx={{
-          top: 'auto',
-          bottom: 0,
-          backgroundColor: 'transparent',
-          boxShadow: 'none',
-        }}
+      <Button
+        size='lg'
+        onClick={openModal}
+        className='fixed bottom-4 right-4 lg:bottom-2 lg:right-2 z-30'
       >
-        <Toolbar sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant='contained' onClick={openModal}>
-            new
-          </Button>
-        </Toolbar>
-      </AppBar>
+        create new
+      </Button>
       <ListArchive />
       <ArchiveForm open={isModalOpen} onClose={closeModal} />
     </Layout>

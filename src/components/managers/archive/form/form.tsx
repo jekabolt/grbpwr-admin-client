@@ -1,13 +1,13 @@
-import { Button, Grid2 as Grid, TextField } from '@mui/material';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
-
 import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
 import { Field, Form, Formik, FormikProps } from 'formik';
+import { isVideo } from 'lib/features/filterContentType';
 import { useArchiveStore } from 'lib/stores/archive/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
+import { Button } from 'ui/components/button';
 import { Dialog } from 'ui/components/dialog';
-// import styles from 'styles/archive.scss';
+import Input from 'ui/components/input';
 import { ArchiveMediaDisplay } from '../utility/archive-items-media';
 
 interface ArchiveFormProps {
@@ -24,13 +24,6 @@ const defaultInitialValues: common_ArchiveInsert = {
   tag: '',
   mediaIds: [],
   videoId: undefined,
-};
-
-export const isVideo = (media: common_MediaFull) => {
-  const videoExtensions = ['.mp4', '.mov', '.avi', '.wmv', '.webm'];
-  return media.media?.fullSize?.mediaUrl
-    ? videoExtensions.some((ext) => media.media?.fullSize?.mediaUrl?.toLowerCase().endsWith(ext))
-    : false;
 };
 
 export function ArchiveForm({
@@ -50,11 +43,21 @@ export function ArchiveForm({
     allowMultiple: boolean,
     formik?: FormikProps<any>,
   ) => {
-    if (isVideo(media)) {
-      const newSelectedMedia = selectedMedia.filter((item) => !isVideo(item));
+    if (isVideo(media.media?.fullSize?.mediaUrl)) {
+      const newSelectedMedia = selectedMedia.filter(
+        (item) => !isVideo(item.media?.fullSize?.mediaUrl),
+      );
 
       if (formik?.values.videoId !== media.id) {
         formik?.setFieldValue('videoId', media.id);
+
+        if (formik?.values.mediaIds?.includes(media.id)) {
+          formik?.setFieldValue(
+            'mediaIds',
+            formik.values.mediaIds.filter((id: number) => id !== media.id),
+          );
+        }
+
         setSelectedMedia([...newSelectedMedia, media]);
       } else {
         formik?.setFieldValue('videoId', undefined);
@@ -63,14 +66,21 @@ export function ArchiveForm({
       return;
     }
 
-    const existingImages = selectedMedia.filter((item) => !isVideo(item));
+    const mediaAlreadyExists = existingMedia?.some((item) => item.id === media.id) || false;
+
+    if (mediaAlreadyExists) {
+      showMessage('This media is already in the archive', 'error');
+      return;
+    }
+
+    const existingImages = selectedMedia.filter((item) => !isVideo(item.media?.fullSize?.mediaUrl));
     const newSelectedMedia = allowMultiple
       ? existingImages.some((item) => item.id === media.id)
         ? existingImages.filter((item) => item.id !== media.id)
         : [...existingImages, media]
       : [media];
 
-    const existingVideo = selectedMedia.find((item) => isVideo(item));
+    const existingVideo = selectedMedia.find((item) => isVideo(item.media?.fullSize?.mediaUrl));
     setSelectedMedia(existingVideo ? [...newSelectedMedia, existingVideo] : newSelectedMedia);
 
     formik?.setFieldValue(
@@ -89,7 +99,6 @@ export function ArchiveForm({
         showMessage('Archive created', 'success');
       }
       setSelectedMedia([]);
-      onClose();
     } catch (error) {
       showMessage(`Failed to ${archiveId ? 'update' : 'create'} archive`, 'error');
     }
@@ -103,13 +112,11 @@ export function ArchiveForm({
     if (!id) return;
     try {
       if (isVideo) {
-        // Handle video deletion
         await updateArchiveStore(archiveId || 0, {
           ...values,
           videoId: undefined,
         });
       } else {
-        // Handle image deletion
         const updatedItems = values.mediaIds
           ?.filter((mediaId) => mediaId !== id)
           .filter((id): id is number => id !== undefined);
@@ -124,30 +131,36 @@ export function ArchiveForm({
     }
   }
 
-  const handleSaveMediaSelection = async (values: common_ArchiveInsert) => {
+  const handleSaveMediaSelection = async (
+    values: common_ArchiveInsert,
+    formik: FormikProps<common_ArchiveInsert>,
+  ) => {
     try {
-      const existingImages = existingMedia?.filter((media) => !isVideo(media)) || [];
-      const selectedImages = selectedMedia.filter((media) => !isVideo(media));
+      const existingImages =
+        existingMedia?.filter((media) => !isVideo(media.media?.fullSize?.mediaUrl)) || [];
+      const selectedImages = selectedMedia.filter(
+        (media) => !isVideo(media.media?.fullSize?.mediaUrl),
+      );
 
-      const combinedMediaIds = [
-        ...existingImages.map((media) => media.id),
-        ...selectedImages.map((media) => media.id),
-      ].filter((id): id is number => id !== undefined);
+      const existingImageIds = existingImages.map((media) => media.id);
+      const selectedImageIds = selectedImages.map((media) => media.id);
 
-      const selectedVideo = selectedMedia.find((media) => isVideo(media));
+      const combinedMediaIds = [...new Set([...existingImageIds, ...selectedImageIds])].filter(
+        (id): id is number => id !== undefined,
+      );
+
+      const selectedVideo = selectedMedia.find((media) => isVideo(media.media?.fullSize?.mediaUrl));
       const videoId = selectedVideo?.id;
 
-      await updateArchiveStore(archiveId || 0, {
-        ...values,
-        mediaIds: combinedMediaIds,
-        videoId: videoId || values.videoId,
-      });
-
       setShowMediaSelector(false);
-      setSelectedMedia([]);
-      showMessage('Media items added successfully', 'success');
+      formik.setFieldValue('mediaIds', combinedMediaIds);
+      if (videoId) {
+        formik.setFieldValue('videoId', videoId);
+      }
+
+      showMessage('Media items selected', 'success');
     } catch (error) {
-      showMessage('Failed to add media items', 'error');
+      showMessage('Failed to select media items', 'error');
     }
   };
 
@@ -155,35 +168,24 @@ export function ArchiveForm({
     <Dialog open={open} onClose={onClose} fullScreen>
       <Formik initialValues={initialValues} onSubmit={handleSubmit} enableReinitialize>
         {(formik: FormikProps<common_ArchiveInsert>) => (
-          <Form
-          // className={styles.form}
-          >
-            <Grid container gap={1}>
-              <Grid
-                size={{ xs: 12 }}
-                display={{ xs: 'grid', lg: 'flex' }}
-                justifyContent={{ xs: '', lg: 'space-between' }}
-                gap={{ xs: 2 }}
-              >
-                <Grid size={{ xs: 12, lg: 2 }}>
-                  <Field as={TextField} name='heading' label='heading' fullWidth />
-                </Grid>
-                <Grid size={{ xs: 12, lg: 6 }}>
-                  <Field as={TextField} name='description' label='description' fullWidth />
-                </Grid>
-                <Grid size={{ xs: 12, lg: 2 }}>
-                  <Field as={TextField} name='tag' label='tag' fullWidth />
-                </Grid>
-              </Grid>
+          <Form className='h-full'>
+            <div className='h-full flex flex-col gap-4'>
+              <div className='flex flex-col lg:flex-row justify-between gap-4'>
+                <Field as={Input} name='heading' placeholder='enter title' className='h-10' />
+                <Field
+                  as={Input}
+                  name='description'
+                  placeholder='enter description'
+                  className='h-10'
+                />
+                <Field as={Input} name='tag' placeholder='enter tag' className='h-10' />
+              </div>
 
-              <Grid
-                size={{ xs: 12 }}
-                // className={styles.media_selector_wrapper}
-              >
+              <div className='h-full overflow-y-scroll no-scroll-bar'>
                 {archiveId && !showMediaSelector ? (
                   <ArchiveMediaDisplay
                     remove={(id, values, isVideo) => handleDeleteArchiveItem(id, values, isVideo)}
-                    media={existingMedia || []}
+                    media={[...(existingMedia || []), ...selectedMedia]}
                     values={formik.values}
                   />
                 ) : (
@@ -192,58 +194,37 @@ export function ArchiveForm({
                       handleMediaSelect(media, allowMultiple, formik)
                     }
                     selectedMedia={selectedMedia}
-                    aspectRatio={['3:4']}
+                    aspectRatio={['3:4', '16:9']}
                     isDeleteAccepted={false}
                     allowMultiple
                     hideVideos={false}
                   />
                 )}
-              </Grid>
+              </div>
 
-              <Grid
-                size={{ xs: 12 }}
-                display='flex'
-                flexDirection={{
-                  xs: 'column',
-                  lg: 'row',
-                }}
-                justifyContent={{
-                  xs: 'center',
-                  lg: archiveId ? 'space-between' : 'end',
-                }}
-                gap={2}
-              >
+              <div className='w-full flex flex-col lg:flex-row justify-center lg:justify-between gap-2'>
                 {archiveId && !showMediaSelector && (
-                  <Button
-                    variant='contained'
-                    size='large'
-                    sx={{ width: { xs: '100%', lg: '20%' } }}
-                    onClick={() => setShowMediaSelector(true)}
-                  >
+                  <Button size='lg' onClick={() => setShowMediaSelector(true)}>
                     select new items
                   </Button>
                 )}
                 {archiveId && showMediaSelector ? (
                   <Button
-                    variant='contained'
-                    size='large'
-                    sx={{ width: { xs: '100%', lg: '20%' } }}
-                    onClick={() => handleSaveMediaSelection(formik.values)}
+                    size='lg'
+                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                      e.preventDefault();
+                      handleSaveMediaSelection(formik.values, formik);
+                    }}
                   >
-                    save Selection
+                    save selection
                   </Button>
                 ) : (
-                  <Button
-                    type='submit'
-                    variant='contained'
-                    size='large'
-                    sx={{ width: { xs: '100%', lg: '20%' } }}
-                  >
+                  <Button type='submit' size='lg'>
                     {archiveId ? 'update' : 'create'} archive
                   </Button>
                 )}
-              </Grid>
-            </Grid>
+              </div>
+            </div>
           </Form>
         )}
       </Formik>
