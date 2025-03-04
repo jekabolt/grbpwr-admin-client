@@ -8,7 +8,7 @@ interface Categories {
 }
 
 
-export function useCategories(topCategoryId: string, subCategoryId: string) {
+export function useCategories(topCategoryId: string, subCategoryId: string, typeId: string = '') {
     const { dictionary } = useDictionaryStore();
 
     const categories = useMemo(() => processCategories(dictionary?.categories || []), [dictionary?.categories]);
@@ -23,6 +23,11 @@ export function useCategories(topCategoryId: string, subCategoryId: string) {
     );
 
     const types = useMemo(() => selectedSubCategory?.types || [], [selectedSubCategory]);
+
+    const selectedType = useMemo(() =>
+        types.find((type) => type.id.toString() === typeId),
+        [types, typeId]
+    );
 
     const topCategoryOptions: Categories[] = useMemo(() =>
         categories.map((category) => ({
@@ -54,6 +59,7 @@ export function useCategories(topCategoryId: string, subCategoryId: string) {
         typeOptions,
         selectedTopCategoryName: topCategories?.name,
         selectedSubCategoryName: selectedSubCategory?.name,
+        selectedTypeName: selectedType?.name,
         categories
     };
 }

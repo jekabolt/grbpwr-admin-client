@@ -31,9 +31,10 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
   const [hasConfirmedSizeChange, setHasConfirmedSizeChange] = useState(false);
 
-  const { selectedTopCategoryName, selectedSubCategoryName } = useCategories(
+  const { selectedTopCategoryName, selectedSubCategoryName, selectedTypeName } = useCategories(
     values.product?.productBody?.topCategoryId?.toString() || '',
     values.product?.productBody?.subCategoryId?.toString() || '',
+    values.product?.productBody?.typeId?.toString() || '',
   );
 
   const filteredSizes = getFilteredSizes(
@@ -47,6 +48,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
     const requiredMeasurements = new Set([
       ...getMeasurementsForCategory(selectedTopCategoryName?.toLowerCase()),
       ...getMeasurementsForCategory(selectedSubCategoryName?.toLowerCase(), true),
+      ...getMeasurementsForCategory(selectedTypeName?.toLowerCase(), false, selectedTypeName),
     ]);
 
     return sortItems(dictionary.measurements).filter((measurement) => {
@@ -57,7 +59,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
       )?.toLowerCase();
       return measurementName && requiredMeasurements.has(measurementName);
     });
-  }, [dictionary, selectedTopCategoryName, selectedSubCategoryName]);
+  }, [dictionary, selectedTopCategoryName, selectedSubCategoryName, selectedTypeName]);
 
   useEffect(() => {
     if (filteredSizes.length > 0) {
