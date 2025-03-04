@@ -544,14 +544,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           }
           onChange={(e: any) => handleFieldChange(e, 'modelWearsHeightCm')}
           InputLabelProps={{ shrink: true }}
-          required
           fullWidth
           disabled={disableFields}
         />
 
         <FormControl
           fullWidth
-          required
           error={Boolean(
             getIn(errors, 'product.productBody.modelWearsSizeId') &&
               getIn(touched, 'product.productBody.modelWearsSizeId'),
