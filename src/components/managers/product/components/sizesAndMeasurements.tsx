@@ -12,15 +12,13 @@ import { common_ProductNew } from 'api/proto-http/admin';
 import { useFormikContext } from 'formik';
 import { sortItems } from 'lib/features/filter-size-measurements';
 import { findInDictionary } from 'lib/features/findInDictionary';
+import { useCategories } from 'lib/features/useCategories';
 import { useDictionaryStore } from 'lib/stores/store';
-import React, { FC, useCallback, useEffect, useState } from 'react';
+import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import Text from 'ui/components/text';
 
 import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
-import {
-  isMeasurementRequiredForCategory,
-  SUBCATEGORY_MEASUREMENTS,
-} from '../utility/mappingMeasurementsForCategories';
+import { getMeasurementsForCategory } from '../utility/mappingMeasurementsForCategories';
 import { getFilteredSizes } from '../utility/sizes';
 
 export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
@@ -33,13 +31,33 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
   const [hasConfirmedSizeChange, setHasConfirmedSizeChange] = useState(false);
 
+  const { selectedTopCategoryName, selectedSubCategoryName } = useCategories(
+    values.product?.productBody?.topCategoryId?.toString() || '',
+    values.product?.productBody?.subCategoryId?.toString() || '',
+  );
+
   const filteredSizes = getFilteredSizes(
     dictionary,
     values.product?.productBody?.topCategoryId || 0,
   );
 
-  const sortedMeasurements =
-    dictionary && dictionary.measurements ? sortItems(dictionary.measurements) : [];
+  const measurementsToDisplay = useMemo(() => {
+    if (!dictionary?.measurements) return [];
+
+    const requiredMeasurements = new Set([
+      ...getMeasurementsForCategory(selectedTopCategoryName?.toLowerCase()),
+      ...getMeasurementsForCategory(selectedSubCategoryName?.toLowerCase(), true),
+    ]);
+
+    return sortItems(dictionary.measurements).filter((measurement) => {
+      const measurementName = findInDictionary(
+        dictionary,
+        measurement.id,
+        'measurement',
+      )?.toLowerCase();
+      return measurementName && requiredMeasurements.has(measurementName);
+    });
+  }, [dictionary, selectedTopCategoryName, selectedSubCategoryName]);
 
   useEffect(() => {
     if (filteredSizes.length > 0) {
@@ -150,53 +168,6 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
     },
     [values.sizeMeasurements, setFieldValue],
   );
-
-  const getMeasurementsForCategory = useCallback(() => {
-    const topCategoryId = values.product?.productBody?.topCategoryId;
-    const subCategoryId = values.product?.productBody?.subCategoryId;
-
-    if (!dictionary || !dictionary.measurements) return [];
-
-    if (subCategoryId) {
-      const subCategoryName = findInDictionary(dictionary, subCategoryId, 'category');
-      if (subCategoryName && SUBCATEGORY_MEASUREMENTS[subCategoryName]) {
-        return sortedMeasurements.filter((measurement) => {
-          const measurementName = findInDictionary(
-            dictionary,
-            measurement.id,
-            'measurement',
-          )?.toLowerCase();
-          return (
-            measurementName &&
-            isMeasurementRequiredForCategory(measurementName, subCategoryName, true)
-          );
-        });
-      }
-    }
-
-    if (topCategoryId) {
-      const categoryName = findInDictionary(dictionary, topCategoryId, 'category');
-      return sortedMeasurements.filter((measurement) => {
-        const measurementName = findInDictionary(
-          dictionary,
-          measurement.id,
-          'measurement',
-        )?.toLowerCase();
-        return (
-          measurementName && isMeasurementRequiredForCategory(measurementName, categoryName || '')
-        );
-      });
-    }
-
-    return sortedMeasurements;
-  }, [
-    dictionary,
-    values.product?.productBody?.topCategoryId,
-    values.product?.productBody?.subCategoryId,
-    sortedMeasurements,
-  ]);
-
-  const measurementsToDisplay = getMeasurementsForCategory();
 
   return (
     <>

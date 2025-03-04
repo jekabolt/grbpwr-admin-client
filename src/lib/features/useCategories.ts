@@ -17,12 +17,12 @@ export function useCategories(topCategoryId: string, subCategoryId: string) {
 
     const subCategories = useMemo(() => topCategories?.subCategories || [], [topCategories]);
 
-    const types = useMemo(() => {
-        const subCategory = subCategories.find(
-            (sub) => sub.id.toString() === subCategoryId
-        );
-        return subCategory?.types || [];
-    }, [subCategories, subCategoryId]);
+    const selectedSubCategory = useMemo(() =>
+        subCategories.find((sub) => sub.id.toString() === subCategoryId),
+        [subCategories, subCategoryId]
+    );
+
+    const types = useMemo(() => selectedSubCategory?.types || [], [selectedSubCategory]);
 
     const topCategoryOptions: Categories[] = useMemo(() =>
         categories.map((category) => ({
@@ -53,6 +53,7 @@ export function useCategories(topCategoryId: string, subCategoryId: string) {
         subCategoryOptions,
         typeOptions,
         selectedTopCategoryName: topCategories?.name,
+        selectedSubCategoryName: selectedSubCategory?.name,
         categories
     };
 }
