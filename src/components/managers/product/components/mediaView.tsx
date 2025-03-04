@@ -3,12 +3,12 @@ import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
 import { useFormikContext } from 'formik';
-import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { MediaViewInterface } from '../interface/interface';
+
 export const MediaView: FC<MediaViewInterface> = ({
   clearMediaPreview,
   isEditMode,
@@ -17,7 +17,6 @@ export const MediaView: FC<MediaViewInterface> = ({
 }) => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [mediaPreview, setMediaPreview] = useState<common_MediaFull[]>([]);
-  const { showMessage } = useSnackBarStore();
   const { values, setFieldValue, errors } = useFormikContext<common_ProductNew>();
 
   useEffect(() => {
@@ -38,21 +37,16 @@ export const MediaView: FC<MediaViewInterface> = ({
 
   const uploadMediasInProduct = (newSelectedMedia: common_MediaFull[]) => {
     if (!newSelectedMedia.length) {
-      showMessage('No selected media', 'error');
+      alert('No selected media');
       return;
     }
 
-    const uniqueMedia = newSelectedMedia.filter((m) => !values.mediaIds?.includes(m.id || 0));
+    setMediaPreview((prevPreview) => [...prevPreview, ...newSelectedMedia]);
 
-    if (uniqueMedia.length === 0) {
-      showMessage('media already in product', 'error');
-      return;
-    }
-
-    setMediaPreview((prevPreview) => [...prevPreview, ...uniqueMedia]);
-
-    const updatedMediaIds = [...(values.mediaIds || []), ...uniqueMedia.map((media) => media.id)];
-
+    const updatedMediaIds = [
+      ...(values.mediaIds || []),
+      ...newSelectedMedia.map((media) => media.id),
+    ];
     setFieldValue('mediaIds', updatedMediaIds);
   };
 
