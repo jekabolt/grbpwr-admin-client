@@ -8,10 +8,10 @@ export const validationSchema = Yup.object().shape({
                 .matches(/^(?![_\.\-]+$)/, 'Name cannot consist only of special symbols'),
             brand: Yup.string()
                 .required('Brand is required')
-                .matches(/^(?![_\.\-]+$)/, 'Brand cannot consist only of special symbols')
-                .max(35, 'Brand cannot exceed 35 characters'),
+                .matches(/^(?![_\.\-]+$)/, 'Brand cannot consist only of special symbols'),
             targetGender: Yup.string().required('Gender is required'),
             topCategoryId: Yup.number().required('Category is required'),
+            typeId: Yup.number().required('Type is required'),
             color: Yup.string().required('Color is required'),
             countryOfOrigin: Yup.string().required('Country is required'),
             price: Yup.object().shape({
@@ -30,7 +30,7 @@ export const validationSchema = Yup.object().shape({
         }).required(),
         thumbnailMediaId: Yup.number().required('Thumbnail must be selected'),
     }).required(),
-    mediaIds: Yup.array().min(1, 'At least one media must be added to the product'),
+    mediaIds: Yup.array().min(2, 'At least two media must be added to the product'),
     sizeMeasurements: Yup.array().test(
         'at-least-one-size',
         'At least one size must be specified',

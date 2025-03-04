@@ -8,7 +8,7 @@ interface Categories {
 }
 
 
-export function useCategories(topCategoryId: string, subCategoryId: string, typeId: string = '') {
+export function useCategories(topCategoryId: string, subCategoryId: string) {
     const { dictionary } = useDictionaryStore();
 
     const categories = useMemo(() => processCategories(dictionary?.categories || []), [dictionary?.categories]);
@@ -17,17 +17,12 @@ export function useCategories(topCategoryId: string, subCategoryId: string, type
 
     const subCategories = useMemo(() => topCategories?.subCategories || [], [topCategories]);
 
-    const selectedSubCategory = useMemo(() =>
-        subCategories.find((sub) => sub.id.toString() === subCategoryId),
-        [subCategories, subCategoryId]
-    );
-
-    const types = useMemo(() => selectedSubCategory?.types || [], [selectedSubCategory]);
-
-    const selectedType = useMemo(() =>
-        types.find((type) => type.id.toString() === typeId),
-        [types, typeId]
-    );
+    const types = useMemo(() => {
+        const subCategory = subCategories.find(
+            (sub) => sub.id.toString() === subCategoryId
+        );
+        return subCategory?.types || [];
+    }, [subCategories, subCategoryId]);
 
     const topCategoryOptions: Categories[] = useMemo(() =>
         categories.map((category) => ({
@@ -58,8 +53,6 @@ export function useCategories(topCategoryId: string, subCategoryId: string, type
         subCategoryOptions,
         typeOptions,
         selectedTopCategoryName: topCategories?.name,
-        selectedSubCategoryName: selectedSubCategory?.name,
-        selectedTypeName: selectedType?.name,
         categories
     };
 }
