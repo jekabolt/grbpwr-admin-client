@@ -7,84 +7,94 @@ interface MeasurementMapping {
 
 export const CATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
     'outerwear': {
-        measurements: ['shoulders', 'sleeve', 'bust', 'waist', 'length']
+        measurements: ['shoulders', 'sleeve', 'chest', 'length']
+    },
+    'tops': {
+        measurements: ['shoulders', 'sleeve', 'chest', 'length']
     },
     'bottoms': {
-        measurements: ['waist', 'length', 'inseam']
+        measurements: ['waist', 'length', 'inseam', 'leg-opening']
     },
     'dresses': {
-        measurements: ['shoulders', 'bust', 'waist', 'length']
-    },
-    'accessories': {
-        measurements: ['width', 'length']
+        measurements: ['sleeve', 'chest', 'bottom-width', 'length']
     },
     'bags': {
-        measurements: ['width', 'length']
+        measurements: ['width', 'length', 'depth']
     },
     'shoes': {
         measurements: []
     },
-    'home': {
-        measurements: []
-    },
-    'body': {
-        measurements: []
+    'objects': {
+        measurements: ['height', 'width', '']
     }
+
 };
 
 export const SUBCATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
-    'vests': {
-        measurements: ['shoulders', 'waist', 'length', 'bust']
-    },
-    'shirts': {
-        measurements: ['shoulders', 'bust', 'length', 'sleeve']
-    },
-    'tshirts': {
-        measurements: ['shoulders', 'sleeve', 'waist', 'length']
-    },
     'tanks': {
-        measurements: ['shoulders', 'waist', 'length']
+        measurements: ['shoulders', 'chest', 'length']
     },
     'crop': {
-        measurements: ['waist', 'length', 'hips']
-    },
-    'sweaters_knits': {
-        measurements: ['shoulders', 'sleeve', 'waist', 'length', 'bust']
-    },
-    'hoodies_sweatshirts': {
-        measurements: ['shoulders', 'sleeve', 'waist', 'length', 'bust']
+        measurements: ['waist', 'length', 'shoulders']
     },
     'shorts': {
         measurements: ['waist', 'length', 'inseam', 'hips']
     },
     'skirts': {
-        measurements: ['waist', 'length', 'hips']
+        measurements: ['waist', 'length', 'hips', 'bottom-width']
+    },
+    'boxers': {
+        measurements: ['waist']
     },
     'bralettes': {
-        measurements: ['bust']
+        measurements: ['chest']
+    },
+    'briefs': {
+        measurements: ['waist']
+    },
+    'robes': {
+        measurements: ['width', 'length']
     },
     'gloves': {
-        measurements: []
+        measurements: ['width', 'length']
     },
-    'socks': {
-        measurements: []
-    },
-    'hats': {
-        measurements: []
-    },
-
+    'belts': {
+        measurements: ['width', 'length', 'start-fit-length', 'end-fit-length']
+    }
 };
 
-export const getMeasurementsForCategory = (categoryName: string | undefined, isSubCategory: boolean = false): string[] => {
+
+export const TYPE_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
+    'necklaces': {
+        measurements: ['length']
+    },
+    'earrings': {
+        measurements: ['length', 'width']
+    },
+    'bracelets': {
+        measurements: ['length', 'width']
+    },
+}
+
+export const getMeasurementsForCategory = (categoryName: string | undefined, isSubCategory: boolean = false, typeName: string | undefined = undefined): string[] => {
     if (!categoryName) return [];
 
     if (categoryName.toLowerCase() === 'shoes') return [];
 
-    const mapping = isSubCategory
-        ? SUBCATEGORY_MEASUREMENTS[categoryName]
-        : CATEGORY_MEASUREMENTS[categoryName];
+    let measurements: string[] = [];
 
-    return mapping?.measurements || [];
+    if (typeName) {
+        measurements = TYPE_MEASUREMENTS[typeName.toLowerCase()]?.measurements || [];
+        return measurements;
+    }
+
+    if (!isSubCategory) {
+        measurements = CATEGORY_MEASUREMENTS[categoryName?.toLowerCase() || '']?.measurements || [];
+    } else {
+        measurements = SUBCATEGORY_MEASUREMENTS[categoryName?.toLowerCase() || '']?.measurements || [];
+    }
+
+    return measurements;
 };
 
 export const getCategoryStructure = (categories: common_Category[]) => {
