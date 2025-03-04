@@ -312,14 +312,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             )}
         </FormControl>
 
-        <FormControl
-          required
-          fullWidth
-          error={Boolean(
-            getIn(errors, 'product.productBody.subCategoryId') &&
-              getIn(touched, 'product.productBody.subCategoryId'),
-          )}
-        >
+        <FormControl fullWidth>
           <InputLabel shrink>{'subcategory'.toUpperCase()}</InputLabel>
           <Select
             name='product.productBody.subCategoryId'
@@ -335,22 +328,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               </MenuItem>
             ))}
           </Select>
-          {getIn(touched, 'product.productBody.subCategoryId') &&
-            getIn(errors, 'product.productBody.subCategoryId') && (
-              <FormHelperText>
-                <ErrorMessage name='product.productBody.subCategoryId' />
-              </FormHelperText>
-            )}
         </FormControl>
 
-        <FormControl
-          required
-          fullWidth
-          error={Boolean(
-            getIn(errors, 'product.productBody.typeId') &&
-              getIn(touched, 'product.productBody.typeId'),
-          )}
-        >
+        <FormControl fullWidth>
           <InputLabel shrink>{'type'.toUpperCase()}</InputLabel>
           <Select
             name='product.productBody.typeId'
@@ -366,12 +346,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               </MenuItem>
             ))}
           </Select>
-          {getIn(touched, 'product.productBody.typeId') &&
-            getIn(errors, 'product.productBody.typeId') && (
-              <FormHelperText>
-                <ErrorMessage name='product.productBody.typeId' />
-              </FormHelperText>
-            )}
         </FormControl>
 
         <FormControl
@@ -534,29 +508,13 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           as={TextField}
           label={'model wears height'.toUpperCase()}
           name='product.productBody.modelWearsHeightCm'
-          error={Boolean(
-            getIn(errors, 'product.productBody.modelWearsHeightCm') &&
-              getIn(touched, 'product.productBody.modelWearsHeightCm'),
-          )}
-          helperText={
-            getIn(touched, 'product.productBody.modelWearsHeightCm') &&
-            getIn(errors, 'product.productBody.modelWearsHeightCm')
-          }
           onChange={(e: any) => handleFieldChange(e, 'modelWearsHeightCm')}
           InputLabelProps={{ shrink: true }}
-          required
           fullWidth
           disabled={disableFields}
         />
 
-        <FormControl
-          fullWidth
-          required
-          error={Boolean(
-            getIn(errors, 'product.productBody.modelWearsSizeId') &&
-              getIn(touched, 'product.productBody.modelWearsSizeId'),
-          )}
-        >
+        <FormControl fullWidth>
           <InputLabel shrink>{'model wears size'.toUpperCase()}</InputLabel>
           <Select
             name='product.productBody.modelWearsSizeId'
@@ -572,12 +530,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               </MenuItem>
             ))}
           </Select>
-          {getIn(touched, 'product.productBody.modelWearsSizeId') &&
-            getIn(errors, 'product.productBody.modelWearsSizeId') && (
-              <FormHelperText>
-                <ErrorMessage name='product.productBody.modelWearsSizeId' />
-              </FormHelperText>
-            )}
         </FormControl>
 
         <Field
