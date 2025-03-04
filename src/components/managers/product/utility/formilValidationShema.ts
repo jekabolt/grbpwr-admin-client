@@ -12,7 +12,6 @@ export const validationSchema = Yup.object().shape({
                 .max(35, 'Brand cannot exceed 35 characters'),
             targetGender: Yup.string().required('Gender is required'),
             topCategoryId: Yup.number().required('Category is required'),
-            typeId: Yup.number().required('Type is required'),
             color: Yup.string().required('Color is required'),
             countryOfOrigin: Yup.string().required('Country is required'),
             price: Yup.object().shape({
