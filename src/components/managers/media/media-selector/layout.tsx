@@ -14,7 +14,8 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
 }) => {
   const [mediaSelectorVisibility, setMediaSelectorVisibility] = useState(false);
 
-  const handleMediaSelectorVisibility = () => {
+  const handleMediaSelectorVisibility = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
     setMediaSelectorVisibility(!mediaSelectorVisibility);
   };
   return (
@@ -29,7 +30,7 @@ export const MediaSelectorLayout: FC<MediaSelectorLayoutProps> = ({
           allowMultiple={allowMultiple}
           isDeleteAccepted={isDeleteAccepted}
           saveSelectedMedia={saveSelectedMedia}
-          closeMediaSelector={handleMediaSelectorVisibility}
+          closeMediaSelector={() => setMediaSelectorVisibility(false)}
         />
       )}
     </div>
