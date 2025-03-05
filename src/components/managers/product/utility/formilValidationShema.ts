@@ -30,7 +30,7 @@ export const validationSchema = Yup.object().shape({
         }).required(),
         thumbnailMediaId: Yup.number().required('Thumbnail must be selected'),
     }).required(),
-    mediaIds: Yup.array().min(2, 'At least two media must be added to the product'),
+    mediaIds: Yup.array().min(1, 'At least one media must be added to the product'),
     sizeMeasurements: Yup.array().test(
         'at-least-one-size',
         'At least one size must be specified',
