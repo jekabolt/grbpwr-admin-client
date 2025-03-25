@@ -71,7 +71,7 @@ export function NavbarHero() {
             <Typography textTransform='uppercase'>men</Typography>
             <SingleMediaViewAndSelect
               link={menMedia}
-              aspectRatio={['4:5']}
+              aspectRatio={['1:1']}
               isDeleteAccepted={false}
               saveSelectedMedia={(media) => saveNavbarMedia(media, 'men')}
               isEditMode
@@ -115,7 +115,7 @@ export function NavbarHero() {
             <Typography textTransform='uppercase'>women</Typography>
             <SingleMediaViewAndSelect
               link={womenMedia}
-              aspectRatio={['4:5']}
+              aspectRatio={['1:1']}
               isDeleteAccepted={false}
               saveSelectedMedia={(media) => saveNavbarMedia(media, 'women')}
               isEditMode
