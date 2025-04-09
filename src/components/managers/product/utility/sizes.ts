@@ -4,7 +4,12 @@ import { sortItems } from "lib/features/filter-size-measurements";
 export function getFilteredSizes(dictionary: common_Dictionary | undefined, topCategoryId: number) {
     if (!dictionary?.sizes) return [];
 
-    const isShoes = topCategoryId === 7;
+    const shoesCategoryId = dictionary.categories?.find((c) => c.name?.toLowerCase() === 'shoes')?.id
+
+
+    const isShoes = topCategoryId === shoesCategoryId;
+    console.log('isShoes', isShoes);
+    console.log('topCategoryId', topCategoryId);
     const defaultSizes = sortItems(dictionary?.sizes || []).filter((size) => {
         return size.id && size.id >= 1 && size.id <= 8;
     });
