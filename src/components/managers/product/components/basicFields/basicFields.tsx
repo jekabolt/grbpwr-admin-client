@@ -42,8 +42,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
 
   const { topCategoryOptions, subCategoryOptions, typeOptions, selectedTopCategoryName } =
     useCategories(
-      values.product?.productBody?.topCategoryId?.toString() || '',
-      values.product?.productBody?.subCategoryId?.toString() || '',
+      values.product?.productBody?.topCategoryId || 0,
+      values.product?.productBody?.subCategoryId || 0,
+      values.product?.productBody?.typeId || 0,
     );
 
   const filteredSizes = getFilteredSizes(
@@ -77,19 +78,22 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
     ) => {
       let newValue = e.target.value;
 
-      if (field === 'topCategoryId') {
-        const selectedCategory = topCategoryOptions.find((cat) => cat.value === newValue);
+      if (field === 'topCategoryId' || field === 'subCategoryId' || field === 'typeId') {
+        newValue = Number(newValue);
 
-        if (selectedCategory) {
-          setFieldValue('product.productBody.subCategoryId', newValue, false);
-        } else {
-          setFieldValue('product.productBody.subCategoryId', '', false);
+        if (field === 'topCategoryId') {
+          const selectedCategory = topCategoryOptions.find((cat) => cat.value === newValue);
+          if (selectedCategory) {
+            setFieldValue('product.productBody.subCategoryId', newValue, false);
+          } else {
+            setFieldValue('product.productBody.subCategoryId', 0, false);
+          }
+          setFieldValue('product.productBody.typeId', 0, false);
         }
-        setFieldValue('product.productBody.typeId', '', false);
-      }
 
-      if (field === 'subCategoryId') {
-        setFieldValue('product.productBody.typeId', '', false);
+        if (field === 'subCategoryId') {
+          setFieldValue('product.productBody.typeId', 0, false);
+        }
       }
 
       if (field === 'color' && typeof newValue === 'string') {
@@ -293,7 +297,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Select
             name='product.productBody.topCategoryId'
             onChange={(e) => handleFieldChange(e, 'topCategoryId')}
-            value={values.product?.productBody?.topCategoryId || ''}
+            value={values.product?.productBody?.topCategoryId || 0}
             label={'category'.toUpperCase()}
             displayEmpty
             disabled={disableFields}
@@ -317,7 +321,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Select
             name='product.productBody.subCategoryId'
             onChange={(e) => handleFieldChange(e, 'subCategoryId')}
-            value={values.product?.productBody?.subCategoryId || ''}
+            value={values.product?.productBody?.subCategoryId || 0}
             label={'subcategory'.toUpperCase()}
             displayEmpty
             disabled={disableFields || !values.product?.productBody?.topCategoryId}

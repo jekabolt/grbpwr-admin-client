@@ -3,35 +3,25 @@ import { useMemo } from "react";
 import { processCategories } from "./proceed-categories";
 
 interface Categories {
-    value: string;
+    value: number;
     label: string;
 }
 
 
-export function useCategories(topCategoryId: string, subCategoryId: string, typeId: string = '') {
+export function useCategories(topCategoryId: number, subCategoryId: number, typeId: number = 0) {
     const { dictionary } = useDictionaryStore();
 
     const categories = useMemo(() => processCategories(dictionary?.categories || []), [dictionary?.categories]);
 
-    const topCategories = useMemo(() => categories.find((c) => c.id.toString() === topCategoryId), [categories, topCategoryId]);
-
-    const subCategories = useMemo(() => topCategories?.subCategories || [], [topCategories]);
-
-    const selectedSubCategory = useMemo(() =>
-        subCategories.find((sub) => sub.id.toString() === subCategoryId),
-        [subCategories, subCategoryId]
-    );
-
-    const types = useMemo(() => selectedSubCategory?.types || [], [selectedSubCategory]);
-
-    const selectedType = useMemo(() =>
-        types.find((type) => type.id.toString() === typeId),
-        [types, typeId]
-    );
+    const topCategories = categories.find((c) => c.id === topCategoryId);
+    const subCategories = topCategories?.subCategories || [];
+    const selectedSubCategory = subCategories.find((sub) => sub.id === subCategoryId);
+    const types = selectedSubCategory?.types || [];
+    const selectedType = types.find((type) => type.id === typeId);
 
     const topCategoryOptions: Categories[] = useMemo(() =>
         categories.map((category) => ({
-            value: category.id.toString(),
+            value: category.id,
             label: category.name,
         })),
         [categories]
@@ -39,7 +29,7 @@ export function useCategories(topCategoryId: string, subCategoryId: string, type
 
     const subCategoryOptions: Categories[] = useMemo(() =>
         subCategories.map((category) => ({
-            value: category.id.toString(),
+            value: category.id,
             label: category.name,
         })),
         [subCategories]
@@ -47,13 +37,11 @@ export function useCategories(topCategoryId: string, subCategoryId: string, type
 
     const typeOptions: Categories[] = useMemo(() =>
         types.map((type) => ({
-            value: type.id.toString(),
+            value: type.id,
             label: type.name,
         })),
         [types]
     );
-
-
 
     return {
         topCategoryOptions,

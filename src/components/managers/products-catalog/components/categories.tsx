@@ -14,8 +14,9 @@ export default function Categories() {
   const { defaultValue: type, handleFilterChange: handleTypeChange } = useFilter('type', true);
 
   const { topCategoryOptions, subCategoryOptions, typeOptions } = useCategories(
-    topCategory[0] || '',
-    subCategory[0] || '',
+    Number(topCategory[0]) || 0,
+    Number(subCategory[0]) || 0,
+    Number(type[0]) || 0,
   );
 
   const handleTopCategoryChangeWithClear = (value: string) => {
