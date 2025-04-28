@@ -39,6 +39,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const filteredSizes = getFilteredSizes(
     dictionary,
     values.product?.productBody?.topCategoryId || 0,
+    values.product?.productBody?.typeId || 0,
   );
 
   const measurementsToDisplay = (() => {
