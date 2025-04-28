@@ -13,7 +13,7 @@ import { useFormikContext } from 'formik';
 import { sortItems } from 'lib/features/filter-size-measurements';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionaryStore } from 'lib/stores/store';
-import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { FC, useEffect, useState } from 'react';
 import Text from 'ui/components/text';
 
 import { useCategories } from 'lib/features/useCategories';
@@ -31,17 +31,18 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
   const [hasConfirmedSizeChange, setHasConfirmedSizeChange] = useState(false);
   const { selectedTopCategoryName, selectedSubCategoryName, selectedTypeName } = useCategories(
-    values.product?.productBody?.topCategoryId?.toString() || '',
-    values.product?.productBody?.subCategoryId?.toString() || '',
-    values.product?.productBody?.typeId?.toString() || '',
+    values.product?.productBody?.topCategoryId || 0,
+    values.product?.productBody?.subCategoryId || 0,
+    values.product?.productBody?.typeId || 0,
   );
 
   const filteredSizes = getFilteredSizes(
     dictionary,
     values.product?.productBody?.topCategoryId || 0,
+    values.product?.productBody?.typeId || 0,
   );
 
-  const measurementsToDisplay = useMemo(() => {
+  const measurementsToDisplay = (() => {
     if (!dictionary?.measurements) return [];
 
     const requiredMeasurements = new Set([
@@ -58,7 +59,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
       )?.toLowerCase();
       return measurementName && requiredMeasurements.has(measurementName);
     });
-  }, [dictionary, selectedTopCategoryName, selectedSubCategoryName, selectedTypeName]);
+  })();
 
   useEffect(() => {
     if (filteredSizes.length > 0) {
@@ -88,87 +89,78 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
     }
   }, [values.sizeMeasurements, filteredSizes, setFieldValue]);
 
-  const handleSizeChange = useCallback(
-    (
-      event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-      sizeId: number | undefined,
-    ) => {
-      const { value } = event.target;
+  const handleSizeChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+    sizeId: number | undefined,
+  ) => {
+    const { value } = event.target;
 
-      if (isEditMode && sizeId && !hasChangedSize[sizeId] && !hasConfirmedSizeChange) {
-        const confirmed = window.confirm('Are you sure you want to change the size quantity?');
-        if (!confirmed) {
-          return;
-        }
-        setHasChangedSize((prev) => ({ ...prev, [sizeId]: true }));
-        setHasConfirmedSizeChange(true);
-      }
-
-      const sizeIndex = values.sizeMeasurements?.findIndex(
-        (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
-      );
-
-      if (sizeIndex === -1 || sizeIndex === undefined) {
-        if (value !== '0' && value !== '') {
-          const newSizeMeasurement = {
-            productSize: { sizeId, quantity: { value } },
-            measurements: [],
-          };
-          setFieldValue('sizeMeasurements', [
-            ...(values.sizeMeasurements || []),
-            newSizeMeasurement,
-          ]);
-        }
-      } else {
-        const quantityPath = `sizeMeasurements[${sizeIndex}].productSize.quantity.value`;
-        setFieldValue(quantityPath, value);
-      }
-
-      const lastSizeId = filteredSizes[filteredSizes.length - 1].id;
-      if (sizeId === lastSizeId) {
-        setLastSizeNonZero(value !== '0' && value !== '');
-      }
-    },
-    [values.sizeMeasurements, setFieldValue, filteredSizes, isEditMode, hasChangedSize],
-  );
-
-  const handleMeasurementChange = useCallback(
-    (
-      e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-      sizeId: number | undefined,
-      measurementNameId: number | undefined,
-    ) => {
-      const measurementValue = e.target.value;
-      const sizeIndex = values.sizeMeasurements?.findIndex(
-        (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
-      );
-
-      if (sizeIndex === -1 || sizeIndex === undefined) {
+    if (isEditMode && sizeId && !hasChangedSize[sizeId] && !hasConfirmedSizeChange) {
+      const confirmed = window.confirm('Are you sure you want to change the size quantity?');
+      if (!confirmed) {
         return;
       }
+      setHasChangedSize((prev) => ({ ...prev, [sizeId]: true }));
+      setHasConfirmedSizeChange(true);
+    }
 
-      const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
-      const currentMeasurements = values.sizeMeasurements?.[sizeIndex]?.measurements || [];
-      const measurementIndex = currentMeasurements.findIndex(
-        (m) => m.measurementNameId === measurementNameId,
-      );
+    const sizeIndex = values.sizeMeasurements?.findIndex(
+      (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
+    );
 
-      if (measurementIndex > -1) {
-        setFieldValue(
-          `${measurementsPath}[${measurementIndex}].measurementValue.value`,
-          measurementValue,
-        );
-      } else {
-        const newMeasurement = {
-          measurementNameId,
-          measurementValue: { value: measurementValue },
+    if (sizeIndex === -1 || sizeIndex === undefined) {
+      if (value !== '0' && value !== '') {
+        const newSizeMeasurement = {
+          productSize: { sizeId, quantity: { value } },
+          measurements: [],
         };
-        const updatedMeasurements = [...currentMeasurements, newMeasurement];
-        setFieldValue(measurementsPath, updatedMeasurements);
+        setFieldValue('sizeMeasurements', [...(values.sizeMeasurements || []), newSizeMeasurement]);
       }
-    },
-    [values.sizeMeasurements, setFieldValue],
-  );
+    } else {
+      const quantityPath = `sizeMeasurements[${sizeIndex}].productSize.quantity.value`;
+      setFieldValue(quantityPath, value);
+    }
+
+    const lastSizeId = filteredSizes[filteredSizes.length - 1].id;
+    if (sizeId === lastSizeId) {
+      setLastSizeNonZero(value !== '0' && value !== '');
+    }
+  };
+
+  const handleMeasurementChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+    sizeId: number | undefined,
+    measurementNameId: number | undefined,
+  ) => {
+    const measurementValue = e.target.value;
+    const sizeIndex = values.sizeMeasurements?.findIndex(
+      (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
+    );
+
+    if (sizeIndex === -1 || sizeIndex === undefined) {
+      return;
+    }
+
+    const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
+    const currentMeasurements = values.sizeMeasurements?.[sizeIndex]?.measurements || [];
+    const measurementIndex = currentMeasurements.findIndex(
+      (m) => m.measurementNameId === measurementNameId,
+    );
+
+    if (measurementIndex > -1) {
+      setFieldValue(
+        `${measurementsPath}[${measurementIndex}].measurementValue.value`,
+        measurementValue,
+      );
+    } else {
+      const newMeasurement = {
+        measurementNameId,
+        measurementValue: { value: measurementValue },
+      };
+      const updatedMeasurements = [...currentMeasurements, newMeasurement];
+      setFieldValue(measurementsPath, updatedMeasurements);
+    }
+  };
 
   return (
     <>
