@@ -44,7 +44,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
     useCategories(
       values.product?.productBody?.topCategoryId || 0,
       values.product?.productBody?.subCategoryId || 0,
-      values.product?.productBody?.typeId || 0,
+      values.product?.productBody?.typeId || undefined,
     );
 
   const filteredSizes = getFilteredSizes(
