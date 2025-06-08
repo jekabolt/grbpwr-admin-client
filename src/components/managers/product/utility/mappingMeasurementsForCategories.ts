@@ -7,13 +7,13 @@ interface MeasurementMapping {
 
 export const CATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
     'outerwear': {
-        measurements: ['shoulders', 'sleeve', 'chest', 'length']
+        measurements: ['shoulders', 'chest', 'length']
     },
     'tops': {
-        measurements: ['shoulders', 'sleeve', 'chest', 'length']
+        measurements: ['shoulders', 'length']
     },
     'bottoms': {
-        measurements: ['waist', 'length', 'inseam', 'leg-opening']
+        measurements: ['waist', 'length']
     },
     'dresses': {
         measurements: ['sleeve', 'chest', 'bottom-width', 'length']
@@ -31,17 +31,31 @@ export const CATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
 };
 
 export const SUBCATEGORY_MEASUREMENTS: { [key: string]: MeasurementMapping } = {
+    'vests': {
+        measurements: ['waist']
+    },
+    'jackets': {
+        measurements: ['sleeve']
+    },
+    'coats': {
+        measurements: ['sleeve']
+    },
     'tanks': {
-        measurements: ['shoulders', 'chest', 'length']
+        measurements: ['chest']
     },
     'crop': {
-        measurements: ['waist', 'length', 'shoulders']
+        measurements: ['waist']
     },
+    'tshirts': { measurements: ['chest', 'sleeve'] },
+    'sweaters_knits': { measurements: ['chest', 'sleeve'] },
+    'shirts': { measurements: ['chest', 'sleeve'] },
+    'hoodies_sweatshirts': { measurements: ['chest', 'sleeve'] },
+    'pants': { measurements: ['inseam', 'leg-opening'] },
     'shorts': {
-        measurements: ['waist', 'length', 'inseam', 'hips']
+        measurements: ['inseam', 'hips']
     },
     'skirts': {
-        measurements: ['waist', 'length', 'hips', 'bottom-width']
+        measurements: ['hips', 'bottom-width']
     },
     'boxers': {
         measurements: ['waist']
