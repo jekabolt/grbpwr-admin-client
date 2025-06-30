@@ -64,7 +64,7 @@ export function FeaturedArchive({
           open={open && currentEntityIndex === index}
           onClose={onClose}
           onSave={(selectedArchive) => handleSaveArchiveSelection(selectedArchive, index)}
-          selectedArchiveId={archive[index]?.[0].id ?? 0}
+          selectedArchiveId={archive[index]?.[0].mainMedia?.id ?? 0}
         />
       </Grid>
       <Grid size={{ xs: 12 }}>
@@ -108,7 +108,7 @@ export function FeaturedArchive({
                 </Grid>
               </Grid>
             ))}
-          {archive[index]?.[0].video && (
+          {archive[index]?.[0].mainMedia?.media?.fullSize?.mediaUrl && (
             <Grid
               size={{ xs: 6, md: 3 }}
               key={`video-${index}`}
@@ -122,7 +122,7 @@ export function FeaturedArchive({
                 // className={styles.item}
               >
                 <video
-                  src={archive[index]?.[0].video?.media?.fullSize?.mediaUrl}
+                  src={archive[index]?.[0].mainMedia?.media?.fullSize?.mediaUrl}
                   controls
                   playsInline
                 />

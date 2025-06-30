@@ -5,6 +5,15 @@ import { isVideo } from 'lib/features/filterContentType';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 
+// Helper function to check if media has 2:1 aspect ratio (main image)
+const isMainImage = (media: common_MediaFull): boolean => {
+  const width = media.media?.fullSize?.width;
+  const height = media.media?.fullSize?.height;
+  if (!width || !height) return false;
+  const ratio = width / height;
+  return Math.abs(ratio - 2) < 0.1; // Allow small tolerance for 2:1 ratio
+};
+
 export function ArchiveMediaDisplay({
   media,
   values,
@@ -16,10 +25,23 @@ export function ArchiveMediaDisplay({
 }) {
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down('sm'));
-  const images = media.filter((item) => !isVideo(item.media?.fullSize?.mediaUrl));
+
   const video = media.find(
-    (item) => isVideo(item.media?.fullSize?.mediaUrl) && item.id === values.videoId,
+    (item) => isVideo(item.media?.fullSize?.mediaUrl) && item.id === values.mainMediaId,
   );
+
+  const mainImage = media.find(
+    (item) =>
+      !isVideo(item.media?.fullSize?.mediaUrl) &&
+      isMainImage(item) &&
+      item.id === values.mainMediaId,
+  );
+
+  const images = media.filter((item) => {
+    if (isVideo(item.media?.fullSize?.mediaUrl)) return false;
+    if (isMainImage(item)) return false;
+    return true;
+  });
 
   return (
     <div className='space-y-2'>
@@ -41,6 +63,24 @@ export function ArchiveMediaDisplay({
           </Button>
         </div>
       )}
+
+      {mainImage && !video && (
+        <div className='w-full relative'>
+          <Media
+            src={mainImage.media?.fullSize?.mediaUrl || ''}
+            alt='archive main image'
+            aspectRatio='2/1'
+            fit='cover'
+          />
+          <Button
+            onClick={() => remove(mainImage.id || 0, values, false)}
+            className='absolute right-0 top-0'
+          >
+            <Cross1Icon />
+          </Button>
+        </div>
+      )}
+
       {images.length > 0 && (
         <div className={`grid ${isSm ? 'grid-cols-2' : 'grid-cols-4'} gap-2`}>
           {images.map((item) => (

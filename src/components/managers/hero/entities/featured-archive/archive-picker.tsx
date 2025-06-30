@@ -1,5 +1,5 @@
 import { Checkbox } from '@mui/material';
-import { common_ArchiveFull } from 'api/proto-http/frontend';
+import { common_ArchiveList } from 'api/proto-http/frontend';
 import { useArchiveStore } from 'lib/stores/archive/store';
 import { Dialog } from 'ui/components/dialog';
 
@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 interface Props {
   open: boolean;
   onClose: () => void;
-  onSave: (newSelectedArchive: common_ArchiveFull[]) => void;
+  onSave: (newSelectedArchive: common_ArchiveList[]) => void;
   selectedArchiveId: number;
 }
 
@@ -17,7 +17,7 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
   const { archives, fetchArchives } = useArchiveStore();
 
   const [data, setData] = useState(archives);
-  const [selectedArchive, setSelectedArchive] = useState<common_ArchiveFull | undefined>(undefined);
+  const [selectedArchive, setSelectedArchive] = useState<common_ArchiveList | undefined>(undefined);
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -38,7 +38,7 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
     onClose();
   }
 
-  const columns = useMemo<MRT_ColumnDef<common_ArchiveFull>[]>(
+  const columns = useMemo<MRT_ColumnDef<common_ArchiveList>[]>(
     () => [
       {
         id: 'selection',
@@ -61,8 +61,7 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
         accessorKey: 'media',
         header: 'Thumbnail',
         Cell: ({ row }) => {
-          const item = row.original.media?.[0];
-          const thumbnail = item?.media?.fullSize?.mediaUrl;
+          const thumbnail = row.original.thumbnail?.media?.fullSize?.mediaUrl;
           return thumbnail ? (
             <img src={thumbnail} alt='Thumbnail' style={{ width: '100px', height: 'auto' }} />
           ) : null;

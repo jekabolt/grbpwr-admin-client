@@ -184,7 +184,10 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
   };
 
   const handleSaveArchive = (newSelectedArchive: common_ArchiveFull[], index: number) => {
-    setFieldValue(`entities.${index}.featuredArchive.archiveId`, newSelectedArchive[0].id);
+    setFieldValue(
+      `entities.${index}.featuredArchive.archiveId`,
+      newSelectedArchive[0].archiveList?.id,
+    );
     setArchive((prevState) => ({
       ...prevState,
       [index]: newSelectedArchive,

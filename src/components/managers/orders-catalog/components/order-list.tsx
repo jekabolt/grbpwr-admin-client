@@ -13,6 +13,8 @@ export function OrderList({ rows }: { rows: common_Order[] }) {
     navigate(`${ROUTES.orders}/${params.row.uuid}`);
   };
 
+  console.log('rows', rows);
+
   return (
     <div className='w-full border-2 border-text'>
       <DataGrid

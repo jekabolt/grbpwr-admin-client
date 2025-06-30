@@ -129,8 +129,8 @@ export function ListArchive() {
                 })}
               >
                 <Media
-                  src={archive.media?.[0]?.media?.fullSize?.mediaUrl || ''}
-                  type={isVideo(archive.media?.[0]?.media?.fullSize?.mediaUrl) ? 'video' : 'image'}
+                  src={archive.thumbnail?.media?.fullSize?.mediaUrl || ''}
+                  type={isVideo(archive.thumbnail?.media?.fullSize?.mediaUrl) ? 'video' : 'image'}
                   controls={false}
                   alt='archive media'
                 />

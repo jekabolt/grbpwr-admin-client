@@ -1,8 +1,8 @@
 import { common_ArchiveInsert } from "api/proto-http/admin";
-import { common_ArchiveFull } from "api/proto-http/frontend";
+import { common_ArchiveFull, common_ArchiveList } from "api/proto-http/frontend";
 
 export interface ArchiveStore {
-    archives: common_ArchiveFull[];
+    archives: common_ArchiveList[];
     archiveItems: common_ArchiveFull | undefined;
     isLoading: boolean;
     hasMore: boolean;

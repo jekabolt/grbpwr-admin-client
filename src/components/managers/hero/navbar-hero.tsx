@@ -1,6 +1,6 @@
 import { Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull } from 'api/proto-http/admin';
-import { common_ArchiveFull } from 'api/proto-http/frontend';
+import { common_ArchiveList } from 'api/proto-http/frontend';
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { Field, useFormikContext } from 'formik';
 import { useHeroStore } from 'lib/stores/hero/store';
@@ -40,7 +40,7 @@ export function NavbarHero() {
   }
 
   const handleSaveArchiveSelection = (
-    selectedArchive: common_ArchiveFull[],
+    selectedArchive: common_ArchiveList[],
     type: 'men' | 'women',
   ) => {
     if (selectedArchive.length > 0) {

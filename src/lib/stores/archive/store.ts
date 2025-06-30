@@ -39,8 +39,12 @@ export const useArchiveStore = create<ArchiveStore>((set, get) => ({
         set({ isLoading: true, error: null });
         try {
             const archive = get().archives.find((a) => a.id === id);
-            const response = await getArchiveItems({ id, heading: archive?.heading || 'string', tag: archive?.tag || 'string' });
-            set({ archiveItems: response.archive, isLoading: false })
+            const response = await getArchiveItems({
+                id,
+                heading: archive?.heading || 'string',
+                tag: archive?.tag || 'string',
+            });
+            set({ archiveItems: response.archive, isLoading: false });
         } catch (error) {
             set({ error: 'Failed to fetch archive items', isLoading: false })
         }
