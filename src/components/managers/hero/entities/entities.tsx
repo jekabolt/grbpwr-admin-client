@@ -4,7 +4,6 @@ import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { Field, useFormikContext } from 'formik';
 import { useHeroStore } from 'lib/stores/hero/store';
 import { FC, useEffect, useState } from 'react';
-// import styles from 'styles/hero.scss';
 import { removeEntityIndex } from '../utility/arrayHelpers';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity/common-entity';

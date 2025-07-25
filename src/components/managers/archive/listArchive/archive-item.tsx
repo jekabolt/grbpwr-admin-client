@@ -1,7 +1,6 @@
 import { common_ArchiveList } from 'api/proto-http/frontend';
-import { useArchiveStore } from 'lib/stores/archive/store';
-import { useEffect } from 'react';
 import { ArchiveForm } from '../form/form';
+import { useArchiveDetails } from '../utility/useArchive';
 
 interface Props {
   archiveData: common_ArchiveList | undefined;
@@ -9,21 +8,47 @@ interface Props {
 }
 
 export function ArchiveItem({ archiveData, close }: Props) {
-  const { archiveItems, fetchArchiveItems, clearArchiveItems } = useArchiveStore();
-
-  useEffect(() => {
-    if (archiveData) {
-      fetchArchiveItems(archiveData.id);
-    }
-
-    return () => {
-      clearArchiveItems();
-    };
-  }, [archiveData]);
+  const {
+    data: archiveItems,
+    isLoading,
+    error,
+  } = useArchiveDetails(archiveData?.id, {
+    heading: archiveData?.heading || 'string',
+    tag: archiveData?.tag || 'string',
+  });
 
   function handleClose() {
-    clearArchiveItems();
     close();
+  }
+
+  if (!archiveData) return null;
+
+  if (isLoading) {
+    return (
+      <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
+        <div className='bg-white p-8 rounded-lg'>
+          <div>Loading archive details...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
+        <div className='bg-white p-8 rounded-lg'>
+          <div className='text-red-500 mb-4'>
+            Error loading archive: {error instanceof Error ? error.message : 'Unknown error'}
+          </div>
+          <button
+            onClick={handleClose}
+            className='px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600'
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const initialValues = {
@@ -40,12 +65,10 @@ export function ArchiveItem({ archiveData, close }: Props) {
     ...(archiveItems?.mainMedia?.media?.fullSize?.mediaUrl ? [archiveItems.mainMedia] : []),
   ];
 
-  if (!archiveData) return null;
-
   return (
     <ArchiveForm
       open={archiveData.id != null}
-      onClose={() => handleClose()}
+      onClose={handleClose}
       initialValues={initialValues}
       archiveId={archiveData.id}
       existingMedia={existingMedia}

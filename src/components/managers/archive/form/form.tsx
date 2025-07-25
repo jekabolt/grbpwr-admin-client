@@ -2,13 +2,13 @@ import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
 import { Field, Form, Formik, FormikProps } from 'formik';
 import { isVideo } from 'lib/features/filterContentType';
-import { useArchiveStore } from 'lib/stores/archive/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Dialog } from 'ui/components/dialog';
 import Input from 'ui/components/input';
 import { ArchiveMediaDisplay } from '../utility/archive-items-media';
+import { useCreateArchive, useUpdateArchive } from '../utility/useArchive';
 
 // Helper function to check if media has 2:1 aspect ratio
 const isMainImage = (media: common_MediaFull): boolean => {
@@ -44,9 +44,14 @@ export function ArchiveForm({
   existingMedia,
 }: ArchiveFormProps) {
   const { showMessage } = useSnackBarStore();
-  const { addArchive: addArchiveStore, updateArchive: updateArchiveStore } = useArchiveStore();
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [showMediaSelector, setShowMediaSelector] = useState(!archiveId);
+
+  // TanStack Query mutations
+  const createArchiveMutation = useCreateArchive();
+  const updateArchiveMutation = useUpdateArchive();
+
+  const isSubmitting = createArchiveMutation.isPending || updateArchiveMutation.isPending;
 
   const handleMediaSelect = (
     media: common_MediaFull,
@@ -136,13 +141,14 @@ export function ArchiveForm({
   async function handleSubmit(values: common_ArchiveInsert) {
     try {
       if (archiveId) {
-        await updateArchiveStore(archiveId, values);
+        await updateArchiveMutation.mutateAsync({ id: archiveId, archiveData: values });
         showMessage('Archive updated', 'success');
       } else {
-        await addArchiveStore(values);
+        await createArchiveMutation.mutateAsync(values);
         showMessage('Archive created', 'success');
       }
       setSelectedMedia([]);
+      onClose();
     } catch (error) {
       showMessage(`Failed to ${archiveId ? 'update' : 'create'} archive`, 'error');
     }
@@ -157,18 +163,24 @@ export function ArchiveForm({
     if (!id) return;
     try {
       if (isVideo || isMainImage) {
-        await updateArchiveStore(archiveId || 0, {
-          ...values,
-          mainMediaId: undefined,
-          thumbnailId: undefined,
+        await updateArchiveMutation.mutateAsync({
+          id: archiveId || 0,
+          archiveData: {
+            ...values,
+            mainMediaId: undefined,
+            thumbnailId: undefined,
+          },
         });
       } else {
         const updatedItems = values.mediaIds
           ?.filter((mediaId) => mediaId !== id)
           .filter((id): id is number => id !== undefined);
-        await updateArchiveStore(archiveId || 0, {
-          ...values,
-          mediaIds: updatedItems,
+        await updateArchiveMutation.mutateAsync({
+          id: archiveId || 0,
+          archiveData: {
+            ...values,
+            mediaIds: updatedItems,
+          },
         });
       }
       showMessage('Archive item deleted', 'success');
@@ -278,7 +290,7 @@ export function ArchiveForm({
                     save selection
                   </Button>
                 ) : (
-                  <Button type='submit' size='lg'>
+                  <Button type='submit' size='lg' disabled={isSubmitting}>
                     {archiveId ? 'update' : 'create'} archive
                   </Button>
                 )}

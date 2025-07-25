@@ -1,6 +1,6 @@
 import { Checkbox } from '@mui/material';
 import { common_ArchiveList } from 'api/proto-http/frontend';
-import { useArchiveStore } from 'lib/stores/archive/store';
+import { useArchives } from 'components/managers/archive/utility/useArchive';
 import { Dialog } from 'ui/components/dialog';
 
 import { MaterialReactTable, MRT_ColumnDef, useMaterialReactTable } from 'material-react-table';
@@ -14,23 +14,19 @@ interface Props {
 }
 
 export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Props) {
-  const { archives, fetchArchives } = useArchiveStore();
-
-  const [data, setData] = useState(archives);
   const [selectedArchive, setSelectedArchive] = useState<common_ArchiveList | undefined>(undefined);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(0);
+  const limit = 50;
+
+  const { data: archives, isLoading, error, refetch } = useArchives(limit, currentPage * limit);
 
   useEffect(() => {
     if (open) {
       const initialSelection = archives?.find((archive) => archive.id === selectedArchiveId);
       setSelectedArchive(initialSelection);
-      fetchArchives(50, 0);
+      refetch(); // Ensure fresh data when opening
     }
-  }, [open, currentPage]);
-
-  useEffect(() => {
-    setData(archives);
-  }, [archives]);
+  }, [open, selectedArchiveId, archives, refetch]);
 
   function handleSave() {
     if (!selectedArchive) return;
@@ -68,7 +64,6 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
         },
         enableGlobalFilter: false,
       },
-
       {
         accessorKey: 'tag',
         header: 'Tag',
@@ -84,11 +79,14 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
   const table = useMaterialReactTable({
     autoResetPageIndex: false,
     columns,
-    data,
+    data: archives || [],
+    state: {
+      isLoading,
+    },
     initialState: {
       pagination: {
         pageSize: 50,
-        pageIndex: 1,
+        pageIndex: 0,
       },
     },
     muiPaginationProps: {
@@ -96,7 +94,23 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
       showFirstButton: false,
       showLastButton: false,
     },
+    onPaginationChange: (updater) => {
+      if (typeof updater === 'function') {
+        const newPagination = updater({ pageIndex: currentPage, pageSize: limit });
+        setCurrentPage(newPagination.pageIndex);
+      }
+    },
   });
+
+  if (error) {
+    return (
+      <Dialog open={open} onClose={onClose} title='select archive'>
+        <div className='text-red-500 p-4'>
+          Error loading archives: {error instanceof Error ? error.message : 'Unknown error'}
+        </div>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onClose={onClose} title='select archive' isSaveButton save={handleSave}>
