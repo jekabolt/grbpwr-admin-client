@@ -16,7 +16,8 @@ import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { StoreProvider } from 'lib/stores/store-provider';
 import { createRoot } from 'react-dom/client';
-import { HashRouter, Route, Routes } from 'react-router-dom';
+import { HashRouter, Outlet, Route, Routes } from 'react-router-dom';
+import { Layout } from 'ui/layout';
 import './global.css';
 
 const container = document.getElementById('root') ?? document.body;
@@ -40,6 +41,14 @@ const theme = createTheme({
   },
 });
 
+const ProtectedLayout = () => (
+  <ProtectedRoute>
+    <Layout>
+      <Outlet />
+    </Layout>
+  </ProtectedRoute>
+);
+
 root.render(
   <ThemeProvider theme={theme}>
     <StoreProvider>
@@ -48,102 +57,20 @@ root.render(
           <HashRouter>
             <Routes>
               <Route path={ROUTES.login} element={<LoginBlock />} />
-              <Route
-                path={ROUTES.main}
-                element={
-                  <ProtectedRoute>
-                    <Analitic />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.media}
-                element={
-                  <ProtectedRoute>
-                    <MediaManager />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.singleProduct}
-                element={
-                  <ProtectedRoute>
-                    <Product />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.product}
-                element={
-                  <ProtectedRoute>
-                    <ProductsCatalog />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.addProduct}
-                element={
-                  <ProtectedRoute>
-                    <Product />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={`${ROUTES.copyProduct}/:id`}
-                element={
-                  <ProtectedRoute>
-                    <Product />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.hero}
-                element={
-                  <ProtectedRoute>
-                    <Hero />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.promo}
-                element={
-                  <ProtectedRoute>
-                    <Promo />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.archive}
-                element={
-                  <ProtectedRoute>
-                    <Archive />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.settings}
-                element={
-                  <ProtectedRoute>
-                    <Settings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.orderDetails}
-                element={
-                  <ProtectedRoute>
-                    <OrderDetails />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.orders}
-                element={
-                  <ProtectedRoute>
-                    <OrdersCatalog />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path='/' element={<ProtectedLayout />}>
+                <Route path={ROUTES.main} element={<Analitic />} />
+                <Route path={ROUTES.media} element={<MediaManager />} />
+                <Route path={ROUTES.singleProduct} element={<Product />} />
+                <Route path={ROUTES.product} element={<ProductsCatalog />} />
+                <Route path={ROUTES.addProduct} element={<Product />} />
+                <Route path={`${ROUTES.copyProduct}/:id`} element={<Product />} />
+                <Route path={ROUTES.hero} element={<Hero />} />
+                <Route path={ROUTES.promo} element={<Promo />} />
+                <Route path={ROUTES.archive} element={<Archive />} />
+                <Route path={ROUTES.settings} element={<Settings />} />
+                <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
+                <Route path={ROUTES.orders} element={<OrdersCatalog />} />
+              </Route>
             </Routes>
           </HashRouter>
         </QueryClientProvider>

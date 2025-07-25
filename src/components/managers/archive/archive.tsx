@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
-import { Layout } from 'ui/layout';
 import { ArchiveForm } from './form/form';
 import { ListArchive } from './listArchive/list-archive';
 
@@ -10,7 +9,7 @@ export function Archive() {
   const closeModal = () => setIsModalOpen(false);
 
   return (
-    <Layout>
+    <>
       <Button
         size='lg'
         onClick={openModal}
@@ -22,6 +21,6 @@ export function Archive() {
       <ListArchive />
 
       <ArchiveForm open={isModalOpen} onClose={closeModal} />
-    </Layout>
+    </>
   );
 }

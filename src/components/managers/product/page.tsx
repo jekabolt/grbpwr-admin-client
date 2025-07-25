@@ -4,7 +4,6 @@ import { productInitialValues } from 'constants/product/initial-values';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { Layout } from 'ui/layout';
 import { ProductForm } from './components/product-form';
 import { createProductPayload, handleFormReset } from './utility/form';
 
@@ -70,7 +69,7 @@ export const Product: FC = () => {
   };
 
   return (
-    <Layout>
+    <>
       <ProductForm
         initialProductState={initialValues}
         isEditMode={isEditMode}
@@ -80,6 +79,6 @@ export const Product: FC = () => {
         onSubmit={handleFormSubmit}
         onEditModeChange={setIsEditMode}
       />
-    </Layout>
+    </>
   );
 };
