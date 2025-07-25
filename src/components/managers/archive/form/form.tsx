@@ -2,13 +2,22 @@ import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
 import { Field, Form, Formik, FormikProps } from 'formik';
 import { isVideo } from 'lib/features/filterContentType';
-import { useArchiveStore } from 'lib/stores/archive/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Dialog } from 'ui/components/dialog';
 import Input from 'ui/components/input';
 import { ArchiveMediaDisplay } from '../utility/archive-items-media';
+import { useCreateArchive, useUpdateArchive } from '../utility/useArchive';
+
+// Helper function to check if media has 2:1 aspect ratio
+const isMainImage = (media: common_MediaFull): boolean => {
+  const width = media.media?.fullSize?.width;
+  const height = media.media?.fullSize?.height;
+  if (!width || !height) return false;
+  const ratio = width / height;
+  return Math.abs(ratio - 2) < 0.1; // Allow small tolerance for 2:1 ratio
+};
 
 interface ArchiveFormProps {
   open: boolean;
@@ -23,7 +32,8 @@ const defaultInitialValues: common_ArchiveInsert = {
   description: '',
   tag: '',
   mediaIds: [],
-  videoId: undefined,
+  mainMediaId: undefined,
+  thumbnailId: undefined,
 };
 
 export function ArchiveForm({
@@ -34,9 +44,14 @@ export function ArchiveForm({
   existingMedia,
 }: ArchiveFormProps) {
   const { showMessage } = useSnackBarStore();
-  const { addArchive: addArchiveStore, updateArchive: updateArchiveStore } = useArchiveStore();
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [showMediaSelector, setShowMediaSelector] = useState(!archiveId);
+
+  // TanStack Query mutations
+  const createArchiveMutation = useCreateArchive();
+  const updateArchiveMutation = useUpdateArchive();
+
+  const isSubmitting = createArchiveMutation.isPending || updateArchiveMutation.isPending;
 
   const handleMediaSelect = (
     media: common_MediaFull,
@@ -45,7 +60,30 @@ export function ArchiveForm({
   ) => {
     if (isVideo(media.media?.fullSize?.mediaUrl)) {
       const newSelectedMedia = selectedMedia.filter(
-        (item) => !isVideo(item.media?.fullSize?.mediaUrl),
+        (item) => !isVideo(item.media?.fullSize?.mediaUrl) && !isMainImage(item),
+      );
+
+      if (formik?.values.videoId !== media.id) {
+        formik?.setFieldValue('videoId', media.id);
+
+        if (formik?.values.mediaIds?.includes(media.id)) {
+          formik?.setFieldValue(
+            'mediaIds',
+            formik.values.mediaIds.filter((id: number) => id !== media.id),
+          );
+        }
+
+        setSelectedMedia([...newSelectedMedia, media]);
+      } else {
+        formik?.setFieldValue('videoId', undefined);
+        setSelectedMedia(newSelectedMedia);
+      }
+      return;
+    }
+
+    if (isMainImage(media)) {
+      const newSelectedMedia = selectedMedia.filter(
+        (item) => !isVideo(item.media?.fullSize?.mediaUrl) && !isMainImage(item),
       );
 
       if (formik?.values.videoId !== media.id) {
@@ -73,32 +111,44 @@ export function ArchiveForm({
       return;
     }
 
-    const existingImages = selectedMedia.filter((item) => !isVideo(item.media?.fullSize?.mediaUrl));
-    const newSelectedMedia = allowMultiple
+    const existingImages = selectedMedia.filter(
+      (item) => !isVideo(item.media?.fullSize?.mediaUrl) && !isMainImage(item),
+    );
+
+    const newSelectedImages = allowMultiple
       ? existingImages.some((item) => item.id === media.id)
         ? existingImages.filter((item) => item.id !== media.id)
         : [...existingImages, media]
       : [media];
 
-    const existingVideo = selectedMedia.find((item) => isVideo(item.media?.fullSize?.mediaUrl));
-    setSelectedMedia(existingVideo ? [...newSelectedMedia, existingVideo] : newSelectedMedia);
+    const existingVideoOrMainImage = selectedMedia.find(
+      (item) => isVideo(item.media?.fullSize?.mediaUrl) || isMainImage(item),
+    );
+
+    const finalSelectedMedia = [
+      ...newSelectedImages,
+      ...(existingVideoOrMainImage ? [existingVideoOrMainImage] : []),
+    ];
+
+    setSelectedMedia(finalSelectedMedia);
 
     formik?.setFieldValue(
       'mediaIds',
-      newSelectedMedia.map((media) => media.id),
+      newSelectedImages.map((media) => media.id),
     );
   };
 
   async function handleSubmit(values: common_ArchiveInsert) {
     try {
       if (archiveId) {
-        await updateArchiveStore(archiveId, values);
+        await updateArchiveMutation.mutateAsync({ id: archiveId, archiveData: values });
         showMessage('Archive updated', 'success');
       } else {
-        await addArchiveStore(values);
+        await createArchiveMutation.mutateAsync(values);
         showMessage('Archive created', 'success');
       }
       setSelectedMedia([]);
+      onClose();
     } catch (error) {
       showMessage(`Failed to ${archiveId ? 'update' : 'create'} archive`, 'error');
     }
@@ -108,21 +158,29 @@ export function ArchiveForm({
     id: number,
     values: common_ArchiveInsert,
     isVideo?: boolean,
+    isMainImage?: boolean,
   ) {
     if (!id) return;
     try {
-      if (isVideo) {
-        await updateArchiveStore(archiveId || 0, {
-          ...values,
-          videoId: undefined,
+      if (isVideo || isMainImage) {
+        await updateArchiveMutation.mutateAsync({
+          id: archiveId || 0,
+          archiveData: {
+            ...values,
+            mainMediaId: undefined,
+            thumbnailId: undefined,
+          },
         });
       } else {
         const updatedItems = values.mediaIds
           ?.filter((mediaId) => mediaId !== id)
           .filter((id): id is number => id !== undefined);
-        await updateArchiveStore(archiveId || 0, {
-          ...values,
-          mediaIds: updatedItems,
+        await updateArchiveMutation.mutateAsync({
+          id: archiveId || 0,
+          archiveData: {
+            ...values,
+            mediaIds: updatedItems,
+          },
         });
       }
       showMessage('Archive item deleted', 'success');
@@ -137,9 +195,11 @@ export function ArchiveForm({
   ) => {
     try {
       const existingImages =
-        existingMedia?.filter((media) => !isVideo(media.media?.fullSize?.mediaUrl)) || [];
+        existingMedia?.filter(
+          (media) => !isVideo(media.media?.fullSize?.mediaUrl) && !isMainImage(media),
+        ) || [];
       const selectedImages = selectedMedia.filter(
-        (media) => !isVideo(media.media?.fullSize?.mediaUrl),
+        (media) => !isVideo(media.media?.fullSize?.mediaUrl) && !isMainImage(media),
       );
 
       const existingImageIds = existingImages.map((media) => media.id);
@@ -150,7 +210,11 @@ export function ArchiveForm({
       );
 
       const selectedVideo = selectedMedia.find((media) => isVideo(media.media?.fullSize?.mediaUrl));
-      const videoId = selectedVideo?.id;
+      const selectedMainImage = selectedMedia.find(
+        (media) => !isVideo(media.media?.fullSize?.mediaUrl) && isMainImage(media),
+      );
+
+      const videoId = selectedVideo?.id || selectedMainImage?.id;
 
       setShowMediaSelector(false);
       formik.setFieldValue('mediaIds', combinedMediaIds);
@@ -184,7 +248,14 @@ export function ArchiveForm({
               <div className='h-full overflow-y-scroll no-scroll-bar'>
                 {archiveId && !showMediaSelector ? (
                   <ArchiveMediaDisplay
-                    remove={(id, values, isVideo) => handleDeleteArchiveItem(id, values, isVideo)}
+                    remove={(id, values, isVideo) => {
+                      const media = [...(existingMedia || []), ...selectedMedia].find(
+                        (m) => m.id === id,
+                      );
+                      const isMainImg =
+                        media && !isVideo && isMainImage(media) && values.mainMediaId === id;
+                      handleDeleteArchiveItem(id, values, isVideo, isMainImg);
+                    }}
                     media={[...(existingMedia || []), ...selectedMedia]}
                     values={formik.values}
                   />
@@ -194,7 +265,7 @@ export function ArchiveForm({
                       handleMediaSelect(media, allowMultiple, formik)
                     }
                     selectedMedia={selectedMedia}
-                    aspectRatio={['3:4', '16:9']}
+                    aspectRatio={['3:4', '16:9', '9:16', '2:1']}
                     isDeleteAccepted={false}
                     allowMultiple
                     hideVideos={false}
@@ -219,7 +290,7 @@ export function ArchiveForm({
                     save selection
                   </Button>
                 ) : (
-                  <Button type='submit' size='lg'>
+                  <Button type='submit' size='lg' disabled={isSubmitting}>
                     {archiveId ? 'update' : 'create'} archive
                   </Button>
                 )}

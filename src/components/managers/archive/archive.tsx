@@ -18,7 +18,9 @@ export function Archive() {
       >
         create new
       </Button>
+
       <ListArchive />
+
       <ArchiveForm open={isModalOpen} onClose={closeModal} />
     </Layout>
   );

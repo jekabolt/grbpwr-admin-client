@@ -1,5 +1,5 @@
 import { common_MediaFull, common_Product } from "api/proto-http/admin";
-import { common_ArchiveFull, common_HeroEntity } from "api/proto-http/frontend";
+import { common_ArchiveFull, common_ArchiveList, common_HeroEntity } from "api/proto-http/frontend";
 import { FieldArrayRenderProps } from "formik";
 
 
@@ -43,6 +43,6 @@ export interface FeatureArchiveProps {
     currentEntityIndex: number | null;
     open: boolean;
     onClose: () => void;
-    handleSaveArchiveSelection: (newSelectedArchive: common_ArchiveFull[], index: number) => void;
+    handleSaveArchiveSelection: (newSelectedArchive: common_ArchiveList[], index: number) => void;
     handleOpenArchiveSelection: (index: number) => void;
 }

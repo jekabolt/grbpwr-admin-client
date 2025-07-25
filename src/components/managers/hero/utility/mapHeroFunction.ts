@@ -65,7 +65,7 @@ export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_Hero
                 exploreText: entity.featuredProductsTag?.products?.exploreText,
             },
             featuredArchive: {
-                archiveId: entity.featuredArchive?.archive?.id,
+                archiveId: entity.featuredArchive?.archive?.archiveList?.id,
                 tag: entity.featuredArchive?.tag,
                 headline: entity.featuredArchive?.headline,
                 exploreText: entity.featuredArchive?.exploreText,

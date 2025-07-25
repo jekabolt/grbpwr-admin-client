@@ -1,6 +1,7 @@
 import { Button, Checkbox } from '@mui/material';
 
-import { common_Product } from 'api/proto-http/admin';
+import { getProductsPaged } from 'api/admin';
+import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
 import { useDictionaryStore } from 'lib/stores/store';
 import {
   MaterialReactTable,
@@ -31,34 +32,37 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   const categories = useDictionaryStore((state) => state.dictionary?.categories || []);
 
   const [currentPage, setCurrentPage] = useState(1);
-  // const [filter, setFilter] = useState<GetProductsPagedRequest>(undefined);
+  const [filter, setFilter] = useState<GetProductsPagedRequest | undefined>(undefined);
   const newLimit = 50;
   const offset = calculateOffset(currentPage, newLimit);
 
-  // useEffect(() => {
-  //   if (open) {
-  //     const fetchProducts = async () => {
-  //       const response = await getProductsPaged({
-  //         ...filter,
-  //         limit: newLimit,
-  //         offset: offset,
-  //       });
-  //       if (Array.isArray(response.products)) {
-  //         setAllProducts((prevProducts) => {
-  //           const combinedProducts = [...prevProducts, ...(response.products || [])];
-  //           const uniqueProducts = combinedProducts.reduce<common_Product[]>((acc, current) => {
-  //             if (!acc.find((product) => product.id === current.id)) {
-  //               acc.push(current);
-  //             }
-  //             return acc;
-  //           }, []);
-  //           return uniqueProducts;
-  //         });
-  //       }
-  //     };
-  //     fetchProducts();
-  //   }
-  // }, [open, currentPage, filter, newLimit, offset]);
+  useEffect(() => {
+    if (open) {
+      const fetchProducts = async () => {
+        const response = await getProductsPaged({
+          limit: newLimit,
+          offset: offset,
+          sortFactors: filter?.sortFactors || ['SORT_FACTOR_CREATED_AT'],
+          orderFactor: filter?.orderFactor || 'ORDER_FACTOR_DESC',
+          filterConditions: filter?.filterConditions || undefined,
+          showHidden: filter?.showHidden || false,
+        });
+        if (Array.isArray(response.products)) {
+          setAllProducts((prevProducts) => {
+            const combinedProducts = [...prevProducts, ...(response.products || [])];
+            const uniqueProducts = combinedProducts.reduce<common_Product[]>((acc, current) => {
+              if (!acc.find((product) => product.id === current.id)) {
+                acc.push(current);
+              }
+              return acc;
+            }, []);
+            return uniqueProducts;
+          });
+        }
+      };
+      fetchProducts();
+    }
+  }, [open, currentPage, filter, newLimit, offset]);
 
   useEffect(() => {
     setData(allProducts);

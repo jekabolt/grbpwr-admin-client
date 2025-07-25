@@ -13,10 +13,25 @@ export const DragDrop: FC = () => {
   const processFiles = async (files: FileList) => {
     if (files && files.length > 0) {
       const file = files[0];
-      prepareUpload({
-        selectedFiles: [file],
-        selectedFileUrl: await getBase64File(file),
-      });
+
+      // Check file size (50MB limit for videos, 10MB for images)
+      const maxSize = file.type.startsWith('video/') ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        const maxSizeMB = maxSize / (1024 * 1024);
+        showMessage(`File too large. Maximum size: ${maxSizeMB}MB`, 'error');
+        return;
+      }
+
+      try {
+        const base64Url = await getBase64File(file);
+        prepareUpload({
+          selectedFiles: [file],
+          selectedFileUrl: base64Url,
+        });
+      } catch (error) {
+        showMessage('Failed to process file. File may be corrupted or too large.', 'error');
+        console.error('File processing error:', error);
+      }
     }
   };
 

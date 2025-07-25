@@ -69,7 +69,14 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
                 showMessage('MEDIA IS UPLOADED', 'success');
                 await get().fetchFiles(20, 0);
             } catch (error) {
-                throw new Error('Upload failed');
+                console.error('Upload error:', error);
+
+                // More specific error messages
+                if (contentType.startsWith('video')) {
+                    throw new Error('Video upload failed. File may be too large or format not supported.');
+                } else {
+                    throw new Error('Image upload failed. Please try again.');
+                }
             }
         };
 
@@ -97,8 +104,13 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
 
                 await processAndUpload(base64, contentType);
             } else if (checkIsHttpHttpsMediaLink(url)) {
+                // Extract file extension from URL
+                const urlPath = new URL(url).pathname;
+                const fileExtension = urlPath.split('.').pop()?.toLowerCase();
+                const contentType = filterExtensionToContentType[fileExtension || ''] || 'image/jpeg';
+
                 const baseData64 = await getBase64ImageFromUrl(url);
-                await processAndUpload(baseData64, 'image');
+                await processAndUpload(baseData64, contentType);
             } else {
                 throw new Error('No media to upload');
             }

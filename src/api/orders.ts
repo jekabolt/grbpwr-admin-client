@@ -1,7 +1,11 @@
-import { adminService, frontService } from './admin';
+import { adminService } from './admin';
 import {
   DeliveredOrderRequest,
   DeliveredOrderResponse,
+
+  GetOrderByUUIDRequest,
+
+  GetOrderByUUIDResponse,
 
   ListOrdersRequest,
   ListOrdersResponse,
@@ -10,14 +14,14 @@ import {
   SetTrackingNumberRequest,
   SetTrackingNumberResponse,
 } from './proto-http/admin';
-import { GetOrderByUUIDRequest, GetOrderByUUIDResponse } from './proto-http/frontend';
+
 
 export function getOrdersList(request: ListOrdersRequest): Promise<ListOrdersResponse> {
   return adminService.ListOrders(request);
 }
 
 export function getOrderByUUID(request: GetOrderByUUIDRequest): Promise<GetOrderByUUIDResponse> {
-  return frontService.GetOrderByUUID(request);
+  return adminService.GetOrderByUUID(request);
 }
 
 export function setTrackingNumberUpdate(
