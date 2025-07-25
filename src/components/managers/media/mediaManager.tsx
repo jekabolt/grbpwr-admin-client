@@ -2,13 +2,6 @@ import { MediaSelector } from 'components/managers/media/media-selector/componen
 
 export const MediaManager = () => {
   return (
-    <>
-      <MediaSelector
-        select={() => {}}
-        selectedMedia={[]}
-        allowMultiple={false}
-        enableModal={true}
-      />
-    </>
+    <MediaSelector select={() => {}} selectedMedia={[]} allowMultiple={false} enableModal={true} />
   );
 };

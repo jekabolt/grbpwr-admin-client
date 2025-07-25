@@ -1,9 +1,10 @@
-import {
-    deleteFiles,
-    getAllUploadedFiles,
-    uploadContentImage,
-    uploadContentVideo
-} from "api/admin";
+// import {
+//     deleteFiles,
+//     getAllUploadedFiles,
+//     uploadContentImage,
+//     uploadContentVideo
+// } from "api/admin";
+import { adminService } from "api/api";
 import { common_MediaFull } from "api/proto-http/admin";
 import { checkIsHttpHttpsMediaLink } from 'lib/features/checkIsHttpHttpsLink';
 import { isVideo } from "lib/features/filterContentType";
@@ -61,10 +62,10 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
         const processAndUpload = async (baseData64: string, contentType: string) => {
             try {
                 if (contentType.startsWith('image')) {
-                    await uploadContentImage({ rawB64Image: baseData64 });
+                    await adminService.UploadContentImage({ rawB64Image: baseData64 });
                 } else if (contentType.startsWith('video')) {
                     const raw = trimBeforeBase64(baseData64);
-                    await uploadContentVideo({ raw, contentType });
+                    await adminService.UploadContentVideo({ raw, contentType });
                 }
                 showMessage('MEDIA IS UPLOADED', 'success');
                 await get().fetchFiles(20, 0);
@@ -130,7 +131,7 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
     fetchFiles: async (limit: number, offset: number): Promise<common_MediaFull[]> => {
         set({ status: { isLoading: true, error: null } });
         try {
-            const response = await getAllUploadedFiles({
+            const response = await adminService.ListObjectsPaged({
                 limit,
                 offset,
                 orderFactor: 'ORDER_FACTOR_DESC',
@@ -171,7 +172,7 @@ export const useMediaSelectorStore = create<MediaSelectorStore>((set, get) => ({
 
         set({ status: { isLoading: true, error: null } });
         try {
-            await deleteFiles({ id });
+            await adminService.DeleteFromBucket({ id });
             set(state => ({
                 media: state.media.filter(file => file.id !== id),
                 status: { isLoading: false, error: null }

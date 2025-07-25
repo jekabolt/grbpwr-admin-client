@@ -1,4 +1,4 @@
-import { getProductByID, upsertProduct } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 import { productInitialValues } from 'constants/product/initial-values';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -23,7 +23,7 @@ export const Product: FC = () => {
 
   const fetchProduct = async () => {
     if (id) {
-      const response = await getProductByID({ id: parseInt(id) });
+      const response = await adminService.GetProductByID({ id: parseInt(id) });
       setProduct(response.product);
       setInitialValues(productInitialValues(response.product));
     }
@@ -47,7 +47,7 @@ export const Product: FC = () => {
       }
 
       const payload = createProductPayload(values, id, isCopyMode);
-      await upsertProduct(payload);
+      await adminService.UpsertProduct(payload);
 
       showMessage(id && !isCopyMode ? 'product updated' : 'product uploaded', 'success');
       handleFormReset(id, isCopyMode, resetForm, setInitialValues);

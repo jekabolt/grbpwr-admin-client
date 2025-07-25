@@ -1,5 +1,5 @@
+import { adminService } from 'api/api';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
-import { updateSettings } from 'api/settings';
 import { useDictionaryStore, useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -51,7 +51,7 @@ export function Settings() {
     if (!settings) return;
     try {
       setIsLoading(true);
-      await updateSettings(settings);
+      await adminService.UpdateSettings(settings);
       showMessage('Settings updated successfully', 'success');
       setIsChanged(false);
       await fetchDictionary(true);

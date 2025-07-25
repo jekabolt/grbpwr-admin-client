@@ -1,4 +1,4 @@
-import { getProductsPaged } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import debounce from 'lodash/debounce';
@@ -19,7 +19,7 @@ export default function ProductsCatalog() {
 
   const debouncedFetch = useCallback(
     debounce(async (params) => {
-      const response = await getProductsPaged({
+      const response = await adminService.GetProductsPaged({
         limit: ITEMS_PER_PAGE,
         offset: 0,
         ...getProductPagedParans(params),

@@ -1,4 +1,4 @@
-import { login } from 'api/auth';
+import { authService } from 'api/api';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
@@ -28,7 +28,7 @@ export const LoginBlock: FC = () => {
 
   const handleLoginSubmit = async (values: LoginFormValues, { setSubmitting }: any) => {
     try {
-      const response = await login(values);
+      const response = await authService.Login(values);
       if (!response.authToken) throw new Error('Invalid credentials');
       localStorage.setItem('authToken', response.authToken);
       navigate(ROUTES.main, { replace: true });
