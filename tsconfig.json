@@ -8,7 +8,9 @@
     "lib": ["dom", "esnext"],
     "strict": true,
     "sourceMap": true,
-    "target": "esnext"
+    "target": "esnext",
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "include": ["src", "global.d.ts"],
   "exclude": ["node_modules"]

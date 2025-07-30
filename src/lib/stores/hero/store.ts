@@ -1,6 +1,5 @@
-import { getHero } from "api/hero";
 
-import { addHero } from "api/hero";
+import { adminService, frontendService } from "api/api";
 import { create } from "zustand";
 import { HeroStore } from "./store-types";
 
@@ -8,7 +7,7 @@ export const useHeroStore = create<HeroStore>((set) => ({
     hero: undefined,
     entities: [],
     fetchHero: async () => {
-        const response = await getHero({});
+        const response = await frontendService.GetHero({});
         if (!response) return;
 
         const heroEntities = response.hero?.entities || [];
@@ -16,7 +15,7 @@ export const useHeroStore = create<HeroStore>((set) => ({
     },
     saveHero: async (values) => {
         try {
-            await addHero({ hero: values });
+            await adminService.AddHero({ hero: values });
             await useHeroStore.getState().fetchHero();
             return { success: true, invalidUrls: [], nonAllowedDomainUrls: [] };
         } catch (error) {

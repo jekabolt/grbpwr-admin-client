@@ -4,18 +4,18 @@ import { common_MediaFull, common_MediaItem } from 'api/proto-http/admin';
 import { MediaSelectorMediaListProps } from 'components/managers/media/media-selector/interfaces/mediaSelectorInterfaces';
 import { aspectRatioColor, mediaAspectRatio } from 'lib/features/aspect-ratio';
 import { isVideo } from 'lib/features/filterContentType';
-import { useMediaSelectorStore } from 'lib/stores/media/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { FC, useEffect, useRef, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
-import { FilterMedias } from './filterMedias';
-import { FullSizeMediaModal } from './fullSizeMediaModal';
 
-const ITEMS_PER_PAGE = 16;
+import { MEDIA_TYPE_OPTIONS, ORDER_FILTER_OPTIONS } from 'constants/filter';
+import Selector from 'ui/components/selector';
+import { useMedia } from './useMedia';
+import { useDeleteMedia, useInfiniteMedia } from './useMediaQuery';
 
 export const MediaList: FC<MediaSelectorMediaListProps> = ({
   allowMultiple,
@@ -27,34 +27,42 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
   select,
   onModalStateChange,
 }) => {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteMedia();
+  const media = data?.pages.flatMap((page) => page.media) || [];
+  const deleteMediaMutation = useDeleteMedia();
+  const {
+    mediaTypeFilter,
+    orderFilter,
+    videoSizes,
+    filteredMedia,
+    handleVideoLoad,
+    setMediaTypeFilter,
+    setOrderFilter,
+  } = useMedia({
+    media,
+    hideVideos,
+    aspectRatio,
+  });
   const { showMessage } = useSnackBarStore();
-  const { getSortedMedia, fetchFiles, deleteFile } = useMediaSelectorStore();
-  const sortedMedia = getSortedMedia();
   const [openModal, setOpenModal] = useState(false);
   const [clickedMedia, setClickedMedia] = useState<common_MediaItem | undefined>();
   const [hoverMedia, setHoverMedia] = useState<number | undefined>();
   const [confirmDeletionId, setConfirmDeletionId] = useState<number | undefined>();
-  const [videoSizes, setVideoSizes] = useState<Record<number, { width: number; height: number }>>(
-    {},
-  );
-  const pageRef = useRef(2);
-  const hasMoreRef = useRef(true);
-  const [isLoading, setIsLoading] = useState(false);
+
   const { ref, inView } = useInView();
-
-  const handleCloseModal = () => setOpenModal(false);
-
   const isSelected = (id: number) => selectedMedia?.some((item) => item.id === id);
 
   useEffect(() => {
-    fetchFiles(ITEMS_PER_PAGE, 0);
-  }, [fetchFiles]);
-
-  useEffect(() => {
-    if (onModalStateChange) {
-      onModalStateChange(openModal);
+    if (inView && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
     }
-  }, [openModal, onModalStateChange]);
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // useEffect(() => {
+  //   if (onModalStateChange) {
+  //     onModalStateChange(openModal);
+  //   }
+  // }, [openModal, onModalStateChange]);
 
   const handleSelect = (media: common_MediaFull | undefined, event: React.MouseEvent) => {
     event.stopPropagation();
@@ -66,107 +74,56 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
     }
   };
 
-  const handleVideoLoad = (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => {
-    const video = event.target as HTMLVideoElement;
-    setVideoSizes((prev) => ({
-      ...prev,
-      [mediaId]: {
-        width: video.videoWidth,
-        height: video.videoHeight,
-      },
-    }));
-  };
-
-  const filteredMedia = sortedMedia.filter((media) => {
-    if (hideVideos && isVideo(media.media?.thumbnail?.mediaUrl)) {
-      return false;
-    }
-
-    const isVideoMedia = isVideo(media.media?.thumbnail?.mediaUrl);
-
-    if (aspectRatio) {
-      if (isVideoMedia) {
-        if (!videoSizes[media.id || 0]) {
-          return true;
-        }
-
-        const mediaRatio = mediaAspectRatio(media, videoSizes);
-        return mediaRatio && aspectRatio.includes(mediaRatio);
-      } else {
-        const mediaRatio = mediaAspectRatio(media, videoSizes);
-        return mediaRatio && aspectRatio.includes(mediaRatio);
-      }
-    }
-
-    return true;
-  });
-
   const handleDeleteFile = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
 
     if (confirmDeletionId === id) {
-      const { success } = await deleteFile(id);
-      if (success) {
+      try {
+        await deleteMediaMutation.mutateAsync(id);
         showMessage('MEDIA WAS SUCCESSFULLY DELETED', 'success');
-      } else {
+        setConfirmDeletionId(undefined);
+      } catch (error) {
         showMessage('MEDIA CANNOT BE REMOVED', 'error');
+        setConfirmDeletionId(undefined);
       }
-      setConfirmDeletionId(undefined);
     } else {
       setConfirmDeletionId(id);
     }
   };
 
-  useEffect(() => {
-    const loadMoreData = async () => {
-      if (!hasMoreRef.current || isLoading) return;
-      setIsLoading(true);
-
-      try {
-        const fetchedFiles = await fetchFiles(
-          ITEMS_PER_PAGE,
-          (pageRef.current - 1) * ITEMS_PER_PAGE,
-        );
-
-        pageRef.current += 1;
-
-        if (fetchedFiles?.length < ITEMS_PER_PAGE) {
-          hasMoreRef.current = false;
-        }
-      } catch (error) {
-        console.error('Failed to fetch media:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (inView && hasMoreRef.current) {
-      loadMoreData();
-    }
-  }, [inView, isLoading, fetchFiles]);
-
   return (
     <div className='w-full space-y-4'>
-      <div className='lg:w-96 w-full'>
-        <FilterMedias />
+      <div className='w-40'>
+        <Selector
+          label='Media Type'
+          value={mediaTypeFilter}
+          options={MEDIA_TYPE_OPTIONS}
+          onChange={(value) => setMediaTypeFilter(value)}
+        />
+        <Selector
+          label='Order'
+          value={orderFilter}
+          options={ORDER_FILTER_OPTIONS}
+          onChange={(value) => setOrderFilter(value)}
+        />
       </div>
       <div className='grid grid-cols-2 md:grid-cols-6 gap-2'>
-        {filteredMedia.map((media) => (
-          <div key={media.id} className='flex flex-col gap-1'>
+        {filteredMedia.map((m) => (
+          <div key={m.id} className='flex flex-col gap-1'>
             <div
               className='relative cursor-pointer group'
-              onClick={(event) => handleSelect(media, event)}
-              onMouseEnter={() => setHoverMedia(media.id)}
+              onClick={(event) => handleSelect(m, event)}
+              onMouseEnter={() => setHoverMedia(m.id)}
               onMouseLeave={() => setHoverMedia(undefined)}
             >
-              <label htmlFor={`${media.id}`} className='block'>
+              <label htmlFor={`${m.id}`} className='block'>
                 <Text
                   variant='selected'
                   component='span'
                   className={cn(
                     'absolute hidden top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 p-2 bg-black/50',
                     {
-                      block: isSelected(media.id || 0),
+                      block: isSelected(m.id || 0),
                     },
                   )}
                 >
@@ -174,24 +131,24 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
                 </Text>
 
                 <Media
-                  alt={media.media?.thumbnail?.mediaUrl || ''}
-                  src={media.media?.thumbnail?.mediaUrl || ''}
-                  type={isVideo(media.media?.thumbnail?.mediaUrl) ? 'video' : 'image'}
-                  controls={isVideo(media.media?.thumbnail?.mediaUrl)}
+                  alt={m.media?.thumbnail?.mediaUrl || ''}
+                  src={m.media?.thumbnail?.mediaUrl || ''}
+                  type={isVideo(m.media?.thumbnail?.mediaUrl) ? 'video' : 'image'}
+                  controls={isVideo(m.media?.thumbnail?.mediaUrl)}
                   onLoadedMetadata={
-                    isVideo(media.media?.thumbnail?.mediaUrl)
-                      ? (e: any) => handleVideoLoad(media.id || 0, e)
+                    isVideo(m.media?.thumbnail?.mediaUrl)
+                      ? (e: any) => handleVideoLoad(m.id || 0, e)
                       : undefined
                   }
                 />
               </label>
 
-              {hoverMedia === media.id && isDeleteAccepted && (
+              {hoverMedia === m.id && isDeleteAccepted && (
                 <Button
                   className='absolute top-0 right-0'
-                  onClick={(e: any) => handleDeleteFile(media.id || 0, e)}
+                  onClick={(e: any) => handleDeleteFile(m.id || 0, e)}
                 >
-                  {confirmDeletionId === media.id ? <CheckIcon /> : <ClearIcon />}
+                  {confirmDeletionId === m.id ? <CheckIcon /> : <ClearIcon />}
                 </Button>
               )}
             </div>
@@ -199,24 +156,25 @@ export const MediaList: FC<MediaSelectorMediaListProps> = ({
               variant='uppercase'
               className='text-center'
               style={{
-                backgroundColor: mediaAspectRatio(media, videoSizes)
-                  ? aspectRatioColor(mediaAspectRatio(media, videoSizes))
+                backgroundColor: mediaAspectRatio(m, videoSizes)
+                  ? aspectRatioColor(mediaAspectRatio(m, videoSizes))
                   : '#808080',
               }}
             >
-              {mediaAspectRatio(media, videoSizes)
-                ? `ratio: ${mediaAspectRatio(media, videoSizes)}`
+              {mediaAspectRatio(m, videoSizes)
+                ? `ratio: ${mediaAspectRatio(m, videoSizes)}`
                 : 'ratio: unknown'}
             </Text>
           </div>
         ))}
       </div>
-      {hasMoreRef.current && (
-        <div ref={ref} className='text-center text-xl'>
-          Loading...
+      {hasNextPage && (
+        <div ref={ref} className='flex justify-center p-4'>
+          {isFetchingNextPage && <div>Loading more media...</div>}
         </div>
       )}
-      <FullSizeMediaModal open={openModal} clickedMedia={clickedMedia} close={handleCloseModal} />
+
+      {/* <FullSizeMediaModal open={openModal} clickedMedia={clickedMedia} close={handleCloseModal} /> */}
     </div>
   );
 };

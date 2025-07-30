@@ -4,7 +4,6 @@ import { Field, FieldArray, Form, Formik } from 'formik';
 import { useHeroStore } from 'lib/stores/hero/store';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useRef } from 'react';
-import { Layout } from 'ui/layout';
 // import styles from 'styles/hero.scss';
 import { Entities } from './entities/entities';
 import { NavbarHero } from './navbar-hero';
@@ -47,57 +46,51 @@ export const Hero: FC = () => {
   };
 
   return (
-    <Layout>
-      <Formik
-        initialValues={mapHeroFunction(hero)}
-        validationSchema={heroValidationSchema}
-        enableReinitialize
-        onSubmit={handleSaveHero}
-      >
-        {({ handleSubmit }) => (
-          <Form onSubmit={handleSubmit}>
-            <FieldArray
-              name='entities'
-              render={(arrayHelpers) => (
-                <Grid
-                  container
-                  spacing={2}
-                  // className={styles.entities_container}
-                >
-                  <Grid size={{ xs: 12, md: 7 }}>
-                    <Field component={NavbarHero} />
-                  </Grid>
-                  <Grid size={{ xs: 12 }}>
-                    <Field
-                      component={Entities}
-                      entityRefs={entityRefs}
-                      arrayHelpers={arrayHelpers}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12 }}>
-                    <Field
-                      component={SelectHeroType}
-                      arrayHelpers={arrayHelpers}
-                      entityRefs={entityRefs}
-                    />
-                  </Grid>
-                </Grid>
-              )}
-            />
-
-            <Grid container>
-              <Button
-                type='submit'
-                variant='contained'
-                color='primary'
-                sx={{ position: 'fixed', bottom: '20px', right: '20px' }}
+    <Formik
+      initialValues={mapHeroFunction(hero)}
+      validationSchema={heroValidationSchema}
+      enableReinitialize
+      onSubmit={handleSaveHero}
+    >
+      {({ handleSubmit }) => (
+        <Form onSubmit={handleSubmit}>
+          <FieldArray
+            name='entities'
+            render={(arrayHelpers) => (
+              <Grid
+                container
+                spacing={2}
+                // className={styles.entities_container}
               >
-                Save
-              </Button>
-            </Grid>
-          </Form>
-        )}
-      </Formik>
-    </Layout>
+                <Grid size={{ xs: 12, md: 7 }}>
+                  <Field component={NavbarHero} />
+                </Grid>
+                <Grid size={{ xs: 12 }}>
+                  <Field component={Entities} entityRefs={entityRefs} arrayHelpers={arrayHelpers} />
+                </Grid>
+                <Grid size={{ xs: 12 }}>
+                  <Field
+                    component={SelectHeroType}
+                    arrayHelpers={arrayHelpers}
+                    entityRefs={entityRefs}
+                  />
+                </Grid>
+              </Grid>
+            )}
+          />
+
+          <Grid container>
+            <Button
+              type='submit'
+              variant='contained'
+              color='primary'
+              sx={{ position: 'fixed', bottom: '20px', right: '20px' }}
+            >
+              Save
+            </Button>
+          </Grid>
+        </Form>
+      )}
+    </Formik>
   );
 };

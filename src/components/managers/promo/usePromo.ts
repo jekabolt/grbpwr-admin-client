@@ -1,4 +1,5 @@
-import { addPromo, getPromo } from "api/promo";
+// import { addPromo, getPromo } from "api/promo";
+import { adminService } from "api/api";
 import { common_PromoCode, common_PromoCodeInsert } from "api/proto-http/admin";
 import { useSnackBarStore } from "lib/stores/store";
 import { useCallback, useState } from "react";
@@ -15,7 +16,7 @@ const usePromo = (initialIsLoading = false, initialHasMore = true): {
 
     const fetchPromos = useCallback(async (limit: number, startOffset: number) => {
         setIsLoading(true)
-        const response = await getPromo({
+        const response = await adminService.ListPromos({
             limit,
             offset: startOffset,
             orderFactor: 'ORDER_FACTOR_DESC'
@@ -29,7 +30,7 @@ const usePromo = (initialIsLoading = false, initialHasMore = true): {
     const createNewPromo = useCallback(async (newPromo: common_PromoCodeInsert) => {
 
         try {
-            await addPromo({ promo: newPromo })
+            await adminService.AddPromo({ promo: newPromo })
             showMessage('PROMO CREATED', 'success');
             fetchPromos(50, 0)
         } catch (error) {

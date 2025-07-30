@@ -1,7 +1,5 @@
 import { Cross1Icon } from '@radix-ui/react-icons';
 import { common_MediaFull, common_ProductNew } from 'api/proto-http/admin';
-import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
-import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
 import { useFormikContext } from 'formik';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useMemo, useState } from 'react';
@@ -74,7 +72,7 @@ export const MediaView: FC<MediaViewInterface> = ({
   return (
     <div>
       <div className='flex flex-col gap-4'>
-        <SingleMediaViewAndSelect
+        {/* <SingleMediaViewAndSelect
           link={
             imagePreviewUrl ||
             product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl
@@ -85,7 +83,7 @@ export const MediaView: FC<MediaViewInterface> = ({
           aspectRatio={['4:5']}
           hideVideos={true}
           saveSelectedMedia={uploadThumbnailInProduct}
-        />
+        /> */}
         {!values.product?.thumbnailMediaId && <Text variant='error'>thumbnail is required</Text>}
         <div className='grid grid-cols-2 gap-2'>
           {selectedMedia.map((m) => (
@@ -104,7 +102,7 @@ export const MediaView: FC<MediaViewInterface> = ({
               )}
             </div>
           ))}
-          {(isAddingProduct || isEditMode) && (
+          {/* {(isAddingProduct || isEditMode) && (
             <div className='w-full h-auto flex items-center justify-center border border-text'>
               <MediaSelectorLayout
                 label='select media'
@@ -115,7 +113,7 @@ export const MediaView: FC<MediaViewInterface> = ({
                 hideVideos={false}
               />
             </div>
-          )}
+          )} */}
         </div>
         {errors.mediaIds && <Text variant='error'>{errors.mediaIds}</Text>}
       </div>

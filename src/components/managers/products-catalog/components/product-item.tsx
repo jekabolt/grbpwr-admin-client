@@ -1,5 +1,5 @@
 import { CheckIcon, Cross1Icon } from '@radix-ui/react-icons';
-import { deleteProductByID } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
@@ -26,7 +26,7 @@ export function ProductItem({
   async function handleDeleteItem(id: number | undefined, e: React.MouseEvent) {
     e.stopPropagation();
     if (confirmDelete === id) {
-      const response = await deleteProductByID({ id });
+      const response = await adminService.DeleteProductByID({ id });
       if (response) {
         showMessage('PRODUCT WAS SUCCESSFULLY DELETED', 'success');
         setConfirmDelete(undefined);

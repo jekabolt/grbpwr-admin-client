@@ -1,5 +1,4 @@
 import { Box, Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
-import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { Field } from 'formik';
 import { useState } from 'react';
 import { Props } from '../interface/interface';
@@ -63,13 +62,13 @@ export function CommonEntity({
             </Button>
           </Box>
         )}
-        <SingleMediaViewAndSelect
+        {/* <SingleMediaViewAndSelect
           link={currentMediaUrl}
           aspectRatio={getCurrentAspectRatio()}
           isDeleteAccepted={false}
           saveSelectedMedia={handleMediaSave}
           isEditMode
-        />
+        /> */}
         <Box sx={{ mt: 2 }}>
           <Field
             as={TextField}

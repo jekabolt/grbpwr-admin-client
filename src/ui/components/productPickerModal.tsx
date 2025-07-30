@@ -1,6 +1,7 @@
 import { Button, Checkbox } from '@mui/material';
 
-import { getProductsPaged } from 'api/admin';
+// import { getProductsPaged } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
 import { useDictionaryStore } from 'lib/stores/store';
 import {
@@ -39,7 +40,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   useEffect(() => {
     if (open) {
       const fetchProducts = async () => {
-        const response = await getProductsPaged({
+        const response = await adminService.GetProductsPaged({
           limit: newLimit,
           offset: offset,
           sortFactors: filter?.sortFactors || ['SORT_FACTOR_CREATED_AT'],
