@@ -9,7 +9,6 @@ export const calculateAspectRatio = (width?: number, height?: number): string | 
     return `${width / divisor}:${height / divisor}`;
 };
 
-
 export const mediaAspectRatio = (
     media: common_MediaFull,
     videoSizes: Record<number, { width: number; height: number }>,
@@ -19,16 +18,17 @@ export const mediaAspectRatio = (
     return calculateAspectRatio(width, height);
 };
 
-export const aspectRatioColor = (aspectRatio?: string) => {
-    const colorMap: Record<string, string> = {
-        '16:9': '#cc0000',
-        '4:3': '#e69138',
-        '2:1': '#c0c0c0',
-        '1:1': '#f1c232',
-        '4:5': '#6aa84f',
-        '3:4': '#45818e',
-        '5:4': '#3d85c6',
-        '9:16': '#674ea7',
-    };
-    return colorMap[aspectRatio || ''] || '#808080';
+const ASPECT_RATIO_CLASSES: Record<string, string> = {
+    '16:9': 'bg-red-600',
+    '4:3': 'bg-orange-500',
+    '2:1': 'bg-gray-300',
+    '1:1': 'bg-yellow-400',
+    '4:5': 'bg-green-500',
+    '3:4': 'bg-cyan-600',
+    '5:4': 'bg-blue-500',
+    '9:16': 'bg-purple-600',
+} as const;
+
+export const getAspectRatioBackgroundClass = (aspectRatio?: string): string => {
+    return ASPECT_RATIO_CLASSES[aspectRatio || ''] || 'bg-gray-500';
 };

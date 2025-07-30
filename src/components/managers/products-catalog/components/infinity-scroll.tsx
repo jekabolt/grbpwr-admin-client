@@ -35,7 +35,10 @@ export function InfinityScroll({ firstItems }: Props) {
     setIsLoading(true);
 
     try {
-      const params = Object.fromEntries(searchParams.entries());
+      const params: Record<string, string> = {};
+      searchParams.forEach((value, key) => {
+        params[key] = value;
+      });
       const offset = (pageRef.current - 1) * ITEMS_PER_PAGE;
 
       const response = await adminService.GetProductsPaged({

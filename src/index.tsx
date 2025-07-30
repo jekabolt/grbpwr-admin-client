@@ -4,7 +4,7 @@ import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
 import { Archive } from 'components/managers/archive/archive';
 import { Hero } from 'components/managers/hero/hero';
-import { MediaManager } from 'components/managers/media/mediaManager';
+import { MediaLayout } from 'components/managers/new-media';
 import { OrderDetails } from 'components/managers/order/page';
 import { OrdersCatalog } from 'components/managers/orders-catalog/page';
 import { Analitic } from 'components/managers/page';
@@ -59,7 +59,7 @@ root.render(
               <Route path={ROUTES.login} element={<LoginBlock />} />
               <Route path='/' element={<ProtectedLayout />}>
                 <Route path={ROUTES.main} element={<Analitic />} />
-                <Route path={ROUTES.media} element={<MediaManager />} />
+                <Route path={ROUTES.media} element={<MediaLayout disabled={true} />} />
                 <Route path={ROUTES.singleProduct} element={<Product />} />
                 <Route path={ROUTES.product} element={<ProductsCatalog />} />
                 <Route path={ROUTES.addProduct} element={<Product />} />

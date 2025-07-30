@@ -1,7 +1,6 @@
 import { Button, Grid2 as Grid, TextField, Typography } from '@mui/material';
 import { common_HeroFullInsert, common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveList } from 'api/proto-http/frontend';
-import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { Field, useFormikContext } from 'formik';
 import { useHeroStore } from 'lib/stores/hero/store';
 import { useEffect, useState } from 'react';
@@ -69,13 +68,13 @@ export function NavbarHero() {
         <Grid container spacing={2}>
           <Grid size={{ xs: 12, md: 6 }} sx={{ display: 'grid', gap: 2 }}>
             <Typography textTransform='uppercase'>men</Typography>
-            <SingleMediaViewAndSelect
+            {/* <SingleMediaViewAndSelect
               link={menMedia}
               aspectRatio={['1:1']}
               isDeleteAccepted={false}
               saveSelectedMedia={(media) => saveNavbarMedia(media, 'men')}
               isEditMode
-            />
+            /> */}
             <Field
               as={TextField}
               name={`navFeatured.men.exploreText`}
@@ -113,13 +112,13 @@ export function NavbarHero() {
           </Grid>
           <Grid size={{ xs: 12, md: 6 }} sx={{ display: 'grid', gap: 2 }}>
             <Typography textTransform='uppercase'>women</Typography>
-            <SingleMediaViewAndSelect
+            {/* <SingleMediaViewAndSelect
               link={womenMedia}
               aspectRatio={['1:1']}
               isDeleteAccepted={false}
               saveSelectedMedia={(media) => saveNavbarMedia(media, 'women')}
               isEditMode
-            />
+            /> */}
             <Field
               as={TextField}
               name={`navFeatured.women.exploreText`}

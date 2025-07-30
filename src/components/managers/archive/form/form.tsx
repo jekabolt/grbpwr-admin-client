@@ -1,5 +1,5 @@
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
+// import { MediaSelector } from 'components/managers/media/media-selector/components/mediaSelector';
 import { Field, Form, Formik, FormikProps } from 'formik';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -260,16 +260,18 @@ export function ArchiveForm({
                     values={formik.values}
                   />
                 ) : (
-                  <MediaSelector
-                    select={(media, allowMultiple) =>
-                      handleMediaSelect(media, allowMultiple, formik)
-                    }
-                    selectedMedia={selectedMedia}
-                    aspectRatio={['3:4', '16:9', '9:16', '2:1']}
-                    isDeleteAccepted={false}
-                    allowMultiple
-                    hideVideos={false}
-                  />
+                  // <MediaSelector
+                  //   select={(media, allowMultiple) =>
+                  //     handleMediaSelect(media, allowMultiple, formik)
+                  //   }
+                  //   selectedMedia={selectedMedia}
+                  //   aspectRatio={['3:4', '16:9', '9:16', '2:1']}
+                  //   isDeleteAccepted={false}
+                  //   allowMultiple
+                  //   hideVideos={false}
+                  // />
+                  // TODO: add media selector
+                  <p>media selector</p>
                 )}
               </div>
 
