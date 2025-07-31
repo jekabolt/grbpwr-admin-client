@@ -1,6 +1,6 @@
 import { TextField } from '@mui/material';
 import { common_ProductNew } from 'api/proto-http/admin';
-import { composition } from 'constants/garment-composition';
+import { composition, CompositionStructure } from 'constants/garment-composition';
 import { useFormikContext } from 'formik';
 import { FC, useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -10,61 +10,81 @@ interface CompositionProps {
   isAddingProduct: boolean;
   isEditMode?: boolean;
 }
-interface SelectedInstructions {
-  [key: string]: {
-    code: string;
-    percentage: number;
-  };
-}
 
 export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode }) => {
   const { values, setFieldValue } = useFormikContext<common_ProductNew>();
   const [isCompositionModalOpen, setIsCompositionModalOpen] = useState(false);
-  const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>({});
+  const [selectedComposition, setSelectedComposition] = useState<CompositionStructure>({});
 
-  const handleSelectComposition = (newInstructions: SelectedInstructions) => {
-    let updatedInstructions: SelectedInstructions;
-    updatedInstructions = newInstructions;
+  // Parse composition from string to new structure (for backward compatibility)
+  const parseOldComposition = (compositionString: string): CompositionStructure => {
+    if (!compositionString) return {};
 
-    setSelectedInstructions(updatedInstructions);
-
-    const formattedValue = Object.values(updatedInstructions)
-      .filter((item) => item.percentage > 0)
-      .map((item) => `${item.code}:${item.percentage}`)
-      .join(',');
-
-    setFieldValue('product.productBody.composition', formattedValue);
-  };
-
-  const handleOpenCompositionModal = () => {
-    const currentComposition = values.product?.productBody?.composition || '';
-    const instructions = currentComposition
+    const instructions = compositionString
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
 
-    const currentInstructions = instructions.reduce((acc, item) => {
-      const [code, percentage] = item.split(':').map((s) => s.trim());
-      if (code) {
-        let foundKey = '';
-        Object.values(composition.garment_composition).forEach((category) => {
-          Object.entries(category).forEach(([key, value]) => {
-            if (value === code) {
-              foundKey = key;
-            }
-          });
-        });
+    const bodyItems = instructions
+      .map((item) => {
+        const [code, percentage] = item.split(':').map((s) => s.trim());
+        return {
+          code,
+          percent: parseInt(percentage) || 0,
+        };
+      })
+      .filter((item) => item.code);
 
-        if (foundKey) {
-          acc[foundKey] = {
-            code,
-            percentage: parseInt(percentage) || 0,
-          };
+    return bodyItems.length > 0 ? { body: bodyItems } : {};
+  };
+
+  // Convert new structure to display string
+  const formatCompositionForDisplay = (compositionStructure: CompositionStructure): string => {
+    const parts: string[] = [];
+
+    Object.entries(compositionStructure).forEach(([partKey, items]) => {
+      if (items && items.length > 0) {
+        const partName =
+          composition.garment_parts[partKey as keyof typeof composition.garment_parts];
+        const itemsString = items
+          .filter((item: any) => item.percent > 0)
+          .map((item: any) => `${item.code}:${item.percent}%`)
+          .join(', ');
+
+        if (itemsString) {
+          parts.push(`${partName}: ${itemsString}`);
         }
       }
-      return acc;
-    }, {} as SelectedInstructions);
-    setSelectedInstructions(currentInstructions);
+    });
+
+    return parts.join(' | ');
+  };
+
+  const handleSelectComposition = (newComposition: CompositionStructure) => {
+    setSelectedComposition(newComposition);
+
+    // Store composition as JSON string
+    const compositionValue =
+      Object.keys(newComposition).length > 0 ? JSON.stringify(newComposition) : '';
+
+    setFieldValue('product.productBody.composition', compositionValue);
+  };
+
+  const handleOpenCompositionModal = () => {
+    const currentCompositionValue = values.product?.productBody?.composition || '';
+    let parsedComposition: CompositionStructure = {};
+
+    if (currentCompositionValue) {
+      try {
+        // Try to parse as JSON
+        parsedComposition = JSON.parse(currentCompositionValue);
+      } catch {
+        // Fall back to old string format parsing for backward compatibility
+        parsedComposition = parseOldComposition(currentCompositionValue);
+      }
+    }
+
+    setSelectedComposition(parsedComposition);
     setIsCompositionModalOpen(true);
   };
 
@@ -74,6 +94,23 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
 
   const handleClearCompositionField = () => {
     setFieldValue('product.productBody.composition', '');
+    setSelectedComposition({});
+  };
+
+  // Get display value
+  const getDisplayValue = (): string => {
+    const currentCompositionValue = values.product?.productBody?.composition || '';
+
+    if (!currentCompositionValue) return '';
+
+    try {
+      // Try to parse as JSON
+      const parsedComposition = JSON.parse(currentCompositionValue);
+      return formatCompositionForDisplay(parsedComposition);
+    } catch {
+      // Fall back to displaying the old format as-is for backward compatibility
+      return currentCompositionValue;
+    }
   };
 
   return (
@@ -82,7 +119,7 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
         <TextField
           fullWidth
           name='product.productBody.composition'
-          value={values.product?.productBody?.composition || ''}
+          value={getDisplayValue()}
           label='Composition'
           slotProps={{
             input: {
@@ -107,7 +144,7 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
       </div>
       <CompositionModal
         isOpen={isCompositionModalOpen}
-        selectedInstructions={selectedInstructions}
+        selectedComposition={selectedComposition}
         selectComposition={handleSelectComposition}
         onClose={handleCloseCompositionModal}
       />

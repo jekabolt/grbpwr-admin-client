@@ -65,5 +65,31 @@ export const composition = {
             "Sable Fur": "SAB",
             "Zibeline": "ZIB"
         }
+    },
+    "garment_parts": {
+        "body": "Body",
+        "trim": "Trim",
+        "lining": "Lining",
+        "part": "Part",
+        "facing": "Facing",
+        "pocket_bag": "Pocket Bag",
+        "interlining": "Interlining",
+        "drawcord": "Drawcord"
     }
+}
+
+export interface CompositionItem {
+    code: string;
+    percent: number;
+}
+
+export interface CompositionStructure {
+    body?: CompositionItem[];
+    trim?: CompositionItem[];
+    lining?: CompositionItem[];
+    part?: CompositionItem[];
+    facing?: CompositionItem[];
+    pocket_bag?: CompositionItem[];
+    interlining?: CompositionItem[];
+    drawcord?: CompositionItem[];
 }
