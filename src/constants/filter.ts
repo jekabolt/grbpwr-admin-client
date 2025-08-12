@@ -74,8 +74,18 @@ export const colors: Colors[] = [
     { "name": "Hot Pink", "hex": "#FF69B4" }
 ]
 
-
 export const STATUS = {
     confirmed: 'bg-green-300',
     denied: 'bg-red-300',
 };
+
+export const MEDIA_TYPE_OPTIONS = [
+    { value: 'all', label: `all` },
+    { value: 'image', label: `image` },
+    { value: 'video', label: `video` },
+]
+
+export const ORDER_FILTER_OPTIONS = [
+    { value: 'asc', label: `asc` },
+    { value: 'desc', label: `desc` },
+]

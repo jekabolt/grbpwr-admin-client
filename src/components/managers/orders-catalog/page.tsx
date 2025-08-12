@@ -1,9 +1,8 @@
-import { getOrdersList } from 'api/orders';
+import { adminService } from 'api/api';
 import { common_Order, ListOrdersRequest } from 'api/proto-http/admin';
 import { PAGE_SIZE } from 'constants/filter';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
-import { Layout } from 'ui/layout';
 import Filter from './components/filter';
 import { OrderList } from './components/order-list';
 
@@ -35,7 +34,7 @@ export function OrdersCatalog() {
         orderFactor: filters.orderFactor || 'ORDER_FACTOR_DESC',
       };
 
-      const response = await getOrdersList(requestParams);
+      const response = await adminService.ListOrders(requestParams);
       if (append) {
         setOrders((prev) => [...prev, ...(response.orders || [])]);
       } else {
@@ -56,14 +55,12 @@ export function OrdersCatalog() {
   };
 
   return (
-    <Layout>
-      <div className='flex flex-col pb-10 gap-5'>
-        <Filter onSearch={fetchOrders} loading={loading} />
-        <OrderList rows={orders} />
-        <Button className='lg:self-start' size='lg' onClick={loadMore} disabled={!hasMore}>
-          load more
-        </Button>
-      </div>
-    </Layout>
+    <div className='flex flex-col pb-10 gap-5'>
+      <Filter onSearch={fetchOrders} loading={loading} />
+      <OrderList rows={orders} />
+      <Button className='lg:self-start' size='lg' onClick={loadMore} disabled={!hasMore}>
+        load more
+      </Button>
+    </div>
   );
 }
