@@ -1,16 +1,17 @@
 import { cn } from 'lib/utility';
 
-interface Props {
+export interface InputProps {
   type?: 'text' | 'password' | 'number' | 'file' | 'email';
   name: string;
   className?: string;
   [k: string]: any;
 }
 
-function Input({ type = 'text', name, className, ...props }: Props) {
+function Input({ type = 'text', name, className, ref, ...props }: InputProps) {
   return (
     <input
       id={name}
+      ref={ref}
       type={type}
       className={cn(
         'w-full focus:bg-bgColor focus:outline-none focus:border-2 border border-inactive focus:border-text px-1',

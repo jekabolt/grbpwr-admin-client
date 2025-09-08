@@ -12,6 +12,7 @@ interface SingleMediaView {
   aspectRatio?: string[];
   hideVideos?: boolean;
   isDeleteAccepted?: boolean;
+  aspectOnPreview?: string;
   saveSelectedMedia: (newSelectedMedia: common_MediaFull[]) => void;
 }
 
@@ -20,19 +21,22 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   isEditMode,
   isAddingProduct,
   aspectRatio = ['4/5'],
+  aspectOnPreview = '4/5',
   hideVideos,
   isDeleteAccepted,
   saveSelectedMedia,
 }) => {
   return (
-    <div className='flex items-center justify-center relative group'>
+    <div className='flex items-center justify-center  relative group border border-red-500'>
       <div className='w-full'>
         {link && (
           <Media
+            aspectRatio={aspectOnPreview}
             alt={link}
             src={link}
             type={isVideo(link) ? 'video' : 'image'}
             controls={isVideo(link)}
+            fit='cover'
           />
         )}
         {(isEditMode === undefined || isEditMode || isAddingProduct) && (

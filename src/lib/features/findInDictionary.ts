@@ -45,12 +45,7 @@ export const findInDictionary = (
     case 'carrier':
       data = dictionary.shipmentCarriers?.find((s) => s.id === id)?.shipmentCarrier?.carrier;
       break;
-    case 'sortFactors':
-      data = dictionary.sortFactors
-        ?.find((s) => s.id === id)
-        ?.name?.replace(pattern[type], '')
-        .replace(/_/g, ' ');
-      break;
+
 
     default:
       return undefined;

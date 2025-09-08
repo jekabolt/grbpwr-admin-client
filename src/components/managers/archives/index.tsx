@@ -4,7 +4,7 @@ import { Layout } from 'ui/layout';
 import { ArchiveForm } from './form/form';
 import { ListArchive } from './listArchive/list-archive';
 
-export function Archive() {
+export function Archives() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const openModal = () => setIsModalOpen(true);
   const closeModal = () => setIsModalOpen(false);

@@ -2,7 +2,9 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
-import { Archive } from 'components/managers/archive/archive';
+
+import { Archives } from 'components/managers/archives';
+import { Archive } from 'components/managers/archives/archive';
 import { Hero } from 'components/managers/hero/hero';
 import { MediaManager } from 'components/managers/media/mediaManager';
 import { OrderDetails } from 'components/managers/order/page';
@@ -113,13 +115,22 @@ root.render(
                 }
               />
               <Route
-                path={ROUTES.archive}
+                path={ROUTES.singleArchive}
                 element={
                   <ProtectedRoute>
                     <Archive />
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path={ROUTES.archives}
+                element={
+                  <ProtectedRoute>
+                    <Archives />
+                  </ProtectedRoute>
+                }
+              />
+
               <Route
                 path={ROUTES.settings}
                 element={

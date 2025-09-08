@@ -13,7 +13,8 @@ export enum ROUTES {
   getHero = '/get-hero',
   promo = '/promo',
   getPromo = '/get-promo',
-  archive = '/archive',
+  archives = '/archives',
+  singleArchive = '/archive/:heading/:tag/:id',
   settings = '/settings',
   orders = '/orders',
   orderDetails = '/orders/:uuid',
@@ -42,7 +43,7 @@ export const sideBarItems = [
   },
   {
     label: 'ARCHIVE',
-    route: ROUTES.archive,
+    route: ROUTES.archives,
   },
   {
     label: 'SETTINGS',

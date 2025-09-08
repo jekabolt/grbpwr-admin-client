@@ -93,4 +93,4 @@ export function useInfiniteArchives(limit: number = 50) {
         initialPageParam: 0,
         staleTime: 5 * 60 * 1000,
     });
-} 
+}
