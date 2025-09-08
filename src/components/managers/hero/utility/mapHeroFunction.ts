@@ -1,5 +1,4 @@
 import { common_HeroFullInsert, common_HeroType } from 'api/proto-http/admin';
-import { common_HeroFull } from 'api/proto-http/frontend';
 
 
 export const heroTypes: { value: common_HeroType; label: string }[] = [
@@ -11,78 +10,100 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
     { value: 'HERO_TYPE_FEATURED_ARCHIVE', label: 'featured archive' }
 ]
 
-export const mapHeroFunction = (hero?: common_HeroFull | undefined): common_HeroFullInsert => {
+export const mapHeroFunction = (hero?: common_HeroFullInsert | undefined): common_HeroFullInsert => {
     return {
         entities: hero?.entities?.map((entity) => ({
             type: entity.type,
             main: {
-                single: {
-                    headline: entity.main?.single?.headline,
-                    mediaLandscapeId: entity.main?.single?.mediaLandscape?.id,
-                    mediaPortraitId: entity.main?.single?.mediaPortrait?.id,
-                    exploreLink: entity.main?.single?.exploreLink,
-                    exploreText: entity.main?.single?.exploreText,
-                },
-                tag: entity.main?.tag,
-                description: entity.main?.description,
+                mediaLandscapeId: entity.main?.mediaLandscapeId,
+                mediaPortraitId: entity.main?.mediaPortraitId,
+                exploreLink: entity.main?.exploreLink,
+                translations: [{
+                    languageId: 1,
+                    headline: entity.main?.translations?.[0].headline || '',
+                    exploreText: entity.main?.translations?.[0].exploreText || '',
+                    tag: entity.main?.translations?.[0].tag || '',
+                    description: entity.main?.translations?.[0].description || '',
+                }],
             },
             single: {
-                headline: entity.single?.headline,
-                mediaLandscapeId: entity.single?.mediaLandscape?.id,
-                mediaPortraitId: entity.single?.mediaPortrait?.id,
+                mediaLandscapeId: entity.single?.mediaLandscapeId,
+                mediaPortraitId: entity.single?.mediaPortraitId,
                 exploreLink: entity.single?.exploreLink,
-                exploreText: entity.single?.exploreText,
+                translations: [{
+                    languageId: 1,
+                    headline: entity.single?.translations?.[0].headline || '',
+                    exploreText: entity.single?.translations?.[0].exploreText || ''
+                }],
             },
             double: {
                 left: {
-                    headline: entity.double?.left?.headline,
-                    mediaLandscapeId: entity.double?.left?.mediaLandscape?.id,
-                    mediaPortraitId: entity.double?.left?.mediaPortrait?.id,
+                    mediaLandscapeId: entity.double?.left?.mediaLandscapeId,
+                    mediaPortraitId: entity.double?.left?.mediaPortraitId,
                     exploreLink: entity.double?.left?.exploreLink,
-                    exploreText: entity.double?.left?.exploreText,
+                    translations: [{
+                        languageId: 1,
+                        headline: entity.double?.left?.translations?.[0].headline || '',
+                        exploreText: entity.double?.left?.translations?.[0].exploreText || ''
+                    }],
                 },
                 right: {
-                    headline: entity.double?.right?.headline,
-                    mediaLandscapeId: entity.double?.right?.mediaLandscape?.id,
-                    mediaPortraitId: entity.double?.right?.mediaPortrait?.id,
+                    mediaLandscapeId: entity.double?.right?.mediaLandscapeId,
+                    mediaPortraitId: entity.double?.right?.mediaPortraitId,
                     exploreLink: entity.double?.right?.exploreLink,
-                    exploreText: entity.double?.right?.exploreText,
+                    translations: [{
+                        languageId: 1,
+                        headline: entity.double?.right?.translations?.[0].headline || '',
+                        exploreText: entity.double?.right?.translations?.[0].exploreText || ''
+                    }],
                 },
             },
             featuredProducts: {
                 productIds:
-                    entity.featuredProducts?.products
-                        ?.map((product) => product.id)
+                    entity.featuredProducts?.productIds
+                        ?.map((product) => product)
                         .filter((id): id is number => id !== undefined) || [],
-                headline: entity.featuredProducts?.headline,
                 exploreLink: entity.featuredProducts?.exploreLink,
-                exploreText: entity.featuredProducts?.exploreText,
+                translations: [{
+                    languageId: 1,
+                    headline: entity.featuredProducts?.translations?.[0].headline || '',
+                    exploreText: entity.featuredProducts?.translations?.[0].exploreText || ''
+                }],
             },
             featuredProductsTag: {
-                tag: entity.featuredProductsTag?.tag,
-                headline: entity.featuredProductsTag?.products?.headline,
-                exploreLink: entity.featuredProductsTag?.products?.exploreLink,
-                exploreText: entity.featuredProductsTag?.products?.exploreText,
+                tag: entity.featuredProductsTag?.tag || '',
+                translations: [{
+                    languageId: 1,
+                    headline: entity.featuredProductsTag?.translations?.[0].headline || '',
+                    exploreText: entity.featuredProductsTag?.translations?.[0].exploreText || ''
+                }],
             },
             featuredArchive: {
-                archiveId: entity.featuredArchive?.archive?.archiveList?.id,
+                archiveId: entity.featuredArchive?.archiveId,
                 tag: entity.featuredArchive?.tag,
-                headline: entity.featuredArchive?.headline,
-                exploreText: entity.featuredArchive?.exploreText,
+                translations: [{
+                    languageId: 1,
+                    headline: entity.featuredArchive?.translations?.[0].headline || '',
+                    exploreText: entity.featuredArchive?.translations?.[0].exploreText || ''
+                }],
             }
         })),
         navFeatured: {
             men: {
-                mediaId: hero?.navFeatured?.men?.media?.id,
-                exploreText: hero?.navFeatured?.men?.exploreText,
+                mediaId: hero?.navFeatured?.men?.mediaId,
                 featuredTag: hero?.navFeatured?.men?.featuredTag,
-                featuredArchiveId: parseInt(hero?.navFeatured?.men?.featuredArchiveId || '0')
+                featuredArchiveId: hero?.navFeatured?.men?.featuredArchiveId,
+                translations: [{
+                    languageId: 1, exploreText: hero?.navFeatured?.men?.translations?.[0].exploreText,
+                }]
             },
             women: {
-                mediaId: hero?.navFeatured?.women?.media?.id,
-                exploreText: hero?.navFeatured?.women?.exploreText,
+                mediaId: hero?.navFeatured?.women?.mediaId,
                 featuredTag: hero?.navFeatured?.women?.featuredTag,
-                featuredArchiveId: parseInt(hero?.navFeatured?.women?.featuredArchiveId || '0')
+                featuredArchiveId: hero?.navFeatured?.women?.featuredArchiveId,
+                translations: [{
+                    languageId: 1, exploreText: hero?.navFeatured?.women?.translations?.[0].exploreText,
+                }]
             }
         }
     };
@@ -93,68 +114,61 @@ export const emptyHeroForm: common_HeroFullInsert = {
         {
             type: 'HERO_TYPE_UNKNOWN' as common_HeroType,
             main: {
-                single: {
-                    mediaLandscapeId: 0,
-                    mediaPortraitId: 0,
-                    headline: '',
-                    exploreLink: '',
-                    exploreText: ''
-                },
-                tag: '',
-                description: ''
-            },
-            single: {
-                headline: '',
+
                 mediaLandscapeId: 0,
                 mediaPortraitId: 0,
                 exploreLink: '',
-                exploreText: ''
+                translations: [{ languageId: 1, headline: '', exploreText: '', tag: '', description: '' }]
+            },
+            single: {
+
+                mediaLandscapeId: 0,
+                mediaPortraitId: 0,
+                exploreLink: '',
+                translations: [{ languageId: 1, headline: '', exploreText: '' }]
             },
             double: {
                 left: {
-                    headline: '',
+
                     mediaLandscapeId: 0,
                     mediaPortraitId: 0,
                     exploreLink: '',
-                    exploreText: ''
+                    translations: [{ languageId: 1, headline: '', exploreText: '' }]
                 },
                 right: {
-                    headline: '',
+
                     mediaLandscapeId: 0,
                     mediaPortraitId: 0,
                     exploreLink: '',
-                    exploreText: ''
+                    translations: [{ languageId: 1, headline: '', exploreText: '' }]
                 }
             },
             featuredProducts: {
                 productIds: [],
-                headline: '',
                 exploreLink: '',
-                exploreText: ''
+                translations: [{ languageId: 1, headline: '', exploreText: '' }]
             },
             featuredProductsTag: {
                 tag: '',
-                headline: '',
-                exploreText: ''
+                translations: [{ languageId: 1, headline: '', exploreText: '' }]
             },
             featuredArchive: {
                 archiveId: 0,
                 tag: '',
-                headline: '',
-                exploreText: ''
+                translations: [{ languageId: 1, headline: '', exploreText: '' }]
             }
         }
     ],
     navFeatured: {
         men: {
             mediaId: 0,
-            exploreText: '',
+            translations: [{ languageId: 1, exploreText: '' }],
             featuredTag: '',
             featuredArchiveId: 0
         },
         women: {
             mediaId: 0,
-            exploreText: '',
+            translations: [{ languageId: 1, exploreText: '' }],
             featuredTag: '',
             featuredArchiveId: 0
         }

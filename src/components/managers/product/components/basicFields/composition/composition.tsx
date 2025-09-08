@@ -71,7 +71,7 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
   };
 
   const handleOpenCompositionModal = () => {
-    const currentCompositionValue = values.product?.productBody?.composition || '';
+    const currentCompositionValue = values.product?.productBodyInsert?.composition || '';
     let parsedComposition: CompositionStructure = {};
 
     if (currentCompositionValue) {
@@ -99,7 +99,7 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
 
   // Get display value
   const getDisplayValue = (): string => {
-    const currentCompositionValue = values.product?.productBody?.composition || '';
+    const currentCompositionValue = values.product?.productBodyInsert?.composition || '';
 
     if (!currentCompositionValue) return '';
 
@@ -127,7 +127,7 @@ export const Composition: FC<CompositionProps> = ({ isAddingProduct, isEditMode 
               endAdornment: (isEditMode || isAddingProduct) && (
                 <div className='flex gap-2'>
                   <Button
-                    disabled={!values.product?.productBody?.composition}
+                    disabled={!values.product?.productBodyInsert?.composition}
                     size='lg'
                     onClick={handleClearCompositionField}
                   >

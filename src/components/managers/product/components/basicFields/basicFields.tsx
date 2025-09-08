@@ -42,32 +42,33 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
 
   const { topCategoryOptions, subCategoryOptions, typeOptions, selectedTopCategoryName } =
     useCategories(
-      values.product?.productBody?.topCategoryId || 0,
-      values.product?.productBody?.subCategoryId || 0,
-      values.product?.productBody?.typeId || undefined,
+      values.product?.productBodyInsert?.topCategoryId || 0,
+      values.product?.productBodyInsert?.subCategoryId || 0,
+      values.product?.productBodyInsert?.typeId || undefined,
     );
 
   const filteredSizes = getFilteredSizes(
     dictionary,
-    values.product?.productBody?.topCategoryId || 0,
+    values.product?.productBodyInsert?.topCategoryId || 0,
   );
 
   useEffect(() => {
     if (
       isCopyMode &&
-      values.product?.productBody?.sku === product?.product?.productDisplay?.productBody?.sku
+      values.product?.productBodyInsert?.sku ===
+        product?.product?.productDisplay?.productBody?.productBodyInsert?.sku
     ) {
       const newUuid = uuidv4();
 
       const newSKU = generateSKU(
-        values.product?.productBody?.brand,
-        values.product?.productBody?.targetGender,
+        values.product?.productBodyInsert?.brand,
+        values.product?.productBodyInsert?.targetGender,
         selectedTopCategoryName,
-        values.product?.productBody?.color,
-        values.product?.productBody?.countryOfOrigin,
+        values.product?.productBodyInsert?.color,
+        values.product?.productBodyInsert?.countryOfOrigin,
         newUuid.slice(-4),
       );
-      setFieldValue('product.productBody.sku', newSKU, false);
+      setFieldValue('product.productBodyInsert.sku', newSKU, false);
     }
   }, [isCopyMode, values]);
 
@@ -84,15 +85,15 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         if (field === 'topCategoryId') {
           const selectedCategory = topCategoryOptions.find((cat) => cat.value === newValue);
           if (selectedCategory) {
-            setFieldValue('product.productBody.subCategoryId', newValue, false);
+            setFieldValue('product.productBodyInsert.subCategoryId', newValue, false);
           } else {
-            setFieldValue('product.productBody.subCategoryId', 0, false);
+            setFieldValue('product.productBodyInsert.subCategoryId', 0, false);
           }
-          setFieldValue('product.productBody.typeId', 0, false);
+          setFieldValue('product.productBodyInsert.typeId', 0, false);
         }
 
         if (field === 'subCategoryId') {
-          setFieldValue('product.productBody.typeId', 0, false);
+          setFieldValue('product.productBodyInsert.typeId', 0, false);
         }
       }
 
@@ -102,26 +103,29 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           (color) => color.name.toLowerCase().replace(/\s/g, '_') === newValue,
         );
         setFieldValue(
-          'product.productBody.colorHex',
+          'product.productBodyInsert.colorHex',
           selectedColor ? selectedColor.hex : '#000000',
           false,
         );
       }
 
-      setFieldValue(`product.productBody.${field}`, newValue);
+      setFieldValue(`product.productBodyInsert.${field}`, newValue);
 
       const categoryId =
-        field === 'topCategoryId' ? newValue : values.product?.productBody?.topCategoryId;
+        field === 'topCategoryId' ? newValue : values.product?.productBodyInsert?.topCategoryId;
       const selectedCategory = topCategoryOptions.find((cat) => cat.value === categoryId);
       const updatedProductBody = {
-        ...values.product?.productBody,
+        ...values.product?.productBodyInsert,
         [field]: newValue,
         categoryName: selectedCategory?.label,
       };
-      const newSku = generateOrUpdateSKU(values.product?.productBody?.sku, updatedProductBody);
+      const newSku = generateOrUpdateSKU(
+        values.product?.productBodyInsert?.sku,
+        updatedProductBody,
+      );
       setFieldValue('product.productBody.sku', newSku);
     },
-    [values.product?.productBody, setFieldValue, dictionary, topCategoryOptions],
+    [values.product?.productBodyInsert, setFieldValue, dictionary, topCategoryOptions],
   );
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>, flag: boolean = false) => {
@@ -154,7 +158,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
 
   const handlePreorderChange = (date: Date | null) => {
     const formattedDate = formatWellKnownTimestamp(date);
-    setFieldValue('product.productBody.preorder', formattedDate);
+    setFieldValue('product.productBodyInsert.preorder', formattedDate);
     setShowSales(!date);
   };
 
@@ -163,7 +167,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
   };
 
   useEffect(() => {
-    const { salePercentage, preorder } = values.product?.productBody || {};
+    const { salePercentage, preorder } = values.product?.productBodyInsert || {};
     const saleValue = salePercentage?.value || '';
     const parsedSaleValue = parseFloat(saleValue);
 
@@ -175,7 +179,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
       setShowSales(true);
       setShowPreorder(true);
     }
-  }, [values.product?.productBody]);
+  }, [values.product?.productBodyInsert]);
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -184,9 +188,9 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           control={
             <Field
               as={Checkbox}
-              name='product.productBody.hidden'
+              name='product.productBodyInsert.hidden'
               disabled={disableFields}
-              checked={values.product?.productBody?.hidden || false}
+              checked={values.product?.productBodyInsert?.hidden || false}
             />
           }
           label={'hidden'.toUpperCase()}
@@ -214,7 +218,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             ))}
           </>
         )}
-
+        //TODO: now it's placed inside the translations
         <Field
           as={TextField}
           variant='outlined'
@@ -232,7 +236,6 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           disabled={disableFields}
           onKeyDown={handleKeyDown}
         />
-
         <Field
           as={TextField}
           variant='outlined'
@@ -242,29 +245,28 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           fullWidth
           InputLabelProps={{ shrink: true }}
           error={Boolean(
-            getIn(errors, 'product.productBody.brand') &&
-              getIn(touched, 'product.productBody.brand'),
+            getIn(errors, 'product.productBodyInsert.brand') &&
+              getIn(touched, 'product.productBodyInsert.brand'),
           )}
           helperText={
-            getIn(touched, 'product.productBody.brand') &&
-            getIn(errors, 'product.productBody.brand')
+            getIn(touched, 'product.productBodyInsert.brand') &&
+            getIn(errors, 'product.productBodyInsert.brand')
           }
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFieldChange(e, 'brand')}
           onKeyDown={handleKeyDown}
           disabled={disableFields}
         />
-
         <FormControl
           required
           fullWidth
           error={Boolean(
-            getIn(errors, 'product.productBody.targetGender') &&
-              getIn(touched, 'product.productBody.targetGender'),
+            getIn(errors, 'product.productBodyInsert.targetGender') &&
+              getIn(touched, 'product.productBodyInsert.targetGender'),
           )}
         >
           <InputLabel shrink>{'gender'.toUpperCase()}</InputLabel>
           <Select
-            value={values.product?.productBody?.targetGender || ''}
+            value={values.product?.productBodyInsert?.targetGender || ''}
             onChange={(e) => handleFieldChange(e, 'targetGender')}
             label={'gender'.toUpperCase()}
             displayEmpty
@@ -277,14 +279,13 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               </MenuItem>
             ))}
           </Select>
-          {getIn(touched, 'product.productBody.targetGender') &&
-            getIn(errors, 'product.productBody.targetGender') && (
+          {getIn(touched, 'product.productBodyInsert.targetGender') &&
+            getIn(errors, 'product.productBodyInsert.targetGender') && (
               <FormHelperText>
-                <ErrorMessage name='product.productBody.targetGender' />
+                <ErrorMessage name='product.productBodyInsert.targetGender' />
               </FormHelperText>
             )}
         </FormControl>
-
         <FormControl
           required
           fullWidth
@@ -297,7 +298,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           <Select
             name='product.productBody.topCategoryId'
             onChange={(e) => handleFieldChange(e, 'topCategoryId')}
-            value={values.product?.productBody?.topCategoryId || 0}
+            value={values.product?.productBodyInsert?.topCategoryId || 0}
             label={'category'.toUpperCase()}
             displayEmpty
             disabled={disableFields}
@@ -315,16 +316,15 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               </FormHelperText>
             )}
         </FormControl>
-
         <FormControl fullWidth>
           <InputLabel shrink>{'subcategory'.toUpperCase()}</InputLabel>
           <Select
-            name='product.productBody.subCategoryId'
+            name='product.productBodyInsert.subCategoryId'
             onChange={(e) => handleFieldChange(e, 'subCategoryId')}
-            value={values.product?.productBody?.subCategoryId || 0}
+            value={values.product?.productBodyInsert?.subCategoryId || 0}
             label={'subcategory'.toUpperCase()}
             displayEmpty
-            disabled={disableFields || !values.product?.productBody?.topCategoryId}
+            disabled={disableFields || !values.product?.productBodyInsert?.topCategoryId}
           >
             {subCategoryOptions.map((category) => (
               <MenuItem value={category.value} key={category.value}>
@@ -333,13 +333,12 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             ))}
           </Select>
         </FormControl>
-
         <FormControl fullWidth>
           <InputLabel shrink>{'type'.toUpperCase()}</InputLabel>
           <Select
-            name='product.productBody.typeId'
+            name='product.productBodyInsert.typeId'
             onChange={(e) => handleFieldChange(e, 'typeId')}
-            value={values.product?.productBody?.typeId || ''}
+            value={values.product?.productBodyInsert?.typeId || ''}
             label={'type'.toUpperCase()}
             displayEmpty
             disabled={disableFields}
@@ -351,22 +350,21 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             ))}
           </Select>
         </FormControl>
-
         <FormControl
           fullWidth
           required
           error={Boolean(
-            getIn(errors, 'product.productBody.color') &&
-              getIn(touched, 'product.productBody.color'),
+            getIn(errors, 'product.productBodyInsert.color') &&
+              getIn(touched, 'product.productBodyInsert.color'),
           )}
         >
           <InputLabel shrink>{'color'.toUpperCase()}</InputLabel>
           <Select
-            value={values.product?.productBody?.color || ''}
+            value={values.product?.productBodyInsert?.color || ''}
             onChange={(e) => handleFieldChange(e, 'color')}
             label={'color'.toUpperCase()}
             displayEmpty
-            name='product.productBody.color'
+            name='product.productBodyInsert.color'
             disabled={disableFields}
           >
             {colors.map((color, id) => (
@@ -375,37 +373,35 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               </MenuItem>
             ))}
           </Select>
-          {getIn(touched, 'product.productBody.color') &&
-            getIn(errors, 'product.productBody.color') && (
+          {getIn(touched, 'product.productBodyInsert.color') &&
+            getIn(errors, 'product.productBodyInsert.color') && (
               <FormHelperText>
-                <ErrorMessage name='product.productBody.color' />
+                <ErrorMessage name='product.productBodyInsert.color' />
               </FormHelperText>
             )}
         </FormControl>
-
         <Field
           as={TextField}
           type='color'
           label='COLOR HEX'
-          name='product.productBody.colorHex'
+          name='product.productBodyInsert.colorHex'
           InputLabelProps={{ shrink: true }}
           required
           fullWidth
           disabled={disableFields}
         />
-
         <FormControl
           fullWidth
           required
           error={Boolean(
-            getIn(errors, 'product.productBody.countryOfOrigin') &&
-              getIn(touched, 'product.productBody.countryOfOrigin'),
+            getIn(errors, 'product.productBodyInsert.countryOfOrigin') &&
+              getIn(touched, 'product.productBodyInsert.countryOfOrigin'),
           )}
         >
           <InputLabel shrink>{'country'.toUpperCase()}</InputLabel>
           <Select
-            name='product.productBody.countryOfOrigin'
-            value={values.product?.productBody?.countryOfOrigin || ''}
+            name='product.productBodyInsert.countryOfOrigin'
+            value={values.product?.productBodyInsert?.countryOfOrigin || ''}
             onChange={(e) => handleFieldChange(e, 'countryOfOrigin')}
             label={'country'.toUpperCase()}
             displayEmpty
@@ -417,30 +413,29 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
               </MenuItem>
             ))}
           </Select>
-          {getIn(touched, 'product.productBody.countryOfOrigin') &&
-            getIn(errors, 'product.productBody.countryOfOrigin') && (
+          {getIn(touched, 'product.productBodyInsert.countryOfOrigin') &&
+            getIn(errors, 'product.productBodyInsert.countryOfOrigin') && (
               <FormHelperText>
-                <ErrorMessage name='product.productBody.countryOfOrigin' />
+                <ErrorMessage name='product.productBodyInsert.countryOfOrigin' />
               </FormHelperText>
             )}
         </FormControl>
-
         <Field
           as={TextField}
           variant='outlined'
           label={'price'.toUpperCase()}
-          name='product.productBody.price.value'
+          name='product.productBodyInsert.price.value'
           type='text'
           inputProps={{ min: 0, step: '0.01' }}
           required
           fullWidth
           error={Boolean(
-            getIn(errors, 'product.productBody.price.value') &&
-              getIn(touched, 'product.productBody.price.value'),
+            getIn(errors, 'product.productBodyInsert.price.value') &&
+              getIn(touched, 'product.productBodyInsert.price.value'),
           )}
           helperText={
-            getIn(touched, 'product.productBody.price.value') &&
-            getIn(errors, 'product.productBody.price.value')
+            getIn(touched, 'product.productBodyInsert.price.value') &&
+            getIn(errors, 'product.productBodyInsert.price.value')
           }
           InputLabelProps={{ shrink: true }}
           onChange={(e: any) => {
@@ -450,16 +445,15 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           }}
           onBlur={(e: any) => {
             const formattedValue = parseFloat(e.target.value).toFixed(2);
-            setFieldValue('product.productBody.price.value', formattedValue);
+            setFieldValue('product.productBodyInsert.price.value', formattedValue);
           }}
           disabled={disableFields}
         />
-
         {showSales && (
           <Field
             as={TextField}
             label={'sale percentage'.toUpperCase()}
-            name='product.productBody.salePercentage.value'
+            name='product.productBodyInsert.salePercentage.value'
             onChange={(e: any) => {
               if (/^\d*$/.test(e.target.value)) {
                 handlePriceChange(e, true);
@@ -475,7 +469,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
         {showPreorder && (
           <DatePicker
             label={'preorder'.toUpperCase()}
-            value={parseDate(values.product?.productBody?.preorder)}
+            value={parseDate(values.product?.productBodyInsert?.preorder)}
             onChange={handlePreorderChange}
             minDate={new Date()}
             slotProps={{
@@ -488,7 +482,7 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             disabled={disableFields}
           />
         )}
-
+        //TODO: now it's placed inside the translations
         <Field
           as={TextField}
           label={'description'.toUpperCase()}
@@ -507,26 +501,24 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
           required
           disabled={disableFields}
         />
-
         <Field
           as={TextField}
           label={'model wears height'.toUpperCase()}
-          name='product.productBody.modelWearsHeightCm'
+          name='product.productBodyInsert.modelWearsHeightCm'
           onChange={(e: any) => handleFieldChange(e, 'modelWearsHeightCm')}
           InputLabelProps={{ shrink: true }}
           fullWidth
           disabled={disableFields}
         />
-
         <FormControl fullWidth>
           <InputLabel shrink>{'model wears size'.toUpperCase()}</InputLabel>
           <Select
-            name='product.productBody.modelWearsSizeId'
-            value={values.product?.productBody?.modelWearsSizeId || ''}
+            name='product.productBodyInsert.modelWearsSizeId'
+            value={values.product?.productBodyInsert?.modelWearsSizeId || ''}
             onChange={(e) => handleFieldChange(e, 'modelWearsSizeId')}
             label={'model wears size'.toUpperCase()}
             displayEmpty
-            disabled={disableFields || !values.product?.productBody?.topCategoryId}
+            disabled={disableFields || !values.product?.productBodyInsert?.topCategoryId}
           >
             {filteredSizes.map((size) => (
               <MenuItem key={size.id} value={size.id}>
@@ -535,23 +527,24 @@ export const BasicFields: FC<BasicProductFieldsInterface> = ({
             ))}
           </Select>
         </FormControl>
-
         <Field
           as={TextField}
           label={'sku'.toUpperCase()}
-          name='product.productBody.sku'
+          name='product.productBodyInsert.sku'
           InputProps={{ readOnly: true }}
           InputLabelProps={{ shrink: true }}
           required
           fullWidth
           disabled={disableFields}
         />
-
-        <Field component={Care} name='product.productBody' {...{ isEditMode, isAddingProduct }} />
-
+        <Field
+          component={Care}
+          name='product.productBodyInsert'
+          {...{ isEditMode, isAddingProduct }}
+        />
         <Field
           component={Composition}
-          name='product.productBody'
+          name='product.productBodyInsert'
           {...{ isAddingProduct, isEditMode }}
         />
       </div>

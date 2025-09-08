@@ -174,12 +174,11 @@ export function ArchiveForm({ open, archiveId, existingMedia, onClose }: Archive
     try {
       // Transform data to match common_ArchiveInsert interface
       const archiveData: common_ArchiveInsert = {
-        heading: data.heading,
-        description: data.description,
         tag: data.tag,
         mediaIds: data.mediaIds && data.mediaIds.length > 0 ? data.mediaIds : undefined,
         mainMediaId: data.mainMediaId,
         thumbnailId: data.mediaIds[0],
+        translations: [{ languageId: 1, heading: data.heading, description: data.description }],
       };
 
       if (archiveId) {

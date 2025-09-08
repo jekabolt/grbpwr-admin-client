@@ -28,13 +28,13 @@ export const processCategories = (categories: common_Category[]): ProcessedCateg
 
             return {
                 id: topCat.id!,
-                name: topCat.name!,
+                name: topCat.translations?.[0]?.name!,
                 subCategories: [{
                     id: topCat.id!,
-                    name: topCat.name!,
+                    name: topCat.translations?.[0]?.name!,
                     types: directTypes.map(type => ({
                         id: type.id!,
-                        name: type.name!
+                        name: type.translations?.[0]?.name!
                     }))
                 }]
             };
@@ -47,17 +47,17 @@ export const processCategories = (categories: common_Category[]): ProcessedCateg
 
             return {
                 id: subCat.id!,
-                name: subCat.name!,
+                name: subCat.translations?.[0]?.name!,
                 types: types.map(type => ({
                     id: type.id!,
-                    name: type.name!
+                    name: type.translations?.[0]?.name!
                 }))
             };
         });
 
         return {
             id: topCat.id!,
-            name: topCat.name!,
+            name: topCat.translations?.[0]?.name!,
             subCategories: processedSubCategories
         };
     });

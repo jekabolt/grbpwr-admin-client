@@ -21,7 +21,7 @@ export const validateExploreLinks = (values: common_HeroFullInsert) => {
             checkUrl(entity.single.exploreLink, 'Single Add');
         }
         if (entity.main) {
-            checkUrl(entity.main.single?.exploreLink, 'Main Add');
+            checkUrl(entity.main.exploreLink, 'Main Add');
         }
         if (entity.double) {
             checkUrl(entity.double.left?.exploreLink, 'Double Add Left');

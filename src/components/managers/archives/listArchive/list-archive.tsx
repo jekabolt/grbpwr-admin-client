@@ -69,14 +69,14 @@ export function ListArchive() {
               <div className='w-full'>
                 <Media
                   src={archive.thumbnail.media.fullSize.mediaUrl}
-                  alt={archive.heading || 'Archive'}
+                  alt={archive.translations?.[0]?.heading || 'Archive'}
                   className='w-full h-full'
                 />
               </div>
             )}
             <div className='px-2'>
-              <Text className='uppercase'>{archive.heading}</Text>
-              <Text className='line-clamp-1 '>{archive.description}</Text>
+              <Text className='uppercase'>{archive.translations?.[0]?.heading}</Text>
+              <Text className='line-clamp-1 '>{archive.translations?.[0]?.description}</Text>
               <Text className='uppercase'>{archive.tag}</Text>
             </div>
 

@@ -2,8 +2,8 @@ import { common_HeroEntityInsert, common_HeroType } from "api/proto-http/admin";
 
 export const validationForSelectHeroType: Record<common_HeroType, (entity: common_HeroEntityInsert) => boolean> = {
     HERO_TYPE_MAIN: (entity: common_HeroEntityInsert) =>
-        !entity.main?.single?.mediaLandscapeId ||
-        !entity.main?.single?.mediaPortraitId,
+        !entity.main?.mediaLandscapeId ||
+        !entity.main?.mediaPortraitId,
 
     HERO_TYPE_SINGLE: (entity: common_HeroEntityInsert) =>
         !entity.single?.mediaLandscapeId ||

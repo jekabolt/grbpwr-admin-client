@@ -31,15 +31,15 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
   const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
   const [hasConfirmedSizeChange, setHasConfirmedSizeChange] = useState(false);
   const { selectedTopCategoryName, selectedSubCategoryName, selectedTypeName } = useCategories(
-    values.product?.productBody?.topCategoryId || 0,
-    values.product?.productBody?.subCategoryId || 0,
-    values.product?.productBody?.typeId || 0,
+    values.product?.productBodyInsert?.topCategoryId || 0,
+    values.product?.productBodyInsert?.subCategoryId || 0,
+    values.product?.productBodyInsert?.typeId || 0,
   );
 
   const filteredSizes = getFilteredSizes(
     dictionary,
-    values.product?.productBody?.topCategoryId || 0,
-    values.product?.productBody?.typeId || 0,
+    values.product?.productBodyInsert?.topCategoryId || 0,
+    values.product?.productBodyInsert?.typeId || 0,
   );
 
   const measurementsToDisplay = (() => {

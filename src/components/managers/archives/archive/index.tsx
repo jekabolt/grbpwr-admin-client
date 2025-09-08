@@ -13,9 +13,9 @@ export function Archive() {
     <Layout>
       <div className='w-full '>
         <div className='flex justify-between'>
-          <Text>{archive?.archiveList?.heading}</Text>
+          <Text>{archive?.archiveList?.translations?.[0]?.heading}</Text>
           <Text>{archive?.archiveList?.tag}</Text>
-          <Text>{archive?.archiveList?.description}</Text>
+          <Text>{archive?.archiveList?.translations?.[0]?.description}</Text>
         </div>
 
         {archive?.mainMedia?.media?.fullSize?.mediaUrl && (
@@ -24,7 +24,7 @@ export function Archive() {
             <div className='mb-8'>
               <Media
                 src={archive.mainMedia.media.fullSize.mediaUrl}
-                alt={archive.archiveList?.heading || 'Archive'}
+                alt={archive.archiveList?.translations?.[0]?.heading || 'Archive'}
                 className='w-full h-96 object-cover rounded-lg'
               />
             </div>

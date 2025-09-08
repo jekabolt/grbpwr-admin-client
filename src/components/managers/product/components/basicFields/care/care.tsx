@@ -51,8 +51,8 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
 
   const handleOpenCareTable = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (values.product?.productBody?.careInstructions) {
-      const codes = values.product.productBody.careInstructions.split(',');
+    if (values.product?.productBodyInsert?.careInstructions) {
+      const codes = values.product.productBodyInsert.careInstructions.split(',');
       const newSelectedInstructions: SelectedInstructions = {};
 
       Object.entries(careInstruction.care_instructions).forEach(([category, methods]) => {
@@ -95,7 +95,7 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
           variant='outlined'
           name='product.productBody.careInstructions'
           label='Care Instructions'
-          value={values.product?.productBody?.careInstructions || ''}
+          value={values.product?.productBodyInsert?.careInstructions || ''}
           slotProps={{
             input: {
               readOnly: true,
@@ -104,7 +104,7 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
                   <Button
                     size='lg'
                     onClick={handleClearInstructions}
-                    disabled={!values.product?.productBody?.careInstructions}
+                    disabled={!values.product?.productBodyInsert?.careInstructions}
                   >
                     clear
                   </Button>

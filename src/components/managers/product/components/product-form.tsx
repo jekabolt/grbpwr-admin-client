@@ -1,40 +1,27 @@
-import { common_ProductNew, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
+import {
+  common_ProductFull,
+  common_ProductNew,
+  common_SizeWithMeasurementInsert,
+} from 'api/proto-http/admin';
+// import { initialProductState } from 'constants/product/initial-values';
 import { ROUTES } from 'constants/routes';
 import { Field, Form, Formik, FormikHelpers } from 'formik';
 import { useDictionaryStore } from 'lib/stores/store';
-import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { GenericProductFormInterface } from '../interface/interface';
-import { comparisonOfInitialProductValues } from '../utility/deepComparisonOfInitialProductValues';
 import { validationSchema } from '../utility/formilValidationShema';
+import { defaultData } from '../utility/schema';
 import { BasicFields } from './basicFields/basicFields';
 import { MediaView } from './mediaView';
 import { SizesAndMeasurements } from './sizesAndMeasurements';
 import { Tags } from './tags';
 
-export const ProductForm: FC<GenericProductFormInterface> = ({
-  initialProductState,
-  isEditMode = false,
-  isAddingProduct = false,
-  isCopyMode,
-  product,
-  onSubmit,
-  onEditModeChange,
-}) => {
+export function ProductForm({ product }: { product: common_ProductFull | undefined }) {
   const { dictionary } = useDictionaryStore();
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [clearMediaPreview, setClearMediaPreview] = useState(false);
-  const initialValues = useMemo(() => initialProductState, [initialProductState]);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && isEditMode && onEditModeChange) onEditModeChange(false);
-    };
-    document.addEventListener('keydown', handleKeydown);
-    return () => document.removeEventListener('keydown', handleKeydown);
-  }, [isEditMode, onEditModeChange]);
 
   const filterEmptySizes = (sizes: common_SizeWithMeasurementInsert[] | undefined) =>
     sizes?.filter((size) => {
@@ -52,25 +39,25 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
   ) => {
     if (!isFormChanged) return;
 
-    await onSubmit(
-      { ...values, sizeMeasurements: filterEmptySizes(values.sizeMeasurements) },
-      actions,
-    );
+    // await onSubmit(
+    //   { ...values, sizeMeasurements: filterEmptySizes(values.sizeMeasurements) },
+    //   actions,
+    // );
 
     setIsFormChanged(false);
-    if (isAddingProduct && !isCopyMode) {
-      setClearMediaPreview(true);
-      setTimeout(() => setClearMediaPreview(false), 0);
-    } else if (isCopyMode) {
-      navigate(ROUTES.product, { replace: true });
-    }
+    // if (isAddingProduct && !isCopyMode) {
+    //   setClearMediaPreview(true);
+    //   setTimeout(() => setClearMediaPreview(false), 0);
+    // } else if (isCopyMode) {
+    //   navigate(ROUTES.product, { replace: true });
+    // }
   };
 
-  const checkChanges = useCallback(
-    (values: common_ProductNew) =>
-      setIsFormChanged(!comparisonOfInitialProductValues(values, initialValues)),
-    [initialValues],
-  );
+  // const checkChanges = useCallback(
+  //   (values: common_ProductNew) =>
+  //     setIsFormChanged(!comparisonOfInitialProductValues(values, initialValues)),
+  //   [initialValues],
+  // );
 
   const handleCopyProductClick = (id: number | undefined) => {
     navigate(`${ROUTES.copyProduct}/${id}`);
@@ -78,35 +65,37 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
 
   return (
     <Formik
-      initialValues={initialValues}
+      initialValues={defaultData as unknown as common_ProductNew}
       onSubmit={handleFormSubmit}
       enableReinitialize
       validationSchema={validationSchema}
     >
       {({ handleSubmit, values }) => {
-        useEffect(() => checkChanges(values), [checkChanges, values]);
+        // useEffect(() => checkChanges(values), [checkChanges, values]);
         return (
           <Form className='h-full flex flex-col gap-10'>
             <div className='w-full flex justify-between'>
-              {!isAddingProduct && (
+              {/* {!isAddingProduct && (
                 <Button onClick={() => handleCopyProductClick(product?.product?.id)} size='lg'>
                   copy
                 </Button>
-              )}
+              )} */}
               <Button
                 size='lg'
-                disabled={isEditMode && !isFormChanged}
+                // disabled={isEditMode && !isFormChanged}
                 className='fixed bottom-2 right-2 z-20'
-                onClick={(e: React.MouseEvent) => {
-                  e.preventDefault();
-                  if (isEditMode || isAddingProduct || isCopyMode) {
-                    handleSubmit();
-                  } else if (onEditModeChange) {
-                    onEditModeChange(true);
-                  }
-                }}
+                // onClick={(e: React.MouseEvent) => {
+                //   e.preventDefault();
+                //   if (isEditMode || isAddingProduct || isCopyMode) {
+                //     handleSubmit();
+                //   } else if (onEditModeChange) {
+                //     onEditModeChange(true);
+                //   }
+                // }}
+                onClick={handleSubmit}
               >
-                {isAddingProduct || isEditMode ? 'save' : 'edit'}
+                {/* {isAddingProduct || isEditMode ? 'save' : 'edit'} */}
+                save
               </Button>
             </div>
 
@@ -116,9 +105,9 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
                   component={MediaView}
                   name='mediaIds'
                   {...{
-                    isEditMode,
-                    isCopyMode,
-                    isAddingProduct,
+                    // isEditMode,
+                    // isCopyMode,
+                    // isAddingProduct,
                     product,
                     clearMediaPreview,
                   }}
@@ -127,17 +116,22 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
               <div className='w-full space-y-4 lg:w-1/2'>
                 <Field
                   component={BasicFields}
-                  name='product.productBody'
-                  {...{ product, isEditMode, isAddingProduct, isCopyMode }}
+                  name='product.productBodyInsert'
+                  {...{
+                    product,
+                    // isEditMode, isAddingProduct, isCopyMode }}
+                  }}
                 />
                 <Field
                   component={Tags}
                   name='tags'
-                  {...{
-                    isEditMode,
-                    isAddingProduct,
-                    isCopyMode,
-                  }}
+                  {
+                    ...{
+                      // isEditMode,
+                      // isAddingProduct,
+                      // isCopyMode,
+                    }
+                  }
                 />
               </div>
             </div>
@@ -145,7 +139,10 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
               <Field
                 component={SizesAndMeasurements}
                 name='sizeMeasurements'
-                {...{ dictionary, isEditMode, isAddingProduct }}
+                {...{
+                  dictionary,
+                  // isEditMode, isAddingProduct }}
+                }}
               />
             </div>
           </Form>
@@ -153,4 +150,4 @@ export const ProductForm: FC<GenericProductFormInterface> = ({
       }}
     </Formik>
   );
-};
+}

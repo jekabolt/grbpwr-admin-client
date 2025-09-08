@@ -1,10 +1,10 @@
-import { common_MediaFull, common_Product } from "api/proto-http/admin";
-import { common_ArchiveFull, common_ArchiveList, common_HeroEntity } from "api/proto-http/frontend";
+import { common_HeroEntityInsert, common_MediaFull, common_Product } from "api/proto-http/admin";
+import { common_ArchiveFull, common_ArchiveList, } from "api/proto-http/frontend";
 import { FieldArrayRenderProps } from "formik";
 
 
 export interface EntitiesProps {
-    entities: common_HeroEntity[];
+    entities: common_HeroEntityInsert[];
     entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
     arrayHelpers: FieldArrayRenderProps;
 }

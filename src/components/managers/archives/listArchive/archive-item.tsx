@@ -9,7 +9,7 @@ interface Props {
 
 export function ArchiveItem({ archiveData, close }: Props) {
   const { data: archiveItems } = useArchiveDetails(archiveData?.id, {
-    heading: archiveData?.heading || 'string',
+    heading: archiveData?.translations?.[0]?.heading || 'string',
     tag: archiveData?.tag || 'string',
   });
 
@@ -20,8 +20,9 @@ export function ArchiveItem({ archiveData, close }: Props) {
   if (!archiveData) return null;
 
   const initialValues = {
-    heading: archiveItems?.archiveList?.heading || '',
-    description: archiveItems?.archiveList?.description || '',
+    translations: archiveItems?.archiveList?.translations || [],
+    heading: archiveItems?.archiveList?.translations?.[0]?.heading || '',
+    description: archiveItems?.archiveList?.translations?.[0]?.description || '',
     tag: archiveItems?.archiveList?.tag || '',
     mediaIds: archiveItems?.media?.map((m) => m.id).filter((id): id is number => id !== undefined),
     mainMediaId: archiveItems?.mainMedia?.id,

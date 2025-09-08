@@ -1,22 +1,11 @@
-import { common_ProductFull, common_ProductNew } from "api/proto-http/admin";
+import { common_ProductFull } from "api/proto-http/admin";
 
 export interface Country {
     value: string;
     label: string;
 }
 
-export interface GenericProductFormInterface {
-    product?: common_ProductFull | undefined;
-    initialProductState: common_ProductNew;
-    isEditMode?: boolean;
-    isAddingProduct?: boolean;
-    isCopyMode: boolean;
-    onSubmit: (
-        values: common_ProductNew,
-        actions: { setSubmitting: (isSubmitting: boolean) => void; resetForm: () => void },
-    ) => Promise<void>;
-    onEditModeChange?: (isEditMode: boolean) => void;
-}
+
 
 export interface BasicProductFieldsInterface {
     product?: common_ProductFull;

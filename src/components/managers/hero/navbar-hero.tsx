@@ -3,27 +3,27 @@ import { common_HeroFullInsert, common_MediaFull } from 'api/proto-http/admin';
 import { common_ArchiveList } from 'api/proto-http/frontend';
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { Field, useFormikContext } from 'formik';
-import { useHeroStore } from 'lib/stores/hero/store';
-import { useEffect, useState } from 'react';
+// import { useHeroStore } from 'lib/stores/hero/store';
+import { useState } from 'react';
 import { ArchivePicker } from './entities/featured-archive/archive-picker';
 
 export function NavbarHero() {
-  const { hero } = useHeroStore();
+  // const { hero } = useHeroStore();
   const { values, setFieldValue } = useFormikContext<common_HeroFullInsert>();
-  const [menMedia, setMenMedia] = useState<string>('');
-  const [womenMedia, setWomenMedia] = useState<string>('');
+  const [menMedia, setMenMedia] = useState<number>(0);
+  const [womenMedia, setWomenMedia] = useState<number>(0);
   const [openArchivePicker, setOpenArchivePicker] = useState<'men' | 'women' | null>(null);
 
-  useEffect(() => {
-    if (hero?.navFeatured) {
-      if (hero.navFeatured.men?.media?.media?.thumbnail?.mediaUrl) {
-        setMenMedia(hero.navFeatured.men.media.media.thumbnail.mediaUrl);
-      }
-      if (hero.navFeatured.women?.media?.media?.thumbnail?.mediaUrl) {
-        setWomenMedia(hero.navFeatured.women.media.media.thumbnail.mediaUrl);
-      }
-    }
-  }, [hero?.navFeatured]);
+  // useEffect(() => {
+  //   if (hero?.navFeatured) {
+  //     if (hero.navFeatured.men?.mediaId) {
+  //       setMenMedia(hero.navFeatured.men.mediaId);
+  //     }
+  //     if (hero.navFeatured.women?.mediaId) {
+  //       setWomenMedia(hero.navFeatured.women.mediaId);
+  //     }
+  //   }
+  // }, [hero?.navFeatured]);
 
   function saveNavbarMedia(selectedMedia: common_MediaFull[], type: 'men' | 'women') {
     if (!selectedMedia.length) return;
@@ -31,10 +31,10 @@ export function NavbarHero() {
     const media = selectedMedia[0];
 
     if (type === 'men') {
-      setMenMedia(media.media?.thumbnail?.mediaUrl || '');
+      setMenMedia(media.id || 0);
       setFieldValue(`navFeatured.${type}.mediaId`, media.id);
     } else {
-      setWomenMedia(media.media?.thumbnail?.mediaUrl || '');
+      setWomenMedia(media.id || 0);
       setFieldValue(`navFeatured.${type}.mediaId`, media.id);
     }
   }
@@ -70,7 +70,7 @@ export function NavbarHero() {
           <Grid size={{ xs: 12, md: 6 }} sx={{ display: 'grid', gap: 2 }}>
             <Typography textTransform='uppercase'>men</Typography>
             <SingleMediaViewAndSelect
-              link={menMedia}
+              link={menMedia.toString()}
               aspectRatio={['1:1']}
               isDeleteAccepted={false}
               saveSelectedMedia={(media) => saveNavbarMedia(media, 'men')}
@@ -114,7 +114,7 @@ export function NavbarHero() {
           <Grid size={{ xs: 12, md: 6 }} sx={{ display: 'grid', gap: 2 }}>
             <Typography textTransform='uppercase'>women</Typography>
             <SingleMediaViewAndSelect
-              link={womenMedia}
+              link={womenMedia.toString()}
               aspectRatio={['1:1']}
               isDeleteAccepted={false}
               saveSelectedMedia={(media) => saveNavbarMedia(media, 'women')}
