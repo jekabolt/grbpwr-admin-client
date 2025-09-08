@@ -18,5 +18,6 @@ export const isBase64Video = (base64: string) => {
     if (mime && mime.length > 1) {
         return mime[1].startsWith('video/');
     }
+
     return false;
 };
