@@ -10,6 +10,7 @@ import { Dialog } from 'ui/components/dialog';
 import Media from 'ui/components/media';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
+import { TranslationField } from 'ui/form/fields/translation-field';
 import { useCreateArchive, useUpdateArchive } from '../utility/useArchive';
 import { CheckoutData, defaultData, schema } from './schema';
 
@@ -166,7 +167,7 @@ export function ArchiveForm({ open, archiveId, existingMedia, onClose }: Archive
     console.log('Form data:', data);
 
     // Validate required fields
-    if (!data.heading || !data.description || !data.tag) {
+    if (!data.translations[0].heading || !data.translations[0].description || !data.tag) {
       showMessage('Please fill in all required fields', 'error');
       return;
     }
@@ -178,7 +179,7 @@ export function ArchiveForm({ open, archiveId, existingMedia, onClose }: Archive
         mediaIds: data.mediaIds && data.mediaIds.length > 0 ? data.mediaIds : undefined,
         mainMediaId: data.mainMediaId,
         thumbnailId: data.mediaIds[0],
-        translations: [{ languageId: 1, heading: data.heading, description: data.description }],
+        translations: data.translations,
       };
 
       if (archiveId) {
@@ -205,8 +206,12 @@ export function ArchiveForm({ open, archiveId, existingMedia, onClose }: Archive
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <div className='flex lg:flex-row flex-col'>
-            <InputField name='heading' placeholder='enter heading' label='heading' />
-            <InputField name='description' placeholder='enter description' label='description' />
+            <TranslationField fieldPrefix='translations' fieldName='heading' label='heading' />
+            <TranslationField
+              fieldPrefix='translations'
+              fieldName='description'
+              label='description'
+            />
             <InputField name='tag' placeholder='enter tag' label='tag' />
           </div>
 
