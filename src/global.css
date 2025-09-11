@@ -1,11 +1,40 @@
 @import 'tailwindcss';
 
+/* Custom Font Face Declarations */
+@font-face {
+  font-family: 'FeatureMono';
+  src: url('./fonts/FeatureMono-Thin.ttf') format('truetype');
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'FeatureMono';
+  src: url('./fonts/FeatureMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'FeatureMono';
+  src: url('./fonts/FeatureMono-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   /* COLORS */
   --color-text: #000;
   --color-bgColor: #fff;
   --color-inactive: #cccccc;
   --color-error: #ff0000;
+
+  /* FONTS */
+  --font-family-sans: 'FeatureMono', 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  --font-family-mono: 'FeatureMono', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
   /* TEXT */
   --text-giant: 200px;
@@ -14,6 +43,9 @@
   --text-base: 16px;
 }
 body {
+  font-family: var(--font-family-sans);
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 @layer utilities {

@@ -1,15 +1,27 @@
-import { TextField } from '@mui/material';
 import { Cross2Icon } from '@radix-ui/react-icons';
-import { common_ProductNew } from 'api/proto-http/admin';
-import { useFormikContext } from 'formik';
 import { cn } from 'lib/utility';
-import { FC, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import Input from 'ui/components/input';
 import Text from 'ui/components/text';
-import { ProductTagsInterface } from '../interface/interface';
+import { ProductFormData } from '../utility/schema';
 
-export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, isCopyMode }) => {
-  const { values, setFieldValue, errors, touched } = useFormikContext<common_ProductNew>();
+export function Tags({
+  isAddingProduct,
+  isEditMode,
+  isCopyMode,
+}: {
+  isAddingProduct: boolean;
+  isEditMode: boolean;
+  isCopyMode: boolean;
+}) {
+  const {
+    watch,
+    setValue,
+    formState: { errors },
+  } = useFormContext<ProductFormData>();
+  const values = watch();
   const [tag, setTag] = useState('');
   const [localTags, setLocalTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
@@ -23,12 +35,12 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
 
   useEffect(() => {
     if (isAddingProduct && !isCopyMode) {
-      setFieldValue(
+      setValue(
         'tags',
         selectedTags.map((tag) => ({ tag })),
       );
     }
-  }, [isAddingProduct, selectedTags, setFieldValue]);
+  }, [isAddingProduct, selectedTags, setValue]);
 
   useEffect(() => {
     if (isCopyMode && values && values.tags && values.tags?.length > 0 && !hasCopiedTagsUpdated) {
@@ -92,7 +104,7 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
 
     setSelectedTags((prevSelectedTags) => prevSelectedTags.filter((t) => t !== tagToDelete));
 
-    setFieldValue(
+    setValue(
       'tags',
       selectedTags.filter((t) => t !== tagToDelete).map((tag) => ({ tag })),
     );
@@ -109,12 +121,12 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
 
   useEffect(() => {
     if (isEditMode || isCopyMode) {
-      setFieldValue(
+      setValue(
         'tags',
         selectedTags.map((tag) => ({ tag })),
       );
     }
-  }, [isAddingProduct, isCopyMode, isEditMode, selectedTags, setFieldValue]);
+  }, [isAddingProduct, isCopyMode, isEditMode, selectedTags, setValue]);
 
   const displayedTags = useMemo(() => {
     return (
@@ -135,24 +147,25 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
         </Button>
       )}
       {(isEditMode || (showAddTagField && (isAddingProduct || isCopyMode))) && (
-        <TextField
-          type='text'
-          value={tag}
-          placeholder='Upload new tag'
-          fullWidth
-          label='TAG'
-          InputLabelProps={{ shrink: true }}
-          onChange={(e) => setTag(e.target.value)}
-          slotProps={{
-            input: {
-              endAdornment: (
-                <Button size='lg' onClick={(e: React.MouseEvent) => handleAddTag(e)}>
-                  upload
-                </Button>
-              ),
-            },
-          }}
-        />
+        <div className='flex items-center border-b border-textColor w-full'>
+          <div className='flex-1'>
+            <Input
+              name='product.tags'
+              value={tag}
+              placeholder='upload new tag'
+              label='tags'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTag(e.target.value)}
+              className='w-full border-none leading-4 bg-transparent'
+            />
+          </div>
+          <Button
+            size='lg'
+            onClick={(e: React.MouseEvent) => handleAddTag(e)}
+            className='flex-shrink-0  ml-2 '
+          >
+            save
+          </Button>
+        </div>
       )}
       {!isEditMode && !isAddingProduct && <Text variant='uppercase'>list of tags</Text>}
       <div className='grid grid-cols-2 lg:grid-cols-4 gap-1'>
@@ -184,7 +197,7 @@ export const Tags: FC<ProductTagsInterface> = ({ isAddingProduct, isEditMode, is
           </div>
         ))}
       </div>
-      {touched.tags && errors.tags && <Text variant='error'>{errors.tags}</Text>}
+      {errors.tags && <Text variant='error'>{errors.tags.message}</Text>}
     </div>
   );
-};
+}

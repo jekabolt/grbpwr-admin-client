@@ -27,7 +27,7 @@ export const SingleMediaViewAndSelect: FC<SingleMediaView> = ({
   saveSelectedMedia,
 }) => {
   return (
-    <div className='flex items-center justify-center  relative group border border-red-500'>
+    <div className='flex items-center justify-center  relative group'>
       <div className='w-full'>
         {link && (
           <Media

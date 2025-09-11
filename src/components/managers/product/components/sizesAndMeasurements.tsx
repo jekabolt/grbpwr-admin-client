@@ -8,42 +8,49 @@ import {
   TableRow,
   TextField,
 } from '@mui/material';
-import { common_ProductNew } from 'api/proto-http/admin';
-import { useFormikContext } from 'formik';
-import { sortItems } from 'lib/features/filter-size-measurements';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionaryStore } from 'lib/stores/store';
-import React, { FC, useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 
+import { sortItems } from 'lib/features/filter-size-measurements';
 import { useCategories } from 'lib/features/useCategories';
-import { ProductSizesAndMeasurementsInterface } from '../interface/interface';
 import { getMeasurementsForCategory } from '../utility/mappingMeasurementsForCategories';
+import { ProductFormData } from '../utility/schema';
 import { getFilteredSizes } from '../utility/sizes';
 
-export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
-  isEditMode = true,
+export function SizesAndMeasurements({
+  isEditMode = false,
   isAddingProduct,
-}) => {
+}: {
+  isEditMode: boolean;
+  isAddingProduct: boolean;
+}) {
   const { dictionary } = useDictionaryStore();
-  const { values, setFieldValue, errors, touched } = useFormikContext<common_ProductNew>();
+  const {
+    watch,
+    setValue,
+    formState: { errors },
+  } = useFormContext<ProductFormData>();
+  const values = watch();
   const [lastSizeNonZero, setLastSizeNonZero] = useState(false);
   const [hasChangedSize, setHasChangedSize] = useState<{ [key: number]: boolean }>({});
   const [hasConfirmedSizeChange, setHasConfirmedSizeChange] = useState(false);
   const { selectedTopCategoryName, selectedSubCategoryName, selectedTypeName } = useCategories(
-    values.product?.productBodyInsert?.topCategoryId || 0,
-    values.product?.productBodyInsert?.subCategoryId || 0,
-    values.product?.productBodyInsert?.typeId || 0,
+    Number(values.product?.productBodyInsert?.topCategoryId) || 0,
+    Number(values.product?.productBodyInsert?.subCategoryId) || 0,
+    Number(values.product?.productBodyInsert?.typeId) || 0,
   );
 
   const filteredSizes = getFilteredSizes(
     dictionary,
-    values.product?.productBodyInsert?.topCategoryId || 0,
-    values.product?.productBodyInsert?.typeId || 0,
+    Number(values.product?.productBodyInsert?.topCategoryId) || 0,
+    Number(values.product?.productBodyInsert?.typeId) || 0,
   );
 
-  const measurementsToDisplay = (() => {
-    if (!dictionary?.measurements) return [];
+  const measurementsToDisplay: { id: number }[] = useMemo(() => {
+    if (!dictionary?.measurements) return [] as { id: number }[];
 
     const requiredMeasurements = new Set([
       ...getMeasurementsForCategory(selectedTopCategoryName?.toLowerCase()),
@@ -51,15 +58,14 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
       ...getMeasurementsForCategory(selectedTypeName?.toLowerCase(), false, selectedTypeName),
     ]);
 
-    return sortItems(dictionary.measurements).filter((measurement) => {
-      const measurementName = findInDictionary(
-        dictionary,
-        measurement.id,
-        'measurement',
-      )?.toLowerCase();
-      return measurementName && requiredMeasurements.has(measurementName);
-    });
-  })();
+    return sortItems(dictionary.measurements)
+      .filter((m: any): m is { id: number } => typeof m?.id === 'number')
+      .filter((m) => {
+        const measurementName = findInDictionary(dictionary, m.id, 'measurement')?.toLowerCase();
+        return measurementName && requiredMeasurements.has(measurementName);
+      })
+      .map((m) => ({ id: m.id }));
+  }, [dictionary, selectedTopCategoryName, selectedSubCategoryName, selectedTypeName]);
 
   useEffect(() => {
     if (filteredSizes.length > 0) {
@@ -84,18 +90,25 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
         const updatedSizeMeasurements = values.sizeMeasurements?.filter(
           (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === lastSize.id,
         );
-        setFieldValue('sizeMeasurements', updatedSizeMeasurements);
+        setValue('sizeMeasurements', updatedSizeMeasurements, { shouldDirty: true });
       }
     }
-  }, [values.sizeMeasurements, filteredSizes, setFieldValue]);
+  }, [values.sizeMeasurements, filteredSizes, setValue]);
 
   const handleSizeChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     sizeId: number | undefined,
   ) => {
     const { value } = event.target;
+    if (!sizeId) return;
 
-    if (isEditMode && sizeId && !hasChangedSize[sizeId] && !hasConfirmedSizeChange) {
+    if (
+      !isAddingProduct &&
+      isEditMode &&
+      sizeId &&
+      !hasChangedSize[sizeId] &&
+      !hasConfirmedSizeChange
+    ) {
       const confirmed = window.confirm('Are you sure you want to change the size quantity?');
       if (!confirmed) {
         return;
@@ -114,15 +127,17 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
           productSize: { sizeId, quantity: { value } },
           measurements: [],
         };
-        setFieldValue('sizeMeasurements', [...(values.sizeMeasurements || []), newSizeMeasurement]);
+        setValue('sizeMeasurements', [...(values.sizeMeasurements || []), newSizeMeasurement], {
+          shouldDirty: true,
+        });
       }
     } else {
-      const quantityPath = `sizeMeasurements[${sizeIndex}].productSize.quantity.value`;
-      setFieldValue(quantityPath, value);
+      const quantityPath = `sizeMeasurements[${sizeIndex}].productSize.quantity.value` as const;
+      setValue(quantityPath as any, value, { shouldDirty: true });
     }
 
-    const lastSizeId = filteredSizes[filteredSizes.length - 1].id;
-    if (sizeId === lastSizeId) {
+    const lastSizeId = filteredSizes[filteredSizes.length - 1]?.id;
+    if (lastSizeId && sizeId === lastSizeId) {
       setLastSizeNonZero(value !== '0' && value !== '');
     }
   };
@@ -148,9 +163,10 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
     );
 
     if (measurementIndex > -1) {
-      setFieldValue(
-        `${measurementsPath}[${measurementIndex}].measurementValue.value`,
+      setValue(
+        `${measurementsPath}[${measurementIndex}].measurementValue.value` as any,
         measurementValue,
+        { shouldDirty: true },
       );
     } else {
       const newMeasurement = {
@@ -158,7 +174,7 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
         measurementValue: { value: measurementValue },
       };
       const updatedMeasurements = [...currentMeasurements, newMeasurement];
-      setFieldValue(measurementsPath, updatedMeasurements);
+      setValue(measurementsPath as any, updatedMeasurements, { shouldDirty: true });
     }
   };
 
@@ -241,9 +257,9 @@ export const SizesAndMeasurements: FC<ProductSizesAndMeasurementsInterface> = ({
           </TableBody>
         </Table>
       </TableContainer>
-      {touched.sizeMeasurements && errors.sizeMeasurements && (
-        <Text>{errors.sizeMeasurements}</Text>
+      {errors?.sizeMeasurements && (
+        <Text>{(errors.sizeMeasurements as any)?.message || 'Invalid sizes'}</Text>
       )}
     </>
   );
-};
+}

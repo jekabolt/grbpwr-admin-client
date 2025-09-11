@@ -6,6 +6,7 @@ type Props = InputProps & {
   description?: string;
   loading?: boolean;
   keyboardRestriction?: RegExp;
+  validateOnBlur?: boolean;
 };
 
 export default function InputField({
@@ -15,12 +16,13 @@ export default function InputField({
   type = 'text',
   srLabel,
   keyboardRestriction,
+  validateOnBlur = true,
   ...props
 }: Props) {
   const { control, trigger, setValue } = useFormContext();
 
   function onBlur() {
-    trigger(name);
+    if (validateOnBlur) trigger(name);
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

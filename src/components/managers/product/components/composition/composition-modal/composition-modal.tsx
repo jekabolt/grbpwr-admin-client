@@ -1,10 +1,10 @@
-import { FormControl, FormControlLabel, Radio, RadioGroup, Tab, Tabs } from '@mui/material';
+import { FormControl, FormControlLabel, Input, Radio, RadioGroup } from '@mui/material';
+import * as Tabs from '@radix-ui/react-tabs';
 import { composition, CompositionItem, CompositionStructure } from 'constants/garment-composition';
 import { cn } from 'lib/utility';
-import { FC, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Dialog } from 'ui/components/dialog';
-import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 
 interface CompositionModalProps {
@@ -14,12 +14,13 @@ interface CompositionModalProps {
   selectComposition: (composition: CompositionStructure) => void;
 }
 
-export const CompositionModal: FC<CompositionModalProps> = ({
+export function CompositionModal({
   isOpen,
   selectedComposition,
   onClose,
   selectComposition,
-}) => {
+}: CompositionModalProps) {
+  if (!isOpen) return null;
   const compositionCategories = Object.keys(composition.garment_composition);
   const garmentParts = Object.keys(composition.garment_parts);
 
@@ -27,6 +28,7 @@ export const CompositionModal: FC<CompositionModalProps> = ({
   const [selectedPart, setSelectedPart] = useState<string>('body');
   const [localComposition, setLocalComposition] =
     useState<CompositionStructure>(selectedComposition);
+  // Radix Tabs do not measure layout like MUI; no need to defer mount
 
   const compositionGarment = Object.entries(
     composition.garment_composition[
@@ -157,24 +159,19 @@ export const CompositionModal: FC<CompositionModalProps> = ({
   };
 
   return (
-    <Dialog open={isOpen} onClose={onClose}>
-      <div className='space-y-4 h-full max-w-4xl'>
-        <Text className='text-lg font-bold'>Composition Setup</Text>
-
-        {/* Garment Parts Selection */}
+    <Dialog open={isOpen} onClose={onClose} keepMounted>
+      <div className='w-full h-full space-y-4'>
+        <Text>composition setup</Text>
         <div>
-          <Text className='font-semibold mb-2'>Select Garment Part:</Text>
-          <Tabs
-            value={selectedPart}
-            onChange={(_, newValue) => handleSelectPart(newValue)}
-            variant='scrollable'
-            scrollButtons='auto'
-          >
-            {garmentParts.map((part) => (
-              <Tab
-                key={part}
-                value={part}
-                label={
+          <Text>select garment part</Text>
+          <Tabs.Root value={selectedPart} onValueChange={setSelectedPart}>
+            <Tabs.List className='flex gap-2 overflow-x-auto'>
+              {garmentParts.map((part) => (
+                <Tabs.Trigger
+                  key={part}
+                  value={part}
+                  className='px-3 py-1 border rounded data-[state=active]:bg-green-50'
+                >
                   <div className='flex items-center gap-2'>
                     {composition.garment_parts[part as keyof typeof composition.garment_parts]}
                     {localComposition[part as keyof CompositionStructure] && (
@@ -190,18 +187,11 @@ export const CompositionModal: FC<CompositionModalProps> = ({
                       </Button>
                     )}
                   </div>
-                }
-                sx={{
-                  backgroundColor: localComposition[part as keyof CompositionStructure]
-                    ? 'rgba(0, 255, 0, 0.1)'
-                    : 'transparent',
-                }}
-              />
-            ))}
-          </Tabs>
+                </Tabs.Trigger>
+              ))}
+            </Tabs.List>
+          </Tabs.Root>
         </div>
-
-        {/* Material Categories */}
         <div>
           <Text className='font-semibold mb-2'>Material Categories:</Text>
           <FormControl>
@@ -231,8 +221,6 @@ export const CompositionModal: FC<CompositionModalProps> = ({
             </RadioGroup>
           </FormControl>
         </div>
-
-        {/* Materials Selection */}
         <div>
           <Text className='font-semibold mb-2'>
             Materials for{' '}
@@ -274,7 +262,6 @@ export const CompositionModal: FC<CompositionModalProps> = ({
             ))}
           </div>
         </div>
-
         <div className='flex justify-between items-center'>
           <Text className='text-sm text-gray-600'>
             Click materials to select/deselect, then set percentages
@@ -300,12 +287,10 @@ export const CompositionModal: FC<CompositionModalProps> = ({
             )}
           </div>
         </div>
-
         <div className='flex justify-end gap-2 pt-4'>
           <Button onClick={onClose}>Cancel</Button>
           <Button
             onClick={() => {
-              // Check if all parts total 100%
               const hasInvalidParts = Object.entries(localComposition).some(([partKey, items]) => {
                 if (!items || items.length === 0) return false;
                 const partTotal = items.reduce(
@@ -337,4 +322,4 @@ export const CompositionModal: FC<CompositionModalProps> = ({
       </div>
     </Dialog>
   );
-};
+}

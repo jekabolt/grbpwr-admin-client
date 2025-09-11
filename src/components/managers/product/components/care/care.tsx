@@ -1,8 +1,7 @@
-import { TextField } from '@mui/material';
-import { common_ProductNew } from 'api/proto-http/admin';
-import { useFormikContext } from 'formik';
-import { FC, useState } from 'react';
+import { useState } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import InputField from 'ui/form/fields/input-field';
 import { careInstruction } from './careInstruction';
 import { CareInstructions } from './careInstructions';
 
@@ -11,13 +10,13 @@ interface SelectedInstructions {
 }
 
 interface CareInterface {
-  isAddingProduct: boolean;
+  isAddingProduct?: boolean;
   isEditMode?: boolean;
 }
 
-export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
+export function Care({ isAddingProduct = true, isEditMode }: CareInterface) {
   const [isCareTableOpen, setIsCareTableOpen] = useState(false);
-  const { values, setFieldValue } = useFormikContext<common_ProductNew>();
+  const { setValue, getValues } = useFormContext();
   const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>({});
 
   const handleSelectCareInstruction = (
@@ -27,7 +26,7 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
     subCategory?: string,
   ) => {
     setSelectedInstructions((prev) => {
-      const newState = { ...prev };
+      const newState = { ...prev } as SelectedInstructions;
 
       if (category === 'Professional Care' && subCategory) {
         const selectionKey = `${category}-${subCategory}`;
@@ -44,28 +43,34 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
           newState[category] = code;
         }
       }
-      setFieldValue('product.productBody.careInstructions', Object.values(newState).join(','));
+
+      setValue('product.productBodyInsert.careInstructions', Object.values(newState).join(','), {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
       return newState;
     });
   };
 
   const handleOpenCareTable = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (values.product?.productBodyInsert?.careInstructions) {
-      const codes = values.product.productBodyInsert.careInstructions.split(',');
+    const existing = getValues('product.productBodyInsert.careInstructions') as string | undefined;
+    if (existing) {
+      const codes = existing.split(',');
       const newSelectedInstructions: SelectedInstructions = {};
 
       Object.entries(careInstruction.care_instructions).forEach(([category, methods]) => {
         if (category === 'Professional Care') {
-          Object.entries(methods).forEach(([subCategory, subMethods]) => {
-            Object.values(subMethods).forEach((method: any) => {
+          Object.entries(methods as Record<string, any>).forEach(([subCategory, subMethods]) => {
+            Object.values(subMethods as Record<string, any>).forEach((method: any) => {
               if (codes.includes(method.code)) {
                 newSelectedInstructions[`${category}-${subCategory}`] = method.code;
               }
             });
           });
         } else {
-          Object.values(methods).forEach((method: any) => {
+          Object.values(methods as Record<string, any>).forEach((method: any) => {
             if (codes.includes(method.code)) {
               newSelectedInstructions[category] = method.code;
             }
@@ -84,38 +89,34 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
 
   const handleClearInstructions = () => {
     setSelectedInstructions({});
-    setFieldValue('product.productBody.careInstructions', '');
+    setValue('product.productBodyInsert.careInstructions', '', {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    });
   };
 
   return (
-    <div className='w-full'>
-      <div className='w-full'>
-        <TextField
-          fullWidth
-          variant='outlined'
-          name='product.productBody.careInstructions'
-          label='Care Instructions'
-          value={values.product?.productBodyInsert?.careInstructions || ''}
-          slotProps={{
-            input: {
-              readOnly: true,
-              endAdornment: (isAddingProduct || isEditMode) && (
-                <div className='flex gap-2'>
-                  <Button
-                    size='lg'
-                    onClick={handleClearInstructions}
-                    disabled={!values.product?.productBodyInsert?.careInstructions}
-                  >
-                    clear
-                  </Button>
-                  <Button size='lg' onClick={(e: React.MouseEvent) => handleOpenCareTable(e)}>
-                    select
-                  </Button>
-                </div>
-              ),
-            },
-          }}
-        />
+    <>
+      <div className='border-b border-textColor flex items-center w-full'>
+        <div className='flex-1'>
+          <InputField
+            name='product.productBodyInsert.careInstructions'
+            label='care instructions'
+            className='w-full border-none leading-4 bg-transparent'
+          />
+        </div>
+
+        {(isAddingProduct || isEditMode) && (
+          <div className='flex gap-2'>
+            <Button size='lg' onClick={handleClearInstructions}>
+              clear
+            </Button>
+            <Button size='lg' onClick={(e: React.MouseEvent) => handleOpenCareTable(e)}>
+              select
+            </Button>
+          </div>
+        )}
       </div>
       <CareInstructions
         isCareTableOpen={isCareTableOpen}
@@ -123,6 +124,6 @@ export const Care: FC<CareInterface> = ({ isAddingProduct, isEditMode }) => {
         onSelectCareInstruction={handleSelectCareInstruction}
         selectedInstructions={selectedInstructions}
       />
-    </div>
+    </>
   );
-};
+}

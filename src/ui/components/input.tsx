@@ -1,22 +1,20 @@
 import { cn } from 'lib/utility';
 
 export interface InputProps {
-  type?: 'text' | 'password' | 'number' | 'file' | 'email';
-  name: string;
+  type?: 'email' | 'number' | 'tel' | 'text' | 'file' | 'color' | 'date';
   className?: string;
+  name: string;
   [k: string]: any;
 }
 
-function Input({ type = 'text', name, className, ref, ...props }: InputProps) {
+function Input({ type = 'text', className, name, ref, ...props }: InputProps) {
   return (
     <input
       id={name}
-      ref={ref}
       type={type}
+      ref={ref}
       className={cn(
-        'w-full focus:bg-bgColor focus:outline-none focus:border-2 border border-inactive focus:border-text px-1',
-        '[&:-webkit-autofill]:bg-bgColor [&:-webkit-autofill]:hover:bg-bgColor [&:-webkit-autofill]:focus:bg-bgColor',
-        '[&:-webkit-autofill]:[box-shadow:0_0_0_1000px_theme(colors.bgColor)_inset]',
+        'w-full appearance-none rounded-none border-b border-textColor bg-bgColor text-textBaseSize focus:outline-none',
         className,
       )}
       {...props}

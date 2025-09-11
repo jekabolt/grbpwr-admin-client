@@ -1,4 +1,3 @@
-import Categories from './categories';
 import Color from './color';
 import FromTo from './from-to';
 import Gender from './gender';
@@ -16,9 +15,9 @@ export default function Filter() {
         <Color />
         <Sizes />
       </div>
-      <div className='flex lg:flex-row flex-col gap-3'>
+      {/* <div className='flex lg:flex-row flex-col gap-3'>
         <Categories />
-      </div>
+      </div> */}
       <div className='flex lg:flex-row lg:justify-between flex-col gap-3'>
         <div className='flex gap-3 flex-col lg:flex-row'>
           <FromTo />
