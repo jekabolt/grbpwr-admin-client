@@ -19,11 +19,9 @@ export function getPromo(request: ListPromosRequest): Promise<ListPromosResponse
 }
 
 export function deletePromo(request: DeletePromoCodeRequest): Promise<DeletePromoCodeResponse> {
-  return adminService.DeletePromoCode(request)
+  return adminService.DeletePromoCode(request);
 }
 
 export function disablePromo(request: DisablePromoCodeRequest): Promise<DisablePromoCodeResponse> {
-  return adminService.DisablePromoCode(request)
+  return adminService.DisablePromoCode(request);
 }
-
-

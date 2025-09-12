@@ -5,9 +5,14 @@ import {
   DeleteArchiveByIdRequest,
   DeleteArchiveByIdResponse,
   UpdateArchiveRequest,
-  UpdateArchiveResponse
+  UpdateArchiveResponse,
 } from './proto-http/admin';
-import { GetArchiveRequest, GetArchiveResponse, GetArchivesPagedRequest, GetArchivesPagedResponse } from './proto-http/frontend';
+import {
+  GetArchiveRequest,
+  GetArchiveResponse,
+  GetArchivesPagedRequest,
+  GetArchivesPagedResponse,
+} from './proto-http/frontend';
 
 export function addArchive(request: AddArchiveRequest): Promise<AddArchiveResponse> {
   return adminService.AddArchive(request);

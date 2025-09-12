@@ -1,37 +1,37 @@
-import { common_ProductFull, common_ProductNew } from "api/proto-http/admin";
+import { common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
 
 export const productInitialValues = (product?: common_ProductFull): common_ProductNew => {
-    // if (!product) {
-    //     return initialProductState;
-    // }
+  // if (!product) {
+  //     return initialProductState;
+  // }
 
-    return {
-        product: {
-            productBodyInsert: product?.product?.productDisplay?.productBody?.productBodyInsert,
-            translations: product?.product?.productDisplay?.productBody?.translations,
-            thumbnailMediaId: product?.product?.productDisplay?.thumbnail?.id || undefined,
+  return {
+    product: {
+      productBodyInsert: product?.product?.productDisplay?.productBody?.productBodyInsert,
+      translations: product?.product?.productDisplay?.productBody?.translations,
+      thumbnailMediaId: product?.product?.productDisplay?.thumbnail?.id || undefined,
+    },
+    sizeMeasurements:
+      product?.sizes?.map((size) => ({
+        productSize: {
+          quantity: { value: size.quantity?.value || '' },
+          sizeId: size.sizeId,
         },
-        sizeMeasurements: product?.sizes?.map((size) => ({
-            productSize: {
-                quantity: { value: size.quantity?.value || '' },
-                sizeId: size.sizeId,
-            },
-            measurements: product.measurements
-                ?.filter((measurement) => measurement.productSizeId === size.sizeId)
-                .map((m) => ({
-                    measurementNameId: m.measurementNameId,
-                    measurementValue: { value: m.measurementValue?.value || '' },
-                })),
-        })) || [],
-        tags: product?.tags?.map((tag) => ({
-            tag: tag.productTagInsert?.tag || '',
-        })) || [],
-        mediaIds: product?.media
-            ?.map((media) => media.id)
-            .filter((id): id is number => id !== undefined) || [],
-    };
+        measurements: product.measurements
+          ?.filter((measurement) => measurement.productSizeId === size.sizeId)
+          .map((m) => ({
+            measurementNameId: m.measurementNameId,
+            measurementValue: { value: m.measurementValue?.value || '' },
+          })),
+      })) || [],
+    tags:
+      product?.tags?.map((tag) => ({
+        tag: tag.productTagInsert?.tag || '',
+      })) || [],
+    mediaIds:
+      product?.media?.map((media) => media.id).filter((id): id is number => id !== undefined) || [],
+  };
 };
-
 
 // // export const initialProductState: common_ProductNew = {
 // //     product: {

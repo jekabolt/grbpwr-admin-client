@@ -2,11 +2,8 @@ import { adminService } from './admin';
 import {
   DeliveredOrderRequest,
   DeliveredOrderResponse,
-
   GetOrderByUUIDRequest,
-
   GetOrderByUUIDResponse,
-
   ListOrdersRequest,
   ListOrdersResponse,
   RefundOrderRequest,
@@ -14,7 +11,6 @@ import {
   SetTrackingNumberRequest,
   SetTrackingNumberResponse,
 } from './proto-http/admin';
-
 
 export function getOrdersList(request: ListOrdersRequest): Promise<ListOrdersResponse> {
   return adminService.ListOrders(request);

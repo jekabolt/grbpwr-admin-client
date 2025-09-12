@@ -14,7 +14,7 @@ export enum ROUTES {
   promo = '/promo',
   getPromo = '/get-promo',
   archives = '/archives',
-  singleArchive = '/archive/:heading/:tag/:id',
+  singleArchive = '/timeline/:heading/:tag/:id',
   settings = '/settings',
   orders = '/orders',
   orderDetails = '/orders/:uuid',
@@ -50,4 +50,3 @@ export const sideBarItems = [
     route: ROUTES.settings,
   },
 ];
-

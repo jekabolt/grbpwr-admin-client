@@ -18,19 +18,18 @@ import {
   UploadContentVideoResponse,
   UpsertProductRequest,
   UpsertProductResponse,
-  createAdminServiceClient
+  createAdminServiceClient,
 } from './proto-http/admin';
 import { createFrontendServiceClient } from './proto-http/frontend';
 
 export const adminService = createAdminServiceClient(axiosRequestHandler);
-export const frontService = createFrontendServiceClient(axiosRequestHandler)
+export const frontService = createFrontendServiceClient(axiosRequestHandler);
 
 export function getAllUploadedFiles(
   request: ListObjectsPagedRequest,
 ): Promise<ListObjectsPagedResponse> {
   return adminService.ListObjectsPaged(request);
 }
-
 
 export function uploadContentImage(
   request: UploadContentImageRequest,
@@ -49,7 +48,7 @@ export function deleteFiles(request: DeleteFromBucketRequest): Promise<DeleteFro
 }
 
 export function upsertProduct(request: UpsertProductRequest): Promise<UpsertProductResponse> {
-  return adminService.UpsertProduct(request)
+  return adminService.UpsertProduct(request);
 }
 
 export function getProductsPaged(
@@ -68,7 +67,10 @@ export function deleteProductByID(
   return adminService.DeleteProductByID(request);
 }
 
-export function getDictionary(request: GetDictionaryRequest, bypassCache = false): Promise<GetDictionaryResponse> {
+export function getDictionary(
+  request: GetDictionaryRequest,
+  bypassCache = false,
+): Promise<GetDictionaryResponse> {
   const storedData = localStorage.getItem('dictionary');
   if (storedData && !bypassCache) {
     return Promise.resolve().then(() => JSON.parse(storedData));
