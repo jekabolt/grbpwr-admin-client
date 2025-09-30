@@ -3,9 +3,8 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { Checkbox } from '@mui/material';
 import IconButton from '@mui/material/IconButton';
-import { common_HeroFullInsert, common_Product } from 'api/proto-http/admin';
+import { common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { useFormikContext } from 'formik';
 import { useDictionaryStore } from 'lib/stores/store';
 import {
   MRT_TableContainer,
@@ -14,7 +13,9 @@ import {
   type MRT_Row,
 } from 'material-react-table';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
+import { HeroSchema } from './schema';
 interface HeroProductTableData {
   products: common_Product[];
   isFeaturedProducts?: boolean;
@@ -26,7 +27,7 @@ export const HeroProductTable: FC<
     onReorder?: (newOrder: common_Product[]) => void;
   }
 > = ({ products, id, onReorder, isFeaturedProducts }) => {
-  const { setFieldValue } = useFormikContext<common_HeroFullInsert>();
+  const { setValue } = useFormContext<HeroSchema>();
   const categories = useDictionaryStore((state) => state.dictionary?.categories || []);
   const navigate = useNavigate();
   const [data, setData] = useState(products);
@@ -43,13 +44,13 @@ export const HeroProductTable: FC<
         newData.splice(toIndex, 0, item);
         setData(newData);
         onReorder?.(newData);
-        setFieldValue(
-          `entities.${id}.featuredProducts.productIds`,
+        setValue(
+          `entities.${id}.featuredProducts.productIds` as any,
           newData.map((product) => product.id),
         );
       }
     },
-    [data, onReorder, setFieldValue],
+    [data, onReorder, setValue],
   );
 
   const columns = useMemo<MRT_ColumnDef<common_Product>[]>(
@@ -162,8 +163,8 @@ export const HeroProductTable: FC<
                     const newData = data.filter((_, index) => index !== row.index);
                     setData(newData);
                     onReorder?.(newData);
-                    setFieldValue(
-                      `entities.${id}.featuredProducts.productIds`,
+                    setValue(
+                      `entities.${id}.featuredProducts.productIds` as any,
                       newData.map((p) => p.id),
                     );
                   }}

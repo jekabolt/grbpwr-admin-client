@@ -45,11 +45,11 @@ export function ProductForm({
 
   // Populate form when product data is available
   useEffect(() => {
-    if (product && !isAddingProduct) {
+    if (product && (!isAddingProduct || isCopyMode)) {
       const formData = mapProductFullToFormData(product);
       form.reset(formData);
     }
-  }, [product, isAddingProduct, form]);
+  }, [product, isAddingProduct, isCopyMode, form]);
 
   // Track dirtiness similar to previous deep-compare logic
   useEffect(() => {

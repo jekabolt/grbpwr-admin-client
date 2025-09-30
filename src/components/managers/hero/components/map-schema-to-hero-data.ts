@@ -37,22 +37,22 @@ export function mapFormFieldsToHeroData(data: HeroSchema): common_HeroFullInsert
       },
       double: {
         left: {
-          mediaLandscapeId: e.doubleAdd?.left?.mediaLandscapeId || 0,
-          mediaPortraitId: e.doubleAdd?.left?.mediaPortraitId || 0,
-          exploreLink: e.doubleAdd?.left?.exploreLink || '',
+          mediaLandscapeId: e.double?.left?.mediaLandscapeId || 0,
+          mediaPortraitId: e.double?.left?.mediaPortraitId || 0,
+          exploreLink: e.double?.left?.exploreLink || '',
           translations:
-            e.doubleAdd?.left?.translations?.map((t: any) => ({
+            e.double?.left?.translations?.map((t: any) => ({
               languageId: t.languageId,
               headline: t.headline,
               exploreText: t.exploreText,
             })) || [],
         },
         right: {
-          mediaLandscapeId: e.doubleAdd?.right?.mediaLandscapeId || 0,
-          mediaPortraitId: e.doubleAdd?.right?.mediaPortraitId || 0,
-          exploreLink: e.doubleAdd?.right?.exploreLink || '',
+          mediaLandscapeId: e.double?.right?.mediaLandscapeId || 0,
+          mediaPortraitId: e.double?.right?.mediaPortraitId || 0,
+          exploreLink: e.double?.right?.exploreLink || '',
           translations:
-            e.doubleAdd?.right?.translations?.map((t: any) => ({
+            e.double?.right?.translations?.map((t: any) => ({
               languageId: t.languageId,
               headline: t.headline,
               exploreText: t.exploreText,
@@ -70,9 +70,9 @@ export function mapFormFieldsToHeroData(data: HeroSchema): common_HeroFullInsert
           })) || [],
       },
       featuredProductsTag: {
-        tag: e.tag || '',
+        tag: e.featuredProductsTag?.tag || '',
         translations:
-          e.translations?.map((t: any) => ({
+          e.featuredProductsTag?.translations?.map((t: any) => ({
             languageId: t.languageId,
             headline: t.headline,
             exploreText: t.exploreText,
@@ -201,13 +201,15 @@ export function mapHeroFullToFormData(heroFull?: common_HeroFullWithTranslations
             case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
               return {
                 type: e.type,
-                tag: e.featuredProductsTag?.tag || '',
-                translations:
-                  e.featuredProductsTag?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    exploreText: t.exploreText || '',
-                  })) || [],
+                featuredProductsTag: {
+                  tag: e.featuredProductsTag?.tag || '',
+                  translations:
+                    e.featuredProductsTag?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      exploreText: t.exploreText || '',
+                    })) || [],
+                },
               };
             default:
               return { type: 'HERO_TYPE_UNKNOWN' as const };

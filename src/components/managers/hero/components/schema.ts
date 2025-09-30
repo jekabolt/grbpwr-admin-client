@@ -112,14 +112,16 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   // HERO_TYPE_FEATURED_PRODUCTS_TAG
   z.object({
     type: z.literal('HERO_TYPE_FEATURED_PRODUCTS_TAG'),
-    tag: z.string().min(1, 'Tag is required'),
-    translations: z.array(
-      z.object({
-        languageId: z.number().min(1, 'Language is required'),
-        headline: z.string().nullable().optional(),
-        exploreText: z.string().nullable().optional(),
-      }),
-    ),
+    featuredProductsTag: z.object({
+      tag: z.string().min(1, 'Tag is required'),
+      translations: z.array(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().nullable().optional(),
+          exploreText: z.string().nullable().optional(),
+        }),
+      ),
+    }),
   }),
 
   // Default case for unknown types

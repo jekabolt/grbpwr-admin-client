@@ -21,7 +21,6 @@ export function Hero() {
     defaultValues: defaultData as HeroSchema,
   });
 
-  // Update form with existing hero data when it loads
   useEffect(() => {
     if (heroData) {
       const formData = mapHeroFullToFormData(heroData.hero);
@@ -35,14 +34,6 @@ export function Hero() {
   });
 
   async function onSubmit(data: HeroSchema) {
-    console.log('Form submitted successfully!');
-    console.log('Form data:', data);
-
-    // Check which types are selected for each entity
-    data.entities.forEach((entity, index) => {
-      console.log(`Entity ${index + 1} type:`, entity.type);
-    });
-
     const heroData = mapFormFieldsToHeroData(data);
     console.log('Mapped hero data:', heroData);
     try {
@@ -51,10 +42,6 @@ export function Hero() {
     } catch (e) {
       console.log('Error saving hero:', e);
     }
-  }
-
-  function onError(errors: any) {
-    console.log('Form validation errors:', errors);
   }
 
   if (isLoading) {
@@ -70,7 +57,7 @@ export function Hero() {
   return (
     <Layout>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit, onError)}>
+        <form onSubmit={form.handleSubmit(onSubmit)}>
           <NavFeatured hero={heroData?.hero} />
 
           <SelectHeroType append={append} insert={insert} form={form} />

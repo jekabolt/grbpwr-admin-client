@@ -1,13 +1,15 @@
+//TODO: rework in future
+
 import { common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { FC, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
-import { FeaturedProductBase } from '../entities/featured-products-(tags)/featured-prduct-base';
 import { EntitiesProps } from '../entities/interface/interface';
 import { removeEntityIndex } from '../utility/arrayHelpers';
 import { createMediaSaveConfigs } from '../utility/save-media-config';
 import { CommonEntity } from './common-entity';
+import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroSchema } from './schema';
 
 export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
@@ -34,8 +36,6 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
   const handleCloseModal = () => setIsModalOpen(false);
 
   const fetchEntities = () => {
-    // We store thumbnail URLs for preview; initialize empty when only IDs are available
-    // Note: Media URLs are only available after media selection, not from form data
     setMain('');
     setMainPortrait('');
 
@@ -70,7 +70,10 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
           },
           productTags: {
             ...acc.productTags,
-            [index]: entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' ? entity.tag || '' : '',
+            [index]:
+              entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG'
+                ? entity.featuredProductsTag.tag || ''
+                : '',
           },
           archive: {
             ...acc.archive,

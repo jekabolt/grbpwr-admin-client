@@ -21,19 +21,38 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
   // Find the selected language
   const selectedLanguage = LANGUAGES.find((lang) => lang.id === selectedLanguageId);
 
-  // Find the index of the selected language in the translations array
-  const translationIndex = LANGUAGES.findIndex((lang) => lang.id === selectedLanguageId);
+  // Get all translations from the form
+  const allTranslations = watch(fieldPrefix) || [];
 
-  // Construct the field name with the selected language index
-  const fieldNameWithIndex = `${fieldPrefix}.${translationIndex}.${fieldName}`;
+  // Find the index of the translation for the selected language
+  const translationIndex = allTranslations.findIndex(
+    (t: any) => t.languageId === selectedLanguageId,
+  );
+
+  // If translation doesn't exist for this language, create it
+  const actualTranslationIndex = translationIndex >= 0 ? translationIndex : allTranslations.length;
+
+  // Construct the field name with the actual translation index
+  const fieldNameWithIndex = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
 
   // Get current value from form for the selected language
   const currentFormValue = watch(fieldNameWithIndex) || '';
 
   // Initialize the languageId for the current translation
   useEffect(() => {
-    setValue(`${fieldPrefix}.${translationIndex}.languageId`, selectedLanguageId);
-  }, [setValue, fieldPrefix, translationIndex, selectedLanguageId]);
+    if (translationIndex < 0) {
+      // Create new translation object for this language
+      const newTranslations = [...allTranslations];
+      newTranslations.push({
+        languageId: selectedLanguageId,
+        [fieldName]: '',
+      });
+      setValue(fieldPrefix, newTranslations);
+    } else {
+      // Ensure languageId is set for existing translation
+      setValue(`${fieldPrefix}.${translationIndex}.languageId`, selectedLanguageId);
+    }
+  }, [setValue, fieldPrefix, translationIndex, selectedLanguageId, allTranslations, fieldName]);
 
   const handleLanguageChange = (languageIdString: string) => {
     // Save current input before switching
@@ -43,9 +62,6 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
 
     const languageId = parseInt(languageIdString, 10);
     setSelectedLanguageId(languageId);
-
-    // Update the languageId field for the current translation
-    setValue(`${fieldPrefix}.${translationIndex}.languageId`, languageId);
 
     // Reset input value for new language
     setCurrentInputValue('');
@@ -68,7 +84,7 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
       <div className='flex items-end w-full '>
         <div className='flex-shrink-0'>
           <Select
-            name={`${fieldPrefix}.${translationIndex}.languageId`}
+            name={`${fieldPrefix}.${actualTranslationIndex}.languageId`}
             value={selectedLanguageId.toString()}
             onValueChange={handleLanguageChange}
             items={LANGUAGES.map((language) => ({

@@ -10,7 +10,6 @@ import { TranslationField } from 'ui/form/fields/translation-field';
 import { ArchivePicker } from '../entities/featured-archive/archive-picker';
 import { HeroSchema } from './schema';
 
-// Type for media URLs state
 type MediaUrlsState = {
   men: string;
   women: string;
@@ -30,7 +29,6 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
       ? watch('navFeatured.men.featuredArchiveId')
       : watch('navFeatured.women.featuredArchiveId');
 
-  // Set media URL from existing hero data on load
   useEffect(() => {
     if (hero?.navFeatured?.[gender]?.media?.media?.thumbnail?.mediaUrl) {
       setMediaUrls((prev) => ({

@@ -34,6 +34,11 @@ export function BodyFields() {
   return (
     <div className='space-y-3'>
       <TranslationField fieldPrefix='product.translations' fieldName='name' label='name' />
+      <TranslationField
+        fieldPrefix='product.translations'
+        fieldName='description'
+        label='description'
+      />
       <InputField name='product.productBodyInsert.brand' label='brand' />
       <InputField name='product.productBodyInsert.version' label='version' />
       <InputField name='product.productBodyInsert.collection' label='collection' />
@@ -64,11 +69,6 @@ export function BodyFields() {
       />
       <Care />
       <Composition />
-      <TranslationField
-        fieldPrefix='product.translations'
-        fieldName='description'
-        label='description'
-      />
     </div>
   );
 }
