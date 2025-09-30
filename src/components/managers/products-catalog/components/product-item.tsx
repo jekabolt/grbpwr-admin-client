@@ -18,7 +18,7 @@ export function ProductItem({
   refresh: (id: number | undefined) => void;
 }) {
   const thumbnail = product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl;
-  const description = `[${product.id}] ${product.productDisplay?.productBody?.brand} ${product.productDisplay?.productBody?.name}`;
+  const description = `[${product.id}] ${product.productDisplay?.productBody?.productBodyInsert?.brand} ${product.productDisplay?.productBody?.translations?.[0]?.name}`;
   const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const navigate = useNavigate();

@@ -1,8 +1,5 @@
 import { adminService, frontService } from './admin';
-import {
-  AddHeroRequest,
-  AddHeroResponse,
-} from './proto-http/admin';
+import { AddHeroRequest, AddHeroResponse } from './proto-http/admin';
 import { GetHeroRequest, GetHeroResponse } from './proto-http/frontend';
 
 export function addHero(request: AddHeroRequest): Promise<AddHeroResponse> {

@@ -30,6 +30,7 @@ export function Settings() {
         maxOrderItems: dictionary.maxOrderItems || 0,
         siteAvailable: dictionary.siteEnabled || false,
         bigMenu: dictionary.bigMenu || false,
+        announce: dictionary.announce || '',
       });
     }
   }, [dictionary]);

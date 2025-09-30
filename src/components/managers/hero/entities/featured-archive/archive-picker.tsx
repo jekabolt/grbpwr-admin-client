@@ -1,6 +1,6 @@
 import { Checkbox } from '@mui/material';
 import { common_ArchiveList } from 'api/proto-http/frontend';
-import { useArchives } from 'components/managers/archive/utility/useArchive';
+import { useArchives } from 'components/managers/archives/utility/useArchive';
 import { Dialog } from 'ui/components/dialog';
 
 import { MaterialReactTable, MRT_ColumnDef, useMaterialReactTable } from 'material-react-table';
