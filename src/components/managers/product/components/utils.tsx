@@ -32,7 +32,7 @@ export function mapProductDataToForm(data: ProductFormData) {
     targetGender: data.product.productBodyInsert.targetGender as common_GenderEnum,
     version: data.product.productBodyInsert.version,
     collection: data.product.productBodyInsert.collection,
-    preorder: data.product.productBodyInsert.preorder,
+    preorder: data.product.productBodyInsert.preorder || '0001-01-01T00:00:00Z',
     fit: data.product.productBodyInsert.fit,
   };
 
