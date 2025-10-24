@@ -37,6 +37,7 @@ const productBodySchema = z.object({
   hidden: z.boolean().optional(),
   modelWearsHeightCm: z.string().optional(),
   modelWearsSizeId: z.string().optional(),
+  fit: z.string().optional(),
 });
 
 export const baseProductSchema = z.object({
@@ -101,6 +102,7 @@ export const defaultData = {
       modelWearsSizeId: undefined,
       version: '',
       collection: '',
+      fit: '',
     },
     thumbnailMediaId: 0,
     translations: [{ languageId: 1, name: '', description: '' }],
