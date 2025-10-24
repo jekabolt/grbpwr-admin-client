@@ -13,6 +13,8 @@ import { ColorFields } from './color-fields';
 import { Composition } from './composition/composition';
 import { SalePreorderFields } from './sale-preorder-fields';
 
+const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped', 'tailored'];
+
 interface Country {
   value: string;
   label: string;
@@ -47,6 +49,14 @@ export function BodyFields() {
         label='gender'
         items={genderOptions}
       />
+      <SelectField
+        name='product.productBodyInsert.fit'
+        label='fit'
+        items={FIT_OPTIONS.map((fit) => ({
+          label: fit,
+          value: fit,
+        }))}
+      />
       <CategoryFields />
       <ColorFields />
       <SelectField
@@ -71,43 +81,4 @@ export function BodyFields() {
       <Composition />
     </div>
   );
-}
-
-{
-  /* <div className='grid gap-4 w-full'>
-<FormControlLabel
-  control={
-    <Field
-      as={Checkbox}
-      name='product.productBodyInsert.hidden'
-      disabled={disableFields}
-      checked={values.product?.productBodyInsert?.hidden || false}
-    />
-  }
-  label={'hidden'.toUpperCase()}
-/>
-{!isAddingProduct && (
-  <>
-    {['id', 'createdAt', 'updatedAt'].map((field) => (
-      <div key={field} className='w-full'>
-        <TextField
-          label={
-            field === 'id'
-              ? 'product id'.toUpperCase()
-              : field === 'createdAt'
-                ? 'created at'.toUpperCase()
-                : field === 'updatedAt'
-                  ? 'updated at'.toUpperCase()
-                  : ''
-          }
-          value={(product?.product as any)?.[field] || ''}
-          InputLabelProps={{ shrink: true }}
-          InputProps={{ readOnly: true }}
-          fullWidth
-        />
-      </div>
-    ))}
-  </>
-)}
-</div> */
 }

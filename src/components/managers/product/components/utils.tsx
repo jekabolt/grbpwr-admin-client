@@ -33,6 +33,7 @@ export function mapProductDataToForm(data: ProductFormData) {
     version: data.product.productBodyInsert.version,
     collection: data.product.productBodyInsert.collection,
     preorder: data.product.productBodyInsert.preorder,
+    fit: data.product.productBodyInsert.fit,
   };
 
   const translations: common_ProductInsertTranslation[] = data.product.translations.map(
