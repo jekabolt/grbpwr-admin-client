@@ -23,7 +23,7 @@ export function CategoryFields() {
         name='product.productBodyInsert.topCategoryId'
         label='category'
         items={topCategories.map((category) => ({
-          label: category.translations?.[0]?.name || '',
+          label: category.name || '',
           value: category.id?.toString() || '',
         }))}
       />
@@ -31,7 +31,7 @@ export function CategoryFields() {
         name='product.productBodyInsert.subCategoryId'
         label='sub category'
         items={subCategories.map((category) => ({
-          label: category.translations?.[0]?.name || '',
+          label: category.name || '',
           value: category.id?.toString() || '',
         }))}
         disabled={!topCategoryId}
@@ -40,7 +40,7 @@ export function CategoryFields() {
         name='product.productBodyInsert.typeId'
         label='type'
         items={types.map((type) => ({
-          label: type.translations?.[0]?.name || '',
+          label: type.name || '',
           value: type.id?.toString() || '',
         }))}
         disabled={!subCategoryId}

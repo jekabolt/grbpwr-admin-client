@@ -31,17 +31,13 @@ export const findInDictionary = (
   let data;
   switch (type) {
     case 'category':
-      data = dictionary.categories
-        ?.find((s) => s.id === id)
-        ?.translations?.[0]?.name?.replace(pattern[type], '');
+      data = dictionary.categories?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
       break;
     case 'size':
       data = dictionary.sizes?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
       break;
     case 'measurement':
-      data = dictionary.measurements
-        ?.find((s) => s.id === id)
-        ?.translations?.[0]?.name?.replace(pattern[type], '');
+      data = dictionary.measurements?.find((s) => s.id === id)?.name?.replace(pattern[type], '');
       break;
     case 'order':
       data = dictionary.orderStatuses?.find((s) => s.id === id)?.name?.replace(pattern[type], '');

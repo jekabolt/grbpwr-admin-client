@@ -20,7 +20,7 @@ export const processCategories = (categories: common_Category[]): ProcessedCateg
 
   return topCategories.map((topCat) => {
     console.log('processCategories - processing topCat:', topCat);
-    console.log('processCategories - topCat.translations:', topCat.translations);
+    console.log('processCategories - topCat.name:', topCat.name);
     const subCategories = categories.filter(
       (cat) => cat.level === 'sub_category' && cat.parentId === topCat.id!,
     );
@@ -33,14 +33,14 @@ export const processCategories = (categories: common_Category[]): ProcessedCateg
 
       return {
         id: topCat.id!,
-        name: topCat.translations?.[0]?.name || 'Unknown',
+        name: topCat.name || 'Unknown',
         subCategories: [
           {
             id: topCat.id!,
-            name: topCat.translations?.[0]?.name || 'Unknown',
+            name: topCat.name || 'Unknown',
             types: directTypes.map((type) => ({
               id: type.id!,
-              name: type.translations?.[0]?.name || 'Unknown',
+              name: type.name || 'Unknown',
             })),
           },
         ],
@@ -52,17 +52,17 @@ export const processCategories = (categories: common_Category[]): ProcessedCateg
 
       return {
         id: subCat.id!,
-        name: subCat.translations?.[0]?.name || 'Unknown',
+        name: subCat.name || 'Unknown',
         types: types.map((type) => ({
           id: type.id!,
-          name: type.translations?.[0]?.name || 'Unknown',
+          name: type.name || 'Unknown',
         })),
       };
     });
 
     return {
       id: topCat.id!,
-      name: topCat.translations?.[0]?.name || 'Unknown',
+      name: topCat.name || 'Unknown',
       subCategories: processedSubCategories,
     };
   });
