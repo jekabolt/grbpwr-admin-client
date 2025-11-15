@@ -19,7 +19,6 @@ export function mapProductDataToForm(data: ProductFormData) {
     color: data.product.productBodyInsert.color,
     colorHex: data.product.productBodyInsert.colorHex,
     countryOfOrigin: data.product.productBodyInsert.countryOfOrigin,
-    price: data.product.productBodyInsert.price,
     salePercentage: data.product.productBodyInsert.salePercentage,
     topCategoryId: parseInt(data.product.productBodyInsert.topCategoryId),
     subCategoryId: parseInt(data.product.productBodyInsert.subCategoryId || '0'),
@@ -67,14 +66,24 @@ export function mapProductDataToForm(data: ProductFormData) {
     }),
   );
 
+  const prices = data.prices.map(priceItem => ({
+    currency: priceItem.currency,
+    price: {
+      value: priceItem.price.value,
+    },
+  }));
+
   const product: common_ProductInsert = {
     productBodyInsert,
     thumbnailMediaId: data.product.thumbnailMediaId,
+    secondaryThumbnailMediaId: data.product.secondaryThumbnailMediaId || 0,
     translations,
+    prices,
   };
 
   const productNew: common_ProductNew = {
     product,
+    prices,
     mediaIds,
     tags,
     sizeMeasurements,
@@ -121,6 +130,13 @@ export function mapProductFullToFormData(
 
   const mediaIds = productFull.media?.map((media) => media.id || 0).filter((id) => id > 0) || [];
 
+  const prices = productFull.product.prices?.map((priceItem) => ({
+    currency: priceItem.currency || 'USD',
+    price: {
+      value: priceItem.price?.value || '0',
+    },
+  })) || [{ currency: 'USD', price: { value: '0' } }];
+
   return {
     product: {
       productBodyInsert: {
@@ -131,9 +147,6 @@ export function mapProductFullToFormData(
         color: productBodyInsert?.color || '',
         colorHex: productBodyInsert?.colorHex || '',
         countryOfOrigin: productBodyInsert?.countryOfOrigin || '',
-        price: {
-          value: productBodyInsert?.price?.value || '0',
-        },
         salePercentage: {
           value: productBodyInsert?.salePercentage?.value || '0',
         },
@@ -148,12 +161,15 @@ export function mapProductFullToFormData(
         collection: productBodyInsert?.collection || '',
       },
       thumbnailMediaId: productFull.product.productDisplay.thumbnail?.id || 0,
+      secondaryThumbnailMediaId: productFull.product.productDisplay.secondaryThumbnail?.id || 0,
       translations: productBody?.translations?.map((translation) => ({
         languageId: translation.languageId || 1,
         name: translation.name || '',
         description: translation.description || '',
       })) || [{ languageId: 1, name: '', description: '' }],
+      prices,
     },
+    prices,
     mediaIds,
     tags,
     sizeMeasurements,

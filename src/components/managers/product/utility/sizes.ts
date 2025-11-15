@@ -8,12 +8,8 @@ export function getFilteredSizes(
 ) {
   if (!dictionary?.sizes) return [];
 
-  const shoesCategoryId = dictionary.categories?.find(
-    (c) => c.translations?.find((t) => t.languageId === 1)?.name?.toLowerCase() === 'shoes',
-  )?.id;
-  const ringCategoryId = dictionary.categories?.find(
-    (c) => c.translations?.find((t) => t.languageId === 1)?.name?.toLowerCase() === 'rings',
-  )?.id;
+  const shoesCategoryId = dictionary.categories?.find((c) => c.name?.toLowerCase() === 'shoes')?.id;
+  const ringCategoryId = dictionary.categories?.find((c) => c.name?.toLowerCase() === 'rings')?.id;
 
   const isShoes = topCategoryId === shoesCategoryId;
   const isRings = typeId === ringCategoryId;

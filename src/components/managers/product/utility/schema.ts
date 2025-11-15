@@ -20,12 +20,6 @@ const productBodySchema = z.object({
   color: z.string().min(1, 'Color is required'),
   colorHex: z.string().min(1, 'Color hex is required'),
   countryOfOrigin: z.string().min(1, 'Country is required'),
-  price: z.object({
-    value: z
-      .string()
-      .min(1, 'Price is required')
-      .regex(/^\d*\.?\d{0,2}$/, 'Price must be a valid number greater than 0'),
-  }),
   salePercentage: z.object({
     value: z.string().regex(/^\d*\.?\d{0,2}$/, 'Sale percentage must be a valid number'),
   }),
@@ -44,8 +38,35 @@ export const baseProductSchema = z.object({
   product: z.object({
     productBodyInsert: productBodySchema,
     thumbnailMediaId: z.number().min(1, 'Thumbnail must be selected'),
+    secondaryThumbnailMediaId: z.number().optional(),
     translations: z.array(productTranslationSchema).min(1, 'At least one translation is required'),
+    prices: z
+      .array(
+        z.object({
+          currency: z.string().min(1, 'Currency is required'),
+          price: z.object({
+            value: z
+              .string()
+              .min(1, 'Price is required')
+              .regex(/^\d*\.?\d{0,2}$/, 'Price must be a valid number greater than 0'),
+          }),
+        }),
+      )
+      .min(1, 'At least one price must be specified'),
   }),
+  prices: z
+    .array(
+      z.object({
+        currency: z.string().min(1, 'Currency is required'),
+        price: z.object({
+          value: z
+            .string()
+            .min(1, 'Price is required')
+            .regex(/^\d*\.?\d{0,2}$/, 'Price must be a valid number greater than 0'),
+        }),
+      }),
+    )
+    .min(1, 'At least one price must be specified'),
   mediaIds: z.array(z.number()).min(1, 'At least one media must be added to the product'),
   tags: z.array(
     z.object({
@@ -91,7 +112,6 @@ export const defaultData = {
       color: '',
       colorHex: '',
       countryOfOrigin: '',
-      price: { value: '0' },
       salePercentage: { value: '0' },
       topCategoryId: '',
       subCategoryId: '',
@@ -105,8 +125,11 @@ export const defaultData = {
       fit: '',
     },
     thumbnailMediaId: 0,
+    secondaryThumbnailMediaId: 0,
     translations: [{ languageId: 1, name: '', description: '' }],
+    prices: [{ currency: 'USD', price: { value: '0' } }],
   },
+  prices: [{ currency: 'USD', price: { value: '0' } }],
   mediaIds: [],
   tags: [],
   sizeMeasurements: [],

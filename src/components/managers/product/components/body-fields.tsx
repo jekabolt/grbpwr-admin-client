@@ -5,12 +5,13 @@ import { useFormContext } from 'react-hook-form';
 import CountryList from 'react-select-country-list';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import { TranslationField } from 'ui/form/fields/translation-field';
+import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { getFilteredSizes } from '../utility/sizes';
 import { Care } from './care/care';
 import { CategoryFields } from './category-fields';
 import { ColorFields } from './color-fields';
 import { Composition } from './composition/composition';
+import { PriceFields } from './price-fields';
 import { SalePreorderFields } from './sale-preorder-fields';
 
 const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped', 'tailored'];
@@ -34,51 +35,52 @@ export function BodyFields() {
   const filteredSizes = getFilteredSizes(dictionary, topCategoryId || 0);
 
   return (
-    <div className='space-y-3'>
-      <TranslationField fieldPrefix='product.translations' fieldName='name' label='name' />
-      <TranslationField
-        fieldPrefix='product.translations'
-        fieldName='description'
-        label='description'
-      />
-      <InputField name='product.productBodyInsert.brand' label='brand' />
-      <InputField name='product.productBodyInsert.version' label='version' />
-      <InputField name='product.productBodyInsert.collection' label='collection' />
-      <SelectField
-        name='product.productBodyInsert.targetGender'
-        label='gender'
-        items={genderOptions}
-      />
-      <SelectField
-        name='product.productBodyInsert.fit'
-        label='fit'
-        items={FIT_OPTIONS.map((fit) => ({
-          label: fit,
-          value: fit,
-        }))}
-      />
-      <CategoryFields />
-      <ColorFields />
-      <SelectField
-        fullWidth
-        name='product.productBodyInsert.countryOfOrigin'
-        label='country of origin'
-        items={countries}
-      />
-      <InputField name='product.productBodyInsert.price.value' label='price' />
-      <SalePreorderFields />
-      <InputField name='product.productBodyInsert.modelWearsHeightCm' label='model wears height' />
-      <SelectField
-        fullWidth
-        name='product.productBodyInsert.modelWearsSizeId'
-        label='model wears size'
-        items={filteredSizes.map((size) => ({
-          label: size.name || '',
-          value: size.id?.toString() || '',
-        }))}
-      />
-      <Care />
-      <Composition />
+    <div className='space-y-10'>
+      <UnifiedTranslationFields fieldPrefix='product.translations' />
+
+      <div className='space-y-3'>
+        <InputField name='product.productBodyInsert.brand' label='brand' />
+        <InputField name='product.productBodyInsert.version' label='version' />
+        <InputField name='product.productBodyInsert.collection' label='collection' />
+        <SelectField
+          name='product.productBodyInsert.targetGender'
+          label='gender'
+          items={genderOptions}
+        />
+        <SelectField
+          name='product.productBodyInsert.fit'
+          label='fit'
+          items={FIT_OPTIONS.map((fit) => ({
+            label: fit,
+            value: fit,
+          }))}
+        />
+        <CategoryFields />
+        <ColorFields />
+        <SelectField
+          fullWidth
+          name='product.productBodyInsert.countryOfOrigin'
+          label='country of origin'
+          items={countries}
+        />
+        <PriceFields />
+        <SalePreorderFields />
+        <InputField
+          name='product.productBodyInsert.modelWearsHeightCm'
+          label='model wears height'
+        />
+        <SelectField
+          fullWidth
+          name='product.productBodyInsert.modelWearsSizeId'
+          label='model wears size'
+          items={filteredSizes.map((size) => ({
+            label: size.name || '',
+            value: size.id?.toString() || '',
+          }))}
+        />
+        <Care />
+        <Composition />
+      </div>
     </div>
   );
 }

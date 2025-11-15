@@ -5,12 +5,22 @@ export const productInitialValues = (product?: common_ProductFull): common_Produ
   //     return initialProductState;
   // }
 
+  const prices = product?.product?.prices?.map((priceItem) => ({
+    currency: priceItem.currency || 'USD',
+    price: {
+      value: priceItem.price?.value || '0',
+    },
+  })) || [{ currency: 'USD', price: { value: '0' } }];
+
   return {
     product: {
       productBodyInsert: product?.product?.productDisplay?.productBody?.productBodyInsert,
       translations: product?.product?.productDisplay?.productBody?.translations,
       thumbnailMediaId: product?.product?.productDisplay?.thumbnail?.id || undefined,
+      secondaryThumbnailMediaId: product?.product?.productDisplay?.secondaryThumbnail?.id || undefined,
+      prices,
     },
+    prices,
     sizeMeasurements:
       product?.sizes?.map((size) => ({
         productSize: {

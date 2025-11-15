@@ -155,13 +155,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         Cell: ({ cell }) => {
           const categoryId = cell.getValue() as number;
           const category = categories.find((c) => c.id === categoryId);
-          return (
-            <span>
-              {category
-                ? category.translations?.[0]?.name!.replace('CATEGORY_ENUM_', '')
-                : 'Unknown'}
-            </span>
-          );
+          return <span>{category ? category.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>;
         },
       },
     ],

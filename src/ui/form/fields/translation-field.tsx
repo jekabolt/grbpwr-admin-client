@@ -1,73 +1,80 @@
 import { LANGUAGES } from 'constants/constants';
-import { useEffect, useRef, useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useEffect, useState } from 'react';
+import { useFieldArray, useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
-import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 
 type Props = {
   label: string;
-  fieldPrefix: string; // e.g., "product.translations"
-  fieldName: string; // e.g., "name" or "description"
+  fieldPrefix: string;
+  fieldName: string;
 };
 
 export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
-  const { setValue, watch } = useFormContext();
+  const { control, watch, setValue } = useFormContext();
+  const { replace } = useFieldArray({
+    control,
+    name: fieldPrefix,
+  });
+
+  const translations = watch(fieldPrefix) || [];
   const [selectedLanguageId, setSelectedLanguageId] = useState<number>(LANGUAGES[0].id);
   const [currentInputValue, setCurrentInputValue] = useState<string>('');
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Find the selected language
   const selectedLanguage = LANGUAGES.find((lang) => lang.id === selectedLanguageId);
 
-  // Get all translations from the form
-  const allTranslations = watch(fieldPrefix) || [];
+  const translationIndex = translations.findIndex((t: any) => t?.languageId === selectedLanguageId);
 
-  // Find the index of the translation for the selected language
-  const translationIndex = allTranslations.findIndex(
-    (t: any) => t.languageId === selectedLanguageId,
-  );
+  const actualTranslationIndex = translationIndex >= 0 ? translationIndex : translations.length;
 
-  // If translation doesn't exist for this language, create it
-  const actualTranslationIndex = translationIndex >= 0 ? translationIndex : allTranslations.length;
-
-  // Construct the field name with the actual translation index
   const fieldNameWithIndex = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
 
-  // Get current value from form for the selected language
   const currentFormValue = watch(fieldNameWithIndex) || '';
 
-  // Initialize the languageId for the current translation
   useEffect(() => {
-    if (translationIndex < 0) {
-      // Create new translation object for this language
-      const newTranslations = [...allTranslations];
+    if (translations.length === 0) {
+      const initialTranslations = LANGUAGES.map((language) => ({
+        languageId: language.id,
+        [fieldName]: '',
+      }));
+      replace(initialTranslations);
+    }
+  }, [translations.length, replace, fieldName]);
+
+  useEffect(() => {
+    if (translationIndex < 0 && translations.length > 0) {
+      const newTranslations = [...translations];
       newTranslations.push({
         languageId: selectedLanguageId,
         [fieldName]: '',
       });
-      setValue(fieldPrefix, newTranslations);
-    } else {
-      // Ensure languageId is set for existing translation
+      replace(newTranslations);
+    } else if (translationIndex >= 0) {
       setValue(`${fieldPrefix}.${translationIndex}.languageId`, selectedLanguageId);
     }
-  }, [setValue, fieldPrefix, translationIndex, selectedLanguageId, allTranslations, fieldName]);
+  }, [selectedLanguageId, translationIndex]);
 
-  const handleLanguageChange = (languageIdString: string) => {
-    // Save current input before switching
+  useEffect(() => {
+    if (!currentInputValue) {
+      setCurrentInputValue(currentFormValue);
+    }
+  }, [currentFormValue]);
+
+  const handleLanguageChange = (languageId: number) => {
     if (currentInputValue.trim()) {
       setValue(fieldNameWithIndex, currentInputValue);
     }
 
-    const languageId = parseInt(languageIdString, 10);
     setSelectedLanguageId(languageId);
 
-    // Reset input value for new language
-    setCurrentInputValue('');
+    const newTranslationIndex = translations.findIndex((t: any) => t?.languageId === languageId);
+    const newFieldName = `${fieldPrefix}.${newTranslationIndex >= 0 ? newTranslationIndex : translations.length}.${fieldName}`;
+    const newValue = watch(newFieldName) || '';
+    setCurrentInputValue(newValue);
   };
 
-  const handleSaveCurrentInput = () => {
+  const handleSave = () => {
     if (currentInputValue.trim()) {
       setValue(fieldNameWithIndex, currentInputValue);
       setCurrentInputValue('');
@@ -78,43 +85,54 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
     setCurrentInputValue(value);
   };
 
+  const isLanguageFilled = (languageId: number) => {
+    const index = translations.findIndex((t: any) => t?.languageId === languageId);
+    if (index < 0) return false;
+    const value = watch(`${fieldPrefix}.${index}.${fieldName}`);
+    return value && value.trim().length > 0;
+  };
+
   return (
-    <div className='w-full'>
+    <div className='space-y-3'>
       <Text>{label}</Text>
-      <div className='flex items-end w-full '>
-        <div className='flex-shrink-0'>
-          <Select
-            name={`${fieldPrefix}.${actualTranslationIndex}.languageId`}
-            value={selectedLanguageId.toString()}
-            onValueChange={handleLanguageChange}
-            items={LANGUAGES.map((language) => ({
-              value: language.id.toString(),
-              label: language.code,
-            }))}
+
+      <div className='flex gap-2 flex-wrap'>
+        {LANGUAGES.map((language) => {
+          const isFilled = isLanguageFilled(language.id);
+          const isSelected = language.id === selectedLanguageId;
+          return (
+            <Button
+              key={language.id}
+              type='button'
+              variant={isSelected ? 'default' : 'default'}
+              onClick={() => handleLanguageChange(language.id)}
+              className={isFilled && !isSelected ? 'border-2 border-green-500' : ''}
+            >
+              {language.code.toUpperCase()}
+            </Button>
+          );
+        })}
+      </div>
+
+      <div className='flex items-end w-full gap-2'>
+        <div className='flex-1 border-b border-textColor'>
+          <Input
+            name={fieldNameWithIndex}
+            value={currentInputValue || currentFormValue}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange(e.target.value)}
+            placeholder={`enter ${label.toLowerCase()} in ${selectedLanguage?.name}`}
+            className='w-full border-none leading-4 bg-transparent'
           />
         </div>
-        <div className='border-b border-textColor flex items-end pl-4 w-full'>
-          <div className='flex-1'>
-            <Input
-              name={fieldNameWithIndex}
-              ref={inputRef}
-              value={currentInputValue || currentFormValue}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                handleInputChange(e.target.value)
-              }
-              placeholder={`enter ${label.toLowerCase()} in ${selectedLanguage?.name}`}
-              className='w-full border-none leading-4 bg-transparent'
-            />
-          </div>
-          <Button
-            size='lg'
-            onClick={handleSaveCurrentInput}
-            disabled={!currentInputValue.trim()}
-            className='flex-shrink-0  ml-2 bg-transparent'
-          >
-            save
-          </Button>
-        </div>
+        <Button
+          type='button'
+          size='lg'
+          onClick={handleSave}
+          disabled={!currentInputValue.trim()}
+          className='flex-shrink-0 bg-transparent'
+        >
+          save
+        </Button>
       </div>
     </div>
   );

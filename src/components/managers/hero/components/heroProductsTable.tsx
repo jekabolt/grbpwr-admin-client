@@ -143,11 +143,7 @@ export const HeroProductTable: FC<
           const categoryId = cell.getValue() as number; // get the current row's categoryId
           const category = categories?.find((c) => c.id === categoryId); // find the category in the state
           return (
-            <span>
-              {category
-                ? category.translations?.[0]?.name!.replace('CATEGORY_ENUM_', '')
-                : 'Unknown'}
-            </span>
+            <span>{category ? category?.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>
           ); // return the category name or 'Unknown'
         },
       },
