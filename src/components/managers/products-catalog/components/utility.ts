@@ -21,6 +21,7 @@ export function getProductPagedParans({
   preorder,
   hidden,
   collections,
+  currency,
 }: {
   sort?: string | null;
   order?: string | null;
@@ -37,6 +38,7 @@ export function getProductPagedParans({
   preorder?: string | null;
   hidden?: string | null;
   collections?: string | null;
+  currency?: string | null;
 }): Pick<
   GetProductsPagedRequest,
   'sortFactors' | 'orderFactor' | 'filterConditions' | 'showHidden'
@@ -61,6 +63,7 @@ export function getProductPagedParans({
       preorder: preorder ? preorder === 'true' : undefined,
       onSale: sale ? sale === 'true' : undefined,
       collections: collections ? collections.split(',') : undefined,
+      currency: currency ? currency : undefined,
     },
     showHidden: hidden ? hidden === 'true' : undefined,
   };

@@ -22,7 +22,7 @@ export const buttonVariants = cva('disabled:cursor-not-allowed block', {
         'leading-4',
         'text-center',
       ],
-
+      simple: ['text-md', 'disabled:opacity-50', 'leading-4', 'text-center'],
       underline: ['text-bgColor', 'hover:underline', 'disabled:text-inactive'],
     },
     size: {
