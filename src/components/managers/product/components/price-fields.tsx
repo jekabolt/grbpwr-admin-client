@@ -4,12 +4,12 @@ import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 
 const CURRENCIES = [
-  { label: 'USD - US Dollar', value: 'USD' },
-  { label: 'EUR - Euro', value: 'EUR' },
-  { label: 'GBP - British Pound', value: 'GBP' },
-  { label: 'JPY - Japanese Yen', value: 'JPY' },
-  { label: 'CNY - Chinese Yuan', value: 'CNY' },
-  { label: 'KRW - South Korean Won', value: 'KRW' },
+  { id: 'EUR', label: 'EUR - Euro', value: 'EUR' },
+  { id: 'USD', label: 'USD - US Dollar', value: 'USD' },
+  { id: 'GBP', label: 'GBP - British Pound', value: 'GBP' },
+  { id: 'JPY', label: 'JPY - Japanese Yen', value: 'JPY' },
+  { id: 'CNY', label: 'CNY - Chinese Yuan', value: 'CNY' },
+  { id: 'KRW', label: 'KRW - South Korean Won', value: 'KRW' },
 ];
 
 export function PriceFields() {
@@ -29,15 +29,13 @@ export function PriceFields() {
       }));
       replace(initialPrices);
     } else {
-      // Filter out null/undefined entries and ensure all prices have currency as string
       const validPrices = prices.filter((price: any) => price !== null && price !== undefined);
 
       if (
         validPrices.length !== prices.length ||
         validPrices.some((price: any) => typeof price.currency !== 'string')
       ) {
-        // Rebuild prices array ensuring proper structure
-        const updatedPrices = CURRENCIES.map((currency, index) => {
+        const updatedPrices = CURRENCIES.map((currency) => {
           const existingPrice = validPrices.find((p: any) => p?.currency === currency.value);
           if (existingPrice) {
             return {
@@ -53,23 +51,29 @@ export function PriceFields() {
         replace(updatedPrices);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prices.length, replace]);
 
-  const handlePriceChange = (fieldName: string, value: string | number, currency: string) => {
-    // Ensure value is always a string
-    const stringValue = typeof value === 'number' ? value.toString() : value || '0';
+  const handlePriceChange = (
+    fieldName: string,
+    value: string | number,
+    currency: string,
+    priceIndex: number,
+  ) => {
+    let stringValue = typeof value === 'number' ? value.toString() : value || '0';
+
+    if (currency === 'JPY' || currency === 'KRW') {
+      const numValue = parseFloat(stringValue);
+      if (!isNaN(numValue)) {
+        stringValue = Math.round(numValue).toString();
+      }
+    }
+
     setValue(fieldName, stringValue);
 
-    // Ensure currency is set for this price entry
-    const fieldPath = fieldName.split('.');
-    const priceIndex = parseInt(fieldPath[1]);
-    if (!isNaN(priceIndex)) {
-      const currencyField = `prices.${priceIndex}.currency`;
-      const currentCurrency = watch(currencyField);
-      if (currentCurrency !== currency) {
-        setValue(currencyField, currency);
-      }
+    const currencyField = `prices.${priceIndex}.currency`;
+    const currentCurrency = watch(currencyField);
+    if (currentCurrency !== currency) {
+      setValue(currencyField, currency);
     }
   };
 
@@ -82,7 +86,7 @@ export function PriceFields() {
           <thead className='bg-gray-50'>
             <tr>
               {CURRENCIES.map((currency) => (
-                <th key={currency.value} className='border border-inactive'>
+                <th key={currency.id} className='border border-inactive'>
                   <Text>{currency.value}</Text>
                 </th>
               ))}
@@ -90,24 +94,28 @@ export function PriceFields() {
           </thead>
           <tbody className='bg-white'>
             <tr>
-              {CURRENCIES.map((currency, index) => {
+              {CURRENCIES.map((currency) => {
                 const priceIndex = prices.findIndex(
                   (price: any) => price?.currency === currency.value,
                 );
-                const actualIndex = priceIndex >= 0 ? priceIndex : index;
+                const isIntegerCurrency = currency.value === 'JPY' || currency.value === 'KRW';
+                const step = isIntegerCurrency ? '1' : '0.01';
+                const placeholder = isIntegerCurrency ? '0' : '0.00';
+
+                const actualIndex = priceIndex >= 0 ? priceIndex : CURRENCIES.indexOf(currency);
 
                 return (
-                  <td key={currency.value} className='px-4 py-3 text-center border border-inactive'>
+                  <td key={currency.id} className='px-4 py-3 text-center border border-inactive'>
                     <InputField
                       name={`prices.${actualIndex}.price.value`}
                       type='number'
-                      step='0.01'
+                      step={step}
                       min='0'
-                      placeholder='0.00'
+                      placeholder={placeholder}
                       className='text-start w-full'
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         const fieldName = `prices.${actualIndex}.price.value`;
-                        handlePriceChange(fieldName, e.target.value, currency.value);
+                        handlePriceChange(fieldName, e.target.value, currency.value, actualIndex);
                       }}
                     />
                   </td>
