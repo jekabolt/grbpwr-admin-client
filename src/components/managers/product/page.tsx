@@ -16,7 +16,12 @@ export const Product: FC = () => {
 
   const fetchProduct = async () => {
     if (id) {
-      const response = await getProductByID({ id: parseInt(id) });
+      const productId = parseInt(id, 10);
+      if (isNaN(productId)) {
+        showMessage('Invalid product ID', 'error');
+        return;
+      }
+      const response = await getProductByID({ id: productId });
       setProduct(response.product);
     }
   };
