@@ -22,11 +22,20 @@ export function Settings() {
           paymentMethod: method.name,
           allow: method.allowed ?? false,
         })),
-        shipmentCarriers: dictionary.shipmentCarriers?.map((carrier) => ({
-          carrier: carrier.shipmentCarrier?.carrier,
-          allow: carrier.shipmentCarrier?.allowed ?? false,
-          price: { value: carrier.shipmentCarrier?.price?.value || '0' },
-        })),
+        shipmentCarriers: dictionary.shipmentCarriers?.map((carrier) => {
+          // Convert array of prices to map: { currency: price }
+          const pricesMap: Record<string, { value: string }> = {};
+          carrier.prices?.forEach((price: any) => {
+            if (price.currency && price.price?.value) {
+              pricesMap[price.currency] = { value: price.price.value };
+            }
+          });
+          return {
+            carrier: carrier.shipmentCarrier?.carrier,
+            allow: carrier.shipmentCarrier?.allowed ?? false,
+            prices: pricesMap,
+          };
+        }),
         maxOrderItems: dictionary.maxOrderItems || 0,
         siteAvailable: dictionary.siteEnabled || false,
         bigMenu: dictionary.bigMenu || false,
@@ -98,32 +107,41 @@ export function Settings() {
             shipment carriers
           </Text>
           <div className='grid gap-3'>
-            {settings?.shipmentCarriers?.map((carrier, index) => (
-              <div key={carrier.carrier} className='space-y-2'>
-                <div className='flex items-center gap-2'>
-                  <CheckboxCommon
-                    name='carrier'
-                    checked={carrier.allow}
-                    onChange={() =>
-                      updateField('shipmentCarriers', { allow: !carrier.allow }, index)
-                    }
-                  />
-                  <Text>{carrier.carrier}</Text>
-                  <Input
-                    name='carrierPrice'
-                    type='text'
-                    value={carrier.price?.value || ''}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      updateField('shipmentCarriers', { price: { value: e.target.value } }, index)
-                    }
-                    className='w-32'
-                  />
+            {settings?.shipmentCarriers?.map((carrier, index) => {
+              const baseCurrency = dictionary?.baseCurrency || 'EUR';
+              const currentPrice = carrier.prices?.[baseCurrency]?.value || '';
+
+              return (
+                <div key={carrier.carrier} className='space-y-2'>
+                  <div className='flex items-center gap-2'>
+                    <CheckboxCommon
+                      name='carrier'
+                      checked={carrier.allow}
+                      onChange={() =>
+                        updateField('shipmentCarriers', { allow: !carrier.allow }, index)
+                      }
+                    />
+                    <Text>{carrier.carrier}</Text>
+                    <Input
+                      name='carrierPrice'
+                      type='text'
+                      value={currentPrice}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        const updatedPrices = {
+                          ...carrier.prices,
+                          [baseCurrency]: { value: e.target.value },
+                        };
+                        updateField('shipmentCarriers', { prices: updatedPrices }, index);
+                      }}
+                      className='w-32'
+                    />
+                  </div>
+                  <Text size='small' variant='uppercase'>
+                    {dictionary?.shipmentCarriers?.[index]?.shipmentCarrier?.description}
+                  </Text>
                 </div>
-                <Text size='small' variant='uppercase'>
-                  {dictionary?.shipmentCarriers?.[index]?.shipmentCarrier?.description}
-                </Text>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
         <div className='flex items-center gap-2'>

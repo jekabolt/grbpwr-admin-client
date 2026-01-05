@@ -67,18 +67,18 @@ root.render(
                 }
               />
               <Route
-                path={ROUTES.singleProduct}
-                element={
-                  <ProtectedRoute>
-                    <Product />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
                 path={ROUTES.product}
                 element={
                   <ProtectedRoute>
                     <ProductsCatalog />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path={ROUTES.singleProduct}
+                element={
+                  <ProtectedRoute>
+                    <Product />
                   </ProtectedRoute>
                 }
               />
