@@ -11,7 +11,7 @@ import { Form } from 'ui/form';
 import { defaultData, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
 import { MediaAds } from './media-ads';
-import { SizesAndMeasurements } from './sizesAndMeasurements';
+import { SizeMeasurements } from './size-measurements';
 import { Tags } from './tags';
 import { Thumbnail } from './thumbnail';
 import { createProductPayload, mapProductDataToForm, mapProductFullToFormData } from './utils';
@@ -147,7 +147,8 @@ export function ProductForm({
               />
             </div>
           </div>
-          <SizesAndMeasurements isAddingProduct={isAddingProduct} isEditMode={isEditMode} />
+          {/* <SizesAndMeasurements isAddingProduct={isAddingProduct} isEditMode={isEditMode} /> */}
+          <SizeMeasurements isAddingProduct={isAddingProduct} isEditMode={isEditMode} />
         </div>
       </form>
     </Form>
