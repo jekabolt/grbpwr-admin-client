@@ -13,7 +13,7 @@ import { Analitic } from 'components/managers/page';
 import { Product } from 'components/managers/product/page';
 import ProductsCatalog from 'components/managers/products-catalog/page';
 import { Promo } from 'components/managers/promo/promo';
-import { Settings } from 'components/managers/settings/settings';
+import { Settings } from 'components/managers/settings';
 import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { StoreProvider } from 'lib/stores/store-provider';
