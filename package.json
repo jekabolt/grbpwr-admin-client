@@ -8,6 +8,8 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "install-buf": "if ! command -v buf >/dev/null 2>&1; then curl -sSL \"https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64\" -o /tmp/buf && chmod +x /tmp/buf; fi",
+    "prebuild": "yarn install-buf && git submodule update --init --recursive && (PATH=\"/tmp:$PATH\" /tmp/buf generate || buf generate || make proto || true)",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "fix": "yarn lint && yarn format",
