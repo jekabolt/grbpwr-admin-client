@@ -1,7 +1,5 @@
-declare module '*.svg' {
-  const content: string;
-  export default content;
-}
+// SVG modules are handled by vite/client.d.ts
+// This file only declares CSS modules
 
 declare module '*.css' {
   const content: { [className: string]: string };

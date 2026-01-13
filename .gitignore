@@ -53,6 +53,13 @@ jsconfig.json
 /e2e/*.js
 /e2e/*.map
 
+# TypeScript build artifacts (compiled .js and .js.map files)
+src/**/*.js
+src/**/*.js.map
+!src/**/*.config.js
+*.config.js
+*.config.js.map
+
 # System Files
 .DS_Store
 Thumbs.db
