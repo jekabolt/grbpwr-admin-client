@@ -4,12 +4,17 @@
     "esModuleInterop": true,
     "jsx": "react-jsx",
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "lib": ["dom", "esnext"],
     "strict": true,
     "sourceMap": true,
-    "target": "esnext"
+    "target": "esnext",
+    "types": ["vite/client"],
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "noEmit": true
   },
-  "include": ["src", "global.d.ts"],
-  "exclude": ["node_modules"]
+  "include": ["src", "global.d.ts", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
 }
