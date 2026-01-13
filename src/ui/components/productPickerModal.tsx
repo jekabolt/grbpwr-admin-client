@@ -1,7 +1,7 @@
 import { Button, Checkbox } from '@mui/material';
 
 import { getProductsPaged } from 'api/admin';
-import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
+import { common_Product, GetProductsPagedRequest, common_Category } from 'api/proto-http/admin';
 import { useDictionaryStore } from 'lib/stores/store';
 import {
   MaterialReactTable,
@@ -154,7 +154,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         header: 'Category',
         Cell: ({ cell }) => {
           const categoryId = cell.getValue() as number;
-          const category = categories.find((c) => c.id === categoryId);
+          const category = categories.find((c: common_Category) => c.id === categoryId);
           return <span>{category ? category.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>;
         },
       },

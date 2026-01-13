@@ -1,4 +1,5 @@
 import { common_ProductFull, common_ProductNew } from 'api/proto-http/admin';
+import { MediaFull } from 'api/proto-http/common';
 
 export const productInitialValues = (product?: common_ProductFull): common_ProductNew => {
   // if (!product) {
@@ -39,7 +40,7 @@ export const productInitialValues = (product?: common_ProductFull): common_Produ
         tag: tag.productTagInsert?.tag || '',
       })) || [],
     mediaIds:
-      product?.media?.map((media) => media.id).filter((id): id is number => id !== undefined) || [],
+      product?.media?.map((media: MediaFull) => media.id).filter((id: number | undefined): id is number => id !== undefined) || [],
   };
 };
 
