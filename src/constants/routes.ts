@@ -1,4 +1,4 @@
-export const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
+export const BASE_PATH = import.meta.env.PROD ? '/grbpwr-admin-client' : '';
 
 export enum ROUTES {
   login = '/',
