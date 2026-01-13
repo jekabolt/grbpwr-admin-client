@@ -26,6 +26,8 @@ export default defineConfig(({ mode }) => {
         styles: path.resolve(__dirname, './src/styles'),
         types: path.resolve(__dirname, './src/types'),
         api: path.resolve(__dirname, './src/api'),
+        // Add explicit alias for api/proto-http
+        'api/proto-http': path.resolve(__dirname, './src/api/proto-http'),
       },
       extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
     },
