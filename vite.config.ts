@@ -8,8 +8,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  const isProduction = mode === 'production';
+  const basePath = isProduction ? '/grbpwr-admin-client' : '/';
 
   return {
+    base: basePath,
     plugins: [react()],
     resolve: {
       alias: {
