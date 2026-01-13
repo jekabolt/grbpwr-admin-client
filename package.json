@@ -8,6 +8,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "prebuild": "make proto || true",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "fix": "yarn lint && yarn format",
