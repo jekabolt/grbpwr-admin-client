@@ -1,0 +1,4 @@
+{
+    "buildCommand": "git submodule update --init --recursive && go install go.einride.tech/protoc-gen-typescript-http@v0.8.1 && export PATH=$PATH:$(go env GOPATH)/bin && npx @bufbuild/buf@1.47.2 generate && vite build",
+    "installCommand": "yarn install"
+}
