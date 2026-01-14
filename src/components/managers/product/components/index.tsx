@@ -12,7 +12,7 @@ import { BodyFields } from './body-fields';
 import { MediaAds } from './media-ads';
 import { SizeMeasurements } from './size-measurements';
 import { Tags } from './tags';
-import { Thumbnail } from './thumbnail';
+import { ThumbnailsCarousel } from './thumbnails-carousel';
 import { createProductPayload, mapProductDataToForm, mapProductFullToFormData } from './utils';
 
 type Props = {
@@ -129,7 +129,7 @@ export function ProductForm({
         <div className='space-y-5'>
           <div className='flex flex-col lg:flex-row lg:justify-between lg:items-start gap-5'>
             <div className='w-full lg:w-1/2 space-y-3'>
-              <Thumbnail product={product} control={form.control} />
+              <ThumbnailsCarousel product={product} control={form.control} />
               <MediaAds product={product} control={form.control} clearKey={mediaClearKey} />
             </div>
             <div className='w-full lg:w-1/2 space-y-3'>

@@ -9,24 +9,29 @@ type Props = {
   control: Control<ProductFormData>;
 };
 
-export function Thumbnail({ product, control }: Props) {
+export function SecondaryThumbnail({ product, control }: Props) {
   const { field } = useController({
-    name: 'product.thumbnailMediaId',
+    name: 'product.secondaryThumbnailMediaId',
     control,
   });
   const [thumbnail, setThumbnail] = useState<common_MediaFull | undefined>();
-  const productThumbnail = product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl;
-  const mediaLink = product ? productThumbnail : thumbnail?.media?.thumbnail?.mediaUrl;
+  const productSecondaryThumbnail =
+    product?.product?.productDisplay?.secondaryThumbnail?.media?.thumbnail?.mediaUrl;
+  const mediaLink = product ? productSecondaryThumbnail : thumbnail?.media?.thumbnail?.mediaUrl;
 
   function handleThumbnail(thumbnail: common_MediaFull[]) {
-    if (!thumbnail.length) return;
+    if (!thumbnail.length) {
+      setThumbnail(undefined);
+      field.onChange(0);
+      return;
+    }
     setThumbnail(thumbnail[0]);
     field.onChange(thumbnail[0]?.id ?? 0);
   }
 
   return (
     <div className='space-y-2'>
-      <label className='text-sm font-medium'>Primary Thumbnail</label>
+      <label className='text-sm font-medium'>Secondary Thumbnail (Optional)</label>
       <div className='border border-text'>
         <SingleMediaViewAndSelect
           link={mediaLink}
