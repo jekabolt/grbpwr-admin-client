@@ -2,7 +2,8 @@ import { useFormContext } from 'react-hook-form';
 import Input, { InputProps } from 'ui/components/input';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '..';
 
-type Props = InputProps & {
+type Props = Omit<InputProps, 'name'> & {
+  name: string;
   description?: string;
   loading?: boolean;
   keyboardRestriction?: RegExp;

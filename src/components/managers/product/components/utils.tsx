@@ -10,7 +10,7 @@ import {
   UpsertProductRequest,
 } from 'api/proto-http/admin';
 import isEqual from 'lodash/isEqual';
-import { defaultData, ProductFormData } from '../utility/schema';
+import { ProductFormData } from '../utility/schema';
 import { getNonEmptySizeMeasurements } from '../utility/sizes';
 
 export function mapProductDataToForm(data: ProductFormData) {
@@ -66,7 +66,7 @@ export function mapProductDataToForm(data: ProductFormData) {
     }),
   );
 
-  const prices = data.prices.map(priceItem => ({
+  const prices = data.prices.map((priceItem) => ({
     currency: priceItem.currency,
     price: {
       value: priceItem.price.value,
@@ -95,16 +95,13 @@ export function mapProductDataToForm(data: ProductFormData) {
 export function mapProductFullToFormData(
   productFull: common_ProductFull | undefined,
 ): ProductFormData {
-  if (!productFull?.product?.productDisplay) {
-    return defaultData;
-  }
-
-  const productBody = productFull.product.productDisplay.productBody;
+  const productDisplay = productFull?.product?.productDisplay;
+  const productBody = productDisplay?.productBody;
   const productBodyInsert = productBody?.productBodyInsert;
 
-  const sizeMeasurements = productFull.sizes?.map((size) => {
+  const sizeMeasurements = productFull?.sizes?.map((size) => {
     const sizeMeasurements =
-      productFull.measurements?.filter((measurement) => measurement.productSizeId === size.id) ||
+      productFull?.measurements?.filter((measurement) => measurement.productSizeId === size.id) ||
       [];
 
     return {
@@ -124,13 +121,13 @@ export function mapProductFullToFormData(
   }) || [{ productSize: { quantity: { value: '0' }, sizeId: 0 }, measurements: [] }];
 
   const tags =
-    productFull.tags?.map((tag) => ({
+    productFull?.tags?.map((tag) => ({
       tag: tag.productTagInsert?.tag || '',
     })) || [];
 
-  const mediaIds = productFull.media?.map((media) => media.id || 0).filter((id) => id > 0) || [];
+  const mediaIds = productFull?.media?.map((media) => media.id || 0).filter((id) => id > 0) || [];
 
-  const prices = productFull.product.prices?.map((priceItem) => ({
+  const prices = productFull?.product?.prices?.map((priceItem) => ({
     currency: priceItem.currency || 'USD',
     price: {
       value: priceItem.price?.value || '0',
@@ -150,18 +147,23 @@ export function mapProductFullToFormData(
         salePercentage: {
           value: productBodyInsert?.salePercentage?.value || '0',
         },
-        topCategoryId: productBodyInsert?.topCategoryId?.toString() || '',
-        subCategoryId: productBodyInsert?.subCategoryId?.toString() || '',
-        typeId: productBodyInsert?.typeId?.toString() || '',
+        topCategoryId: productBodyInsert?.topCategoryId
+          ? productBodyInsert.topCategoryId.toString()
+          : '',
+        subCategoryId: productBodyInsert?.subCategoryId
+          ? productBodyInsert.subCategoryId.toString()
+          : '',
+        typeId: productBodyInsert?.typeId ? productBodyInsert.typeId.toString() : '',
         hidden: productBodyInsert?.hidden || false,
         targetGender: productBodyInsert?.targetGender || ('' as common_GenderEnum),
         modelWearsHeightCm: productBodyInsert?.modelWearsHeightCm?.toString() || undefined,
         modelWearsSizeId: productBodyInsert?.modelWearsSizeId?.toString() || undefined,
         version: productBodyInsert?.version || '',
         collection: productBodyInsert?.collection || '',
+        fit: productBodyInsert?.fit || '',
       },
-      thumbnailMediaId: productFull.product.productDisplay.thumbnail?.id || 0,
-      secondaryThumbnailMediaId: productFull.product.productDisplay.secondaryThumbnail?.id || 0,
+      thumbnailMediaId: productDisplay?.thumbnail?.id || 0,
+      secondaryThumbnailMediaId: productDisplay?.secondaryThumbnail?.id || 0,
       translations: productBody?.translations?.map((translation) => ({
         languageId: translation.languageId || 1,
         name: translation.name || '',

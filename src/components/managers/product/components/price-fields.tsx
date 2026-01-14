@@ -12,7 +12,7 @@ const CURRENCIES = [
   { id: 'KRW', label: 'KRW - South Korean Won', value: 'KRW' },
 ];
 
-export function PriceFields() {
+export function PriceFields({ editMode }: { editMode: boolean }) {
   const { control, watch, setValue } = useFormContext();
   const { replace } = useFieldArray({
     control,
@@ -112,6 +112,7 @@ export function PriceFields() {
                       step={step}
                       min='0'
                       placeholder={placeholder}
+                      readOnly={!editMode}
                       className='text-start w-full'
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         const fieldName = `prices.${actualIndex}.price.value`;

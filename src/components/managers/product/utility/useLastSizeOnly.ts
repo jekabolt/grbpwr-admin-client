@@ -5,42 +5,48 @@ import { ProductFormData } from './schema';
 export function useLastSizeOnly(filteredSizes: Array<{ id?: number; name?: string }>) {
   const { watch, setValue } = useFormContext<ProductFormData>();
   const values = watch();
-  const [lastSizeNonZero, setLastSizeNonZero] = useState(false);
+  const [osSizeNonZero, setOsSizeNonZero] = useState(false);
 
-  const lastSizeId = useMemo(() => filteredSizes[filteredSizes.length - 1]?.id, [filteredSizes]);
+  const osSize = useMemo(() => {
+    return filteredSizes.find(
+      (size) => size.name?.toLowerCase() === 'os' || size.name?.toLowerCase() === 'one size',
+    );
+  }, [filteredSizes]);
+
+  const osSizeId = osSize?.id;
 
   useEffect(() => {
-    if (!lastSizeId) return;
+    if (!osSizeId) return;
 
-    const lastSizeMeasurement = values.sizeMeasurements?.find(
-      (sm) => sm?.productSize?.sizeId === lastSizeId,
+    const osSizeMeasurement = values.sizeMeasurements?.find(
+      (sm) => sm?.productSize?.sizeId === osSizeId,
     );
 
-    const lastSizeValue = lastSizeMeasurement?.productSize?.quantity?.value || '0';
-    const hasValue = lastSizeValue !== '0' && lastSizeValue !== '';
+    const osSizeValue = osSizeMeasurement?.productSize?.quantity?.value || '0';
+    const hasValue = osSizeValue !== '0' && osSizeValue !== '';
 
-    setLastSizeNonZero(hasValue);
+    setOsSizeNonZero(hasValue);
 
     if (hasValue && values.sizeMeasurements && values.sizeMeasurements.length > 1) {
-      const onlyLastSize = values.sizeMeasurements.filter(
-        (sm) => sm?.productSize?.sizeId === lastSizeId,
+      const onlyOsSize = values.sizeMeasurements.filter(
+        (sm) => sm?.productSize?.sizeId === osSizeId,
       );
-      if (onlyLastSize.length !== values.sizeMeasurements.length) {
-        setValue('sizeMeasurements', onlyLastSize, { shouldDirty: true });
+      if (onlyOsSize.length !== values.sizeMeasurements.length) {
+        setValue('sizeMeasurements', onlyOsSize, { shouldDirty: true });
       }
     }
-  }, [values.sizeMeasurements, lastSizeId, setValue]);
+  }, [values.sizeMeasurements, osSizeId, setValue]);
 
   const handleLastSizeCheck = (sizeId: number | undefined, value: string) => {
-    if (sizeId === lastSizeId) {
-      setLastSizeNonZero(value !== '0' && value !== '');
+    if (sizeId === osSizeId) {
+      setOsSizeNonZero(value !== '0' && value !== '');
     }
   };
 
-  const shouldShowSize = (sizeId: number | undefined, index: number) => {
-    const isLastSize = index === filteredSizes.length - 1;
-    return isLastSize || !lastSizeNonZero;
+  const shouldShowSize = (sizeId: number | undefined) => {
+    const isOsSize = sizeId === osSizeId;
+    return isOsSize || !osSizeNonZero;
   };
 
-  return { lastSizeNonZero, lastSizeId, handleLastSizeCheck, shouldShowSize };
+  return { osSizeNonZero, osSizeId, handleLastSizeCheck, shouldShowSize };
 }

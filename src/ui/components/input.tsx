@@ -3,7 +3,7 @@ import { cn } from 'lib/utility';
 export interface InputProps {
   type?: 'email' | 'number' | 'tel' | 'text' | 'file' | 'color' | 'date';
   className?: string;
-  name: string;
+  name?: string;
   [k: string]: any;
 }
 

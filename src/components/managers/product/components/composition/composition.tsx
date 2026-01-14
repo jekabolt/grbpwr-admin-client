@@ -6,11 +6,10 @@ import InputField from 'ui/form/fields/input-field';
 import { CompositionModal } from './composition-modal/composition-modal';
 
 interface CompositionProps {
-  isAddingProduct?: boolean;
-  isEditMode?: boolean;
+  editMode: boolean;
 }
 
-export function Composition({ isAddingProduct = true, isEditMode }: CompositionProps) {
+export function Composition({ editMode }: CompositionProps) {
   const { getValues, setValue } = useFormContext();
   const [isCompositionModalOpen, setIsCompositionModalOpen] = useState(false);
   const [selectedComposition, setSelectedComposition] = useState<CompositionStructure>({});
@@ -125,9 +124,10 @@ export function Composition({ isAddingProduct = true, isEditMode }: CompositionP
             value={getDisplayValue()}
             label='composition'
             className='w-full border-none leading-4 bg-transparent'
+            readOnly={!editMode}
           />
         </div>
-        {(isAddingProduct || isEditMode) && (
+        {editMode && (
           <div className='flex gap-2'>
             <Button size='lg' onClick={handleClearCompositionField}>
               clear

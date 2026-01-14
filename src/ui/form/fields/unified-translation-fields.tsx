@@ -9,12 +9,14 @@ type Props = {
   fieldPrefix: string;
   nameLabel?: string;
   descriptionLabel?: string;
+  editMode: boolean;
 };
 
 export function UnifiedTranslationFields({
   fieldPrefix,
   nameLabel = 'name',
   descriptionLabel = 'description',
+  editMode,
 }: Props) {
   const { control, watch, setValue } = useFormContext();
   const { replace } = useFieldArray({
@@ -150,6 +152,7 @@ export function UnifiedTranslationFields({
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleNameChange(e.target.value)}
             placeholder={`enter ${nameLabel.toLowerCase()} in ${selectedLanguage?.name}`}
             className='w-full border-none leading-4 bg-transparent'
+            readOnly={!editMode}
           />
         </div>
       </div>
@@ -164,6 +167,7 @@ export function UnifiedTranslationFields({
           placeholder={`enter ${descriptionLabel.toLowerCase()} in ${selectedLanguage?.name}`}
           className='w-full border border-text leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2'
           rows={4}
+          readOnly={!editMode}
         />
       </div>
     </div>
