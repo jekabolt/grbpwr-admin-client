@@ -162,7 +162,7 @@ export function SizeMeasurements({
         </thead>
         <tbody className='bg-bgColor'>
           {filteredSizes.map((size, index) => {
-            if (!shouldShowSize(size.id, index)) return null;
+            if (!shouldShowSize(size.id)) return null;
 
             const sizeData = sizeMeasurementsMap.get(size.id);
             const idx = sizeData?.index ?? -1;
