@@ -10,11 +10,10 @@ interface SelectedInstructions {
 }
 
 interface CareInterface {
-  isAddingProduct?: boolean;
-  isEditMode?: boolean;
+  editMode: boolean;
 }
 
-export function Care({ isAddingProduct = true, isEditMode }: CareInterface) {
+export function Care({ editMode }: CareInterface) {
   const [isCareTableOpen, setIsCareTableOpen] = useState(false);
   const { setValue, getValues } = useFormContext();
   const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>({});
@@ -104,10 +103,11 @@ export function Care({ isAddingProduct = true, isEditMode }: CareInterface) {
             name='product.productBodyInsert.careInstructions'
             label='care instructions'
             className='w-full border-none leading-4 bg-transparent'
+            readOnly={!editMode}
           />
         </div>
 
-        {(isAddingProduct || isEditMode) && (
+        {editMode && (
           <div className='flex gap-2'>
             <Button size='lg' onClick={handleClearInstructions}>
               clear

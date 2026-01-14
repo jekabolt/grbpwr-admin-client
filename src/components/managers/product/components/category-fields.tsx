@@ -3,7 +3,7 @@ import { getCategoriesByParentId } from 'lib/utility';
 import { useFormContext } from 'react-hook-form';
 import SelectField from 'ui/form/fields/select-field';
 
-export function CategoryFields() {
+export function CategoryFields({ editMode }: { editMode: boolean }) {
   const { dictionary } = useDictionaryStore();
   const { watch } = useFormContext();
   const topCategoryId = watch('product.productBodyInsert.topCategoryId');
@@ -26,6 +26,7 @@ export function CategoryFields() {
           label: category.name || '',
           value: category.id?.toString() || '',
         }))}
+        readOnly={!editMode}
       />
       <SelectField
         name='product.productBodyInsert.subCategoryId'
@@ -35,6 +36,7 @@ export function CategoryFields() {
           value: category.id?.toString() || '',
         }))}
         disabled={!topCategoryId}
+        readOnly={!editMode}
       />
       <SelectField
         name='product.productBodyInsert.typeId'
@@ -44,6 +46,7 @@ export function CategoryFields() {
           value: type.id?.toString() || '',
         }))}
         disabled={!subCategoryId}
+        readOnly={!editMode}
       />
     </div>
   );

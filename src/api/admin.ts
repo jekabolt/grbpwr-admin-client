@@ -19,8 +19,8 @@ import {
   UpsertProductRequest,
   UpsertProductResponse,
   createAdminServiceClient,
-} from './proto-http/admin';
-import { createFrontendServiceClient } from './proto-http/frontend';
+} from './proto-http/admin/index.ts';
+import { createFrontendServiceClient } from './proto-http/frontend/index.ts';
 
 export const adminService = createAdminServiceClient(axiosRequestHandler);
 export const frontService = createFrontendServiceClient(axiosRequestHandler);

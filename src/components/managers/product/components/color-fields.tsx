@@ -3,7 +3,7 @@ import { useFormContext } from 'react-hook-form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 
-export function ColorFields() {
+export function ColorFields({ editMode }: { editMode: boolean }) {
   const { setValue } = useFormContext();
 
   const handleColorChange = (selectedColorName: string) => {
@@ -28,8 +28,14 @@ export function ColorFields() {
           value: color.name.toLowerCase().replace(/\s/g, '_'),
         }))}
         onValueChange={handleColorChange}
+        readOnly={!editMode}
       />
-      <InputField type='color' name='product.productBodyInsert.colorHex' label='color hex' />
+      <InputField
+        type='color'
+        name='product.productBodyInsert.colorHex'
+        label='color hex'
+        readOnly={!editMode}
+      />
     </div>
   );
 }

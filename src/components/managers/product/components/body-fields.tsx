@@ -21,7 +21,7 @@ interface Country {
   label: string;
 }
 
-export function BodyFields() {
+export function BodyFields({ editMode }: { editMode: boolean }) {
   const { dictionary } = useDictionaryStore();
   const { getValues, watch } = useFormContext();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
@@ -36,16 +36,21 @@ export function BodyFields() {
 
   return (
     <div className='space-y-10'>
-      <UnifiedTranslationFields fieldPrefix='product.translations' />
+      <UnifiedTranslationFields fieldPrefix='product.translations' editMode={editMode} />
 
       <div className='space-y-3'>
-        <InputField name='product.productBodyInsert.brand' label='brand' />
-        <InputField name='product.productBodyInsert.version' label='version' />
-        <InputField name='product.productBodyInsert.collection' label='collection' />
+        <InputField name='product.productBodyInsert.brand' label='brand' readOnly={!editMode} />
+        <InputField name='product.productBodyInsert.version' label='version' readOnly={!editMode} />
+        <InputField
+          name='product.productBodyInsert.collection'
+          label='collection'
+          readOnly={!editMode}
+        />
         <SelectField
           name='product.productBodyInsert.targetGender'
           label='gender'
           items={genderOptions}
+          readOnly={!editMode}
         />
         <SelectField
           name='product.productBodyInsert.fit'
@@ -54,20 +59,23 @@ export function BodyFields() {
             label: fit,
             value: fit,
           }))}
+          readOnly={!editMode}
         />
-        <CategoryFields />
-        <ColorFields />
+        <CategoryFields editMode={editMode} />
+        <ColorFields editMode={editMode} />
         <SelectField
           fullWidth
           name='product.productBodyInsert.countryOfOrigin'
           label='country of origin'
           items={countries}
+          readOnly={!editMode}
         />
-        <PriceFields />
-        <SalePreorderFields />
+        <PriceFields editMode={editMode} />
+        <SalePreorderFields editMode={editMode} />
         <InputField
           name='product.productBodyInsert.modelWearsHeightCm'
           label='model wears height'
+          readOnly={!editMode}
         />
         <SelectField
           fullWidth
@@ -77,9 +85,10 @@ export function BodyFields() {
             label: size.name || '',
             value: size.id?.toString() || '',
           }))}
+          readOnly={!editMode}
         />
-        <Care />
-        <Composition />
+        <Care editMode={editMode} />
+        <Composition editMode={editMode} />
       </div>
     </div>
   );

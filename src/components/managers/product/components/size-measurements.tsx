@@ -12,8 +12,8 @@ import { useMeasurements } from '../utility/useMeasurements';
 import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle';
 import { ToggleSizeNames } from './toggle-sizenames';
 
-const cellClass = 'text-center border-r border-text font-normal h-10';
-const lastCellClass = 'text-center font-normal';
+const cellClass = 'text-center border-r border-text h-10';
+const lastCellClass = 'text-center';
 
 export function SizeMeasurements({
   isEditMode = false,
@@ -88,49 +88,52 @@ export function SizeMeasurements({
   };
 
   const handleMeasurementChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     sizeId: number | undefined,
     measurementNameId: number | undefined,
   ) => {
-    if (!sizeId || !measurementNameId) return;
-    const sizeData = sizeMeasurementsMap.get(sizeId);
     const measurementValue = e.target.value;
+    if (!sizeId || !requireConfirmation(sizeId)) return;
 
-    if (!sizeData) {
-      if (measurementValue) {
-        setValue(
-          'sizeMeasurements',
-          [
-            ...(values.sizeMeasurements || []),
-            {
-              productSize: { sizeId, quantity: { value: '0' } },
-              measurements: [{ measurementNameId, measurementValue: { value: measurementValue } }],
-            },
-          ],
-          { shouldDirty: true },
-        );
-      }
-      return;
-    }
-
-    const path = `sizeMeasurements[${sizeData.index}].measurements`;
-    const measurementIndex = sizeData.measurements.findIndex(
-      (m: any) => m.measurementNameId === measurementNameId,
+    let sizeIndex = values.sizeMeasurements?.findIndex(
+      (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
     );
 
-    if (measurementIndex !== -1) {
-      setValue(`${path}[${measurementIndex}].measurementValue.value` as any, measurementValue, {
-        shouldDirty: true,
-      });
-    } else {
+    const wasNewEntry = sizeIndex === -1 || sizeIndex === undefined;
+    if (wasNewEntry) {
+      const currentLength = values.sizeMeasurements?.length || 0;
       setValue(
-        path as any,
+        'sizeMeasurements',
         [
-          ...sizeData.measurements,
-          { measurementNameId, measurementValue: { value: measurementValue } },
+          ...(values.sizeMeasurements || []),
+          { productSize: { sizeId, quantity: { value: '0' } }, measurements: [] },
         ],
         { shouldDirty: true },
       );
+      sizeIndex = currentLength;
+    }
+
+    const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
+    const currentMeasurements = wasNewEntry
+      ? []
+      : values.sizeMeasurements?.[sizeIndex]?.measurements || [];
+    const measurementIndex = currentMeasurements.findIndex(
+      (m) => m.measurementNameId === measurementNameId,
+    );
+
+    if (measurementIndex > -1) {
+      setValue(
+        `${measurementsPath}[${measurementIndex}].measurementValue.value` as any,
+        measurementValue,
+        { shouldDirty: true },
+      );
+    } else {
+      const newMeasurement = {
+        measurementNameId,
+        measurementValue: { value: measurementValue },
+      };
+      const updatedMeasurements = [...currentMeasurements, newMeasurement];
+      setValue(measurementsPath as any, updatedMeasurements, { shouldDirty: true });
     }
   };
 
@@ -183,23 +186,21 @@ export function SizeMeasurements({
                   />
                 </td>
                 {measurements.map((m, i) => {
-                  const mIdx =
-                    sizeData?.measurements.findIndex((x: any) => x?.measurementNameId === m.id) ??
-                    -1;
-                  const mVal = sizeData?.measurements.find((x: any) => x.measurementNameId === m.id)
-                    ?.measurementValue?.value;
-
                   return (
                     <td
                       key={m.id}
                       className={i < measurements.length - 1 ? cellClass : lastCellClass}
                     >
                       <Input
-                        name={`sizeMeasurements[${idx}].measurements[${mIdx}].measurementValue.value`}
-                        value={mVal || ''}
+                        value={
+                          values.sizeMeasurements?.[idx]?.measurements?.find(
+                            (measurement) => measurement.measurementNameId === m.id,
+                          )?.measurementValue?.value || ''
+                        }
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                          if (/^\d*$/.test(e.target.value))
+                          if (/^\d*$/.test(e.target.value)) {
                             handleMeasurementChange(e, size.id, m.id);
+                          }
                         }}
                         className='w-full border-none text-center'
                       />

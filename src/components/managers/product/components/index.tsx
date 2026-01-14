@@ -2,7 +2,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { upsertProduct } from 'api/admin';
 import { common_ProductFull, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { useDictionaryStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
@@ -33,9 +32,9 @@ export function ProductForm({
   productId,
   onEditModeChange,
 }: Props) {
-  const { dictionary } = useDictionaryStore();
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [mediaClearKey, setMediaClearKey] = useState(0);
+  const editMode = isEditMode || isAddingProduct;
   const navigate = useNavigate();
 
   const form = useForm<ProductFormData>({
@@ -43,7 +42,6 @@ export function ProductForm({
     defaultValues: defaultData,
   });
 
-  // Populate form when product data is available
   useEffect(() => {
     if (product && (!isAddingProduct || isCopyMode)) {
       const formData = mapProductFullToFormData(product);
@@ -51,7 +49,6 @@ export function ProductForm({
     }
   }, [product, isAddingProduct, isCopyMode, form]);
 
-  // Track dirtiness similar to previous deep-compare logic
   useEffect(() => {
     setIsFormChanged(form.formState.isDirty);
   }, [form.formState.isDirty]);
@@ -82,12 +79,10 @@ export function ProductForm({
 
     try {
       await upsertProduct(payload);
-      // After successful save
       setIsFormChanged(false);
       form.reset(data, { keepValues: true });
 
       if (isAddingProduct && !isCopyMode) {
-        // Signal media components to clear their local selections
         setMediaClearKey((k) => k + 1);
       } else if (isCopyMode) {
         navigate(ROUTES.product, { replace: true });
@@ -107,7 +102,10 @@ export function ProductForm({
 
   return (
     <Form {...form}>
-      <form className='relative' onSubmit={form.handleSubmit(handleSubmit, handleFormError)}>
+      <form
+        className='relative lg:py-16 lg:px-10'
+        onSubmit={form.handleSubmit(handleSubmit, handleFormError)}
+      >
         <div className='w-full flex justify-between'>
           {!isAddingProduct && (
             <Button onClick={() => handleCopyProductClick(product?.product?.id)} size='lg'>
@@ -121,25 +119,25 @@ export function ProductForm({
             className='fixed bottom-3 right-3'
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
               e.preventDefault();
-              if (isEditMode || isAddingProduct || isCopyMode) {
+              if (editMode || isCopyMode) {
                 form.handleSubmit(handleSubmit, handleFormError)();
               } else if (onEditModeChange) {
                 onEditModeChange(true);
               }
             }}
           >
-            {isAddingProduct || isEditMode ? 'save' : 'edit'}
+            {editMode ? 'save' : 'edit'}
           </Button>
         </div>
 
-        <div>
-          <div className='flex flex-col lg:flex-row lg:justify-between gap-5'>
+        <div className='space-y-5'>
+          <div className='flex flex-col lg:flex-row lg:justify-between lg:items-start gap-5'>
             <div className='w-full lg:w-1/2 space-y-3'>
               <Thumbnail product={product} control={form.control} />
               <MediaAds product={product} control={form.control} clearKey={mediaClearKey} />
             </div>
             <div className='w-full lg:w-1/2 space-y-3'>
-              <BodyFields />
+              <BodyFields editMode={editMode} />
               <Tags
                 isAddingProduct={isAddingProduct}
                 isEditMode={isEditMode}
@@ -147,7 +145,6 @@ export function ProductForm({
               />
             </div>
           </div>
-          {/* <SizesAndMeasurements isAddingProduct={isAddingProduct} isEditMode={isEditMode} /> */}
           <SizeMeasurements isAddingProduct={isAddingProduct} isEditMode={isEditMode} />
         </div>
       </form>

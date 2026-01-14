@@ -25,11 +25,13 @@ export function Thumbnail({ product, control }: Props) {
   }
 
   return (
-    <SingleMediaViewAndSelect
-      link={mediaLink}
-      hideVideos
-      aspectRatio={['4:5']}
-      saveSelectedMedia={handleThumbnail}
-    />
+    <div className='border border-text'>
+      <SingleMediaViewAndSelect
+        link={mediaLink}
+        hideVideos
+        aspectRatio={['4:5']}
+        saveSelectedMedia={handleThumbnail}
+      />
+    </div>
   );
 }

@@ -14,7 +14,7 @@ function formatWellKnownTimestamp(date: Date | null): string {
   return date.toISOString();
 }
 
-export function SalePreorderFields() {
+export function SalePreorderFields({ editMode }: { editMode: boolean }) {
   const { watch, setValue } = useFormContext();
   const [showSales, setShowSales] = useState(false);
   const [showPreorder, setShowPreorder] = useState(false);
@@ -98,6 +98,7 @@ export function SalePreorderFields() {
           value={String(numericSale)}
           onChange={handleSaleChange}
           disabled={hasPreorder}
+          readOnly={!editMode}
         />
       )}
       {showPreorder && (
@@ -109,6 +110,7 @@ export function SalePreorderFields() {
           min={todayYmd}
           onChange={handlePreorderChange}
           disabled={numericSale > 0}
+          readOnly={!editMode}
         />
       )}
     </div>
