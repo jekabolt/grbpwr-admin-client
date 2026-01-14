@@ -147,8 +147,12 @@ export function mapProductFullToFormData(
         salePercentage: {
           value: productBodyInsert?.salePercentage?.value || '0',
         },
-        topCategoryId: productBodyInsert?.topCategoryId ? productBodyInsert.topCategoryId.toString() : '',
-        subCategoryId: productBodyInsert?.subCategoryId ? productBodyInsert.subCategoryId.toString() : '',
+        topCategoryId: productBodyInsert?.topCategoryId
+          ? productBodyInsert.topCategoryId.toString()
+          : '',
+        subCategoryId: productBodyInsert?.subCategoryId
+          ? productBodyInsert.subCategoryId.toString()
+          : '',
         typeId: productBodyInsert?.typeId ? productBodyInsert.typeId.toString() : '',
         hidden: productBodyInsert?.hidden || false,
         targetGender: productBodyInsert?.targetGender || ('' as common_GenderEnum),

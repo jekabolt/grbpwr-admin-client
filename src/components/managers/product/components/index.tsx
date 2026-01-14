@@ -37,9 +37,8 @@ export function ProductForm({
   const editMode = isEditMode || isAddingProduct;
   const navigate = useNavigate();
 
-  const initialValues = product && (!isAddingProduct || isCopyMode)
-    ? mapProductFullToFormData(product)
-    : defaultData;
+  const initialValues =
+    product && (!isAddingProduct || isCopyMode) ? mapProductFullToFormData(product) : defaultData;
 
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
