@@ -2,8 +2,12 @@ import axios from 'axios';
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL;
 
+if (!BASE_URL) {
+  console.error('VITE_SERVER_URL is not defined. API calls will fail.');
+}
+
 const axiosInstance = axios.create({
-  baseURL: BASE_URL,
+  baseURL: BASE_URL || 'https://backend.grbpwr.com',
   headers: {
     'Content-Type': 'application/json',
   },
