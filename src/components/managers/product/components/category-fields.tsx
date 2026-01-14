@@ -1,13 +1,12 @@
 import { useDictionaryStore } from 'lib/stores/store';
 import { getCategoriesByParentId } from 'lib/utility';
-import { useFormContext } from 'react-hook-form';
+import { useWatch } from 'react-hook-form';
 import SelectField from 'ui/form/fields/select-field';
 
 export function CategoryFields({ editMode }: { editMode: boolean }) {
   const { dictionary } = useDictionaryStore();
-  const { watch } = useFormContext();
-  const topCategoryId = watch('product.productBodyInsert.topCategoryId');
-  const subCategoryId = watch('product.productBodyInsert.subCategoryId');
+  const topCategoryId = useWatch({ name: 'product.productBodyInsert.topCategoryId' });
+  const subCategoryId = useWatch({ name: 'product.productBodyInsert.subCategoryId' });
 
   const topCategories = dictionary?.categories?.filter((cat) => cat.level === 'top_category') || [];
   const subCategories = topCategoryId

@@ -33,6 +33,7 @@ export const Product: FC = () => {
   return (
     <Layout>
       <ProductForm
+        key={product?.product?.id || `new-${id}`}
         isEditMode={isEditMode}
         isAddingProduct={isCopyMode || !id}
         isCopyMode={isCopyMode}

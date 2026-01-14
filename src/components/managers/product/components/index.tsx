@@ -37,17 +37,14 @@ export function ProductForm({
   const editMode = isEditMode || isAddingProduct;
   const navigate = useNavigate();
 
+  const initialValues = product && (!isAddingProduct || isCopyMode)
+    ? mapProductFullToFormData(product)
+    : defaultData;
+
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
-    defaultValues: defaultData,
+    defaultValues: initialValues,
   });
-
-  useEffect(() => {
-    if (product && (!isAddingProduct || isCopyMode)) {
-      const formData = mapProductFullToFormData(product);
-      form.reset(formData);
-    }
-  }, [product, isAddingProduct, isCopyMode, form]);
 
   useEffect(() => {
     setIsFormChanged(form.formState.isDirty);
