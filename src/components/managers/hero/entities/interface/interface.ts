@@ -10,6 +10,7 @@ export interface EntitiesProps {
     move: UseFieldArrayMove;
     insert: UseFieldArrayInsert<HeroSchema, 'entities'>;
   };
+  initialProducts?: Record<number, any[]>;
 }
 
 export interface Props {

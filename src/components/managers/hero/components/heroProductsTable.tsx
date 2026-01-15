@@ -1,21 +1,13 @@
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import DeleteIcon from '@mui/icons-material/Delete';
-import { Checkbox } from '@mui/material';
-import IconButton from '@mui/material/IconButton';
 import { common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useDictionaryStore } from 'lib/stores/store';
-import {
-  MRT_TableContainer,
-  useMaterialReactTable,
-  type MRT_ColumnDef,
-  type MRT_Row,
-} from 'material-react-table';
-import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { FC, useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
+import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import { HeroSchema } from './schema';
+
 interface HeroProductTableData {
   products: common_Product[];
   isFeaturedProducts?: boolean;
@@ -50,154 +42,163 @@ export const HeroProductTable: FC<
         );
       }
     },
-    [data, onReorder, setValue],
+    [data, onReorder, setValue, id],
   );
 
-  const columns = useMemo<MRT_ColumnDef<common_Product>[]>(
-    () => [
-      ...(isFeaturedProducts
-        ? [
-            {
-              id: 'actions',
-              header: 'Order',
-              Cell: ({ row }: { row: MRT_Row<common_Product> }) => (
-                <div>
-                  <IconButton
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      moveRow(row.index, row.index - 1);
-                    }}
-                    disabled={row.index === 0}
-                  >
-                    <ArrowUpwardIcon fontSize='small' />
-                  </IconButton>
-                  <IconButton
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      moveRow(row.index, row.index + 1);
-                    }}
-                    disabled={row.index === data.length - 1}
-                  >
-                    <ArrowDownwardIcon fontSize='small' />
-                  </IconButton>
-                </div>
-              ),
-            },
-          ]
-        : []),
-      {
-        accessorKey: 'id',
-        header: 'Id',
-        Cell: ({ cell, row }) => (
-          <span
-            style={{ color: 'blue', cursor: 'pointer', textDecoration: 'underline' }}
-            onClick={() => navigate(`${ROUTES.singleProduct}/${row.original.id}`)}
-          >
-            {cell.getValue() as string}
-          </span>
-        ),
-      },
-      {
-        accessorKey: 'productDisplay.thumbnail.media.thumbnail.mediaUrl',
-        header: 'Thumbnail',
-        Cell: ({ cell }) => (
-          <img
-            src={cell.getValue() as string}
-            alt='Thumbnail'
-            style={{ width: '100px', height: 'auto', objectFit: 'scale-down' }}
-          />
-        ),
-      },
-      {
-        accessorKey: 'productDisplay.productBody.name',
-        header: 'Name',
-      },
-      {
-        accessorKey: 'productDisplay.productBody.hidden',
-        header: 'isHidden',
+  const handleDelete = useCallback(
+    (index: number) => {
+      const newData = data.filter((_, i) => i !== index);
+      setData(newData);
+      onReorder?.(newData);
+      setValue(
+        `entities.${id}.featuredProducts.productIds` as any,
+        newData.map((p) => p.id),
+      );
+    },
+    [data, onReorder, setValue, id],
+  );
 
-        Cell: ({ cell }) => {
-          const hidden = cell.getValue() as boolean;
-          return (
-            <Checkbox
-              checked={hidden}
-              disabled={true} // Makes the checkbox read-only
-              inputProps={{ 'aria-label': 'hidden checkbox' }}
-            />
-          );
-        },
-      },
-      {
-        accessorKey: 'productDisplay.productBody.price.value',
-        header: 'Price',
-      },
-      {
-        accessorKey: 'productDisplay.productBody.salePercentage.value',
-        header: 'Sale percentage',
-      },
-      {
-        accessorKey: 'productDisplay.productBody.categoryId',
-        header: 'Category',
-        enableResizing: true,
-        Cell: ({ cell }) => {
-          const categoryId = cell.getValue() as number; // get the current row's categoryId
-          const category = categories?.find((c) => c.id === categoryId); // find the category in the state
-          return (
-            <span>{category ? category?.name!.replace('CATEGORY_ENUM_', '') : 'Unknown'}</span>
-          ); // return the category name or 'Unknown'
-        },
-      },
-      ...(isFeaturedProducts
-        ? [
-            {
-              id: 'delete',
-              header: 'Delete',
-              Cell: ({ row }: { row: MRT_Row<common_Product> }) => (
-                <IconButton
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    const newData = data.filter((_, index) => index !== row.index);
-                    setData(newData);
-                    onReorder?.(newData);
-                    setValue(
-                      `entities.${id}.featuredProducts.productIds` as any,
-                      newData.map((p) => p.id),
-                    );
-                  }}
-                  aria-label='delete'
-                  size='small'
+  const getCategoryName = (categoryId?: number) => {
+    if (!categoryId) return 'Unknown';
+    const category = categories?.find((c) => c.id === categoryId);
+    return category ? category.name?.replace('CATEGORY_ENUM_', '') : 'Unknown';
+  };
+
+  if (data.length === 0) {
+    return (
+      <div className='py-8 text-center'>
+        <Text>No products</Text>
+      </div>
+    );
+  }
+
+  return (
+    <div className='overflow-x-auto'>
+      <table className='w-full border-collapse border border-text'>
+        <thead>
+          <tr className='bg-bgColor border-b border-text'>
+            {isFeaturedProducts && (
+              <th className='border border-text p-2 text-left'>
+                <Text variant='uppercase'>Order</Text>
+              </th>
+            )}
+            <th className='border border-text p-2 text-left'>
+              <Text variant='uppercase'>Id</Text>
+            </th>
+            <th className='border border-text p-2 text-left'>
+              <Text variant='uppercase'>Thumbnail</Text>
+            </th>
+            <th className='border border-text p-2 text-left'>
+              <Text variant='uppercase'>Name</Text>
+            </th>
+            <th className='border border-text p-2 text-left'>
+              <Text variant='uppercase'>isHidden</Text>
+            </th>
+            <th className='border border-text p-2 text-left'>
+              <Text variant='uppercase'>Price</Text>
+            </th>
+            <th className='border border-text p-2 text-left'>
+              <Text variant='uppercase'>Sale percentage</Text>
+            </th>
+            <th className='border border-text p-2 text-left'>
+              <Text variant='uppercase'>Category</Text>
+            </th>
+            {isFeaturedProducts && (
+              <th className='border border-text p-2 text-left'>
+                <Text variant='uppercase'>Delete</Text>
+              </th>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((product, index) => (
+            <tr key={product.id} className='border-b border-text hover:bg-bgColor/50'>
+              {isFeaturedProducts && (
+                <td className='border border-text p-2'>
+                  <div className='flex '>
+                    <Button
+                      type='button'
+                      variant='simple'
+                      onClick={() => moveRow(index, index - 1)}
+                      disabled={index === 0}
+                      className='w-full'
+                    >
+                      ↑
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='simple'
+                      onClick={() => moveRow(index, index + 1)}
+                      disabled={index === data.length - 1}
+                      className='w-full'
+                    >
+                      ↓
+                    </Button>
+                  </div>
+                </td>
+              )}
+              <td className='border border-text p-2'>
+                <button
+                  onClick={() => navigate(`${ROUTES.singleProduct}/${product.id}`)}
+                  className='text-blue-500 underline hover:text-blue-700 cursor-pointer'
                 >
-                  <DeleteIcon fontSize='small' />
-                </IconButton>
-              ),
-            },
-          ]
-        : []),
-    ],
-    [categories, moveRow, setData, onReorder, isFeaturedProducts],
+                  {product.id}
+                </button>
+              </td>
+              <td className='border border-text p-2'>
+                {product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl && (
+                  <img
+                    src={product.productDisplay.thumbnail.media.thumbnail.mediaUrl}
+                    alt='Thumbnail'
+                    className='w-[100px] h-auto object-contain'
+                  />
+                )}
+              </td>
+              <td className='border border-text p-2'>
+                <Text>{product.productDisplay?.productBody?.translations?.[0].name}</Text>
+              </td>
+              <td className='border border-text p-2'>
+                <input
+                  type='checkbox'
+                  checked={(product.productDisplay?.productBody as any)?.hidden || false}
+                  disabled
+                  readOnly
+                  className='cursor-not-allowed'
+                  aria-label='hidden checkbox'
+                />
+              </td>
+              <td className='border border-text p-2'>
+                <Text>{`${product.prices?.[1].price?.value} ${product.prices?.[1].currency}`}</Text>
+              </td>
+              <td className='border border-text p-2'>
+                <Text>
+                  {`${product.productDisplay?.productBody?.productBodyInsert?.salePercentage?.value} %`}
+                </Text>
+              </td>
+              <td className='border border-text p-2'>
+                <Text>
+                  {getCategoryName(
+                    product.productDisplay?.productBody?.productBodyInsert?.topCategoryId,
+                  )}
+                </Text>
+              </td>
+              {isFeaturedProducts && (
+                <td className='border border-text'>
+                  <Button
+                    type='button'
+                    variant='delete'
+                    onClick={() => handleDelete(index)}
+                    className='w-full'
+                    aria-label='delete'
+                  >
+                    ×
+                  </Button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
-
-  const table = useMaterialReactTable({
-    autoResetPageIndex: false,
-    columns,
-    data,
-    enableSorting: false,
-    enableRowOrdering: isFeaturedProducts,
-    muiRowDragHandleProps: ({ table }) => ({
-      onDragEnd: () => {
-        const { draggingRow, hoveredRow } = table.getState();
-        if (hoveredRow && draggingRow) {
-          data.splice(
-            (hoveredRow as MRT_Row<common_Product>).index,
-            0,
-            data.splice(draggingRow.index, 1)[0],
-          );
-          setData([...data]);
-          onReorder?.(data);
-        }
-      },
-    }),
-  });
-
-  return <MRT_TableContainer table={table} />;
 };

@@ -4,20 +4,23 @@ import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
+import Text from 'ui/components/text';
+
+type FieldConfig = {
+  name: string;
+  label: string;
+  type?: 'input' | 'textarea';
+  placeholder?: string;
+  rows?: number;
+};
 
 type Props = {
   fieldPrefix: string;
-  nameLabel?: string;
-  descriptionLabel?: string;
-  editMode: boolean;
+  fields: FieldConfig[];
+  editMode?: boolean;
 };
 
-export function UnifiedTranslationFields({
-  fieldPrefix,
-  nameLabel = 'name',
-  descriptionLabel = 'description',
-  editMode,
-}: Props) {
+export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true }: Props) {
   const { control, watch, setValue } = useFormContext();
   const { replace } = useFieldArray({
     control,
@@ -26,99 +29,86 @@ export function UnifiedTranslationFields({
 
   const translations = watch(fieldPrefix) || [];
   const [selectedLanguageId, setSelectedLanguageId] = useState<number>(LANGUAGES[0].id);
-  const [currentNameValue, setCurrentNameValue] = useState<string>('');
-  const [currentDescriptionValue, setCurrentDescriptionValue] = useState<string>('');
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
 
   const selectedLanguage = LANGUAGES.find((lang) => lang.id === selectedLanguageId);
   const translationIndex = translations.findIndex((t: any) => t?.languageId === selectedLanguageId);
   const actualTranslationIndex = translationIndex >= 0 ? translationIndex : translations.length;
-  const nameFieldWithIndex = `${fieldPrefix}.${actualTranslationIndex}.name`;
-  const descriptionFieldWithIndex = `${fieldPrefix}.${actualTranslationIndex}.description`;
-  const currentNameFormValue = watch(nameFieldWithIndex) || '';
-  const currentDescriptionFormValue = watch(descriptionFieldWithIndex) || '';
 
+  // Initialize translations if empty
   useEffect(() => {
     if (translations.length === 0) {
-      const initialTranslations = LANGUAGES.map((language) => ({
-        languageId: language.id,
-        name: '',
-        description: '',
-      }));
+      const initialTranslations = LANGUAGES.map((language) => {
+        const translation: any = { languageId: language.id };
+        fields.forEach((field) => {
+          translation[field.name] = '';
+        });
+        return translation;
+      });
       replace(initialTranslations);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [translations.length, replace]);
 
+  // Add missing translation for selected language
   useEffect(() => {
     if (translationIndex < 0 && translations.length > 0) {
-      const newTranslations = [...translations];
-      newTranslations.push({
-        languageId: selectedLanguageId,
-        name: '',
-        description: '',
+      const newTranslation: any = { languageId: selectedLanguageId };
+      fields.forEach((field) => {
+        newTranslation[field.name] = '';
       });
+      const newTranslations = [...translations, newTranslation];
       replace(newTranslations);
     } else if (translationIndex >= 0) {
       setValue(`${fieldPrefix}.${translationIndex}.languageId`, selectedLanguageId);
     }
-  }, [selectedLanguageId, translationIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLanguageId, translationIndex, translations.length, replace, setValue, fieldPrefix]);
 
+  // Load field values when language changes
   useEffect(() => {
-    if (!currentNameValue) {
-      setCurrentNameValue(currentNameFormValue);
-    }
-  }, [currentNameFormValue]);
-
-  useEffect(() => {
-    if (!currentDescriptionValue) {
-      setCurrentDescriptionValue(currentDescriptionFormValue);
-    }
-  }, [currentDescriptionFormValue]);
+    const newValues: Record<string, string> = {};
+    fields.forEach((field) => {
+      const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${field.name}`;
+      newValues[field.name] = watch(fieldPath) || '';
+    });
+    setFieldValues(newValues);
+  }, [selectedLanguageId, actualTranslationIndex, fields, fieldPrefix, watch]);
 
   const handleLanguageChange = (e: React.MouseEvent<HTMLButtonElement>, languageId: number) => {
     e.preventDefault();
 
-    if (currentNameValue.trim() || currentNameValue !== currentNameFormValue) {
-      setValue(nameFieldWithIndex, currentNameValue);
-    }
-    if (currentDescriptionValue.trim() || currentDescriptionValue !== currentDescriptionFormValue) {
-      setValue(descriptionFieldWithIndex, currentDescriptionValue);
-    }
+    // Save current values before switching
+    fields.forEach((field) => {
+      const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${field.name}`;
+      const currentValue = fieldValues[field.name];
+      if (currentValue !== undefined) {
+        setValue(fieldPath, currentValue);
+      }
+    });
 
     setSelectedLanguageId(languageId);
-
-    const newTranslationIndex = translations.findIndex((t: any) => t?.languageId === languageId);
-    const newNameField = `${fieldPrefix}.${newTranslationIndex >= 0 ? newTranslationIndex : translations.length}.name`;
-    const newDescriptionField = `${fieldPrefix}.${newTranslationIndex >= 0 ? newTranslationIndex : translations.length}.description`;
-    const newNameValue = watch(newNameField) || '';
-    const newDescriptionValue = watch(newDescriptionField) || '';
-    setCurrentNameValue(newNameValue);
-    setCurrentDescriptionValue(newDescriptionValue);
   };
 
-  const handleNameChange = (value: string) => {
-    setCurrentNameValue(value);
-    setValue(nameFieldWithIndex, value);
-  };
-
-  const handleDescriptionChange = (value: string) => {
-    setCurrentDescriptionValue(value);
-    setValue(descriptionFieldWithIndex, value);
+  const handleFieldChange = (fieldName: string, value: string) => {
+    setFieldValues((prev) => ({ ...prev, [fieldName]: value }));
+    const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
+    setValue(fieldPath, value);
   };
 
   const isLanguageFilled = (languageId: number) => {
     const index = translations.findIndex((t: any) => t?.languageId === languageId);
     if (index < 0) return false;
-    const nameValue = watch(`${fieldPrefix}.${index}.name`);
-    const descriptionValue = watch(`${fieldPrefix}.${index}.description`);
-    return (
-      (nameValue && nameValue.trim().length > 0) ||
-      (descriptionValue && descriptionValue.trim().length > 0)
-    );
+
+    return fields.some((field) => {
+      const value = watch(`${fieldPrefix}.${index}.${field.name}`);
+      return value && value.trim().length > 0;
+    });
   };
 
   return (
     <div className='space-y-3'>
-      <div className='flex justify-between flex-wrap'>
+      <div className='flex justify-between flex-wrap gap-2'>
         {LANGUAGES.map((language) => {
           const isFilled = isLanguageFilled(language.id);
           const isSelected = language.id === selectedLanguageId;
@@ -127,6 +117,7 @@ export function UnifiedTranslationFields({
               key={language.id}
               variant='simple'
               size='lg'
+              type='button'
               onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
                 handleLanguageChange(e, language.id)
               }
@@ -144,31 +135,47 @@ export function UnifiedTranslationFields({
         })}
       </div>
 
-      <div className='space-y-2'>
-        <div className='border-b border-textColor'>
-          <Input
-            name={nameFieldWithIndex}
-            value={currentNameValue || currentNameFormValue}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleNameChange(e.target.value)}
-            placeholder={`enter ${nameLabel.toLowerCase()} in ${selectedLanguage?.name}`}
-            className='w-full border-none leading-4 bg-transparent'
-            readOnly={!editMode}
-          />
-        </div>
-      </div>
+      <div className='space-y-4'>
+        {fields.map((field) => {
+          const fieldValue = fieldValues[field.name] || '';
+          const placeholder =
+            field.placeholder || `enter ${field.label.toLowerCase()} in ${selectedLanguage?.name}`;
 
-      <div className='space-y-2'>
-        <textarea
-          name={descriptionFieldWithIndex}
-          value={currentDescriptionValue || currentDescriptionFormValue}
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-            handleDescriptionChange(e.target.value)
+          if (field.type === 'textarea') {
+            return (
+              <div key={field.name} className='space-y-2'>
+                <label className='text-sm font-medium'>{field.label}</label>
+                <textarea
+                  value={fieldValue}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    handleFieldChange(field.name, e.target.value)
+                  }
+                  placeholder={placeholder}
+                  className='w-full border border-text leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2'
+                  rows={field.rows || 4}
+                  readOnly={!editMode}
+                />
+              </div>
+            );
           }
-          placeholder={`enter ${descriptionLabel.toLowerCase()} in ${selectedLanguage?.name}`}
-          className='w-full border border-text leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2'
-          rows={4}
-          readOnly={!editMode}
-        />
+
+          return (
+            <div key={field.name} className='space-y-2'>
+              <Text component='label'>{field.label}</Text>
+              <div className='border-b border-textColor'>
+                <Input
+                  value={fieldValue}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    handleFieldChange(field.name, e.target.value)
+                  }
+                  placeholder={placeholder}
+                  className='w-full border-none leading-4 bg-transparent'
+                  readOnly={!editMode}
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

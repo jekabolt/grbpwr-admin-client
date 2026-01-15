@@ -1,14 +1,19 @@
-import { Button, Grid2 as Grid, Typography } from '@mui/material';
+import { Button } from '@mui/material';
 import { useFormContext } from 'react-hook-form';
 import { ProductPickerModal } from 'ui/components/productPickerModal';
+import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
-import { TranslationField } from 'ui/form/fields/translation-field';
+import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { HeroProductEntityInterface } from '../entities/interface/interface';
 import { HeroProductTable } from './heroProductsTable';
 import { HeroSchema } from './schema';
 
+const FEATURED_PRODUCTS_TRANSLATION_FIELDS = [
+  { name: 'headline', label: 'headline', type: 'input' as const },
+  { name: 'exploreText', label: 'explore text', type: 'input' as const },
+];
+
 export function FeaturedProductBase({
-  entity,
   index,
   product,
   currentEntityIndex,
@@ -22,31 +27,22 @@ export function FeaturedProductBase({
   handleSaveNewSelection,
 }: HeroProductEntityInterface) {
   const {
-    control,
     formState: { errors },
   } = useFormContext<HeroSchema>();
-  // const prefixBase = 'featuredProductsTag';
-  // const prefix = `${prefixBase}`;
+
   return (
-    <Grid container spacing={2}>
-      <Grid size={{ xs: 12 }}>
-        <Typography variant='h4' textTransform='uppercase'>
-          {title}
-        </Typography>
-      </Grid>
+    <div>
+      <Text className='text-xl font-bold leading-none' variant='uppercase'>
+        {title}
+      </Text>
       {prefix?.includes('featuredProductsTag') && (
         <InputField name={`entities.${index}.${prefix}.tag`} label='tag' />
       )}
 
-      <TranslationField
-        label='headline'
+      <UnifiedTranslationFields
         fieldPrefix={`entities.${index}.${prefix}.translations`}
-        fieldName='headline'
-      />
-      <TranslationField
-        label='explore text'
-        fieldPrefix={`entities.${index}.${prefix}.translations`}
-        fieldName='exploreText'
+        fields={FEATURED_PRODUCTS_TRANSLATION_FIELDS}
+        editMode={true}
       />
       <InputField name={`entities.${index}.${prefix}.exploreLink`} label='explore link' />
 
@@ -75,6 +71,6 @@ export function FeaturedProductBase({
           />
         </>
       )}
-    </Grid>
+    </div>
   );
 }

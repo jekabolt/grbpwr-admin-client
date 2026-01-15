@@ -6,7 +6,6 @@ import { Form } from 'ui/form';
 import { Layout } from 'ui/layout';
 import { Entities } from './entities';
 import { mapFormFieldsToHeroData, mapHeroFullToFormData } from './map-schema-to-hero-data';
-import { NavFeatured } from './nav-featured';
 import { defaultData, HeroSchema, heroSchema } from './schema';
 import { SelectHeroType } from './selectHeroType';
 import { useHero, useSaveHero } from './useHero';
@@ -15,6 +14,7 @@ export function Hero() {
   const { data: heroData, isLoading } = useHero();
   const saveHero = useSaveHero();
   const entityRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
+  const productsByEntityIndexRef = useRef<Record<number, any[]>>({});
 
   const form = useForm<HeroSchema>({
     resolver: zodResolver(heroSchema),
@@ -23,8 +23,9 @@ export function Hero() {
 
   useEffect(() => {
     if (heroData) {
-      const formData = mapHeroFullToFormData(heroData.hero);
-      form.reset(formData);
+      const mappedData = mapHeroFullToFormData(heroData.hero);
+      productsByEntityIndexRef.current = mappedData.productsByEntityIndex || {};
+      form.reset(mappedData);
     }
   }, [heroData, form]);
 
@@ -58,11 +59,15 @@ export function Hero() {
     <Layout>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <NavFeatured hero={heroData?.hero} />
+          {/* <NavFeatured hero={heroData?.hero} /> */}
 
           <SelectHeroType append={append} insert={insert} form={form} />
 
-          <Entities entityRefs={entityRefs} arrayHelpers={{ remove, move, insert }} />
+          <Entities
+            entityRefs={entityRefs}
+            arrayHelpers={{ remove, move, insert }}
+            initialProducts={productsByEntityIndexRef.current}
+          />
 
           <Button size='lg' type='submit'>
             Save

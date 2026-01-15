@@ -1,29 +1,44 @@
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
+import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
-import { TranslationField } from 'ui/form/fields/translation-field';
+import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { Props } from '../entities/interface/interface';
-import { HeroSchema } from './schema';
+
+const TRANSLATION_CONFIGS = {
+  main: [
+    { name: 'headline', label: 'headline', type: 'input' as const },
+    { name: 'tag', label: 'tag', type: 'input' as const },
+    { name: 'description', label: 'description', type: 'textarea' as const, rows: 3 },
+    { name: 'exploreText', label: 'explore text', type: 'input' as const },
+  ],
+  single: [
+    { name: 'headline', label: 'headline', type: 'input' as const },
+    { name: 'exploreText', label: 'explore text', type: 'input' as const },
+  ],
+  double: [
+    { name: 'headline', label: 'headline', type: 'input' as const },
+    { name: 'exploreText', label: 'explore text', type: 'input' as const },
+  ],
+};
+
+const ORIENTATIONS = ['Landscape', 'Portrait'] as const;
+type Orientation = (typeof ORIENTATIONS)[number];
 
 export function CommonEntity({
   title,
   prefix,
   portraitLink,
   landscapeLink,
-  size,
   aspectRatio,
   isDoubleAd = false,
   onSaveMedia,
 }: Props) {
-  const { register } = useFormContext<HeroSchema>();
-  const [orientation, setOrientation] = useState<'Portrait' | 'Landscape'>('Landscape');
+  const [orientation, setOrientation] = useState<Orientation>('Landscape');
 
-  const handleOrientationChange = (newOrientation: 'Portrait' | 'Landscape') => {
-    setOrientation(newOrientation);
-  };
+  const currentMediaUrl = orientation === 'Portrait' ? portraitLink : landscapeLink;
 
   const handleMediaSave = (selectedMedia: any[]) => {
     if (isDoubleAd) {
@@ -34,8 +49,6 @@ export function CommonEntity({
     }
   };
 
-  const currentMediaUrl = orientation === 'Portrait' ? portraitLink : landscapeLink;
-
   const getCurrentAspectRatio = () => {
     if (Array.isArray(aspectRatio)) {
       return aspectRatio;
@@ -43,63 +56,64 @@ export function CommonEntity({
     return orientation === 'Portrait' ? aspectRatio.Portrait : aspectRatio.Landscape;
   };
 
+  const getTranslationFields = () => {
+    if (prefix.includes('.main')) return TRANSLATION_CONFIGS.main;
+    if (prefix.includes('.single')) return TRANSLATION_CONFIGS.single;
+    if (prefix.includes('.double')) return TRANSLATION_CONFIGS.double;
+    return TRANSLATION_CONFIGS.single;
+  };
+
   return (
-    <div className='space-y-4'>
-      <div>
-        <Text className='text-xl font-bold uppercase'>{title}</Text>
-      </div>
-      <div>
+    <div className='lg:px-2.5 lg:pb-8 p-2.5 space-y-6'>
+      <div className='flex flex-col items-start justify-start gap-4'>
+        {title && (
+          <Text className='text-xl font-bold leading-none' variant='uppercase'>
+            {title}
+          </Text>
+        )}
+        {!title && isDoubleAd && <div className='h-5' />}
         {!isDoubleAd && (
-          <div className='mb-4 flex gap-2'>
-            <Button
-              type='button'
-              variant={orientation === 'Landscape' ? 'default' : 'underline'}
-              onClick={() => handleOrientationChange('Landscape')}
-            >
-              Landscape
-            </Button>
-            <Button
-              type='button'
-              variant={orientation === 'Portrait' ? 'default' : 'underline'}
-              onClick={() => handleOrientationChange('Portrait')}
-            >
-              Portrait
-            </Button>
+          <div className='flex gap-2'>
+            {ORIENTATIONS.map((orient) => (
+              <Button
+                key={orient}
+                type='button'
+                className='cursor-pointer p-2.5 uppercase'
+                variant={orientation === orient ? 'default' : 'simpleReverse'}
+                onClick={() => setOrientation(orient)}
+              >
+                {orient}
+              </Button>
+            ))}
           </div>
         )}
-        <SingleMediaViewAndSelect
-          link={currentMediaUrl}
-          aspectRatio={getCurrentAspectRatio()}
-          isDeleteAccepted={false}
-          saveSelectedMedia={handleMediaSave}
-          isEditMode
-        />
-        <div className='mt-4 space-y-4'>
+      </div>
+      <div
+        className={cn('flex flex-col', {
+          'lg:flex-row flex-col lg:justify-between lg:gap-4': !isDoubleAd,
+        })}
+      >
+        <div className='w-full'>
+          <SingleMediaViewAndSelect
+            link={currentMediaUrl}
+            aspectRatio={getCurrentAspectRatio()}
+            isDeleteAccepted={false}
+            saveSelectedMedia={handleMediaSave}
+            isEditMode
+          />
+        </div>
+        <div className='space-y-4 w-full'>
           <InputField
             name={`${prefix}.exploreLink` as any}
-            label='Explore Link'
+            label='explore link'
             placeholder='Enter explore link'
           />
 
-          <div className='space-y-4'>
-            <Text className='text-lg font-semibold'>Translations</Text>
-            <TranslationField
-              label='Headline'
-              fieldPrefix={`${prefix}.translations`}
-              fieldName='headline'
-            />
-            <TranslationField
-              label='Explore Text'
-              fieldPrefix={`${prefix}.translations`}
-              fieldName='exploreText'
-            />
-            <TranslationField label='Tag' fieldPrefix={`${prefix}.translations`} fieldName='tag' />
-            <TranslationField
-              label='Description'
-              fieldPrefix={`${prefix}.translations`}
-              fieldName='description'
-            />
-          </div>
+          <UnifiedTranslationFields
+            fieldPrefix={`${prefix}.translations`}
+            fields={getTranslationFields()}
+            editMode={true}
+          />
         </div>
       </div>
     </div>
