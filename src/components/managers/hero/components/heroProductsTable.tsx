@@ -5,6 +5,7 @@ import { FC, useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import MediaComponent from 'ui/components/media';
 import Text from 'ui/components/text';
 import { HeroSchema } from './schema';
 
@@ -64,6 +65,18 @@ export const HeroProductTable: FC<
     return category ? category.name?.replace('CATEGORY_ENUM_', '') : 'Unknown';
   };
 
+  const columnLabels = [
+    ...(isFeaturedProducts ? ['order'] : []),
+    'id',
+    'thumbnail',
+    'name',
+    'is hidden',
+    'price',
+    'sale percentage',
+    'category',
+    ...(isFeaturedProducts ? ['delete'] : []),
+  ];
+
   if (data.length === 0) {
     return (
       <div className='py-8 text-center'>
@@ -77,45 +90,19 @@ export const HeroProductTable: FC<
       <table className='w-full border-collapse border border-text'>
         <thead>
           <tr className='bg-bgColor border-b border-text'>
-            {isFeaturedProducts && (
-              <th className='border border-text p-2 text-left'>
-                <Text variant='uppercase'>Order</Text>
+            {columnLabels.map((label) => (
+              <th key={label} className='border border-text p-2 text-center'>
+                <Text variant='uppercase'>{label}</Text>
               </th>
-            )}
-            <th className='border border-text p-2 text-left'>
-              <Text variant='uppercase'>Id</Text>
-            </th>
-            <th className='border border-text p-2 text-left'>
-              <Text variant='uppercase'>Thumbnail</Text>
-            </th>
-            <th className='border border-text p-2 text-left'>
-              <Text variant='uppercase'>Name</Text>
-            </th>
-            <th className='border border-text p-2 text-left'>
-              <Text variant='uppercase'>isHidden</Text>
-            </th>
-            <th className='border border-text p-2 text-left'>
-              <Text variant='uppercase'>Price</Text>
-            </th>
-            <th className='border border-text p-2 text-left'>
-              <Text variant='uppercase'>Sale percentage</Text>
-            </th>
-            <th className='border border-text p-2 text-left'>
-              <Text variant='uppercase'>Category</Text>
-            </th>
-            {isFeaturedProducts && (
-              <th className='border border-text p-2 text-left'>
-                <Text variant='uppercase'>Delete</Text>
-              </th>
-            )}
+            ))}
           </tr>
         </thead>
         <tbody>
           {data.map((product, index) => (
-            <tr key={product.id} className='border-b border-text hover:bg-bgColor/50'>
+            <tr key={product.id} className='border-b border-text hover:bg-bgColor/50 text-center'>
               {isFeaturedProducts && (
                 <td className='border border-text p-2'>
-                  <div className='flex '>
+                  <div className='flex'>
                     <Button
                       type='button'
                       variant='simple'
@@ -145,11 +132,12 @@ export const HeroProductTable: FC<
                   {product.id}
                 </button>
               </td>
-              <td className='border border-text p-2'>
+              <td className='border border-text lg:w-16'>
                 {product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl && (
-                  <img
-                    src={product.productDisplay.thumbnail.media.thumbnail.mediaUrl}
+                  <MediaComponent
+                    src={product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl}
                     alt='Thumbnail'
+                    type='image'
                     className='w-[100px] h-auto object-contain'
                   />
                 )}
@@ -158,14 +146,11 @@ export const HeroProductTable: FC<
                 <Text>{product.productDisplay?.productBody?.translations?.[0].name}</Text>
               </td>
               <td className='border border-text p-2'>
-                <input
-                  type='checkbox'
-                  checked={(product.productDisplay?.productBody as any)?.hidden || false}
-                  disabled
-                  readOnly
-                  className='cursor-not-allowed'
-                  aria-label='hidden checkbox'
-                />
+                <Text>
+                  {product.productDisplay?.productBody?.productBodyInsert?.hidden
+                    ? 'hidden'
+                    : 'shown'}
+                </Text>
               </td>
               <td className='border border-text p-2'>
                 <Text>{`${product.prices?.[1].price?.value} ${product.prices?.[1].currency}`}</Text>
