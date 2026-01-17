@@ -23,21 +23,17 @@ export function Hero() {
   const form = useForm<HeroSchema>({
     resolver: zodResolver(heroSchema),
     defaultValues: defaultData as HeroSchema,
-    mode: 'onChange', // Track changes immediately
+    mode: 'onChange',
   });
 
-  // Block navigation when form has unsaved changes
-  const isDirty = form.formState.isDirty; // Read it to subscribe
+  const isDirty = form.formState.isDirty;
   useBlockNavigation(isDirty);
-
-  console.log('Form isDirty:', isDirty); // Debug log
 
   useEffect(() => {
     if (heroData) {
       const mappedData = mapHeroFullToFormData(heroData.hero);
       productsByEntityIndexRef.current = mappedData.productsByEntityIndex || {};
       form.reset(mappedData);
-      // Clear deleted indices when form is reset
       deletedIndicesRef.current.clear();
     }
   }, [heroData, form]);
@@ -56,7 +52,7 @@ export function Hero() {
     console.log('Mapped hero data:', heroData);
     try {
       await saveHero.mutateAsync(heroData);
-      form.reset(data); // Reset dirty state after successful save
+      form.reset(data);
       console.log('Hero saved successfully!');
     } catch (e) {
       console.log('Error saving hero:', e);
