@@ -7,7 +7,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { TranslationField } from 'ui/form/fields/translation-field';
-import { ArchivePicker } from '../entities/featured-archive/archive-picker';
+import { ArchivePicker } from './archive-picker';
 import { HeroSchema } from './schema';
 
 type MediaUrlsState = {
@@ -50,9 +50,8 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
   };
 
   return (
-    <div className='space-y-4 p-4 border border-gray-200 w-full'>
-      <Text>{gender}</Text>
-
+    <div className='space-y-4 p-4 border border-text w-full'>
+      <Text variant='uppercase'>{gender}</Text>
       <div className='w-full'>
         <SingleMediaViewAndSelect
           link={mediaUrls[gender]}
@@ -61,21 +60,15 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
           saveSelectedMedia={saveMedia}
           isEditMode
         />
-
-        <InputField name={`navFeatured.${gender}.featuredTag`} label='featured tag' />
-
-        <div className='flex items-end w-full border border-textColor'>
-          <div className='flex-1'>
-            <Text className='text-sm'>
-              {selectedArchiveId ? `Archive ID: ${selectedArchiveId}` : 'No archive selected'}
-            </Text>
-          </div>
-          <div>
-            <Button type='button' onClick={() => onOpenArchivePicker(gender)} size='lg'>
-              select archive
-            </Button>
-          </div>
-        </div>
+      </div>
+      <InputField name={`navFeatured.${gender}.featuredTag`} label='tag' />
+      <div className='flex items-center w-full border border-textColor justify-between px-2 py-1'>
+        <Text variant='uppercase'>
+          {selectedArchiveId ? `archive id: ${selectedArchiveId}` : 'no archive selected'}
+        </Text>
+        <Button type='button' onClick={() => onOpenArchivePicker(gender)} className='p-2'>
+          select
+        </Button>
       </div>
 
       <TranslationField
@@ -105,9 +98,11 @@ export function NavFeatured({ hero }: { hero?: common_HeroFullWithTranslations }
   };
 
   return (
-    <div>
-      <Text>navigation featured</Text>
-      <div className='flex'>
+    <div className='border border-text p-4 space-y-4'>
+      <Text variant='uppercase' className='text-xl font-bold leading-none'>
+        navigation featured
+      </Text>
+      <div className='flex lg:flex-row flex-col gap-4'>
         {genders.map((gender) => (
           <GenderSection
             hero={hero}

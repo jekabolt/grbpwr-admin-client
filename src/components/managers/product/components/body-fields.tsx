@@ -36,7 +36,14 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
 
   return (
     <div className='space-y-10'>
-      <UnifiedTranslationFields fieldPrefix='product.translations' editMode={editMode} />
+      <UnifiedTranslationFields
+        fieldPrefix='product.translations'
+        fields={[
+          { name: 'name', label: 'Name', type: 'input' },
+          { name: 'description', label: 'Description', type: 'textarea', rows: 4 },
+        ]}
+        editMode={editMode}
+      />
 
       <div className='space-y-3'>
         <InputField name='product.productBodyInsert.brand' label='brand' readOnly={!editMode} />

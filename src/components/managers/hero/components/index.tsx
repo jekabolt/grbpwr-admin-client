@@ -1,4 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+
+import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useEffect, useRef } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -15,16 +17,26 @@ export function Hero() {
   const { data: heroData, isLoading } = useHero();
   const saveHero = useSaveHero();
   const entityRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
+  const productsByEntityIndexRef = useRef<Record<number, any[]>>({});
+  const deletedIndicesRef = useRef<Set<number>>(new Set());
 
   const form = useForm<HeroSchema>({
     resolver: zodResolver(heroSchema),
     defaultValues: defaultData as HeroSchema,
+    mode: 'onChange',
   });
+
+  // comment
+
+  const isDirty = form.formState.isDirty;
+  useBlockNavigation(isDirty);
 
   useEffect(() => {
     if (heroData) {
-      const formData = mapHeroFullToFormData(heroData.hero);
-      form.reset(formData);
+      const mappedData = mapHeroFullToFormData(heroData.hero);
+      productsByEntityIndexRef.current = mappedData.productsByEntityIndex || {};
+      form.reset(mappedData);
+      deletedIndicesRef.current.clear();
     }
   }, [heroData, form]);
 
@@ -34,10 +46,15 @@ export function Hero() {
   });
 
   async function onSubmit(data: HeroSchema) {
-    const heroData = mapFormFieldsToHeroData(data);
+    const filteredData = {
+      ...data,
+      entities: data.entities.filter((_, index) => !deletedIndicesRef.current.has(index)),
+    };
+    const heroData = mapFormFieldsToHeroData(filteredData);
     console.log('Mapped hero data:', heroData);
     try {
       await saveHero.mutateAsync(heroData);
+      form.reset(data);
       console.log('Hero saved successfully!');
     } catch (e) {
       console.log('Error saving hero:', e);
@@ -57,15 +74,25 @@ export function Hero() {
   return (
     <Layout>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
+        <form
+          onSubmit={form.handleSubmit(onSubmit)}
+          className='flex flex-col gap-y-16 lg:pt-24 pt-5 lg:px-12 px-2.5'
+        >
           <NavFeatured hero={heroData?.hero} />
-
           <SelectHeroType append={append} insert={insert} form={form} />
-
-          <Entities entityRefs={entityRefs} arrayHelpers={{ remove, move, insert }} />
-
-          <Button size='lg' type='submit'>
-            Save
+          <Entities
+            entityRefs={entityRefs}
+            arrayHelpers={{ remove, move, insert }}
+            initialProducts={productsByEntityIndexRef.current}
+            deletedIndicesRef={deletedIndicesRef}
+          />
+          <Button
+            size='lg'
+            type='submit'
+            disabled={form.formState.isSubmitting || saveHero.isPending}
+            className='fixed top-3 right-3 z-50 cursor-pointer uppercase'
+          >
+            save
           </Button>
         </form>
       </Form>

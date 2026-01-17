@@ -32,6 +32,8 @@ const heroEntitySchema = z.discriminatedUnion('type', [
     main: z.object({
       mediaLandscapeId: z.number().min(1, 'Main Add Media is required'),
       mediaPortraitId: z.number().min(1, 'Main Add Media is required'),
+      mediaLandscapeUrl: z.string().optional(),
+      mediaPortraitUrl: z.string().optional(),
       exploreLink: z.string().nullable().optional(),
       translations: z.array(
         z.object({
@@ -51,6 +53,8 @@ const heroEntitySchema = z.discriminatedUnion('type', [
     single: z.object({
       mediaLandscapeId: z.number().min(1, 'Single Add Media is required'),
       mediaPortraitId: z.number().min(1, 'Single Add Media is required'),
+      mediaLandscapeUrl: z.string().optional(),
+      mediaPortraitUrl: z.string().optional(),
       exploreLink: z.string().nullable().optional(),
       translations: z.array(
         z.object({
@@ -69,6 +73,8 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       left: z.object({
         mediaLandscapeId: z.number().min(1, 'Single Add Media is required'),
         mediaPortraitId: z.number().min(1, 'Single Add Media is required'),
+        mediaLandscapeUrl: z.string().optional(),
+        mediaPortraitUrl: z.string().optional(),
         exploreLink: z.string().nullable().optional(),
         translations: z.array(
           z.object({
@@ -81,6 +87,8 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       right: z.object({
         mediaLandscapeId: z.number().min(1, 'Single Add Media is required'),
         mediaPortraitId: z.number().min(1, 'Single Add Media is required'),
+        mediaLandscapeUrl: z.string().optional(),
+        mediaPortraitUrl: z.string().optional(),
         exploreLink: z.string().nullable().optional(),
         translations: z.array(
           z.object({

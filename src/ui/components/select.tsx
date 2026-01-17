@@ -74,10 +74,10 @@ export function SelectTrigger({
   children,
   placeholder,
   className,
-  renderValue,
   value,
   items,
   isOpen,
+  renderValue,
 }: {
   children: React.ReactNode;
   placeholder: string;
