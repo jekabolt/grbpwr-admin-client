@@ -1,4 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+
+import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useEffect, useRef } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -21,7 +23,14 @@ export function Hero() {
   const form = useForm<HeroSchema>({
     resolver: zodResolver(heroSchema),
     defaultValues: defaultData as HeroSchema,
+    mode: 'onChange', // Track changes immediately
   });
+
+  // Block navigation when form has unsaved changes
+  const isDirty = form.formState.isDirty; // Read it to subscribe
+  useBlockNavigation(isDirty);
+
+  console.log('Form isDirty:', isDirty); // Debug log
 
   useEffect(() => {
     if (heroData) {
@@ -47,6 +56,7 @@ export function Hero() {
     console.log('Mapped hero data:', heroData);
     try {
       await saveHero.mutateAsync(heroData);
+      form.reset(data); // Reset dirty state after successful save
       console.log('Hero saved successfully!');
     } catch (e) {
       console.log('Error saving hero:', e);

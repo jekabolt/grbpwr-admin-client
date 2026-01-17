@@ -2,7 +2,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { FC, useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
-import { EntitiesProps } from '../entities/interface/interface';
+import { EntitiesProps } from '../utility/interface';
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroSchema } from './schema';

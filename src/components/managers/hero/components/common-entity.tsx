@@ -5,7 +5,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
-import { Props } from '../entities/interface/interface';
+import { Props } from '../utility/interface';
 
 const TRANSLATION_CONFIGS = {
   main: [

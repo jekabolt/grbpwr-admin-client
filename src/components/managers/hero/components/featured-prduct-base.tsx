@@ -4,7 +4,7 @@ import { ProductPickerModal } from 'ui/components/productPickerModal';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
-import { HeroProductEntityInterface } from '../entities/interface/interface';
+import { HeroProductEntityInterface } from '../utility/interface';
 import { HeroProductTable } from './heroProductsTable';
 import { HeroSchema } from './schema';
 import { useProductsByTag } from './useProductsByTag';
