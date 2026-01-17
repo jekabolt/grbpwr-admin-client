@@ -39,7 +39,11 @@ export function Hero() {
   });
 
   async function onSubmit(data: HeroSchema) {
-    const heroData = mapFormFieldsToHeroData(data);
+    const filteredData = {
+      ...data,
+      entities: data.entities.filter((_, index) => !deletedIndicesRef.current.has(index)),
+    };
+    const heroData = mapFormFieldsToHeroData(filteredData);
     console.log('Mapped hero data:', heroData);
     try {
       await saveHero.mutateAsync(heroData);

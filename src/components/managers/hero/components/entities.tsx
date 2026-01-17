@@ -9,22 +9,15 @@ import { HeroSchema } from './schema';
 import { useEntityMedia } from './useEntityMedia';
 import { useProductSelection } from './useProductSelection';
 
-export const Entities: FC<EntitiesProps> = ({
-  entityRefs,
-  arrayHelpers,
-  initialProducts,
-  deletedIndicesRef,
-}) => {
+export const Entities: FC<EntitiesProps> = ({ entityRefs, initialProducts, deletedIndicesRef }) => {
   const { watch, setValue } = useFormContext<HeroSchema>();
   const entities = watch('entities') || [];
   const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set());
 
-  // Sync state with ref
   useEffect(() => {
     deletedIndicesRef.current = deletedIndices;
   }, [deletedIndices, deletedIndicesRef]);
 
-  // Clear deleted indices that are out of bounds (when entities are reset)
   useEffect(() => {
     setDeletedIndices((prev) => {
       const filtered = new Set<number>();

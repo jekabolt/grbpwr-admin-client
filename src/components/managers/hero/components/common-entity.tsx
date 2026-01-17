@@ -1,6 +1,6 @@
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { cn } from 'lib/utility';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
@@ -25,7 +25,6 @@ const TRANSLATION_CONFIGS = {
 };
 
 const ORIENTATIONS = ['Landscape', 'Portrait'] as const;
-type Orientation = (typeof ORIENTATIONS)[number];
 
 export function CommonEntity({
   title,
@@ -36,17 +35,18 @@ export function CommonEntity({
   isDoubleAd = false,
   onSaveMedia,
 }: Props) {
-  const [orientation, setOrientation] = useState<Orientation>('Landscape');
+  const [orientation, setOrientation] = useState<'Landscape' | 'Portrait'>('Landscape');
 
   const currentMediaUrl = orientation === 'Portrait' ? portraitLink : landscapeLink;
 
-  const handleMediaSave = useCallback(
-    (selectedMedia: any[]) => {
-      console.log('CommonEntity handleMediaSave - orientation:', orientation, 'prefix:', prefix);
+  const handleSaveMedia = (selectedMedia: any[]) => {
+    if (isDoubleAd) {
+      onSaveMedia(selectedMedia, 'Portrait');
+      onSaveMedia(selectedMedia, 'Landscape');
+    } else {
       onSaveMedia(selectedMedia, orientation);
-    },
-    [onSaveMedia, orientation, prefix],
-  );
+    }
+  };
 
   const getCurrentAspectRatio = () => {
     if (Array.isArray(aspectRatio)) {
@@ -71,19 +71,21 @@ export function CommonEntity({
           </Text>
         )}
         {!title && isDoubleAd && <div className='h-5' />}
-        <div className='flex gap-2'>
-          {ORIENTATIONS.map((orient) => (
-            <Button
-              key={orient}
-              type='button'
-              className='cursor-pointer p-2.5 uppercase'
-              variant={orientation === orient ? 'default' : 'simpleReverse'}
-              onClick={() => setOrientation(orient)}
-            >
-              {orient}
-            </Button>
-          ))}
-        </div>
+        {!isDoubleAd && (
+          <div className='flex gap-2'>
+            {ORIENTATIONS.map((orient) => (
+              <Button
+                key={orient}
+                type='button'
+                className='cursor-pointer p-2.5 uppercase'
+                variant={orientation === orient ? 'default' : 'simpleReverse'}
+                onClick={() => setOrientation(orient)}
+              >
+                {orient}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
       <div
         className={cn('flex flex-col', {
@@ -95,7 +97,7 @@ export function CommonEntity({
             link={currentMediaUrl}
             aspectRatio={getCurrentAspectRatio()}
             isDeleteAccepted={false}
-            saveSelectedMedia={handleMediaSave}
+            saveSelectedMedia={handleSaveMedia}
             isEditMode
           />
         </div>
