@@ -1,9 +1,9 @@
 import { LANGUAGES } from 'constants/constants';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
+import { LanguageButtons } from '../../components/language-buttons';
 
 type Props = {
   label: string;
@@ -61,8 +61,11 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
     }
   }, [currentFormValue]);
 
-  const handleLanguageChange = (languageId: number) => {
-    if (currentInputValue.trim()) {
+  const handleLanguageChange = (e: React.MouseEvent<HTMLButtonElement>, languageId: number) => {
+    e.preventDefault();
+
+    // Save current value before switching languages
+    if (currentInputValue !== undefined) {
       setValue(fieldNameWithIndex, currentInputValue);
     }
 
@@ -74,15 +77,17 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
     setCurrentInputValue(newValue);
   };
 
-  const handleSave = () => {
-    if (currentInputValue.trim()) {
-      setValue(fieldNameWithIndex, currentInputValue);
-      setCurrentInputValue('');
-    }
-  };
-
   const handleInputChange = (value: string) => {
     setCurrentInputValue(value);
+    // Save to form immediately
+    setValue(fieldNameWithIndex, value);
+  };
+
+  const handleBlur = () => {
+    // Ensure value is saved on blur
+    if (currentInputValue !== undefined) {
+      setValue(fieldNameWithIndex, currentInputValue);
+    }
   };
 
   const isLanguageFilled = (languageId: number) => {
@@ -96,43 +101,22 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
     <div className='space-y-3'>
       <Text>{label}</Text>
 
-      <div className='flex gap-2 flex-wrap'>
-        {LANGUAGES.map((language) => {
-          const isFilled = isLanguageFilled(language.id);
-          const isSelected = language.id === selectedLanguageId;
-          return (
-            <Button
-              key={language.id}
-              type='button'
-              variant={isSelected ? 'default' : 'default'}
-              onClick={() => handleLanguageChange(language.id)}
-              className={isFilled && !isSelected ? 'border-2 border-green-500' : ''}
-            >
-              {language.code.toUpperCase()}
-            </Button>
-          );
-        })}
-      </div>
+      <LanguageButtons
+        selectedLanguageId={selectedLanguageId}
+        isLanguageFilled={isLanguageFilled}
+        onLanguageChange={handleLanguageChange}
+        showRedBorderForUnfilled={true}
+      />
 
-      <div className='flex items-end w-full gap-2'>
-        <div className='flex-1 border-b border-textColor'>
-          <Input
-            name={fieldNameWithIndex}
-            value={currentInputValue || currentFormValue}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange(e.target.value)}
-            placeholder={`enter ${label.toLowerCase()} in ${selectedLanguage?.name}`}
-            className='w-full border-none leading-4 bg-transparent'
-          />
-        </div>
-        <Button
-          type='button'
-          size='lg'
-          onClick={handleSave}
-          disabled={!currentInputValue.trim()}
-          className='flex-shrink-0 bg-transparent'
-        >
-          save
-        </Button>
+      <div className='border-b border-textColor'>
+        <Input
+          name={fieldNameWithIndex}
+          value={currentInputValue || currentFormValue}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange(e.target.value)}
+          onBlur={handleBlur}
+          placeholder={`enter ${label.toLowerCase()} in ${selectedLanguage?.name}`}
+          className='w-full border-none leading-4 bg-transparent'
+        />
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
@@ -40,14 +40,13 @@ export function CommonEntity({
 
   const currentMediaUrl = orientation === 'Portrait' ? portraitLink : landscapeLink;
 
-  const handleMediaSave = (selectedMedia: any[]) => {
-    if (isDoubleAd) {
-      onSaveMedia(selectedMedia, 'Portrait');
-      onSaveMedia(selectedMedia, 'Landscape');
-    } else {
+  const handleMediaSave = useCallback(
+    (selectedMedia: any[]) => {
+      console.log('CommonEntity handleMediaSave - orientation:', orientation, 'prefix:', prefix);
       onSaveMedia(selectedMedia, orientation);
-    }
-  };
+    },
+    [onSaveMedia, orientation, prefix],
+  );
 
   const getCurrentAspectRatio = () => {
     if (Array.isArray(aspectRatio)) {
@@ -72,28 +71,26 @@ export function CommonEntity({
           </Text>
         )}
         {!title && isDoubleAd && <div className='h-5' />}
-        {!isDoubleAd && (
-          <div className='flex gap-2'>
-            {ORIENTATIONS.map((orient) => (
-              <Button
-                key={orient}
-                type='button'
-                className='cursor-pointer p-2.5 uppercase'
-                variant={orientation === orient ? 'default' : 'simpleReverse'}
-                onClick={() => setOrientation(orient)}
-              >
-                {orient}
-              </Button>
-            ))}
-          </div>
-        )}
+        <div className='flex gap-2'>
+          {ORIENTATIONS.map((orient) => (
+            <Button
+              key={orient}
+              type='button'
+              className='cursor-pointer p-2.5 uppercase'
+              variant={orientation === orient ? 'default' : 'simpleReverse'}
+              onClick={() => setOrientation(orient)}
+            >
+              {orient}
+            </Button>
+          ))}
+        </div>
       </div>
       <div
         className={cn('flex flex-col', {
           'lg:flex-row flex-col lg:justify-between lg:gap-4': !isDoubleAd,
         })}
       >
-        <div className='w-full'>
+        <div className='w-full h-full'>
           <SingleMediaViewAndSelect
             link={currentMediaUrl}
             aspectRatio={getCurrentAspectRatio()}

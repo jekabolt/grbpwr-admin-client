@@ -4,7 +4,13 @@ import { HeroSchema } from './schema';
 interface MediaUrls {
   main: { landscape: string; portrait: string };
   single: Record<number, { landscape: string; portrait: string }>;
-  double: Record<number, { left: string; right: string }>;
+  double: Record<
+    number,
+    {
+      left: { landscape: string; portrait: string };
+      right: { landscape: string; portrait: string };
+    }
+  >;
 }
 
 export function useEntityMedia(entities: HeroSchema['entities']) {
@@ -34,8 +40,14 @@ export function useEntityMedia(entities: HeroSchema['entities']) {
 
           case 'HERO_TYPE_DOUBLE':
             acc.double[index] = {
-              left: entity.double?.left?.mediaLandscapeUrl || '',
-              right: entity.double?.right?.mediaLandscapeUrl || '',
+              left: {
+                landscape: entity.double?.left?.mediaLandscapeUrl || '',
+                portrait: entity.double?.left?.mediaPortraitUrl || '',
+              },
+              right: {
+                landscape: entity.double?.right?.mediaLandscapeUrl || '',
+                portrait: entity.double?.right?.mediaPortraitUrl || '',
+              },
             };
             break;
         }

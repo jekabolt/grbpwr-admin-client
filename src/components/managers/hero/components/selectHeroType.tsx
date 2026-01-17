@@ -47,31 +47,38 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, insert, form }
   }, [entities?.length, addedEntityIndex]);
 
   return (
-    <div className='flex gap-4 items-end'>
-      <div>
-        <SelectComponent
-          name='entityType'
-          placeholder='SELECT ENTITY TYPE'
-          customWidth={250}
-          value={entityType}
-          onValueChange={setEntityType}
-          items={heroTypes
-            .filter((type) => {
-              if (type.value === 'HERO_TYPE_MAIN' && isMainAddExists) {
-                return false;
-              }
-              return true;
-            })
-            .map((type) => ({
-              value: type.value,
-              label: type.label.toUpperCase(),
-            }))}
-        />
-      </div>
+    <div className='flex gap-4 items-end justify-end'>
+      <div className='border border-2 border-text flex items-center gap-2 p-2'>
+        <div>
+          <SelectComponent
+            name='entityType'
+            placeholder='SELECT ENTITY TYPE'
+            className='border border-none'
+            customWidth={250}
+            value={entityType}
+            onValueChange={setEntityType}
+            items={heroTypes
+              .filter((type) => {
+                if (type.value === 'HERO_TYPE_MAIN' && isMainAddExists) {
+                  return false;
+                }
+                return true;
+              })
+              .map((type) => ({
+                value: type.value,
+                label: type.label.toUpperCase(),
+              }))}
+          />
+        </div>
 
-      <Button size='lg' onClick={handleAddEntity} disabled={!entityType || isEntityIncomplete}>
-        +
-      </Button>
+        <Button
+          onClick={handleAddEntity}
+          disabled={!entityType || isEntityIncomplete}
+          className='px-2 py-1'
+        >
+          +
+        </Button>
+      </div>
     </div>
   );
 };

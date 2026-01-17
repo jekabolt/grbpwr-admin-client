@@ -11,6 +11,7 @@ export interface EntitiesProps {
     insert: UseFieldArrayInsert<HeroSchema, 'entities'>;
   };
   initialProducts?: Record<number, any[]>;
+  deletedIndicesRef: React.MutableRefObject<Set<number>>;
 }
 
 export interface Props {

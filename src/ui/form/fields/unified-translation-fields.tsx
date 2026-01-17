@@ -1,10 +1,9 @@
 import { LANGUAGES } from 'constants/constants';
-import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
+import { LanguageButtons } from '../../components/language-buttons';
 
 type FieldConfig = {
   name: string;
@@ -108,32 +107,11 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
 
   return (
     <div className='space-y-3'>
-      <div className='flex justify-between flex-wrap gap-2'>
-        {LANGUAGES.map((language) => {
-          const isFilled = isLanguageFilled(language.id);
-          const isSelected = language.id === selectedLanguageId;
-          return (
-            <Button
-              key={language.id}
-              variant='simple'
-              size='lg'
-              type='button'
-              onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
-                handleLanguageChange(e, language.id)
-              }
-              className={cn(
-                'border border-text bg-bgColor text-text hover:bg-text hover:text-bgColor',
-                {
-                  'bg-text text-bgColor': isSelected,
-                  'border-green-500 bg-bgColor text-text': isFilled && !isSelected,
-                },
-              )}
-            >
-              {language.code.toUpperCase()}
-            </Button>
-          );
-        })}
-      </div>
+      <LanguageButtons
+        selectedLanguageId={selectedLanguageId}
+        isLanguageFilled={isLanguageFilled}
+        onLanguageChange={handleLanguageChange}
+      />
 
       <div className='space-y-4'>
         {fields.map((field) => {

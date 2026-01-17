@@ -7,6 +7,7 @@ import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fie
 import { HeroProductEntityInterface } from '../entities/interface/interface';
 import { HeroProductTable } from './heroProductsTable';
 import { HeroSchema } from './schema';
+import { useProductsByTag } from './useProductsByTag';
 
 const FEATURED_PRODUCTS_TRANSLATION_FIELDS = [
   { name: 'headline', label: 'headline', type: 'input' as const },
@@ -28,10 +29,25 @@ export function FeaturedProductBase({
 }: HeroProductEntityInterface) {
   const {
     formState: { errors },
+    watch,
   } = useFormContext<HeroSchema>();
 
+  const tag = prefix?.includes('featuredProductsTag')
+    ? watch(`entities.${index}.${prefix}.tag` as any)
+    : undefined;
+
+  const { data: productsByTag = [], isLoading: isLoadingProducts } = useProductsByTag(
+    tag,
+    prefix?.includes('featuredProductsTag'),
+  );
+
+  const displayProducts =
+    prefix?.includes('featuredProductsTag') && productsByTag.length > 0
+      ? productsByTag
+      : product[index] || [];
+
   return (
-    <div>
+    <div className='lg:px-2.5 lg:pb-8 p-2.5 space-y-6'>
       <Text className='text-xl font-bold leading-none' variant='uppercase'>
         {title}
       </Text>
@@ -46,12 +62,18 @@ export function FeaturedProductBase({
       />
       <InputField name={`entities.${index}.${prefix}.exploreLink`} label='explore link' />
 
-      <HeroProductTable
-        products={product[index] || []}
-        id={index}
-        isFeaturedProducts={prefix === 'featuredProducts'}
-        onReorder={(e: any) => handleProductsReorder?.(e, index)}
-      />
+      {isLoadingProducts && prefix?.includes('featuredProductsTag') ? (
+        <div className='py-8 text-center'>
+          <Text>Loading products...</Text>
+        </div>
+      ) : (
+        <HeroProductTable
+          products={displayProducts}
+          id={index}
+          isFeaturedProducts={prefix === 'featuredProducts'}
+          onReorder={(e: any) => handleProductsReorder?.(e, index)}
+        />
+      )}
 
       {showProductPicker && (
         <>

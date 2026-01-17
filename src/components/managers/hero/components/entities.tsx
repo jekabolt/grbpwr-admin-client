@@ -1,5 +1,5 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { FC, useCallback } from 'react';
+import { FC, useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { EntitiesProps } from '../entities/interface/interface';
@@ -9,13 +9,36 @@ import { HeroSchema } from './schema';
 import { useEntityMedia } from './useEntityMedia';
 import { useProductSelection } from './useProductSelection';
 
-export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers, initialProducts }) => {
+export const Entities: FC<EntitiesProps> = ({
+  entityRefs,
+  arrayHelpers,
+  initialProducts,
+  deletedIndicesRef,
+}) => {
   const { watch, setValue } = useFormContext<HeroSchema>();
   const entities = watch('entities') || [];
+  const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set());
+
+  // Sync state with ref
+  useEffect(() => {
+    deletedIndicesRef.current = deletedIndices;
+  }, [deletedIndices, deletedIndicesRef]);
+
+  // Clear deleted indices that are out of bounds (when entities are reset)
+  useEffect(() => {
+    setDeletedIndices((prev) => {
+      const filtered = new Set<number>();
+      prev.forEach((index) => {
+        if (index < entities.length) {
+          filtered.add(index);
+        }
+      });
+      return filtered;
+    });
+  }, [entities.length]);
 
   const mediaUrls = useEntityMedia(entities);
   const featuredProducts = useProductSelection(initialProducts);
-  const featuredProductsTags = useProductSelection();
 
   const handleSaveMedia = useCallback(
     (
@@ -61,12 +84,17 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers, initialP
     [setValue, featuredProducts],
   );
 
-  const handleRemoveEntity = useCallback(
-    (index: number) => {
-      arrayHelpers.remove(index);
-    },
-    [arrayHelpers],
-  );
+  const handleRemoveEntity = useCallback((index: number) => {
+    setDeletedIndices((prev) => new Set(prev).add(index));
+  }, []);
+
+  const handleRestoreEntity = useCallback((index: number) => {
+    setDeletedIndices((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(index);
+      return newSet;
+    });
+  }, []);
 
   const renderEntity = (entity: HeroSchema['entities'][number], index: number) => {
     switch (entity.type) {
@@ -111,8 +139,8 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers, initialP
               <CommonEntity
                 title='double add'
                 prefix={`entities.${index}.double.left`}
-                landscapeLink={mediaUrls.double[index]?.left || ''}
-                portraitLink={mediaUrls.double[index]?.left || ''}
+                landscapeLink={mediaUrls.double[index]?.left?.landscape || ''}
+                portraitLink={mediaUrls.double[index]?.left?.portrait || ''}
                 aspectRatio={['1:1']}
                 isDoubleAd={true}
                 onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
@@ -124,12 +152,12 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers, initialP
               <CommonEntity
                 title=''
                 prefix={`entities.${index}.double.right`}
-                landscapeLink={mediaUrls.double[index]?.right || ''}
-                portraitLink={mediaUrls.double[index]?.right || ''}
+                landscapeLink={mediaUrls.double[index]?.right?.landscape || ''}
+                portraitLink={mediaUrls.double[index]?.right?.portrait || ''}
                 aspectRatio={['1:1']}
                 isDoubleAd
-                onSaveMedia={(media: common_MediaFull[]) =>
-                  handleSaveMedia(media, index, 'doubleRight', 'Landscape')
+                onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
+                  handleSaveMedia(media, index, 'doubleRight', orientation)
                 }
               />
             </div>
@@ -159,10 +187,9 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers, initialP
           <FeaturedProductBase
             index={index}
             entity={entity}
-            product={featuredProductsTags.products}
+            product={{}}
             title='featured products tag'
             prefix='featuredProductsTag'
-            handleProductsReorder={(e, i) => featuredProductsTags.reorderProducts(e, i)}
           />
         );
 
@@ -172,25 +199,48 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers, initialP
   };
 
   return (
-    <div className='mt-16 space-y-24'>
-      {entities.map((entity, index) => (
-        <div key={index} className='border border-text relative'>
-          <div
-            ref={(el: HTMLDivElement | null) => {
-              entityRefs.current[index] = el;
-            }}
-          >
-            {renderEntity(entity, index)}
+    <div className='space-y-24'>
+      {entities.map((entity, index) => {
+        const isDeleted = deletedIndices.has(index);
+        if (isDeleted) {
+          return (
+            <div
+              key={index}
+              className='border border-text relative opacity-50 bg-gray-100 dark:bg-gray-800'
+            >
+              <div className='p-4 flex items-center justify-between'>
+                <span className='text-sm italic'>Entity marked for deletion</span>
+                <Button
+                  variant='simple'
+                  className='py-1 px-3 cursor-pointer'
+                  onClick={() => handleRestoreEntity(index)}
+                >
+                  restore
+                </Button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={index} className='border border-text relative'>
+            <div
+              ref={(el: HTMLDivElement | null) => {
+                entityRefs.current[index] = el;
+              }}
+            >
+              {renderEntity(entity, index)}
+            </div>
+            <Button
+              variant='delete'
+              className='absolute top-2 right-2 py-1 px-3 cursor-pointer'
+              onClick={() => handleRemoveEntity(index)}
+            >
+              x
+            </Button>
           </div>
-          <Button
-            variant='delete'
-            className='absolute top-2 right-2 py-1 px-3 cursor-pointer'
-            onClick={() => handleRemoveEntity(index)}
-          >
-            x
-          </Button>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
