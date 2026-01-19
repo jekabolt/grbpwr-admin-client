@@ -116,7 +116,7 @@ export function CommonEntity({
               </div>
             </div>
           ) : (
-            <div className='w-full  border border-text'>
+            <div className='w-full'>
               <SingleMediaViewAndSelect
                 link={landscapeLink}
                 aspectRatio={['1:1']}
@@ -135,7 +135,7 @@ export function CommonEntity({
             </div>
           )}
         </div>
-        <div className='space-y-4 w-full border border-text'>
+        <div className='space-y-4 w-full'>
           <InputField
             name={`${prefix}.exploreLink` as any}
             label='explore link'
