@@ -12,6 +12,7 @@ export interface EntitiesProps {
   };
   initialProducts?: Record<number, any[]>;
   deletedIndicesRef: React.MutableRefObject<Set<number>>;
+  onDeletedIndicesChange?: () => void;
 }
 
 export interface Props {
@@ -19,7 +20,7 @@ export interface Props {
   prefix: string;
   landscapeLink: string;
   portraitLink: string;
-  size?: { xs: number; md?: number }; // Made optional since we're not using Material-UI Grid
+  size?: { xs: number; md?: number };
   aspectRatio: string[] | { Portrait: string[]; Landscape: string[] };
   isDoubleAd?: boolean;
   onSaveMedia: (selectedMedia: common_MediaFull[], orientation: 'Portrait' | 'Landscape') => void;

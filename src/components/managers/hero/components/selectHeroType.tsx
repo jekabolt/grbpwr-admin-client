@@ -1,6 +1,6 @@
 import { common_HeroEntityInsert, common_HeroType } from 'api/proto-http/admin';
 import { heroTypes } from 'constants/constants';
-import { FC, useEffect, useState } from 'react';
+import React, { FC, useEffect, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import SelectComponent from 'ui/components/select';
@@ -11,16 +11,28 @@ interface SelectHeroTypeProps {
   append: (value: any) => void;
   insert: (index: number, value: any) => void;
   form: UseFormReturn<HeroSchema>;
+  entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
+  deletedIndicesRef: React.MutableRefObject<Set<number>>;
 }
 
-export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, insert, form }) => {
+export const SelectHeroType: FC<SelectHeroTypeProps> = ({
+  append,
+  insert,
+  form,
+  entityRefs,
+  deletedIndicesRef,
+}) => {
   const [entityType, setEntityType] = useState<string>('');
   const [addedEntityIndex, setAddedEntityIndex] = useState<number | null>(null);
 
   const entities = form.watch('entities');
-  const isMainAddExists = entities?.some((entity) => entity.type === 'HERO_TYPE_MAIN');
+  const isMainAddExists = entities?.some(
+    (entity, index) => entity.type === 'HERO_TYPE_MAIN' && !deletedIndicesRef.current.has(index),
+  );
 
-  const isEntityIncomplete = entities?.some((entity) => {
+  const isEntityIncomplete = entities?.some((entity, index) => {
+    if (deletedIndicesRef.current.has(index)) return false;
+
     const validateEntity = validationForSelectHeroType[entity.type as common_HeroType];
     return validateEntity ? validateEntity(entity as common_HeroEntityInsert) : false;
   });
@@ -41,10 +53,18 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, insert, form }
 
   useEffect(() => {
     if (addedEntityIndex !== null) {
-      const element = document.getElementById(`entity-${addedEntityIndex}`);
-      element?.scrollIntoView({ behavior: 'smooth' });
+      setTimeout(() => {
+        const element = entityRefs.current[addedEntityIndex];
+        if (element) {
+          element.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+        setAddedEntityIndex(null);
+      }, 100);
     }
-  }, [entities?.length, addedEntityIndex]);
+  }, [entities?.length, addedEntityIndex, entityRefs]);
 
   return (
     <div className='flex gap-4 items-end justify-end'>

@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Form } from 'ui/form';
@@ -21,14 +21,13 @@ export function Hero() {
   const entityRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
   const productsByEntityIndexRef = useRef<Record<number, any[]>>({});
   const deletedIndicesRef = useRef<Set<number>>(new Set());
+  const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
 
   const form = useForm<HeroSchema>({
     resolver: zodResolver(heroSchema),
     defaultValues: defaultData as HeroSchema,
     mode: 'onChange',
   });
-
-  // comment
 
   const isDirty = form.formState.isDirty;
   useBlockNavigation(isDirty);
@@ -47,29 +46,61 @@ export function Hero() {
     name: 'entities',
   });
 
-  async function onSubmit(data: HeroSchema) {
+  const handleDeletedIndicesChange = useCallback(() => {
+    setDeletedIndicesVersion((v) => v + 1);
+  }, []);
+
+  async function handleSubmit() {
+    const data = form.getValues();
+    const entities = data.entities;
+
+    deletedIndicesRef.current.forEach((index) => {
+      form.clearErrors(`entities.${index}` as any);
+    });
+
+    const validationPromises = entities.map((_, index) => {
+      if (deletedIndicesRef.current.has(index)) {
+        return Promise.resolve(true);
+      }
+      return form.trigger(`entities.${index}` as any);
+    });
+
+    const validationResults = await Promise.all(validationPromises);
+    const isValid = validationResults.every((result) => result === true);
+
+    const navFeaturedValid = await form.trigger('navFeatured');
+
+    if (!isValid || !navFeaturedValid) {
+      onError(form.formState.errors);
+      return;
+    }
+
     const filteredData = {
       ...data,
-      entities: data.entities.filter((_, index) => !deletedIndicesRef.current.has(index)),
+      entities: entities.filter((_, index) => !deletedIndicesRef.current.has(index)),
     };
+
     const heroData = mapFormFieldsToHeroData(filteredData);
-    console.log('Mapped hero data:', heroData);
     try {
       await saveHero.mutateAsync(heroData);
-      form.reset(data);
+      form.reset(filteredData);
+      deletedIndicesRef.current.clear();
       console.log('Hero saved successfully!');
     } catch (e) {
       console.log('Error saving hero:', e);
     }
   }
 
-  async function onError(errors: any) {
+  function onError(errors: any) {
     console.log('Validation errors:', errors);
 
     showMessage('please fill in all required fields', 'error');
 
     if (errors.entities) {
-      const firstErrorIndex = errors.entities.findIndex((entity: any) => entity !== undefined);
+      const firstErrorIndex = errors.entities.findIndex(
+        (entity: any, index: number) =>
+          entity !== undefined && !deletedIndicesRef.current.has(index),
+      );
       if (firstErrorIndex >= 0 && entityRefs.current[firstErrorIndex]) {
         entityRefs.current[firstErrorIndex]?.scrollIntoView({
           behavior: 'smooth',
@@ -79,30 +110,30 @@ export function Hero() {
     }
   }
 
-  if (isLoading) {
-    return (
-      <Layout>
-        <div className='flex items-center justify-center h-64'>
-          <div className='text-lg'>Loading hero data...</div>
-        </div>
-      </Layout>
-    );
-  }
-
   return (
     <Layout>
       <Form {...form}>
         <form
-          onSubmit={form.handleSubmit(onSubmit, onError)}
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
           className='flex flex-col gap-y-16 lg:pt-24 pt-5 lg:px-12 px-2.5'
         >
           <NavFeatured hero={heroData?.hero} />
-          <SelectHeroType append={append} insert={insert} form={form} />
+          <SelectHeroType
+            append={append}
+            insert={insert}
+            form={form}
+            entityRefs={entityRefs}
+            deletedIndicesRef={deletedIndicesRef}
+          />
           <Entities
             entityRefs={entityRefs}
             arrayHelpers={{ remove, move, insert }}
             initialProducts={productsByEntityIndexRef.current}
             deletedIndicesRef={deletedIndicesRef}
+            onDeletedIndicesChange={handleDeletedIndicesChange}
           />
           <Button
             size='lg'

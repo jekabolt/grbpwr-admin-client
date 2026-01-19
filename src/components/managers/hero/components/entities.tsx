@@ -1,5 +1,5 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { FC, useCallback, useEffect, useState } from 'react';
+import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -10,14 +10,32 @@ import { HeroSchema } from './schema';
 import { useEntityMedia } from './useEntityMedia';
 import { useProductSelection } from './useProductSelection';
 
-export const Entities: FC<EntitiesProps> = ({ entityRefs, initialProducts, deletedIndicesRef }) => {
+export const Entities: FC<EntitiesProps> = ({
+  entityRefs,
+  initialProducts,
+  deletedIndicesRef,
+  onDeletedIndicesChange,
+}) => {
   const { setValue, control } = useFormContext<HeroSchema>();
   const entities = useWatch({ control, name: 'entities' }) || [];
   const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set());
+  const prevDeletedIndicesRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     deletedIndicesRef.current = deletedIndices;
-  }, [deletedIndices, deletedIndicesRef]);
+
+    const prev = prevDeletedIndicesRef.current;
+    if (
+      prev.size !== deletedIndices.size ||
+      Array.from(prev).some((idx) => !deletedIndices.has(idx)) ||
+      Array.from(deletedIndices).some((idx) => !prev.has(idx))
+    ) {
+      prevDeletedIndicesRef.current = new Set(deletedIndices);
+      if (onDeletedIndicesChange) {
+        onDeletedIndicesChange();
+      }
+    }
+  }, [deletedIndices, deletedIndicesRef, onDeletedIndicesChange]);
 
   useEffect(() => {
     setDeletedIndices((prev) => {
