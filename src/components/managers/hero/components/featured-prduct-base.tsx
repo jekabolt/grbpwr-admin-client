@@ -80,9 +80,9 @@ export function FeaturedProductBase({
           {errors.entities?.[index] &&
             prefix &&
             (errors.entities[index] as any)?.[prefix]?.productIds && (
-              <div style={{ color: 'red' }}>
+              <Text variant='error'>
                 {(errors.entities[index] as any)[prefix]?.productIds?.message}
-              </div>
+              </Text>
             )}
           <Button onClick={() => handleOpenProductSelection?.(index)}>add products</Button>
           <ProductPickerModal

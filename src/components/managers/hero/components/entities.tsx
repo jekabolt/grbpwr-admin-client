@@ -1,7 +1,8 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { FC, useCallback, useEffect, useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import { EntitiesProps } from '../utility/interface';
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
@@ -10,8 +11,8 @@ import { useEntityMedia } from './useEntityMedia';
 import { useProductSelection } from './useProductSelection';
 
 export const Entities: FC<EntitiesProps> = ({ entityRefs, initialProducts, deletedIndicesRef }) => {
-  const { watch, setValue } = useFormContext<HeroSchema>();
-  const entities = watch('entities') || [];
+  const { setValue, control } = useFormContext<HeroSchema>();
+  const entities = useWatch({ control, name: 'entities' }) || [];
   const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set());
 
   useEffect(() => {
@@ -58,8 +59,8 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, initialProducts, delet
         urlPath = `entities.${entityIndex}.${entityType}.media${orientation}Url`;
       }
 
-      setValue(idPath as any, media.id);
-      setValue(urlPath as any, thumbnailUrl);
+      setValue(idPath as any, media.id, { shouldDirty: true, shouldTouch: true });
+      setValue(urlPath as any, thumbnailUrl, { shouldDirty: true, shouldTouch: true });
     },
     [setValue],
   );
@@ -127,33 +128,34 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, initialProducts, delet
 
       case 'HERO_TYPE_DOUBLE':
         return (
-          <div className='flex flex-col lg:flex-row items-start gap-4'>
-            <div className='w-full'>
-              <CommonEntity
-                title='double add'
-                prefix={`entities.${index}.double.left`}
-                landscapeLink={mediaUrls.double[index]?.left?.landscape || ''}
-                portraitLink={mediaUrls.double[index]?.left?.portrait || ''}
-                aspectRatio={['1:1']}
-                isDoubleAd={true}
-                onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
-                  handleSaveMedia(media, index, 'doubleLeft', orientation)
-                }
-              />
+          <div className='flex flex-col gap-4'>
+            <div className='lg:px-2.5 p-2.5'>
+              <Text className='text-xl font-bold leading-none' variant='uppercase'>
+                double add
+              </Text>
             </div>
-            <div className='w-full'>
-              <CommonEntity
-                title=''
-                prefix={`entities.${index}.double.right`}
-                landscapeLink={mediaUrls.double[index]?.right?.landscape || ''}
-                portraitLink={mediaUrls.double[index]?.right?.portrait || ''}
-                aspectRatio={['1:1']}
-                isDoubleAd
-                onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
-                  handleSaveMedia(media, index, 'doubleRight', orientation)
-                }
-              />
-            </div>
+            <CommonEntity
+              title='left add'
+              prefix={`entities.${index}.double.left`}
+              landscapeLink={mediaUrls.double[index]?.left?.landscape || ''}
+              portraitLink={mediaUrls.double[index]?.left?.portrait || ''}
+              aspectRatio={['1:1']}
+              isDoubleAd={true}
+              onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
+                handleSaveMedia(media, index, 'doubleLeft', orientation)
+              }
+            />
+            <CommonEntity
+              title='right add'
+              prefix={`entities.${index}.double.right`}
+              landscapeLink={mediaUrls.double[index]?.right?.landscape || ''}
+              portraitLink={mediaUrls.double[index]?.right?.portrait || ''}
+              aspectRatio={['1:1']}
+              isDoubleAd
+              onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
+                handleSaveMedia(media, index, 'doubleRight', orientation)
+              }
+            />
           </div>
         );
 
@@ -216,7 +218,7 @@ export const Entities: FC<EntitiesProps> = ({ entityRefs, initialProducts, delet
         }
 
         return (
-          <div key={index} className='border border-text relative'>
+          <div key={index} className='border border-2 border-text relative'>
             <div
               ref={(el: HTMLDivElement | null) => {
                 entityRefs.current[index] = el;

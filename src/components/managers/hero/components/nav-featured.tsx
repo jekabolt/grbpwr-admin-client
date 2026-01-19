@@ -50,32 +50,39 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
   };
 
   return (
-    <div className='space-y-4 p-4 border border-text w-full'>
-      <Text variant='uppercase'>{gender}</Text>
-      <div className='w-full'>
-        <SingleMediaViewAndSelect
-          link={mediaUrls[gender]}
-          aspectRatio={['1:1']}
-          isDeleteAccepted={false}
-          saveSelectedMedia={saveMedia}
-          isEditMode
-        />
-      </div>
-      <InputField name={`navFeatured.${gender}.featuredTag`} label='tag' />
-      <div className='flex items-center w-full border border-textColor justify-between px-2 py-1'>
-        <Text variant='uppercase'>
-          {selectedArchiveId ? `archive id: ${selectedArchiveId}` : 'no archive selected'}
-        </Text>
-        <Button type='button' onClick={() => onOpenArchivePicker(gender)} className='p-2'>
-          select
-        </Button>
-      </div>
+    <div className='w-full flex flex-col gap-4'>
+      <Text className='text-xl font-bold leading-none' variant='uppercase'>
+        {gender}
+      </Text>
+      <div className='flex flex-col lg:flex-row gap-4'>
+        <div className='w-full'>
+          <SingleMediaViewAndSelect
+            link={mediaUrls[gender]}
+            aspectRatio={['1:1']}
+            aspectOnPreview='1/1'
+            isDeleteAccepted={false}
+            saveSelectedMedia={saveMedia}
+            isEditMode
+          />
+        </div>
+        <div className='w-full flex flex-col gap-4'>
+          <InputField name={`navFeatured.${gender}.featuredTag`} label='tag' />
+          <div className='flex items-center w-full border border-textColor justify-between px-2 py-1'>
+            <Text variant='uppercase'>
+              {selectedArchiveId ? `archive id: ${selectedArchiveId}` : 'no archive selected'}
+            </Text>
+            <Button type='button' onClick={() => onOpenArchivePicker(gender)} className='p-2'>
+              select
+            </Button>
+          </div>
 
-      <TranslationField
-        label='explore text'
-        fieldPrefix={`navFeatured.${gender}.translations`}
-        fieldName='exploreText'
-      />
+          <TranslationField
+            label='explore text'
+            fieldPrefix={`navFeatured.${gender}.translations`}
+            fieldName='exploreText'
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -98,11 +105,11 @@ export function NavFeatured({ hero }: { hero?: common_HeroFullWithTranslations }
   };
 
   return (
-    <div className='border border-text p-4 space-y-4'>
+    <div className='border border-2 border-text p-4 space-y-6'>
       <Text variant='uppercase' className='text-xl font-bold leading-none'>
         navigation featured
       </Text>
-      <div className='flex lg:flex-row flex-col gap-4'>
+      <div className='flex flex-col gap-10'>
         {genders.map((gender) => (
           <GenderSection
             hero={hero}

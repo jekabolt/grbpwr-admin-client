@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -16,6 +17,7 @@ import { useHero, useSaveHero } from './useHero';
 export function Hero() {
   const { data: heroData, isLoading } = useHero();
   const saveHero = useSaveHero();
+  const { showMessage } = useSnackBarStore();
   const entityRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
   const productsByEntityIndexRef = useRef<Record<number, any[]>>({});
   const deletedIndicesRef = useRef<Set<number>>(new Set());
@@ -61,6 +63,22 @@ export function Hero() {
     }
   }
 
+  async function onError(errors: any) {
+    console.log('Validation errors:', errors);
+
+    showMessage('please fill in all required fields', 'error');
+
+    if (errors.entities) {
+      const firstErrorIndex = errors.entities.findIndex((entity: any) => entity !== undefined);
+      if (firstErrorIndex >= 0 && entityRefs.current[firstErrorIndex]) {
+        entityRefs.current[firstErrorIndex]?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      }
+    }
+  }
+
   if (isLoading) {
     return (
       <Layout>
@@ -75,7 +93,7 @@ export function Hero() {
     <Layout>
       <Form {...form}>
         <form
-          onSubmit={form.handleSubmit(onSubmit)}
+          onSubmit={form.handleSubmit(onSubmit, onError)}
           className='flex flex-col gap-y-16 lg:pt-24 pt-5 lg:px-12 px-2.5'
         >
           <NavFeatured hero={heroData?.hero} />

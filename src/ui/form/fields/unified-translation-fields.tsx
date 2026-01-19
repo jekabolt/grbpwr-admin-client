@@ -20,7 +20,12 @@ type Props = {
 };
 
 export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true }: Props) {
-  const { control, watch, setValue } = useFormContext();
+  const {
+    control,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useFormContext();
   const { replace } = useFieldArray({
     control,
     name: fieldPrefix,
@@ -105,6 +110,19 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     });
   };
 
+  const getFieldError = (fieldName: string) => {
+    const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
+    const pathParts = fieldPath.split('.');
+    let error: any = errors;
+
+    for (const part of pathParts) {
+      if (!error) return null;
+      error = error[part];
+    }
+
+    return error?.message;
+  };
+
   return (
     <div className='space-y-3'>
       <LanguageButtons
@@ -118,6 +136,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
           const fieldValue = fieldValues[field.name] || '';
           const placeholder =
             field.placeholder || `enter ${field.label.toLowerCase()} in ${selectedLanguage?.name}`;
+          const errorMessage = getFieldError(field.name);
 
           if (field.type === 'textarea') {
             return (
@@ -129,10 +148,11 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
                     handleFieldChange(field.name, e.target.value)
                   }
                   placeholder={placeholder}
-                  className='w-full border border-text leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2'
+                  className={`w-full border ${errorMessage ? 'border-red-500' : 'border-text'} leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2`}
                   rows={field.rows || 4}
                   readOnly={!editMode}
                 />
+                {errorMessage && <p className='text-sm font-medium text-red-500'>{errorMessage}</p>}
               </div>
             );
           }
@@ -140,7 +160,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
           return (
             <div key={field.name} className='space-y-2'>
               <Text component='label'>{field.label}</Text>
-              <div className='border-b border-textColor'>
+              <div className={`border-b ${errorMessage ? 'border-red-500' : 'border-textColor'}`}>
                 <Input
                   value={fieldValue}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -151,6 +171,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
                   readOnly={!editMode}
                 />
               </div>
+              {errorMessage && <p className='text-sm font-medium text-red-500'>{errorMessage}</p>}
             </div>
           );
         })}

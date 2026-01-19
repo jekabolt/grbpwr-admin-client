@@ -1,7 +1,5 @@
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
-import { cn } from 'lib/utility';
-import { useState } from 'react';
-import { Button } from 'ui/components/button';
+import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
@@ -24,8 +22,6 @@ const TRANSLATION_CONFIGS = {
   ],
 };
 
-const ORIENTATIONS = ['Landscape', 'Portrait'] as const;
-
 export function CommonEntity({
   title,
   prefix,
@@ -35,24 +31,22 @@ export function CommonEntity({
   isDoubleAd = false,
   onSaveMedia,
 }: Props) {
-  const [orientation, setOrientation] = useState<'Landscape' | 'Portrait'>('Landscape');
+  const {
+    formState: { errors },
+  } = useFormContext();
 
-  const currentMediaUrl = orientation === 'Portrait' ? portraitLink : landscapeLink;
-
-  const handleSaveMedia = (selectedMedia: any[]) => {
-    if (isDoubleAd) {
-      onSaveMedia(selectedMedia, 'Portrait');
-      onSaveMedia(selectedMedia, 'Landscape');
-    } else {
-      onSaveMedia(selectedMedia, orientation);
-    }
-  };
-
-  const getCurrentAspectRatio = () => {
+  const getAspectRatioFor = (orientation: 'Portrait' | 'Landscape') => {
     if (Array.isArray(aspectRatio)) {
       return aspectRatio;
     }
-    return orientation === 'Portrait' ? aspectRatio.Portrait : aspectRatio.Landscape;
+    return aspectRatio[orientation];
+  };
+
+  const getAspectOnPreview = (orientation: 'Portrait' | 'Landscape') => {
+    const ratios = getAspectRatioFor(orientation);
+    const ratio = ratios[0];
+    // Convert '2:1' to '2/1' for CSS aspect-ratio compatibility
+    return ratio?.replace(':', '/') || '4/5';
   };
 
   const getTranslationFields = () => {
@@ -60,6 +54,18 @@ export function CommonEntity({
     if (prefix.includes('.single')) return TRANSLATION_CONFIGS.single;
     if (prefix.includes('.double')) return TRANSLATION_CONFIGS.double;
     return TRANSLATION_CONFIGS.single;
+  };
+
+  const getFieldError = (fieldPath: string) => {
+    const pathParts = fieldPath.split('.');
+    let error: any = errors;
+
+    for (const part of pathParts) {
+      if (!error) return null;
+      error = error[part];
+    }
+
+    return error?.message;
   };
 
   return (
@@ -70,36 +76,51 @@ export function CommonEntity({
             {title}
           </Text>
         )}
-        {!title && isDoubleAd && <div className='h-5' />}
-        {!isDoubleAd && (
-          <div className='flex gap-2'>
-            {ORIENTATIONS.map((orient) => (
-              <Button
-                key={orient}
-                type='button'
-                className='cursor-pointer p-2.5 uppercase'
-                variant={orientation === orient ? 'default' : 'simpleReverse'}
-                onClick={() => setOrientation(orient)}
-              >
-                {orient}
-              </Button>
-            ))}
-          </div>
-        )}
       </div>
-      <div
-        className={cn('flex flex-col', {
-          'lg:flex-row flex-col lg:justify-between lg:gap-4': !isDoubleAd,
-        })}
-      >
-        <div className='w-full h-full'>
-          <SingleMediaViewAndSelect
-            link={currentMediaUrl}
-            aspectRatio={getCurrentAspectRatio()}
-            isDeleteAccepted={false}
-            saveSelectedMedia={handleSaveMedia}
-            isEditMode
-          />
+      <div className='flex lg:flex-row flex-col lg:justify-between lg:gap-4'>
+        <div className='w-full h-full flex flex-col gap-4'>
+          {!isDoubleAd ? (
+            <>
+              <div className='w-full'>
+                <SingleMediaViewAndSelect
+                  link={landscapeLink}
+                  aspectRatio={getAspectRatioFor('Landscape')}
+                  aspectOnPreview={getAspectOnPreview('Landscape')}
+                  isDeleteAccepted={false}
+                  saveSelectedMedia={(media) => onSaveMedia(media, 'Landscape')}
+                  error={getFieldError(`${prefix}.mediaLandscapeId`)}
+                  isEditMode
+                />
+              </div>
+              <div className='w-1/2'>
+                <SingleMediaViewAndSelect
+                  link={portraitLink}
+                  aspectRatio={getAspectRatioFor('Portrait')}
+                  aspectOnPreview={getAspectOnPreview('Portrait')}
+                  isDeleteAccepted={false}
+                  saveSelectedMedia={(media) => onSaveMedia(media, 'Portrait')}
+                  error={getFieldError(`${prefix}.mediaPortraitId`)}
+                  isEditMode
+                />
+              </div>
+            </>
+          ) : (
+            <SingleMediaViewAndSelect
+              link={landscapeLink}
+              aspectRatio={['1:1']}
+              aspectOnPreview='1/1'
+              isDeleteAccepted={false}
+              saveSelectedMedia={(media) => {
+                onSaveMedia(media, 'Landscape');
+                onSaveMedia(media, 'Portrait');
+              }}
+              error={
+                getFieldError(`${prefix}.mediaLandscapeId`) ||
+                getFieldError(`${prefix}.mediaPortraitId`)
+              }
+              isEditMode
+            />
+          )}
         </div>
         <div className='space-y-4 w-full'>
           <InputField
