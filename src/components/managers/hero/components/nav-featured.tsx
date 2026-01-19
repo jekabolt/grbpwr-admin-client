@@ -55,7 +55,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
         {gender}
       </Text>
       <div className='flex flex-col lg:flex-row gap-4'>
-        <div className='w-full'>
+        <div className='w-full lg:w-1/4'>
           <SingleMediaViewAndSelect
             link={mediaUrls[gender]}
             aspectRatio={['1:1']}

@@ -1,4 +1,5 @@
 import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
+import { cn } from 'lib/utility';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
@@ -77,11 +78,18 @@ export function CommonEntity({
           </Text>
         )}
       </div>
-      <div className='flex lg:flex-row flex-col lg:justify-between lg:gap-4'>
-        <div className='w-full h-full flex flex-col gap-4'>
+      <div className='flex lg:flex-row flex-col lg:gap-4'>
+        <div
+          className={cn('w-full h-full flex flex-col gap-4', {
+            'lg:w-1/3': isDoubleAd,
+          })}
+        >
           {!isDoubleAd ? (
-            <>
-              <div className='w-full'>
+            <div className='flex flex-col gap-4'>
+              <div className='w-full space-y-2'>
+                <Text className='text-sm font-bold leading-none' variant='uppercase'>
+                  landscape
+                </Text>
                 <SingleMediaViewAndSelect
                   link={landscapeLink}
                   aspectRatio={getAspectRatioFor('Landscape')}
@@ -92,7 +100,10 @@ export function CommonEntity({
                   isEditMode
                 />
               </div>
-              <div className='w-1/2'>
+              <div className='lg:w-1/2 w-full space-y-2'>
+                <Text className='text-sm font-bold leading-none' variant='uppercase'>
+                  portrait
+                </Text>
                 <SingleMediaViewAndSelect
                   link={portraitLink}
                   aspectRatio={getAspectRatioFor('Portrait')}
@@ -103,26 +114,28 @@ export function CommonEntity({
                   isEditMode
                 />
               </div>
-            </>
+            </div>
           ) : (
-            <SingleMediaViewAndSelect
-              link={landscapeLink}
-              aspectRatio={['1:1']}
-              aspectOnPreview='1/1'
-              isDeleteAccepted={false}
-              saveSelectedMedia={(media) => {
-                onSaveMedia(media, 'Landscape');
-                onSaveMedia(media, 'Portrait');
-              }}
-              error={
-                getFieldError(`${prefix}.mediaLandscapeId`) ||
-                getFieldError(`${prefix}.mediaPortraitId`)
-              }
-              isEditMode
-            />
+            <div className='w-full  border border-text'>
+              <SingleMediaViewAndSelect
+                link={landscapeLink}
+                aspectRatio={['1:1']}
+                aspectOnPreview='1/1'
+                isDeleteAccepted={false}
+                saveSelectedMedia={(media) => {
+                  onSaveMedia(media, 'Landscape');
+                  onSaveMedia(media, 'Portrait');
+                }}
+                error={
+                  getFieldError(`${prefix}.mediaLandscapeId`) ||
+                  getFieldError(`${prefix}.mediaPortraitId`)
+                }
+                isEditMode
+              />
+            </div>
           )}
         </div>
-        <div className='space-y-4 w-full'>
+        <div className='space-y-4 w-full border border-text'>
           <InputField
             name={`${prefix}.exploreLink` as any}
             label='explore link'

@@ -85,9 +85,9 @@ export function Hero() {
       await saveHero.mutateAsync(heroData);
       form.reset(filteredData);
       deletedIndicesRef.current.clear();
-      console.log('Hero saved successfully!');
+      showMessage('Hero saved successfully!', 'success');
     } catch (e) {
-      console.log('Error saving hero:', e);
+      showMessage('Error saving hero:', 'error');
     }
   }
 

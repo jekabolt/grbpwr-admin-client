@@ -18,7 +18,7 @@ import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { StoreProvider } from 'lib/stores/store-provider';
 import { createRoot } from 'react-dom/client';
-import { HashRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import './global.css';
 
 const container = document.getElementById('root') ?? document.body;
@@ -47,7 +47,7 @@ root.render(
     <StoreProvider>
       <ContextProvider>
         <QueryClientProvider client={queryClient}>
-          <HashRouter>
+          <BrowserRouter>
             <Routes>
               <Route path={ROUTES.login} element={<LoginBlock />} />
               <Route
@@ -156,7 +156,7 @@ root.render(
                 }
               />
             </Routes>
-          </HashRouter>
+          </BrowserRouter>
         </QueryClientProvider>
       </ContextProvider>
     </StoreProvider>
