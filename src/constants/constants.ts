@@ -16,5 +16,4 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
   { value: 'HERO_TYPE_DOUBLE', label: 'double add' },
   { value: 'HERO_TYPE_FEATURED_PRODUCTS', label: 'featured products' },
   { value: 'HERO_TYPE_FEATURED_PRODUCTS_TAG', label: 'featured products tag' },
-  { value: 'HERO_TYPE_FEATURED_ARCHIVE', label: 'featured archive' },
 ];
