@@ -27,7 +27,9 @@ export const requestHandler = async (
   }
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_SERVER_URL}/${path}`, {
+    const baseUrl = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
+    const url = `${baseUrl}/${path}`;
+    const response = await fetch(url, {
       method,
       headers,
       body,
