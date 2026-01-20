@@ -1,4 +1,4 @@
-import { getOrdersList } from 'api/orders';
+import { adminService } from 'api/api';
 import { common_Order, ListOrdersRequest } from 'api/proto-http/admin';
 import { PAGE_SIZE } from 'constants/filter';
 import { useEffect, useState } from 'react';
@@ -35,7 +35,7 @@ export function OrdersCatalog() {
         orderFactor: filters.orderFactor || 'ORDER_FACTOR_DESC',
       };
 
-      const response = await getOrdersList(requestParams);
+      const response = await adminService.ListOrders(requestParams);
       if (append) {
         setOrders((prev) => [...prev, ...(response.orders || [])]);
       } else {

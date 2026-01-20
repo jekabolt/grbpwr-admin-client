@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { adminService } from 'api/api';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
-import { updateSettings } from 'api/settings';
 import { useDictionaryStore, useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -36,7 +36,7 @@ export function Settings() {
   const handleSave = async (data: SettingsSchema) => {
     try {
       setIsLoading(true);
-      await updateSettings(data as UpdateSettingsRequest);
+      await adminService.UpdateSettings(data as UpdateSettingsRequest);
       showMessage('Settings updated successfully', 'success');
       await fetchDictionary(true);
     } catch (error) {

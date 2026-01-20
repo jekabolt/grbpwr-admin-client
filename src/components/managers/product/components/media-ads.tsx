@@ -1,5 +1,5 @@
 import { common_MediaFull, common_ProductFull } from 'api/proto-http/admin';
-import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
+// import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
 import { useEffect, useState } from 'react';
 import { Control, useController } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -63,7 +63,7 @@ export function MediaAds({ product, control, clearKey }: Props) {
           </Button>
         </div>
       ))}
-      <div className='w-full h-auto flex items-center justify-center border border-text'>
+      {/* <div className='w-full h-auto flex items-center justify-center border border-text'>
         <MediaSelectorLayout
           label='select media'
           aspectRatio={['4:5']}
@@ -72,7 +72,7 @@ export function MediaAds({ product, control, clearKey }: Props) {
           saveSelectedMedia={handleMediaAds}
           hideVideos={false}
         />
-      </div>
+      </div> */}
     </div>
   );
 }

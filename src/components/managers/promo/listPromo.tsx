@@ -1,7 +1,7 @@
 import DeleteIcon from '@mui/icons-material/Delete';
 import { IconButton } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
-import { deletePromo } from 'api/promo';
+import { adminService } from 'api/api';
 import { common_PromoCode } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useCallback } from 'react';
@@ -40,7 +40,7 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos }) => {
   const deletePromoFromList = useCallback(async (code: string | undefined) => {
     if (!code) return;
     try {
-      await deletePromo({ code });
+      await adminService.DeletePromoCode({ code });
       showMessage('PROMO REMOVED FROM LIST', 'success');
       fetchPromos(50, 0);
     } catch {

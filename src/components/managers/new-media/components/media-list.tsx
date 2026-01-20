@@ -21,7 +21,7 @@ export function MediaList({
   onVideoLoad,
 }: MediaListProps) {
   return (
-    <div>
+    <div className='grid grid-cols-2  lg:grid-cols-4 gap-4'>
       {media.map((m) => (
         <MediaItem
           key={m.id}

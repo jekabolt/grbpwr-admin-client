@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { getProductsPaged } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
 
 export const productsByTagKeys = {
@@ -15,7 +15,7 @@ export function useProductsByTag(tag: string | undefined | null, enabled = true)
         return [];
       }
 
-      const response = await getProductsPaged({
+      const response = await adminService.GetProductsPaged({
         limit: 1000,
         offset: 0,
         sortFactors: ['SORT_FACTOR_CREATED_AT'],

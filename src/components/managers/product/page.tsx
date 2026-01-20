@@ -1,4 +1,4 @@
-import { getProductByID } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_ProductFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
@@ -21,7 +21,7 @@ export const Product: FC = () => {
         showMessage('Invalid product ID', 'error');
         return;
       }
-      const response = await getProductByID({ id: productId });
+      const response = await adminService.GetProductByID({ id: productId });
       setProduct(response.product);
     }
   };
