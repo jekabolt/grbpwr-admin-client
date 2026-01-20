@@ -30,8 +30,18 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('HERO_TYPE_MAIN'),
     main: z.object({
-      mediaLandscapeId: z.number().min(1, 'Main Add Media is required'),
-      mediaPortraitId: z.number().min(1, 'Main Add Media is required'),
+      mediaLandscapeId: z
+        .union([z.number(), z.undefined()])
+        .refine((val) => val !== undefined && val >= 1, {
+          message: 'Landscape media is required',
+        }),
+      mediaPortraitId: z
+        .union([z.number(), z.undefined()])
+        .refine((val) => val !== undefined && val >= 1, {
+          message: 'Portrait media is required',
+        }),
+      mediaLandscapeUrl: z.string().optional(),
+      mediaPortraitUrl: z.string().optional(),
       exploreLink: z.string().nullable().optional(),
       translations: z.array(
         z.object({
@@ -49,8 +59,18 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('HERO_TYPE_SINGLE'),
     single: z.object({
-      mediaLandscapeId: z.number().min(1, 'Single Add Media is required'),
-      mediaPortraitId: z.number().min(1, 'Single Add Media is required'),
+      mediaLandscapeId: z
+        .union([z.number(), z.undefined()])
+        .refine((val) => val !== undefined && val >= 1, {
+          message: 'Landscape media is required',
+        }),
+      mediaPortraitId: z
+        .union([z.number(), z.undefined()])
+        .refine((val) => val !== undefined && val >= 1, {
+          message: 'Portrait media is required',
+        }),
+      mediaLandscapeUrl: z.string().optional(),
+      mediaPortraitUrl: z.string().optional(),
       exploreLink: z.string().nullable().optional(),
       translations: z.array(
         z.object({
@@ -67,8 +87,18 @@ const heroEntitySchema = z.discriminatedUnion('type', [
     type: z.literal('HERO_TYPE_DOUBLE'),
     double: z.object({
       left: z.object({
-        mediaLandscapeId: z.number().min(1, 'Single Add Media is required'),
-        mediaPortraitId: z.number().min(1, 'Single Add Media is required'),
+        mediaLandscapeId: z
+          .union([z.number(), z.undefined()])
+          .refine((val) => val !== undefined && val >= 1, {
+            message: 'Left media is required',
+          }),
+        mediaPortraitId: z
+          .union([z.number(), z.undefined()])
+          .refine((val) => val !== undefined && val >= 1, {
+            message: 'Left media is required',
+          }),
+        mediaLandscapeUrl: z.string().optional(),
+        mediaPortraitUrl: z.string().optional(),
         exploreLink: z.string().nullable().optional(),
         translations: z.array(
           z.object({
@@ -79,8 +109,18 @@ const heroEntitySchema = z.discriminatedUnion('type', [
         ),
       }),
       right: z.object({
-        mediaLandscapeId: z.number().min(1, 'Single Add Media is required'),
-        mediaPortraitId: z.number().min(1, 'Single Add Media is required'),
+        mediaLandscapeId: z
+          .union([z.number(), z.undefined()])
+          .refine((val) => val !== undefined && val >= 1, {
+            message: 'Right media is required',
+          }),
+        mediaPortraitId: z
+          .union([z.number(), z.undefined()])
+          .refine((val) => val !== undefined && val >= 1, {
+            message: 'Right media is required',
+          }),
+        mediaLandscapeUrl: z.string().optional(),
+        mediaPortraitUrl: z.string().optional(),
         exploreLink: z.string().nullable().optional(),
         translations: z.array(
           z.object({

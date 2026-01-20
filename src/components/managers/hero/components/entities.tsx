@@ -1,336 +1,259 @@
-//TODO: rework in future
-
-import { common_MediaFull, common_Product } from 'api/proto-http/admin';
-import { common_ArchiveFull } from 'api/proto-http/frontend';
-import { FC, useEffect, useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { common_MediaFull } from 'api/proto-http/admin';
+import { FC, useCallback, useEffect, useRef, useState } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
-import { EntitiesProps } from '../entities/interface/interface';
-import { removeEntityIndex } from '../utility/arrayHelpers';
-import { createMediaSaveConfigs } from '../utility/save-media-config';
+import Text from 'ui/components/text';
+import { EntitiesProps } from '../utility/interface';
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroSchema } from './schema';
+import { useEntityMedia } from './useEntityMedia';
+import { useProductSelection } from './useProductSelection';
 
-export const Entities: FC<EntitiesProps> = ({ entityRefs, arrayHelpers }) => {
-  const { watch, setValue } = useFormContext<HeroSchema>();
-  const values = watch();
-  const [main, setMain] = useState<string>('');
-  const [mainPortrait, setMainPortrait] = useState<string>('');
-  const [single, setSingle] = useState<{ [key: number]: string }>({});
-  const [singlePortrait, setSinglePortrait] = useState<{ [key: number]: string }>({});
-  const [doubleAdd, setDoubleAdd] = useState<{
-    [key: number]: { left: string | undefined; right: string | undefined };
-  }>({});
-  const [product, setProduct] = useState<{ [key: number]: common_Product[] }>({});
-  const [productTags, setProductTags] = useState<{ [key: number]: common_Product[] }>({});
-  const [archive, setArchive] = useState<{ [key: number]: common_ArchiveFull[] }>({});
-  const [currentEntityIndex, setCurrentEntityIndex] = useState<number | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const mediaSaveConfigs = createMediaSaveConfigs(setMain, setSingle, setDoubleAdd);
-
-  const handleOpenProductSelection = (index: number) => {
-    setCurrentEntityIndex(index);
-    setIsModalOpen(true);
-  };
-  const handleCloseModal = () => setIsModalOpen(false);
-
-  const fetchEntities = () => {
-    setMain('');
-    setMainPortrait('');
-
-    const entityMappings = (values.entities || []).reduce(
-      (acc, entity, index) => {
-        return {
-          single: {
-            ...acc.single,
-            [index]: entity.type === 'HERO_TYPE_SINGLE' ? entity.single?.mediaLandscapeId || 0 : 0,
-          },
-          singlePortrait: {
-            ...acc.singlePortrait,
-            [index]: entity.type === 'HERO_TYPE_SINGLE' ? entity.single?.mediaPortraitId || 0 : 0,
-          },
-          doubleAdd: {
-            ...acc.doubleAdd,
-            [index]: {
-              left:
-                entity.type === 'HERO_TYPE_DOUBLE' ? entity.double?.left?.mediaLandscapeId || 0 : 0,
-              right:
-                entity.type === 'HERO_TYPE_DOUBLE'
-                  ? entity.double?.right?.mediaLandscapeId || 0
-                  : 0,
-            },
-          },
-          products: {
-            ...acc.products,
-            [index]:
-              entity.type === 'HERO_TYPE_FEATURED_PRODUCTS'
-                ? entity.featuredProducts?.productIds || []
-                : [],
-          },
-          productTags: {
-            ...acc.productTags,
-            [index]:
-              entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG'
-                ? entity.featuredProductsTag.tag || ''
-                : '',
-          },
-          archive: {
-            ...acc.archive,
-            [index]: 0,
-          },
-        };
-      },
-      {
-        single: {},
-        singlePortrait: {},
-        doubleAdd: {},
-        products: {},
-        productTags: {},
-        archive: {},
-      },
-    );
-
-    setSingle(entityMappings.single);
-    setSinglePortrait(entityMappings.singlePortrait);
-    setDoubleAdd(entityMappings.doubleAdd);
-    setProduct(entityMappings.products);
-    setProductTags(entityMappings.productTags);
-    setArchive(entityMappings.archive);
-  };
+export const Entities: FC<EntitiesProps> = ({
+  entityRefs,
+  initialProducts,
+  deletedIndicesRef,
+  onDeletedIndicesChange,
+}) => {
+  const { setValue, control } = useFormContext<HeroSchema>();
+  const entities = useWatch({ control, name: 'entities' }) || [];
+  const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set());
+  const prevDeletedIndicesRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
-    fetchEntities();
-  }, [values.entities]);
+    deletedIndicesRef.current = deletedIndices;
 
-  const handleProductsReorder = (
-    newProductsOrder: common_Product[],
-    index: number,
-    isProductTag: boolean = false,
-  ) => {
-    if (isProductTag) {
-      setProductTags((prevState) => ({
-        ...prevState,
-        [index]: newProductsOrder,
-      }));
-    } else {
-      setProduct((prevState) => ({
-        ...prevState,
-        [index]: newProductsOrder,
-      }));
-    }
-  };
-
-  const handleSaveNewSelection = (newSelectedProducts: common_Product[], index: number) => {
-    const productIds = newSelectedProducts
-      .map((product) => product.id)
-      .filter((id): id is number => id !== undefined);
-    setValue(`entities.${index}.featuredProducts.productIds` as any, productIds);
-    setProduct((prevState) => ({
-      ...prevState,
-      [index]: newSelectedProducts,
-    }));
-
-    handleCloseModal();
-  };
-
-  const saveMedia = (
-    selectedMedia: common_MediaFull[],
-    type: 'main' | 'single' | 'doubleLeft' | 'doubleRight',
-    index: number,
-    orientation: 'Portrait' | 'Landscape',
-  ) => {
-    if (!selectedMedia.length) return;
-
-    const media = selectedMedia[0];
-    const config = mediaSaveConfigs[type](index, orientation);
-    const thumbnailURL = media.media?.thumbnail?.mediaUrl || '';
-
-    if (type === 'doubleLeft' || type === 'doubleRight') {
-      setValue(
-        `entities.${index}.double.${type === 'doubleLeft' ? 'left' : 'right'}.mediaLandscapeId` as any,
-        media.id,
-      );
-      setValue(
-        `entities.${index}.double.${type === 'doubleLeft' ? 'left' : 'right'}.mediaPortraitId` as any,
-        media.id,
-      );
-    } else {
-      setValue(config.fieldPath as any, media.id);
-    }
-
-    if (type === 'main') {
-      if (orientation === 'Portrait') {
-        setMainPortrait(thumbnailURL);
-      } else {
-        setMain(thumbnailURL);
+    const prev = prevDeletedIndicesRef.current;
+    if (
+      prev.size !== deletedIndices.size ||
+      Array.from(prev).some((idx) => !deletedIndices.has(idx)) ||
+      Array.from(deletedIndices).some((idx) => !prev.has(idx))
+    ) {
+      prevDeletedIndicesRef.current = new Set(deletedIndices);
+      if (onDeletedIndicesChange) {
+        onDeletedIndicesChange();
       }
-    } else if (type === 'single') {
-      if (orientation === 'Portrait') {
-        setSinglePortrait((prev) => ({ ...prev, [index]: thumbnailURL }));
+    }
+  }, [deletedIndices, deletedIndicesRef, onDeletedIndicesChange]);
+
+  useEffect(() => {
+    setDeletedIndices((prev) => {
+      const filtered = new Set<number>();
+      prev.forEach((index) => {
+        if (index < entities.length) {
+          filtered.add(index);
+        }
+      });
+      return filtered;
+    });
+  }, [entities.length]);
+
+  const mediaUrls = useEntityMedia(entities);
+  const featuredProducts = useProductSelection(initialProducts);
+
+  const handleSaveMedia = useCallback(
+    (
+      selectedMedia: common_MediaFull[],
+      entityIndex: number,
+      type: 'main' | 'single' | 'doubleLeft' | 'doubleRight',
+      orientation: 'Portrait' | 'Landscape',
+    ) => {
+      if (!selectedMedia.length) return;
+
+      const media = selectedMedia[0];
+      const thumbnailUrl = media.media?.thumbnail?.mediaUrl || '';
+
+      let idPath: string;
+      let urlPath: string;
+
+      if (type === 'doubleLeft' || type === 'doubleRight') {
+        const side = type === 'doubleLeft' ? 'left' : 'right';
+        idPath = `entities.${entityIndex}.double.${side}.media${orientation}Id`;
+        urlPath = `entities.${entityIndex}.double.${side}.media${orientation}Url`;
       } else {
-        setSingle((prev) => ({ ...prev, [index]: thumbnailURL }));
+        const entityType = type === 'main' ? 'main' : 'single';
+        idPath = `entities.${entityIndex}.${entityType}.media${orientation}Id`;
+        urlPath = `entities.${entityIndex}.${entityType}.media${orientation}Url`;
       }
-    } else {
-      config.state(thumbnailURL);
+
+      setValue(idPath as any, media.id, { shouldDirty: true, shouldTouch: true });
+      setValue(urlPath as any, thumbnailUrl, { shouldDirty: true, shouldTouch: true });
+    },
+    [setValue],
+  );
+
+  const handleSaveProductSelection = useCallback(
+    (newProducts: any[], index: number) => {
+      const productIds = newProducts
+        .map((product) => product.id)
+        .filter((id): id is number => id !== undefined);
+
+      setValue(`entities.${index}.featuredProducts.productIds` as any, productIds);
+      featuredProducts.saveSelection(newProducts, index);
+      featuredProducts.closeSelection();
+    },
+    [setValue, featuredProducts],
+  );
+
+  const handleRemoveEntity = useCallback((index: number) => {
+    setDeletedIndices((prev) => new Set(prev).add(index));
+  }, []);
+
+  const handleRestoreEntity = useCallback((index: number) => {
+    setDeletedIndices((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(index);
+      return newSet;
+    });
+  }, []);
+
+  const renderEntity = (entity: HeroSchema['entities'][number], index: number) => {
+    switch (entity.type) {
+      case 'HERO_TYPE_MAIN':
+        return (
+          <CommonEntity
+            title='main add'
+            prefix={`entities.${index}.main`}
+            landscapeLink={mediaUrls.main.landscape}
+            portraitLink={mediaUrls.main.portrait}
+            aspectRatio={{
+              Portrait: ['9:16'],
+              Landscape: ['2:1'],
+            }}
+            onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
+              handleSaveMedia(media, index, 'main', orientation)
+            }
+          />
+        );
+
+      case 'HERO_TYPE_SINGLE':
+        return (
+          <CommonEntity
+            title='single add'
+            prefix={`entities.${index}.single`}
+            landscapeLink={mediaUrls.single[index]?.landscape || ''}
+            portraitLink={mediaUrls.single[index]?.portrait || ''}
+            aspectRatio={{
+              Portrait: ['9:16'],
+              Landscape: ['2:1'],
+            }}
+            onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
+              handleSaveMedia(media, index, 'single', orientation)
+            }
+          />
+        );
+
+      case 'HERO_TYPE_DOUBLE':
+        return (
+          <div className='flex flex-col gap-4'>
+            <div className='lg:px-2.5 p-2.5'>
+              <Text className='text-xl font-bold leading-none' variant='uppercase'>
+                double add
+              </Text>
+            </div>
+            <CommonEntity
+              title='left add'
+              prefix={`entities.${index}.double.left`}
+              landscapeLink={mediaUrls.double[index]?.left?.landscape || ''}
+              portraitLink={mediaUrls.double[index]?.left?.portrait || ''}
+              aspectRatio={['1:1']}
+              isDoubleAd={true}
+              onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
+                handleSaveMedia(media, index, 'doubleLeft', orientation)
+              }
+            />
+            <CommonEntity
+              title='right add'
+              prefix={`entities.${index}.double.right`}
+              landscapeLink={mediaUrls.double[index]?.right?.landscape || ''}
+              portraitLink={mediaUrls.double[index]?.right?.portrait || ''}
+              aspectRatio={['1:1']}
+              isDoubleAd
+              onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
+                handleSaveMedia(media, index, 'doubleRight', orientation)
+              }
+            />
+          </div>
+        );
+
+      case 'HERO_TYPE_FEATURED_PRODUCTS':
+        return (
+          <FeaturedProductBase
+            index={index}
+            entity={entity}
+            product={featuredProducts.products}
+            currentEntityIndex={featuredProducts.currentIndex}
+            isModalOpen={featuredProducts.isOpen}
+            showProductPicker={true}
+            title='featured products'
+            prefix='featuredProducts'
+            handleOpenProductSelection={featuredProducts.openSelection}
+            handleCloseModal={featuredProducts.closeSelection}
+            handleSaveNewSelection={handleSaveProductSelection}
+            handleProductsReorder={featuredProducts.reorderProducts}
+          />
+        );
+
+      case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
+        return (
+          <FeaturedProductBase
+            index={index}
+            entity={entity}
+            product={{}}
+            title='featured products tag'
+            prefix='featuredProductsTag'
+          />
+        );
+
+      default:
+        return null;
     }
-  };
-
-  const handleRemoveEntity = (index: number, arrayHelpers: any, values: any) => {
-    if (values.entities[index].type === 'HERO_TYPE_MAIN_ADD') {
-      setMain('');
-    }
-    setSingle((prevSingle) => removeEntityIndex(prevSingle, index));
-    setDoubleAdd((prevDoubleAdd) => removeEntityIndex(prevDoubleAdd, index));
-    setProduct((prevProduct) => removeEntityIndex(prevProduct, index));
-    setProductTags((prevProductTags) => removeEntityIndex(prevProductTags, index));
-    setArchive((prevArchive) => removeEntityIndex(prevArchive, index));
-
-    arrayHelpers.remove(index);
-  };
-
-  const handleOpenArchiveSelection = (index: number) => {
-    setCurrentEntityIndex(index);
-    setIsModalOpen(true);
-  };
-
-  const handleSaveArchive = (newSelectedArchive: common_ArchiveFull[], index: number) => {
-    setValue(
-      `entities.${index}.featuredArchive.archiveId` as any,
-      newSelectedArchive[0].archiveList?.id,
-    );
-    setArchive((prevState) => ({
-      ...prevState,
-      [index]: newSelectedArchive,
-    }));
-    handleCloseModal();
   };
 
   return (
-    <div className='mt-8 space-y-6'>
-      {values.entities &&
-        values.entities.map((entity, index) => (
-          <div key={index} className='border rounded-lg p-4'>
+    <div className='space-y-24'>
+      {entities.map((entity, index) => {
+        const isDeleted = deletedIndices.has(index);
+        if (isDeleted) {
+          return (
+            <div
+              key={index}
+              className='border border-text relative opacity-50 bg-gray-100 dark:bg-gray-800'
+            >
+              <div className='p-4 flex items-center justify-between'>
+                <span className='text-sm italic'>Entity marked for deletion</span>
+                <Button
+                  variant='simple'
+                  className='py-1 px-3 cursor-pointer'
+                  onClick={() => handleRestoreEntity(index)}
+                >
+                  restore
+                </Button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={index} className='border border-2 border-text relative'>
             <div
               ref={(el: HTMLDivElement | null) => {
                 entityRefs.current[index] = el;
               }}
             >
-              <div className='space-y-4'>
-                {entity.type === 'HERO_TYPE_MAIN' && (
-                  <div className='w-full'>
-                    <CommonEntity
-                      title='main add'
-                      prefix={`entities.${index}.main`}
-                      landscapeLink={main}
-                      portraitLink={mainPortrait}
-                      aspectRatio={{
-                        Portrait: ['9:16'],
-                        Landscape: ['2:1'],
-                      }}
-                      onSaveMedia={(
-                        media: common_MediaFull[],
-                        orientation: 'Portrait' | 'Landscape',
-                      ) => saveMedia(media, 'main', index, orientation)}
-                    />
-                  </div>
-                )}
-                {entity.type === 'HERO_TYPE_SINGLE' && (
-                  <div className='w-full'>
-                    <CommonEntity
-                      title='single add'
-                      prefix={`entities.${index}.single`}
-                      landscapeLink={single[index]}
-                      portraitLink={singlePortrait[index]}
-                      aspectRatio={{
-                        Portrait: ['9:16'],
-                        Landscape: ['2:1'],
-                      }}
-                      onSaveMedia={(
-                        media: common_MediaFull[],
-                        orientation: 'Portrait' | 'Landscape',
-                      ) => saveMedia(media, 'single', index, orientation)}
-                    />
-                  </div>
-                )}
-                {entity.type === 'HERO_TYPE_DOUBLE' && (
-                  <div className='w-full'>
-                    <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-                      <div>
-                        <CommonEntity
-                          title='double add'
-                          prefix={`entities.${index}.double.left`}
-                          landscapeLink={doubleAdd[index]?.left || ''}
-                          portraitLink={doubleAdd[index]?.left || ''}
-                          aspectRatio={['1:1']}
-                          isDoubleAd={true}
-                          onSaveMedia={(
-                            media: common_MediaFull[],
-                            orientation: 'Portrait' | 'Landscape',
-                          ) => saveMedia(media, 'doubleLeft', index, orientation)}
-                        />
-                      </div>
-                      <div className='mt-10'>
-                        <CommonEntity
-                          title=''
-                          prefix={`entities.${index}.double.right`}
-                          landscapeLink={doubleAdd[index]?.right || ''}
-                          portraitLink={doubleAdd[index]?.right || ''}
-                          aspectRatio={['1:1']}
-                          isDoubleAd
-                          onSaveMedia={(media: common_MediaFull[]) =>
-                            saveMedia(media, 'doubleRight', index, 'Landscape')
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS' && (
-                  <div className='w-full'>
-                    <FeaturedProductBase
-                      index={index}
-                      entity={entity}
-                      product={product}
-                      currentEntityIndex={currentEntityIndex}
-                      isModalOpen={isModalOpen}
-                      showProductPicker={true}
-                      title='featured products'
-                      prefix='featuredProducts'
-                      handleOpenProductSelection={handleOpenProductSelection}
-                      handleCloseModal={handleCloseModal}
-                      handleSaveNewSelection={handleSaveNewSelection}
-                      handleProductsReorder={handleProductsReorder}
-                    />
-                  </div>
-                )}
-                {entity.type === 'HERO_TYPE_FEATURED_PRODUCTS_TAG' && (
-                  <div className='w-full'>
-                    <FeaturedProductBase
-                      index={index}
-                      entity={entity}
-                      product={productTags}
-                      title='featured products tag'
-                      prefix='featuredProductsTag'
-                      handleProductsReorder={(e, i) => handleProductsReorder(e, i, true)}
-                    />
-                  </div>
-                )}
-
-                <Button
-                  className='border border-red-500'
-                  onClick={() => {
-                    handleRemoveEntity(index, arrayHelpers, values);
-                  }}
-                >
-                  Remove Entity
-                </Button>
-
-                <div className='w-full border-t pt-4' />
-              </div>
+              {renderEntity(entity, index)}
             </div>
+            <Button
+              variant='delete'
+              className='absolute top-2 right-2 py-1 px-3 cursor-pointer'
+              onClick={() => handleRemoveEntity(index)}
+            >
+              x
+            </Button>
           </div>
-        ))}
+        );
+      })}
     </div>
   );
 };

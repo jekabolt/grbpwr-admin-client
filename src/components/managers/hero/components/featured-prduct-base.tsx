@@ -1,14 +1,20 @@
-import { Button, Grid2 as Grid, Typography } from '@mui/material';
+import { Button } from '@mui/material';
 import { useFormContext } from 'react-hook-form';
 import { ProductPickerModal } from 'ui/components/productPickerModal';
+import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
-import { TranslationField } from 'ui/form/fields/translation-field';
-import { HeroProductEntityInterface } from '../entities/interface/interface';
+import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { HeroProductEntityInterface } from '../utility/interface';
 import { HeroProductTable } from './heroProductsTable';
 import { HeroSchema } from './schema';
+import { useProductsByTag } from './useProductsByTag';
+
+const FEATURED_PRODUCTS_TRANSLATION_FIELDS = [
+  { name: 'headline', label: 'headline', type: 'input' as const },
+  { name: 'exploreText', label: 'explore text', type: 'input' as const },
+];
 
 export function FeaturedProductBase({
-  entity,
   index,
   product,
   currentEntityIndex,
@@ -22,49 +28,61 @@ export function FeaturedProductBase({
   handleSaveNewSelection,
 }: HeroProductEntityInterface) {
   const {
-    control,
     formState: { errors },
+    watch,
   } = useFormContext<HeroSchema>();
-  // const prefixBase = 'featuredProductsTag';
-  // const prefix = `${prefixBase}`;
+
+  const tag = prefix?.includes('featuredProductsTag')
+    ? watch(`entities.${index}.${prefix}.tag` as any)
+    : undefined;
+
+  const { data: productsByTag = [], isLoading: isLoadingProducts } = useProductsByTag(
+    tag,
+    prefix?.includes('featuredProductsTag'),
+  );
+
+  const displayProducts =
+    prefix?.includes('featuredProductsTag') && productsByTag.length > 0
+      ? productsByTag
+      : product[index] || [];
+
   return (
-    <Grid container spacing={2}>
-      <Grid size={{ xs: 12 }}>
-        <Typography variant='h4' textTransform='uppercase'>
-          {title}
-        </Typography>
-      </Grid>
+    <div className='lg:px-2.5 lg:pb-8 p-2.5 space-y-6'>
+      <Text className='text-xl font-bold leading-none' variant='uppercase'>
+        {title}
+      </Text>
       {prefix?.includes('featuredProductsTag') && (
         <InputField name={`entities.${index}.${prefix}.tag`} label='tag' />
       )}
 
-      <TranslationField
-        label='headline'
+      <UnifiedTranslationFields
         fieldPrefix={`entities.${index}.${prefix}.translations`}
-        fieldName='headline'
-      />
-      <TranslationField
-        label='explore text'
-        fieldPrefix={`entities.${index}.${prefix}.translations`}
-        fieldName='exploreText'
+        fields={FEATURED_PRODUCTS_TRANSLATION_FIELDS}
+        editMode={true}
       />
       <InputField name={`entities.${index}.${prefix}.exploreLink`} label='explore link' />
 
-      <HeroProductTable
-        products={product[index] || []}
-        id={index}
-        isFeaturedProducts={prefix === 'featuredProducts'}
-        onReorder={(e: any) => handleProductsReorder?.(e, index)}
-      />
+      {isLoadingProducts && prefix?.includes('featuredProductsTag') ? (
+        <div className='py-8 text-center'>
+          <Text>Loading products...</Text>
+        </div>
+      ) : (
+        <HeroProductTable
+          products={displayProducts}
+          id={index}
+          isFeaturedProducts={prefix === 'featuredProducts'}
+          onReorder={(e: any) => handleProductsReorder?.(e, index)}
+        />
+      )}
 
       {showProductPicker && (
         <>
           {errors.entities?.[index] &&
             prefix &&
             (errors.entities[index] as any)?.[prefix]?.productIds && (
-              <div style={{ color: 'red' }}>
+              <Text variant='error'>
                 {(errors.entities[index] as any)[prefix]?.productIds?.message}
-              </div>
+              </Text>
             )}
           <Button onClick={() => handleOpenProductSelection?.(index)}>add products</Button>
           <ProductPickerModal
@@ -75,6 +93,6 @@ export function FeaturedProductBase({
           />
         </>
       )}
-    </Grid>
+    </div>
   );
 }

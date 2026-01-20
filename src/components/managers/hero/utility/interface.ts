@@ -1,7 +1,7 @@
 import { common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveList } from 'api/proto-http/frontend';
 import { UseFieldArrayInsert, UseFieldArrayMove, UseFieldArrayRemove } from 'react-hook-form';
-import { HeroSchema } from '../../components/schema';
+import { HeroSchema } from '../components/schema';
 
 export interface EntitiesProps {
   entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
@@ -10,6 +10,9 @@ export interface EntitiesProps {
     move: UseFieldArrayMove;
     insert: UseFieldArrayInsert<HeroSchema, 'entities'>;
   };
+  initialProducts?: Record<number, any[]>;
+  deletedIndicesRef: React.MutableRefObject<Set<number>>;
+  onDeletedIndicesChange?: () => void;
 }
 
 export interface Props {
@@ -17,7 +20,7 @@ export interface Props {
   prefix: string;
   landscapeLink: string;
   portraitLink: string;
-  size?: { xs: number; md?: number }; // Made optional since we're not using Material-UI Grid
+  size?: { xs: number; md?: number };
   aspectRatio: string[] | { Portrait: string[]; Landscape: string[] };
   isDoubleAd?: boolean;
   onSaveMedia: (selectedMedia: common_MediaFull[], orientation: 'Portrait' | 'Landscape') => void;
