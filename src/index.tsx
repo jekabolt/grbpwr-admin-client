@@ -1,164 +1,124 @@
-import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { lazy, StrictMode, Suspense } from 'react';
+import { createRoot } from 'react-dom/client';
+import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
+import { BrowserRouter, Outlet, Route, Routes } from 'react-router-dom';
+
 import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
-
-import { Archives } from 'components/managers/archives';
-import { Archive } from 'components/managers/archives/archive';
-import { Hero } from 'components/managers/hero/components';
-import { MediaManager } from 'components/managers/media/mediaManager';
-import { OrderDetails } from 'components/managers/order/page';
-import { OrdersCatalog } from 'components/managers/orders-catalog/page';
-import { Analitic } from 'components/managers/page';
-import { Product } from 'components/managers/product/page';
-import ProductsCatalog from 'components/managers/products-catalog/page';
-import { Promo } from 'components/managers/promo/promo';
-import { Settings } from 'components/managers/settings';
 import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { StoreProvider } from 'lib/stores/store-provider';
-import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { Layout } from 'ui/layout';
 import './global.css';
 
-const container = document.getElementById('root') ?? document.body;
-const root = createRoot(container);
-const queryClient = new QueryClient();
+// Lazy load routes for code splitting
+const Hero = lazy(() =>
+  import('components/managers/hero/components').then((m) => ({ default: m.Hero })),
+);
+const MediaManager = lazy(() =>
+  import('components/managers/new-media').then((m) => ({ default: m.MediaManager })),
+);
+const OrderDetails = lazy(() =>
+  import('components/managers/order/page').then((m) => ({ default: m.OrderDetails })),
+);
+const OrdersCatalog = lazy(() =>
+  import('components/managers/orders-catalog/page').then((m) => ({ default: m.OrdersCatalog })),
+);
+const Analitic = lazy(() =>
+  import('components/managers/page').then((m) => ({ default: m.Analitic })),
+);
+const Product = lazy(() =>
+  import('components/managers/product/page').then((m) => ({ default: m.Product })),
+);
+const ProductsCatalog = lazy(() => import('components/managers/products-catalog/page'));
+const Promo = lazy(() =>
+  import('components/managers/promo/promo').then((m) => ({ default: m.Promo })),
+);
+const Settings = lazy(() =>
+  import('components/managers/settings').then((m) => ({ default: m.Settings })),
+);
 
-const theme = createTheme({
-  palette: {
-    primary: {
-      light: '#9e9e9e',
-      main: '#616161',
-      dark: '#424242',
-      contrastText: '#fff',
+// Configure QueryClient with best practices
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5, // 5 minutes
+      retry: 1,
+      refetchOnWindowFocus: false,
     },
-    secondary: {
-      light: '#ff7961',
-      main: '#f44336',
-      dark: '#ba000d',
-      contrastText: '#000',
+    mutations: {
+      retry: 1,
     },
   },
 });
 
-root.render(
-  <ThemeProvider theme={theme}>
-    <StoreProvider>
-      <ContextProvider>
-        <QueryClientProvider client={queryClient}>
-          <BrowserRouter>
-            <Routes>
-              <Route path={ROUTES.login} element={<LoginBlock />} />
-              <Route
-                path={ROUTES.main}
-                element={
-                  <ProtectedRoute>
-                    <Analitic />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.media}
-                element={
-                  <ProtectedRoute>
-                    <MediaManager />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.product}
-                element={
-                  <ProtectedRoute>
-                    <ProductsCatalog />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.singleProduct}
-                element={
-                  <ProtectedRoute>
-                    <Product />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.addProduct}
-                element={
-                  <ProtectedRoute>
-                    <Product />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={`${ROUTES.copyProduct}/:id`}
-                element={
-                  <ProtectedRoute>
-                    <Product />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.hero}
-                element={
-                  <ProtectedRoute>
-                    <Hero />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.promo}
-                element={
-                  <ProtectedRoute>
-                    <Promo />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.singleArchive}
-                element={
-                  <ProtectedRoute>
-                    <Archive />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.archives}
-                element={
-                  <ProtectedRoute>
-                    <Archives />
-                  </ProtectedRoute>
-                }
-              />
+// Error fallback component
+const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => (
+  <div style={{ padding: '2rem', textAlign: 'center' }}>
+    <h2>Something went wrong</h2>
+    <pre style={{ color: 'red', marginTop: '1rem' }}>
+      {error instanceof Error ? error.message : String(error)}
+    </pre>
+    <button onClick={resetErrorBoundary} style={{ marginTop: '1rem', padding: '0.5rem 1rem' }}>
+      Try again
+    </button>
+  </div>
+);
 
-              <Route
-                path={ROUTES.settings}
-                element={
-                  <ProtectedRoute>
-                    <Settings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.orderDetails}
-                element={
-                  <ProtectedRoute>
-                    <OrderDetails />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTES.orders}
-                element={
-                  <ProtectedRoute>
-                    <OrdersCatalog />
-                  </ProtectedRoute>
-                }
-              />
-            </Routes>
-          </BrowserRouter>
-        </QueryClientProvider>
-      </ContextProvider>
-    </StoreProvider>
-  </ThemeProvider>,
+// Loading fallback
+const LoadingFallback = () => (
+  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+    Loading...
+  </div>
+);
+
+const ProtectedLayout = () => (
+  <ProtectedRoute>
+    <Layout>
+      <Suspense fallback={<LoadingFallback />}>
+        <Outlet />
+      </Suspense>
+    </Layout>
+  </ProtectedRoute>
+);
+
+const container = document.getElementById('root');
+if (!container) throw new Error('Root element not found');
+
+const root = createRoot(container);
+
+root.render(
+  <StrictMode>
+    <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => (window.location.href = '/')}>
+      <StoreProvider>
+        <ContextProvider>
+          <QueryClientProvider client={queryClient}>
+            <BrowserRouter>
+              <Suspense fallback={<LoadingFallback />}>
+                <Routes>
+                  <Route path={ROUTES.login} element={<LoginBlock />} />
+                  <Route path='/' element={<ProtectedLayout />}>
+                    <Route path={ROUTES.main} element={<Analitic />} />
+                    <Route path={ROUTES.media} element={<MediaManager disabled={true} />} />
+                    <Route path={ROUTES.singleProduct} element={<Product />} />
+                    <Route path={ROUTES.product} element={<ProductsCatalog />} />
+                    <Route path={ROUTES.addProduct} element={<Product />} />
+                    <Route path={`${ROUTES.copyProduct}/:id`} element={<Product />} />
+                    <Route path={ROUTES.hero} element={<Hero />} />
+                    <Route path={ROUTES.promo} element={<Promo />} />
+                    <Route path={ROUTES.settings} element={<Settings />} />
+                    <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
+                    <Route path={ROUTES.orders} element={<OrdersCatalog />} />
+                  </Route>
+                </Routes>
+              </Suspense>
+            </BrowserRouter>
+            <ReactQueryDevtools initialIsOpen={false} />
+          </QueryClientProvider>
+        </ContextProvider>
+      </StoreProvider>
+    </ErrorBoundary>
+  </StrictMode>,
 );

@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { upsertProduct } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_ProductFull, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useEffect, useState } from 'react';
@@ -74,7 +74,7 @@ export function ProductForm({
     const payload = createProductPayload(filteredData, productId, isCopyMode);
 
     try {
-      await upsertProduct(payload);
+      await adminService.UpsertProduct(payload);
       setIsFormChanged(false);
       form.reset(data, { keepValues: true });
 
