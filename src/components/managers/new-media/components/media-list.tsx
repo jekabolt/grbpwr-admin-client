@@ -1,5 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { VideoSize } from '..';
+import { DragDropArea } from './dragdrop-area';
 import { MediaItem } from './media-item';
 
 interface MediaListProps {
@@ -21,7 +22,7 @@ export function MediaList({
   onVideoLoad,
 }: MediaListProps) {
   return (
-    <div className='grid grid-cols-2  lg:grid-cols-4 gap-4'>
+    <DragDropArea mediaLength={media.length} className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
       {media.map((m) => (
         <MediaItem
           key={m.id}
@@ -33,6 +34,6 @@ export function MediaList({
           onVideoLoad={onVideoLoad}
         />
       ))}
-    </div>
+    </DragDropArea>
   );
 }

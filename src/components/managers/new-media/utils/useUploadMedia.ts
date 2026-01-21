@@ -31,7 +31,7 @@ export function useUploadMedia() {
   return useMutation<common_MediaFull, Error, File>({
     mutationFn: async (file: File) => {
       const isVideoFile = file.type.startsWith('video/');
-      const maxSize = isVideoFile ? 50 * 1024 * 1024 : 10 * 1024 * 1024; // 50MB video, 10MB image
+      const maxSize = isVideoFile ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
 
       if (file.size > maxSize) {
         const maxSizeMB = Math.round((maxSize / (1024 * 1024)) * 10) / 10;
@@ -41,7 +41,6 @@ export function useUploadMedia() {
       const base64 = await fileToDataUrl(file);
 
       if (!isVideoFile) {
-        // For images we previously sent the full data URL, keep the same behavior
         const response = await adminService.UploadContentImage({
           rawB64Image: base64,
         });
@@ -69,7 +68,6 @@ export function useUploadMedia() {
       queryClient.invalidateQueries({ queryKey: mediaKeys.all });
     },
     onError: (error) => {
-      // eslint-disable-next-line no-console
       console.error('Failed to upload media:', error);
     },
   });

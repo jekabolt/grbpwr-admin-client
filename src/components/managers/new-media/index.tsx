@@ -6,6 +6,7 @@ import { MediaList } from './components/media-list';
 import { useFilter } from './utils/useFilter';
 import { useInfiniteMedia } from './utils/useMediaQuery';
 import { useSelection } from './utils/useSelectMedia';
+import { useUploadMedia } from './utils/useUploadMedia';
 
 export type VideoSize = { width: number; height: number };
 
@@ -26,6 +27,7 @@ export function MediaManager({
   const { ref, inView } = useInView();
   const media = data?.pages.flatMap((page) => page.media as common_MediaFull[]) || [];
   const [videoSizes, setVideoSizes] = useState<Record<number, VideoSize>>({});
+  const uploadMedia = useUploadMedia();
 
   const { filteredMedia, type, order, setType, setOrder } = useFilter(
     media,
