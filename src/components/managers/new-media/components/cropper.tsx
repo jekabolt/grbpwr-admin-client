@@ -26,55 +26,21 @@ export const MediaCropper: FC<CropperInterface> = ({
     imgRef: HTMLImageElement;
   } | null>(null);
 
-  const getCroppedImgFromCanvas = (image: HTMLImageElement, crop: PixelCrop): Promise<string> => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) {
-      throw new Error('No 2d context');
-    }
-
+  const convertPixelCropToArea = (image: HTMLImageElement, crop: PixelCrop): Area => {
     const naturalWidth = image.naturalWidth;
     const naturalHeight = image.naturalHeight;
-
     const displayedWidth = image.width;
     const displayedHeight = image.height;
 
     const scaleX = naturalWidth / displayedWidth;
     const scaleY = naturalHeight / displayedHeight;
 
-    const naturalCropX = crop.x * scaleX;
-    const naturalCropY = crop.y * scaleY;
-    const naturalCropWidth = crop.width * scaleX;
-    const naturalCropHeight = crop.height * scaleY;
-
-    canvas.width = Math.round(naturalCropWidth);
-    canvas.height = Math.round(naturalCropHeight);
-
-    ctx.drawImage(
-      image,
-      naturalCropX,
-      naturalCropY,
-      naturalCropWidth,
-      naturalCropHeight,
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    );
-
-    return new Promise((resolve) => {
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          throw new Error('Canvas is empty');
-        }
-        const reader = new FileReader();
-        reader.readAsDataURL(blob);
-        reader.onloadend = () => {
-          resolve(reader.result as string);
-        };
-      }, 'image/jpeg');
-    });
+    return {
+      x: crop.x * scaleX,
+      y: crop.y * scaleY,
+      width: crop.width * scaleX,
+      height: crop.height * scaleY,
+    };
   };
 
   const handleSave = async () => {
@@ -84,10 +50,9 @@ export const MediaCropper: FC<CropperInterface> = ({
       const format = selectedFile.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
 
       if (aspect === undefined && customCropData) {
-        const croppedImage = await getCroppedImgFromCanvas(
-          customCropData.imgRef,
-          customCropData.crop,
-        );
+        // Convert PixelCrop to Area format and use the utility
+        const area = convertPixelCropToArea(customCropData.imgRef, customCropData.crop);
+        const croppedImage = await getCroppedImg(selectedFile, area, undefined, format);
         saveCroppedImage(croppedImage);
       } else if (croppedAreaPixels && aspect !== undefined) {
         const croppedImage = await getCroppedImg(selectedFile, croppedAreaPixels, aspect, format);

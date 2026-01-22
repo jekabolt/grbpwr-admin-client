@@ -1,5 +1,6 @@
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
+import { dataUrlToFile } from '../utils/dataUrlToFile';
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { PreviewItem, PreviewMedia } from './preview-media';
 
@@ -81,12 +82,7 @@ export function DragDropArea({
       let fileToUpload = pendingFile;
 
       if (croppedUrl) {
-        const response = await fetch(croppedUrl);
-        const blob = await response.blob();
-        fileToUpload = new File([blob], pendingFile.name, {
-          type: pendingFile.type || 'image/jpeg',
-          lastModified: Date.now(),
-        });
+        fileToUpload = dataUrlToFile(croppedUrl, pendingFile.name);
       }
 
       await uploadMedia.mutateAsync(fileToUpload);

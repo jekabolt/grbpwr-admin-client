@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Filter } from './components/filter';
 import { MediaList } from './components/media-list';
+import { PreviewMedia } from './components/preview-media';
 import { useFilter } from './utils/useFilter';
 import { useInfiniteMedia } from './utils/useMediaQuery';
+import { usePreviewMedia } from './utils/usePreviewMedia';
 import { useSelection } from './utils/useSelectMedia';
-import { useUploadMedia } from './utils/useUploadMedia';
 
 export type VideoSize = { width: number; height: number };
 
@@ -27,7 +28,17 @@ export function MediaManager({
   const { ref, inView } = useInView();
   const media = data?.pages.flatMap((page) => page.media as common_MediaFull[]) || [];
   const [videoSizes, setVideoSizes] = useState<Record<number, VideoSize>>({});
-  const uploadMedia = useUploadMedia();
+
+  const {
+    viewingMedia,
+    viewingMediaData,
+    isPreviewOpen,
+    isUploading,
+    setIsPreviewOpen,
+    handleViewMedia,
+    handlePreviewCancel,
+    handlePreviewUpload,
+  } = usePreviewMedia();
 
   const { filteredMedia, type, order, setType, setOrder } = useFilter(
     media,
@@ -69,6 +80,17 @@ export function MediaManager({
         disabled={disabled}
         videoSizes={videoSizes}
         onVideoLoad={handleVideoLoad}
+        onView={handleViewMedia}
+      />
+      <PreviewMedia
+        open={isPreviewOpen}
+        preview={viewingMedia}
+        onOpenChange={setIsPreviewOpen}
+        onUpload={handlePreviewUpload}
+        onCancel={handlePreviewCancel}
+        isExistingMedia={true}
+        mediaData={viewingMediaData}
+        isUploading={isUploading}
       />
       {hasNextPage && (
         <div ref={ref} className='flex justify-center p-4'>

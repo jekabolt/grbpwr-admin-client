@@ -17,6 +17,7 @@ interface MediaItemProps {
   videoSizes: Record<number, VideoSize>;
   onToggle: () => void;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
+  onView?: (media: common_MediaFull) => void;
 }
 
 export function MediaItem({
@@ -26,6 +27,7 @@ export function MediaItem({
   videoSizes,
   onToggle,
   onVideoLoad,
+  onView,
 }: MediaItemProps) {
   const mediaUrl = media.media?.thumbnail?.mediaUrl;
   const deleteMediaMutation = useDeleteMedia();
@@ -44,6 +46,19 @@ export function MediaItem({
     onToggle();
   };
 
+  const handleClick = (event: React.MouseEvent) => {
+    // Always allow viewing, even when disabled
+    // If shift or ctrl/cmd is held, toggle selection (only if not disabled), otherwise view
+    if (!disabled && (event.shiftKey || event.metaKey || event.ctrlKey)) {
+      handleSelect(event);
+    } else if (onView) {
+      event.stopPropagation();
+      onView(media);
+    } else if (!disabled) {
+      handleSelect(event);
+    }
+  };
+
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirmDelete === media.id) {
@@ -58,7 +73,7 @@ export function MediaItem({
     <div className='w-full h-full'>
       <Button
         asChild
-        onClick={handleSelect}
+        onClick={handleClick}
         className='relative overflow-hidden w-full h-full group cursor-pointer bg-white'
       >
         <div>

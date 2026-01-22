@@ -1,9 +1,11 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { common_MediaFull } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import { MediaCropper } from './cropper';
+import { MediaInfo } from './media-info';
 
 export type PreviewItem = { url: string; type: 'image' | 'video' };
 
@@ -13,6 +15,9 @@ interface PreviewMediaProps {
   onOpenChange: (open: boolean) => void;
   onUpload: (croppedUrl?: string) => void;
   onCancel: () => void;
+  isExistingMedia?: boolean;
+  mediaData?: common_MediaFull | null;
+  isUploading?: boolean;
 }
 
 export function PreviewMedia({
@@ -21,6 +26,9 @@ export function PreviewMedia({
   onOpenChange,
   onUpload,
   onCancel,
+  isExistingMedia = false,
+  mediaData,
+  isUploading = false,
 }: PreviewMediaProps) {
   const [isCropperOpen, setIsCropperOpen] = useState(false);
   const [croppedUrl, setCroppedUrl] = useState<string | undefined>(undefined);
@@ -34,7 +42,6 @@ export function PreviewMedia({
 
   const handleUploadClick = () => {
     onUpload(croppedUrl);
-    onOpenChange(false);
   };
 
   const handleCancelClick = () => {
@@ -62,7 +69,7 @@ export function PreviewMedia({
                 onCancel={() => setIsCropperOpen(false)}
               />
             ) : (
-              <div className='flex flex-col items-center justify-center gap-10'>
+              <div className='flex flex-col items-center justify-center gap-6'>
                 <div className='w-[500px] h-[400px]'>
                   <Media
                     src={croppedUrl || preview.url}
@@ -73,6 +80,8 @@ export function PreviewMedia({
                     aspectRatio='auto'
                   />
                 </div>
+
+                {isExistingMedia && mediaData && <MediaInfo media={mediaData} />}
 
                 <div className='flex justify-center items-center gap-6'>
                   {preview.type === 'image' && (
@@ -88,9 +97,16 @@ export function PreviewMedia({
                   <Button className='absolute right-1 top-1 px-1 py-1' onClick={handleCancelClick}>
                     x
                   </Button>
-                  <Button size='lg' className='uppercase' onClick={handleUploadClick}>
-                    upload
-                  </Button>
+                  {(!isExistingMedia || croppedUrl) && (
+                    <Button
+                      size='lg'
+                      className='uppercase'
+                      onClick={handleUploadClick}
+                      disabled={isUploading}
+                    >
+                      {isUploading ? 'uploading...' : 'upload'}
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
