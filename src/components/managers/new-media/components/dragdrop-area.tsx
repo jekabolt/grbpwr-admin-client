@@ -1,6 +1,7 @@
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useUploadMedia } from '../utils/useUploadMedia';
+import { PreviewItem, PreviewMedia } from './preview-media';
 
 export function DragDropArea({
   children,
@@ -12,7 +13,18 @@ export function DragDropArea({
   className?: string;
 }) {
   const [isDragging, setIsDragging] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<PreviewItem | null>(null);
   const uploadMedia = useUploadMedia();
+
+  useEffect(
+    () => () => {
+      if (preview) {
+        URL.revokeObjectURL(preview.url);
+      }
+    },
+    [preview],
+  );
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -46,18 +58,59 @@ export function DragDropArea({
       (file) => file.type.startsWith('image/') || file.type.startsWith('video/'),
     );
 
+    if (!files.length) return;
+
+    if (preview) {
+      URL.revokeObjectURL(preview.url);
+    }
+
+    const file = files[0];
+    const nextPreview: PreviewItem = {
+      url: URL.createObjectURL(file),
+      type: (file.type.startsWith('video/') ? 'video' : 'image') as PreviewItem['type'],
+    };
+
+    setPendingFile(file);
+    setPreview(nextPreview);
+  };
+
+  const handleUpload = async (croppedUrl?: string) => {
+    if (!pendingFile) return;
+
     try {
-      await Promise.all(files.map((file) => uploadMedia.mutateAsync(file)));
+      let fileToUpload = pendingFile;
+
+      if (croppedUrl) {
+        const response = await fetch(croppedUrl);
+        const blob = await response.blob();
+        fileToUpload = new File([blob], pendingFile.name, {
+          type: pendingFile.type || 'image/jpeg',
+          lastModified: Date.now(),
+        });
+      }
+
+      await uploadMedia.mutateAsync(fileToUpload);
+      if (preview) {
+        URL.revokeObjectURL(preview.url);
+      }
+      setPendingFile(null);
+      setPreview(null);
     } catch (e) {
       console.error('upload failed:', e);
     }
   };
 
+  const handleCancel = () => {
+    if (preview) {
+      URL.revokeObjectURL(preview.url);
+    }
+    setPendingFile(null);
+    setPreview(null);
+  };
+
   return (
     <div
-      className={cn('relative transition-all', className, {
-        'ring-4 ring-blue-500 ring-opacity-50': isDragging,
-      })}
+      className={cn('relative transition-all', className)}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
@@ -66,16 +119,26 @@ export function DragDropArea({
     >
       {children}
 
-      {mediaLength === 0 && (
+      {mediaLength === 0 && !preview && (
         <div className='col-span-2 lg:col-span-4 flex items-center justify-center text-gray-400'>
-          Перетащите файлы сюда
+          dragdrop here
         </div>
       )}
 
+      <PreviewMedia
+        open={!!preview}
+        onOpenChange={(open) => {
+          if (!open) {
+            handleCancel();
+          }
+        }}
+        preview={preview}
+        onUpload={handleUpload}
+        onCancel={handleCancel}
+      />
+
       {isDragging && (
-        <div className='absolute inset-0 bg-blue-500 bg-opacity-10 border-4 border-dashed border-blue-500 rounded-lg flex items-center justify-center pointer-events-none z-10'>
-          <div className='text-blue-600 text-xl font-semibold'>Отпустите для загрузки</div>
-        </div>
+        <div className='absolute inset-0 bg-inactive/90 flex items-center justify-center pointer-events-none z-10' />
       )}
     </div>
   );

@@ -59,7 +59,7 @@ export function MediaItem({
       <Button
         asChild
         onClick={handleSelect}
-        className='relative overflow-hidden h-full group cursor-pointer'
+        className='relative overflow-hidden w-full h-full group cursor-pointer bg-white'
       >
         <div>
           <Text
@@ -83,6 +83,7 @@ export function MediaItem({
               'opacity-75': isSelected && !disabled,
             })}
             onLoadedMetadata={handleVideoLoadEvent}
+            fit='contain'
           />
         </div>
         <Text

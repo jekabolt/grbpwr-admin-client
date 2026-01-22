@@ -17,3 +17,15 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
   { value: 'HERO_TYPE_FEATURED_PRODUCTS', label: 'featured products' },
   { value: 'HERO_TYPE_FEATURED_PRODUCTS_TAG', label: 'featured products tag' },
 ];
+
+export const ASPECT_RATIOS = [
+  { label: '16:9', value: 1.7778, color: '#cc0000' },
+  { label: '4:3', value: 1.3333, color: '#e69138' },
+  { label: '2:1', value: 2, color: '#c0c0c0' },
+  { label: '1:1', value: 1.0, color: '#f1c232' },
+  { label: '4:5', value: 0.8, color: '#6aa84f' },
+  { label: '3:4', value: 0.75, color: '#45818e' },
+  { label: '5:4', value: 1.25, color: '#3d85c6' },
+  { label: '9:16', value: 0.5625, color: '#674ea7' },
+  { label: 'Custom', value: undefined, color: '#000000' },
+];
