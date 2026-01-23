@@ -40,6 +40,7 @@ export function MediaManager({
     viewingMediaData,
     isPreviewOpen,
     isUploading,
+    isLoadingBlob,
     setIsPreviewOpen,
     handleViewMedia,
     handlePreviewCancel,
@@ -97,6 +98,7 @@ export function MediaManager({
         isExistingMedia={true}
         mediaData={viewingMediaData}
         isUploading={isUploading}
+        isLoadingBlob={isLoadingBlob}
       />
       {hasNextPage && (
         <div ref={ref} className='flex justify-center p-4'>

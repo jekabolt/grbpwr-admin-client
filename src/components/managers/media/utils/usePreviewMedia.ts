@@ -11,6 +11,7 @@ export function usePreviewMedia() {
   const [viewingMediaData, setViewingMediaData] = useState<common_MediaFull | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isLoadingBlob, setIsLoadingBlob] = useState(false);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const uploadMedia = useUploadMedia();
   const { showMessage } = useSnackBarStore();
@@ -19,27 +20,38 @@ export function usePreviewMedia() {
     const mediaUrl = media.media?.fullSize?.mediaUrl || media.media?.thumbnail?.mediaUrl || '';
     const mediaType = isVideo(mediaUrl) ? 'video' : 'image';
 
-    // For images, fetch as blob to enable cropping without CORS issues
+    // For images, try to fetch as blob to enable cropping
     if (mediaType === 'image') {
+      // First show the preview with direct URL immediately
+      const preview: PreviewItem = {
+        url: mediaUrl,
+        type: mediaType,
+      };
+      setViewingMedia(preview);
+      setViewingMediaData(media);
+      setIsPreviewOpen(true);
+      setIsLoadingBlob(true);
+
+      // Then attempt to fetch as blob in the background
       try {
         const response = await fetch(mediaUrl);
         if (!response.ok) {
-          throw new Error('Failed to fetch media');
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
         const blob = await response.blob();
         const objectUrl = URL.createObjectURL(blob);
         setBlobUrl(objectUrl);
 
-        const preview: PreviewItem = {
+        // Update preview with blob URL
+        setViewingMedia({
           url: objectUrl,
           type: mediaType,
-        };
-        setViewingMedia(preview);
-        setViewingMediaData(media);
-        setIsPreviewOpen(true);
+        });
+        setIsLoadingBlob(false);
       } catch (error) {
-        console.error('Failed to load media:', error);
-        showMessage('Failed to load media for preview', 'error');
+        console.warn('Could not fetch image as blob (CORS restriction):', error);
+        setIsLoadingBlob(false);
+        // Keep showing the direct URL - cropping won't be available
       }
     } else {
       // For videos, use direct URL
@@ -61,6 +73,7 @@ export function usePreviewMedia() {
     setIsPreviewOpen(false);
     setViewingMedia(null);
     setViewingMediaData(null);
+    setIsLoadingBlob(false);
   };
 
   const handlePreviewUpload = async (croppedUrl?: string) => {
@@ -100,6 +113,7 @@ export function usePreviewMedia() {
       setIsPreviewOpen(false);
       setViewingMedia(null);
       setViewingMediaData(null);
+      setIsLoadingBlob(false);
     } catch (error) {
       console.error('Failed to upload cropped media:', error);
 
@@ -129,6 +143,7 @@ export function usePreviewMedia() {
     viewingMediaData,
     isPreviewOpen,
     isUploading,
+    isLoadingBlob,
     setIsPreviewOpen,
     handleViewMedia,
     handlePreviewCancel,

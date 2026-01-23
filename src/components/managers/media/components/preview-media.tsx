@@ -15,6 +15,7 @@ interface PreviewMediaProps {
   isExistingMedia?: boolean;
   mediaData?: common_MediaFull | null;
   isUploading?: boolean;
+  isLoadingBlob?: boolean;
   onOpenChange: (open: boolean) => void;
   onUpload: (croppedUrl?: string) => void;
   onCancel: () => void;
@@ -26,12 +27,17 @@ export function PreviewMedia({
   isExistingMedia = false,
   mediaData,
   isUploading = false,
+  isLoadingBlob = false,
   onOpenChange,
   onUpload,
   onCancel,
 }: PreviewMediaProps) {
   const [isCropperOpen, setIsCropperOpen] = useState(false);
   const [croppedUrl, setCroppedUrl] = useState<string | undefined>(undefined);
+
+  // Check if image can be cropped (blob URL or data URL, not external URL)
+  const canCrop = preview?.url.startsWith('blob:') || preview?.url.startsWith('data:') || false;
+  const isCorsBlocked = isExistingMedia && preview?.type === 'image' && !canCrop && !isLoadingBlob;
 
   useEffect(() => {
     if (!open) {
@@ -91,16 +97,29 @@ export function PreviewMedia({
                 </div>
 
                 {isExistingMedia && mediaData && <MediaInfo media={mediaData} />}
+                
+                {isLoadingBlob && (
+                  <div className='text-sm text-gray-500 text-center'>
+                    Loading image for cropping...
+                  </div>
+                )}
+                
+                {isCorsBlocked && (
+                  <div className='text-sm text-red-500 text-center max-w-md px-4'>
+                    ⚠️ Cropping unavailable: Server blocked cross-origin access. 
+                    Contact admin to enable CORS on files.grbpwr.com
+                  </div>
+                )}
 
                 <div className='flex justify-center items-center gap-6'>
-                  {preview.type === 'image' && (
+                  {preview.type === 'image' && (canCrop || isLoadingBlob) && (
                     <Button
                       size='lg'
                       className='uppercase'
                       onClick={() => setIsCropperOpen(true)}
-                      disabled={!preview || isUploading}
+                      disabled={!preview || isUploading || isLoadingBlob || !canCrop}
                     >
-                      crop
+                      {isLoadingBlob ? 'loading...' : 'crop'}
                     </Button>
                   )}
                   <Button
