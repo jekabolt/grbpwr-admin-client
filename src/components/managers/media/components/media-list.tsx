@@ -11,6 +11,7 @@ interface MediaListProps {
     isSelected: (mediaId: number) => boolean;
   };
   videoSizes: Record<number, VideoSize>;
+  selectionMode?: boolean;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
   onView?: (media: common_MediaFull) => void;
 }
@@ -22,6 +23,7 @@ export function MediaList({
   videoSizes,
   onVideoLoad,
   onView,
+  selectionMode = false,
 }: MediaListProps) {
   return (
     <DragDropArea mediaLength={media.length} className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
@@ -35,6 +37,7 @@ export function MediaList({
           videoSizes={videoSizes}
           onVideoLoad={onVideoLoad}
           onView={onView}
+          selectionMode={selectionMode}
         />
       ))}
     </DragDropArea>

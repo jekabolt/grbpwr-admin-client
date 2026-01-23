@@ -6,7 +6,6 @@ import {
   DialogProps,
   DialogTitle,
   Dialog as MuiDialog,
-  Theme,
   Toolbar,
   useMediaQuery,
 } from '@mui/material';
@@ -32,7 +31,7 @@ export function Dialog({
   fullWidth = false,
   ...props
 }: Props) {
-  const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
+  const isMobile = useMediaQuery('(max-width:600px)');
   return (
     <MuiDialog
       open={open}

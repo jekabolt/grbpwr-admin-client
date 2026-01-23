@@ -10,7 +10,7 @@ interface FilterProps {
 
 export function Filter({ type, order, setType, setOrder }: FilterProps) {
   return (
-    <div className='flex lg:flex-row flex-col gap-2 lg:w-1/2 w-full'>
+    <div className='flex lg:flex-row flex-col gap-2 justify-end w-full'>
       <Selector
         label='Media Type'
         value={type}

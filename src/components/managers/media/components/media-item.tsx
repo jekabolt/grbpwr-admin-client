@@ -18,6 +18,7 @@ interface MediaItemProps {
   onToggle: () => void;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
   onView?: (media: common_MediaFull) => void;
+  selectionMode?: boolean;
 }
 
 export function MediaItem({
@@ -28,6 +29,7 @@ export function MediaItem({
   onToggle,
   onVideoLoad,
   onView,
+  selectionMode = false,
 }: MediaItemProps) {
   const mediaUrl = media.media?.thumbnail?.mediaUrl;
   const deleteMediaMutation = useDeleteMedia();
@@ -47,11 +49,14 @@ export function MediaItem({
   };
 
   const handleClick = (event: React.MouseEvent) => {
-    // Always allow viewing, even when disabled
-    // If shift or ctrl/cmd is held, toggle selection (only if not disabled), otherwise view
-    if (!disabled && (event.shiftKey || event.metaKey || event.ctrlKey)) {
-      handleSelect(event);
-    } else if (onView) {
+    if (selectionMode) {
+      if (!disabled) {
+        handleSelect(event);
+      }
+      return;
+    }
+
+    if (onView) {
       event.stopPropagation();
       onView(media);
     } else if (!disabled) {

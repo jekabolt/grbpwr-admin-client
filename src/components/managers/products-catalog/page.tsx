@@ -5,7 +5,6 @@ import debounce from 'lodash/debounce';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { Layout } from 'ui/layout';
 import Filter from './components/filter';
 import { InfinityScroll } from './components/infinity-scroll';
 import { getProductPagedParans } from './components/utility';
@@ -40,7 +39,7 @@ export default function ProductsCatalog() {
   };
 
   return (
-    <Layout>
+    <>
       <div className='flex flex-col grid gap-10 pb-20'>
         <Filter />
         <InfinityScroll firstItems={products} />
@@ -48,6 +47,6 @@ export default function ProductsCatalog() {
       <Button className='fixed bottom-4 right-4 z-20' size='lg' onClick={handleCreateNewProduct}>
         create new
       </Button>
-    </Layout>
+    </>
   );
 }

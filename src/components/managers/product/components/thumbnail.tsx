@@ -1,5 +1,5 @@
 import { common_MediaFull, common_ProductFull } from 'api/proto-http/admin';
-import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
+import { MediaPreviewWithSelector } from 'components/managers/hero/components/media-preview-with-selector';
 import { useState } from 'react';
 import { Control, useController } from 'react-hook-form';
 import { ProductFormData } from '../utility/schema';
@@ -16,7 +16,7 @@ export function Thumbnail({ product, control }: Props) {
   });
   const [thumbnail, setThumbnail] = useState<common_MediaFull | undefined>();
   const productThumbnail = product?.product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl;
-  const mediaLink = product ? productThumbnail : thumbnail?.media?.thumbnail?.mediaUrl;
+  const mediaLink = thumbnail?.media?.thumbnail?.mediaUrl || productThumbnail;
 
   function handleThumbnail(thumbnail: common_MediaFull[]) {
     if (!thumbnail.length) return;
@@ -27,14 +27,14 @@ export function Thumbnail({ product, control }: Props) {
   return (
     <div className='space-y-2'>
       <label className='text-sm font-medium'>Primary Thumbnail</label>
-      <div className='border border-text'>
-        <SingleMediaViewAndSelect
-          link={mediaLink}
-          hideVideos
-          aspectRatio={['4:5']}
-          saveSelectedMedia={handleThumbnail}
-        />
-      </div>
+      <MediaPreviewWithSelector
+        mediaUrl={mediaLink}
+        aspectRatio={['4:5']}
+        allowMultiple={false}
+        showVideos={false}
+        alt='Thumbnail preview'
+        onSaveMedia={handleThumbnail}
+      />
     </div>
   );
 }

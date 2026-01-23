@@ -10,9 +10,10 @@ import { Form } from 'ui/form';
 import { defaultData, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
 import { MediaAds } from './media-ads';
+import { SecondaryThumbnail } from './secondary-thumbnail';
 import { SizeMeasurements } from './size-measurements';
 import { Tags } from './tags';
-import { ThumbnailsCarousel } from './thumbnails-carousel';
+import { Thumbnail } from './thumbnail';
 import { createProductPayload, mapProductDataToForm, mapProductFullToFormData } from './utils';
 
 type Props = {
@@ -129,7 +130,10 @@ export function ProductForm({
         <div className='space-y-5'>
           <div className='flex flex-col lg:flex-row lg:justify-between lg:items-start gap-5'>
             <div className='w-full lg:w-1/2 space-y-3'>
-              <ThumbnailsCarousel product={product} control={form.control} />
+              <div className='flex flex-col gap-5'>
+                <Thumbnail product={product} control={form.control} />
+                <SecondaryThumbnail product={product} control={form.control} />
+              </div>
               <MediaAds product={product} control={form.control} clearKey={mediaClearKey} />
             </div>
             <div className='w-full lg:w-1/2 space-y-3'>

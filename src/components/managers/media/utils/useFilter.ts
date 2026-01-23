@@ -14,8 +14,9 @@ export function useFilter(
   media?: common_MediaFull[],
   aspectRatio?: string[],
   videoSizes: Record<number, VideoSize> = {},
+  initialType?: FilterType,
 ) {
-  const [type, setType] = useState<FilterType>('all');
+  const [type, setType] = useState<FilterType>(initialType || 'all');
   const [order, setOrder] = useState<SortOrder>('desc');
 
   function matchesTypeFilter(m: common_MediaFull) {

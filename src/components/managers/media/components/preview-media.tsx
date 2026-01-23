@@ -12,23 +12,23 @@ export type PreviewItem = { url: string; type: 'image' | 'video' };
 interface PreviewMediaProps {
   open: boolean;
   preview: PreviewItem | null;
-  onOpenChange: (open: boolean) => void;
-  onUpload: (croppedUrl?: string) => void;
-  onCancel: () => void;
   isExistingMedia?: boolean;
   mediaData?: common_MediaFull | null;
   isUploading?: boolean;
+  onOpenChange: (open: boolean) => void;
+  onUpload: (croppedUrl?: string) => void;
+  onCancel: () => void;
 }
 
 export function PreviewMedia({
   open,
   preview,
-  onOpenChange,
-  onUpload,
-  onCancel,
   isExistingMedia = false,
   mediaData,
   isUploading = false,
+  onOpenChange,
+  onUpload,
+  onCancel,
 }: PreviewMediaProps) {
   const [isCropperOpen, setIsCropperOpen] = useState(false);
   const [croppedUrl, setCroppedUrl] = useState<string | undefined>(undefined);

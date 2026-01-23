@@ -1,7 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
-import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
-import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
+import { MediaPreviewWithSelector } from 'components/managers/hero/components/media-preview-with-selector';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -215,12 +214,11 @@ export function ArchiveForm({ open, archiveId, existingMedia, onClose }: Archive
             <InputField name='tag' placeholder='enter tag' label='tag' />
           </div>
 
-          <SingleMediaViewAndSelect
-            link={imagePreviewUrl}
-            isDeleteAccepted={false}
+          <MediaPreviewWithSelector
+            mediaUrl={imagePreviewUrl}
             aspectRatio={['2:1', '16:9']}
-            aspectOnPreview='2/1'
-            saveSelectedMedia={selectMainMedia}
+            alt='Main media preview'
+            onSaveMedia={selectMainMedia}
           />
 
           {mediaPreview.map((m) => (
@@ -234,13 +232,12 @@ export function ArchiveForm({ open, archiveId, existingMedia, onClose }: Archive
           ))}
 
           <div className='w-full h-auto flex items-center justify-center border border-text'>
-            <MediaSelectorLayout
-              label='select media'
+            <MediaPreviewWithSelector
               aspectRatio={['3:4']}
-              isDeleteAccepted={false}
               allowMultiple={true}
-              saveSelectedMedia={uploadMediaInArchive}
-              hideVideos={true}
+              showVideos={false}
+              alt='Media preview'
+              onSaveMedia={uploadMediaInArchive}
             />
           </div>
 

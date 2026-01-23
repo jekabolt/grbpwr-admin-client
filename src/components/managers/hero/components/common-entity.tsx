@@ -1,9 +1,9 @@
-import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { cn } from 'lib/utility';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { MediaPreviewWithSelector } from './media-preview-with-selector';
 import { Props } from '../utility/interface';
 
 const TRANSLATION_CONFIGS = {
@@ -43,12 +43,6 @@ export function CommonEntity({
     return aspectRatio[orientation];
   };
 
-  const getAspectOnPreview = (orientation: 'Portrait' | 'Landscape') => {
-    const ratios = getAspectRatioFor(orientation);
-    const ratio = ratios[0];
-    // Convert '2:1' to '2/1' for CSS aspect-ratio compatibility
-    return ratio?.replace(':', '/') || '4/5';
-  };
 
   const getTranslationFields = () => {
     if (prefix.includes('.main')) return TRANSLATION_CONFIGS.main;
@@ -90,47 +84,41 @@ export function CommonEntity({
                 <Text className='text-sm font-bold leading-none' variant='uppercase'>
                   landscape
                 </Text>
-                <SingleMediaViewAndSelect
-                  link={landscapeLink}
+                <MediaPreviewWithSelector
+                  mediaUrl={landscapeLink}
                   aspectRatio={getAspectRatioFor('Landscape')}
-                  aspectOnPreview={getAspectOnPreview('Landscape')}
-                  isDeleteAccepted={false}
-                  saveSelectedMedia={(media) => onSaveMedia(media, 'Landscape')}
-                  error={getFieldError(`${prefix}.mediaLandscapeId`)}
-                  isEditMode
+                  allowMultiple={false}
+                  showVideos={false}
+                  alt='Landscape preview'
+                  onSaveMedia={(media) => onSaveMedia(media, 'Landscape')}
                 />
               </div>
               <div className='lg:w-1/2 w-full space-y-2'>
                 <Text className='text-sm font-bold leading-none' variant='uppercase'>
                   portrait
                 </Text>
-                <SingleMediaViewAndSelect
-                  link={portraitLink}
+                <MediaPreviewWithSelector
+                  mediaUrl={portraitLink}
                   aspectRatio={getAspectRatioFor('Portrait')}
-                  aspectOnPreview={getAspectOnPreview('Portrait')}
-                  isDeleteAccepted={false}
-                  saveSelectedMedia={(media) => onSaveMedia(media, 'Portrait')}
-                  error={getFieldError(`${prefix}.mediaPortraitId`)}
-                  isEditMode
+                  allowMultiple={false}
+                  showVideos={false}
+                  alt='Portrait preview'
+                  onSaveMedia={(media) => onSaveMedia(media, 'Portrait')}
                 />
               </div>
             </div>
           ) : (
-            <div className='w-full'>
-              <SingleMediaViewAndSelect
-                link={landscapeLink}
+            <div className='w-full space-y-2'>
+              <MediaPreviewWithSelector
+                mediaUrl={landscapeLink || portraitLink}
                 aspectRatio={['1:1']}
-                aspectOnPreview='1/1'
-                isDeleteAccepted={false}
-                saveSelectedMedia={(media) => {
+                allowMultiple={false}
+                showVideos={false}
+                alt='Media preview'
+                onSaveMedia={(media) => {
                   onSaveMedia(media, 'Landscape');
                   onSaveMedia(media, 'Portrait');
                 }}
-                error={
-                  getFieldError(`${prefix}.mediaLandscapeId`) ||
-                  getFieldError(`${prefix}.mediaPortraitId`)
-                }
-                isEditMode
               />
             </div>
           )}

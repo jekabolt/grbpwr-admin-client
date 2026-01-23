@@ -15,6 +15,9 @@ interface MediaLayoutProps {
   aspectRatio?: string[];
   allowMultiple?: boolean;
   disabled?: boolean;
+  showVideos?: boolean;
+  selectionMode?: boolean;
+  showFilters?: boolean;
   onSelectionChange?: (selectedMedia: common_MediaFull[]) => void;
 }
 
@@ -22,6 +25,9 @@ export function MediaManager({
   aspectRatio,
   allowMultiple,
   disabled,
+  showVideos,
+  selectionMode = false,
+  showFilters = true,
   onSelectionChange,
 }: MediaLayoutProps) {
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteMedia();
@@ -44,6 +50,7 @@ export function MediaManager({
     media,
     aspectRatio,
     videoSizes,
+    showVideos ? undefined : 'image',
   );
 
   const selection = useSelection({
@@ -71,16 +78,15 @@ export function MediaManager({
 
   return (
     <div className='flex flex-col gap-6'>
-      <div className='flex justify-end'>
-        <Filter type={type} order={order} setType={setType} setOrder={setOrder} />
-      </div>
+      {showFilters && <Filter type={type} order={order} setType={setType} setOrder={setOrder} />}
       <MediaList
         media={filteredMedia || []}
         selection={selection}
         disabled={disabled}
         videoSizes={videoSizes}
         onVideoLoad={handleVideoLoad}
-        onView={handleViewMedia}
+        onView={selectionMode ? undefined : handleViewMedia}
+        selectionMode={selectionMode}
       />
       <PreviewMedia
         open={isPreviewOpen}

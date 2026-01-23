@@ -1,15 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { LoginBlock } from 'components/login/login';
+import ProtectedRoute from 'components/login/protectedRoute';
+import { Archives } from 'components/managers/archives';
+import { Archive } from 'components/managers/archives/archive';
+import { ROUTES } from 'constants/routes';
+import { ContextProvider } from 'context';
+import { StoreProvider } from 'lib/stores/store-provider';
 import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Outlet, Route, Routes } from 'react-router-dom';
-
-import { LoginBlock } from 'components/login/login';
-import ProtectedRoute from 'components/login/protectedRoute';
-import { ROUTES } from 'constants/routes';
-import { ContextProvider } from 'context';
-import { StoreProvider } from 'lib/stores/store-provider';
 import { Layout } from 'ui/layout';
 import './global.css';
 
@@ -18,7 +19,7 @@ const Hero = lazy(() =>
   import('components/managers/hero/components').then((m) => ({ default: m.Hero })),
 );
 const MediaManager = lazy(() =>
-  import('components/managers/new-media').then((m) => ({ default: m.MediaManager })),
+  import('components/managers/media').then((m) => ({ default: m.MediaManager })),
 );
 const OrderDetails = lazy(() =>
   import('components/managers/order/page').then((m) => ({ default: m.OrderDetails })),
@@ -111,6 +112,8 @@ root.render(
                     <Route path={ROUTES.settings} element={<Settings />} />
                     <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
                     <Route path={ROUTES.orders} element={<OrdersCatalog />} />
+                    <Route path={ROUTES.singleArchive} element={<Archive />} />
+                    <Route path={ROUTES.archives} element={<Archives />} />
                   </Route>
                 </Routes>
               </Suspense>
