@@ -77,9 +77,9 @@ export function useUploadMedia() {
       }
 
       if (!isVideo) {
-        const rawB64 = trimBeforeBase64(base64);
+        // For images, API expects full data URL format: 'data:image/...;base64,...'
         const response = await adminService.UploadContentImage({
-          rawB64Image: rawB64,
+          rawB64Image: base64,
         });
 
         if (!response.media) {
@@ -89,6 +89,7 @@ export function useUploadMedia() {
         return response.media;
       }
 
+      // For videos, API expects trimmed base64 (without data:video/...;base64, prefix)
       const raw = trimBeforeBase64(base64);
       const response = await adminService.UploadContentVideo({
         raw,
