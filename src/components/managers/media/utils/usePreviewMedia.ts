@@ -32,8 +32,18 @@ export function usePreviewMedia() {
   };
 
   const handlePreviewUpload = async (croppedUrl?: string) => {
-    if (!croppedUrl || !viewingMedia) {
-      showMessage('No cropped media to upload', 'error');
+    if (!croppedUrl) {
+      showMessage('Please crop the image before uploading', 'error');
+      return;
+    }
+
+    if (!viewingMedia) {
+      showMessage('No media selected', 'error');
+      return;
+    }
+
+    if (!croppedUrl.startsWith('data:')) {
+      showMessage('Invalid cropped image format', 'error');
       return;
     }
 

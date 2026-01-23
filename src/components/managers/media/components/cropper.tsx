@@ -1,5 +1,6 @@
 import { ASPECT_RATIOS } from 'constants/constants';
 import getCroppedImg from 'lib/features/getCropped';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { FC, useState } from 'react';
 import { Area } from 'react-easy-crop';
@@ -19,6 +20,7 @@ export const MediaCropper: FC<CropperInterface> = ({
   saveCroppedImage,
   onCancel,
 }) => {
+  const { showMessage } = useSnackBarStore();
   const [aspect, setAspect] = useState<number | undefined>(4 / 5);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [customCropData, setCustomCropData] = useState<{
@@ -59,9 +61,15 @@ export const MediaCropper: FC<CropperInterface> = ({
         saveCroppedImage(croppedImage);
       } else {
         console.warn('No crop data available');
+        showMessage('Please adjust the crop area before saving', 'error');
       }
     } catch (error) {
       console.error('Error cropping image:', error);
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Failed to crop image. This may be due to CORS restrictions or an invalid image.';
+      showMessage(errorMessage, 'error');
     }
   };
 

@@ -16,6 +16,7 @@ export function DragDropArea({
   const [isDragging, setIsDragging] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewItem | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const uploadMedia = useUploadMedia();
 
   useEffect(
@@ -76,7 +77,9 @@ export function DragDropArea({
   };
 
   const handleUpload = async (croppedUrl?: string) => {
-    if (!pendingFile) return;
+    if (!pendingFile || isUploading) return;
+
+    setIsUploading(true);
 
     try {
       let fileToUpload = pendingFile;
@@ -93,6 +96,8 @@ export function DragDropArea({
       setPreview(null);
     } catch (e) {
       console.error('upload failed:', e);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -131,6 +136,7 @@ export function DragDropArea({
         preview={preview}
         onUpload={handleUpload}
         onCancel={handleCancel}
+        isUploading={isUploading}
       />
 
       {isDragging && (

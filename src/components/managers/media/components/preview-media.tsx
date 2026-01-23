@@ -41,16 +41,25 @@ export function PreviewMedia({
   }, [open]);
 
   const handleUploadClick = () => {
+    if (isUploading) return;
     onUpload(croppedUrl);
   };
 
   const handleCancelClick = () => {
+    if (isUploading) return;
     onCancel();
     onOpenChange(false);
   };
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(open) => {
+        if (!isUploading) {
+          onOpenChange(open);
+        }
+      }}
+    >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/80' />
         <DialogPrimitive.Content
@@ -89,12 +98,16 @@ export function PreviewMedia({
                       size='lg'
                       className='uppercase'
                       onClick={() => setIsCropperOpen(true)}
-                      disabled={!preview}
+                      disabled={!preview || isUploading}
                     >
                       crop
                     </Button>
                   )}
-                  <Button className='absolute right-1 top-1 px-1 py-1' onClick={handleCancelClick}>
+                  <Button
+                    className='absolute right-1 top-1 px-1 py-1'
+                    onClick={handleCancelClick}
+                    disabled={isUploading}
+                  >
                     x
                   </Button>
                   {(!isExistingMedia || croppedUrl) && (
