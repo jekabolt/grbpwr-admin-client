@@ -13,7 +13,7 @@ interface MediaListProps {
   videoSizes: Record<number, VideoSize>;
   selectionMode?: boolean;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
-  onView?: (media: common_MediaFull) => void;
+  onView?: (media: common_MediaFull) => void | Promise<void>;
 }
 
 export function MediaList({

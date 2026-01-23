@@ -1,7 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PreviewItem } from '../components/preview-media';
 import { dataUrlToFile } from './dataUrlToFile';
 import { useUploadMedia } from './useUploadMedia';
@@ -11,21 +11,53 @@ export function usePreviewMedia() {
   const [viewingMediaData, setViewingMediaData] = useState<common_MediaFull | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const uploadMedia = useUploadMedia();
   const { showMessage } = useSnackBarStore();
 
-  const handleViewMedia = (media: common_MediaFull) => {
+  const handleViewMedia = async (media: common_MediaFull) => {
     const mediaUrl = media.media?.fullSize?.mediaUrl || media.media?.thumbnail?.mediaUrl || '';
-    const preview: PreviewItem = {
-      url: mediaUrl,
-      type: isVideo(mediaUrl) ? 'video' : 'image',
-    };
-    setViewingMedia(preview);
-    setViewingMediaData(media);
-    setIsPreviewOpen(true);
+    const mediaType = isVideo(mediaUrl) ? 'video' : 'image';
+
+    // For images, fetch as blob to enable cropping without CORS issues
+    if (mediaType === 'image') {
+      try {
+        const response = await fetch(mediaUrl);
+        if (!response.ok) {
+          throw new Error('Failed to fetch media');
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+
+        const preview: PreviewItem = {
+          url: objectUrl,
+          type: mediaType,
+        };
+        setViewingMedia(preview);
+        setViewingMediaData(media);
+        setIsPreviewOpen(true);
+      } catch (error) {
+        console.error('Failed to load media:', error);
+        showMessage('Failed to load media for preview', 'error');
+      }
+    } else {
+      // For videos, use direct URL
+      const preview: PreviewItem = {
+        url: mediaUrl,
+        type: mediaType,
+      };
+      setViewingMedia(preview);
+      setViewingMediaData(media);
+      setIsPreviewOpen(true);
+    }
   };
 
   const handlePreviewCancel = () => {
+    if (blobUrl) {
+      URL.revokeObjectURL(blobUrl);
+      setBlobUrl(null);
+    }
     setIsPreviewOpen(false);
     setViewingMedia(null);
     setViewingMediaData(null);
@@ -61,6 +93,10 @@ export function usePreviewMedia() {
 
       showMessage('MEDIA IS UPLOADED', 'success');
 
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        setBlobUrl(null);
+      }
       setIsPreviewOpen(false);
       setViewingMedia(null);
       setViewingMediaData(null);
@@ -78,6 +114,15 @@ export function usePreviewMedia() {
       setIsUploading(false);
     }
   };
+
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    };
+  }, [blobUrl]);
 
   return {
     viewingMedia,

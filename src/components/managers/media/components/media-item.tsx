@@ -17,7 +17,7 @@ interface MediaItemProps {
   videoSizes: Record<number, VideoSize>;
   onToggle: () => void;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
-  onView?: (media: common_MediaFull) => void;
+  onView?: (media: common_MediaFull) => void | Promise<void>;
   selectionMode?: boolean;
 }
 
