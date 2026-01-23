@@ -3,7 +3,6 @@ import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { PreviewItem } from '../components/preview-media';
-import { dataUrlToFile } from './dataUrlToFile';
 import { useUploadMedia } from './useUploadMedia';
 
 export function usePreviewMedia() {
@@ -95,14 +94,8 @@ export function usePreviewMedia() {
     setIsUploading(true);
 
     try {
-      const extension = viewingMedia.type === 'video' ? 'mp4' : 'jpg';
-      const fileName = viewingMediaData?.id
-        ? `cropped-media-${viewingMediaData.id}.${extension}`
-        : `cropped-media.${extension}`;
-
-      const fileToUpload = dataUrlToFile(croppedUrl, fileName);
-
-      await uploadMedia.mutateAsync(fileToUpload);
+      // Use the uploadMedia hook which now accepts data URL strings
+      await uploadMedia.mutateAsync(croppedUrl);
 
       showMessage('MEDIA IS UPLOADED', 'success');
 
