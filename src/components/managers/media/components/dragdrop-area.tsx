@@ -14,19 +14,23 @@ export function DragDropArea({
   className?: string;
 }) {
   const [isDragging, setIsDragging] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<PreviewItem | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<PreviewItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const uploadMedia = useUploadMedia();
 
-  useEffect(
-    () => () => {
-      if (preview) {
-        URL.revokeObjectURL(preview.url);
-      }
-    },
-    [preview],
-  );
+  // Cleanup blob URLs only on component unmount
+  // Individual files handle their own URL cleanup when removed
+  useEffect(() => {
+    return () => {
+      previews.forEach((p) => {
+        if (p.url.startsWith('blob:')) {
+          URL.revokeObjectURL(p.url);
+        }
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -62,38 +66,40 @@ export function DragDropArea({
 
     if (!files.length) return;
 
-    if (preview) {
-      URL.revokeObjectURL(preview.url);
-    }
+    previews.forEach((p) => URL.revokeObjectURL(p.url));
 
-    const file = files[0];
-    const nextPreview: PreviewItem = {
+    const nextPreviews: PreviewItem[] = files.map((file) => ({
       url: URL.createObjectURL(file),
       type: (file.type.startsWith('video/') ? 'video' : 'image') as PreviewItem['type'],
-    };
+    }));
 
-    setPendingFile(file);
-    setPreview(nextPreview);
+    setPendingFiles(files);
+    setPreviews(nextPreviews);
   };
 
-  const handleUpload = async (croppedUrl?: string) => {
-    if (!pendingFile || isUploading) return;
-
+  const handleUpload = async (index: number, croppedUrl?: string) => {
+    if (!pendingFiles.length || isUploading || index < 0 || index >= pendingFiles.length) return;
     setIsUploading(true);
-
     try {
-      let fileToUpload = pendingFile;
+      const file = pendingFiles[index];
+      let fileToUpload = file;
 
       if (croppedUrl) {
-        fileToUpload = dataUrlToFile(croppedUrl, pendingFile.name);
+        fileToUpload = dataUrlToFile(croppedUrl, file.name);
       }
 
       await uploadMedia.mutateAsync(fileToUpload);
-      if (preview) {
-        URL.revokeObjectURL(preview.url);
+
+      // Revoke the URL for the uploaded file before removing
+      if (previews[index]?.url) {
+        URL.revokeObjectURL(previews[index].url);
       }
-      setPendingFile(null);
-      setPreview(null);
+
+      // Remove the uploaded file from the arrays
+      setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+      setPreviews((prev) => prev.filter((_, i) => i !== index));
+
+      // If no more files, the preview will close automatically
     } catch (e) {
       console.error('upload failed:', e);
     } finally {
@@ -102,11 +108,9 @@ export function DragDropArea({
   };
 
   const handleCancel = () => {
-    if (preview) {
-      URL.revokeObjectURL(preview.url);
-    }
-    setPendingFile(null);
-    setPreview(null);
+    previews.forEach((p) => URL.revokeObjectURL(p.url));
+    setPendingFiles([]);
+    setPreviews([]);
   };
 
   return (
@@ -120,21 +124,21 @@ export function DragDropArea({
     >
       {children}
 
-      {mediaLength === 0 && !preview && (
+      {mediaLength === 0 && !previews.length && (
         <div className='col-span-2 lg:col-span-4 flex items-center justify-center text-gray-400'>
           dragdrop here
         </div>
       )}
 
       <PreviewMedia
-        open={!!preview}
+        open={previews.length > 0}
         onOpenChange={(open) => {
           if (!open) {
             handleCancel();
           }
         }}
-        preview={preview}
-        onUpload={handleUpload}
+        previews={previews}
+        onUpload={(index, croppedUrl) => handleUpload(index, croppedUrl)}
         onCancel={handleCancel}
         isUploading={isUploading}
       />

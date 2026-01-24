@@ -2,7 +2,7 @@ import { ASPECT_RATIOS } from 'constants/constants';
 import getCroppedImg from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { FC, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 import { Area } from 'react-easy-crop';
 import { PixelCrop } from 'react-image-crop';
 import { Button } from 'ui/components/button';
@@ -27,6 +27,15 @@ export const MediaCropper: FC<CropperInterface> = ({
     crop: PixelCrop;
     imgRef: HTMLImageElement;
   } | null>(null);
+
+  // Reset crop state when selectedFile changes
+  useEffect(() => {
+    if (selectedFile) {
+      setCroppedAreaPixels(null);
+      setCustomCropData(null);
+      setAspect(4 / 5);
+    }
+  }, [selectedFile]);
 
   const convertPixelCropToArea = (image: HTMLImageElement, crop: PixelCrop): Area => {
     const naturalWidth = image.naturalWidth;
@@ -92,11 +101,13 @@ export const MediaCropper: FC<CropperInterface> = ({
           <div className='w-[500px] h-[400px]'>
             {aspect === undefined ? (
               <CustomCrop
+                key={selectedFile}
                 selectedFile={selectedFile}
                 onCropComplete={(crop, imgRef) => setCustomCropData({ crop, imgRef })}
               />
             ) : (
               <PresetCrop
+                key={`${selectedFile}-${aspect}`}
                 selectedFile={selectedFile}
                 aspect={aspect}
                 onCropComplete={(croppedAreaPixels: Area) =>

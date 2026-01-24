@@ -26,7 +26,6 @@ async function fileToDataUrl(file: File): Promise<string> {
 }
 
 function getDataUrlSize(dataUrl: string): number {
-  // Estimate size from base64: base64 is ~33% larger than binary
   const base64Data = dataUrl.split('base64,')[1] || '';
   return Math.floor((base64Data.length * 3) / 4);
 }
@@ -36,7 +35,7 @@ function getContentTypeFromDataUrl(dataUrl: string): string {
   return match ? match[1] : 'image/jpeg';
 }
 
-export type UploadMediaInput = File | string; // File or data URL string
+export type UploadMediaInput = File | string;
 
 export function useUploadMedia() {
   const queryClient = useQueryClient();
@@ -77,7 +76,6 @@ export function useUploadMedia() {
       }
 
       if (!isVideo) {
-        // For images, API expects full data URL format: 'data:image/...;base64,...'
         const response = await adminService.UploadContentImage({
           rawB64Image: base64,
         });
@@ -89,7 +87,6 @@ export function useUploadMedia() {
         return response.media;
       }
 
-      // For videos, API expects trimmed base64 (without data:video/...;base64, prefix)
       const raw = trimBeforeBase64(base64);
       const response = await adminService.UploadContentVideo({
         raw,
