@@ -61,7 +61,6 @@ export const MediaCropper: FC<CropperInterface> = ({
       const format = selectedFile.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
 
       if (aspect === undefined && customCropData) {
-        // Convert PixelCrop to Area format and use the utility
         const area = convertPixelCropToArea(customCropData.imgRef, customCropData.crop);
         const croppedImage = await getCroppedImg(selectedFile, area, undefined, format);
         saveCroppedImage(croppedImage);
@@ -92,8 +91,8 @@ export const MediaCropper: FC<CropperInterface> = ({
 
   return (
     <>
-      <Button className='absolute right-1 top-1 px-1 py-1 cursor-pointer' onClick={onCancel}>
-        x
+      <Button className='absolute right-1 top-1 py-1 cursor-pointer' onClick={onCancel}>
+        [x]
       </Button>
 
       <div className='w-full h-full flex flex-col items-center justify-center gap-4'>
@@ -134,6 +133,7 @@ export const MediaCropper: FC<CropperInterface> = ({
         </div>
         <Button
           size='lg'
+          className='uppercase'
           onClick={handleSave}
           disabled={
             (aspect === undefined && !customCropData) ||

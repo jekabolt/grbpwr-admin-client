@@ -67,7 +67,7 @@ export function PendingMediaPlate({
           ) : (
             <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
               {previews.map((preview, id) => (
-                <div key={id} className='relative flex flex-col border border-text'>
+                <div key={id} className='relative flex flex-col gap-2'>
                   <Button
                     className='absolute right-0 top-0 leading-none z-10 py-1 cursor-pointer'
                     onClick={() => onRemove(id)}
@@ -75,7 +75,7 @@ export function PendingMediaPlate({
                   >
                     [x]
                   </Button>
-                  <div className='w-full h-64 overflow-hidden'>
+                  <div className='w-full h-64 overflow-hidden  border border-text'>
                     <Media
                       src={preview.url || croppedUrls[id]}
                       alt={preview.url}
@@ -89,7 +89,7 @@ export function PendingMediaPlate({
                     <Button
                       size='lg'
                       onClick={() => setCroppingIndex(id)}
-                      className='uppercase cursor-pointer'
+                      className='uppercase cursor-pointer w-full'
                       disabled={uploadingIndices.has(id)}
                     >
                       crop
@@ -97,7 +97,7 @@ export function PendingMediaPlate({
                     <Button
                       size='lg'
                       onClick={() => onUpload(id, croppedUrls[id])}
-                      className='uppercase cursor-pointer'
+                      className='uppercase cursor-pointer w-full'
                       disabled={uploadingIndices.has(id)}
                     >
                       upload

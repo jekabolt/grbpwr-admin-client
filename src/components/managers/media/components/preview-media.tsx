@@ -105,11 +105,11 @@ export function PreviewMedia({
                   </Button>
                 )}
                 <Button
-                  className='absolute right-1 top-1 px-1 py-1'
+                  className='absolute right-1 top-1 py-1'
                   onClick={handleCancelClick}
                   disabled={isUploading}
                 >
-                  x
+                  [x]
                 </Button>
                 <Button
                   size='lg'
