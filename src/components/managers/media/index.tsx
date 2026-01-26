@@ -20,6 +20,7 @@ interface MediaLayoutProps {
   showVideos?: boolean;
   selectionMode?: boolean;
   showFilters?: boolean;
+
   onSelectionChange?: (selectedMedia: common_MediaFull[]) => void;
 }
 
@@ -30,6 +31,7 @@ export function MediaManager({
   showVideos,
   selectionMode = false,
   showFilters = true,
+
   onSelectionChange,
 }: MediaLayoutProps) {
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteMedia();
@@ -106,6 +108,7 @@ export function MediaManager({
         onView={selectionMode ? undefined : handleViewMedia}
         selectionMode={selectionMode}
         pendingFilesHook={pendingFilesHook}
+        showAddButton={!selectionMode}
       />
       <PreviewMedia
         open={isPreviewOpen}

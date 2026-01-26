@@ -14,6 +14,7 @@ interface MediaListProps {
   videoSizes: Record<number, VideoSize>;
   selectionMode?: boolean;
   pendingFilesHook: ReturnType<typeof usePendingFiles>;
+  showAddButton?: boolean;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
   onView?: (media: common_MediaFull) => void | Promise<void>;
 }
@@ -25,6 +26,7 @@ export function MediaList({
   videoSizes,
   selectionMode = false,
   pendingFilesHook,
+  showAddButton = false,
   onVideoLoad,
   onView,
 }: MediaListProps) {
@@ -33,6 +35,7 @@ export function MediaList({
       mediaLength={media.length}
       className='grid grid-cols-2 lg:grid-cols-4 gap-4'
       pendingFilesHook={pendingFilesHook}
+      showAddButton={showAddButton}
     >
       {media.map((m) => (
         <MediaItem

@@ -8,11 +8,13 @@ export function DragDropArea({
   mediaLength,
   className,
   pendingFilesHook,
+  showAddButton = false,
 }: {
   children: React.ReactNode;
   mediaLength: number;
   className?: string;
   pendingFilesHook: ReturnType<typeof usePendingFiles>;
+  showAddButton?: boolean;
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const { previews, addFiles } = pendingFilesHook;
@@ -98,9 +100,11 @@ export function DragDropArea({
           <div>dragdrop here</div>
         </div>
       )}
-      <Button onClick={handleAddButtonClick} size='lg' className='fixed bottom-2 right-2 z-50'>
-        add
-      </Button>
+      {showAddButton && (
+        <Button onClick={handleAddButtonClick} size='lg' className='fixed bottom-2 right-2 z-50'>
+          add
+        </Button>
+      )}
 
       {isDragging && (
         <div className='absolute inset-0 bg-inactive/90 flex items-center justify-center pointer-events-none z-10' />
