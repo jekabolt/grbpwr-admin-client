@@ -1,5 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { VideoSize } from '..';
+import { usePendingFiles } from '../utils/usePendingFiles';
 import { DragDropArea } from './dragdrop-area';
 import { MediaItem } from './media-item';
 
@@ -12,6 +13,7 @@ interface MediaListProps {
   };
   videoSizes: Record<number, VideoSize>;
   selectionMode?: boolean;
+  pendingFilesHook: ReturnType<typeof usePendingFiles>;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
   onView?: (media: common_MediaFull) => void | Promise<void>;
 }
@@ -21,12 +23,17 @@ export function MediaList({
   selection,
   disabled = false,
   videoSizes,
+  selectionMode = false,
+  pendingFilesHook,
   onVideoLoad,
   onView,
-  selectionMode = false,
 }: MediaListProps) {
   return (
-    <DragDropArea mediaLength={media.length} className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
+    <DragDropArea
+      mediaLength={media.length}
+      className='grid grid-cols-2 lg:grid-cols-4 gap-4'
+      pendingFilesHook={pendingFilesHook}
+    >
       {media.map((m) => (
         <MediaItem
           key={m.id}

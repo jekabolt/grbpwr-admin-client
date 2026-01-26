@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Filter } from './components/filter';
 import { MediaList } from './components/media-list';
+import { PendingMediaPlate } from './components/pending-media-plate';
 import { PreviewMedia } from './components/preview-media';
 import { useFilter } from './utils/useFilter';
 import { useInfiniteMedia } from './utils/useMediaQuery';
+import { usePendingFiles } from './utils/usePendingFiles';
 import { usePreviewMedia } from './utils/usePreviewMedia';
 import { useSelection } from './utils/useSelectMedia';
 
@@ -34,6 +36,8 @@ export function MediaManager({
   const { ref, inView } = useInView();
   const media = data?.pages.flatMap((page) => page.media as common_MediaFull[]) || [];
   const [videoSizes, setVideoSizes] = useState<Record<number, VideoSize>>({});
+
+  const pendingFilesHook = usePendingFiles();
 
   const {
     viewingMedia,
@@ -79,7 +83,20 @@ export function MediaManager({
 
   return (
     <div className='flex flex-col gap-6'>
-      {showFilters && <Filter type={type} order={order} setType={setType} setOrder={setOrder} />}
+      <div className='flex lg:flex-row flex-col lg:justify-betwenn'>
+        {pendingFilesHook.previews.length > 0 && (
+          <PendingMediaPlate
+            previews={pendingFilesHook.previews}
+            croppedUrls={pendingFilesHook.croppedUrls}
+            uploadingIndices={pendingFilesHook.uploadingIndices}
+            onUpload={pendingFilesHook.handleUpload}
+            onCrop={pendingFilesHook.setCroppedUrl}
+            onRemove={pendingFilesHook.removeFile}
+          />
+        )}
+        {showFilters && <Filter type={type} order={order} setType={setType} setOrder={setOrder} />}
+      </div>
+
       <MediaList
         media={filteredMedia || []}
         selection={selection}
@@ -88,6 +105,7 @@ export function MediaManager({
         onVideoLoad={handleVideoLoad}
         onView={selectionMode ? undefined : handleViewMedia}
         selectionMode={selectionMode}
+        pendingFilesHook={pendingFilesHook}
       />
       <PreviewMedia
         open={isPreviewOpen}
@@ -100,9 +118,10 @@ export function MediaManager({
         isUploading={isUploading}
         isLoadingBlob={isLoadingBlob}
       />
+
       {hasNextPage && (
         <div ref={ref} className='flex justify-center p-4'>
-          {isFetchingNextPage && <div>Loading more media...</div>}
+          {isFetchingNextPage && <div>loading more media...</div>}
         </div>
       )}
     </div>
