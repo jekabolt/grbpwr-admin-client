@@ -11,6 +11,7 @@ interface PendingMediaPlateProps {
   croppedUrls: Record<number, string>;
   uploadingIndices: Set<number>;
   onUpload: (index: number, croppedUrl?: string) => void;
+  onUploadAll: () => void;
   onCrop: (index: number, croppedUrl: string) => void;
   onRemove: (index: number) => void;
 }
@@ -20,6 +21,7 @@ export function PendingMediaPlate({
   croppedUrls,
   uploadingIndices,
   onUpload,
+  onUploadAll,
   onCrop,
   onRemove,
 }: PendingMediaPlateProps) {
@@ -35,6 +37,13 @@ export function PendingMediaPlate({
   useEffect(() => {
     if (previews.length > 0) {
       setIsOPen(true);
+    }
+  }, [previews.length]);
+
+  useEffect(() => {
+    if (previews.length === 0) {
+      setIsOPen(false);
+      setCroppingIndex(null);
     }
   }, [previews.length]);
 
@@ -55,6 +64,18 @@ export function PendingMediaPlate({
             'fixed left-[50%] top-[50%] z-50 w-[90vw] max-w-[1200px] max-h-[90vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] bg-white pt-8 pb-5 px-6',
           )}
         >
+          {previews.length > 0 && (
+            <div className='flex justify-end mb-4'>
+              <Button
+                size='lg'
+                className='uppercase cursor-pointer'
+                onClick={onUploadAll}
+                disabled={previews.length === 0 || uploadingIndices.size > 0}
+              >
+                upload all
+              </Button>
+            </div>
+          )}
           {croppingIndex !== null && currentCroppingItem?.type === 'image' ? (
             <MediaCropper
               key={`${croppingIndex}-${currentCroppingItem.url}`}

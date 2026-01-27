@@ -138,6 +138,34 @@ export function usePendingFiles() {
     }
   };
 
+  const handleUploadAll = async () => {
+    if (!pendingFiles.length) return;
+
+    const itemsToUpload = [...pendingFiles];
+
+    setUploadingIds(new Set(itemsToUpload.map((item) => item.id)));
+
+    try {
+      for (let i = 0; i < itemsToUpload.length; i += 1) {
+        const fileItem = itemsToUpload[i];
+        const fileToUpload = fileItem.file;
+        // eslint-disable-next-line no-await-in-loop
+        await uploadMedia.mutateAsync(fileToUpload);
+      }
+    } catch (e) {
+      console.error('bulk upload failed:', e);
+    } finally {
+      itemsToUpload.forEach((item) => {
+        if (item.preview.url && item.preview.url.startsWith('blob:')) {
+          URL.revokeObjectURL(item.preview.url);
+        }
+      });
+      setUploadingIds(new Set());
+      setPendingFiles([]);
+      setCroppedUrls({});
+    }
+  };
+
   const setCroppedUrl = (index: number, croppedUrl: string) => {
     setCroppedUrls((prev) => ({ ...prev, [index]: croppedUrl }));
   };
@@ -160,6 +188,7 @@ export function usePendingFiles() {
     croppedUrls,
     uploadingIndices,
     handleUpload,
+    handleUploadAll,
     setCroppedUrl,
     removeFile,
     removeFileById,
