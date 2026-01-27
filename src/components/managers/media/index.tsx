@@ -91,7 +91,6 @@ export function MediaManager({
             previews={pendingFilesHook.previews}
             croppedUrls={pendingFilesHook.croppedUrls}
             uploadingIndices={pendingFilesHook.uploadingIndices}
-            onUpload={pendingFilesHook.handleUpload}
             onUploadAll={pendingFilesHook.handleUploadAll}
             onCrop={pendingFilesHook.setCroppedUrl}
             onRemove={pendingFilesHook.removeFile}

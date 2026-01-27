@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { PreviewItem } from '../components/preview-media';
 import { dataUrlToFile } from './dataUrlToFile';
 import { useUploadMedia } from './useUploadMedia';
-import { PreviewItem } from '../components/preview-media';
 
 type PendingFileItem = {
   id: string;
@@ -12,19 +12,19 @@ type PendingFileItem = {
 export function usePendingFiles() {
   const [pendingFiles, setPendingFiles] = useState<PendingFileItem[]>([]);
   const [uploadingIds, setUploadingIds] = useState<Set<string>>(new Set());
-  const [croppedUrls, setCroppedUrls] = useState<Record<number, string>>({});
-  const previewsRef = useRef<PreviewItem[]>([]);
+  const [croppedById, setCroppedById] = useState<Record<string, string>>({});
+  const previewsRef = useRef<PendingFileItem[]>([]);
   const uploadMedia = useUploadMedia();
 
   useEffect(() => {
-    previewsRef.current = pendingFiles.map((item) => item.preview);
+    previewsRef.current = pendingFiles;
   }, [pendingFiles]);
 
   useEffect(() => {
     return () => {
-      previewsRef.current.forEach((p) => {
-        if (p.url.startsWith('blob:')) {
-          URL.revokeObjectURL(p.url);
+      previewsRef.current.forEach((item) => {
+        if (item.preview.url.startsWith('blob:')) {
+          URL.revokeObjectURL(item.preview.url);
         }
       });
     };
@@ -43,99 +43,55 @@ export function usePendingFiles() {
   };
 
   const removeFileById = (id: string) => {
-    const index = pendingFiles.findIndex((p) => p.id === id);
-    if (index < 0) return;
-    
-    const item = pendingFiles[index];
-    if (item?.preview.url) {
-      URL.revokeObjectURL(item.preview.url);
-    }
-    setUploadingIds((prev) => {
-      const newSet = new Set(prev);
-      newSet.delete(id);
-      return newSet;
+    setPendingFiles((prev) => {
+      const index = prev.findIndex((p) => p.id === id);
+      if (index < 0) return prev;
+
+      const item = prev[index];
+      if (item?.preview.url) {
+        URL.revokeObjectURL(item.preview.url);
+      }
+
+      setUploadingIds((prevIds) => {
+        const newSet = new Set(prevIds);
+        newSet.delete(id);
+        return newSet;
+      });
+
+      setCroppedById((prevCropped) => {
+        if (!prevCropped[id]) return prevCropped;
+        const next = { ...prevCropped };
+        delete next[id];
+        return next;
+      });
+
+      return prev.filter((p) => p.id !== id);
     });
-    setPendingFiles((prev) => prev.filter((p) => p.id !== id));
-    shiftCroppedUrls(index);
   };
 
   const removeFile = (index: number) => {
     if (index < 0 || index >= pendingFiles.length) return;
     const item = pendingFiles[index];
-    if (item?.preview.url) {
+    if (!item) return;
+
+    if (item.preview.url) {
       URL.revokeObjectURL(item.preview.url);
     }
+
     setUploadingIds((prevIds) => {
       const newSet = new Set(prevIds);
       newSet.delete(item.id);
       return newSet;
     });
+
+    setCroppedById((prevCropped) => {
+      if (!prevCropped[item.id]) return prevCropped;
+      const next = { ...prevCropped };
+      delete next[item.id];
+      return next;
+    });
+
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
-    shiftCroppedUrls(index);
-  };
-
-  const setUploadingIndex = (index: number | null) => {
-    if (index === null) {
-      setUploadingIds(new Set());
-    } else {
-      setPendingFiles((prev) => {
-        if (index >= 0 && index < prev.length) {
-          setUploadingIds((prevIds) => new Set(prevIds).add(prev[index].id));
-        }
-        return prev;
-      });
-    }
-  };
-
-  const clearUploadingById = (id: string) => {
-    setUploadingIds((prev) => {
-      const newSet = new Set(prev);
-      newSet.delete(id);
-      return newSet;
-    });
-  };
-
-  const isUploading = (index: number) => {
-    if (index < 0 || index >= pendingFiles.length) return false;
-    return uploadingIds.has(pendingFiles[index].id);
-  };
-
-  const shiftCroppedUrls = (removedIndex: number) => {
-    setCroppedUrls((prev) => {
-      const newUrls = { ...prev };
-      delete newUrls[removedIndex];
-      const shifted: Record<number, string> = {};
-      Object.keys(newUrls).forEach((key) => {
-        const oldIndex = parseInt(key, 10);
-        if (oldIndex > removedIndex) {
-          shifted[oldIndex - 1] = newUrls[oldIndex];
-        } else if (oldIndex < removedIndex) {
-          shifted[oldIndex] = newUrls[oldIndex];
-        }
-      });
-      return shifted;
-    });
-  };
-
-  const handleUpload = async (index: number, croppedUrl?: string) => {
-    if (!pendingFiles.length || index < 0 || index >= pendingFiles.length) return;
-
-    const fileItem = pendingFiles[index];
-    if (!fileItem || isUploading(index)) return;
-
-    const fileId = fileItem.id;
-    setUploadingIndex(index);
-    try {
-      const fileToUpload = croppedUrl
-        ? dataUrlToFile(croppedUrl, fileItem.file.name)
-        : fileItem.file;
-      await uploadMedia.mutateAsync(fileToUpload);
-      clearUploadingById(fileId);
-      removeFileById(fileId);
-    } catch (e) {
-      console.error('upload failed:', e);
-      clearUploadingById(fileId);
-    }
   };
 
   const handleUploadAll = async () => {
@@ -148,30 +104,42 @@ export function usePendingFiles() {
     try {
       for (let i = 0; i < itemsToUpload.length; i += 1) {
         const fileItem = itemsToUpload[i];
-        const fileToUpload = fileItem.file;
+        const croppedUrl = croppedById[fileItem.id];
+        const fileToUpload = croppedUrl
+          ? dataUrlToFile(croppedUrl, fileItem.file.name)
+          : fileItem.file;
         // eslint-disable-next-line no-await-in-loop
         await uploadMedia.mutateAsync(fileToUpload);
+        removeFileById(fileItem.id);
       }
     } catch (e) {
       console.error('bulk upload failed:', e);
     } finally {
-      itemsToUpload.forEach((item) => {
-        if (item.preview.url && item.preview.url.startsWith('blob:')) {
-          URL.revokeObjectURL(item.preview.url);
-        }
-      });
       setUploadingIds(new Set());
-      setPendingFiles([]);
-      setCroppedUrls({});
     }
   };
 
   const setCroppedUrl = (index: number, croppedUrl: string) => {
-    setCroppedUrls((prev) => ({ ...prev, [index]: croppedUrl }));
+    setCroppedById((prev) => {
+      const item = pendingFiles[index];
+      if (!item) return prev;
+      return { ...prev, [item.id]: croppedUrl };
+    });
   };
 
   const previews = useMemo(() => pendingFiles.map((item) => item.preview), [pendingFiles]);
   const files = useMemo(() => pendingFiles.map((item) => item.file), [pendingFiles]);
+
+  const croppedUrls = useMemo(() => {
+    const byIndex: Record<number, string> = {};
+    pendingFiles.forEach((item, index) => {
+      const url = croppedById[item.id];
+      if (url) {
+        byIndex[index] = url;
+      }
+    });
+    return byIndex;
+  }, [pendingFiles, croppedById]);
 
   const uploadingIndices = useMemo(() => {
     return new Set(
@@ -187,7 +155,6 @@ export function usePendingFiles() {
     pendingFileItems: pendingFiles,
     croppedUrls,
     uploadingIndices,
-    handleUpload,
     handleUploadAll,
     setCroppedUrl,
     removeFile,

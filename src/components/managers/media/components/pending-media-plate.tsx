@@ -10,7 +10,6 @@ interface PendingMediaPlateProps {
   previews: PreviewItem[];
   croppedUrls: Record<number, string>;
   uploadingIndices: Set<number>;
-  onUpload: (index: number, croppedUrl?: string) => void;
   onUploadAll: () => void;
   onCrop: (index: number, croppedUrl: string) => void;
   onRemove: (index: number) => void;
@@ -20,12 +19,12 @@ export function PendingMediaPlate({
   previews,
   croppedUrls,
   uploadingIndices,
-  onUpload,
   onUploadAll,
   onCrop,
   onRemove,
 }: PendingMediaPlateProps) {
-  const [isOpen, setIsOPen] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [hasUserClosed, setHasUserClosed] = useState(false);
   const [croppingIndex, setCroppingIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -35,23 +34,27 @@ export function PendingMediaPlate({
   }, [previews.length, croppingIndex]);
 
   useEffect(() => {
-    if (previews.length > 0) {
-      setIsOPen(true);
-    }
-  }, [previews.length]);
-
-  useEffect(() => {
-    if (previews.length === 0) {
-      setIsOPen(false);
+    if (previews.length > 0 && !hasUserClosed) {
+      setIsOpen(true);
+    } else if (previews.length === 0) {
+      setIsOpen(false);
       setCroppingIndex(null);
+      setHasUserClosed(false);
     }
-  }, [previews.length]);
+  }, [previews.length, hasUserClosed]);
 
   const currentCroppingItem =
     croppingIndex !== null && croppingIndex < previews.length ? previews[croppingIndex] : null;
 
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (!open && previews.length > 0) {
+      setHasUserClosed(true);
+    }
+  };
+
   return (
-    <DialogPrimitive.Root open={isOpen} onOpenChange={setIsOPen}>
+    <DialogPrimitive.Root open={isOpen} onOpenChange={handleOpenChange}>
       <DialogPrimitive.Trigger asChild>
         <Button size='lg' className='min-w-64' disabled={previews.length === 0}>
           pending uploads {previews.length > 0 && `[${previews.length}]`}
@@ -62,9 +65,12 @@ export function PendingMediaPlate({
         <DialogPrimitive.Content
           className={cn(
             'fixed left-[50%] top-[50%] z-50 w-[90vw] max-w-[1200px] max-h-[90vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] bg-white pt-8 pb-5 px-6',
+            {
+              'w-[800px]': croppingIndex !== null,
+            },
           )}
         >
-          {previews.length > 0 && (
+          {previews.length > 0 && croppingIndex === null && (
             <div className='flex justify-end mb-4'>
               <Button
                 size='lg'
@@ -82,6 +88,7 @@ export function PendingMediaPlate({
               selectedFile={currentCroppingItem.url}
               saveCroppedImage={(url: string) => {
                 onCrop(croppingIndex, url);
+                setCroppingIndex(null);
               }}
               onCancel={() => setCroppingIndex(null)}
             />
@@ -98,7 +105,7 @@ export function PendingMediaPlate({
                   </Button>
                   <div className='w-full h-64 overflow-hidden  border border-text'>
                     <Media
-                      src={preview.url || croppedUrls[id]}
+                      src={croppedUrls[id] || preview.url}
                       alt={preview.url}
                       type={preview.type}
                       controls={preview.type === 'video'}
@@ -106,24 +113,15 @@ export function PendingMediaPlate({
                       aspectRatio='auto'
                     />
                   </div>
-                  <div className='flex lg:flex-row flex-col gap-2 items-center justify-center'>
-                    <Button
-                      size='lg'
-                      onClick={() => setCroppingIndex(id)}
-                      className='uppercase cursor-pointer w-full'
-                      disabled={uploadingIndices.has(id)}
-                    >
-                      crop
-                    </Button>
-                    <Button
-                      size='lg'
-                      onClick={() => onUpload(id, croppedUrls[id])}
-                      className='uppercase cursor-pointer w-full'
-                      disabled={uploadingIndices.has(id)}
-                    >
-                      upload
-                    </Button>
-                  </div>
+
+                  <Button
+                    size='lg'
+                    onClick={() => setCroppingIndex(id)}
+                    className='uppercase cursor-pointer w-full'
+                    disabled={uploadingIndices.has(id)}
+                  >
+                    crop
+                  </Button>
                 </div>
               ))}
             </div>
