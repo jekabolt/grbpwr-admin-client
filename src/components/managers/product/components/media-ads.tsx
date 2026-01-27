@@ -57,6 +57,7 @@ export function MediaAds({ product, control, clearKey }: Props) {
             type='image'
             src={m.media?.thumbnail?.mediaUrl || ''}
             alt={m.media?.blurhash || ''}
+            fit='contain'
           />
 
           <Button
@@ -70,7 +71,7 @@ export function MediaAds({ product, control, clearKey }: Props) {
       <div className='w-full h-auto flex items-center justify-center border border-text'>
         <MediaSelector
           label='select media'
-          aspectRatio={['4:5']}
+          aspectRatio={['4:5', 'Custom']}
           isDeleteAccepted={false}
           allowMultiple={true}
           saveSelectedMedia={handleMediaAds}

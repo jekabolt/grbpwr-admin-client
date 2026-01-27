@@ -62,7 +62,7 @@ export function MediaSelector({
               <Text variant='uppercase'>select Media</Text>
             </DialogPrimitive.Title>
             <DialogPrimitive.Close asChild>
-              <Button className='px-1 py-1'>x</Button>
+              <Button className='py-1'>[x]</Button>
             </DialogPrimitive.Close>
           </div>
           <div className='flex-1 min-h-0 overflow-y-scroll mt-6'>

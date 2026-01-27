@@ -33,11 +33,22 @@ export function useFilter(
 
   const matchesAspectRatioFilter = (m: common_MediaFull) => {
     if (!aspectRatio?.length) return true;
+
     const mediaRatio = mediaAspectRatio(m, videoSizes);
 
     if (!mediaRatio) {
       const isVideoMedia = isVideo(m.media?.thumbnail?.mediaUrl);
       return isVideoMedia;
+    }
+
+    const hasCustom = aspectRatio.includes('Custom');
+
+    if (hasCustom) {
+      const predefinedAspectRatios = ['16:9', '4:3', '2:1', '1:1', '4:5', '3:4', '5:4', '9:16'];
+
+      if (!predefinedAspectRatios.includes(mediaRatio)) {
+        return true;
+      }
     }
 
     return aspectRatio.includes(mediaRatio);
