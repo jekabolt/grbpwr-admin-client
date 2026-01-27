@@ -1,9 +1,4 @@
-import {
-  deliveredOrderUpdate,
-  getOrderByUUID,
-  refundOrderUpdate,
-  setTrackingNumberUpdate,
-} from 'api/orders';
+import { adminService } from 'api/api';
 import { useDictionaryStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { getOrderStatusName } from '../orders-catalog/components/utility';
@@ -25,7 +20,7 @@ export const useOrderDetails = (uuid: string) => {
   async function fetchOrderDetails() {
     setState((prev) => ({ ...prev, isLoading: true }));
     try {
-      const order = await getOrderByUUID({ orderUuid: uuid });
+      const order = await adminService.GetOrderByUUID({ orderUuid: uuid });
       setState((prev) => ({
         ...prev,
         orderDetails: order.order,
@@ -74,7 +69,7 @@ export const useOrderDetails = (uuid: string) => {
       setIsEdit(false);
       return;
     }
-    const response = await setTrackingNumberUpdate({
+    const response = await adminService.SetTrackingNumber({
       orderUuid: state.orderDetails?.order?.uuid,
       trackingCode: trackingNumber,
     });
@@ -85,7 +80,7 @@ export const useOrderDetails = (uuid: string) => {
   };
 
   async function markAsDelivered() {
-    const response = await deliveredOrderUpdate({
+    const response = await adminService.DeliveredOrder({
       orderUuid: state.orderDetails?.order?.uuid,
     });
     if (response) {
@@ -94,7 +89,7 @@ export const useOrderDetails = (uuid: string) => {
   }
 
   async function refundOrder() {
-    const response = await refundOrderUpdate({
+    const response = await adminService.RefundOrder({
       orderUuid: state.orderDetails?.order?.uuid,
     });
     if (response) {

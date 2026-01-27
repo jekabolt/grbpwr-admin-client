@@ -6,7 +6,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Form } from 'ui/form';
-import { Layout } from 'ui/layout';
 import { Entities } from './entities';
 import { mapFormFieldsToHeroData, mapHeroFullToFormData } from './map-schema-to-hero-data';
 import { NavFeatured } from './nav-featured';
@@ -111,40 +110,38 @@ export function Hero() {
   }
 
   return (
-    <Layout>
-      <Form {...form}>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSubmit();
-          }}
-          className='flex flex-col gap-y-16 lg:pt-24 pt-5 lg:px-12 px-2.5'
+    <Form {...form}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSubmit();
+        }}
+        className='flex flex-col gap-y-16 lg:pt-24 pt-5 lg:px-12 px-2.5'
+      >
+        <NavFeatured hero={heroData?.hero} />
+        <SelectHeroType
+          append={append}
+          insert={insert}
+          form={form}
+          entityRefs={entityRefs}
+          deletedIndicesRef={deletedIndicesRef}
+        />
+        <Entities
+          entityRefs={entityRefs}
+          arrayHelpers={{ remove, move, insert }}
+          initialProducts={productsByEntityIndexRef.current}
+          deletedIndicesRef={deletedIndicesRef}
+          onDeletedIndicesChange={handleDeletedIndicesChange}
+        />
+        <Button
+          size='lg'
+          type='submit'
+          disabled={form.formState.isSubmitting || saveHero.isPending}
+          className='fixed top-3 right-3 z-50 cursor-pointer uppercase'
         >
-          <NavFeatured hero={heroData?.hero} />
-          <SelectHeroType
-            append={append}
-            insert={insert}
-            form={form}
-            entityRefs={entityRefs}
-            deletedIndicesRef={deletedIndicesRef}
-          />
-          <Entities
-            entityRefs={entityRefs}
-            arrayHelpers={{ remove, move, insert }}
-            initialProducts={productsByEntityIndexRef.current}
-            deletedIndicesRef={deletedIndicesRef}
-            onDeletedIndicesChange={handleDeletedIndicesChange}
-          />
-          <Button
-            size='lg'
-            type='submit'
-            disabled={form.formState.isSubmitting || saveHero.isPending}
-            className='fixed top-3 right-3 z-50 cursor-pointer uppercase'
-          >
-            save
-          </Button>
-        </form>
-      </Form>
-    </Layout>
+          save
+        </Button>
+      </form>
+    </Form>
   );
 }

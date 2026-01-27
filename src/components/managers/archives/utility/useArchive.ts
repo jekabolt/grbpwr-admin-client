@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addArchive, deleteArchive, getArchive, getArchiveItems, updateArchive } from 'api/archive';
+import { adminService, frontendService } from 'api/api';
 import { common_ArchiveInsert } from 'api/proto-http/admin';
 
 export const archiveKeys = {
@@ -14,7 +14,7 @@ export function useArchives(limit: number = 50, offset: number = 0) {
   return useQuery({
     queryKey: archiveKeys.list({ limit, offset }),
     queryFn: async () => {
-      const response = await getArchive({
+      const response = await frontendService.GetArchivesPaged({
         limit,
         offset,
         orderFactor: 'ORDER_FACTOR_DESC',
@@ -32,7 +32,7 @@ export function useArchiveDetails(
   return useQuery({
     queryKey: archiveKeys.detail(id!),
     queryFn: async () => {
-      const response = await getArchiveItems({
+      const response = await frontendService.GetArchive({
         id: id!,
         heading: archiveData?.heading || 'string',
         tag: archiveData?.tag || 'string',
@@ -47,7 +47,8 @@ export function useArchiveDetails(
 export function useCreateArchive() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (archiveData: common_ArchiveInsert) => addArchive({ archiveInsert: archiveData }),
+    mutationFn: (archiveData: common_ArchiveInsert) =>
+      adminService.AddArchive({ archiveInsert: archiveData }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: archiveKeys.lists() });
     },
@@ -58,7 +59,7 @@ export function useUpdateArchive() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, archiveData }: { id: number; archiveData: common_ArchiveInsert }) =>
-      updateArchive({ id, archiveInsert: archiveData }),
+      adminService.UpdateArchive({ id, archiveInsert: archiveData }),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: archiveKeys.lists() });
       queryClient.invalidateQueries({ queryKey: archiveKeys.detail(variables.id) });
@@ -69,7 +70,7 @@ export function useUpdateArchive() {
 export function useDeleteArchive() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => deleteArchive({ id }),
+    mutationFn: (id: number) => adminService.DeleteArchiveById({ id }),
     onSuccess: (data, id) => {
       queryClient.removeQueries({ queryKey: archiveKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: archiveKeys.lists() });
@@ -81,7 +82,7 @@ export function useInfiniteArchives(limit: number = 50) {
   return useInfiniteQuery({
     queryKey: [...archiveKeys.lists(), 'infinite'],
     queryFn: async ({ pageParam }: { pageParam: number }) => {
-      const response = await getArchive({
+      const response = await frontendService.GetArchivesPaged({
         limit,
         offset: pageParam,
         orderFactor: 'ORDER_FACTOR_DESC',

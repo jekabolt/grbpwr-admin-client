@@ -1,5 +1,62 @@
 import { Area } from 'react-easy-crop';
 
+/**
+ * Converts an image URL to a data URL to avoid CORS issues
+ * Falls back to original URL if conversion fails
+ */
+async function urlToDataUrl(imageUrl: string): Promise<string> {
+  // If it's already a data URL, return as is
+  if (imageUrl.startsWith('data:')) {
+    return imageUrl;
+  }
+
+  // If it's a blob URL, return as is (already local)
+  if (imageUrl.startsWith('blob:')) {
+    return imageUrl;
+  }
+
+  try {
+    // Try to fetch the image as a blob and convert to data URL
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.statusText}`);
+    }
+    const blob = await response.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result) {
+          resolve(reader.result.toString());
+        } else {
+          reject(new Error('Could not convert image to data URL'));
+        }
+      };
+      reader.onerror = () => {
+        reject(new Error('Error reading image blob'));
+      };
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    // If fetch fails due to CORS, throw a more descriptive error
+    if (
+      error instanceof TypeError &&
+      (error.message.includes('fetch') ||
+        error.message.includes('CORS') ||
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('NetworkError'))
+    ) {
+      throw new Error(
+        'Cannot crop this image due to CORS restrictions. The image server (files.grbpwr.com) does not allow cross-origin requests. Please contact the server administrator to enable CORS headers.',
+      );
+    }
+    // Re-throw with more context
+    if (error instanceof Error) {
+      throw new Error(`Failed to load image for cropping: ${error.message}`);
+    }
+    throw error;
+  }
+}
+
 function findBestCrop(width: number, height: number, targetRatio: number | undefined) {
   if (targetRatio === undefined) {
     return { bestWidth: width, bestHeight: height };
@@ -25,12 +82,17 @@ function findBestCrop(width: number, height: number, targetRatio: number | undef
 }
 
 async function getRotatedImage(imageSrc: string, rotation: number): Promise<HTMLCanvasElement> {
-  const image = new Image();
-  image.crossOrigin = 'Anonymous';
-  image.src = imageSrc;
+  // Convert URL to data URL first to avoid CORS issues
+  const dataUrl = await urlToDataUrl(imageSrc);
 
-  await new Promise((resolve) => {
+  const image = new Image();
+  image.src = dataUrl;
+
+  await new Promise((resolve, reject) => {
     image.onload = resolve;
+    image.onerror = () => {
+      reject(new Error('Failed to load image'));
+    };
   });
 
   const canvas = document.createElement('canvas');

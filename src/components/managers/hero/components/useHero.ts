@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addHero, getHero } from 'api/hero';
+import { adminService, frontendService } from 'api/api';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
 
@@ -13,7 +13,7 @@ export function useHero() {
   return useQuery({
     queryKey: heroKeys.detail(),
     queryFn: async () => {
-      const response = await getHero({});
+      const response = await frontendService.GetHero({});
       if (!response?.hero) return null;
 
       return {
@@ -29,7 +29,7 @@ export function useSaveHero() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (heroData: common_HeroFullInsert) => addHero({ hero: heroData }),
+    mutationFn: (heroData: common_HeroFullInsert) => adminService.AddHero({ hero: heroData }),
     onSuccess: () => {
       // Invalidate and refetch hero data
       queryClient.invalidateQueries({ queryKey: heroKeys.detail() });

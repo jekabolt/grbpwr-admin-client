@@ -1,10 +1,10 @@
-import { FormControl, InputLabel, MenuItem, Select as MuiSelect } from '@mui/material';
+import { ChevronDownIcon, ChevronUpIcon } from '@radix-ui/react-icons';
+import * as Select from '@radix-ui/react-select';
 
 interface Option {
   value: string | number;
   label: string;
 }
-
 interface SelectFieldProps {
   label: string;
   value: string | number | (string | number)[];
@@ -17,7 +17,6 @@ interface SelectFieldProps {
   onChange: (value: any) => void;
   [k: string]: any;
 }
-
 export default function Selector({
   label,
   value,
@@ -32,60 +31,91 @@ export default function Selector({
 }: SelectFieldProps) {
   const allOptions = showAll ? [{ value: 'all', label: 'All' }, ...options] : options;
 
-  const handleChange = (event: any) => {
-    const newValue = event.target.value;
-
+  const handleValueChange = (newValue: string) => {
     if (multiple) {
-      if (Array.isArray(newValue)) {
-        if (newValue.includes('all')) {
-          onChange([]);
+      const currentValues = Array.isArray(value) ? value : [];
+      if (newValue === 'all') {
+        onChange([]);
+      } else {
+        const valueExists = currentValues.includes(newValue);
+        if (valueExists) {
+          onChange(currentValues.filter((v) => v !== newValue));
         } else {
-          onChange(newValue.filter((v) => v !== 'all'));
+          onChange([...currentValues, newValue]);
         }
       }
     } else {
-      onChange(newValue === 'all' ? '' : newValue);
+      onChange(newValue);
     }
   };
 
-  const displayValue = multiple
-    ? Array.isArray(value)
-      ? value.includes('all')
-        ? ['all']
-        : value
-      : []
-    : value || (showAll ? 'all' : '');
+  const getDisplayValue = () => {
+    if (multiple) {
+      if (!value || (Array.isArray(value) && !value.length)) return placeholder;
+      if (Array.isArray(value) && value.includes('all')) return 'All';
+      if (Array.isArray(value)) {
+        return value.map((val) => allOptions.find((opt) => opt.value === val)?.label).join(', ');
+      }
+      return placeholder;
+    }
+    return allOptions.find((opt) => opt.value === value)?.label || placeholder;
+  };
+
+  const currentValue = multiple
+    ? Array.isArray(value) && value.length > 0
+      ? value[0].toString()
+      : ''
+    : (value || (showAll ? 'all' : '')).toString();
 
   return (
-    <FormControl size='small' disabled={disabled} className='w-full'>
-      <InputLabel shrink id={`select-label-${label}`} className='uppercase'>
-        {label}
-      </InputLabel>
-      <MuiSelect
-        labelId={`select-label-${label}`}
-        value={displayValue}
-        label={label}
-        onChange={handleChange}
-        multiple={multiple}
-        displayEmpty
-        renderValue={(selected) => {
-          if (multiple) {
-            if (!selected || (Array.isArray(selected) && !selected.length)) return placeholder;
-            if (Array.isArray(selected) && selected.includes('all')) return 'All';
-            return (Array.isArray(selected) ? selected : [selected])
-              .map((val) => allOptions.find((opt) => opt.value === val)?.label)
-              .join(', ');
-          }
-          return allOptions.find((opt) => opt.value === selected)?.label || placeholder;
-        }}
+    <div className={`${fullWidth ? 'w-full' : ''}`}>
+      <Select.Root
+        value={currentValue}
+        onValueChange={handleValueChange}
+        disabled={disabled}
         {...props}
       >
-        {allOptions.map((option) => (
-          <MenuItem key={option.value} value={option.value} className='uppercase'>
-            {option.label}
-          </MenuItem>
-        ))}
-      </MuiSelect>
-    </FormControl>
+        <Select.Trigger className='inline-flex items-center justify-between w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm hover:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500'>
+          <Select.Value placeholder={placeholder}>{getDisplayValue()}</Select.Value>
+          <Select.Icon className='ml-2'>
+            <ChevronDownIcon />
+          </Select.Icon>
+        </Select.Trigger>
+
+        <Select.Portal>
+          <Select.Content className='overflow-hidden bg-white border border-gray-200 z-50'>
+            <Select.ScrollUpButton className='flex items-center justify-center h-6 bg-white cursor-default'>
+              <ChevronUpIcon />
+            </Select.ScrollUpButton>
+
+            <Select.Viewport className='p-1'>
+              <Select.Group>
+                <Select.Label className='px-6 py-2 text-xs font-medium text-gray-500 uppercase'>
+                  {label}
+                </Select.Label>
+                {allOptions.map((option) => {
+                  return (
+                    <Select.Item
+                      key={option.value}
+                      value={option.value.toString()}
+                      className='relative flex items-center px-8 py-2 text-sm cursor-pointer select-none uppercase hover:bg-gray-500/50 focus:outline-none'
+                    >
+                      <Select.ItemText>{option.label}</Select.ItemText>
+                      <Select.ItemIndicator className='absolute left-2 w-4 h-4 inline-flex items-center justify-center'>
+                        ✓
+                      </Select.ItemIndicator>
+                    </Select.Item>
+                  );
+                })}
+              </Select.Group>
+            </Select.Viewport>
+
+            <Select.ScrollDownButton className='flex items-center justify-center h-6 bg-white text-gray-700 cursor-default'>
+              <ChevronDownIcon />
+            </Select.ScrollDownButton>
+          </Select.Content>
+        </Select.Portal>
+      </Select.Root>
+    </div>
   );
 }

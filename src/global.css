@@ -1,6 +1,5 @@
 @import 'tailwindcss';
 
-/* Custom Font Face Declarations */
 @font-face {
   font-family: 'FeatureMono';
   src: url('./fonts/FeatureMono-Thin.ttf') format('truetype');
@@ -42,6 +41,16 @@
   --text-small: 12px;
   --text-base: 16px;
 }
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 body {
   font-family: var(--font-family-sans);
   font-weight: 400;
@@ -51,17 +60,10 @@ body {
 @layer utilities {
   .no-scroll-bar {
     scrollbar-width: none;
-  }
+    -ms-overflow-style: none;
 
-  .no-scroll-bar::-webkit-scrollbar {
-    display: none;
-  }
-
-  .no-scroll-bar::-webkit-scrollbar-track {
-    display: none;
-  }
-
-  .no-scroll-bar::-webkit-scrollbar-thumb {
-    display: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
   }
 }

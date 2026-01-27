@@ -1,68 +1,56 @@
-import axios from 'axios';
+import { createAdminServiceClient } from './proto-http/admin';
+import { createAuthServiceClient } from './proto-http/auth';
+import { createFrontendServiceClient } from './proto-http/frontend';
 
-const BASE_URL = import.meta.env.VITE_SERVER_URL;
-
-if (!BASE_URL) {
-  console.error('VITE_SERVER_URL is not defined. API calls will fail.');
-}
-
-const axiosInstance = axios.create({
-  baseURL: BASE_URL || 'https://backend.grbpwr.com',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-axiosInstance.interceptors.request.use(
-  (config) => {
-    const authToken = localStorage.getItem('authToken');
-    if (authToken) {
-      config.headers = config.headers || {};
-      config.headers['Grpc-Metadata-Authorization'] = `Bearer ${authToken}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  },
-);
-
-interface AxiosRequestConfig {
+interface RequestHandlerParams {
   path: string;
   method: string;
-  body?: any;
+  body: string | null;
 }
 
-axiosInstance.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
-      const errorMessage = `Error: ${error.response.status} - ${error.response.data.message || error.response.statusText}`;
-      return Promise.reject(new Error(errorMessage));
-    } else if (error.request) {
-      // The request was made but no response was received
-      const errorMessage = 'Error: No response received from server';
-      return Promise.reject(new Error(errorMessage));
-    } else {
-      // Something happened in setting up the request that triggered an Error
-      const errorMessage = `Error: ${error.message}`;
-      return Promise.reject(new Error(errorMessage));
-    }
-  },
-);
+interface ProtoMetaParams {
+  service: string;
+  method: string;
+}
 
-export const axiosRequestHandler = async ({ path, method, body }: AxiosRequestConfig) => {
+export const requestHandler = async (
+  { path, method, body }: RequestHandlerParams,
+  { method: serviceMethod }: ProtoMetaParams, // eslint-disable-line @typescript-eslint/no-unused-vars
+) => {
+  const authToken = localStorage.getItem('authToken');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (authToken) {
+    headers['Grpc-Metadata-Authorization'] = `Bearer ${authToken}`;
+  }
+
   try {
-    const response = await axiosInstance({
-      method: method as 'GET' | 'POST' | 'PUT' | 'DELETE',
-      url: path,
-      data: body,
+    const baseUrl = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
+    const url = `${baseUrl}/${path}`;
+    const response = await fetch(url, {
+      method,
+      headers,
+      body,
     });
-    return response.data;
+
+    console.log('[BE] response: ', response.status, response.statusText);
+
+    if (!response.ok) {
+      const errorMessage = `Error: ${response.status} - ${response.statusText}`;
+      throw new Error(errorMessage);
+    }
+
+    return await response.json();
   } catch (error) {
-    // Handle error appropriately, maybe show a notification to the user
-    throw error; // Rethrow so calling function can handle it
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(`Request failed: ${error}`);
   }
 };
+
+export const frontendService = createFrontendServiceClient(requestHandler);
+export const adminService = createAdminServiceClient(requestHandler);
+export const authService = createAuthServiceClient(requestHandler);

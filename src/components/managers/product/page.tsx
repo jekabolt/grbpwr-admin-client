@@ -1,9 +1,8 @@
-import { getProductByID } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_ProductFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { Layout } from 'ui/layout';
 import { ProductForm } from './components';
 
 export const Product: FC = () => {
@@ -21,7 +20,7 @@ export const Product: FC = () => {
         showMessage('Invalid product ID', 'error');
         return;
       }
-      const response = await getProductByID({ id: productId });
+      const response = await adminService.GetProductByID({ id: productId });
       setProduct(response.product);
     }
   };
@@ -31,16 +30,14 @@ export const Product: FC = () => {
   }, [id, isCopyMode]);
 
   return (
-    <Layout>
-      <ProductForm
-        key={product?.product?.id || `new-${id}`}
-        isEditMode={isEditMode}
-        isAddingProduct={isCopyMode || !id}
-        isCopyMode={isCopyMode}
-        product={product}
-        productId={id}
-        onEditModeChange={setIsEditMode}
-      />
-    </Layout>
+    <ProductForm
+      key={product?.product?.id || `new-${id}`}
+      isEditMode={isEditMode}
+      isAddingProduct={isCopyMode || !id}
+      isCopyMode={isCopyMode}
+      product={product}
+      productId={id}
+      onEditModeChange={setIsEditMode}
+    />
   );
 };

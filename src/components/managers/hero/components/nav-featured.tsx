@@ -1,6 +1,5 @@
 import { common_ArchiveList, common_MediaFull } from 'api/proto-http/admin';
 import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
-import { SingleMediaViewAndSelect } from 'components/managers/media/media-selector/components/singleMediaViewAndSelect';
 import { useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -8,6 +7,7 @@ import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { TranslationField } from 'ui/form/fields/translation-field';
 import { ArchivePicker } from './archive-picker';
+import { MediaPreviewWithSelector } from './media-preview-with-selector';
 import { HeroSchema } from './schema';
 
 type MediaUrlsState = {
@@ -56,13 +56,13 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
       </Text>
       <div className='flex flex-col lg:flex-row gap-4'>
         <div className='w-full lg:w-1/4'>
-          <SingleMediaViewAndSelect
-            link={mediaUrls[gender]}
+          <MediaPreviewWithSelector
+            mediaUrl={mediaUrls[gender]}
             aspectRatio={['1:1']}
-            aspectOnPreview='1/1'
-            isDeleteAccepted={false}
-            saveSelectedMedia={saveMedia}
-            isEditMode
+            allowMultiple={false}
+            showVideos={false}
+            alt={`${gender} media preview`}
+            onSaveMedia={saveMedia}
           />
         </div>
         <div className='w-full flex flex-col gap-4'>

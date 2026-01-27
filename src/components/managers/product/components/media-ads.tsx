@@ -1,5 +1,5 @@
 import { common_MediaFull, common_ProductFull } from 'api/proto-http/admin';
-import { MediaSelectorLayout } from 'components/managers/media/media-selector/layout';
+import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useEffect, useState } from 'react';
 import { Control, useController } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -18,8 +18,12 @@ export function MediaAds({ product, control, clearKey }: Props) {
     control,
   });
   const [mediaAds, setMediaAds] = useState<common_MediaFull[]>([]);
-  const productMedia = product?.media;
-  const mediaLinks = product?.media ? productMedia : mediaAds;
+  const productMedia = product?.media || [];
+
+  const mediaLinks = [
+    ...productMedia,
+    ...mediaAds.filter((m) => !productMedia.some((pm) => pm.id === m.id)),
+  ];
 
   useEffect(() => {
     if (!product && typeof clearKey === 'number') {
@@ -64,13 +68,13 @@ export function MediaAds({ product, control, clearKey }: Props) {
         </div>
       ))}
       <div className='w-full h-auto flex items-center justify-center border border-text'>
-        <MediaSelectorLayout
+        <MediaSelector
           label='select media'
           aspectRatio={['4:5']}
           isDeleteAccepted={false}
           allowMultiple={true}
           saveSelectedMedia={handleMediaAds}
-          hideVideos={false}
+          showVideos={true}
         />
       </div>
     </div>

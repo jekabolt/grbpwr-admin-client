@@ -5,7 +5,10 @@ type ImageContainerProps = {
 
 function ImageContainer({ aspectRatio, children }: ImageContainerProps) {
   return (
-    <div className='relative w-full overflow-hidden' style={{ aspectRatio: aspectRatio || 'auto' }}>
+    <div
+      className='relative w-full h-full overflow-hidden'
+      style={{ aspectRatio: aspectRatio || 'auto' }}
+    >
       {children}
     </div>
   );

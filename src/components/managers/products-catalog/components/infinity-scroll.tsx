@@ -1,4 +1,4 @@
-import { getProductsPaged } from 'api/admin';
+import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
 import { useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
@@ -38,7 +38,7 @@ export function InfinityScroll({ firstItems }: Props) {
       const params = Object.fromEntries(searchParams.entries());
       const offset = (pageRef.current - 1) * ITEMS_PER_PAGE;
 
-      const response = await getProductsPaged({
+      const response = await adminService.GetProductsPaged({
         limit: ITEMS_PER_PAGE,
         offset,
         ...getProductPagedParans(params),
