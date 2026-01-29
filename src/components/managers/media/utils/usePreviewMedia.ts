@@ -16,7 +16,7 @@ export function usePreviewMedia() {
   const { showMessage } = useSnackBarStore();
 
   const handleViewMedia = async (media: common_MediaFull) => {
-    const mediaUrl = media.media?.fullSize?.mediaUrl || media.media?.thumbnail?.mediaUrl || '';
+    const mediaUrl = media.media?.thumbnail?.mediaUrl || '';
     const mediaType = isVideo(mediaUrl) ? 'video' : 'image';
 
     // For images, try to fetch as blob to enable cropping

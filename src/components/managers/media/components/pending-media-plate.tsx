@@ -53,11 +53,26 @@ export function PendingMediaPlate({
     }
   };
 
+  const isUploading = uploadingIndices.size > 0;
+
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={handleOpenChange}>
       <DialogPrimitive.Trigger asChild>
-        <Button size='lg' className='min-w-64' disabled={previews.length === 0}>
-          pending uploads {previews.length > 0 && `[${previews.length}]`}
+        <Button
+          size='lg'
+          className='min-w-64 flex items-center justify-center gap-2'
+          disabled={previews.length === 0}
+        >
+          {isUploading ? (
+            <>
+              <span
+                className='size-4 border-2 border-current border-t-transparent rounded-full animate-spin'
+                aria-hidden
+              />
+            </>
+          ) : (
+            <>pending uploads {previews.length > 0 && `[${previews.length}]`}</>
+          )}
         </Button>
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
