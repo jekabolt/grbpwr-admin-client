@@ -22,10 +22,6 @@ export default function InputField({
 }: Props) {
   const { control, trigger, setValue } = useFormContext();
 
-  function onBlur() {
-    if (validateOnBlur) trigger(name);
-  }
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!keyboardRestriction || e.ctrlKey || e.metaKey) return;
 
@@ -56,9 +52,12 @@ export default function InputField({
               type={type}
               disabled={loading}
               {...field}
-              value={field.value || ''}
+              value={field.value ?? ''}
               {...props}
-              onBlur={onBlur}
+              onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                field.onBlur();
+                if (validateOnBlur) trigger(name);
+              }}
               onKeyDown={handleKeyDown}
               onChange={keyboardRestriction ? handleChange : field.onChange}
             />

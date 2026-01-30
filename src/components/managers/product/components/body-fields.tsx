@@ -3,6 +3,7 @@ import { useDictionaryStore } from 'lib/stores/store';
 import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
 import CountryList from 'react-select-country-list';
+import CheckboxField from 'ui/form/fields/checkbox-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
@@ -36,6 +37,7 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
 
   return (
     <div className='space-y-10'>
+      <CheckboxField name='product.productBodyInsert.hidden' label='hidden' readOnly={!editMode} />
       <UnifiedTranslationFields
         fieldPrefix='product.translations'
         fields={[

@@ -12,6 +12,7 @@ export default function SelectComponent({
   customWidth,
   fullWidth,
   renderValue,
+  readOnly,
   ...props
 }: {
   name: string;
@@ -19,6 +20,7 @@ export default function SelectComponent({
   className?: string;
   customWidth?: number;
   fullWidth?: boolean;
+  readOnly?: boolean;
   renderValue?: (
     selectedValue: string | number,
     selectedItem: { label: string; value: string | number } | undefined,
@@ -28,7 +30,11 @@ export default function SelectComponent({
   const [open, setOpen] = useState(false);
 
   return (
-    <Select.Root {...props} open={open} onOpenChange={setOpen}>
+    <Select.Root
+      {...props}
+      open={open}
+      onOpenChange={(open) => !readOnly && setOpen(open)}
+    >
       <SelectTrigger
         placeholder={props.placeholder}
         className={className}
@@ -36,6 +42,7 @@ export default function SelectComponent({
         value={props.value}
         items={items}
         isOpen={open}
+        readOnly={readOnly}
       >
         <Arrow />
       </SelectTrigger>
@@ -78,6 +85,7 @@ export function SelectTrigger({
   items,
   isOpen,
   renderValue,
+  readOnly,
 }: {
   children: React.ReactNode;
   placeholder: string;
@@ -89,6 +97,7 @@ export function SelectTrigger({
   value?: string | number;
   items?: { label: string; value: string | number }[];
   isOpen?: boolean;
+  readOnly?: boolean;
 }) {
   let displayValue = null;
   if (renderValue && value && items) {
@@ -100,6 +109,7 @@ export function SelectTrigger({
     <Select.Trigger
       className={cn(
         'flex w-full items-center justify-between gap-2 border-b border-b-textColor bg-bgColor text-textBaseSize focus:outline-none focus:ring-0',
+        readOnly && 'cursor-default pointer-events-none opacity-90',
         className,
       )}
       aria-label={placeholder}

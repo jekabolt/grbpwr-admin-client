@@ -8,7 +8,7 @@ export default function Gender() {
   return (
     <Selector
       label='gender'
-      value={defaultValue || []}
+      value={defaultValue || 'all'}
       options={genderOptions}
       onChange={handleFilterChange}
       showAll

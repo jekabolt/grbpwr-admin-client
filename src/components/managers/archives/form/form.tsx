@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
-import { MediaPreviewWithSelector } from 'components/managers/hero/components/media-preview-with-selector';
+import { MediaPreviewWithSelector } from 'components/managers/media/components/media-preview-with-selector';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';

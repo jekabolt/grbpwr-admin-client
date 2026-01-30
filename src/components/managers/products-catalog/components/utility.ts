@@ -5,9 +5,35 @@ import {
   GetProductsPagedRequest,
 } from 'api/proto-http/admin';
 
+const DEFAULT_SORT: common_SortFactor = 'SORT_FACTOR_CREATED_AT';
+const DEFAULT_ORDER: common_OrderFactor = 'ORDER_FACTOR_DESC';
+
+function normalizeSort(sort?: string | null): common_SortFactor {
+  if (sort && sort.startsWith('SORT_FACTOR_') && sort !== 'SORT_FACTOR_UNKNOWN') {
+    return sort as common_SortFactor;
+  }
+  return DEFAULT_SORT;
+}
+
+function normalizeOrder(order?: string | null): common_OrderFactor {
+  if (order && order.startsWith('ORDER_FACTOR_') && order !== 'ORDER_FACTOR_UNKNOWN') {
+    return order as common_OrderFactor;
+  }
+  return DEFAULT_ORDER;
+}
+
+function isGenderFilter(gender?: string | null): gender is common_GenderEnum {
+  return !!(
+    gender &&
+    gender.startsWith('GENDER_ENUM_') &&
+    gender !== 'GENDER_ENUM_UNKNOWN' &&
+    gender !== 'all'
+  );
+}
+
 export function getProductPagedParans({
-  sort = 'SORT_FACTOR_CREATED_AT',
-  order = 'ORDER_FACTOR_DESC',
+  sort,
+  order,
   topCategories,
   subCategories,
   types,
@@ -43,13 +69,15 @@ export function getProductPagedParans({
   GetProductsPagedRequest,
   'sortFactors' | 'orderFactor' | 'filterConditions' | 'showHidden'
 > {
+  const sortFactor = normalizeSort(sort);
+  const orderFactor = normalizeOrder(order);
   return {
-    sortFactors: sort ? [sort as common_SortFactor] : undefined, //done
-    orderFactor: order ? (order as common_OrderFactor) : undefined, //done
+    sortFactors: [sortFactor],
+    orderFactor,
     filterConditions: {
       from: from ? from : undefined, //done
       to: to ? to : undefined, //done
-      gender: gender ? [gender as common_GenderEnum] : undefined, //done
+      gender: isGenderFilter(gender) ? [gender] : undefined,
       color: color ? color : undefined, //done
       topCategoryIds: topCategories
         ? topCategories.split(',').map((id) => parseInt(id))

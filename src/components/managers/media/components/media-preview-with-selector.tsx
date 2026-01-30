@@ -12,6 +12,9 @@ interface MediaPreviewWithSelectorProps {
   label?: string;
   alt?: string;
   sequence?: number;
+  editMode?: boolean;
+  /** When false and no mediaUrl, empty state is shown without the media selector (e.g. for optional secondary thumb in view mode). */
+  showSelectorWhenEmpty?: boolean;
   onSaveMedia: (media: common_MediaFull[]) => void;
   onClear?: () => void;
 }
@@ -24,6 +27,8 @@ export function MediaPreviewWithSelector({
   alt = 'Media preview',
   label = 'select media',
   sequence,
+  editMode = true,
+  showSelectorWhenEmpty = true,
   onSaveMedia,
   onClear,
 }: MediaPreviewWithSelectorProps) {
@@ -41,7 +46,7 @@ export function MediaPreviewWithSelector({
           aspectRatio={previewAspectRatio}
           className='max-w-full h-auto'
         />
-        {onClear && (
+        {editMode && (onClear || editMode) && (
           <Button
             type='button'
             onClick={onClear}
@@ -50,19 +55,30 @@ export function MediaPreviewWithSelector({
             ×
           </Button>
         )}
-        <div className='absolute left-[50%] top-[50%] translate-x-[-50%] translate-y-[-50%] hidden group-hover:block'>
-          <MediaSelector
-            label={label}
-            aspectRatio={aspectRatio}
-            allowMultiple={allowMultiple}
-            showVideos={showVideos}
-            saveSelectedMedia={onSaveMedia}
-          />
-        </div>
+        {editMode && (
+          <div className='absolute left-[50%] top-[50%] translate-x-[-50%] translate-y-[-50%] group-hover:block hidden'>
+            <MediaSelector
+              label={label}
+              aspectRatio={aspectRatio}
+              allowMultiple={allowMultiple}
+              showVideos={showVideos}
+              saveSelectedMedia={onSaveMedia}
+            />
+          </div>
+        )}
         <Text size='small' className='leading-none whitespace-nowrap absolute bottom-0 left-0'>
           {sequence}
         </Text>
       </div>
+    );
+  }
+
+  if (!showSelectorWhenEmpty) {
+    return (
+      <div
+        className='relative w-full h-auto border border-text'
+        style={{ aspectRatio: previewAspectRatio }}
+      />
     );
   }
 

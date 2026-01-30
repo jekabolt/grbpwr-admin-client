@@ -38,7 +38,27 @@ export const requestHandler = async (
     console.log('[BE] response: ', response.status, response.statusText);
 
     if (!response.ok) {
-      const errorMessage = `Error: ${response.status} - ${response.statusText}`;
+      let errorMessage = `Error: ${response.status} - ${response.statusText}`;
+      try {
+        const contentType = response.headers.get('content-type');
+        const text = await response.text();
+        if (contentType?.includes('application/json') && text) {
+          const json = JSON.parse(text) as Record<string, unknown>;
+          const msg =
+            typeof json.message === 'string'
+              ? json.message
+              : typeof json.error === 'string'
+                ? json.error
+                : typeof json.detail === 'string'
+                  ? json.detail
+                  : undefined;
+          if (msg) errorMessage = msg;
+        } else if (text) {
+          errorMessage = text;
+        }
+      } catch {
+        // keep default errorMessage
+      }
       throw new Error(errorMessage);
     }
 

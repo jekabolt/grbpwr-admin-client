@@ -18,6 +18,7 @@ export function ProductItem({
   refresh: (id: number | undefined) => void;
 }) {
   const thumbnail = product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl;
+  const isHidden = product.productDisplay?.productBody?.productBodyInsert?.hidden;
   const description = `[${product.id}] ${product.productDisplay?.productBody?.productBodyInsert?.brand} ${product.productDisplay?.productBody?.translations?.[0]?.name}`;
   const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
@@ -43,7 +44,10 @@ export function ProductItem({
 
   const handleCopyProduct = (id: number | undefined, e: React.MouseEvent) => {
     e.stopPropagation();
-    navigate(`${ROUTES.copyProduct}/${id}`);
+    const confirmed = confirm('Are you sure you want to copy this product?');
+    if (confirmed) {
+      navigate(`${ROUTES.copyProduct}/${id}`);
+    }
   };
 
   return (
@@ -68,6 +72,11 @@ export function ProductItem({
         >
           copy
         </Button>
+        {isHidden && (
+          <Text size='small' className='absolute bottom-0 left-0'>
+            hidden
+          </Text>
+        )}
       </div>
       <Text className='w-full break-words' variant='underLineWithColor' size='small'>
         {description}

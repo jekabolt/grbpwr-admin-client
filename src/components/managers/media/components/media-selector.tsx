@@ -52,7 +52,9 @@ export function MediaSelector({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
       <DialogPrimitive.Trigger asChild>
-        <Button size='lg'>{label}</Button>
+        <Button size='lg' className='whitespace-nowrap cursor-pointer'>
+          {label}
+        </Button>
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/80' />
