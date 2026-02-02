@@ -59,7 +59,9 @@ export const requestHandler = async (
       } catch {
         // keep default errorMessage
       }
-      throw new Error(errorMessage);
+      const err = new Error(errorMessage) as Error & { status?: number };
+      err.status = response.status;
+      throw err;
     }
 
     return await response.json();
