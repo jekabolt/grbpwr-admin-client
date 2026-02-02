@@ -18,7 +18,7 @@ export function MediaSelector({
   label,
   aspectRatio,
   allowMultiple = true,
-  showVideos = false,
+  showVideos = true,
   isDeleteAccepted = false,
   saveSelectedMedia,
 }: MediaSelectorProps) {

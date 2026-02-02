@@ -20,7 +20,7 @@ export function MediaPreviewWithSelector({
   mediaUrl,
   aspectRatio,
   allowMultiple = false,
-  showVideos = false,
+  showVideos = true,
   alt = 'Media preview',
   label = 'select media',
   editMode = true,

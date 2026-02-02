@@ -34,12 +34,12 @@ export function useFilter(
   const matchesAspectRatioFilter = (m: common_MediaFull) => {
     if (!aspectRatio?.length) return true;
 
+    const isVideoMedia = isVideo(m.media?.thumbnail?.mediaUrl);
+    if (isVideoMedia) return true;
+
     const mediaRatio = mediaAspectRatio(m, videoSizes);
 
-    if (!mediaRatio) {
-      const isVideoMedia = isVideo(m.media?.thumbnail?.mediaUrl);
-      return isVideoMedia;
-    }
+    if (!mediaRatio) return false;
 
     const hasCustom = aspectRatio.includes('Custom');
 

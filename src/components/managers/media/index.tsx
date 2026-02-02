@@ -1,5 +1,5 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Filter } from './components/filter';
 import { MediaList } from './components/media-list';
@@ -31,11 +31,11 @@ export function MediaManager({
   showVideos,
   selectionMode = false,
   showFilters = true,
-
   onSelectionChange,
 }: MediaLayoutProps) {
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteMedia();
   const { ref, inView } = useInView();
+  const prevInViewRef = useRef(false);
   const media = data?.pages.flatMap((page) => page.media as common_MediaFull[]) || [];
   const [videoSizes, setVideoSizes] = useState<Record<number, VideoSize>>({});
 
@@ -57,7 +57,7 @@ export function MediaManager({
     media,
     aspectRatio,
     videoSizes,
-    showVideos ? undefined : 'image',
+    showVideos === false ? 'image' : undefined,
   );
 
   const selection = useSelection({
@@ -67,7 +67,9 @@ export function MediaManager({
   });
 
   useEffect(() => {
-    if (inView && hasNextPage && !isFetchingNextPage) {
+    const justEnteredView = inView && !prevInViewRef.current;
+    prevInViewRef.current = inView;
+    if (justEnteredView && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     }
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);

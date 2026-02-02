@@ -1,9 +1,11 @@
 import { Button } from 'ui/components/button';
 import { Overlay } from 'ui/components/overlay';
 import Text from 'ui/components/text';
+import Color from './color';
 import FromTo from './from-to';
 import Gender from './gender';
 import PreorderSaleHidden from './preorder-sale-hidden';
+import ShowLatestLimit from './show-latest-limit';
 import { Sizes } from './sizes';
 import Sort from './sort-order';
 import { useRouteParams } from './useRouteParams';
@@ -25,7 +27,9 @@ export default function Filter({
             <div className='flex h-full flex-col'>
               <div className='flex items-center justify-between'>
                 <Text variant='uppercase'>filter</Text>
-                <Button onClick={toggleModal}>[x]</Button>
+                <Button variant='simple' onClick={toggleModal}>
+                  [x]
+                </Button>
               </div>
               <div className='h-full space-y-10 overflow-y-scroll pt-6'>
                 <div className='space-y-6'>
@@ -33,7 +37,9 @@ export default function Filter({
                   <Sort />
                 </div>
                 <PreorderSaleHidden />
+                <ShowLatestLimit />
                 <Gender />
+                <Color />
                 <FromTo />
                 <Sizes gender={gender} />
               </div>

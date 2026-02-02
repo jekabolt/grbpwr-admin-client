@@ -1,5 +1,6 @@
 import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
+import { DEFAULT_PRODUCT_LIMIT } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
 import debounce from 'lodash/debounce';
 import { useCallback, useEffect, useState } from 'react';
@@ -9,8 +10,6 @@ import { Categories } from './components/categories';
 import Filter from './components/filter';
 import { InfinityScroll } from './components/infinity-scroll';
 import { getProductPagedParans } from './components/utility';
-
-const ITEMS_PER_PAGE = 30;
 
 export default function ProductsCatalog() {
   const [searchParams] = useSearchParams();
@@ -32,8 +31,11 @@ export default function ProductsCatalog() {
 
   const debouncedFetch = useCallback(
     debounce(async (params: Record<string, string>) => {
+      const limit = params.limit
+        ? Math.max(1, parseInt(params.limit, 10) || DEFAULT_PRODUCT_LIMIT)
+        : DEFAULT_PRODUCT_LIMIT;
       const response = await adminService.GetProductsPaged({
-        limit: ITEMS_PER_PAGE,
+        limit,
         offset: 0,
         ...getProductPagedParans(params),
       });
@@ -42,10 +44,11 @@ export default function ProductsCatalog() {
     [],
   );
 
+  const searchString = searchParams.toString();
   useEffect(() => {
     debouncedFetch(fetchParams);
     return () => debouncedFetch.cancel();
-  }, [searchParams, debouncedFetch]);
+  }, [searchString, debouncedFetch]);
 
   const handleCreateNewProduct = () => {
     navigate(`${ROUTES.addProduct}`);
@@ -54,10 +57,12 @@ export default function ProductsCatalog() {
   return (
     <>
       <div className='flex flex-col grid gap-10 pb-20'>
-        <Categories />
-        <Button className='flex w-auto uppercase' onClick={toggleModal}>
-          filter +
-        </Button>
+        <div className='flex items-end justify-between'>
+          <Categories />
+          <Button variant='simple' className='uppercase' onClick={toggleModal}>
+            filter +
+          </Button>
+        </div>
         <Filter isOpen={isModalOpen} toggleModal={toggleModal} />
         <InfinityScroll firstItems={products} />
       </div>

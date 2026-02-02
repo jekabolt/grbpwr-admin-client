@@ -1,5 +1,8 @@
 import { common_GenderEnum } from 'api/proto-http/admin';
+import { currencySymbols, LANGUAGES } from 'constants/constants';
 import { z } from 'zod';
+
+const requiredLanguageIds = LANGUAGES.map((l) => l.id);
 
 const productTranslationSchema = z.object({
   languageId: z.number().min(1, 'Language ID is required'),
@@ -34,39 +37,40 @@ const productBodySchema = z.object({
   fit: z.string().optional(),
 });
 
-export const baseProductSchema = z.object({
-  product: z.object({
-    productBodyInsert: productBodySchema,
-    thumbnailMediaId: z.number().min(1, 'Thumbnail must be selected'),
-    secondaryThumbnailMediaId: z.number().optional(),
-    translations: z.array(productTranslationSchema).min(1, 'At least one translation is required'),
-    prices: z
-      .array(
-        z.object({
-          currency: z.string().min(1, 'Currency is required'),
-          price: z.object({
-            value: z
-              .string()
-              .min(1, 'Price is required')
-              .regex(/^\d*\.?\d{0,2}$/, 'Price must be a valid number greater than 0'),
-          }),
-        }),
-      )
-      .min(1, 'At least one price must be specified'),
+const priceEntrySchema = z.object({
+  currency: z.string().min(1, 'Currency is required'),
+  price: z.object({
+    value: z
+      .string()
+      .min(1, 'Price is required')
+      .regex(/^\d*\.?\d{0,2}$/, 'Price must be a valid number'),
   }),
-  prices: z
-    .array(
-      z.object({
-        currency: z.string().min(1, 'Currency is required'),
-        price: z.object({
-          value: z
-            .string()
-            .min(1, 'Price is required')
-            .regex(/^\d*\.?\d{0,2}$/, 'Price must be a valid number greater than 0'),
-        }),
-      }),
-    )
-    .min(1, 'At least one price must be specified'),
+});
+
+const allPricesFilledRefine = (arr: { price?: { value?: string } }[]) =>
+  arr.every((p) => {
+    const v = p?.price?.value;
+    return v != null && v !== '' && parseFloat(v) > 0;
+  });
+
+export const baseProductSchema = z
+  .object({
+    product: z.object({
+      productBodyInsert: productBodySchema,
+      thumbnailMediaId: z.number().min(1, 'Thumbnail must be selected'),
+      secondaryThumbnailMediaId: z.number().optional(),
+      translations: z
+        .array(productTranslationSchema)
+        .min(1, 'At least one translation is required')
+        .refine(
+          (arr) =>
+            arr.length === requiredLanguageIds.length &&
+            requiredLanguageIds.every((id) => arr.some((t) => t.languageId === id)),
+          { message: 'All languages must be filled (name and description for each)' },
+        ),
+      prices: z.array(priceEntrySchema).min(1, 'At least one price must be specified'),
+    }),
+    prices: z.array(priceEntrySchema).min(1, 'At least one price must be specified'),
   mediaIds: z.array(z.number()).min(1, 'At least one media must be added to the product'),
   tags: z.array(
     z.object({
@@ -98,7 +102,11 @@ export const baseProductSchema = z.object({
     .refine((sizes) => sizes.some((size) => size.productSize.quantity.value !== '0'), {
       message: 'At least one size must be specified',
     }),
-});
+  })
+  .refine((data) => allPricesFilledRefine(data.prices), {
+    message: 'All prices must be filled (value greater than 0)',
+    path: ['prices'],
+  });
 
 export const productSchema = baseProductSchema;
 
@@ -126,10 +134,16 @@ export const defaultData = {
     },
     thumbnailMediaId: 0,
     secondaryThumbnailMediaId: 0,
-    translations: [{ languageId: 1, name: '', description: '' }],
-    prices: [{ currency: 'USD', price: { value: '0' } }],
+    translations: LANGUAGES.map((l) => ({ languageId: l.id, name: '', description: '' })),
+    prices: Object.keys(currencySymbols).map((currency) => ({
+      currency,
+      price: { value: '0' },
+    })),
   },
-  prices: [{ currency: 'USD', price: { value: '0' } }],
+  prices: Object.keys(currencySymbols).map((currency) => ({
+    currency,
+    price: { value: '0' },
+  })),
   mediaIds: [],
   tags: [],
   sizeMeasurements: [],

@@ -87,7 +87,7 @@ export function CommonEntity({
                   mediaUrl={landscapeLink}
                   aspectRatio={getAspectRatioFor('Landscape')}
                   allowMultiple={false}
-                  showVideos={false}
+                  showVideos={true}
                   alt='Landscape preview'
                   onSaveMedia={(media) => onSaveMedia(media, 'Landscape')}
                 />
@@ -100,7 +100,7 @@ export function CommonEntity({
                   mediaUrl={portraitLink}
                   aspectRatio={getAspectRatioFor('Portrait')}
                   allowMultiple={false}
-                  showVideos={false}
+                  showVideos={true}
                   alt='Portrait preview'
                   onSaveMedia={(media) => onSaveMedia(media, 'Portrait')}
                 />

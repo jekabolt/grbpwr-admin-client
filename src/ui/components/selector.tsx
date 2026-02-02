@@ -49,23 +49,25 @@ export default function Selector({
     }
   };
 
-  const getDisplayValue = () => {
-    if (multiple) {
-      if (!value || (Array.isArray(value) && !value.length)) return placeholder;
-      if (Array.isArray(value) && value.includes('all')) return 'All';
-      if (Array.isArray(value)) {
-        return value.map((val) => allOptions.find((opt) => opt.value === val)?.label).join(', ');
-      }
-      return placeholder;
-    }
-    return allOptions.find((opt) => opt.value === value)?.label || placeholder;
-  };
-
   const currentValue = multiple
     ? Array.isArray(value) && value.length > 0
       ? value[0].toString()
       : ''
     : (value || (showAll ? 'all' : '')).toString();
+
+  const getDisplayValue = () => {
+    if (multiple) {
+      if (!value || (Array.isArray(value) && !value.length)) return placeholder;
+      if (Array.isArray(value) && value.includes('all')) return 'All';
+      if (Array.isArray(value)) {
+        return value
+          .map((val) => allOptions.find((opt) => String(opt.value) === String(val))?.label)
+          .join(', ');
+      }
+      return placeholder;
+    }
+    return allOptions.find((opt) => String(opt.value) === String(currentValue))?.label || placeholder;
+  };
 
   return (
     <div className={`${fullWidth ? 'w-full' : ''}`}>

@@ -9,6 +9,7 @@ import {
   common_SizeWithMeasurementInsert,
   UpsertProductRequest,
 } from 'api/proto-http/admin';
+import { currencySymbols, LANGUAGES } from 'constants/constants';
 import isEqual from 'lodash/isEqual';
 import { ProductFormData } from '../utility/schema';
 import { getNonEmptySizeMeasurements } from '../utility/sizes';
@@ -127,12 +128,14 @@ export function mapProductFullToFormData(
 
   const mediaIds = productFull?.media?.map((media) => media.id || 0).filter((id) => id > 0) || [];
 
-  const prices = productFull?.product?.prices?.map((priceItem) => ({
-    currency: priceItem.currency || 'USD',
-    price: {
-      value: priceItem.price?.value || '0',
-    },
-  })) || [{ currency: 'USD', price: { value: '0' } }];
+  const apiPrices = productFull?.product?.prices ?? [];
+  const prices = Object.keys(currencySymbols).map((currency) => {
+    const fromApi = apiPrices.find((p) => p.currency === currency);
+    return {
+      currency,
+      price: { value: fromApi?.price?.value ?? '0' },
+    };
+  });
 
   return {
     product: {
@@ -164,11 +167,14 @@ export function mapProductFullToFormData(
       },
       thumbnailMediaId: productDisplay?.thumbnail?.id || 0,
       secondaryThumbnailMediaId: productDisplay?.secondaryThumbnail?.id || 0,
-      translations: productBody?.translations?.map((translation) => ({
-        languageId: translation.languageId || 1,
-        name: translation.name || '',
-        description: translation.description || '',
-      })) || [{ languageId: 1, name: '', description: '' }],
+      translations: LANGUAGES.map((lang) => {
+        const fromApi = productBody?.translations?.find((t) => t.languageId === lang.id);
+        return {
+          languageId: lang.id,
+          name: fromApi?.name ?? '',
+          description: fromApi?.description ?? '',
+        };
+      }),
       prices,
     },
     prices,

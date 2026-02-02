@@ -93,7 +93,7 @@ export function SalePreorderFields({ editMode }: { editMode: boolean }) {
       {showSales && (
         <InputField
           name={salePath}
-          label='sale percentage'
+          label='sale percentage (optional)'
           keyboardRestriction={/[0-9]/}
           value={String(numericSale)}
           onChange={handleSaleChange}
@@ -105,7 +105,7 @@ export function SalePreorderFields({ editMode }: { editMode: boolean }) {
         <InputField
           type='date'
           name={preorderPath}
-          label='preorder'
+          label='preorder (optional)'
           value={uiDate}
           min={todayYmd}
           onChange={handlePreorderChange}
