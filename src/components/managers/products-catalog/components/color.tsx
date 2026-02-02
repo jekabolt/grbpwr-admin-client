@@ -1,5 +1,6 @@
 import { colors } from 'constants/filter';
 import Selector from 'ui/components/selector';
+import Text from 'ui/components/text';
 import useFilter from '../../../../lib/useFilter';
 
 export default function Color() {
@@ -11,12 +12,17 @@ export default function Color() {
   }));
 
   return (
-    <Selector
-      label='color'
-      options={colorOptions}
-      value={defaultValue || ''}
-      onChange={(value) => handleFilterChange(value)}
-      showAll
-    />
+    <div className='space-y-2'>
+      <Text variant='uppercase' size='small'>
+        color
+      </Text>
+      <Selector
+        label='color'
+        options={colorOptions}
+        value={defaultValue || ''}
+        onChange={(value) => handleFilterChange(value)}
+        showAll
+      />
+    </div>
   );
 }

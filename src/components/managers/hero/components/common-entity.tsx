@@ -3,7 +3,7 @@ import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
-import { MediaPreviewWithSelector } from './media-preview-with-selector';
+import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { Props } from '../utility/interface';
 
 const TRANSLATION_CONFIGS = {
@@ -42,7 +42,6 @@ export function CommonEntity({
     }
     return aspectRatio[orientation];
   };
-
 
   const getTranslationFields = () => {
     if (prefix.includes('.main')) return TRANSLATION_CONFIGS.main;
@@ -88,7 +87,7 @@ export function CommonEntity({
                   mediaUrl={landscapeLink}
                   aspectRatio={getAspectRatioFor('Landscape')}
                   allowMultiple={false}
-                  showVideos={false}
+                  showVideos={true}
                   alt='Landscape preview'
                   onSaveMedia={(media) => onSaveMedia(media, 'Landscape')}
                 />
@@ -101,7 +100,7 @@ export function CommonEntity({
                   mediaUrl={portraitLink}
                   aspectRatio={getAspectRatioFor('Portrait')}
                   allowMultiple={false}
-                  showVideos={false}
+                  showVideos={true}
                   alt='Portrait preview'
                   onSaveMedia={(media) => onSaveMedia(media, 'Portrait')}
                 />

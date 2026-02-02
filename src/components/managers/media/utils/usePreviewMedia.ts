@@ -16,7 +16,7 @@ export function usePreviewMedia() {
   const { showMessage } = useSnackBarStore();
 
   const handleViewMedia = async (media: common_MediaFull) => {
-    const mediaUrl = media.media?.fullSize?.mediaUrl || media.media?.thumbnail?.mediaUrl || '';
+    const mediaUrl = media.media?.thumbnail?.mediaUrl || '';
     const mediaType = isVideo(mediaUrl) ? 'video' : 'image';
 
     // For images, try to fetch as blob to enable cropping
@@ -31,9 +31,12 @@ export function usePreviewMedia() {
       setIsPreviewOpen(true);
       setIsLoadingBlob(true);
 
-      // Then attempt to fetch as blob in the background
       try {
-        const response = await fetch(mediaUrl);
+        const response = await fetch(mediaUrl, {
+          mode: 'cors',
+          credentials: 'omit',
+          cache: 'default',
+        });
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -41,7 +44,6 @@ export function usePreviewMedia() {
         const objectUrl = URL.createObjectURL(blob);
         setBlobUrl(objectUrl);
 
-        // Update preview with blob URL
         setViewingMedia({
           url: objectUrl,
           type: mediaType,
@@ -50,10 +52,8 @@ export function usePreviewMedia() {
       } catch (error) {
         console.warn('Could not fetch image as blob (CORS restriction):', error);
         setIsLoadingBlob(false);
-        // Keep showing the direct URL - cropping won't be available
       }
     } else {
-      // For videos, use direct URL
       const preview: PreviewItem = {
         url: mediaUrl,
         type: mediaType,

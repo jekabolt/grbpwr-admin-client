@@ -12,6 +12,16 @@ interface Colors {
 
 export const PAGE_SIZE = 16;
 
+export const PRODUCT_LIMIT_OPTIONS = [
+  { value: 5, label: '5' },
+  { value: 10, label: '10' },
+  { value: 30, label: '30' },
+  { value: 50, label: '50' },
+  { value: 100, label: '100' },
+] as const;
+
+export const DEFAULT_PRODUCT_LIMIT = 30;
+
 export const sortOptions: Array<{ value: common_SortFactor; label: string }> = [
   { value: 'SORT_FACTOR_CREATED_AT', label: 'Created At' },
   { value: 'SORT_FACTOR_PRICE', label: 'Price' },

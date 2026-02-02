@@ -18,7 +18,7 @@ export function MediaSelector({
   label,
   aspectRatio,
   allowMultiple = true,
-  showVideos = false,
+  showVideos = true,
   isDeleteAccepted = false,
   saveSelectedMedia,
 }: MediaSelectorProps) {
@@ -52,7 +52,9 @@ export function MediaSelector({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
       <DialogPrimitive.Trigger asChild>
-        <Button size='lg'>{label}</Button>
+        <Button size='lg' className='whitespace-nowrap cursor-pointer'>
+          {label}
+        </Button>
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/80' />
@@ -62,7 +64,7 @@ export function MediaSelector({
               <Text variant='uppercase'>select Media</Text>
             </DialogPrimitive.Title>
             <DialogPrimitive.Close asChild>
-              <Button className='px-1 py-1'>x</Button>
+              <Button className='py-1'>[x]</Button>
             </DialogPrimitive.Close>
           </div>
           <div className='flex-1 min-h-0 overflow-y-scroll mt-6'>

@@ -183,6 +183,7 @@ export function SizeMeasurements({
                       }
                     }}
                     className='w-full border-none text-center bg-inactive'
+                    disabled={!isEditMode}
                   />
                 </td>
                 {measurements.map((m, i) => {
@@ -203,6 +204,7 @@ export function SizeMeasurements({
                           }
                         }}
                         className='w-full border-none text-center'
+                        disabled={!isEditMode}
                       />
                     </td>
                   );

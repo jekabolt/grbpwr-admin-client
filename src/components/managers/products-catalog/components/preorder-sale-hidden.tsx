@@ -26,11 +26,11 @@ export default function PreorderSaleHidden() {
         <Checkbox
           name='hidden'
           label='hidden'
-          checked={hidden === 'true'}
-          onChange={(checked) => handleHiddenChange(checked.toString())}
+          checked={hidden !== 'false'}
+          onChange={(checked) => handleHiddenChange(checked ? 'true' : 'false')}
         />
         <Text variant='uppercase' size='small'>
-          hidden
+          show hidden
         </Text>
       </div>
       <div className='flex items-center gap-2'>

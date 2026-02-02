@@ -21,7 +21,7 @@ export function SnackBar() {
           }}
         >
           <Alert severity={alert.severity} onClose={() => closeMessage(alert.id)}>
-            {alert.message.toUpperCase()}
+            {(alert.message ?? '').toUpperCase()}
           </Alert>
         </Snackbar>
       ))}

@@ -2,15 +2,15 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { common_ProductFull, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { FieldErrors, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Form } from 'ui/form';
 import { defaultData, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
 import { MediaAds } from './media-ads';
-import { SecondaryThumbnail } from './secondary-thumbnail';
 import { SizeMeasurements } from './size-measurements';
 import { Tags } from './tags';
 import { Thumbnail } from './thumbnail';
@@ -33,6 +33,7 @@ export function ProductForm({
   productId,
   onEditModeChange,
 }: Props) {
+  const { showMessage } = useSnackBarStore();
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [mediaClearKey, setMediaClearKey] = useState(0);
   const editMode = isEditMode || isAddingProduct;
@@ -44,6 +45,7 @@ export function ProductForm({
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
     defaultValues: initialValues,
+    mode: 'onTouched',
   });
 
   useEffect(() => {
@@ -78,6 +80,7 @@ export function ProductForm({
       await adminService.UpsertProduct(payload);
       setIsFormChanged(false);
       form.reset(data, { keepValues: true });
+      showMessage(isAddingProduct ? 'Product created' : 'Product updated', 'success');
 
       if (isAddingProduct && !isCopyMode) {
         setMediaClearKey((k) => k + 1);
@@ -85,16 +88,34 @@ export function ProductForm({
         navigate(ROUTES.product, { replace: true });
       }
     } catch (e) {
-      console.log('error', e);
+      const message = e instanceof Error ? e.message : 'Failed to save product';
+      showMessage(message, 'error');
+      console.error('UpsertProduct error', e);
     }
   }
 
-  const handleFormError = (errors: any) => {
-    console.log('Form validation errors:', errors);
+  const getFirstErrorMessage = (errs: Record<string, unknown>): string | undefined => {
+    for (const value of Object.values(errs)) {
+      if (
+        value &&
+        typeof value === 'object' &&
+        'message' in value &&
+        typeof (value as { message: unknown }).message === 'string'
+      ) {
+        return (value as { message: string }).message;
+      }
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const nested = getFirstErrorMessage(value as Record<string, unknown>);
+        if (nested) return nested;
+      }
+    }
+    return undefined;
   };
 
-  const handleCopyProductClick = (id: number | undefined) => {
-    navigate(`${ROUTES.copyProduct}/${id}`);
+  const handleFormError = (errors: FieldErrors<ProductFormData>) => {
+    const message =
+      getFirstErrorMessage(errors as Record<string, unknown>) ?? 'Please fix the form errors';
+    showMessage(message, 'error');
   };
 
   return (
@@ -104,16 +125,10 @@ export function ProductForm({
         onSubmit={form.handleSubmit(handleSubmit, handleFormError)}
       >
         <div className='w-full flex justify-between'>
-          {!isAddingProduct && (
-            <Button onClick={() => handleCopyProductClick(product?.product?.id)} size='lg'>
-              copy
-            </Button>
-          )}
-
           <Button
             size='lg'
             disabled={isEditMode && !isFormChanged}
-            className='fixed bottom-3 right-3'
+            className='fixed bottom-3 right-3 z-50'
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
               e.preventDefault();
               if (editMode || isCopyMode) {
@@ -129,12 +144,27 @@ export function ProductForm({
 
         <div className='space-y-5'>
           <div className='flex flex-col lg:flex-row lg:justify-between lg:items-start gap-5'>
-            <div className='w-full lg:w-1/2 space-y-3'>
-              <div className='flex flex-col gap-5'>
-                <Thumbnail product={product} control={form.control} />
-                <SecondaryThumbnail product={product} control={form.control} />
+            <div className='w-full lg:w-1/2 space-y-8'>
+              <div className='flex flex-col lg:flex-row gap-5'>
+                <Thumbnail
+                  product={product}
+                  control={form.control}
+                  variant='primary'
+                  editMode={editMode}
+                />
+                <Thumbnail
+                  product={product}
+                  control={form.control}
+                  variant='secondary'
+                  editMode={editMode}
+                />
               </div>
-              <MediaAds product={product} control={form.control} clearKey={mediaClearKey} />
+              <MediaAds
+                product={product}
+                control={form.control}
+                clearKey={mediaClearKey}
+                editMode={editMode}
+              />
             </div>
             <div className='w-full lg:w-1/2 space-y-3'>
               <BodyFields editMode={editMode} />

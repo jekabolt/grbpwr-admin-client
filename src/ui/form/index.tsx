@@ -42,6 +42,8 @@ const useFormField = () => {
   const { getFieldState, formState } = useFormContext();
 
   const fieldState = getFieldState(fieldContext.name, formState);
+  // Subscribe to errors so FormMessage/FormControl re-render when validation runs (RHF proxy)
+  void formState.errors;
 
   if (!fieldContext) {
     throw new Error('useFormField must be used within a FormField');
@@ -96,8 +98,10 @@ function FormLabel({
   const { formItemId } = useFormField();
 
   return (
-    <Label ref={ref} className={cn(className)} htmlFor={formItemId} {...props}>
-      <Text>{typeof props.children === 'string' ? props.children : null}</Text>
+    <Label ref={ref} className={cn('leading-none', className)} htmlFor={formItemId} {...props}>
+      <Text className='leading-none'>
+        {typeof props.children === 'string' ? props.children : null}
+      </Text>
     </Label>
   );
 }
@@ -132,7 +136,7 @@ function FormMessage({ className, children, ref, ...props }: any) {
       ref={ref}
       id={formMessageId}
       className={cn('text-xs', className, {
-        'text-errorColor': error,
+        'text-error': error,
       })}
       {...props}
     >

@@ -6,8 +6,8 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { TranslationField } from 'ui/form/fields/translation-field';
+import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { ArchivePicker } from './archive-picker';
-import { MediaPreviewWithSelector } from './media-preview-with-selector';
 import { HeroSchema } from './schema';
 
 type MediaUrlsState = {

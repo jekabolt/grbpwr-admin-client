@@ -1,6 +1,7 @@
 import { CheckIcon, Cross2Icon as ClearIcon } from '@radix-ui/react-icons';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -33,6 +34,7 @@ export function MediaItem({
 }: MediaItemProps) {
   const mediaUrl = media.media?.thumbnail?.mediaUrl;
   const deleteMediaMutation = useDeleteMedia();
+  const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const aspectRatio = mediaAspectRatio(media, videoSizes);
 
@@ -67,7 +69,16 @@ export function MediaItem({
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirmDelete === media.id) {
-      deleteMediaMutation.mutate(media.id || 0);
+      deleteMediaMutation.mutate(media.id || 0, {
+        onError: (error) => {
+          const status = (error as Error & { status?: number }).status;
+          const is500 = status === 500;
+          showMessage(
+            is500 ? 'Media exists in product and cannot be deleted' : 'Media cannot be removed',
+            'error',
+          );
+        },
+      });
       setConfirmDelete(undefined);
     } else {
       setConfirmDelete(media.id || 0);
