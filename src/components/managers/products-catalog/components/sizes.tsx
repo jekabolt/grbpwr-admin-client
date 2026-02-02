@@ -1,25 +1,21 @@
-import { useDictionaryStore } from 'lib/stores/store';
-import Selector from 'ui/components/selector';
-import useFilter from '../../../../lib/useFilter';
+import FilterOptionButtons from './filter-buttons';
+import { useFilterSelection } from './useFilterSelection';
+import { useSizeFiltering } from './useSizeFiltering';
 
-export default function Sizes() {
-  const { dictionary } = useDictionaryStore();
-  const { defaultValue, handleFilterChange } = useFilter('sizes', true);
-
-  const sizeOptions =
-    dictionary?.sizes?.map((s) => ({
-      value: s.id?.toString() ?? '',
-      label: s.name ?? '',
-    })) || [];
+export function Sizes({ gender }: { gender: string }) {
+  const { sizeOptions } = useSizeFiltering();
+  const { selectedValues, handleToggle } = useFilterSelection({
+    filterKey: 'size',
+    multiSelect: true,
+  });
 
   return (
-    <Selector
-      label='sizes'
-      options={sizeOptions}
-      value={defaultValue || []}
-      showAll
-      multiple
-      onChange={handleFilterChange}
+    <FilterOptionButtons
+      selectedValues={selectedValues}
+      handleFilterChange={handleToggle}
+      values={sizeOptions || []}
+      showSeparated={true}
+      gender={gender}
     />
   );
 }

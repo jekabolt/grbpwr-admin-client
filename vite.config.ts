@@ -6,7 +6,12 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
-    plugins: [react()],
+    plugins: [
+      react({
+        // Only treat .tsx/.jsx as component modules so constants and utils don't trigger Fast Refresh warnings
+        include: /\.(tsx|jsx)$/,
+      }),
+    ],
     resolve: {
       extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
       alias: {

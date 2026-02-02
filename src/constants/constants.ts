@@ -1,4 +1,29 @@
-import { common_HeroType } from 'api/proto-http/admin';
+import {
+  common_GenderEnum,
+  common_HeroType,
+  common_OrderFactor,
+  common_SortFactor,
+} from 'api/proto-http/admin';
+
+export type OrderFactorOption = {
+  factor: common_OrderFactor;
+  name: string;
+  sale?: boolean;
+};
+
+export type SortFactorConfig = {
+  label?: string;
+  orderFactors: OrderFactorOption[];
+};
+
+export const currencySymbols: Record<string, string> = {
+  CNY: '¥', // Chinese Yuan
+  EUR: '€', // Euro
+  KRW: '₩', // Korean Won
+  GBP: '£', // British Pound Sterling
+  JPY: '¥', // Japanese Yen
+  USD: '$', // United States Dollar
+};
 
 export const LANGUAGES = [
   { id: 1, name: 'english', code: 'en', isDefault: true },
@@ -29,3 +54,45 @@ export const ASPECT_RATIOS = [
   { label: '9:16', value: 0.5625, color: '#674ea7' },
   { label: 'Custom', value: undefined, color: '#000000' },
 ];
+
+export const SORT_MAP: Partial<Record<common_SortFactor, SortFactorConfig>> = {
+  SORT_FACTOR_CREATED_AT: {
+    orderFactors: [{ factor: 'ORDER_FACTOR_DESC', name: 'latest arrivals' }],
+  },
+  SORT_FACTOR_PRICE: {
+    label: 'price',
+    orderFactors: [
+      { factor: 'ORDER_FACTOR_ASC', name: 'low to high' },
+      { factor: 'ORDER_FACTOR_DESC', name: 'high to low' },
+      { factor: 'ORDER_FACTOR_ASC', name: 'low to high', sale: true },
+      { factor: 'ORDER_FACTOR_DESC', name: 'high to low', sale: true },
+    ],
+  },
+};
+
+export const ORDER_MAP: Record<string, common_OrderFactor> = {
+  asc: 'ORDER_FACTOR_ASC',
+  desc: 'ORDER_FACTOR_DESC',
+};
+
+export const SORT_MAP_URL: Record<string, common_SortFactor> = {
+  created_at: 'SORT_FACTOR_CREATED_AT',
+  updated_at: 'SORT_FACTOR_UPDATED_AT',
+  name: 'SORT_FACTOR_NAME',
+  price: 'SORT_FACTOR_PRICE',
+};
+
+export const GENDER_MAP: Record<string, common_GenderEnum> = {
+  men: 'GENDER_ENUM_MALE',
+  women: 'GENDER_ENUM_FEMALE',
+  unisex: 'GENDER_ENUM_UNISEX',
+  ukn: 'GENDER_ENUM_UNKNOWN',
+};
+
+/** Slug for category/size filtering (men | women | unisex). URL may store enum; use this for UI logic. */
+export const GENDER_ENUM_TO_SLUG: Record<string, string> = {
+  GENDER_ENUM_MALE: 'men',
+  GENDER_ENUM_FEMALE: 'women',
+  GENDER_ENUM_UNISEX: 'unisex',
+  GENDER_ENUM_UNKNOWN: '',
+};
