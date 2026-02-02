@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
+import { Overlay } from 'ui/components/overlay';
 import Text from 'ui/components/text';
 
 export function ProductItem({
@@ -72,11 +73,7 @@ export function ProductItem({
         >
           copy
         </Button>
-        {isHidden && (
-          <Text size='small' className='absolute bottom-0 left-0'>
-            hidden
-          </Text>
-        )}
+        {isHidden && <Overlay cover='container' />}
       </div>
       <Text className='w-full break-words' variant='underLineWithColor' size='small'>
         {description}

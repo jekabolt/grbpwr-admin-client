@@ -15,14 +15,12 @@ const CONFIG = {
     productPath: 'thumbnail' as const,
     label: 'Primary Thumbnail',
     clearOnEmpty: false,
-    sequence: 1,
   },
   secondary: {
     fieldName: 'product.secondaryThumbnailMediaId' as const,
     productPath: 'secondaryThumbnail' as const,
     label: 'Secondary Thumbnail (Optional)',
     clearOnEmpty: true,
-    sequence: 2,
   },
 } as const;
 
@@ -85,7 +83,6 @@ export function Thumbnail({ product, control, variant = 'primary', editMode }: P
         allowMultiple={false}
         showVideos={false}
         alt='Thumbnail preview'
-        sequence={config.sequence}
         editMode={editMode}
         showSelectorWhenEmpty={editMode || !!mediaLink}
         onSaveMedia={handleThumbnail}

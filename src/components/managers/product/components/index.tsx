@@ -96,7 +96,12 @@ export function ProductForm({
 
   const getFirstErrorMessage = (errs: Record<string, unknown>): string | undefined => {
     for (const value of Object.values(errs)) {
-      if (value && typeof value === 'object' && 'message' in value && typeof (value as { message: unknown }).message === 'string') {
+      if (
+        value &&
+        typeof value === 'object' &&
+        'message' in value &&
+        typeof (value as { message: unknown }).message === 'string'
+      ) {
         return (value as { message: string }).message;
       }
       if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -108,7 +113,8 @@ export function ProductForm({
   };
 
   const handleFormError = (errors: FieldErrors<ProductFormData>) => {
-    const message = getFirstErrorMessage(errors as Record<string, unknown>) ?? 'Please fix the form errors';
+    const message =
+      getFirstErrorMessage(errors as Record<string, unknown>) ?? 'Please fix the form errors';
     showMessage(message, 'error');
   };
 
@@ -122,7 +128,7 @@ export function ProductForm({
           <Button
             size='lg'
             disabled={isEditMode && !isFormChanged}
-            className='fixed bottom-3 right-3'
+            className='fixed bottom-3 right-3 z-50'
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
               e.preventDefault();
               if (editMode || isCopyMode) {

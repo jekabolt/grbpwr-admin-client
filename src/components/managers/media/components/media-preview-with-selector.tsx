@@ -2,7 +2,6 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { Button } from 'ui/components/button';
 import MediaComponent from 'ui/components/media';
-import Text from 'ui/components/text';
 
 interface MediaPreviewWithSelectorProps {
   mediaUrl?: string;
@@ -11,9 +10,7 @@ interface MediaPreviewWithSelectorProps {
   showVideos?: boolean;
   label?: string;
   alt?: string;
-  sequence?: number;
   editMode?: boolean;
-  /** When false and no mediaUrl, empty state is shown without the media selector (e.g. for optional secondary thumb in view mode). */
   showSelectorWhenEmpty?: boolean;
   onSaveMedia: (media: common_MediaFull[]) => void;
   onClear?: () => void;
@@ -26,7 +23,6 @@ export function MediaPreviewWithSelector({
   showVideos = false,
   alt = 'Media preview',
   label = 'select media',
-  sequence,
   editMode = true,
   showSelectorWhenEmpty = true,
   onSaveMedia,
@@ -66,9 +62,6 @@ export function MediaPreviewWithSelector({
             />
           </div>
         )}
-        <Text size='small' className='leading-none whitespace-nowrap absolute bottom-0 left-0'>
-          {sequence}
-        </Text>
       </div>
     );
   }

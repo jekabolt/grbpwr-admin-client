@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Control, useController } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
+import Text from 'ui/components/text';
 import { ProductFormData } from '../utility/schema';
 
 type Props = {
@@ -57,7 +58,7 @@ export function MediaAds({ product, control, clearKey, editMode }: Props) {
   }
   return (
     <div className='grid  grid-cols-2 gap-2'>
-      {mediaLinks?.map((m) => (
+      {mediaLinks?.map((m, id) => (
         <div key={m.id} className='relative w-full border border-text aspect-[4/5] overflow-hidden'>
           <Media
             type='image'
@@ -78,6 +79,9 @@ export function MediaAds({ product, control, clearKey, editMode }: Props) {
           >
             x
           </Button>
+          <Text size='small' className='absolute bottom-0 left-0 mix-blend-difference text-white'>
+            {id + 1}
+          </Text>
         </div>
       ))}
       {editMode && (

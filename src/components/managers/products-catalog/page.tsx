@@ -9,7 +9,7 @@ import Filter from './components/filter';
 import { InfinityScroll } from './components/infinity-scroll';
 import { getProductPagedParans } from './components/utility';
 
-const ITEMS_PER_PAGE = 16;
+const ITEMS_PER_PAGE = 30;
 
 export default function ProductsCatalog() {
   const [searchParams] = useSearchParams();

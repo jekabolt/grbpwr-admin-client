@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 
-const ITEMS_PER_PAGE = 16;
+const ITEMS_PER_PAGE = 50;
 
 export const mediaKeys = {
   all: ['media'] as const,
