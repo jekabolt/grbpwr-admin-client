@@ -66,18 +66,20 @@ export function Tags({
 
   const handleAddTag = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (tag.trim() !== '' && !localTags.includes(tag)) {
-      const newTags = [...localTags, tag];
+    const trimmedTag = tag.trim();
+    if (trimmedTag !== '' && !localTags.includes(trimmedTag)) {
+      const newTags = [...localTags, trimmedTag];
       if (isAddingProduct) {
         localStorage.setItem('productTags', JSON.stringify(newTags));
         setLocalTags(newTags);
       }
       if (isCopyMode) {
-        setCopiedTags((prevCopiedTags) => [...prevCopiedTags, tag]);
+        setCopiedTags((prevCopiedTags) => [...prevCopiedTags, trimmedTag]);
       }
       if (isEditMode) {
-        setEditedTags((prevTags) => [...prevTags, tag]);
+        setEditedTags((prevTags) => [...prevTags, trimmedTag]);
       }
+      setSelectedTags((prev) => (prev.includes(trimmedTag) ? prev : [...prev, trimmedTag]));
       setTag('');
     }
   };
