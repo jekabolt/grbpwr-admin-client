@@ -64,10 +64,31 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
       const newTranslations = [...translations, newTranslation];
       replace(newTranslations);
     } else if (translationIndex >= 0) {
-      setValue(`${fieldPrefix}.${translationIndex}.languageId`, selectedLanguageId);
+      setValue(`${fieldPrefix}.${translationIndex}.languageId`, selectedLanguageId, {
+        shouldDirty: true,
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLanguageId, translationIndex, translations.length, replace, setValue, fieldPrefix]);
+
+  useEffect(() => {
+    const pathParts = fieldPrefix.split('.');
+    let node: any = errors;
+
+    for (const part of pathParts) {
+      node = node?.[part];
+      if (!node) return;
+    }
+
+    if (!Array.isArray(node) || !node.length || !translations.length) return;
+
+    const idx = node.findIndex((item: any) => item && fields.some((f) => item[f.name]));
+
+    const langId = translations[idx]?.languageId;
+    if (idx !== -1 && typeof langId === 'number') {
+      setSelectedLanguageId(langId);
+    }
+  }, [errors, fieldPrefix, fields, translations]);
 
   // Load field values when language changes
   useEffect(() => {
@@ -82,12 +103,11 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
   const handleLanguageChange = (e: React.MouseEvent<HTMLButtonElement>, languageId: number) => {
     e.preventDefault();
 
-    // Save current values before switching
     fields.forEach((field) => {
       const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${field.name}`;
       const currentValue = fieldValues[field.name];
       if (currentValue !== undefined) {
-        setValue(fieldPath, currentValue);
+        setValue(fieldPath, currentValue, { shouldDirty: true });
       }
     });
 
@@ -97,7 +117,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
   const handleFieldChange = (fieldName: string, value: string) => {
     setFieldValues((prev) => ({ ...prev, [fieldName]: value }));
     const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
-    setValue(fieldPath, value);
+    setValue(fieldPath, value, { shouldDirty: true });
   };
 
   const isLanguageFilled = (languageId: number) => {

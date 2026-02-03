@@ -128,7 +128,7 @@ export function ProductForm({
           <Button
             size='lg'
             disabled={isEditMode && !isFormChanged}
-            className='fixed bottom-3 right-3 z-50'
+            className='fixed bottom-3 right-3 z-50 cursor-pointer'
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
               e.preventDefault();
               if (editMode || isCopyMode) {
