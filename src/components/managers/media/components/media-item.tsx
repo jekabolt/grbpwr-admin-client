@@ -8,7 +8,11 @@ import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { VideoSize } from '..';
-import { getAspectRatioBackgroundClass, mediaAspectRatio } from '../utils/calculate-aspect';
+import {
+  getAspectRatioBackgroundClass,
+  isKnownAspectRatio,
+  mediaAspectRatio,
+} from '../utils/calculate-aspect';
 import { useDeleteMedia } from '../utils/useMediaQuery';
 
 interface MediaItemProps {
@@ -36,6 +40,8 @@ export function MediaItem({
   const deleteMediaMutation = useDeleteMedia();
   const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
+  const width = media.media?.thumbnail?.width || videoSizes[media.id || 0]?.width;
+  const height = media.media?.thumbnail?.height || videoSizes[media.id || 0]?.height;
   const aspectRatio = mediaAspectRatio(media, videoSizes);
 
   const handleVideoLoadEvent = (event: React.SyntheticEvent<HTMLVideoElement>) => {
@@ -121,7 +127,11 @@ export function MediaItem({
           variant='uppercase'
           className={cn('text-center', getAspectRatioBackgroundClass(aspectRatio))}
         >
-          {aspectRatio ? `ratio: ${aspectRatio}` : 'ratio: unknown'}
+          {!isKnownAspectRatio(aspectRatio) && width && height
+            ? `${width}:${height}`
+            : aspectRatio
+              ? `ratio: ${aspectRatio}`
+              : 'ratio: unknown'}
         </Text>
         <Button className='absolute top-0 right-0 hidden group-hover:block' onClick={handleDelete}>
           {confirmDelete === media.id ? <CheckIcon /> : <ClearIcon />}

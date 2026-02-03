@@ -29,6 +29,11 @@ const ASPECT_RATIO_CLASSES: Record<string, string> = {
   '9:16': 'bg-purple-600',
 } as const;
 
+export const isKnownAspectRatio = (aspectRatio?: string): boolean => {
+  if (!aspectRatio) return false;
+  return Boolean(ASPECT_RATIO_CLASSES[aspectRatio]);
+};
+
 export const getAspectRatioBackgroundClass = (aspectRatio?: string): string => {
   return ASPECT_RATIO_CLASSES[aspectRatio || ''] || 'bg-gray-500';
 };
