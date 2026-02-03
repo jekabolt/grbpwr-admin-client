@@ -36,7 +36,8 @@ const usePromo = (
         showMessage('PROMO CREATED', 'success');
         fetchPromos(50, 0);
       } catch (error) {
-        showMessage(`${(error as Error).message}`, 'error');
+        const msg = error instanceof Error ? error.message : 'Failed to create promo';
+        showMessage(msg, 'error');
       }
     },
     [promos],

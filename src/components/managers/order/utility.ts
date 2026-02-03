@@ -1,11 +1,12 @@
 import { adminService } from 'api/api';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionaryStore, useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { getOrderStatusName } from '../orders-catalog/components/utility';
 import { OrderDetailsState } from './interface';
 
 export const useOrderDetails = (uuid: string) => {
   const { dictionary } = useDictionaryStore();
+  const { showMessage } = useSnackBarStore();
   const [state, setState] = useState<OrderDetailsState>({
     orderDetails: undefined,
     dictionary: undefined,
@@ -28,7 +29,8 @@ export const useOrderDetails = (uuid: string) => {
         orderStatus: getOrderStatusName(dictionary, order.order?.order?.orderStatusId),
       }));
     } catch (error) {
-      console.error('Error fetching order details:', error);
+      const msg = error instanceof Error ? error.message : 'Error fetching order details';
+      showMessage(msg, 'error');
     } finally {
       setState((prev) => ({ ...prev, isLoading: false }));
     }
@@ -69,31 +71,40 @@ export const useOrderDetails = (uuid: string) => {
       setIsEdit(false);
       return;
     }
-    const response = await adminService.SetTrackingNumber({
-      orderUuid: state.orderDetails?.order?.uuid,
-      trackingCode: trackingNumber,
-    });
-    if (response) {
+    try {
+      await adminService.SetTrackingNumber({
+        orderUuid: state.orderDetails?.order?.uuid,
+        trackingCode: trackingNumber,
+      });
       fetchOrderDetails();
       setIsEdit(false);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to save tracking number';
+      showMessage(msg, 'error');
     }
   };
 
   async function markAsDelivered() {
-    const response = await adminService.DeliveredOrder({
-      orderUuid: state.orderDetails?.order?.uuid,
-    });
-    if (response) {
+    try {
+      await adminService.DeliveredOrder({
+        orderUuid: state.orderDetails?.order?.uuid,
+      });
       fetchOrderDetails();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to mark as delivered';
+      showMessage(msg, 'error');
     }
   }
 
   async function refundOrder() {
-    const response = await adminService.RefundOrder({
-      orderUuid: state.orderDetails?.order?.uuid,
-    });
-    if (response) {
+    try {
+      await adminService.RefundOrder({
+        orderUuid: state.orderDetails?.order?.uuid,
+      });
       fetchOrderDetails();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to refund order';
+      showMessage(msg, 'error');
     }
   }
 

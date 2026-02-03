@@ -86,7 +86,8 @@ export function Hero() {
       deletedIndicesRef.current.clear();
       showMessage('Hero saved successfully!', 'success');
     } catch (e) {
-      showMessage('Error saving hero:', 'error');
+      const msg = e instanceof Error ? e.message : 'Error saving hero';
+      showMessage(msg, 'error');
     }
   }
 

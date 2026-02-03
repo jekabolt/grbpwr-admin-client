@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_MediaFull } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { mediaKeys } from './useMediaQuery';
 
 function trimBeforeBase64(input: string): string {
@@ -39,6 +40,7 @@ export type UploadMediaInput = File | string;
 
 export function useUploadMedia() {
   const queryClient = useQueryClient();
+  const { showMessage } = useSnackBarStore();
 
   return useMutation<common_MediaFull, Error, UploadMediaInput>({
     mutationFn: async (input: UploadMediaInput) => {
@@ -103,7 +105,8 @@ export function useUploadMedia() {
       queryClient.invalidateQueries({ queryKey: mediaKeys.all });
     },
     onError: (error) => {
-      console.error('Failed to upload media:', error);
+      const msg = error instanceof Error ? error.message : 'Failed to upload media';
+      showMessage(msg, 'error');
     },
   });
 }

@@ -15,7 +15,7 @@ interface ProtoMetaParams {
 
 export const requestHandler = async (
   { path, method, body }: RequestHandlerParams,
-  { method: serviceMethod }: ProtoMetaParams, // eslint-disable-line @typescript-eslint/no-unused-vars
+  // { method: serviceMethod }: ProtoMetaParams, // eslint-disable-line @typescript-eslint/no-unused-vars
 ) => {
   const authToken = localStorage.getItem('authToken');
   const headers: Record<string, string> = {
@@ -38,28 +38,24 @@ export const requestHandler = async (
     console.log('[BE] response: ', response.status, response.statusText);
 
     if (!response.ok) {
-      let errorMessage = `Error: ${response.status} - ${response.statusText}`;
+      let msg = `Error: ${response.status} - ${response.statusText}`;
       try {
-        const contentType = response.headers.get('content-type');
         const text = await response.text();
-        if (contentType?.includes('application/json') && text) {
-          const json = JSON.parse(text) as Record<string, unknown>;
-          const msg =
-            typeof json.message === 'string'
-              ? json.message
-              : typeof json.error === 'string'
-                ? json.error
-                : typeof json.detail === 'string'
-                  ? json.detail
-                  : undefined;
-          if (msg) errorMessage = msg;
-        } else if (text) {
-          errorMessage = text;
+        if (text) {
+          if (response.headers.get('content-type')?.includes('application/json')) {
+            const json = JSON.parse(text) as Record<string, unknown>;
+            const s = ['message', 'error', 'detail']
+              .map((k) => json[k])
+              .find((v) => typeof v === 'string');
+            if (s) msg = s as string;
+          } else {
+            msg = text;
+          }
         }
       } catch {
-        // keep default errorMessage
+        /* keep default */
       }
-      const err = new Error(errorMessage) as Error & { status?: number };
+      const err = new Error(msg) as Error & { status?: number };
       err.status = response.status;
       throw err;
     }

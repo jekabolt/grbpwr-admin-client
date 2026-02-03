@@ -77,12 +77,8 @@ export function MediaItem({
     if (confirmDelete === media.id) {
       deleteMediaMutation.mutate(media.id || 0, {
         onError: (error) => {
-          const status = (error as Error & { status?: number }).status;
-          const is500 = status === 500;
-          showMessage(
-            is500 ? 'Media exists in product and cannot be deleted' : 'Media cannot be removed',
-            'error',
-          );
+          const message = error instanceof Error ? error.message : 'Media cannot be removed';
+          showMessage(message, 'error');
         },
       });
       setConfirmDelete(undefined);

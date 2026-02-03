@@ -44,7 +44,8 @@ export function ListArchive() {
       await deleteArchiveMutation.mutateAsync(archiveId);
       showMessage('Archive deleted successfully', 'success');
     } catch (error) {
-      showMessage('Failed to delete archive', 'error');
+      const msg = error instanceof Error ? error.message : 'Failed to delete archive';
+      showMessage(msg, 'error');
     }
   };
 

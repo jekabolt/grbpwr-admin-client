@@ -1,6 +1,7 @@
 import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
 import { DEFAULT_PRODUCT_LIMIT } from 'constants/filter';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useSearchParams } from 'react-router-dom';
@@ -15,6 +16,7 @@ export function InfinityScroll({ firstItems }: Props) {
   const [searchParams] = useSearchParams();
   const [items, setItems] = useState<common_Product[]>(firstItems);
   const [isLoading, setIsLoading] = useState(false);
+  const { showMessage } = useSnackBarStore();
   const { ref, inView } = useInView();
   const pageRef = useRef(2);
   const hasMoreRef = useRef(true);
@@ -63,7 +65,8 @@ export function InfinityScroll({ firstItems }: Props) {
       pageRef.current += 1;
       setItems((prevItems) => [...prevItems, ...newProducts]);
     } catch (error) {
-      console.error('Failed to fetch more products:', error);
+      const msg = error instanceof Error ? error.message : 'Failed to fetch more products';
+      showMessage(msg, 'error');
     } finally {
       setIsLoading(false);
     }

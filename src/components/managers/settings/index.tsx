@@ -39,7 +39,8 @@ export function Settings() {
       showMessage('Settings updated successfully', 'success');
       await fetchDictionary(true);
     } catch (error) {
-      showMessage('Failed to update settings', 'error');
+      const msg = error instanceof Error ? error.message : 'Failed to update settings';
+      showMessage(msg, 'error');
     } finally {
       setIsLoading(false);
     }

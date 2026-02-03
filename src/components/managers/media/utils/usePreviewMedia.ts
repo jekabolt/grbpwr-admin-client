@@ -108,15 +108,8 @@ export function usePreviewMedia() {
       setViewingMediaData(null);
       setIsLoadingBlob(false);
     } catch (error) {
-      console.error('Failed to upload cropped media:', error);
-
-      if (viewingMedia.type === 'video') {
-        showMessage('Video upload failed. File may be too large or format not supported.', 'error');
-      } else {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Image upload failed. Please try again.';
-        showMessage(errorMessage, 'error');
-      }
+      const msg = error instanceof Error ? error.message : 'Upload failed. Please try again.';
+      showMessage(msg, 'error');
     } finally {
       setIsUploading(false);
     }

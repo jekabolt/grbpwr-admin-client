@@ -14,7 +14,8 @@ export const useDictionaryStore = create<DictionaryStore>((set, get) => ({
       const response = await adminService.GetDictionary({});
       set({ dictionary: response.dictionary, loading: false, initialized: true });
     } catch (error) {
-      set({ error: 'Failed to fetch dictionary', loading: false, initialized: false });
+      const msg = error instanceof Error ? error.message : 'Failed to fetch dictionary';
+      set({ error: msg, loading: false, initialized: false });
     }
   },
 }));
