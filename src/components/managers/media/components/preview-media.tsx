@@ -60,24 +60,15 @@ export function PreviewMedia({
         <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/80' />
         <DialogPrimitive.Content className='fixed left-[50%] top-[50%] z-50 w-[800px] h-auto translate-x-[-50%] translate-y-[-50%] bg-white pt-8 pb-5 px-2.5'>
           {isCropperOpen && preview.type === 'image' ? (
-            (() => {
-              const imageUrl = preview.url;
-              if (!imageUrl || (!imageUrl.startsWith('blob:') && !imageUrl.startsWith('data:'))) {
-                console.error('Invalid image URL for cropping:', imageUrl);
-                return null;
-              }
-              return (
-                <MediaCropper
-                  key={imageUrl}
-                  selectedFile={imageUrl}
-                  saveCroppedImage={(url: string) => {
-                    setCroppedUrl(url);
-                    setIsCropperOpen(false);
-                  }}
-                  onCancel={() => setIsCropperOpen(false)}
-                />
-              );
-            })()
+            <MediaCropper
+              key={preview.url}
+              selectedFile={preview.url}
+              saveCroppedImage={(url: string) => {
+                setCroppedUrl(url);
+                setIsCropperOpen(false);
+              }}
+              onCancel={() => setIsCropperOpen(false)}
+            />
           ) : (
             <div className='flex flex-col items-center justify-center gap-6'>
               <div className='w-[500px] h-[400px]'>
