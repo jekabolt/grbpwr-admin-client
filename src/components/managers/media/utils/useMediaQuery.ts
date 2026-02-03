@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import { useSnackBarStore } from 'lib/stores/store';
 
 const ITEMS_PER_PAGE = 50;
 
@@ -46,13 +47,15 @@ export function useInfiniteMedia(limit: number = ITEMS_PER_PAGE) {
 
 export function useDeleteMedia() {
   const queryClient = useQueryClient();
+  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (id: number) => adminService.DeleteFromBucket({ id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: mediaKeys.all });
     },
     onError: (error) => {
-      console.error('Failed to delete media:', error);
+      const msg = error instanceof Error ? error.message : 'Failed to delete media';
+      showMessage(msg, 'error');
     },
   });
 }

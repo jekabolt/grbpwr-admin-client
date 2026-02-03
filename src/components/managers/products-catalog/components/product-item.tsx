@@ -28,11 +28,14 @@ export function ProductItem({
   async function handleDeleteItem(id: number | undefined, e: React.MouseEvent) {
     e.stopPropagation();
     if (confirmDelete === id) {
-      const response = await adminService.DeleteProductByID({ id });
-      if (response) {
+      try {
+        await adminService.DeleteProductByID({ id });
         showMessage('PRODUCT WAS SUCCESSFULLY DELETED', 'success');
         setConfirmDelete(undefined);
         refresh(id);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to delete product';
+        showMessage(msg, 'error');
       }
     } else {
       setConfirmDelete(id);

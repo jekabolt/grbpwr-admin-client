@@ -43,8 +43,9 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos }) => {
       await adminService.DeletePromoCode({ code });
       showMessage('PROMO REMOVED FROM LIST', 'success');
       fetchPromos(50, 0);
-    } catch {
-      showMessage("PROMO CAN'T BE REMOVED FROM LIST", 'error');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "PROMO CAN'T BE REMOVED FROM LIST";
+      showMessage(msg, 'error');
     }
   }, []);
 

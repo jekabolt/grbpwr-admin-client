@@ -32,8 +32,9 @@ export const LoginBlock: FC = () => {
       if (!response.authToken) throw new Error('Invalid credentials');
       localStorage.setItem('authToken', response.authToken);
       navigate(ROUTES.main, { replace: true });
-    } catch {
-      setGeneralError('Invalid username or password. Please try again.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Invalid username or password. Please try again.';
+      setGeneralError(msg);
     } finally {
       setSubmitting(false);
     }

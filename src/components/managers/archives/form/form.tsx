@@ -83,7 +83,8 @@ export function ArchiveForm({ open, archiveId, existingMedia, onClose }: Archive
       }
       showMessage('Archive item deleted', 'success');
     } catch (e) {
-      showMessage('Failed to delete archive item', 'error');
+      const msg = e instanceof Error ? e.message : 'Failed to delete archive item';
+      showMessage(msg, 'error');
     }
   }
 
@@ -195,8 +196,8 @@ export function ArchiveForm({ open, archiveId, existingMedia, onClose }: Archive
       setImagePreviewUrl('');
       onClose();
     } catch (error) {
-      console.error('Failed to save archive:', error);
-      showMessage(`Failed to ${archiveId ? 'update' : 'create'} archive`, 'error');
+      const msg = error instanceof Error ? error.message : `Failed to ${archiveId ? 'update' : 'create'} archive`;
+      showMessage(msg, 'error');
     }
   }
 
