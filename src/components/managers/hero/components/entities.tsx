@@ -83,6 +83,31 @@ export const Entities: FC<EntitiesProps> = ({
     [setValue],
   );
 
+  const handleClearMedia = useCallback(
+    (
+      entityIndex: number,
+      type: 'main' | 'single' | 'doubleLeft' | 'doubleRight',
+      orientation: 'Portrait' | 'Landscape',
+    ) => {
+      let idPath: string;
+      let urlPath: string;
+
+      if (type === 'doubleLeft' || type === 'doubleRight') {
+        const side = type === 'doubleLeft' ? 'left' : 'right';
+        idPath = `entities.${entityIndex}.double.${side}.media${orientation}Id`;
+        urlPath = `entities.${entityIndex}.double.${side}.media${orientation}Url`;
+      } else {
+        const entityType = type === 'main' ? 'main' : 'single';
+        idPath = `entities.${entityIndex}.${entityType}.media${orientation}Id`;
+        urlPath = `entities.${entityIndex}.${entityType}.media${orientation}Url`;
+      }
+
+      setValue(idPath as any, undefined, { shouldDirty: true, shouldTouch: true });
+      setValue(urlPath as any, '', { shouldDirty: true, shouldTouch: true });
+    },
+    [setValue],
+  );
+
   const handleSaveProductSelection = useCallback(
     (newProducts: any[], index: number) => {
       const productIds = newProducts
@@ -124,6 +149,7 @@ export const Entities: FC<EntitiesProps> = ({
             onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
               handleSaveMedia(media, index, 'main', orientation)
             }
+            onClearMedia={(orientation) => handleClearMedia(index, 'main', orientation)}
           />
         );
 
@@ -141,6 +167,7 @@ export const Entities: FC<EntitiesProps> = ({
             onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
               handleSaveMedia(media, index, 'single', orientation)
             }
+            onClearMedia={(orientation) => handleClearMedia(index, 'single', orientation)}
           />
         );
 
@@ -162,6 +189,7 @@ export const Entities: FC<EntitiesProps> = ({
               onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
                 handleSaveMedia(media, index, 'doubleLeft', orientation)
               }
+              onClearMedia={(orientation) => handleClearMedia(index, 'doubleLeft', orientation)}
             />
             <CommonEntity
               title='right add'
@@ -173,6 +201,7 @@ export const Entities: FC<EntitiesProps> = ({
               onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
                 handleSaveMedia(media, index, 'doubleRight', orientation)
               }
+              onClearMedia={(orientation) => handleClearMedia(index, 'doubleRight', orientation)}
             />
           </div>
         );

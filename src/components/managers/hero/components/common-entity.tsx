@@ -31,6 +31,7 @@ export function CommonEntity({
   aspectRatio,
   isDoubleAd = false,
   onSaveMedia,
+  onClearMedia,
 }: Props) {
   const {
     formState: { errors },
@@ -48,18 +49,6 @@ export function CommonEntity({
     if (prefix.includes('.single')) return TRANSLATION_CONFIGS.single;
     if (prefix.includes('.double')) return TRANSLATION_CONFIGS.double;
     return TRANSLATION_CONFIGS.single;
-  };
-
-  const getFieldError = (fieldPath: string) => {
-    const pathParts = fieldPath.split('.');
-    let error: any = errors;
-
-    for (const part of pathParts) {
-      if (!error) return null;
-      error = error[part];
-    }
-
-    return error?.message;
   };
 
   return (
@@ -90,6 +79,7 @@ export function CommonEntity({
                   showVideos={true}
                   alt='Landscape preview'
                   onSaveMedia={(media) => onSaveMedia(media, 'Landscape')}
+                  onClear={onClearMedia ? () => onClearMedia('Landscape') : undefined}
                 />
               </div>
               <div className='lg:w-1/2 w-full space-y-2'>
@@ -103,6 +93,7 @@ export function CommonEntity({
                   showVideos={true}
                   alt='Portrait preview'
                   onSaveMedia={(media) => onSaveMedia(media, 'Portrait')}
+                  onClear={onClearMedia ? () => onClearMedia('Portrait') : undefined}
                 />
               </div>
             </div>
@@ -112,12 +103,20 @@ export function CommonEntity({
                 mediaUrl={landscapeLink || portraitLink}
                 aspectRatio={['1:1']}
                 allowMultiple={false}
-                showVideos={false}
+                showVideos={true}
                 alt='Media preview'
                 onSaveMedia={(media) => {
                   onSaveMedia(media, 'Landscape');
                   onSaveMedia(media, 'Portrait');
                 }}
+                onClear={
+                  onClearMedia
+                    ? () => {
+                        onClearMedia('Landscape');
+                        onClearMedia('Portrait');
+                      }
+                    : undefined
+                }
               />
             </div>
           )}
