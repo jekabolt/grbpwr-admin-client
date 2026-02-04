@@ -1,5 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { isVideo } from 'lib/features/filterContentType';
 import { Button } from 'ui/components/button';
 import MediaComponent from 'ui/components/media';
 
@@ -40,6 +41,8 @@ export function MediaPreviewWithSelector({
           src={mediaUrl}
           alt={alt}
           aspectRatio={previewAspectRatio}
+          type={isVideo(mediaUrl) ? 'video' : 'image'}
+          controls={isVideo(mediaUrl)}
           className='max-w-full h-auto'
         />
         {editMode && (onClear || editMode) && (

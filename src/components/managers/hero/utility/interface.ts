@@ -24,6 +24,7 @@ export interface Props {
   aspectRatio: string[] | { Portrait: string[]; Landscape: string[] };
   isDoubleAd?: boolean;
   onSaveMedia: (selectedMedia: common_MediaFull[], orientation: 'Portrait' | 'Landscape') => void;
+  onClearMedia?: (orientation: 'Portrait' | 'Landscape') => void;
 }
 
 export interface HeroProductEntityInterface {
