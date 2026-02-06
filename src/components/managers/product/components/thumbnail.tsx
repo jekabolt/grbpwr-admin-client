@@ -88,9 +88,7 @@ export function Thumbnail({ product, control, variant = 'primary', editMode }: P
         onSaveMedia={handleThumbnail}
         onClear={handleDelete}
       />
-      <Text size='small' className='leading-none whitespace-nowrap'>
-        {config.label}
-      </Text>
+      <Text className='leading-none whitespace-nowrap'>{config.label}</Text>
     </div>
   );
 }

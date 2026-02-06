@@ -94,44 +94,46 @@ export function MediaItem({
         onClick={handleClick}
         className='relative overflow-hidden w-full h-full group cursor-pointer bg-white'
       >
-        <div>
+        <div className='relative w-full h-full'>
+          <div>
+            <Text
+              variant='selected'
+              component='span'
+              className={cn(
+                'absolute hidden top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 p-2',
+                {
+                  block: isSelected && !disabled,
+                },
+              )}
+            >
+              selected
+            </Text>
+            <Media
+              src={mediaUrl || ''}
+              type={isVideo(mediaUrl) ? 'video' : 'image'}
+              alt={mediaUrl || 'media not found'}
+              controls={isVideo(mediaUrl)}
+              className={cn('w-full h-full w-full transition-opacity', {
+                'opacity-75': isSelected && !disabled,
+              })}
+              onLoadedMetadata={handleVideoLoadEvent}
+              fit='contain'
+            />
+          </div>
           <Text
-            variant='selected'
-            component='span'
-            className={cn(
-              'absolute hidden top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 p-2',
-              {
-                block: isSelected && !disabled,
-              },
-            )}
+            variant='uppercase'
+            className={cn('text-center', getAspectRatioBackgroundClass(aspectRatio))}
           >
-            selected
+            {!isKnownAspectRatio(aspectRatio) && width && height
+              ? `${width}:${height}`
+              : aspectRatio
+                ? `ratio: ${aspectRatio}`
+                : 'ratio: unknown'}
           </Text>
-          <Media
-            src={mediaUrl || ''}
-            type={isVideo(mediaUrl) ? 'video' : 'image'}
-            alt={mediaUrl || 'media not found'}
-            controls={isVideo(mediaUrl)}
-            className={cn('w-full h-full w-full transition-opacity', {
-              'opacity-75': isSelected && !disabled,
-            })}
-            onLoadedMetadata={handleVideoLoadEvent}
-            fit='contain'
-          />
+          <Button className='absolute top-0 right-0 hidden group-hover:block' onClick={handleDelete}>
+            {confirmDelete === media.id ? <CheckIcon /> : <ClearIcon />}
+          </Button>
         </div>
-        <Text
-          variant='uppercase'
-          className={cn('text-center', getAspectRatioBackgroundClass(aspectRatio))}
-        >
-          {!isKnownAspectRatio(aspectRatio) && width && height
-            ? `${width}:${height}`
-            : aspectRatio
-              ? `ratio: ${aspectRatio}`
-              : 'ratio: unknown'}
-        </Text>
-        <Button className='absolute top-0 right-0 hidden group-hover:block' onClick={handleDelete}>
-          {confirmDelete === media.id ? <CheckIcon /> : <ClearIcon />}
-        </Button>
       </Button>
     </div>
   );

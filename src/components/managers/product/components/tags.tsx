@@ -174,21 +174,18 @@ export function Tags({
         {displayedTags.map((tag, index) => (
           <div
             key={index}
-            className={cn(
-              'flex justify-center items-center gap-2 p-2 rounded-full border border-text group',
-              {
-                'border-3': selectedTags.includes(tag || ''),
-                'hover:cursor-pointer': isEditMode || isAddingProduct,
-              },
-            )}
+            className={cn('flex justify-center items-center gap-2 p-2 border border-text group', {
+              'border-3': selectedTags.includes(tag || ''),
+              'hover:cursor-pointer': isEditMode || isAddingProduct,
+            })}
             onClick={() =>
               (isEditMode || isAddingProduct || isCopyMode) && handleTagClick(tag || '')
             }
           >
-            <Text size='small'>{tag}</Text>
+            <Text>{tag}</Text>
             {(isEditMode || isAddingProduct || isCopyMode) && (
               <Button
-                className='rounded-full lg:hidden lg:group-hover:block'
+                className='lg:hidden lg:group-hover:block'
                 onClick={(e: React.MouseEvent) => {
                   handleDeleteTag(tag || '', e);
                 }}

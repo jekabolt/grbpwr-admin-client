@@ -26,9 +26,9 @@
 
 @theme {
   /* COLORS */
-  --color-text: #000;
+  --color-textColor: #000;
   --color-bgColor: #fff;
-  --color-inactive: #cccccc;
+  --color-textInactiveColor: #cccccc;
   --color-error: #ff0000;
   --color-overlay: rgba(0, 0, 0, 0.4);
 
@@ -39,8 +39,7 @@
   /* TEXT */
   --text-giant: 200px;
   --text-giantSmall: 110px;
-  --text-small: 12px;
-  --text-base: 16px;
+  --text-textBaseSize: 12px;
 }
 
 * {

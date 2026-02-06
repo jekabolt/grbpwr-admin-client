@@ -14,7 +14,7 @@ export default function ShowLatestLimit() {
 
   return (
     <div className='flex items-center gap-2'>
-      <Text variant='uppercase' size='small' className='w-full'>
+      <Text variant='uppercase' className='w-auto whitespace-nowrap'>
         show latest
       </Text>
       <SelectComponent

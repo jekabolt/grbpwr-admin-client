@@ -87,6 +87,7 @@ export function PreviewMedia({
               <div className='flex justify-center items-center gap-6'>
                 {preview.type === 'image' && (
                   <Button
+                    variant='main'
                     size='lg'
                     className='uppercase'
                     onClick={() => setIsCropperOpen(true)}
@@ -103,6 +104,7 @@ export function PreviewMedia({
                   [x]
                 </Button>
                 <Button
+                  variant='main'
                   size='lg'
                   className='uppercase'
                   onClick={handleUploadClick}

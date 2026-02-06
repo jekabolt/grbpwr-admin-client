@@ -13,9 +13,7 @@ export default function Color() {
 
   return (
     <div className='space-y-2'>
-      <Text variant='uppercase' size='small'>
-        color
-      </Text>
+      <Text variant='uppercase'>color</Text>
       <Selector
         label='color'
         options={colorOptions}

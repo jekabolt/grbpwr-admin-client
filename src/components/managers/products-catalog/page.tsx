@@ -45,6 +45,7 @@ export default function ProductsCatalog() {
   );
 
   const searchString = searchParams.toString();
+
   useEffect(() => {
     debouncedFetch(fetchParams);
     return () => debouncedFetch.cancel();
@@ -59,14 +60,19 @@ export default function ProductsCatalog() {
       <div className='flex flex-col grid gap-10 pb-20'>
         <div className='flex items-end justify-between'>
           <Categories />
-          <Button variant='simple' className='uppercase' onClick={toggleModal}>
+          <Button className='uppercase' onClick={toggleModal}>
             filter +
           </Button>
         </div>
         <Filter isOpen={isModalOpen} toggleModal={toggleModal} />
         <InfinityScroll firstItems={products} />
       </div>
-      <Button className='fixed bottom-4 right-4 z-20' size='lg' onClick={handleCreateNewProduct}>
+      <Button
+        variant='main'
+        className='fixed bottom-4 right-4 z-20'
+        size='lg'
+        onClick={handleCreateNewProduct}
+      >
         create new
       </Button>
     </>

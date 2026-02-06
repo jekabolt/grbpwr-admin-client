@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Overlay } from 'ui/components/overlay';
 import Text from 'ui/components/text';
@@ -18,6 +19,12 @@ export default function Filter({
   toggleModal: () => void;
 }) {
   const { gender } = useRouteParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const handleClearAll = () => {
+    setSearchParams(new URLSearchParams());
+  };
+
   return (
     <div className='z-50 w-full'>
       {isOpen && (
@@ -27,11 +34,9 @@ export default function Filter({
             <div className='flex h-full flex-col'>
               <div className='flex items-center justify-between'>
                 <Text variant='uppercase'>filter</Text>
-                <Button variant='simple' onClick={toggleModal}>
-                  [x]
-                </Button>
+                <Button onClick={toggleModal}>[x]</Button>
               </div>
-              <div className='h-full space-y-10 overflow-y-scroll pt-6'>
+              <div className='h-full space-y-10 overflow-y-scroll py-6'>
                 <div className='space-y-6'>
                   <Text variant='uppercase'>sort by</Text>
                   <Sort />
@@ -44,10 +49,20 @@ export default function Filter({
                 <Sizes gender={gender} />
               </div>
               <div className='flex items-center justify-end gap-2 bg-bgColor'>
-                <Button className='w-1/2 uppercase' size='lg' onClick={() => {}}>
+                <Button
+                  className='w-1/2 uppercase'
+                  variant='main'
+                  size='lg'
+                  onClick={handleClearAll}
+                >
                   clear all
                 </Button>
-                <Button className='w-1/2 uppercase' size='lg' onClick={() => toggleModal()}>
+                <Button
+                  className='w-1/2 uppercase'
+                  variant='main'
+                  size='lg'
+                  onClick={() => toggleModal()}
+                >
                   show
                 </Button>
               </div>

@@ -8,9 +8,7 @@ export default function Gender() {
 
   return (
     <div className='space-y-2'>
-      <Text variant='uppercase' size='small'>
-        gender
-      </Text>
+      <Text variant='uppercase'>gender</Text>
       <Selector
         label='gender'
         value={defaultValue || 'all'}

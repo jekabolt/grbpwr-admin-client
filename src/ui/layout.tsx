@@ -32,7 +32,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
   return (
     <div className='flex h-screen'>
       <div
-        className={`fixed h-full w-50 border-r border-text bg-white print:hidden transition-transform duration-300 ${
+        className={`fixed h-full w-50 border-r border-text bg-textColor print:hidden transition-transform duration-300 ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -46,8 +46,8 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           </div>
 
           <div className='w-full border-t border-text p-4'>
-            <Button variant='underline' onClick={handleLogout} size='lg'>
-              Logout
+            <Button variant='main' onClick={handleLogout} size='lg'>
+              logout
             </Button>
           </div>
         </div>
