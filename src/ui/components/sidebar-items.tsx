@@ -8,7 +8,12 @@ export const SideBarItems: FC = () => {
   return (
     <div className='w-full h-full flex flex-col gap-10 justify-center items-center bg-text'>
       {sideBarItems.map((item) => (
-        <Button key={item.label} className='w-full h-10' onClick={() => navigate(item.route)}>
+        <Button
+          variant='simple'
+          key={item.label}
+          className='w-full h-10'
+          onClick={() => navigate(item.route)}
+        >
           {item.label}
         </Button>
       ))}
