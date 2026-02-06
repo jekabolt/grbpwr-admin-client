@@ -35,14 +35,16 @@ const DEFAULT_ORDER: common_OrderFactor = 'ORDER_FACTOR_DESC';
 function normalizeSort(sort?: string | null): common_SortFactor {
   if (!sort) return DEFAULT_SORT;
   if (SORT_MAP_URL[sort]) return SORT_MAP_URL[sort];
-  if (sort.startsWith('SORT_FACTOR_') && sort !== 'SORT_FACTOR_UNKNOWN') return sort as common_SortFactor;
+  if (sort.startsWith('SORT_FACTOR_') && sort !== 'SORT_FACTOR_UNKNOWN')
+    return sort as common_SortFactor;
   return DEFAULT_SORT;
 }
 
 function normalizeOrder(order?: string | null): common_OrderFactor {
   if (!order) return DEFAULT_ORDER;
   if (ORDER_MAP[order]) return ORDER_MAP[order];
-  if (order.startsWith('ORDER_FACTOR_') && order !== 'ORDER_FACTOR_UNKNOWN') return order as common_OrderFactor;
+  if (order.startsWith('ORDER_FACTOR_') && order !== 'ORDER_FACTOR_UNKNOWN')
+    return order as common_OrderFactor;
   return DEFAULT_ORDER;
 }
 
@@ -104,13 +106,9 @@ export function getProductPagedParans({
       from: from ? from : undefined, //done
       to: to ? to : undefined, //done
       gender: isGenderFilter(genderEnum) ? [genderEnum] : undefined,
-      color: color ? color : undefined, //done
-      topCategoryIds: topCategory
-        ? topCategory.split(',').map((id) => parseInt(id))
-        : undefined, //done
-      subCategoryIds: subCategory
-        ? subCategory.split(',').map((id) => parseInt(id))
-        : undefined, //done
+      color: color && color !== 'all' ? color : undefined,
+      topCategoryIds: topCategory ? topCategory.split(',').map((id) => parseInt(id)) : undefined, //done
+      subCategoryIds: subCategory ? subCategory.split(',').map((id) => parseInt(id)) : undefined, //done
       typeIds: type ? type.split(',').map((id) => parseInt(id)) : undefined, //done
       sizesIds: sizes ? sizes.split(',').map((id) => parseInt(id)) : undefined, //done
       byTag: tag ? tag : undefined,

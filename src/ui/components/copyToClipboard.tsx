@@ -39,7 +39,7 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, cutText }) => 
 
   return (
     <div className='flex items-center'>
-      <Text size='small'>{cutText ? text.slice(0, 4) + '...' + text.slice(-4) : text}</Text>
+      <Text>{cutText ? text.slice(0, 4) + '...' + text.slice(-4) : text}</Text>
       <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
         <IconButton
           onClick={handleCopy}

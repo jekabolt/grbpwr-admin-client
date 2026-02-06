@@ -14,7 +14,7 @@ const textVariants = cva('', {
       inactive: ['text-inactive'],
     },
     size: {
-      default: ['text-base'],
+      default: ['text-textBaseSize'],
       giant: [
         'lg:text-giant',
         'text-giantSmall',

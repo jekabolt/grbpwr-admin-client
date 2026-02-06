@@ -1,4 +1,4 @@
-import { CheckIcon, Cross1Icon } from '@radix-ui/react-icons';
+import { CheckIcon } from '@radix-ui/react-icons';
 import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
@@ -67,18 +67,19 @@ export function ProductItem({
           onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
           className='absolute top-0 right-0 p-1 md:group-hover:block md:hidden block'
         >
-          {confirmDelete === product.id ? <CheckIcon /> : <Cross1Icon />}
+          {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
         </Button>
         <Button
           size='lg'
-          className='absolute bottom-0 left-0'
+          className='absolute bottom-0 left-0 z-30'
+          variant='main'
           onClick={(e: React.MouseEvent) => handleCopyProduct(product.id, e)}
         >
           copy
         </Button>
         {isHidden && <Overlay cover='container' />}
       </div>
-      <Text className='w-full break-words' variant='underLineWithColor' size='small'>
+      <Text className='w-full break-words' variant='underLineWithColor'>
         {description}
       </Text>
     </div>

@@ -161,7 +161,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
           if (field.type === 'textarea') {
             return (
               <div key={field.name} className='space-y-2'>
-                <label className='text-sm font-medium'>{field.label}</label>
+                <Text component='label'>{field.label}</Text>
                 <textarea
                   value={fieldValue}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>

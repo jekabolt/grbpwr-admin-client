@@ -17,9 +17,7 @@ export default function PreorderSaleHidden() {
           checked={preorder === 'true'}
           onChange={(checked) => handlePreorderChange(checked.toString())}
         />
-        <Text variant='uppercase' size='small'>
-          preorder
-        </Text>
+        <Text variant='uppercase'>preorder</Text>
       </div>
 
       <div className='flex items-center gap-2'>
@@ -29,9 +27,7 @@ export default function PreorderSaleHidden() {
           checked={hidden !== 'false'}
           onChange={(checked) => handleHiddenChange(checked ? 'true' : 'false')}
         />
-        <Text variant='uppercase' size='small'>
-          show hidden
-        </Text>
+        <Text variant='uppercase'>show hidden</Text>
       </div>
       <div className='flex items-center gap-2'>
         <Checkbox
@@ -40,9 +36,7 @@ export default function PreorderSaleHidden() {
           checked={sale === 'true'}
           onChange={(checked) => handleSaleChange(checked.toString())}
         />
-        <Text variant='uppercase' size='small'>
-          sale
-        </Text>
+        <Text variant='uppercase'>sale</Text>
       </div>
     </div>
   );
