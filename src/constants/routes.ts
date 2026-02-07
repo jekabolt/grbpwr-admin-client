@@ -18,6 +18,7 @@ export enum ROUTES {
   settings = '/settings',
   orders = '/orders',
   orderDetails = '/orders/:uuid',
+  customerSupport = '/customer-support',
 }
 
 export const sideBarItems = [
@@ -48,5 +49,9 @@ export const sideBarItems = [
   {
     label: 'SETTINGS',
     route: ROUTES.settings,
+  },
+  {
+    label: 'CUSTOMER SUPPORT',
+    route: ROUTES.customerSupport,
   },
 ];

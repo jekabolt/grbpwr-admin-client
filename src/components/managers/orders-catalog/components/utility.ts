@@ -18,6 +18,18 @@ export function formatDateTime(value: string | undefined): string {
   return `${formattedDate}, ${formattedTime}`;
 }
 
+export function formatDate(value: string | undefined): string {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
 export function getOrderStatusName(
   dictionary: common_Dictionary | undefined,
   orderStatusId: number | undefined,
