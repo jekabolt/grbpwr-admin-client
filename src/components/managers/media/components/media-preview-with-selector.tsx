@@ -43,7 +43,7 @@ export function MediaPreviewWithSelector({
           aspectRatio={previewAspectRatio}
           type={isVideo(mediaUrl) ? 'video' : 'image'}
           controls={isVideo(mediaUrl)}
-          className='max-w-full h-auto'
+          fit='cover'
         />
         {editMode && (onClear || editMode) && (
           <Button
@@ -51,7 +51,7 @@ export function MediaPreviewWithSelector({
             onClick={onClear}
             className='absolute top-0 right-0 z-10 cursor-pointer'
           >
-            ×
+            [×]
           </Button>
         )}
         {editMode && (

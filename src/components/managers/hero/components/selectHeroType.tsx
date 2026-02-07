@@ -92,6 +92,7 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
         </div>
 
         <Button
+          variant='main'
           onClick={handleAddEntity}
           disabled={!entityType || isEntityIncomplete}
           className='px-2 py-1'

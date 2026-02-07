@@ -39,7 +39,6 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
   const translationIndex = translations.findIndex((t: any) => t?.languageId === selectedLanguageId);
   const actualTranslationIndex = translationIndex >= 0 ? translationIndex : translations.length;
 
-  // Initialize translations if empty
   useEffect(() => {
     if (translations.length === 0) {
       const initialTranslations = LANGUAGES.map((language) => {
