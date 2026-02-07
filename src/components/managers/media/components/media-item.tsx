@@ -1,4 +1,4 @@
-import { CheckIcon, Cross2Icon as ClearIcon } from '@radix-ui/react-icons';
+import { CheckIcon } from '@radix-ui/react-icons';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -74,6 +74,7 @@ export function MediaItem({
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     if (confirmDelete === media.id) {
       deleteMediaMutation.mutate(media.id || 0, {
         onError: (error) => {
@@ -130,8 +131,11 @@ export function MediaItem({
                 ? `ratio: ${aspectRatio}`
                 : 'ratio: unknown'}
           </Text>
-          <Button className='absolute top-0 right-0 hidden group-hover:block' onClick={handleDelete}>
-            {confirmDelete === media.id ? <CheckIcon /> : <ClearIcon />}
+          <Button
+            className='absolute top-0 right-0 hidden group-hover:block cursor-pointer'
+            onClick={handleDelete}
+          >
+            {confirmDelete === media.id ? <CheckIcon /> : '[x]'}
           </Button>
         </div>
       </Button>

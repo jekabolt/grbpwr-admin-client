@@ -10,6 +10,29 @@ const productTranslationSchema = z.object({
   description: z.string().min(1, 'Description is required'),
 });
 
+const createStrictTranslationSchema = <T extends z.ZodType>(
+  translationSchema: T,
+  requiredIds: number[],
+) => {
+  return z
+    .array(translationSchema)
+    .min(1, 'At least one translation is required')
+    .refine(
+      (arr) => {
+        const ids = arr.map((t: any) => t.languageId);
+        const uniqueIds = new Set(ids);
+        return uniqueIds.size === ids.length;
+      },
+      { message: 'Each language can only appear once' },
+    )
+    .refine((arr) => arr.length === requiredIds.length, {
+      message: `Exactly ${requiredIds.length} language(s) required`,
+    })
+    .refine((arr) => requiredIds.every((id) => arr.some((t: any) => t.languageId === id)), {
+      message: 'All languages must be filled (name and description for each)',
+    });
+};
+
 const productBodySchema = z.object({
   brand: z
     .string()
@@ -59,49 +82,40 @@ export const baseProductSchema = z
       productBodyInsert: productBodySchema,
       thumbnailMediaId: z.number().min(1, 'Thumbnail must be selected'),
       secondaryThumbnailMediaId: z.number().optional(),
-      translations: z
-        .array(productTranslationSchema)
-        .min(1, 'At least one translation is required')
-        .refine(
-          (arr) =>
-            arr.length === requiredLanguageIds.length &&
-            requiredLanguageIds.every((id) => arr.some((t) => t.languageId === id)),
-          { message: 'All languages must be filled (name and description for each)' },
-        ),
+      translations: createStrictTranslationSchema(productTranslationSchema, requiredLanguageIds),
       prices: z.array(priceEntrySchema).min(1, 'At least one price must be specified'),
     }),
     prices: z.array(priceEntrySchema).min(1, 'At least one price must be specified'),
-  mediaIds: z.array(z.number()).min(1, 'At least one media must be added to the product'),
-  tags: z.array(
-    z.object({
-      tag: z.string().min(1, 'Tag is required'),
-    }),
-  ),
-  sizeMeasurements: z
-    .array(
+    mediaIds: z.array(z.number()).min(1, 'At least one media must be added to the product'),
+    tags: z.array(
       z.object({
-        productSize: z.object({
-          quantity: z.object({
-            // Allow empty string for unselected sizes; rely on array-level refine below
-            value: z.string(),
-          }),
-          sizeId: z.number().min(1, 'Size is required'),
-        }),
-        measurements: z
-          .array(
-            z.object({
-              measurementNameId: z.number(),
-              measurementValue: z.object({
-                value: z.string(),
-              }),
-            }),
-          )
-          .optional(),
+        tag: z.string().min(1, 'Tag is required'),
       }),
-    )
-    .refine((sizes) => sizes.some((size) => size.productSize.quantity.value !== '0'), {
-      message: 'At least one size must be specified',
-    }),
+    ),
+    sizeMeasurements: z
+      .array(
+        z.object({
+          productSize: z.object({
+            quantity: z.object({
+              value: z.string(),
+            }),
+            sizeId: z.number().min(1, 'Size is required'),
+          }),
+          measurements: z
+            .array(
+              z.object({
+                measurementNameId: z.number(),
+                measurementValue: z.object({
+                  value: z.string(),
+                }),
+              }),
+            )
+            .optional(),
+        }),
+      )
+      .refine((sizes) => sizes.some((size) => size.productSize.quantity.value !== '0'), {
+        message: 'At least one size must be specified',
+      }),
   })
   .refine((data) => allPricesFilledRefine(data.prices), {
     message: 'All prices must be filled (value greater than 0)',

@@ -1,7 +1,7 @@
 import { GridColDef } from '@mui/x-data-grid';
 import { common_Dictionary } from 'api/proto-http/admin';
 import { common_OrderItem } from 'api/proto-http/frontend';
-import { BASE_PATH, ROUTES } from 'constants/routes';
+import { BASE_PATH } from 'constants/routes';
 
 export const OrderDetailsData = (
   dictionary: common_Dictionary | undefined,
@@ -14,7 +14,7 @@ export const OrderDetailsData = (
     width: 200,
     renderCell: (params: any) => (
       <a
-        href={`${BASE_PATH}/#${ROUTES.singleProduct}/${params.row.orderItem.productId}`}
+        href={`${BASE_PATH}/products/${params.row.orderItem.productId}`}
         target='_blank'
         style={{
           cursor: 'pointer',

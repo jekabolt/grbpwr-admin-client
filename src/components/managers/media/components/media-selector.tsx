@@ -52,7 +52,7 @@ export function MediaSelector({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
       <DialogPrimitive.Trigger asChild>
-        <Button size='lg' className='whitespace-nowrap cursor-pointer'>
+        <Button variant='main' size='lg' className='whitespace-nowrap cursor-pointer'>
           {label}
         </Button>
       </DialogPrimitive.Trigger>

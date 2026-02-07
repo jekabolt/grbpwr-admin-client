@@ -1,8 +1,35 @@
+import { LANGUAGES } from 'constants/constants';
 import z from 'zod';
 
+const requiredLanguageIds = LANGUAGES.map((l) => l.id);
+
+// Reusable strict translation validator
+const createStrictTranslationSchema = <T extends z.ZodType>(
+  translationSchema: T,
+  requiredIds: number[],
+) => {
+  return z
+    .array(translationSchema)
+    .min(1, 'At least one translation is required')
+    .refine(
+      (arr) => {
+        const ids = arr.map((t: any) => t.languageId);
+        const uniqueIds = new Set(ids);
+        return uniqueIds.size === ids.length;
+      },
+      { message: 'Each language can only appear once' },
+    )
+    .refine((arr) => arr.length === requiredIds.length, {
+      message: `Exactly ${requiredIds.length} language(s) required`,
+    })
+    .refine((arr) => requiredIds.every((id) => arr.some((t: any) => t.languageId === id)), {
+      message: 'All languages must be filled',
+    });
+};
+
 const announceTranslationSchema = z.object({
-  languageId: z.number().optional(),
-  text: z.string().optional(),
+  languageId: z.number().min(1, 'Language is required'),
+  text: z.string().min(1, 'Announcement text is required'),
 });
 
 const paymentMethodSchema = z.object({
@@ -30,7 +57,10 @@ export const settingsSchema = z.object({
   announce: z
     .object({
       link: z.string().optional(),
-      translations: z.array(announceTranslationSchema).optional(),
+      translations: createStrictTranslationSchema(
+        announceTranslationSchema,
+        requiredLanguageIds,
+      ).optional(),
     })
     .optional(),
   bigMenu: z.boolean().optional(),
@@ -43,7 +73,7 @@ export const settingsSchema = z.object({
 export const defaultSettings = {
   announce: {
     link: '',
-    translations: [],
+    translations: LANGUAGES.map((l) => ({ languageId: l.id, text: '' })),
   },
   bigMenu: false,
   maxOrderItems: 0,

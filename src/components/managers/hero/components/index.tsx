@@ -25,7 +25,7 @@ export function Hero() {
   const form = useForm<HeroSchema>({
     resolver: zodResolver(heroSchema),
     defaultValues: defaultData as HeroSchema,
-    mode: 'onChange',
+    mode: 'onSubmit',
   });
 
   const isDirty = form.formState.isDirty;
@@ -49,31 +49,10 @@ export function Hero() {
     setDeletedIndicesVersion((v) => v + 1);
   }, []);
 
-  async function handleSubmit() {
-    const data = form.getValues();
+  async function handleSubmit(data: HeroSchema) {
     const entities = data.entities;
 
-    deletedIndicesRef.current.forEach((index) => {
-      form.clearErrors(`entities.${index}` as any);
-    });
-
-    const validationPromises = entities.map((_, index) => {
-      if (deletedIndicesRef.current.has(index)) {
-        return Promise.resolve(true);
-      }
-      return form.trigger(`entities.${index}` as any);
-    });
-
-    const validationResults = await Promise.all(validationPromises);
-    const isValid = validationResults.every((result) => result === true);
-
-    const navFeaturedValid = await form.trigger('navFeatured');
-
-    if (!isValid || !navFeaturedValid) {
-      onError(form.formState.errors);
-      return;
-    }
-
+    // Filter out deleted entities before sending
     const filteredData = {
       ...data,
       entities: entities.filter((_, index) => !deletedIndicesRef.current.has(index)),
@@ -94,6 +73,13 @@ export function Hero() {
   function onError(errors: any) {
     console.log('Validation errors:', errors);
 
+    // Clear errors for deleted entities
+    if (errors.entities) {
+      deletedIndicesRef.current.forEach((index) => {
+        form.clearErrors(`entities.${index}` as any);
+      });
+    }
+
     showMessage('please fill in all required fields', 'error');
 
     if (errors.entities) {
@@ -113,10 +99,7 @@ export function Hero() {
   return (
     <Form {...form}>
       <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleSubmit();
-        }}
+        onSubmit={form.handleSubmit(handleSubmit, onError)}
         className='flex flex-col gap-y-16 lg:pt-24 pt-5 lg:px-12 px-2.5'
       >
         <NavFeatured hero={heroData?.hero} />
@@ -136,6 +119,7 @@ export function Hero() {
         />
         <Button
           size='lg'
+          variant='main'
           type='submit'
           disabled={form.formState.isSubmitting || saveHero.isPending}
           className='fixed top-3 right-3 z-50 cursor-pointer uppercase'

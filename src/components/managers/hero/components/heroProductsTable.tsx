@@ -126,7 +126,7 @@ export const HeroProductTable: FC<
               )}
               <td className='border border-text p-2'>
                 <button
-                  onClick={() => navigate(`${ROUTES.singleProduct}/${product.id}`)}
+                  onClick={() => navigate(`/products/${product.id}`)}
                   className='text-blue-500 underline hover:text-blue-700 cursor-pointer'
                 >
                   {product.id}
@@ -171,7 +171,6 @@ export const HeroProductTable: FC<
                 <td className='border border-text'>
                   <Button
                     type='button'
-                    variant='delete'
                     onClick={() => handleDelete(index)}
                     className='w-full'
                     aria-label='delete'

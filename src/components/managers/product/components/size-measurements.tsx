@@ -12,7 +12,7 @@ import { useMeasurements } from '../utility/useMeasurements';
 import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle';
 import { ToggleSizeNames } from './toggle-sizenames';
 
-const cellClass = 'text-center border-r border-text h-10';
+const cellClass = 'text-center border-r border-textColor h-10';
 const lastCellClass = 'text-center';
 
 export function SizeMeasurements({
@@ -139,8 +139,8 @@ export function SizeMeasurements({
 
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full border-collapse border-2 border-text min-w-max'>
-        <thead className='bg-inactive h-10'>
+      <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+        <thead className='bg-textInactiveColor h-10'>
           <tr className='border-b border-text'>
             <th className={cn(cellClass, 'sticky left-0 bg-inactive z-10')}>
               <ToggleSizeNames
