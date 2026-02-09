@@ -1,5 +1,10 @@
 export const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
 
+type Manager = {
+  label: string;
+  route: string;
+};
+
 export enum ROUTES {
   login = '/',
   main = '/main',
@@ -43,7 +48,7 @@ export const sideBarItems = [
     route: ROUTES.promo,
   },
   {
-    label: 'ARCHIVE',
+    label: 'timeline',
     route: ROUTES.archives,
   },
   {
@@ -53,5 +58,42 @@ export const sideBarItems = [
   {
     label: 'CUSTOMER SUPPORT',
     route: ROUTES.customerSupport,
+  },
+];
+
+export const PRODUCT_MEDIA: Manager[] = [
+  {
+    label: 'media',
+    route: ROUTES.media,
+  },
+  {
+    label: 'products',
+    route: ROUTES.product,
+  },
+];
+
+export const LEFT_SIDE_MANAGERS: Manager[] = [
+  {
+    label: 'orders',
+    route: ROUTES.orders,
+  },
+  {
+    label: 'hero',
+    route: ROUTES.hero,
+  },
+  {
+    label: 'promo',
+    route: ROUTES.promo,
+  },
+  {
+    label: 'customer support',
+    route: ROUTES.customerSupport,
+  },
+];
+
+export const RIGHT_SIDE_MANAGERS: Manager[] = [
+  {
+    label: 'settings',
+    route: ROUTES.settings,
   },
 ];
