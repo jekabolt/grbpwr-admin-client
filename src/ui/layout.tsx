@@ -1,12 +1,10 @@
-import { DragHandleHorizontalIcon } from '@radix-ui/react-icons';
 import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { FC, ReactNode, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { SnackBar } from 'ui/components/snackbar';
-import { SideBarItems } from './components/sidebar-items';
-import { WhiteLogo } from './icons/white-logo';
+import { Link, useNavigate } from 'react-router-dom';
+import { Button } from './components/button';
+import { LeftSideNavMenu } from './components/left-side-nav-menu';
+import { SnackBar } from './components/snackbar';
 
 interface LayoutProps {
   children: ReactNode;
@@ -14,59 +12,63 @@ interface LayoutProps {
 
 export const Layout: FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
-  const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const [isNavOpen, setIsNavOpen] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
     navigate(ROUTES.login, { replace: true });
   };
 
-  const navigateMainPage = () => {
-    navigate(ROUTES.main, { replace: true });
-  };
-
-  const toggleSidebar = () => {
-    setSidebarOpen(!isSidebarOpen);
-  };
-
   return (
-    <div className='flex h-screen'>
+    <>
       <div
-        className={`fixed h-full w-50 border-r border-text bg-textColor print:hidden transition-transform duration-300 ${
-          isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={cn(
+          'fixed inset-x-2.5 top-2 z-30 h-12 py-2 lg:gap-0 lg:px-5 lg:py-3',
+          'flex items-center gap-1',
+          'border border-textInactiveColor bg-bgColor text-textColor lg:border-transparent',
+          'transform-gpu transition-transform duration-150 ease-[cubic-bezier(0.25,0.46,0.45,0.94)]',
+          'lg:transform-none lg:transition-[top] lg:duration-150 lg:ease-[cubic-bezier(0.25,0.46,0.45,0.94)]',
+          {
+            '!border-b-transparent lg:border-textInactiveColor lg:bg-bgColor lg:text-textColor lg:mix-blend-normal':
+              isNavOpen,
+          },
+        )}
       >
-        <div className='flex flex-col h-full bg-text'>
-          <div className='flex h-20 pt-4 items-center justify-center border-b border-text'>
-            <WhiteLogo onClick={navigateMainPage} />
-          </div>
+        <div className='flex grow basis-0 items-center justify-start'>
+          <LeftSideNavMenu onNavOpenChange={setIsNavOpen} />
+        </div>
 
-          <div className='overflow-y-auto h-full flex items-center justify-center'>
-            <SideBarItems />
-          </div>
+        <div className='flex grow basis-0 items-center justify-center'>
+          <Button
+            asChild
+            size='lg'
+            className='text-center transition-colors hover:opacity-70 active:opacity-50'
+          >
+            <Link to='/'>grbpwr</Link>
+          </Button>
+        </div>
 
-          <div className='w-full border-t border-text p-4'>
-            <Button variant='main' onClick={handleLogout} size='lg'>
-              logout
-            </Button>
+        <div className='flex grow basis-0 items-center justify-end'>
+          <div className='relative w-full lg:w-auto'>
+            <div className='flex'>
+              <Button
+                asChild
+                className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70'
+              >
+                <Link to={ROUTES.settings}>settings</Link>
+              </Button>
+              <Button
+                className='pl-2 pr-0 underline-offset-2 hover:underline transition-colors hover:opacity-70 cursor-pointer'
+                onClick={handleLogout}
+              >
+                logout
+              </Button>
+            </div>
           </div>
         </div>
       </div>
-      <Button
-        onClick={toggleSidebar}
-        className='fixed left-0 top-4 z-50 ml-2 rounded-md bg-white p-2 text-gray-600 shadow-md hover:bg-gray-100 print:hidden'
-      >
-        <DragHandleHorizontalIcon />
-      </Button>
-      <div
-        className={cn('transition-all duration-300 w-full', {
-          'pl-50': isSidebarOpen,
-          'print:pl-0': true,
-        })}
-      >
-        <div className='h-full print:pt-0 p-2.5 lg:px-2'>{children}</div>
-        <SnackBar />
-      </div>
-    </div>
+      <div className='h-full pt-26 px-2.5'>{children}</div>
+      <SnackBar />
+    </>
   );
 };
