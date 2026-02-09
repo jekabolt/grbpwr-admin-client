@@ -1,4 +1,4 @@
-import { DataGrid } from '@mui/x-data-grid';
+// import { DataGrid } from '@mui/x-data-grid';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -8,7 +8,6 @@ import { Logo } from 'ui/icons/logo';
 import { Billing } from './components/billing';
 import { Buyer } from './components/buyer';
 import { Description } from './components/description';
-import { OrderDetailsData } from './components/order-details-data';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
 import { ShippingBuyer } from './components/shipping';
@@ -60,7 +59,7 @@ export function OrderDetails() {
 
       <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
 
-      <DataGrid
+      {/* <DataGrid
         rows={orderDetails?.orderItems || []}
         columns={OrderDetailsData(dictionary, isPrinting)}
         columnVisibilityModel={displayState.columnVisibility}
@@ -77,7 +76,7 @@ export function OrderDetails() {
         rowHeight={100}
         hideFooterPagination={isPrinting}
         hideFooter={isPrinting}
-      />
+      /> */}
 
       <div
         className={cn('block', {

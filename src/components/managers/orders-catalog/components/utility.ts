@@ -48,17 +48,17 @@ export function getStatusColor(status: string | undefined): string {
     case 'PLACED':
       return 'bg-white';
     case 'AWAITING PAYMENT':
-      return 'bg-sky-200';
+      return 'bg-sky-500';
     case 'CONFIRMED':
-      return 'bg-blue-300';
+      return 'bg-blue-500';
     case 'SHIPPED':
-      return 'bg-teal-200';
+      return 'bg-teal-500';
     case 'DELIVERED':
-      return 'bg-green-300';
+      return 'bg-green-500';
     case 'CANCELLED':
-      return 'bg-red-300';
+      return 'bg-red-500';
     case 'REFUNDED':
-      return 'bg-gray-700';
+      return 'bg-gray-500';
     default:
       return 'bg-white';
   }
