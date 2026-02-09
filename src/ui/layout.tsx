@@ -44,7 +44,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
             size='lg'
             className='text-center transition-colors hover:opacity-70 active:opacity-50'
           >
-            <Link to='/'>grbpwr</Link>
+            <Link to='/'>grbpw</Link>
           </Button>
         </div>
 
