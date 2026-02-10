@@ -142,7 +142,7 @@ export function SizeMeasurements({
       <table className='w-full border-collapse border-2 border-textColor min-w-max'>
         <thead className='bg-textInactiveColor h-10'>
           <tr className='border-b border-text'>
-            <th className={cn(cellClass, 'sticky left-0 bg-inactive z-10')}>
+            <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
               <ToggleSizeNames
                 subCategoryName={selectedSubCategoryName}
                 typeName={selectedTypeName}

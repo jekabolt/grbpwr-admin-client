@@ -9,6 +9,7 @@ import { Button } from 'ui/components/button';
 import { Categories } from './components/categories';
 import Filter from './components/filter';
 import { InfinityScroll } from './components/infinity-scroll';
+import { MobileFiltration } from './components/mobile-filtration';
 import { getProductPagedParans } from './components/utility';
 
 export default function ProductsCatalog() {
@@ -57,8 +58,11 @@ export default function ProductsCatalog() {
 
   return (
     <>
+      <div className='block lg:hidden'>
+        <MobileFiltration />
+      </div>
       <div className='flex flex-col grid gap-10 pb-20'>
-        <div className='flex items-end justify-between'>
+        <div className='hidden lg:flex items-end justify-between'>
           <Categories />
           <Button className='uppercase' onClick={toggleModal}>
             filter +

@@ -34,9 +34,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           },
         )}
       >
-        <div className='flex grow basis-0 items-center justify-start'>
-          <LeftSideNavMenu onNavOpenChange={setIsNavOpen} />
-        </div>
+        <LeftSideNavMenu onNavOpenChange={setIsNavOpen} />
 
         <div className='flex grow basis-0 items-center justify-center'>
           <Button
@@ -50,15 +48,15 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
 
         <div className='flex grow basis-0 items-center justify-end'>
           <div className='relative w-full lg:w-auto'>
-            <div className='flex'>
+            <div className='flex justify-end lg:justify-start'>
               <Button
                 asChild
-                className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70'
+                className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden'
               >
                 <Link to={ROUTES.settings}>settings</Link>
               </Button>
               <Button
-                className='pl-2 pr-0 underline-offset-2 hover:underline transition-colors hover:opacity-70 cursor-pointer'
+                className='px-2  underline-offset-2 hover:underline transition-colors hover:opacity-70 cursor-pointer'
                 onClick={handleLogout}
               >
                 logout

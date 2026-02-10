@@ -91,7 +91,7 @@ export function InfinityScroll({ firstItems }: Props) {
     <div>
       <ProductGrid products={items} refresh={refreshAfterDeletetion} />
       {hasMore && (
-        <div ref={ref} className='text-center text-xl' style={{ minHeight: '100px' }}>
+        <div ref={ref} className='text-center' style={{ minHeight: '100px' }}>
           loading...
         </div>
       )}

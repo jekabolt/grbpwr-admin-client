@@ -60,7 +60,7 @@ export function Categories() {
   });
 
   return (
-    <div className='flex items-center gap-2'>
+    <div className='flex items-center gap-2 overflow-x-scroll w-full'>
       <CategoryButton href={baseHref}>{topCategoryName || categoryName || ''}</CategoryButton>
 
       {!!filteredSubCategories.length && <Text>/</Text>}
