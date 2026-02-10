@@ -15,7 +15,6 @@ export interface OrderDescriptionProps {
 }
 
 export interface DisplayState {
-  showBilling: boolean;
   page: number;
   pageSize: number;
   columnVisibility: {

@@ -167,7 +167,3 @@ export function OrdersTable({
     </div>
   );
 }
-
-// const handleRowClick = (params: any) => {
-//   navigate(`${ROUTES.orders}/${params.row.uuid}`);
-// };
