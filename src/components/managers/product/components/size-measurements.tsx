@@ -1,4 +1,4 @@
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import React, { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -22,7 +22,7 @@ export function SizeMeasurements({
   isEditMode?: boolean;
   isAddingProduct?: boolean;
 } = {}) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const { watch, setValue } = useFormContext<ProductFormData>();
   const values = watch();
   const { requireConfirmation } = useEditConfirmation(isEditMode, isAddingProduct);

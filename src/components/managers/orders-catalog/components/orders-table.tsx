@@ -1,7 +1,7 @@
 import { common_OrderStatusEnum } from 'api/proto-http/admin';
 import { statusOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -37,7 +37,7 @@ export function OrdersTable({
   onStatusChange,
   onOrderIdChange,
 }: OrdersTableProps) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const navigate = useNavigate();
 
   const handleRowClick = (order: Order) => {

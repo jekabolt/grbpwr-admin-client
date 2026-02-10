@@ -7,7 +7,7 @@ import { Archive } from 'components/managers/archives/archive';
 import { CustomerPage } from 'components/managers/customer-support';
 import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
-import { StoreProvider } from 'lib/stores/store-provider';
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
@@ -94,7 +94,7 @@ const root = createRoot(container);
 root.render(
   <StrictMode>
     <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => (window.location.href = '/')}>
-      <StoreProvider>
+      <DictionaryProvider>
         <ContextProvider>
           <QueryClientProvider client={queryClient}>
             <BrowserRouter>
@@ -123,7 +123,7 @@ root.render(
             <ReactQueryDevtools initialIsOpen={false} />
           </QueryClientProvider>
         </ContextProvider>
-      </StoreProvider>
+      </DictionaryProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

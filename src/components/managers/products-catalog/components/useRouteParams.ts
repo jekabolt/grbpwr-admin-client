@@ -1,7 +1,7 @@
 'use client';
 
 import { GENDER_ENUM_TO_SLUG } from 'constants/constants';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSearchParams } from 'react-router-dom';
 
 interface RouteParams {
@@ -13,7 +13,7 @@ interface RouteParams {
 }
 
 export function useRouteParams(): RouteParams {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const [searchParams] = useSearchParams();
 
   const topCategoryId = searchParams.get('topCategory');

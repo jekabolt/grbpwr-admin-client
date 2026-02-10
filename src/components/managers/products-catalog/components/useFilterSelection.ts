@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 
 import useFilter from 'lib/useFilter';
 
@@ -10,7 +10,7 @@ interface UseFilterSelectionProps {
 }
 
 export function useFilterSelection({ filterKey, multiSelect = false }: UseFilterSelectionProps) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const { defaultValue, handleFilterChange } = useFilter(filterKey);
 
   const items = dictionary?.[filterKey === 'size' ? 'sizes' : 'collections'] || [];

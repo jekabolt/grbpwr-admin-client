@@ -1,7 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
-import { useDictionaryStore, useSnackBarStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -18,8 +19,8 @@ import {
 } from './utility/schema';
 
 export function Settings() {
-  const { dictionary, fetchDictionary } = useDictionaryStore();
-  const { showMessage } = useSnackBarStore();
+  const { dictionary, refetch } = useDictionary();
+  const showMessage = useSnackBarStore((state) => state.showMessage);
   const [isLoading, setIsLoading] = useState(false);
 
   const initialValues = useMemo(
@@ -37,7 +38,7 @@ export function Settings() {
       setIsLoading(true);
       await adminService.UpdateSettings(data as UpdateSettingsRequest);
       showMessage('Settings updated successfully', 'success');
-      await fetchDictionary(true);
+      await refetch();
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to update settings';
       showMessage(msg, 'error');
@@ -86,7 +87,7 @@ export function Settings() {
                     keyboardRestriction={/[\d.]/}
                   />
                 </div>
-                <Text size='small' variant='uppercase' className='text-inactive'>
+                <Text variant='uppercase' className='text-textInactiveColor'>
                   {dictionary?.shipmentCarriers?.[index]?.shipmentCarrier?.description}
                 </Text>
               </div>
@@ -118,14 +119,11 @@ export function Settings() {
 
         <Text variant='uppercase'>base currency: {baseCurrency}</Text>
 
-        <Button
-          type='submit'
-          size='lg'
-          disabled={isLoading || !form.formState.isDirty}
-          loading={isLoading}
-        >
-          save
-        </Button>
+        <div className='flex justify-center'>
+          <Button type='submit' size='lg' variant='main' disabled={isLoading} loading={isLoading}>
+            save
+          </Button>
+        </div>
       </form>
     </Form>
   );

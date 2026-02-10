@@ -53,7 +53,6 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [translations.length, replace]);
 
-  // Add missing translation for selected language
   useEffect(() => {
     if (translationIndex < 0 && translations.length > 0) {
       const newTranslation: any = { languageId: selectedLanguageId };
@@ -171,7 +170,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
                   rows={field.rows || 4}
                   readOnly={!editMode}
                 />
-                {errorMessage && <p className='text-sm font-medium text-red-500'>{errorMessage}</p>}
+                {errorMessage && <Text className='text-red-500'>{errorMessage}</Text>}
               </div>
             );
           }
@@ -190,7 +189,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
                   readOnly={!editMode}
                 />
               </div>
-              {errorMessage && <p className='text-sm font-medium text-red-500'>{errorMessage}</p>}
+              {errorMessage && <Text className='text-red-500'>{errorMessage}</Text>}
             </div>
           );
         })}

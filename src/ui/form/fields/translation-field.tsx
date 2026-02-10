@@ -12,7 +12,12 @@ type Props = {
 };
 
 export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
-  const { control, watch, setValue } = useFormContext();
+  const {
+    control,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useFormContext();
   const { replace } = useFieldArray({
     control,
     name: fieldPrefix,
@@ -23,14 +28,9 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
   const [currentInputValue, setCurrentInputValue] = useState<string>('');
 
   const selectedLanguage = LANGUAGES.find((lang) => lang.id === selectedLanguageId);
-
   const translationIndex = translations.findIndex((t: any) => t?.languageId === selectedLanguageId);
-
   const actualTranslationIndex = translationIndex >= 0 ? translationIndex : translations.length;
-
   const fieldNameWithIndex = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
-
-  const currentFormValue = watch(fieldNameWithIndex) || '';
 
   useEffect(() => {
     if (translations.length === 0) {
@@ -40,53 +40,69 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
       }));
       replace(initialTranslations);
     }
-  }, [translations.length, replace, fieldName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [translations.length, replace]);
 
   useEffect(() => {
     if (translationIndex < 0 && translations.length > 0) {
-      const newTranslations = [...translations];
-      newTranslations.push({
+      const newTranslation = {
         languageId: selectedLanguageId,
         [fieldName]: '',
-      });
+      };
+      const newTranslations = [...translations, newTranslation];
       replace(newTranslations);
     } else if (translationIndex >= 0) {
-      setValue(`${fieldPrefix}.${translationIndex}.languageId`, selectedLanguageId);
+      setValue(`${fieldPrefix}.${translationIndex}.languageId`, selectedLanguageId, {
+        shouldDirty: true,
+      });
     }
-  }, [selectedLanguageId, translationIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLanguageId, translationIndex, translations.length, replace, setValue, fieldPrefix]);
 
   useEffect(() => {
-    if (!currentInputValue) {
-      setCurrentInputValue(currentFormValue);
+    const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
+    const newValue = watch(fieldPath) || '';
+    setCurrentInputValue(newValue);
+  }, [selectedLanguageId, actualTranslationIndex, fieldPrefix, fieldName, watch]);
+
+  useEffect(() => {
+    const pathParts = fieldPrefix.split('.');
+    let node: any = errors;
+
+    for (const part of pathParts) {
+      node = node?.[part];
+      if (!node) return;
     }
-  }, [currentFormValue]);
+
+    if (!Array.isArray(node) || !node.length || !translations.length) return;
+
+    const idx = node.findIndex((item: any) => item && item[fieldName]);
+
+    const langId = translations[idx]?.languageId;
+    if (idx !== -1 && typeof langId === 'number') {
+      setSelectedLanguageId(langId);
+    }
+  }, [errors, fieldPrefix, fieldName, translations]);
 
   const handleLanguageChange = (e: React.MouseEvent<HTMLButtonElement>, languageId: number) => {
     e.preventDefault();
 
     // Save current value before switching languages
     if (currentInputValue !== undefined) {
-      setValue(fieldNameWithIndex, currentInputValue);
+      setValue(fieldNameWithIndex, currentInputValue, { shouldDirty: true });
     }
 
     setSelectedLanguageId(languageId);
-
-    const newTranslationIndex = translations.findIndex((t: any) => t?.languageId === languageId);
-    const newFieldName = `${fieldPrefix}.${newTranslationIndex >= 0 ? newTranslationIndex : translations.length}.${fieldName}`;
-    const newValue = watch(newFieldName) || '';
-    setCurrentInputValue(newValue);
   };
 
   const handleInputChange = (value: string) => {
     setCurrentInputValue(value);
-    // Save to form immediately
-    setValue(fieldNameWithIndex, value);
+    setValue(fieldNameWithIndex, value, { shouldDirty: true });
   };
 
   const handleBlur = () => {
-    // Ensure value is saved on blur
     if (currentInputValue !== undefined) {
-      setValue(fieldNameWithIndex, currentInputValue);
+      setValue(fieldNameWithIndex, currentInputValue, { shouldDirty: true });
     }
   };
 
@@ -96,6 +112,21 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
     const value = watch(`${fieldPrefix}.${index}.${fieldName}`);
     return value && value.trim().length > 0;
   };
+
+  const getFieldError = () => {
+    const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
+    const pathParts = fieldPath.split('.');
+    let error: any = errors;
+
+    for (const part of pathParts) {
+      if (!error) return null;
+      error = error[part];
+    }
+
+    return error?.message;
+  };
+
+  const errorMessage = getFieldError();
 
   return (
     <div className='space-y-3'>
@@ -108,16 +139,18 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
         showRedBorderForUnfilled={true}
       />
 
-      <div className='border-b border-textColor'>
+      <div className={`border-b ${errorMessage ? 'border-red-500' : 'border-textColor'}`}>
         <Input
           name={fieldNameWithIndex}
-          value={currentInputValue || currentFormValue}
+          value={currentInputValue}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange(e.target.value)}
           onBlur={handleBlur}
           placeholder={`enter ${label.toLowerCase()} in ${selectedLanguage?.name}`}
           className='w-full border-none leading-4 bg-transparent'
         />
       </div>
+
+      {errorMessage && <Text className='text-red-500'>{errorMessage}</Text>}
     </div>
   );
 }

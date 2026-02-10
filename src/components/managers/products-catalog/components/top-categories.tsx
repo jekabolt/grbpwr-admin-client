@@ -1,5 +1,5 @@
 import { getTopCategoryName } from 'lib/features/categories';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import Text from 'ui/components/text';
 import { useSearchParams } from 'react-router-dom';
 import { isCategoryDisabled } from './categories';
@@ -11,7 +11,7 @@ export function TopCategories() {
   const [searchParams] = useSearchParams();
   const { gender } = useRouteParams();
   const genderParam = searchParams.get('gender') || undefined;
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const categories = dictionary?.categories || [];
 
   const topCategories = dictionary?.categories

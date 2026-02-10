@@ -60,7 +60,7 @@ export const settingsSchema = z.object({
       translations: createStrictTranslationSchema(
         announceTranslationSchema,
         requiredLanguageIds,
-      ).optional(),
+      ),
     })
     .optional(),
   bigMenu: z.boolean().optional(),

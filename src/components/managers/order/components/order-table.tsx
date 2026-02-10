@@ -1,7 +1,7 @@
 import { common_OrderFull } from 'api/proto-http/admin';
 import { common_OrderItem } from 'api/proto-http/frontend';
 import { BASE_PATH } from 'constants/routes';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import MediaComponent from 'ui/components/media';
 import Text from 'ui/components/text';
@@ -12,7 +12,7 @@ interface OrderTableProps {
 }
 
 export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
 
   const ALL_COLUMNS: {
     label: string;
