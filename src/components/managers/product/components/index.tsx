@@ -126,6 +126,7 @@ export function ProductForm({
       >
         <div className='w-full flex justify-between'>
           <Button
+            variant='main'
             size='lg'
             disabled={isEditMode && !isFormChanged}
             className='fixed bottom-3 right-3 z-50 cursor-pointer'

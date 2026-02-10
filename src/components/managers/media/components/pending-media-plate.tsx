@@ -60,6 +60,7 @@ export function PendingMediaPlate({
       <DialogPrimitive.Trigger asChild>
         <Button
           size='lg'
+          variant='main'
           className='min-w-64 flex items-center justify-center gap-2'
           disabled={previews.length === 0}
         >
@@ -89,6 +90,7 @@ export function PendingMediaPlate({
             <div className='flex justify-end mb-4'>
               <Button
                 size='lg'
+                variant='main'
                 className='uppercase cursor-pointer'
                 onClick={onUploadAll}
                 disabled={previews.length === 0 || uploadingIndices.size > 0}
@@ -112,6 +114,7 @@ export function PendingMediaPlate({
               {previews.map((preview, id) => (
                 <div key={id} className='relative flex flex-col gap-2'>
                   <Button
+                    variant='main'
                     className='absolute right-0 top-0 leading-none z-10 py-1 cursor-pointer'
                     onClick={() => onRemove(id)}
                     disabled={uploadingIndices.has(id)}
@@ -131,6 +134,7 @@ export function PendingMediaPlate({
 
                   <Button
                     size='lg'
+                    variant='main'
                     onClick={() => setCroppingIndex(id)}
                     className='uppercase cursor-pointer w-full'
                     disabled={uploadingIndices.has(id)}
