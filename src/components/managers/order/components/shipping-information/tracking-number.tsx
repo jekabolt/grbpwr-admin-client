@@ -38,11 +38,11 @@ export function TrackingNumber({
             />
           ) : (
             !isPrinting && (
-              <Text variant='uppercase' size='small'>
+              <Text variant='uppercase'>
                 {[
                   `tracking number: ${orderDetails?.shipment?.trackingCode} `,
                   orderStatus === 'SHIPPED' && (
-                    <Button onClick={toggleTrackNumber} size='sm'>
+                    <Button onClick={toggleTrackNumber}>
                       <Pencil2Icon />
                     </Button>
                   ),

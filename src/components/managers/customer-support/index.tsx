@@ -40,7 +40,7 @@ export function CustomerPage() {
   ];
 
   return (
-    <div className='flex flex-col w-full gap-4 lg:pt-26'>
+    <div className='flex flex-col w-full gap-4'>
       <div className='overflow-x-auto w-full'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
           <thead className='bg-textInactiveColor h-10 overflow-x-scroll'>

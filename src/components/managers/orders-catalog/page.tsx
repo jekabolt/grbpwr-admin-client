@@ -1,66 +1,87 @@
-import { adminService } from 'api/api';
-import { common_Order, ListOrdersRequest } from 'api/proto-http/admin';
-import { PAGE_SIZE } from 'constants/filter';
+import { common_OrderStatusEnum } from 'api/proto-http/admin';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
-import Filter from './components/filter';
-import { OrderList } from './components/order-list';
+import Input from 'ui/components/input';
+import { OrdersTable } from './components/orders-table';
+import { useInfiniteOrders } from './components/useOrdersQuery';
 
 export function OrdersCatalog() {
-  const [orders, setOrders] = useState<common_Order[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [currentOffset, setCurrentOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [currentFilters, setCurrentFilters] = useState<Partial<ListOrdersRequest>>({});
+  const [orderFactor, setOrderFactor] = useState<'ORDER_FACTOR_ASC' | 'ORDER_FACTOR_DESC'>(
+    'ORDER_FACTOR_DESC',
+  );
+  const [status, setStatus] = useState<common_OrderStatusEnum | ''>('');
+  const [orderId, setOrderId] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
+  const [debouncedEmail, setDebouncedEmail] = useState<string>('');
+  const [debouncedOrderId, setDebouncedOrderId] = useState<string>('');
 
   useEffect(() => {
-    fetchOrders();
-  }, []);
+    const timer = setTimeout(() => {
+      setDebouncedEmail(email);
+    }, 500);
 
-  const fetchOrders = async (filters: Partial<ListOrdersRequest> = {}, append = false) => {
-    if (!append) {
-      setCurrentFilters(filters);
-      setCurrentOffset(0);
-    }
-    setLoading(true);
-    try {
-      const requestParams: ListOrdersRequest = {
-        status: filters.status || undefined,
-        paymentMethod: filters.paymentMethod || undefined,
-        email: filters.email || undefined,
-        orderId: filters.orderId || undefined,
-        limit: filters.limit || PAGE_SIZE,
-        offset: append ? currentOffset + PAGE_SIZE : 0,
-        orderFactor: filters.orderFactor || 'ORDER_FACTOR_DESC',
-      };
+    return () => clearTimeout(timer);
+  }, [email]);
 
-      const response = await adminService.ListOrders(requestParams);
-      if (append) {
-        setOrders((prev) => [...prev, ...(response.orders || [])]);
-      } else {
-        setOrders(response.orders || []);
-      }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedOrderId(orderId);
+    }, 500);
 
-      setHasMore((response.orders || []).length === (filters.limit || PAGE_SIZE));
-    } finally {
-      setLoading(false);
-    }
-  };
+    return () => clearTimeout(timer);
+  }, [orderId]);
 
-  const loadMore = async () => {
-    const newOffset = currentOffset + PAGE_SIZE;
-    setCurrentOffset(newOffset);
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteOrders(
+      50,
+      orderFactor,
+      debouncedEmail || undefined,
+      status || undefined,
+      debouncedOrderId || undefined,
+    );
+  const orders = data?.pages.flatMap((page) => page.orders) || [];
 
-    await fetchOrders(currentFilters, true);
+  const toggleSort = () => {
+    setOrderFactor((prev) =>
+      prev === 'ORDER_FACTOR_ASC' ? 'ORDER_FACTOR_DESC' : 'ORDER_FACTOR_ASC',
+    );
   };
 
   return (
-    <div className='flex flex-col pb-10 gap-5'>
-      <Filter onSearch={fetchOrders} loading={loading} />
-      <OrderList rows={orders} />
-      <Button className='lg:self-start' size='lg' onClick={loadMore} disabled={!hasMore}>
-        load more
-      </Button>
+    <div className='flex flex-col gap-4 pb-16'>
+      <div className='flex justify-end'>
+        <Input
+          name='email'
+          type='text'
+          placeholder='enter email'
+          value={email}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+          disabled={isLoading || isFetchingNextPage}
+          className='w-64'
+        />
+      </div>
+      <OrdersTable
+        orders={orders}
+        orderFactor={orderFactor}
+        onToggleSort={toggleSort}
+        status={status}
+        onStatusChange={setStatus}
+        orderId={orderId}
+        onOrderIdChange={setOrderId}
+        isLoading={isLoading || isFetchingNextPage}
+      />
+      {hasNextPage && (
+        <div className='flex justify-center'>
+          <Button
+            variant='main'
+            size='lg'
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? 'Loading...' : 'Load More'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

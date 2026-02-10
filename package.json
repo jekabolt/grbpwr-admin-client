@@ -50,7 +50,6 @@
     "@hookform/resolvers": "^5.2.1",
     "@mui/icons-material": "^6.1.6",
     "@mui/material": "^6.1.6",
-    "@mui/x-data-grid": "^7.27.0",
     "@mui/x-date-pickers": "^7.0.0",
     "@radix-ui/react-checkbox": "^1.1.4",
     "@radix-ui/react-dialog": "^1.1.15",

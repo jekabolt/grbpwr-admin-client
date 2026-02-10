@@ -1,4 +1,3 @@
-import { CheckIcon } from '@radix-ui/react-icons';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
@@ -18,20 +17,20 @@ export function NewTrackCode({
 }: Props) {
   return (
     <div
-      className={cn('w-full lg:w-1/4', {
+      className={cn('w-full lg:w-1/4 border border-textColor', {
         hidden: isPrinting,
       })}
     >
-      <div className='flex items-center gap-2'>
+      <div className='flex items-end gap-2'>
         <Input
           name='trackingNumber'
           placeholder='tracking number'
+          className='placeholder:uppercase border border-b border-transparent h-9'
           value={trackingNumber}
           onChange={handleTrackingNumberChange}
-          className='h-10'
         />
-        <Button onClick={saveTrackingNumber} size='lg'>
-          <CheckIcon />
+        <Button onClick={saveTrackingNumber} variant='main' size='lg'>
+          +
         </Button>
       </div>
     </div>

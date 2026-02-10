@@ -11,11 +11,11 @@ interface Props {
 
 export function Buyer({ buyer, isPrinting }: Props) {
   return (
-    <div className='grid gap-2 w-full'>
+    <div className='flex flex-col gap-1'>
       <Text variant='uppercase' className='font-bold'>
         buyer information:
       </Text>
-      <Text className='flex items-center gap-2' variant='uppercase' size='small'>
+      <Text className='flex items-center gap-2' variant='uppercase'>
         {[
           `email: `,
           <Text component='span' className='lowercase'>
@@ -24,15 +24,14 @@ export function Buyer({ buyer, isPrinting }: Props) {
         ]}
       </Text>
 
-      <Text variant='uppercase' size='small'>{`first name: ${buyer?.firstName}`}</Text>
+      <Text variant='uppercase'>{`first name: ${buyer?.firstName}`}</Text>
 
-      <Text variant='uppercase' size='small'>{`last name: ${buyer?.lastName}`}</Text>
+      <Text variant='uppercase'>{`last name: ${buyer?.lastName}`}</Text>
 
-      <Text variant='uppercase' size='small'>{`phone: ${buyer?.phone}`}</Text>
+      <Text variant='uppercase'>{`phone: ${buyer?.phone}`}</Text>
 
       <Text
         variant='uppercase'
-        size='small'
         className={cn({
           hidden: isPrinting,
         })}
@@ -40,11 +39,11 @@ export function Buyer({ buyer, isPrinting }: Props) {
         {[
           `receive promo emails: `,
           buyer?.receivePromoEmails ? (
-            <Text component='span' size='small' className={STATUS.confirmed}>
+            <Text component='span' className={STATUS.confirmed}>
               yes
             </Text>
           ) : (
-            <Text component='span' size='small' className={STATUS.denied}>
+            <Text component='span' className={STATUS.denied}>
               no
             </Text>
           ),

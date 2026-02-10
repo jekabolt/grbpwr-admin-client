@@ -31,6 +31,7 @@
   --color-textInactiveColor: #cccccc;
   --color-error: #ff0000;
   --color-overlay: rgba(0, 0, 0, 0.4);
+  --color-highlightColor: #311eee;
 
   /* FONTS */
   --font-family-sans: 'FeatureMono', 'Inter', 'Helvetica Neue', Arial, sans-serif;
