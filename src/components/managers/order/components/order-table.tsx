@@ -20,67 +20,67 @@ export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps
     showOnPrint?: boolean;
   }[] = useMemo(
     () => [
-        {
-          label: 'THUMBNAIL',
-          showOnPrint: true,
-          accessor: (item) => (
-            <a
-              href={`${BASE_PATH}/products/${item.orderItem?.productId}`}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='cursor-pointer flex items-center justify-center w-24 h-full mx-auto'
-            >
-              <MediaComponent
-                src={item.thumbnail || ''}
-                alt='thumbnail'
-                aspectRatio='1/1'
-                fit='contain'
-              />
-            </a>
-          ),
-        },
-        {
-          label: 'SKU',
-          showOnPrint: true,
-          accessor: (item) => item.sku,
-        },
-        {
-          label: 'PRODUCT NAME',
-          showOnPrint: true,
-          accessor: (item) => item.translations?.[0].name,
-        },
-        {
-          label: 'QUANTITY',
-          showOnPrint: false,
-          accessor: (item) => item.orderItem?.quantity,
-        },
-        {
-          label: 'SIZE',
-          showOnPrint: false,
-          accessor: (item) =>
-            dictionary?.sizes
-              ?.find((x) => x.id === item.orderItem?.sizeId)
-              ?.name?.replace('SIZE_ENUM_', ''),
-        },
-        {
-          label: 'PRICE',
-          showOnPrint: false,
-          accessor: (item) =>
-            `${(item as any).productPrice && item.orderItem?.quantity ? (item as any).productPrice * item.orderItem.quantity : 0} ${dictionary?.baseCurrency}`,
-        },
-        {
-          label: 'SALE',
-          showOnPrint: false,
-          accessor: (item) => (item as any).productSalePercentage,
-        },
-        {
-          label: 'PRICE WITH SALE',
-          showOnPrint: true,
-          accessor: (item) => (item as any).productPriceWithSale,
-        },
-      ],
-      [dictionary],
-    );
+      {
+        label: 'THUMBNAIL',
+        showOnPrint: true,
+        accessor: (item) => (
+          <a
+            href={`${BASE_PATH}/products/${item.orderItem?.productId}`}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='cursor-pointer flex items-center justify-center w-24 h-full mx-auto'
+          >
+            <MediaComponent
+              src={item.thumbnail || ''}
+              alt='thumbnail'
+              aspectRatio='1/1'
+              fit='contain'
+            />
+          </a>
+        ),
+      },
+      {
+        label: 'SKU',
+        showOnPrint: true,
+        accessor: (item) => item.sku,
+      },
+      {
+        label: 'PRODUCT NAME',
+        showOnPrint: true,
+        accessor: (item) => item.translations?.[0].name,
+      },
+      {
+        label: 'QUANTITY',
+        showOnPrint: false,
+        accessor: (item) => item.orderItem?.quantity,
+      },
+      {
+        label: 'SIZE',
+        showOnPrint: false,
+        accessor: (item) =>
+          dictionary?.sizes
+            ?.find((x) => x.id === item.orderItem?.sizeId)
+            ?.name?.replace('SIZE_ENUM_', ''),
+      },
+      {
+        label: 'PRICE',
+        showOnPrint: false,
+        accessor: (item) =>
+          `${(item as any).productPrice && item.orderItem?.quantity ? (item as any).productPrice * item.orderItem.quantity : 0} ${dictionary?.baseCurrency}`,
+      },
+      {
+        label: 'SALE',
+        showOnPrint: false,
+        accessor: (item) => (item as any).productSalePercentage,
+      },
+      {
+        label: 'PRICE WITH SALE',
+        showOnPrint: true,
+        accessor: (item) => (item as any).productPriceWithSale,
+      },
+    ],
+    [dictionary],
+  );
 
   const COLUMNS = useMemo(
     () => (isPrinting ? ALL_COLUMNS.filter((col) => col.showOnPrint) : ALL_COLUMNS),
@@ -88,7 +88,7 @@ export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps
   );
 
   return (
-    <div className='w-full flex flex-col gap-4'>
+    <div className='w-full'>
       <div className='overflow-x-auto w-full'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
           <thead className='bg-textInactiveColor h-10'>

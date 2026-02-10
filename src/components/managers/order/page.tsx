@@ -45,7 +45,7 @@ export function OrderDetails() {
         <div className='block print:hidden'>
           <PromoApplied orderDetails={orderDetails} />
         </div>
-        <div className='flex items-end justify-between w-full'>
+        <div className='flex gap-10 lg:gap-0 lg:flex-row flex-col lg:items-end lg:justify-between w-full'>
           <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
           <ShippingBillingToggle
             orderDetails={orderDetails}
