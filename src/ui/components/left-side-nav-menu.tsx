@@ -57,7 +57,7 @@ export function LeftSideNavMenu({
         </NavigationMenu.Item>
       </NavigationMenu.List>
       <div
-        className={cn('fixed inset-x-2.5 top-12 flex justify-center', {
+        className={cn('fixed inset-x-2.5 top-12 flex justify-center bg-bgColor', {
           'border-x border-b border-textInactiveColor': isNavOpen,
         })}
       >
