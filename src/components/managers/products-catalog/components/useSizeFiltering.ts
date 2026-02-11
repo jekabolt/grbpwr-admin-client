@@ -1,8 +1,8 @@
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useRouteParams } from './useRouteParams';
 
 export function useSizeFiltering() {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const { topCategory } = useRouteParams();
   const sizes = dictionary?.sizes || [];
   const categories = dictionary?.categories;

@@ -98,6 +98,7 @@ export function PreviewMedia({
                 )}
                 <Button
                   className='absolute right-1 top-1 py-1'
+                  variant='main'
                   onClick={handleCancelClick}
                   disabled={isUploading}
                 >

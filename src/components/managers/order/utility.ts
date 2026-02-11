@@ -1,12 +1,13 @@
 import { adminService } from 'api/api';
-import { useDictionaryStore, useSnackBarStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { getOrderStatusName } from '../orders-catalog/components/utility';
 import { OrderDetailsState } from './interface';
 
 export const useOrderDetails = (uuid: string) => {
-  const { dictionary } = useDictionaryStore();
-  const { showMessage } = useSnackBarStore();
+  const { dictionary } = useDictionary();
+  const showMessage = useSnackBarStore((state) => state.showMessage);
   const [state, setState] = useState<OrderDetailsState>({
     orderDetails: undefined,
     dictionary: undefined,

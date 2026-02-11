@@ -2,7 +2,7 @@ import { Button, Checkbox } from '@mui/material';
 
 import { adminService } from 'api/api';
 import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import {
   MaterialReactTable,
   useMaterialReactTable,
@@ -29,7 +29,8 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   const [allProducts, setAllProducts] = useState<common_Product[]>([]);
   const [selectedProducts, setSelectedProducts] = useState<common_Product[]>([]);
   const [data, setData] = useState(allProducts);
-  const categories = useDictionaryStore((state) => state.dictionary?.categories || []);
+  const { dictionary } = useDictionary();
+  const categories = dictionary?.categories || [];
 
   const [currentPage, setCurrentPage] = useState(1);
   const [filter, setFilter] = useState<GetProductsPagedRequest | undefined>(undefined);

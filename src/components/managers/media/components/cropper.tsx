@@ -133,6 +133,7 @@ export const MediaCropper: FC<CropperInterface> = ({
         </div>
         <Button
           size='lg'
+          variant='main'
           className='uppercase'
           onClick={handleSave}
           disabled={

@@ -1,4 +1,4 @@
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { processCategories } from './proceed-categories';
 
@@ -8,7 +8,7 @@ interface Categories {
 }
 
 export function useCategories(topCategoryId: number, subCategoryId: number, typeId: number = 0) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
 
   const categories = useMemo(
     () => processCategories(dictionary?.categories || []),

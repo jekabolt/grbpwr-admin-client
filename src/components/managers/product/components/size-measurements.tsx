@@ -1,4 +1,4 @@
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import React, { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -22,7 +22,7 @@ export function SizeMeasurements({
   isEditMode?: boolean;
   isAddingProduct?: boolean;
 } = {}) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const { watch, setValue } = useFormContext<ProductFormData>();
   const values = watch();
   const { requireConfirmation } = useEditConfirmation(isEditMode, isAddingProduct);
@@ -142,7 +142,7 @@ export function SizeMeasurements({
       <table className='w-full border-collapse border-2 border-textColor min-w-max'>
         <thead className='bg-textInactiveColor h-10'>
           <tr className='border-b border-text'>
-            <th className={cn(cellClass, 'sticky left-0 bg-inactive z-10')}>
+            <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
               <ToggleSizeNames
                 subCategoryName={selectedSubCategoryName}
                 typeName={selectedTypeName}

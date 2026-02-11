@@ -4,7 +4,7 @@ import {
   getSubCategoryName,
   getTopCategoryName,
 } from 'lib/features/categories';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSearchParams } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { CategoryButton } from './category-btn';
@@ -35,7 +35,7 @@ export function isCategoryDisabled(category: common_Category, gender: string) {
 }
 
 export function Categories() {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const [searchParams] = useSearchParams();
   const { gender, categoryName, subCategoryName, topCategory, subCategory } = useRouteParams();
   const genderParam = searchParams.get('gender') || undefined;
@@ -60,7 +60,7 @@ export function Categories() {
   });
 
   return (
-    <div className='flex items-center gap-2'>
+    <div className='flex items-center gap-2 overflow-x-scroll w-full'>
       <CategoryButton href={baseHref}>{topCategoryName || categoryName || ''}</CategoryButton>
 
       {!!filteredSubCategories.length && <Text>/</Text>}

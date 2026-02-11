@@ -21,6 +21,8 @@ export function Hero() {
   const productsByEntityIndexRef = useRef<Record<number, any[]>>({});
   const deletedIndicesRef = useRef<Set<number>>(new Set());
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
+  const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
+  const isResettingRef = useRef(false);
 
   const form = useForm<HeroSchema>({
     resolver: zodResolver(heroSchema),
@@ -28,17 +30,32 @@ export function Hero() {
     mode: 'onSubmit',
   });
 
-  const isDirty = form.formState.isDirty;
-  useBlockNavigation(isDirty);
+  useBlockNavigation(hasUserMadeChanges);
 
   useEffect(() => {
     if (heroData) {
+      isResettingRef.current = true;
       const mappedData = mapHeroFullToFormData(heroData.hero);
       productsByEntityIndexRef.current = mappedData.productsByEntityIndex || {};
       form.reset(mappedData);
       deletedIndicesRef.current.clear();
+      setHasUserMadeChanges(false);
+      // Give form time to fully reset before allowing watch to track changes
+      setTimeout(() => {
+        isResettingRef.current = false;
+      }, 0);
     }
   }, [heroData, form]);
+
+  // Track when user makes changes
+  useEffect(() => {
+    const subscription = form.watch(() => {
+      if (!isResettingRef.current && form.formState.isDirty) {
+        setHasUserMadeChanges(true);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form]);
 
   const { append, remove, move, insert } = useFieldArray({
     control: form.control,
@@ -61,8 +78,13 @@ export function Hero() {
     const heroData = mapFormFieldsToHeroData(filteredData);
     try {
       await saveHero.mutateAsync(heroData);
+      isResettingRef.current = true;
       form.reset(filteredData);
       deletedIndicesRef.current.clear();
+      setHasUserMadeChanges(false);
+      setTimeout(() => {
+        isResettingRef.current = false;
+      }, 0);
       showMessage('Hero saved successfully!', 'success');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error saving hero';
@@ -100,7 +122,7 @@ export function Hero() {
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(handleSubmit, onError)}
-        className='flex flex-col gap-y-16 lg:pt-24 pt-5 lg:px-12 px-2.5'
+        className='flex flex-col gap-y-16  '
       >
         <NavFeatured hero={heroData?.hero} />
         <SelectHeroType
@@ -122,7 +144,7 @@ export function Hero() {
           variant='main'
           type='submit'
           disabled={form.formState.isSubmitting || saveHero.isPending}
-          className='fixed top-3 right-3 z-50 cursor-pointer uppercase'
+          className='fixed bottom-3 right-3 z-50 cursor-pointer uppercase'
         >
           save
         </Button>

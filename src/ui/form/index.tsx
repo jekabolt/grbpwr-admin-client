@@ -132,16 +132,16 @@ function FormMessage({ className, children, ref, ...props }: any) {
   }
 
   return (
-    <p
+    <Text
       ref={ref}
       id={formMessageId}
-      className={cn('text-xs', className, {
+      className={cn('', className, {
         'text-error': error,
       })}
       {...props}
     >
       {body}
-    </p>
+    </Text>
   );
 }
 

@@ -1,7 +1,7 @@
 import { common_OrderStatusEnum } from 'api/proto-http/admin';
 import { statusOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -37,7 +37,7 @@ export function OrdersTable({
   onStatusChange,
   onOrderIdChange,
 }: OrdersTableProps) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const navigate = useNavigate();
 
   const handleRowClick = (order: Order) => {
@@ -70,7 +70,9 @@ export function OrdersTable({
               {COLUMNS.map((col) => (
                 <th
                   key={col.label}
-                  className='text-center h-10 min-w-26 border border-r border-textColor px-2'
+                  className={cn('text-center h-10 min-w-26 border border-r border-textColor px-2', {
+                    'sticky left-0 bg-textInactiveColor z-10': col.label === 'Order ID',
+                  })}
                 >
                   {col.label === 'Order ID' ? (
                     <div className='flex justify-center gap-3'>
@@ -152,7 +154,13 @@ export function OrdersTable({
                     return (
                       <td
                         key={col.label}
-                        className={cn('border border-r border-textColor text-center px-2', bgColor)}
+                        className={cn(
+                          'border border-r border-textColor text-center px-2',
+                          bgColor,
+                          {
+                            'sticky left-0 bg-bgColor z-10': col.label === 'Order ID',
+                          },
+                        )}
                       >
                         <Text>{cellValue}</Text>
                       </td>

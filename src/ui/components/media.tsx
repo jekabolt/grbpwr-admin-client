@@ -6,7 +6,7 @@ type ImageContainerProps = {
 function ImageContainer({ aspectRatio, children }: ImageContainerProps) {
   return (
     <div
-      className='relative w-full h-full overflow-hidden'
+      className='relative w-full overflow-hidden'
       style={{ aspectRatio: aspectRatio || 'auto' }}
     >
       {children}
@@ -55,14 +55,17 @@ export default function MediaComponent({
         <video
           src={src}
           title={alt}
-          className='h-full w-full'
+          className='w-full h-full'
           style={{
             objectFit: fit,
+            maxWidth: '100%',
+            maxHeight: '100%',
           }}
           autoPlay={autoPlay}
           muted={muted}
           loop={loop}
           controls={controls}
+          playsInline
           {...props}
         />
       )}

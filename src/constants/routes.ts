@@ -26,7 +26,7 @@ export enum ROUTES {
   customerSupport = '/customer-support',
 }
 
-export const sideBarItems = [
+export const SIDE_BAR_ITEMS = [
   {
     label: 'MEDIA',
     route: ROUTES.media,
@@ -48,7 +48,7 @@ export const sideBarItems = [
     route: ROUTES.promo,
   },
   {
-    label: 'timeline',
+    label: 'TIMELINE',
     route: ROUTES.archives,
   },
   {

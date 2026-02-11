@@ -1,5 +1,5 @@
 import { common_OrderFull } from 'api/proto-http/frontend';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -27,7 +27,7 @@ export function ShippingBillingToggle({
   handleTrackingNumberChange,
   saveTrackingNumber,
 }: Props) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const [showBilling, setShowBilling] = useState(false);
 
   const shipping = orderDetails?.shipping?.addressInsert;

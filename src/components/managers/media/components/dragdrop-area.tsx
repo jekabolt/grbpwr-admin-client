@@ -101,13 +101,18 @@ export function DragDropArea({
         </div>
       )}
       {showAddButton && (
-        <Button onClick={handleAddButtonClick} size='lg' className='fixed bottom-2 right-2 z-50'>
+        <Button
+          onClick={handleAddButtonClick}
+          variant='main'
+          size='lg'
+          className='fixed bottom-2 right-2 z-50'
+        >
           add
         </Button>
       )}
 
       {isDragging && (
-        <div className='absolute inset-0 bg-inactive/90 flex items-center justify-center pointer-events-none z-10' />
+        <div className='absolute inset-0 bg-textInactiveColor/90 flex items-center justify-center pointer-events-none z-10' />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import { common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { FC, useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
@@ -21,7 +21,8 @@ export const HeroProductTable: FC<
   }
 > = ({ products, id, onReorder, isFeaturedProducts }) => {
   const { setValue } = useFormContext<HeroSchema>();
-  const categories = useDictionaryStore((state) => state.dictionary?.categories || []);
+  const { dictionary } = useDictionary();
+  const categories = dictionary?.categories || [];
   const navigate = useNavigate();
   const [data, setData] = useState(products);
 

@@ -81,12 +81,13 @@ export function MediaSelector({
           </div>
           <div className='flex items-center justify-end gap-4 pt-4 border-t bg-white flex-shrink-0'>
             <DialogPrimitive.Close asChild>
-              <Button className='uppercase' variant='simple'>
+              <Button size='lg' className='uppercase' variant='simpleReverse'>
                 cancel
               </Button>
             </DialogPrimitive.Close>
             <Button
               className='uppercase'
+              variant='main'
               size='lg'
               onClick={handleSave}
               disabled={selectedMedia.length === 0}

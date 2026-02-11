@@ -1,5 +1,5 @@
 import { genderOptions } from 'constants/filter';
-import { useDictionaryStore } from 'lib/stores/store';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
 import CountryList from 'react-select-country-list';
@@ -23,7 +23,7 @@ interface Country {
 }
 
 export function BodyFields({ editMode }: { editMode: boolean }) {
-  const { dictionary } = useDictionaryStore();
+  const { dictionary } = useDictionary();
   const { getValues, watch } = useFormContext();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
 
