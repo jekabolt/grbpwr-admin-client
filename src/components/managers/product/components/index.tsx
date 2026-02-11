@@ -146,7 +146,7 @@ export function ProductForm({
         <div className='space-y-5'>
           <div className='flex flex-col lg:flex-row lg:justify-between lg:items-start gap-5'>
             <div className='w-full lg:w-1/2 space-y-8'>
-              <div className='flex flex-col lg:flex-row gap-5'>
+              <div className='flex flex-row gap-5'>
                 <Thumbnail
                   product={product}
                   control={form.control}
