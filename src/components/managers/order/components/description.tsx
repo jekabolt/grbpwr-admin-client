@@ -1,5 +1,5 @@
 import {
-  formatDateTime,
+  formatDateShort,
   getStatusColor,
 } from 'components/managers/orders-catalog/components/utility';
 import { cn } from 'lib/utility';
@@ -8,8 +8,8 @@ import { OrderDescriptionProps } from '../interface';
 
 export function Description({ orderDetails, orderStatus, isPrinting }: OrderDescriptionProps) {
   const statusColor = getStatusColor(orderStatus);
-  const orderPlaced = formatDateTime(orderDetails?.order?.placed);
-  const orderModified = formatDateTime(orderDetails?.order?.modified);
+  const orderPlaced = formatDateShort(orderDetails?.order?.placed, true);
+
   return (
     <div className='flex flex-col lg:flex-row lg:justify-between'>
       <Text
@@ -21,7 +21,10 @@ export function Description({ orderDetails, orderStatus, isPrinting }: OrderDesc
         {`order id: ${orderDetails?.order?.id}`}
       </Text>
 
-      <Text variant='uppercase'>{`order reference: ${orderDetails?.order?.uuid}`}</Text>
+      <Text variant='uppercase'>
+        {`order reference: `}
+        <span className='select-all'>{orderDetails?.order?.uuid}</span>
+      </Text>
 
       <div className='flex items-center gap-2 print:hidden'>
         <Text variant='uppercase'>status:</Text>
@@ -31,13 +34,6 @@ export function Description({ orderDetails, orderStatus, isPrinting }: OrderDesc
       </div>
 
       <Text variant='uppercase'>{`placed: ${orderPlaced}`}</Text>
-
-      <Text
-        variant='uppercase'
-        className={cn('block', {
-          'print:hidden': isPrinting,
-        })}
-      >{`modified: ${orderModified}`}</Text>
     </div>
   );
 }

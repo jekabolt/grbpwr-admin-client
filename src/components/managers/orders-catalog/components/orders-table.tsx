@@ -10,7 +10,7 @@ import Input from 'ui/components/input';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { useInfiniteOrders } from './useOrdersQuery';
-import { formatDateTime, getOrderStatusName, getStatusColor } from './utility';
+import { formatDateShort, getOrderStatusName, getStatusColor } from './utility';
 
 type Order = NonNullable<
   ReturnType<typeof useInfiniteOrders>['data']
@@ -51,11 +51,10 @@ export function OrdersTable({
         label: 'Order Status',
         accessor: (o) => getOrderStatusName(dictionary, o.orderStatusId),
       },
-      { label: 'Placed', accessor: (o) => formatDateTime(o.placed) },
-      { label: 'Modified', accessor: (o) => formatDateTime(o.modified) },
+      { label: 'Placed', accessor: (o) => formatDateShort(o.placed) },
       {
         label: 'Total',
-        accessor: (o) => `${o.totalPrice?.value} ${dictionary?.baseCurrency}`,
+        accessor: (o) => `${o.totalPrice?.value} ${o.currency}`,
       },
     ],
     [dictionary],
@@ -143,7 +142,7 @@ export function OrdersTable({
               orders.map((o) => (
                 <tr
                   key={o.id}
-                  className='border-b border-text last:border-b-0 h-10 hover:bg-highlightColor cursor-pointer transition-colors'
+                  className='group border-b border-text last:border-b-0 h-10 hover:bg-highlightColor/20 cursor-pointer transition-colors'
                   onClick={() => handleRowClick(o)}
                 >
                   {COLUMNS.map((col) => {
@@ -158,7 +157,8 @@ export function OrdersTable({
                           'border border-r border-textColor text-center px-2',
                           bgColor,
                           {
-                            'sticky left-0 bg-bgColor z-10': col.label === 'Order ID',
+                            'sticky left-0 bg-bgColor group-hover:bg-highlightColor/20 z-10':
+                              col.label === 'Order ID',
                           },
                         )}
                       >

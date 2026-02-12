@@ -59,7 +59,34 @@ export function getStatusColor(status: string | undefined): string {
       return 'bg-red-500';
     case 'REFUNDED':
       return 'bg-gray-500';
+    case 'PENDING RETURN':
+      return 'bg-yellow-500';
+    case 'REFUND IN PROGRESS':
+      return 'bg-gray-500';
     default:
       return 'bg-white';
   }
+}
+
+export function formatDateShort(value: string | undefined, withTime = false): string {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = date.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+  const year = date.getFullYear();
+
+  if (!withTime) {
+    return `${day} ${month} ${year}`;
+  }
+
+  const formattedTime = date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  return `${day} ${month} ${year}, ${formattedTime}`;
 }

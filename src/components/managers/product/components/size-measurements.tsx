@@ -12,8 +12,9 @@ import { useMeasurements } from '../utility/useMeasurements';
 import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle';
 import { ToggleSizeNames } from './toggle-sizenames';
 
-const cellClass = 'text-center border-r border-textColor h-10';
-const lastCellClass = 'text-center';
+const cellClass = 'text-center border-r border-textColor';
+const measurementCellClass = 'text-center border-r border-textColor w-20 lg:w-auto';
+const lastCellClass = 'text-center w-20 lg:w-auto';
 
 export function SizeMeasurements({
   isEditMode = false,
@@ -140,7 +141,7 @@ export function SizeMeasurements({
   return (
     <div className='w-full overflow-x-auto'>
       <table className='w-full border-collapse border-2 border-textColor min-w-max'>
-        <thead className='bg-textInactiveColor h-10'>
+        <thead className='bg-textInactiveColor'>
           <tr className='border-b border-text'>
             <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
               <ToggleSizeNames
@@ -151,7 +152,7 @@ export function SizeMeasurements({
               />
             </th>
             <th className={cellClass}>
-              <Text variant='uppercase'>quantity</Text>
+              <Text variant='uppercase'>qty</Text>
             </th>
             {measurements.map((m, i) => (
               <th key={m.id} className={i < measurements.length - 1 ? cellClass : lastCellClass}>
@@ -161,7 +162,7 @@ export function SizeMeasurements({
           </tr>
         </thead>
         <tbody className='bg-bgColor'>
-          {filteredSizes.map((size, index) => {
+          {filteredSizes.map((size) => {
             if (!shouldShowSize(size.id)) return null;
 
             const sizeData = sizeMeasurementsMap.get(size.id);
@@ -173,7 +174,7 @@ export function SizeMeasurements({
                 <td className={cn(cellClass, 'sticky left-0 bg-bgColor z-10')}>
                   <Text variant='uppercase'>{formatSizeName(size.name)}</Text>
                 </td>
-                <td className={cn(cellClass, 'bg-inactive w-26')}>
+                <td className={cn(cellClass, 'bg-inactive w-12 lg:w-26')}>
                   <Input
                     name={`sizeMeasurements[${idx}].productSize.quantity.value`}
                     value={qty === '0' ? '' : qty || ''}
@@ -190,7 +191,7 @@ export function SizeMeasurements({
                   return (
                     <td
                       key={m.id}
-                      className={i < measurements.length - 1 ? cellClass : lastCellClass}
+                      className={i < measurements.length - 1 ? measurementCellClass : lastCellClass}
                     >
                       <Input
                         value={

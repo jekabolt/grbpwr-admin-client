@@ -18,17 +18,26 @@ export function Buyer({ buyer, isPrinting }: Props) {
       <Text className='flex items-center gap-2' variant='uppercase'>
         {[
           `email: `,
-          <Text component='span' className='lowercase'>
+          <Text component='span' className='lowercase select-all'>
             <CopyToClipboard text={buyer?.email || ''} />
           </Text>,
         ]}
       </Text>
 
-      <Text variant='uppercase'>{`first name: ${buyer?.firstName}`}</Text>
+      <Text variant='uppercase'>
+        {`first name: `}
+        <span className='select-all'>{buyer?.firstName}</span>
+      </Text>
 
-      <Text variant='uppercase'>{`last name: ${buyer?.lastName}`}</Text>
+      <Text variant='uppercase'>
+        {`last name: `}
+        <span className='select-all'>{buyer?.lastName}</span>
+      </Text>
 
-      <Text variant='uppercase'>{`phone: ${buyer?.phone}`}</Text>
+      <Text variant='uppercase'>
+        {`phone: `}
+        <span className='select-all'>{buyer?.phone}</span>
+      </Text>
 
       <Text
         variant='uppercase'

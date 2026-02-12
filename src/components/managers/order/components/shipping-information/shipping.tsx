@@ -8,11 +8,28 @@ interface Props {
 export function Shipping({ shipping }: Props) {
   return (
     <div className='flex flex-col gap-1'>
-      <Text variant='uppercase'>{`street adress: ${shipping?.addressLineOne}`}</Text>
-      <Text variant='uppercase'>{`city: ${shipping?.city}`}</Text>
-      {shipping?.state && <Text variant='uppercase'>{`state: ${shipping?.state}`}</Text>}
-      <Text variant='uppercase'>{`country: ${shipping?.country}`}</Text>
-      <Text variant='uppercase'>{`postal code: ${shipping?.postalCode}`}</Text>
+      <Text variant='uppercase'>
+        {`street adress: `}
+        <span className='select-all'>{shipping?.addressLineOne}</span>
+      </Text>
+      <Text variant='uppercase'>
+        {`city: `}
+        <span className='select-all'>{shipping?.city}</span>
+      </Text>
+      {shipping?.state && (
+        <Text variant='uppercase'>
+          {`state: `}
+          <span className='select-all'>{shipping?.state}</span>
+        </Text>
+      )}
+      <Text variant='uppercase'>
+        {`country: `}
+        <span className='select-all'>{shipping?.country}</span>
+      </Text>
+      <Text variant='uppercase'>
+        {`postal code: `}
+        <span className='select-all'>{shipping?.postalCode}</span>
+      </Text>
     </div>
   );
 }
