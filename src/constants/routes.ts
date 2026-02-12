@@ -61,7 +61,7 @@ export const SIDE_BAR_ITEMS = [
   },
 ];
 
-export const PRODUCT_MEDIA: Manager[] = [
+export const LEFT_SIDE_ITEMS: Manager[] = [
   {
     label: 'media',
     route: ROUTES.media,
@@ -70,9 +70,13 @@ export const PRODUCT_MEDIA: Manager[] = [
     label: 'products',
     route: ROUTES.product,
   },
+  {
+    label: 'timiline',
+    route: ROUTES.archives,
+  },
 ];
 
-export const LEFT_SIDE_MANAGERS: Manager[] = [
+export const MANAGERS: Manager[] = [
   {
     label: 'orders',
     route: ROUTES.orders,

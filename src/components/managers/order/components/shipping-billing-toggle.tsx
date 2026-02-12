@@ -62,16 +62,18 @@ export function ShippingBillingToggle({
               <Text variant='uppercase'>
                 {`cost: ${orderDetails?.shipment?.cost?.value} ${dictionary?.baseCurrency}`}
               </Text>
-              <TrackingNumber
-                isEdit={isEdit}
-                isPrinting={isPrinting}
-                trackingNumber={trackingNumber}
-                orderStatus={orderStatus || ''}
-                orderDetails={orderDetails}
-                toggleTrackNumber={toggleTrackNumber}
-                handleTrackingNumberChange={handleTrackingNumberChange}
-                saveTrackingNumber={saveTrackingNumber}
-              />
+              <div className='w-full'>
+                <TrackingNumber
+                  isEdit={isEdit}
+                  isPrinting={isPrinting}
+                  trackingNumber={trackingNumber}
+                  orderStatus={orderStatus || ''}
+                  orderDetails={orderDetails}
+                  toggleTrackNumber={toggleTrackNumber}
+                  handleTrackingNumberChange={handleTrackingNumberChange}
+                  saveTrackingNumber={saveTrackingNumber}
+                />
+              </div>
             </div>
           )
         : billing && (

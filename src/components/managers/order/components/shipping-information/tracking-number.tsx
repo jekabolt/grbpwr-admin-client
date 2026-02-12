@@ -1,4 +1,3 @@
-import { Pencil2Icon } from '@radix-ui/react-icons';
 import { common_OrderFull } from 'api/proto-http/frontend';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -28,26 +27,40 @@ export function TrackingNumber({
   return (
     <>
       {orderDetails?.shipment?.trackingCode && (
-        <div>
+        <div className='w-full'>
           {isEdit && !isPrinting ? (
-            <NewTrackCode
-              isPrinting={isPrinting}
-              trackingNumber={trackingNumber}
-              handleTrackingNumberChange={handleTrackingNumberChange}
-              saveTrackingNumber={saveTrackingNumber}
-            />
+            <div className='flex items-center gap-2'>
+              <NewTrackCode
+                isPrinting={isPrinting}
+                trackingNumber={trackingNumber}
+                handleTrackingNumberChange={handleTrackingNumberChange}
+                saveTrackingNumber={saveTrackingNumber}
+              />
+              <Button
+                variant='main'
+                className='cursor-pointer'
+                size='lg'
+                onClick={toggleTrackNumber}
+              >
+                close
+              </Button>
+            </div>
           ) : (
             !isPrinting && (
-              <Text variant='uppercase'>
-                {[
-                  `tracking number: ${orderDetails?.shipment?.trackingCode} `,
-                  orderStatus === 'SHIPPED' && (
-                    <Button onClick={toggleTrackNumber}>
-                      <Pencil2Icon />
-                    </Button>
-                  ),
-                ]}
-              </Text>
+              <div className='flex items-center gap-2'>
+                <Text variant='uppercase'>
+                  tracking number: {orderDetails?.shipment?.trackingCode}
+                </Text>
+                {orderStatus === 'SHIPPED' && (
+                  <Button
+                    variant='main'
+                    className='px-1 cursor-pointer'
+                    onClick={toggleTrackNumber}
+                  >
+                    edit
+                  </Button>
+                )}
+              </div>
             )
           )}
         </div>
