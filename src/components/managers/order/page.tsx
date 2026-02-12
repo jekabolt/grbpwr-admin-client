@@ -1,4 +1,5 @@
 // import { DataGrid } from '@mui/x-data-grid';
+import { REASONS } from 'constants/constants';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -17,7 +18,6 @@ export function OrderDetails() {
 
   const {
     orderDetails,
-    dictionary,
     orderStatus,
     isPrinting,
     isEdit,
@@ -40,9 +40,9 @@ export function OrderDetails() {
         <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
         <OrderTable orderDetails={orderDetails} isPrinting={isPrinting} />
         <Text variant='uppercase' className='font-bold self-end'>
-          {`Total: ${orderDetails?.order?.totalPrice?.value} ${dictionary?.baseCurrency}`}
+          {`Total: ${orderDetails?.order?.totalPrice?.value} ${orderDetails?.order?.currency}`}
         </Text>
-        <div className='block print:hidden'>
+        <div className='block self-end print:hidden'>
           <PromoApplied orderDetails={orderDetails} />
         </div>
         <div className='flex gap-10 lg:gap-0 lg:flex-row flex-col lg:items-end lg:justify-between w-full'>
@@ -60,24 +60,45 @@ export function OrderDetails() {
           <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
         </div>
       </div>
+      {orderStatus === 'REFUNDED' && (
+        <div className='flex flex-col gap-2 w-full lg:w-2/5'>
+          <Text variant='uppercase' className='font-bold'>
+            refund reason:
+          </Text>
+
+          <div className='flex flex-wrap gap-3 w-full lg:w-4/5'>
+            {REASONS.map((l, i) => (
+              <Button key={i} type='button' size='lg' className='border border-textColor uppercase'>
+                {l}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
       {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
-        <NewTrackCode
-          isPrinting={isPrinting}
-          trackingNumber={trackingNumber}
-          handleTrackingNumberChange={handleTrackingNumberChange}
-          saveTrackingNumber={saveTrackingNumber}
-        />
+        <div className='w-full lg:w-1/4'>
+          <NewTrackCode
+            isPrinting={isPrinting}
+            trackingNumber={trackingNumber}
+            handleTrackingNumberChange={handleTrackingNumberChange}
+            saveTrackingNumber={saveTrackingNumber}
+          />
+        </div>
       )}
       {orderStatus === 'SHIPPED' && (
-        <Button variant='main' size='lg' className='block print:hidden' onClick={markAsDelivered}>
-          mark as delivered
-        </Button>
+        <div className='fixed right-2.5 lg:absolute bottom-2.5 lg:left-1/2 lg:-translate-x-1/2 flex justify-center print:hidden'>
+          <Button variant='main' size='lg' onClick={markAsDelivered}>
+            mark as delivered
+          </Button>
+        </div>
       )}
       {orderStatus === 'CONFIRMED' ||
         (orderStatus === 'DELIVERED' && (
-          <Button variant='main' size='lg' className='block print:hidden' onClick={refundOrder}>
-            refund order
-          </Button>
+          <div className='fixed right-2.5 lg:absolute bottom-2.5 lg:left-1/2 lg:-translate-x-1/2 flex justify-center print:hidden'>
+            <Button variant='main' size='lg' onClick={refundOrder}>
+              refund order
+            </Button>
+          </div>
         ))}
       <Text variant='uppercase' className='font-bold hidden print:block'>
         If you have any questions, please send an email to customercare@grbpwr.com

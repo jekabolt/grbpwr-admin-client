@@ -96,3 +96,15 @@ export const GENDER_ENUM_TO_SLUG: Record<string, string> = {
   GENDER_ENUM_UNISEX: 'unisex',
   GENDER_ENUM_UNKNOWN: '',
 };
+
+export const REASONS = [
+  'size issues',
+  'damaged or defective',
+  'wrong item received',
+  'item does not match description',
+  'changed my mind',
+  'quality not as expected',
+  'ordered by mistake',
+  'partial refund',
+  'other',
+];

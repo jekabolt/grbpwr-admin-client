@@ -1,5 +1,5 @@
 import * as NavigationMenu from '@radix-ui/react-navigation-menu';
-import { LEFT_SIDE_MANAGERS, PRODUCT_MEDIA } from 'constants/routes';
+import { LEFT_SIDE_ITEMS, MANAGERS } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -24,7 +24,7 @@ export function DesktopNavMenu({
       }}
     >
       <NavigationMenu.List className='flex items-center'>
-        {PRODUCT_MEDIA.map(({ label, route }, id) => (
+        {LEFT_SIDE_ITEMS.map(({ label, route }, id) => (
           <NavigationMenu.Item key={route}>
             <Button asChild>
               <Link
@@ -47,7 +47,7 @@ export function DesktopNavMenu({
           </NavigationMenu.Trigger>
           <NavigationMenu.Content>
             <div className='flex flex-col gap-2'>
-              {LEFT_SIDE_MANAGERS.map(({ label, route }) => (
+              {MANAGERS.map(({ label, route }) => (
                 <NavigationMenu.Link key={route} href={route}>
                   <Text>{label}</Text>
                 </NavigationMenu.Link>

@@ -42,10 +42,14 @@ export const genderOptions: Array<{ value: common_GenderEnum; label: string }> =
 
 export const statusOptions: Array<{ value: common_OrderStatusEnum; label: string }> = [
   { value: 'ORDER_STATUS_ENUM_PLACED', label: 'placed' },
+  { value: 'ORDER_STATUS_ENUM_AWAITING_PAYMENT', label: 'awaiting payment' },
   { value: 'ORDER_STATUS_ENUM_CONFIRMED', label: 'confirmed' },
   { value: 'ORDER_STATUS_ENUM_SHIPPED', label: 'shipped' },
   { value: 'ORDER_STATUS_ENUM_DELIVERED', label: 'delivered' },
   { value: 'ORDER_STATUS_ENUM_CANCELLED', label: 'cancelled' },
+  { value: 'ORDER_STATUS_ENUM_REFUNDED', label: 'refunded' },
+  { value: 'ORDER_STATUS_ENUM_PENDING_RETURN', label: 'pending return' },
+  { value: 'ORDER_STATUS_ENUM_REFUND_IN_PROGRESS', label: 'refund in progress' },
 ];
 
 export const colors: Colors[] = [
