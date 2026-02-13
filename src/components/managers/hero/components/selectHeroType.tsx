@@ -4,6 +4,7 @@ import React, { FC, useEffect, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import SelectComponent from 'ui/components/select';
+import Text from 'ui/components/text';
 import { validationForSelectHeroType } from '../utility/validationForSelectHeroType';
 import { HeroSchema } from './schema';
 
@@ -67,7 +68,10 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
   }, [entities?.length, addedEntityIndex, entityRefs]);
 
   return (
-    <div className='flex gap-4 items-end justify-end'>
+    <div className='flex gap-4 items-end justify-between'>
+      <Text variant='uppercase' size='large'>
+        hero entities
+      </Text>
       <div className='border border-2 border-text flex items-center gap-2 p-2'>
         <div>
           <SelectComponent
