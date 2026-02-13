@@ -87,11 +87,15 @@ export const useOrderDetails = (uuid: string) => {
   };
 
   async function markAsDelivered() {
+    const confirmed = window.confirm('Are you sure you want to mark this order as delivered?');
+    if (!confirmed) return;
+
     try {
       await adminService.DeliveredOrder({
         orderUuid: state.orderDetails?.order?.uuid,
       });
       fetchOrderDetails();
+      showMessage('Order marked as delivered successfully', 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to mark as delivered';
       showMessage(msg, 'error');
@@ -99,14 +103,17 @@ export const useOrderDetails = (uuid: string) => {
   }
 
   async function refundOrder() {
+    const confirmed = window.confirm('Are you sure you want to refund this order?');
+    if (!confirmed) return;
+
     try {
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,
-        // empty => full refund; non-empty => partial refund
         orderItemIds: selectedOrderItemIds.length ? selectedOrderItemIds : [],
       });
       fetchOrderDetails();
       setSelectedOrderItemIds([]);
+      showMessage('Order refunded successfully', 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to refund order';
       showMessage(msg, 'error');
