@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { LoginBlock } from 'components/login/login';
 import ProtectedRoute from 'components/login/protectedRoute';
+import { Archive } from 'components/managers/archive';
 import { Archives } from 'components/managers/archives';
-import { Archive } from 'components/managers/archives/archive';
 import { CustomerPage } from 'components/managers/customer-support';
 import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
@@ -115,6 +115,7 @@ root.render(
                     <Route path={ROUTES.orders} element={<OrdersCatalog />} />
                     <Route path={ROUTES.singleArchive} element={<Archive />} />
                     <Route path={ROUTES.archives} element={<Archives />} />
+                    <Route path={ROUTES.addArchive} element={<Archive />} />
                     <Route path={ROUTES.customerSupport} element={<CustomerPage />} />
                   </Route>
                 </Routes>

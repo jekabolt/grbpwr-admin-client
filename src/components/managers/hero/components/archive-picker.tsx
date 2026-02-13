@@ -1,5 +1,5 @@
 import { common_ArchiveList } from 'api/proto-http/frontend';
-import { useArchives } from 'components/managers/archives/utility/useArchive';
+import { useArchives } from 'components/managers/archives/components/useArchiveQuery';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Dialog } from 'ui/components/dialog';

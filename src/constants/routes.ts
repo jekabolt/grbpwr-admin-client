@@ -18,6 +18,7 @@ export enum ROUTES {
   getHero = '/get-hero',
   promo = '/promo',
   getPromo = '/get-promo',
+  addArchive = '/add-archive',
   archives = '/archives',
   singleArchive = '/timeline/:heading/:tag/:id',
   settings = '/settings',

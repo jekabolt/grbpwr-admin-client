@@ -4,11 +4,16 @@ type ImageContainerProps = {
 };
 
 function ImageContainer({ aspectRatio, children }: ImageContainerProps) {
+  if (aspectRatio === 'auto' || !aspectRatio) {
+    return (
+      <div className='relative w-full h-full overflow-hidden flex items-center justify-center'>
+        {children}
+      </div>
+    );
+  }
+
   return (
-    <div
-      className='relative w-full overflow-hidden'
-      style={{ aspectRatio: aspectRatio || 'auto' }}
-    >
+    <div className='relative w-full overflow-hidden' style={{ aspectRatio }}>
       {children}
     </div>
   );
@@ -37,7 +42,6 @@ export default function MediaComponent({
   muted = true,
   loop = true,
   controls = false,
-
   ...props
 }: MediaProps) {
   return (
