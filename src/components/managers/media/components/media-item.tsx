@@ -132,7 +132,7 @@ export function MediaItem({
                 : 'ratio: unknown'}
           </Text>
           <Button
-            className='absolute top-0 right-0 hidden group-hover:block cursor-pointer'
+            className='absolute top-0 right-0 hidden group-hover:block cursor-pointer text-bgColor mix-blend-exclusion'
             onClick={handleDelete}
           >
             {confirmDelete === media.id ? <CheckIcon /> : '[x]'}

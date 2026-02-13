@@ -71,13 +71,13 @@ export function MediaAds({ product, control, clearKey, editMode }: Props) {
             type='button'
             onClick={() => deleteMediaAds(m.id || 0)}
             className={cn(
-              'absolute top-0 right-0 flex items-center justify-center z-50 cursor-pointer',
+              'absolute top-0 right-0 flex items-center justify-center z-50 cursor-pointer text-white mix-blend-exclusion',
               {
                 hidden: !editMode,
               },
             )}
           >
-            x
+            [x]
           </Button>
           <Text size='small' className='absolute bottom-0 left-0 mix-blend-difference text-white'>
             {id + 1}

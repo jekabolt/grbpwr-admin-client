@@ -79,6 +79,7 @@ export function PreviewMedia({
                   controls={preview.type === 'video'}
                   fit='contain'
                   aspectRatio='auto'
+                  className='w-full h-full'
                 />
               </div>
 
