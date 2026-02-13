@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Form } from 'ui/form';
@@ -23,9 +23,24 @@ export function Hero() {
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
   const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
   const isResettingRef = useRef(false);
+  const heroZodResolver = useMemo(
+    () =>
+      zodResolver(heroSchema) as any,
+    [],
+  );
 
   const form = useForm<HeroSchema>({
-    resolver: zodResolver(heroSchema),
+    resolver: async (values, context, options) => {
+      // strip entities that are "soft-deleted" so Zod doesn't validate them
+      const filteredValues: HeroSchema = {
+        ...values,
+        entities: values.entities.filter(
+          (_: any, index: number) => !deletedIndicesRef.current.has(index),
+        ),
+      };
+
+      return heroZodResolver(filteredValues, context, options);
+    },
     defaultValues: defaultData as HeroSchema,
     mode: 'onSubmit',
   });
@@ -93,7 +108,25 @@ export function Hero() {
   }
 
   function onError(errors: any) {
-    console.log('Validation errors:', errors);
+    // log RHF-level errors
+    console.log('Validation errors (RHF):', errors);
+
+    // log Zod schema errors explicitly (ignoring soft-deleted entities)
+    const values = form.getValues();
+    const filteredValues: HeroSchema = {
+      ...values,
+      entities: values.entities.filter(
+        (_: any, index: number) => !deletedIndicesRef.current.has(index),
+      ),
+    };
+    const result = heroSchema.safeParse(filteredValues);
+
+    if (!result.success) {
+      console.log(
+        'Hero schema errors (Zod):',
+        result.error.flatten(), // or result.error.issues for raw issues
+      );
+    }
 
     // Clear errors for deleted entities
     if (errors.entities) {

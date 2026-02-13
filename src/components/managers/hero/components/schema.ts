@@ -1,12 +1,11 @@
-import { z } from 'zod';
 import { LANGUAGES } from 'constants/constants';
+import { z } from 'zod';
 
 const requiredLanguageIds = LANGUAGES.map((l) => l.id);
 
-// Reusable strict translation validator
 const createStrictTranslationSchema = <T extends z.ZodType>(
   translationSchema: T,
-  requiredIds: number[]
+  requiredIds: number[],
 ) => {
   return z
     .array(translationSchema)
@@ -17,15 +16,45 @@ const createStrictTranslationSchema = <T extends z.ZodType>(
         const uniqueIds = new Set(ids);
         return uniqueIds.size === ids.length;
       },
-      { message: 'Each language can only appear once' }
+      { message: 'Each language can only appear once' },
+    )
+    .refine((arr) => arr.length === requiredIds.length, {
+      message: `Exactly ${requiredIds.length} language(s) required`,
+    })
+    .refine((arr) => requiredIds.every((id) => arr.some((t: any) => t.languageId === id)), {
+      message: 'All languages must be filled',
+    });
+};
+
+const createOptionalStrictTranslationSchema = <T extends z.ZodType>(
+  translationSchema: T,
+  requiredIds: number[],
+) => {
+  return z
+    .array(translationSchema)
+    .optional()
+    .refine(
+      (arr) => {
+        if (!arr || arr.length === 0) return true;
+        const ids = arr.map((t: any) => t.languageId);
+        const uniqueIds = new Set(ids);
+        return uniqueIds.size === ids.length;
+      },
+      { message: 'Each language can only appear once' },
     )
     .refine(
-      (arr) => arr.length === requiredIds.length,
-      { message: `Exactly ${requiredIds.length} language(s) required` }
+      (arr) => {
+        if (!arr || arr.length === 0) return true;
+        return arr.length === requiredIds.length;
+      },
+      { message: `Exactly ${requiredIds.length} language(s) required` },
     )
     .refine(
-      (arr) => requiredIds.every((id) => arr.some((t: any) => t.languageId === id)),
-      { message: 'All languages must be filled' }
+      (arr) => {
+        if (!arr || arr.length === 0) return true;
+        return requiredIds.every((id) => arr.some((t: any) => t.languageId === id));
+      },
+      { message: 'All languages must be filled' },
     );
 };
 
@@ -34,30 +63,24 @@ export const navFeatured = z.object({
     mediaId: z.number().min(0).optional(),
     featuredTag: z.string().optional(),
     featuredArchiveId: z.number().min(0).optional(),
-    translations: createStrictTranslationSchema(
+    translations: createOptionalStrictTranslationSchema(
       z.object({
         languageId: z.number().min(1, 'Language is required'),
-        exploreText: z
-          .string()
-          .min(1, 'Explore text is required')
-          .max(25, 'Explore text must be at most 25 characters'),
+        exploreText: z.string().max(25, 'Explore text must be at most 25 characters').optional(),
       }),
-      requiredLanguageIds
+      requiredLanguageIds,
     ),
   }),
   women: z.object({
     mediaId: z.number().min(0).optional(),
     featuredTag: z.string().optional(),
     featuredArchiveId: z.number().min(0).optional(),
-    translations: createStrictTranslationSchema(
+    translations: createOptionalStrictTranslationSchema(
       z.object({
         languageId: z.number().min(1, 'Language is required'),
-        exploreText: z
-          .string()
-          .min(1, 'Explore text is required')
-          .max(25, 'Explore text must be at most 25 characters'),
+        exploreText: z.string().max(25, 'Explore text must be at most 25 characters').optional(),
       }),
-      requiredLanguageIds
+      requiredLanguageIds,
     ),
   }),
 });
@@ -90,7 +113,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
             .max(138, 'Description must be at most 138 characters'),
           exploreText: z.string().min(1, 'Explore text is required'),
         }),
-        requiredLanguageIds
+        requiredLanguageIds,
       ),
     }),
   }),
@@ -120,7 +143,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
             .min(1, 'Explore text is required')
             .max(39, 'Explore text must be at most 39 characters'),
         }),
-        requiredLanguageIds
+        requiredLanguageIds,
       ),
     }),
   }),
@@ -152,7 +175,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
                 .min(1, 'Explore text is required')
                 .max(39, 'Explore text must be at most 39 characters'),
             }),
-            requiredLanguageIds
+            requiredLanguageIds,
           ),
         }),
         right: z.object({
@@ -178,22 +201,20 @@ const heroEntitySchema = z.discriminatedUnion('type', [
                 .min(1, 'Explore text is required')
                 .max(39, 'Explore text must be at most 39 characters'),
             }),
-            requiredLanguageIds
+            requiredLanguageIds,
           ),
         }),
       })
       .refine(
         (data) => {
-          // Check if any left headline is filled
           const hasLeftHeadline = data.left.translations.some(
             (t) => t.headline && t.headline.trim().length > 0,
           );
-          // Check if any right headline is filled
+
           const hasRightHeadline = data.right.translations.some(
             (t) => t.headline && t.headline.trim().length > 0,
           );
 
-          // If one side has headline, the other must also have headline
           if (hasLeftHeadline || hasRightHeadline) {
             return hasLeftHeadline && hasRightHeadline;
           }
@@ -207,7 +228,6 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       ),
   }),
 
-  // HERO_TYPE_FEATURED_PRODUCTS
   z.object({
     type: z.literal('HERO_TYPE_FEATURED_PRODUCTS'),
     featuredProducts: z.object({
@@ -225,12 +245,11 @@ const heroEntitySchema = z.discriminatedUnion('type', [
             .min(1, 'Explore text is required')
             .max(8, 'Explore text must be at most 8 characters'),
         }),
-        requiredLanguageIds
+        requiredLanguageIds,
       ),
     }),
   }),
 
-  // HERO_TYPE_FEATURED_PRODUCTS_TAG
   z.object({
     type: z.literal('HERO_TYPE_FEATURED_PRODUCTS_TAG'),
     featuredProductsTag: z.object({
@@ -241,7 +260,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
           headline: z.string().min(1, 'Headline is required'),
           exploreText: z.string().min(1, 'Explore text is required'),
         }),
-        requiredLanguageIds
+        requiredLanguageIds,
       ),
     }),
   }),
@@ -253,27 +272,14 @@ const heroEntitySchema = z.discriminatedUnion('type', [
 
 export const heroBaseSchema = z.object({
   entities: z.array(heroEntitySchema),
-  navFeatured,
+  navFeatured: navFeatured.optional(),
 });
 
 export const heroSchema = heroBaseSchema;
 
 export const defaultData = {
   entities: [],
-  navFeatured: {
-    men: {
-      mediaId: 0,
-      translations: LANGUAGES.map((l) => ({ languageId: l.id, exploreText: '' })),
-      featuredTag: '',
-      featuredArchiveId: 0,
-    },
-    women: {
-      mediaId: 0,
-      translations: LANGUAGES.map((l) => ({ languageId: l.id, exploreText: '' })),
-      featuredTag: '',
-      featuredArchiveId: 0,
-    },
-  },
+  navFeatured: undefined,
 };
 
 export type HeroSchema = z.infer<typeof heroSchema>;

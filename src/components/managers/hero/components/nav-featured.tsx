@@ -90,6 +90,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
 export function NavFeatured({ hero }: { hero?: common_HeroFullWithTranslations }) {
   const { setValue, watch } = useFormContext<HeroSchema>();
   const [openArchivePicker, setOpenArchivePicker] = useState<'men' | 'women' | null>(null);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const values = watch();
   const genders: ('men' | 'women')[] = ['men', 'women'];
 
@@ -106,19 +107,33 @@ export function NavFeatured({ hero }: { hero?: common_HeroFullWithTranslations }
 
   return (
     <div className='border border-2 border-text p-4 space-y-6'>
-      <Text variant='uppercase' className='text-xl font-bold leading-none'>
-        navigation featured
-      </Text>
-      <div className='flex flex-col gap-10'>
-        {genders.map((gender) => (
-          <GenderSection
-            hero={hero}
-            key={gender}
-            gender={gender}
-            onOpenArchivePicker={setOpenArchivePicker}
-          />
-        ))}
+      <div className='flex items-center justify-between'>
+        <Text variant='uppercase' className='text-xl font-bold leading-none'>
+          navigation featured
+        </Text>
+        <Button
+          type='button'
+          variant='main'
+          size='lg'
+          className='uppercase'
+          onClick={() => setIsCollapsed((prev) => !prev)}
+        >
+          {isCollapsed ? 'expand' : 'collapse'}
+        </Button>
       </div>
+
+      {!isCollapsed && (
+        <div className='flex flex-col gap-10'>
+          {genders.map((gender) => (
+            <GenderSection
+              hero={hero}
+              key={gender}
+              gender={gender}
+              onOpenArchivePicker={setOpenArchivePicker}
+            />
+          ))}
+        </div>
+      )}
 
       <ArchivePicker
         open={!!openArchivePicker}

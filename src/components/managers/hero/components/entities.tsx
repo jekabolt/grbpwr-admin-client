@@ -274,11 +274,11 @@ export const Entities: FC<EntitiesProps> = ({
               {renderEntity(entity, index)}
             </div>
             <Button
-              variant='simple'
+              variant='main'
               className='absolute top-2 right-2 py-1 px-3 cursor-pointer'
               onClick={() => handleRemoveEntity(index)}
             >
-              x
+              [x]
             </Button>
           </div>
         );

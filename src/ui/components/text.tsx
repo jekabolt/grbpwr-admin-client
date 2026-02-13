@@ -23,6 +23,7 @@ const textVariants = cva('', {
         'whitespace-nowrap',
       ],
       small: ['text-small'],
+      large: ['text-lg'],
     },
   },
   defaultVariants: {

@@ -48,7 +48,7 @@ export function FeaturedProductBase({
 
   return (
     <div className='lg:px-2.5 lg:pb-8 p-2.5 space-y-6'>
-      <Text className='text-xl font-bold leading-none' variant='uppercase'>
+      <Text className='font-bold leading-none' variant='uppercase' size='large'>
         {title}
       </Text>
       {prefix?.includes('featuredProductsTag') && (
