@@ -18,6 +18,7 @@ export const useOrderDetails = (uuid: string) => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState('');
+  const [selectedOrderItemIds, setSelectedOrderItemIds] = useState<number[]>([]);
 
   async function fetchOrderDetails() {
     setState((prev) => ({ ...prev, isLoading: true }));
@@ -101,25 +102,49 @@ export const useOrderDetails = (uuid: string) => {
     try {
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,
-        // empty => full refund; else partial refund
-        orderItemIds: [],
+        // empty => full refund; non-empty => partial refund
+        orderItemIds: selectedOrderItemIds.length ? selectedOrderItemIds : [],
       });
       fetchOrderDetails();
+      setSelectedOrderItemIds([]);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to refund order';
       showMessage(msg, 'error');
     }
   }
 
+  const toggleOrderItemsSelection = (orderItemIds: number[]) => {
+    if (!orderItemIds.length) return;
+
+    setSelectedOrderItemIds((prev) => {
+      const allSelected = orderItemIds.every((id) => prev.includes(id));
+
+      if (allSelected) {
+        return prev.filter((id) => !orderItemIds.includes(id));
+      }
+
+      const next = [...prev];
+      orderItemIds.forEach((id) => {
+        if (!next.includes(id)) {
+          next.push(id);
+        }
+      });
+
+      return next;
+    });
+  };
+
   return {
     ...state,
     isPrinting,
     isEdit,
     trackingNumber,
+    selectedOrderItemIds,
     saveTrackingNumber,
     toggleTrackNumber,
     handleTrackingNumberChange,
     markAsDelivered,
     refundOrder,
+    toggleOrderItemsSelection,
   };
 };

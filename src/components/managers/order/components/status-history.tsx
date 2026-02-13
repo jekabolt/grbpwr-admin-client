@@ -1,12 +1,10 @@
 import { common_OrderFull } from 'api/proto-http/admin';
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Button } from 'ui/components/button';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 
 export function StatusHistory({ orderDetails }: { orderDetails?: common_OrderFull }) {
-  const { dictionary } = useDictionary();
   return (
     <GenericPopover
       variant='default'

@@ -11,9 +11,18 @@ const HIDDEN_ON_MOBILE_STYLE = 'hidden lg:table-cell';
 interface OrderTableProps {
   orderDetails: common_OrderFull | undefined;
   isPrinting?: boolean;
+  showRefundSelection?: boolean;
+  selectedOrderItemIds?: number[];
+  onToggleOrderItems?: (orderItemIds: number[]) => void;
 }
 
-export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps) {
+export function OrderTable({
+  orderDetails,
+  isPrinting = false,
+  showRefundSelection = false,
+  selectedOrderItemIds = [],
+  onToggleOrderItems,
+}: OrderTableProps) {
   const { dictionary } = useDictionary();
 
   const ALL_COLUMNS: {
@@ -106,7 +115,7 @@ export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps
   const uniqueOrderItems = useMemo(() => {
     if (!orderDetails?.orderItems) return [];
 
-    const aggregated = new Map<string | number, common_OrderItem & any>();
+    const aggregated = new Map<string | number, (common_OrderItem & any) | any>();
 
     orderDetails.orderItems.forEach((item) => {
       const key =
@@ -120,12 +129,14 @@ export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps
       const unitPrice = Number((item as any).productPrice ?? 0);
       const basePrice = unitPrice * quantity;
       const priceWithSale = Number((item as any).productPriceWithSale ?? 0);
+      const orderItemId = typeof item.id === 'number' ? item.id : undefined;
 
       if (!existing) {
         const clone: any = { ...item };
         clone.aggregatedQuantity = quantity;
         clone.aggregatedBasePrice = basePrice;
         clone.aggregatedPriceWithSale = priceWithSale;
+        clone.orderItemIds = orderItemId ? [orderItemId] : [];
         aggregated.set(key, clone);
       } else {
         const agg: any = existing;
@@ -134,6 +145,11 @@ export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps
           Number(agg.aggregatedBasePrice ?? 0) + basePrice;
         agg.aggregatedPriceWithSale =
           Number(agg.aggregatedPriceWithSale ?? 0) + priceWithSale;
+        if (orderItemId) {
+          agg.orderItemIds = Array.isArray(agg.orderItemIds)
+            ? [...agg.orderItemIds, orderItemId]
+            : [orderItemId];
+        }
       }
     });
 
@@ -146,6 +162,13 @@ export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
           <thead className='bg-textInactiveColor h-10'>
             <tr className='border-b border-textColor'>
+              {showRefundSelection && !isPrinting && (
+                <th className='text-center w-10 border border-r border-textColor px-2'>
+                  <Text variant='uppercase' className='leading-none'>
+                    refund
+                  </Text>
+                </th>
+              )}
               {COLUMNS.map((col) => (
                 <th
                   key={col.label}
@@ -166,22 +189,50 @@ export function OrderTable({ orderDetails, isPrinting = false }: OrderTableProps
                 </td>
               </tr>
             ) : (
-              uniqueOrderItems.map((item, idx) => (
-                <tr key={idx} className='border-b border-text last:border-b-0 lg:w-24 '>
-                  {COLUMNS.map((col) => (
-                    <td
-                      key={col.label}
-                      className={`border border-textColor text-center px-2 w-16  lg:w-auto ${col.className || ''}`}
-                    >
-                      {col.label === 'THUMBNAIL' ? (
-                        col.accessor(item)
-                      ) : (
-                        <Text>{col.accessor(item)}</Text>
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              uniqueOrderItems.map((item, idx) => {
+                const rowOrderItemIds: number[] = Array.isArray((item as any).orderItemIds)
+                  ? (item as any).orderItemIds
+                  : [];
+
+                const allSelectedForRow =
+                  rowOrderItemIds.length > 0 &&
+                  rowOrderItemIds.every((id) => selectedOrderItemIds.includes(id));
+
+                const handleRowToggle = () => {
+                  if (!rowOrderItemIds.length || !onToggleOrderItems) return;
+                  onToggleOrderItems(rowOrderItemIds);
+                };
+
+                return (
+                  <tr
+                    key={idx}
+                    className='border-b border-text last:border-b-0 lg:w-24 '
+                  >
+                    {showRefundSelection && !isPrinting && (
+                      <td className='border border-textColor text-center px-2 w-10'>
+                        <input
+                          type='checkbox'
+                          checked={allSelectedForRow}
+                          onChange={handleRowToggle}
+                          className='cursor-pointer'
+                        />
+                      </td>
+                    )}
+                    {COLUMNS.map((col) => (
+                      <td
+                        key={col.label}
+                        className={`border border-textColor text-center px-2 w-16  lg:w-auto ${col.className || ''}`}
+                      >
+                        {col.label === 'THUMBNAIL' ? (
+                          col.accessor(item)
+                        ) : (
+                          <Text>{col.accessor(item)}</Text>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
