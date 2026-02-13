@@ -101,6 +101,8 @@ export const useOrderDetails = (uuid: string) => {
     try {
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,
+        // empty => full refund; else partial refund
+        orderItemIds: [],
       });
       fetchOrderDetails();
     } catch (error) {
