@@ -5,6 +5,7 @@ import {
 import { cn } from 'lib/utility';
 import Text from 'ui/components/text';
 import { OrderDescriptionProps } from '../interface';
+import { StatusHistory } from './status-history';
 
 export function Description({ orderDetails, orderStatus, isPrinting }: OrderDescriptionProps) {
   const statusColor = getStatusColor(orderStatus);
@@ -31,6 +32,7 @@ export function Description({ orderDetails, orderStatus, isPrinting }: OrderDesc
         <Text variant='uppercase' className={cn(statusColor)}>
           {orderStatus}
         </Text>
+        <StatusHistory orderDetails={orderDetails} />
       </div>
 
       <Text variant='uppercase'>{`placed: ${orderPlaced}`}</Text>

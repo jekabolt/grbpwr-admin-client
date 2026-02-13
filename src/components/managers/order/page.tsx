@@ -27,6 +27,8 @@ export function OrderDetails() {
     saveTrackingNumber,
     markAsDelivered,
     refundOrder,
+    selectedOrderItemIds,
+    toggleOrderItemsSelection,
   } = useOrderDetails(uuid || '');
 
   return (
@@ -38,7 +40,13 @@ export function OrderDetails() {
       )}
       <div className='flex flex-col gap-4'>
         <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
-        <OrderTable orderDetails={orderDetails} isPrinting={isPrinting} />
+        <OrderTable
+          orderDetails={orderDetails}
+          isPrinting={isPrinting}
+          showRefundSelection={orderStatus === 'DELIVERED'}
+          selectedOrderItemIds={selectedOrderItemIds}
+          onToggleOrderItems={toggleOrderItemsSelection}
+        />
         <Text variant='uppercase' className='font-bold self-end'>
           {`Total: ${orderDetails?.order?.totalPrice?.value} ${orderDetails?.order?.currency}`}
         </Text>
