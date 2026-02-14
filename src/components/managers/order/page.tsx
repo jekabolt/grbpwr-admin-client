@@ -13,6 +13,13 @@ import { ShippingBillingToggle } from './components/shipping-billing-toggle';
 import { NewTrackCode } from './components/shipping-information/new-track-code';
 import { useOrderDetails } from './utility';
 
+const DISPLAY_REFUND_BUTTON_STATUSES = [
+  'CONFIRMED',
+  'DELIVERED',
+  'PENDING RETURN',
+  'REFUND IN PROGRESS',
+];
+
 export function OrderDetails() {
   const { uuid } = useParams<{ uuid: string }>();
 
@@ -27,7 +34,7 @@ export function OrderDetails() {
     saveTrackingNumber,
     markAsDelivered,
     refundOrder,
-    selectedOrderItemIds,
+    selectedProductIds,
     toggleOrderItemsSelection,
   } = useOrderDetails(uuid || '');
 
@@ -43,12 +50,23 @@ export function OrderDetails() {
         <OrderTable
           orderDetails={orderDetails}
           isPrinting={isPrinting}
-          showRefundSelection={orderStatus === 'DELIVERED'}
-          selectedOrderItemIds={selectedOrderItemIds}
+          showRefundSelection={
+            DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') &&
+            !['CONFIRMED'].includes(orderStatus || '')
+          }
+          selectedProductIds={selectedProductIds}
           onToggleOrderItems={toggleOrderItemsSelection}
         />
         <Text variant='uppercase' className='font-bold self-end'>
           {`Total: ${orderDetails?.order?.totalPrice?.value} ${orderDetails?.order?.currency}`}
+        </Text>
+        {(orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED') && (
+          <Text variant='uppercase' className='font-bold self-end'>
+            {`refunded amount: ${orderDetails?.order?.refundedAmount?.value} ${orderDetails?.order?.currency}`}
+          </Text>
+        )}
+        <Text variant='uppercase' className='font-bold self-end'>
+          cost: {orderDetails?.shipment?.cost?.value} {orderDetails?.order?.currency}
         </Text>
         <div className='block self-end print:hidden'>
           <PromoApplied orderDetails={orderDetails} />
@@ -100,14 +118,13 @@ export function OrderDetails() {
           </Button>
         </div>
       )}
-      {orderStatus === 'CONFIRMED' ||
-        (orderStatus === 'DELIVERED' && (
-          <div className='fixed right-2.5 lg:absolute bottom-2.5 lg:left-1/2 lg:-translate-x-1/2 flex justify-center print:hidden'>
-            <Button variant='main' size='lg' onClick={refundOrder}>
-              refund order
-            </Button>
-          </div>
-        ))}
+      {DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') && (
+        <div className='fixed right-2.5 lg:absolute bottom-2.5 lg:left-1/2 lg:-translate-x-1/2 flex justify-center print:hidden'>
+          <Button variant='main' size='lg' onClick={refundOrder}>
+            refund order
+          </Button>
+        </div>
+      )}
       <Text variant='uppercase' className='font-bold hidden print:block'>
         If you have any questions, please send an email to customercare@grbpwr.com
       </Text>

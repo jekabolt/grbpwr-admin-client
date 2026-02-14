@@ -2,6 +2,7 @@ import { common_OrderFull } from 'api/proto-http/admin';
 import { common_OrderItem } from 'api/proto-http/frontend';
 import { BASE_PATH } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
+import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import MediaComponent from 'ui/components/media';
 import Text from 'ui/components/text';
@@ -12,15 +13,15 @@ interface OrderTableProps {
   orderDetails: common_OrderFull | undefined;
   isPrinting?: boolean;
   showRefundSelection?: boolean;
-  selectedOrderItemIds?: number[];
-  onToggleOrderItems?: (orderItemIds: number[]) => void;
+  selectedProductIds?: number[];
+  onToggleOrderItems?: (productIds: number[]) => void;
 }
 
 export function OrderTable({
   orderDetails,
   isPrinting = false,
   showRefundSelection = false,
-  selectedOrderItemIds = [],
+  selectedProductIds = [],
   onToggleOrderItems,
 }: OrderTableProps) {
   const { dictionary } = useDictionary();
@@ -63,12 +64,6 @@ export function OrderTable({
         accessor: (item) => item.translations?.[0].name,
       },
       {
-        label: 'QTY',
-        showOnPrint: false,
-        accessor: (item) =>
-          (item as any).aggregatedQuantity ?? item.orderItem?.quantity,
-      },
-      {
         label: 'SIZE',
         showOnPrint: false,
         accessor: (item) =>
@@ -99,62 +94,23 @@ export function OrderTable({
         showOnPrint: true,
         accessor: (item) =>
           `${
-            (item as any).aggregatedPriceWithSale ??
-            (item as any).productPriceWithSale
+            (item as any).aggregatedPriceWithSale ?? (item as any).productPriceWithSale
           } ${orderDetails?.order?.currency || ''}`,
       },
+      {
+        label: 'REFUNDED',
+        showOnPrint: true,
+        accessor: (item) =>
+          orderDetails?.refundedOrderItems?.some((r) => r.id === item.id) ? 'Yes' : 'No',
+      },
     ],
-    [dictionary, orderDetails?.order?.currency],
+    [dictionary, orderDetails?.order?.currency, orderDetails?.refundedOrderItems],
   );
 
   const COLUMNS = useMemo(
     () => (isPrinting ? ALL_COLUMNS.filter((col) => col.showOnPrint) : ALL_COLUMNS),
     [ALL_COLUMNS, isPrinting],
   );
-
-  const uniqueOrderItems = useMemo(() => {
-    if (!orderDetails?.orderItems) return [];
-
-    const aggregated = new Map<string | number, (common_OrderItem & any) | any>();
-
-    orderDetails.orderItems.forEach((item) => {
-      const key =
-        item.orderItem?.productId ??
-        item.sku ??
-        `${item.thumbnail}-${item.translations?.[0]?.name ?? ''}`;
-
-      const existing = aggregated.get(key);
-
-      const quantity = Number(item.orderItem?.quantity ?? 0);
-      const unitPrice = Number((item as any).productPrice ?? 0);
-      const basePrice = unitPrice * quantity;
-      const priceWithSale = Number((item as any).productPriceWithSale ?? 0);
-      const orderItemId = typeof item.id === 'number' ? item.id : undefined;
-
-      if (!existing) {
-        const clone: any = { ...item };
-        clone.aggregatedQuantity = quantity;
-        clone.aggregatedBasePrice = basePrice;
-        clone.aggregatedPriceWithSale = priceWithSale;
-        clone.orderItemIds = orderItemId ? [orderItemId] : [];
-        aggregated.set(key, clone);
-      } else {
-        const agg: any = existing;
-        agg.aggregatedQuantity = Number(agg.aggregatedQuantity ?? 0) + quantity;
-        agg.aggregatedBasePrice =
-          Number(agg.aggregatedBasePrice ?? 0) + basePrice;
-        agg.aggregatedPriceWithSale =
-          Number(agg.aggregatedPriceWithSale ?? 0) + priceWithSale;
-        if (orderItemId) {
-          agg.orderItemIds = Array.isArray(agg.orderItemIds)
-            ? [...agg.orderItemIds, orderItemId]
-            : [orderItemId];
-        }
-      }
-    });
-
-    return Array.from(aggregated.values());
-  }, [orderDetails?.orderItems]);
 
   return (
     <div className='w-full'>
@@ -182,21 +138,23 @@ export function OrderTable({
             </tr>
           </thead>
           <tbody>
-            {uniqueOrderItems.length === 0 ? (
+            {orderDetails?.orderItems?.length === 0 ? (
               <tr>
                 <td colSpan={COLUMNS.length} className='text-center py-8'>
                   <Text variant='uppercase'>no items found</Text>
                 </td>
               </tr>
             ) : (
-              uniqueOrderItems.map((item, idx) => {
-                const rowOrderItemIds: number[] = Array.isArray((item as any).orderItemIds)
-                  ? (item as any).orderItemIds
-                  : [];
+              orderDetails?.orderItems?.map((item, idx) => {
+                const orderItemId = typeof item.id === 'number' ? item.id : null;
+                const rowOrderItemIds: number[] = orderItemId != null ? [orderItemId] : [];
+                const isRefunded =
+                  orderItemId != null &&
+                  orderDetails?.refundedOrderItems?.some((r) => r.id === orderItemId);
 
                 const allSelectedForRow =
                   rowOrderItemIds.length > 0 &&
-                  rowOrderItemIds.every((id) => selectedOrderItemIds.includes(id));
+                  rowOrderItemIds.every((id) => selectedProductIds.includes(id));
 
                 const handleRowToggle = () => {
                   if (!rowOrderItemIds.length || !onToggleOrderItems) return;
@@ -205,8 +163,8 @@ export function OrderTable({
 
                 return (
                   <tr
-                    key={idx}
-                    className='border-b border-text last:border-b-0 lg:w-24 '
+                    key={orderItemId ?? idx}
+                    className='border-b border-text last:border-b-0 lg:w-24'
                   >
                     {showRefundSelection && !isPrinting && (
                       <td className='border border-textColor text-center px-2 w-10'>
@@ -218,18 +176,32 @@ export function OrderTable({
                         />
                       </td>
                     )}
-                    {COLUMNS.map((col) => (
-                      <td
-                        key={col.label}
-                        className={`border border-textColor text-center px-2 w-16  lg:w-auto ${col.className || ''}`}
-                      >
-                        {col.label === 'THUMBNAIL' ? (
-                          col.accessor(item)
-                        ) : (
-                          <Text>{col.accessor(item)}</Text>
-                        )}
-                      </td>
-                    ))}
+                    {COLUMNS.map((col) => {
+                      const isDataCell = col.label !== 'THUMBNAIL' && col.label !== 'REFUNDED';
+                      return (
+                        <td
+                          key={col.label}
+                          className={cn(
+                            'border border-textColor text-center px-2 w-16 lg:w-auto',
+                            col.className,
+                            isRefunded &&
+                              isDataCell &&
+                              'relative after:content-[""] after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:bg-current',
+                            {
+                              'bg-textInactiveColor/80': orderDetails.refundedOrderItems?.some(
+                                (refundedItem) => refundedItem.id === orderItemId,
+                              ),
+                            },
+                          )}
+                        >
+                          {col.label === 'THUMBNAIL' ? (
+                            col.accessor(item)
+                          ) : (
+                            <Text>{col.accessor(item)}</Text>
+                          )}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })
