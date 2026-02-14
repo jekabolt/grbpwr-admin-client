@@ -3,6 +3,7 @@ import {
   getStatusColor,
 } from 'components/managers/orders-catalog/components/utility';
 import { cn } from 'lib/utility';
+import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
 import { OrderDescriptionProps } from '../interface';
 import { StatusHistory } from './status-history';
@@ -22,9 +23,9 @@ export function Description({ orderDetails, orderStatus, isPrinting }: OrderDesc
         {`order id: ${orderDetails?.order?.id}`}
       </Text>
 
-      <Text variant='uppercase'>
+      <Text variant='uppercase' className='flex items-center gap-2'>
         {`order reference: `}
-        <span className='select-all'>{orderDetails?.order?.uuid}</span>
+        <CopyToClipboard text={orderDetails?.order?.uuid || ''} />
       </Text>
 
       <div className='flex items-center gap-2 print:hidden'>

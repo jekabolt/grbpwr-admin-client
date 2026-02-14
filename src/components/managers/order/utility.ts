@@ -18,7 +18,7 @@ export const useOrderDetails = (uuid: string) => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState('');
-  const [selectedOrderItemIds, setSelectedOrderItemIds] = useState<number[]>([]);
+  const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
 
   async function fetchOrderDetails() {
     setState((prev) => ({ ...prev, isLoading: true }));
@@ -103,16 +103,16 @@ export const useOrderDetails = (uuid: string) => {
   }
 
   async function refundOrder() {
-    const confirmed = window.confirm('Are you sure you want to refund this order?');
+    const confirmed = window.confirm('Are you sure you want to full refund this order?');
     if (!confirmed) return;
 
     try {
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,
-        orderItemIds: selectedOrderItemIds.length ? selectedOrderItemIds : [],
+        orderItemIds: selectedProductIds.length ? selectedProductIds : [],
       });
       fetchOrderDetails();
-      setSelectedOrderItemIds([]);
+      setSelectedProductIds([]);
       showMessage('Order refunded successfully', 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to refund order';
@@ -120,18 +120,18 @@ export const useOrderDetails = (uuid: string) => {
     }
   }
 
-  const toggleOrderItemsSelection = (orderItemIds: number[]) => {
-    if (!orderItemIds.length) return;
+  const toggleOrderItemsSelection = (productIds: number[]) => {
+    if (!productIds.length) return;
 
-    setSelectedOrderItemIds((prev) => {
-      const allSelected = orderItemIds.every((id) => prev.includes(id));
+    setSelectedProductIds((prev) => {
+      const allSelected = productIds.every((id) => prev.includes(id));
 
       if (allSelected) {
-        return prev.filter((id) => !orderItemIds.includes(id));
+        return prev.filter((id) => !productIds.includes(id));
       }
 
       const next = [...prev];
-      orderItemIds.forEach((id) => {
+      productIds.forEach((id) => {
         if (!next.includes(id)) {
           next.push(id);
         }
@@ -146,7 +146,7 @@ export const useOrderDetails = (uuid: string) => {
     isPrinting,
     isEdit,
     trackingNumber,
-    selectedOrderItemIds,
+    selectedProductIds,
     saveTrackingNumber,
     toggleTrackNumber,
     handleTrackingNumberChange,

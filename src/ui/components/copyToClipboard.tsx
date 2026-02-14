@@ -3,6 +3,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import { FC, useEffect, useState } from 'react';
+
 import Text from './text';
 
 interface CopyToClipboardProps {
