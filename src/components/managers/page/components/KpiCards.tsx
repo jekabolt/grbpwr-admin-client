@@ -33,10 +33,10 @@ export const KpiCards: FC<KpiCardsProps> = ({ metrics, compareEnabled = false })
 
   return (
     <div className='space-y-6'>
-      <Text variant='uppercase' className='font-bold'>
+      <Text variant='uppercase' className='font-bold text-lg'>
         Key metrics
       </Text>
-      <div className='grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7'>
+      <div className='grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-5 xl:grid-cols-5'>
         {KPI_CONFIG.map(({ key, label, format }) => {
           const m = metrics[key];
           if (!m || typeof m !== 'object' || !('value' in m)) return null;
@@ -54,16 +54,16 @@ export const KpiCards: FC<KpiCardsProps> = ({ metrics, compareEnabled = false })
           return (
             <div
               key={key}
-              className='border border-textInactiveColor p-4 flex flex-col gap-1 min-w-0'
+              className='border border-textInactiveColor p-5 flex flex-col gap-2 min-w-0'
             >
-              <Text variant='uppercase' className='text-textColor text-[10px] truncate'>
+              <Text variant='uppercase' className='text-textColor text-xs truncate'>
                 {label}
               </Text>
-              <Text className='font-bold truncate'>{format(value)}</Text>
+              <Text className='font-bold text-xl truncate'>{format(value)}</Text>
               {hasCompare && changePct != null && (
                 <Text
                   variant='uppercase'
-                  className={`text-[10px] ${
+                  className={`text-xs ${
                     changePct > 0 ? 'text-green-600' : changePct < 0 ? 'text-error' : 'text-textColor'
                   }`}
                 >
@@ -78,31 +78,31 @@ export const KpiCards: FC<KpiCardsProps> = ({ metrics, compareEnabled = false })
       </div>
       {metrics.clvDistribution && (
         <div className='border border-textInactiveColor p-4'>
-          <Text variant='uppercase' className='font-bold mb-3 block'>
+          <Text variant='uppercase' className='font-bold text-lg mb-3 block'>
             CLV distribution
           </Text>
           <div className='grid grid-cols-3 gap-4'>
             <div>
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-xs'>
                 mean
               </Text>
-              <Text className='font-bold'>
+              <Text className='font-bold text-lg'>
                 {formatCurrency(parseDecimal(metrics.clvDistribution.mean))}
               </Text>
             </div>
             <div>
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-xs'>
                 median
               </Text>
-              <Text className='font-bold'>
+              <Text className='font-bold text-lg'>
                 {formatCurrency(parseDecimal(metrics.clvDistribution.median))}
               </Text>
             </div>
             <div>
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-xs'>
                 p90
               </Text>
-              <Text className='font-bold'>
+              <Text className='font-bold text-lg'>
                 {formatCurrency(parseDecimal(metrics.clvDistribution.p90))}
               </Text>
             </div>
