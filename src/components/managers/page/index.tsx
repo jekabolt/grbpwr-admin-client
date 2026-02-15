@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import {
@@ -16,62 +16,40 @@ import {
   getDefaultCompareRange,
   getDefaultDateRange,
   getGranularityForDays,
-  getPresetRange,
-  PRESETS,
   useMetricsQuery,
 } from './useMetricsQuery';
 import type { MetricsGranularity } from 'api/proto-http/admin';
-
-function isSameDay(a: Date, b: Date) {
-  return a.toDateString() === b.toDateString();
-}
-
-function getActivePresetDays(
-  periodFrom: Date,
-  periodTo: Date,
-  compareFrom: Date,
-  compareTo: Date,
-): number | null {
-  const periodDays = Math.round((periodTo.getTime() - periodFrom.getTime()) / (24 * 60 * 60 * 1000));
-  const preset = PRESETS.find((p) => p.days === periodDays);
-  if (!preset) return null;
-  const expected = getPresetRange(preset.days);
-  if (
-    isSameDay(periodFrom, expected.from) &&
-    isSameDay(periodTo, expected.to) &&
-    isSameDay(compareFrom, expected.compareFrom) &&
-    isSameDay(compareTo, expected.compareTo)
-  ) {
-    return preset.days;
-  }
-  return null;
-}
 
 export function Analitic() {
   const defaultRange = getDefaultDateRange(7);
   const defaultCompare = getDefaultCompareRange(defaultRange.from, defaultRange.to);
   const [periodFrom, setPeriodFrom] = useState(defaultRange.from);
   const [periodTo, setPeriodTo] = useState(defaultRange.to);
-  const [compareEnabled, setCompareEnabled] = useState(true);
   const [comparePeriodFrom, setComparePeriodFrom] = useState(defaultCompare.from);
   const [comparePeriodTo, setComparePeriodTo] = useState(defaultCompare.to);
   const [granularity, setGranularity] = useState<MetricsGranularity>(
     getGranularityForDays(7),
   );
 
-  const handlePresetSelect = (days: number) => {
-    const { from, to, compareFrom, compareTo } = getPresetRange(days);
-    setPeriodFrom(from);
-    setPeriodTo(to);
-    setComparePeriodFrom(compareFrom);
-    setComparePeriodTo(compareTo);
-    setCompareEnabled(true);
-    setGranularity(getGranularityForDays(days));
+  useEffect(() => {
+    const { from, to } = getDefaultCompareRange(periodFrom, periodTo);
+    setComparePeriodFrom(from);
+    setComparePeriodTo(to);
+  }, [periodFrom, periodTo]);
+
+  const handlePeriodFromChange = (d: Date) => {
+    setPeriodFrom(d);
+    if (d > periodTo) setPeriodTo(d);
+  };
+
+  const handlePeriodToChange = (d: Date) => {
+    setPeriodTo(d);
+    if (d < periodFrom) setPeriodFrom(d);
   };
 
   const { data: metrics, isLoading, isError, refetch } = useMetricsQuery(periodFrom, periodTo, {
-    comparePeriodFrom: compareEnabled ? comparePeriodFrom : undefined,
-    comparePeriodTo: compareEnabled ? comparePeriodTo : undefined,
+    comparePeriodFrom,
+    comparePeriodTo,
     granularity,
   });
 
@@ -86,20 +64,10 @@ export function Analitic() {
           periodTo={periodTo}
           comparePeriodFrom={comparePeriodFrom}
           comparePeriodTo={comparePeriodTo}
-          onPeriodFromChange={setPeriodFrom}
-          onPeriodToChange={setPeriodTo}
-          onComparePeriodFromChange={setComparePeriodFrom}
-          onComparePeriodToChange={setComparePeriodTo}
-          compareEnabled={compareEnabled}
-          onCompareEnabledChange={setCompareEnabled}
+          onPeriodFromChange={handlePeriodFromChange}
+          onPeriodToChange={handlePeriodToChange}
           granularity={granularity}
           onGranularityChange={(v) => setGranularity(v as MetricsGranularity)}
-          onPresetSelect={handlePresetSelect}
-          activePresetDays={
-            compareEnabled
-              ? getActivePresetDays(periodFrom, periodTo, comparePeriodFrom, comparePeriodTo)
-              : null
-          }
         />
       </div>
 
@@ -120,7 +88,7 @@ export function Analitic() {
 
       {!isLoading && !isError && metrics && (
         <>
-          <KpiCards metrics={metrics} compareEnabled={compareEnabled} />
+          <KpiCards metrics={metrics} compareEnabled={true} />
 
           <div className='space-y-6'>
             <Text variant='uppercase' className='font-bold'>
