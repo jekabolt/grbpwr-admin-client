@@ -59,76 +59,76 @@ export const DateRangePicker: FC<DateRangePickerProps> = ({
           custom range
         </Text>
         <div className='flex flex-wrap items-end gap-4'>
-      <div className='flex flex-col gap-1'>
-        <Text variant='uppercase' className='text-textInactiveColor'>
-          from
-        </Text>
-        <DatePicker
-          value={periodFrom}
-          onChange={(d) => d && onPeriodFromChange(d)}
-          slotProps={{ textField: { size: 'small', className: 'w-40' } }}
-        />
-      </div>
-      <div className='flex flex-col gap-1'>
-        <Text variant='uppercase' className='text-textInactiveColor'>
-          to
-        </Text>
-        <DatePicker
-          value={periodTo}
-          onChange={(d) => d && onPeriodToChange(d)}
-          slotProps={{ textField: { size: 'small', className: 'w-40' } }}
-        />
-      </div>
-      <div className='flex items-center gap-2'>
-        <input
-          type='checkbox'
-          id='compare'
-          checked={compareEnabled}
-          onChange={(e) => onCompareEnabledChange(e.target.checked)}
-          className='h-4 w-4'
-        />
-        <label htmlFor='compare' className='text-textBaseSize uppercase cursor-pointer'>
-          compare period
-        </label>
-      </div>
-      {compareEnabled && onComparePeriodFromChange && onComparePeriodToChange && (
-        <>
           <div className='flex flex-col gap-1'>
             <Text variant='uppercase' className='text-textInactiveColor'>
-              compare from
+              from
             </Text>
             <DatePicker
-              value={comparePeriodFrom}
-              onChange={(d) => d && onComparePeriodFromChange(d)}
+              value={periodFrom}
+              onChange={(d) => d && onPeriodFromChange(d)}
               slotProps={{ textField: { size: 'small', className: 'w-40' } }}
             />
           </div>
           <div className='flex flex-col gap-1'>
             <Text variant='uppercase' className='text-textInactiveColor'>
-              compare to
+              to
             </Text>
             <DatePicker
-              value={comparePeriodTo}
-              onChange={(d) => d && onComparePeriodToChange(d)}
+              value={periodTo}
+              onChange={(d) => d && onPeriodToChange(d)}
               slotProps={{ textField: { size: 'small', className: 'w-40' } }}
             />
           </div>
-        </>
-      )}
-      <div className='flex flex-col gap-1'>
-        <Text variant='uppercase' className='text-textInactiveColor'>
-          granularity
-        </Text>
-        <select
-          value={granularity}
-          onChange={(e) => onGranularityChange(e.target.value)}
-          className='h-9 w-32 border border-textInactiveColor bg-bgColor px-2 text-textBaseSize uppercase'
-        >
-          <option value='METRICS_GRANULARITY_DAY'>day</option>
-          <option value='METRICS_GRANULARITY_WEEK'>week</option>
-          <option value='METRICS_GRANULARITY_MONTH'>month</option>
-        </select>
-      </div>
+          <div className='flex items-center gap-2'>
+            <input
+              type='checkbox'
+              id='compare'
+              checked={compareEnabled}
+              onChange={(e) => onCompareEnabledChange(e.target.checked)}
+              className='h-4 w-4'
+            />
+            <label htmlFor='compare' className='text-textBaseSize uppercase cursor-pointer'>
+              compare period
+            </label>
+          </div>
+          {compareEnabled && onComparePeriodFromChange && onComparePeriodToChange && (
+            <>
+              <div className='flex flex-col gap-1'>
+                <Text variant='uppercase' className='text-textInactiveColor'>
+                  compare from
+                </Text>
+                <DatePicker
+                  value={comparePeriodFrom}
+                  onChange={(d) => d && onComparePeriodFromChange(d)}
+                  slotProps={{ textField: { size: 'small', className: 'w-40' } }}
+                />
+              </div>
+              <div className='flex flex-col gap-1'>
+                <Text variant='uppercase' className='text-textInactiveColor'>
+                  compare to
+                </Text>
+                <DatePicker
+                  value={comparePeriodTo}
+                  onChange={(d) => d && onComparePeriodToChange(d)}
+                  slotProps={{ textField: { size: 'small', className: 'w-40' } }}
+                />
+              </div>
+            </>
+          )}
+          <div className='flex flex-col gap-1'>
+            <Text variant='uppercase' className='text-textInactiveColor'>
+              granularity
+            </Text>
+            <select
+              value={granularity}
+              onChange={(e) => onGranularityChange(e.target.value)}
+              className='h-9 w-32 border border-textInactiveColor bg-bgColor px-2 text-textBaseSize uppercase'
+            >
+              <option value='METRICS_GRANULARITY_DAY'>day</option>
+              <option value='METRICS_GRANULARITY_WEEK'>week</option>
+              <option value='METRICS_GRANULARITY_MONTH'>month</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
