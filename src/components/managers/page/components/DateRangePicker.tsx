@@ -1,26 +1,23 @@
-import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { FC } from 'react';
-import { Button } from 'ui/components/button';
+import * as Popover from '@radix-ui/react-popover';
+import { format } from 'date-fns';
+import { FC, useState } from 'react';
+import { DateRange, DayPicker } from 'react-day-picker';
+import 'react-day-picker/style.css';
 import Text from 'ui/components/text';
-import { PRESETS } from '../useMetricsQuery';
-import { cn } from 'lib/utility';
 
 interface DateRangePickerProps {
   periodFrom: Date;
   periodTo: Date;
-  comparePeriodFrom?: Date;
-  comparePeriodTo?: Date;
+  comparePeriodFrom: Date;
+  comparePeriodTo: Date;
   onPeriodFromChange: (d: Date) => void;
   onPeriodToChange: (d: Date) => void;
-  onComparePeriodFromChange?: (d: Date) => void;
-  onComparePeriodToChange?: (d: Date) => void;
-  compareEnabled: boolean;
-  onCompareEnabledChange: (v: boolean) => void;
   granularity: string;
   onGranularityChange: (v: string) => void;
-  onPresetSelect: (days: number) => void;
-  activePresetDays: number | null;
+}
+
+function formatDateRange(from: Date, to: Date): string {
+  return `${format(from, 'MMM d')} – ${format(to, 'MMM d')}`;
 }
 
 export const DateRangePicker: FC<DateRangePickerProps> = ({
@@ -30,91 +27,92 @@ export const DateRangePicker: FC<DateRangePickerProps> = ({
   comparePeriodTo,
   onPeriodFromChange,
   onPeriodToChange,
-  onComparePeriodFromChange,
-  onComparePeriodToChange,
-  compareEnabled,
-  onCompareEnabledChange,
   granularity,
   onGranularityChange,
-  onPresetSelect,
-  activePresetDays,
-}) => (
-  <LocalizationProvider dateAdapter={AdapterDateFns}>
-    <div className='flex flex-col gap-4 pb-6'>
-      <div className='flex flex-wrap items-center gap-2'>
-        {PRESETS.map(({ label, days }) => (
-          <Button
-            key={days}
-            variant={activePresetDays === days ? 'main' : 'simpleReverseWithBorder'}
-            size='sm'
-            onClick={() => onPresetSelect(days)}
-            className={cn('uppercase text-textBaseSize', activePresetDays === days && 'ring-2 ring-textColor')}
+}) => {
+  const [open, setOpen] = useState(false);
+  const [selectingRange, setSelectingRange] = useState<DateRange | undefined>(undefined);
+
+  const handleSelect = (range: DateRange | undefined) => {
+    console.log('handleSelect called with:', range);
+    console.log('Current selectingRange:', selectingRange);
+    
+    // If no range, ignore
+    if (!range) {
+      setSelectingRange(undefined);
+      return;
+    }
+    
+    // Update the selecting range
+    setSelectingRange(range);
+    
+    // Only close and apply when both from and to are selected AND they're different
+    if (range.from && range.to && range.from.getTime() !== range.to.getTime()) {
+      console.log('Applying range and closing');
+      onPeriodFromChange(range.from);
+      onPeriodToChange(range.to);
+      setOpen(false);
+      setSelectingRange(undefined);
+    } else {
+      console.log('Waiting for second date selection');
+    }
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      // Clear selection when opening to start fresh
+      setSelectingRange(undefined);
+    } else {
+      // Reset when closing
+      setSelectingRange(undefined);
+    }
+    setOpen(nextOpen);
+  };
+
+  return (
+    <div className='flex flex-wrap items-end gap-4 pb-6'>
+      <div className='flex flex-col gap-1'>
+        <Text variant='uppercase' className='text-textInactiveColor'>
+          current period
+        </Text>
+        <Popover.Root open={open} onOpenChange={handleOpenChange}>
+          <Popover.Trigger asChild>
+            <button
+              type='button'
+              className='h-9 px-3 flex items-center gap-2 border border-textInactiveColor bg-bgColor text-textBaseSize text-left min-w-[200px] hover:border-textColor transition-colors'
+            >
+              {formatDateRange(periodFrom, periodTo)}
+            </button>
+          </Popover.Trigger>
+          <Popover.Content
+            className='z-50 bg-bgColor p-4 rounded border border-textInactiveColor shadow-lg'
+            align='start'
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onInteractOutside={(e) => {
+              // Prevent closing when clicking inside the calendar
+              if (selectingRange?.from && !selectingRange?.to) {
+                e.preventDefault();
+              }
+            }}
           >
-            {label}
-          </Button>
-        ))}
-      </div>
-      <div className='space-y-2'>
-        <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
-          custom range
-        </Text>
-        <div className='flex flex-wrap items-end gap-4'>
-      <div className='flex flex-col gap-1'>
-        <Text variant='uppercase' className='text-textInactiveColor'>
-          from
-        </Text>
-        <DatePicker
-          value={periodFrom}
-          onChange={(d) => d && onPeriodFromChange(d)}
-          slotProps={{ textField: { size: 'small', className: 'w-40' } }}
-        />
+            <DayPicker
+              mode='range'
+              selected={selectingRange}
+              onSelect={handleSelect}
+              numberOfMonths={2}
+              defaultMonth={periodFrom}
+            />
+          </Popover.Content>
+        </Popover.Root>
       </div>
       <div className='flex flex-col gap-1'>
         <Text variant='uppercase' className='text-textInactiveColor'>
-          to
-        </Text>
-        <DatePicker
-          value={periodTo}
-          onChange={(d) => d && onPeriodToChange(d)}
-          slotProps={{ textField: { size: 'small', className: 'w-40' } }}
-        />
-      </div>
-      <div className='flex items-center gap-2'>
-        <input
-          type='checkbox'
-          id='compare'
-          checked={compareEnabled}
-          onChange={(e) => onCompareEnabledChange(e.target.checked)}
-          className='h-4 w-4'
-        />
-        <label htmlFor='compare' className='text-textBaseSize uppercase cursor-pointer'>
           compare period
-        </label>
+        </Text>
+        <div className='h-9 px-3 flex items-center border border-textInactiveColor bg-bgColor text-textBaseSize min-w-[200px]'>
+          {formatDateRange(comparePeriodFrom, comparePeriodTo)}
+        </div>
       </div>
-      {compareEnabled && onComparePeriodFromChange && onComparePeriodToChange && (
-        <>
-          <div className='flex flex-col gap-1'>
-            <Text variant='uppercase' className='text-textInactiveColor'>
-              compare from
-            </Text>
-            <DatePicker
-              value={comparePeriodFrom}
-              onChange={(d) => d && onComparePeriodFromChange(d)}
-              slotProps={{ textField: { size: 'small', className: 'w-40' } }}
-            />
-          </div>
-          <div className='flex flex-col gap-1'>
-            <Text variant='uppercase' className='text-textInactiveColor'>
-              compare to
-            </Text>
-            <DatePicker
-              value={comparePeriodTo}
-              onChange={(d) => d && onComparePeriodToChange(d)}
-              slotProps={{ textField: { size: 'small', className: 'w-40' } }}
-            />
-          </div>
-        </>
-      )}
       <div className='flex flex-col gap-1'>
         <Text variant='uppercase' className='text-textInactiveColor'>
           granularity
@@ -129,8 +127,6 @@ export const DateRangePicker: FC<DateRangePickerProps> = ({
           <option value='METRICS_GRANULARITY_MONTH'>month</option>
         </select>
       </div>
-        </div>
-      </div>
     </div>
-  </LocalizationProvider>
-);
+  );
+};
