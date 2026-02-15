@@ -29,7 +29,7 @@ const OrdersCatalog = lazy(() =>
   import('components/managers/orders-catalog/page').then((m) => ({ default: m.OrdersCatalog })),
 );
 const Analitic = lazy(() =>
-  import('components/managers/page').then((m) => ({ default: m.Analitic })),
+  import('components/managers/page/index').then((m) => ({ default: m.Analitic })),
 );
 const Product = lazy(() =>
   import('components/managers/product/page').then((m) => ({ default: m.Product })),

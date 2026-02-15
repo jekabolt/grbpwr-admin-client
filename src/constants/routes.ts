@@ -29,6 +29,10 @@ export enum ROUTES {
 
 export const SIDE_BAR_ITEMS = [
   {
+    label: 'ANALYTICS',
+    route: ROUTES.main,
+  },
+  {
     label: 'MEDIA',
     route: ROUTES.media,
   },
@@ -63,6 +67,10 @@ export const SIDE_BAR_ITEMS = [
 ];
 
 export const LEFT_SIDE_ITEMS: Manager[] = [
+  {
+    label: 'analytics',
+    route: ROUTES.main,
+  },
   {
     label: 'media',
     route: ROUTES.media,
