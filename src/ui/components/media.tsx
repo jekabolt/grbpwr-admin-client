@@ -50,9 +50,11 @@ export default function MediaComponent({
         <img
           src={src}
           alt={alt}
-          className='h-full w-full'
+          className='block w-full h-auto'
           style={{
             objectFit: fit,
+            maxWidth: '100%',
+            maxHeight: '100%',
           }}
         />
       ) : (
