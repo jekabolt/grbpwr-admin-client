@@ -121,6 +121,21 @@ function FormControl(props: any) {
   );
 }
 
+function FormDescription({ className, ref, ...props }: any) {
+  const { formDescriptionId } = useFormField();
+
+  return (
+    <p
+      ref={ref}
+      id={formDescriptionId}
+      className={cn('text-muted-foreground text-xs', className)}
+      {...props}
+    />
+  );
+}
+
+FormDescription.displayName = 'FormDescription';
+
 FormControl.displayName = 'FormControl';
 
 function FormMessage({ className, children, ref, ...props }: any) {
@@ -147,4 +162,13 @@ function FormMessage({ className, children, ref, ...props }: any) {
 
 FormMessage.displayName = 'FormMessage';
 
-export { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, useFormField };
+export {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  useFormField,
+};
