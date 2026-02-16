@@ -25,6 +25,15 @@ export const currencySymbols: Record<string, string> = {
   USD: '$', // United States Dollar
 };
 
+export const CURRENCIES = [
+  { id: 'EUR', label: 'EUR - Euro', value: 'EUR' },
+  { id: 'USD', label: 'USD - US Dollar', value: 'USD' },
+  { id: 'GBP', label: 'GBP - British Pound', value: 'GBP' },
+  { id: 'JPY', label: 'JPY - Japanese Yen', value: 'JPY' },
+  { id: 'CNY', label: 'CNY - Chinese Yuan', value: 'CNY' },
+  { id: 'KRW', label: 'KRW - South Korean Won', value: 'KRW' },
+];
+
 export const LANGUAGES = [
   { id: 1, name: 'english', code: 'en', isDefault: true },
   { id: 2, name: 'french', code: 'fr', isDefault: false },
