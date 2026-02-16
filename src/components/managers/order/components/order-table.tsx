@@ -4,7 +4,8 @@ import { BASE_PATH } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
-import MediaComponent from 'ui/components/media';
+import { Link } from 'react-router-dom';
+import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 
 const HIDDEN_ON_MOBILE_STYLE = 'hidden lg:table-cell';
@@ -37,19 +38,13 @@ export function OrderTable({
         label: 'THUMBNAIL',
         showOnPrint: true,
         accessor: (item) => (
-          <a
-            href={`${BASE_PATH}/products/${item.orderItem?.productId}`}
+          <Link
+            to={`${BASE_PATH}/products/${item.orderItem?.productId}`}
             target='_blank'
-            rel='noopener noreferrer'
             className='cursor-pointer flex items-center justify-center w-24 h-full mx-auto'
           >
-            <MediaComponent
-              src={item.thumbnail || ''}
-              alt='thumbnail'
-              aspectRatio='1/1'
-              fit='contain'
-            />
-          </a>
+            <Media src={item.thumbnail || ''} alt='thumbnail' aspectRatio='1/1' fit='contain' />
+          </Link>
         ),
       },
       {
