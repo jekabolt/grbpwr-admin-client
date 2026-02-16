@@ -103,9 +103,6 @@ export const useOrderDetails = (uuid: string) => {
   }
 
   async function refundOrder() {
-    const confirmed = window.confirm('Are you sure you want to full refund this order?');
-    if (!confirmed) return;
-
     try {
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,

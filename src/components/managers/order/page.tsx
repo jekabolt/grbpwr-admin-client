@@ -1,14 +1,18 @@
 // import { DataGrid } from '@mui/x-data-grid';
 import { REASONS } from 'constants/constants';
+import { useState } from 'react';
+import { FormProvider, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import TextareaField from 'ui/form/fields/textarea-field';
 import { Logo } from 'ui/icons/logo';
 import { Buyer } from './components/buyer';
 import { Description } from './components/description';
 import { OrderTable } from './components/order-table';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
+import { RefundConfirmation } from './components/refund-confirmation';
 import { ShippingBillingToggle } from './components/shipping-billing-toggle';
 import { NewTrackCode } from './components/shipping-information/new-track-code';
 import { useOrderDetails } from './utility';
@@ -29,105 +33,144 @@ export function OrderDetails() {
     isPrinting,
     isEdit,
     trackingNumber,
+    selectedProductIds,
     toggleTrackNumber,
     handleTrackingNumberChange,
     saveTrackingNumber,
     markAsDelivered,
     refundOrder,
-    selectedProductIds,
     toggleOrderItemsSelection,
   } = useOrderDetails(uuid || '');
 
+  const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
+
+  const form = useForm<{ refundReason: string }>({
+    defaultValues: { refundReason: '' },
+  });
+
+  const handleRefundClick = () => {
+    setIsRefundModalOpen(true);
+  };
+
+  const handleRefundConfirm = () => {
+    refundOrder();
+  };
+
   return (
-    <div className='flex flex-col gap-4 w-full'>
-      {isPrinting && (
-        <div className='self-start h-10 pt-2'>
-          <Logo />
-        </div>
-      )}
-      <div className='flex flex-col gap-4'>
-        <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
-        <OrderTable
-          orderDetails={orderDetails}
-          isPrinting={isPrinting}
-          showRefundSelection={
-            DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') &&
-            !['CONFIRMED'].includes(orderStatus || '')
-          }
-          selectedProductIds={selectedProductIds}
-          onToggleOrderItems={toggleOrderItemsSelection}
-        />
-        <Text variant='uppercase' className='font-bold self-end'>
-          {`Total: ${orderDetails?.order?.totalPrice?.value} ${orderDetails?.order?.currency}`}
-        </Text>
-        {(orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED') && (
-          <Text variant='uppercase' className='font-bold self-end'>
-            {`refunded amount: ${orderDetails?.order?.refundedAmount?.value} ${orderDetails?.order?.currency}`}
-          </Text>
+    <FormProvider {...form}>
+      <div className='flex flex-col gap-4 w-full pb-16'>
+        {isPrinting && (
+          <div className='self-start h-10 pt-2'>
+            <Logo />
+          </div>
         )}
-        <Text variant='uppercase' className='font-bold self-end'>
-          cost: {orderDetails?.shipment?.cost?.value} {orderDetails?.order?.currency}
-        </Text>
-        <div className='block self-end print:hidden'>
-          <PromoApplied orderDetails={orderDetails} />
-        </div>
-        <div className='flex gap-10 lg:gap-0 lg:flex-row flex-col lg:items-end lg:justify-between w-full'>
-          <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
-          <ShippingBillingToggle
+        <div className='flex flex-col gap-4'>
+          <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
+          <OrderTable
             orderDetails={orderDetails}
             isPrinting={isPrinting}
-            orderStatus={orderStatus}
-            isEdit={isEdit}
-            trackingNumber={trackingNumber}
-            toggleTrackNumber={toggleTrackNumber}
-            handleTrackingNumberChange={handleTrackingNumberChange}
-            saveTrackingNumber={saveTrackingNumber}
+            showRefundSelection={
+              DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') &&
+              !['CONFIRMED'].includes(orderStatus || '')
+            }
+            selectedProductIds={selectedProductIds}
+            onToggleOrderItems={toggleOrderItemsSelection}
           />
-          <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
-        </div>
-      </div>
-      {orderStatus === 'REFUNDED' && (
-        <div className='flex flex-col gap-2 w-full lg:w-2/5'>
-          <Text variant='uppercase' className='font-bold'>
-            refund reason:
+          <Text variant='uppercase' className='font-bold self-end'>
+            {`Total: ${orderDetails?.order?.totalPrice?.value} ${orderDetails?.order?.currency}`}
           </Text>
-
-          <div className='flex flex-wrap gap-3 w-full lg:w-4/5'>
-            {REASONS.map((l, i) => (
-              <Button key={i} type='button' size='lg' className='border border-textColor uppercase'>
-                {l}
-              </Button>
-            ))}
+          {(orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED') && (
+            <Text variant='uppercase' className='font-bold self-end'>
+              {`refunded amount: ${orderDetails?.order?.refundedAmount?.value} ${orderDetails?.order?.currency}`}
+            </Text>
+          )}
+          <Text variant='uppercase' className='font-bold self-end'>
+            cost: {orderDetails?.shipment?.cost?.value} {orderDetails?.order?.currency}
+          </Text>
+          <div className='block self-end print:hidden'>
+            <PromoApplied orderDetails={orderDetails} />
+          </div>
+          <div className='flex gap-10 lg:gap-0 lg:flex-row flex-col lg:items-end lg:justify-between w-full'>
+            <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
+            <ShippingBillingToggle
+              orderDetails={orderDetails}
+              isPrinting={isPrinting}
+              orderStatus={orderStatus}
+              isEdit={isEdit}
+              trackingNumber={trackingNumber}
+              toggleTrackNumber={toggleTrackNumber}
+              handleTrackingNumberChange={handleTrackingNumberChange}
+              saveTrackingNumber={saveTrackingNumber}
+            />
+            <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
           </div>
         </div>
-      )}
-      {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
-        <div className='w-full lg:w-1/4'>
-          <NewTrackCode
-            isPrinting={isPrinting}
-            trackingNumber={trackingNumber}
-            handleTrackingNumberChange={handleTrackingNumberChange}
-            saveTrackingNumber={saveTrackingNumber}
+        {orderStatus === 'REFUNDED' && (
+          <div className='flex flex-col gap-2 w-full lg:w-2/5'>
+            <Text variant='uppercase' className='font-bold'>
+              refund reason:
+            </Text>
+
+            <div className='flex flex-wrap gap-3 w-full lg:w-4/5'>
+              {REASONS.map((l, i) => (
+                <Button
+                  key={i}
+                  type='button'
+                  size='lg'
+                  className='border border-textColor uppercase'
+                >
+                  {l}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+        {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
+          <div className='w-full lg:w-1/4'>
+            <NewTrackCode
+              isPrinting={isPrinting}
+              trackingNumber={trackingNumber}
+              handleTrackingNumberChange={handleTrackingNumberChange}
+              saveTrackingNumber={saveTrackingNumber}
+            />
+          </div>
+        )}
+        <div className='block print:hidden'>
+          <TextareaField
+            variant='secondary'
+            name='notes'
+            placeholder='leave comments here'
+            showCharCount
+            maxLength={1500}
+            className='placeholder:uppercase placeholder:text-textInactiveColor'
           />
         </div>
-      )}
-      {orderStatus === 'SHIPPED' && (
-        <div className='fixed right-2.5 lg:absolute bottom-2.5 lg:left-1/2 lg:-translate-x-1/2 flex justify-center print:hidden'>
-          <Button variant='main' size='lg' onClick={markAsDelivered}>
-            mark as delivered
-          </Button>
-        </div>
-      )}
-      {DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') && (
-        <div className='fixed right-2.5 lg:absolute bottom-2.5 lg:left-1/2 lg:-translate-x-1/2 flex justify-center print:hidden'>
-          <Button variant='main' size='lg' onClick={refundOrder}>
-            refund order
-          </Button>
-        </div>
-      )}
-      <Text variant='uppercase' className='font-bold hidden print:block'>
-        If you have any questions, please send an email to customercare@grbpwr.com
-      </Text>
-    </div>
+
+        {orderStatus === 'SHIPPED' && (
+          <div className='fixed right-2.5 bottom-2.5 print:hidden'>
+            <Button variant='main' size='lg' onClick={markAsDelivered}>
+              mark as delivered
+            </Button>
+          </div>
+        )}
+        {DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') && (
+          <div className='fixed right-2.5 bottom-2.5 print:hidden'>
+            <Button variant='main' size='lg' onClick={handleRefundClick}>
+              refund order
+            </Button>
+          </div>
+        )}
+        <RefundConfirmation
+          orderDetails={orderDetails}
+          open={isRefundModalOpen}
+          selectedProductIds={selectedProductIds}
+          onOpenChange={setIsRefundModalOpen}
+          refundOrder={handleRefundConfirm}
+        />
+        <Text variant='uppercase' className='font-bold hidden print:block'>
+          If you have any questions, please send an email to customercare@grbpwr.com
+        </Text>
+      </div>
+    </FormProvider>
   );
 }
