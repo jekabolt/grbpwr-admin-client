@@ -1,16 +1,8 @@
+import { CURRENCIES } from 'constants/constants';
 import { useEffect } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
-
-const CURRENCIES = [
-  { id: 'EUR', label: 'EUR - Euro', value: 'EUR' },
-  { id: 'USD', label: 'USD - US Dollar', value: 'USD' },
-  { id: 'GBP', label: 'GBP - British Pound', value: 'GBP' },
-  { id: 'JPY', label: 'JPY - Japanese Yen', value: 'JPY' },
-  { id: 'CNY', label: 'CNY - Chinese Yuan', value: 'CNY' },
-  { id: 'KRW', label: 'KRW - South Korean Won', value: 'KRW' },
-];
 
 export function PriceFields({ editMode }: { editMode: boolean }) {
   const { control, watch, setValue } = useFormContext();

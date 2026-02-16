@@ -39,10 +39,10 @@ const paymentMethodSchema = z.object({
       'PAYMENT_METHOD_NAME_ENUM_UNKNOWN',
       'PAYMENT_METHOD_NAME_ENUM_CARD',
       'PAYMENT_METHOD_NAME_ENUM_CARD_TEST',
-      'PAYMENT_METHOD_NAME_ENUM_ETH',
-      'PAYMENT_METHOD_NAME_ENUM_ETH_TEST',
-      'PAYMENT_METHOD_NAME_ENUM_USDT_TRON',
-      'PAYMENT_METHOD_NAME_ENUM_USDT_SHASTA',
+      // 'PAYMENT_METHOD_NAME_ENUM_ETH',
+      // 'PAYMENT_METHOD_NAME_ENUM_ETH_TEST',
+      // 'PAYMENT_METHOD_NAME_ENUM_USDT_TRON',
+      // 'PAYMENT_METHOD_NAME_ENUM_USDT_SHASTA',
     ])
     .optional(),
 });
@@ -57,10 +57,7 @@ export const settingsSchema = z.object({
   announce: z
     .object({
       link: z.string().optional(),
-      translations: createStrictTranslationSchema(
-        announceTranslationSchema,
-        requiredLanguageIds,
-      ),
+      translations: createStrictTranslationSchema(announceTranslationSchema, requiredLanguageIds),
     })
     .optional(),
   bigMenu: z.boolean().optional(),
@@ -86,10 +83,16 @@ export type SettingsSchema = z.infer<typeof settingsSchema>;
 
 export function transformDictionaryToSettings(dictionary: any): SettingsSchema {
   return {
-    paymentMethods: dictionary.paymentMethods?.map((method: any) => ({
-      paymentMethod: method.name,
-      allow: method.allowed ?? false,
-    })),
+    paymentMethods: dictionary.paymentMethods
+      ?.filter(
+        (method: any) =>
+          method?.name === 'PAYMENT_METHOD_NAME_ENUM_CARD' ||
+          method?.name === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST',
+      )
+      .map((method: any) => ({
+        paymentMethod: method.name,
+        allow: method.allowed ?? false,
+      })),
     shipmentCarriers: dictionary.shipmentCarriers?.map((carrier: any) => {
       const pricesMap: Record<string, { value: string }> = {};
       carrier.prices?.forEach((price: any) => {
