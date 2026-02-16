@@ -1,5 +1,6 @@
 // import { DataGrid } from '@mui/x-data-grid';
 import { REASONS } from 'constants/constants';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -9,6 +10,7 @@ import { Description } from './components/description';
 import { OrderTable } from './components/order-table';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
+import { RefundConfirmation } from './components/refund-confirmation';
 import { ShippingBillingToggle } from './components/shipping-billing-toggle';
 import { NewTrackCode } from './components/shipping-information/new-track-code';
 import { useOrderDetails } from './utility';
@@ -29,14 +31,24 @@ export function OrderDetails() {
     isPrinting,
     isEdit,
     trackingNumber,
+    selectedProductIds,
     toggleTrackNumber,
     handleTrackingNumberChange,
     saveTrackingNumber,
     markAsDelivered,
     refundOrder,
-    selectedProductIds,
     toggleOrderItemsSelection,
   } = useOrderDetails(uuid || '');
+
+  const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
+
+  const handleRefundClick = () => {
+    setIsRefundModalOpen(true);
+  };
+
+  const handleRefundConfirm = () => {
+    refundOrder();
+  };
 
   return (
     <div className='flex flex-col gap-4 w-full'>
@@ -120,11 +132,18 @@ export function OrderDetails() {
       )}
       {DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') && (
         <div className='fixed right-2.5 lg:absolute bottom-2.5 lg:left-1/2 lg:-translate-x-1/2 flex justify-center print:hidden'>
-          <Button variant='main' size='lg' onClick={refundOrder}>
+          <Button variant='main' size='lg' onClick={handleRefundClick}>
             refund order
           </Button>
         </div>
       )}
+      <RefundConfirmation
+        orderDetails={orderDetails}
+        open={isRefundModalOpen}
+        selectedProductIds={selectedProductIds}
+        onOpenChange={setIsRefundModalOpen}
+        refundOrder={handleRefundConfirm}
+      />
       <Text variant='uppercase' className='font-bold hidden print:block'>
         If you have any questions, please send an email to customercare@grbpwr.com
       </Text>
