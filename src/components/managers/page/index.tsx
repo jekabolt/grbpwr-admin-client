@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { subDays } from 'date-fns';
+import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import {
@@ -11,46 +12,43 @@ import {
   PromoTable,
   CrossSellTable,
   TimeSeriesChart,
+  TrafficCharts,
 } from './components';
-import {
-  getDefaultCompareRange,
-  getDefaultDateRange,
-  getGranularityForDays,
-  useMetricsQuery,
-} from './useMetricsQuery';
-import type { MetricsGranularity } from 'api/proto-http/admin';
+import { useMetricsQuery } from './useMetricsQuery';
+import type { CompareMode } from 'api/proto-http/admin';
+import type { MetricsPeriod } from './useMetricsQuery';
+
+function getDefaultCustomRange() {
+  const to = new Date();
+  const from = subDays(to, 6); // 7 days inclusive
+  return { from, to };
+}
 
 export function Analitic() {
-  const defaultRange = getDefaultDateRange(7);
-  const defaultCompare = getDefaultCompareRange(defaultRange.from, defaultRange.to);
-  const [periodFrom, setPeriodFrom] = useState(defaultRange.from);
-  const [periodTo, setPeriodTo] = useState(defaultRange.to);
-  const [comparePeriodFrom, setComparePeriodFrom] = useState(defaultCompare.from);
-  const [comparePeriodTo, setComparePeriodTo] = useState(defaultCompare.to);
-  const [granularity, setGranularity] = useState<MetricsGranularity>(
-    getGranularityForDays(7),
-  );
+  const defaultCustom = getDefaultCustomRange();
+  const [period, setPeriod] = useState<MetricsPeriod>('7d');
+  const [compareMode, setCompareMode] = useState<CompareMode>('COMPARE_MODE_PREVIOUS_PERIOD');
+  const [customFrom, setCustomFrom] = useState(defaultCustom.from);
+  const [customTo, setCustomTo] = useState(defaultCustom.to);
 
-  useEffect(() => {
-    const { from, to } = getDefaultCompareRange(periodFrom, periodTo);
-    setComparePeriodFrom(from);
-    setComparePeriodTo(to);
-  }, [periodFrom, periodTo]);
-
-  const handlePeriodFromChange = (d: Date) => {
-    setPeriodFrom(d);
-    if (d > periodTo) setPeriodTo(d);
+  const handlePeriodChange = (p: MetricsPeriod) => {
+    setPeriod(p);
+    if (p === 'custom') {
+      const { from, to } = getDefaultCustomRange();
+      setCustomFrom(from);
+      setCustomTo(to);
+    }
   };
 
-  const handlePeriodToChange = (d: Date) => {
-    setPeriodTo(d);
-    if (d < periodFrom) setPeriodFrom(d);
+  const handleCustomRangeChange = (from: Date, to: Date) => {
+    setCustomFrom(from);
+    setCustomTo(to);
   };
 
-  const { data: metrics, isLoading, isError, refetch } = useMetricsQuery(periodFrom, periodTo, {
-    comparePeriodFrom,
-    comparePeriodTo,
-    granularity,
+  const { data: metrics, isLoading, isError, refetch } = useMetricsQuery(period, {
+    compareMode,
+    customFrom: period === 'custom' ? customFrom : undefined,
+    customTo: period === 'custom' ? customTo : undefined,
   });
 
   return (
@@ -60,14 +58,13 @@ export function Analitic() {
           Analytics
         </Text>
         <DateRangePicker
-          periodFrom={periodFrom}
-          periodTo={periodTo}
-          comparePeriodFrom={comparePeriodFrom}
-          comparePeriodTo={comparePeriodTo}
-          onPeriodFromChange={handlePeriodFromChange}
-          onPeriodToChange={handlePeriodToChange}
-          granularity={granularity}
-          onGranularityChange={(v) => setGranularity(v as MetricsGranularity)}
+          period={period}
+          compareMode={compareMode}
+          customFrom={customFrom}
+          customTo={customTo}
+          onPeriodChange={handlePeriodChange}
+          onCompareModeChange={setCompareMode}
+          onCustomRangeChange={handleCustomRangeChange}
         />
       </div>
 
@@ -88,7 +85,10 @@ export function Analitic() {
 
       {!isLoading && !isError && metrics && (
         <>
-          <KpiCards metrics={metrics} compareEnabled={true} />
+          <KpiCards
+            metrics={metrics}
+            compareEnabled={compareMode !== 'COMPARE_MODE_NONE'}
+          />
 
           <div className='space-y-6'>
             <Text variant='uppercase' className='font-bold'>
@@ -160,6 +160,39 @@ export function Analitic() {
             </div>
           </div>
 
+          <div className='space-y-6'>
+            <Text variant='uppercase' className='font-bold'>
+              GA4 Traffic & Engagement
+            </Text>
+            <div className='grid gap-4 md:grid-cols-2'>
+              <TimeSeriesChart
+                title='Sessions by day'
+                data={metrics.sessionsByDay}
+                compareData={metrics.sessionsByDayCompare}
+                valueFormat='number'
+              />
+              <TimeSeriesChart
+                title='Users by day'
+                data={metrics.usersByDay}
+                compareData={metrics.usersByDayCompare}
+                valueFormat='number'
+              />
+              <TimeSeriesChart
+                title='Page views by day'
+                data={metrics.pageViewsByDay}
+                compareData={metrics.pageViewsByDayCompare}
+                valueFormat='number'
+              />
+              <TimeSeriesChart
+                title='Conversion rate by day'
+                data={metrics.conversionRateByDay}
+                compareData={metrics.conversionRateByDayCompare}
+                valueFormat='number'
+              />
+            </div>
+          </div>
+
+          <TrafficCharts metrics={metrics} />
           <GeographyCharts metrics={metrics} />
           <CurrencyPaymentCharts metrics={metrics} />
           <ProductCharts metrics={metrics} />
