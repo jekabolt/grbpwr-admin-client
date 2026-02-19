@@ -44,7 +44,12 @@ export function getOrderStatusName(
 }
 
 export function getStatusColor(status: string | undefined): string {
-  switch (status) {
+  const key = status
+    ?.replace('ORDER_STATUS_ENUM_', '')
+    .replace(/_/g, ' ')
+    .toUpperCase()
+    .trim();
+  switch (key) {
     case 'PLACED':
       return 'bg-white';
     case 'AWAITING PAYMENT':
