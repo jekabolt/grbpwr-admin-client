@@ -26,6 +26,16 @@ const KPI_CONFIG: Array<{
   { key: 'repeatCustomersRate', label: 'Repeat Rate', format: (v) => `${v.toFixed(1)}%` },
   { key: 'avgOrdersPerCustomer', label: 'Avg Orders/Customer', format: formatNumber },
   { key: 'avgDaysBetweenOrders', label: 'Avg Days Between Orders', format: formatNumber },
+  // GA4 Traffic & Engagement
+  { key: 'sessions', label: 'Sessions', format: formatNumber },
+  { key: 'users', label: 'Users', format: formatNumber },
+  { key: 'newUsers', label: 'New Users', format: formatNumber },
+  { key: 'pageViews', label: 'Page Views', format: formatNumber },
+  { key: 'bounceRate', label: 'Bounce Rate', format: (v) => `${v.toFixed(1)}%` },
+  { key: 'avgSessionDuration', label: 'Avg Session (s)', format: formatNumber },
+  { key: 'pagesPerSession', label: 'Pages/Session', format: formatNumber },
+  { key: 'conversionRate', label: 'Conversion Rate', format: (v) => `${v.toFixed(1)}%` },
+  { key: 'revenuePerSession', label: 'Revenue/Session', format: formatCurrency },
 ];
 
 export const KpiCards: FC<KpiCardsProps> = ({ metrics, compareEnabled = false }) => {

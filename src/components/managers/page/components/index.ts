@@ -7,3 +7,4 @@ export { OrdersByStatusChart } from './OrdersByStatusChart';
 export { ProductCharts } from './ProductCharts';
 export { PromoTable } from './PromoTable';
 export { TimeSeriesChart } from './TimeSeriesChart';
+export { TrafficCharts } from './TrafficCharts';
