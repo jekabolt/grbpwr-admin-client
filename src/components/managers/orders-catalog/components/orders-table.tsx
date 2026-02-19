@@ -44,12 +44,14 @@ export function OrdersTable({
     navigate(`${ROUTES.orders}/${order.uuid}`);
   };
 
+  const statusFilterLabel = status ? statusOptions.find((o) => o.value === status)?.label : null;
+
   const COLUMNS: { label: string; accessor: (o: Order) => React.ReactNode }[] = useMemo(
     () => [
       { label: 'Order ID', accessor: (o: Order) => o.id },
       {
         label: 'Order Status',
-        accessor: (o) => getOrderStatusName(dictionary, o.orderStatusId),
+        accessor: (o) => statusFilterLabel ?? getOrderStatusName(dictionary, o.orderStatusId),
       },
       { label: 'Placed', accessor: (o) => formatDateShort(o.placed) },
       {
@@ -57,7 +59,7 @@ export function OrdersTable({
         accessor: (o) => `${o.totalPrice?.value} ${o.currency}`,
       },
     ],
-    [dictionary],
+    [dictionary, statusFilterLabel],
   );
 
   return (
@@ -159,6 +161,7 @@ export function OrdersTable({
                           {
                             'sticky left-0 bg-bgColor group-hover:bg-highlightColor/20 z-10':
                               col.label === 'Order ID',
+                            uppercase: col.label === 'Order Status',
                           },
                         )}
                       >
