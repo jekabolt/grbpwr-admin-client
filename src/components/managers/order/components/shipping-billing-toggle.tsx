@@ -70,9 +70,6 @@ export function ShippingBillingToggle({
             </div>
           )}
       <div className='border-t-2 border-textColor'>
-        <Text variant='uppercase'>
-          {`cost: ${orderDetails?.shipment?.cost?.value} ${dictionary?.baseCurrency}`}
-        </Text>
         <div className='w-full'>
           <TrackingNumber
             isEdit={isEdit}

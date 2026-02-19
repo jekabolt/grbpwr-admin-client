@@ -14,6 +14,7 @@ import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { Layout } from 'ui/layout';
 import './global.css';
+import { Shipping } from 'components/managers/shipping';
 
 // Lazy load routes for code splitting
 const Hero = lazy(() =>
@@ -111,6 +112,7 @@ root.render(
                     <Route path={ROUTES.hero} element={<Hero />} />
                     <Route path={ROUTES.promo} element={<Promo />} />
                     <Route path={ROUTES.settings} element={<Settings />} />
+                    <Route path={ROUTES.shipping} element={<Shipping />} />
                     <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
                     <Route path={ROUTES.orders} element={<OrdersCatalog />} />
                     <Route path={ROUTES.singleArchive} element={<Archive />} />

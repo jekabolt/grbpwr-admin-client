@@ -25,6 +25,7 @@ export enum ROUTES {
   orders = '/orders',
   orderDetails = '/orders/:uuid',
   customerSupport = '/customer-support',
+  shipping = '/shipping',
 }
 
 export const SIDE_BAR_ITEMS = [
@@ -61,6 +62,10 @@ export const SIDE_BAR_ITEMS = [
     route: ROUTES.settings,
   },
   {
+    label: 'SHIPPING',
+    route: ROUTES.shipping,
+  },
+  {
     label: 'CUSTOMER SUPPORT',
     route: ROUTES.customerSupport,
   },
@@ -83,9 +88,6 @@ export const LEFT_SIDE_ITEMS: Manager[] = [
     label: 'timiline',
     route: ROUTES.archives,
   },
-];
-
-export const MANAGERS: Manager[] = [
   {
     label: 'orders',
     route: ROUTES.orders,
@@ -94,6 +96,9 @@ export const MANAGERS: Manager[] = [
     label: 'hero',
     route: ROUTES.hero,
   },
+];
+
+export const MANAGERS: Manager[] = [
   {
     label: 'promo',
     route: ROUTES.promo,

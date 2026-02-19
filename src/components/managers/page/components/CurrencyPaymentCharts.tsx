@@ -1,6 +1,6 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { FC } from 'react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Text from 'ui/components/text';
 import { formatCurrency, parseDecimal } from '../utils';
 
@@ -20,7 +20,9 @@ export const CurrencyPaymentCharts: FC<CurrencyPaymentChartsProps> = ({ metrics 
 
   const paymentData =
     metrics.revenueByPaymentMethod?.map((p) => ({
-      name: (p.paymentMethod ?? 'Unknown').replace(/PAYMENT_METHOD_NAME_ENUM_/g, '').replace(/_/g, ' '),
+      name: (p.paymentMethod ?? 'Unknown')
+        .replace(/PAYMENT_METHOD_NAME_ENUM_/g, '')
+        .replace(/_/g, ' '),
       value: parseDecimal(p.value),
       count: p.count ?? 0,
     })) ?? [];
@@ -41,7 +43,9 @@ export const CurrencyPaymentCharts: FC<CurrencyPaymentChartsProps> = ({ metrics 
                 <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
                 <XAxis dataKey='name' tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatCurrency(v)} />
-                <Tooltip formatter={(value: number) => [formatCurrency(value), '']} />
+                <Tooltip
+                  formatter={(value?: number) => [value != null ? formatCurrency(value) : '', '']}
+                />
                 <Bar dataKey='value' fill='#000' radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -57,7 +61,9 @@ export const CurrencyPaymentCharts: FC<CurrencyPaymentChartsProps> = ({ metrics 
                 <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
                 <XAxis dataKey='name' tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatCurrency(v)} />
-                <Tooltip formatter={(value: number) => [formatCurrency(value), '']} />
+                <Tooltip
+                  formatter={(value?: number) => [value != null ? formatCurrency(value) : '', '']}
+                />
                 <Bar dataKey='value' fill='#000' radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>

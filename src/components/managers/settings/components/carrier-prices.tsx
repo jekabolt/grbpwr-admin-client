@@ -1,16 +1,27 @@
-import { CURRENCIES, currencySymbols } from 'constants/constants';
+import { CURRENCIES } from 'constants/constants';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 
-export function CarrierPrices({ carrierIndex }: { carrierIndex: number }) {
+type CarrierPricesProps =
+  | {
+      basePath: string;
+      carrierIndex?: never;
+    }
+  | {
+      carrierIndex: number;
+      basePath?: undefined;
+    };
+
+export function CarrierPrices(props: CarrierPricesProps) {
   const { setValue } = useFormContext();
 
-  const handleShipmentPriceChange = (
-    carrierIndex: number,
-    currency: string,
-    value: string | number,
-  ) => {
+  const basePath =
+    'basePath' in props && props.basePath
+      ? props.basePath
+      : `shipmentCarriers.${props.carrierIndex}.prices`;
+
+  const handleShipmentPriceChange = (currency: string, value: string | number) => {
     let stringValue = typeof value === 'number' ? value.toString() : value || '0';
 
     if (currency === 'JPY' || currency === 'KRW') {
@@ -20,10 +31,11 @@ export function CarrierPrices({ carrierIndex }: { carrierIndex: number }) {
       }
     }
 
-    setValue(`shipmentCarriers.${carrierIndex}.prices.${currency}.value`, stringValue, {
+    setValue(`${basePath}.${currency}.value`, stringValue, {
       shouldDirty: true,
     });
   };
+
   return (
     <div className='w-full overflow-x-auto'>
       <table className='w-full lg:w-auto table-fixed border-collapse border-2 border-textColor'>
@@ -31,7 +43,7 @@ export function CarrierPrices({ carrierIndex }: { carrierIndex: number }) {
           <tr>
             {CURRENCIES.map((c) => (
               <th key={c.id} className='border border-textColor px-1 py-1 lg:w-[64px]'>
-                <Text>{currencySymbols[c.value]}</Text>
+                <Text>{c.value}</Text>
               </th>
             ))}
           </tr>
@@ -45,11 +57,11 @@ export function CarrierPrices({ carrierIndex }: { carrierIndex: number }) {
               return (
                 <td key={currency.id} className='border border-textColor px-1 py-1 lg:w-[64px]'>
                   <InputField
-                    name={`shipmentCarriers.${carrierIndex}.prices.${currency.value}.value`}
+                    name={`${basePath}.${currency.value}.value`}
                     placeholder={placeholder}
                     className='w-full border-none text-center'
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      handleShipmentPriceChange(carrierIndex, currency.value, e.target.value);
+                      handleShipmentPriceChange(currency.value, e.target.value);
                     }}
                   />
                 </td>

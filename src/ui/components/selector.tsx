@@ -87,7 +87,9 @@ export default function Selector({
             compact ? 'py-0.5 text-xs' : 'py-2'
           } bg-white border border-gray-300 shadow-sm focus:outline-none disabled:bg-gray-50 disabled:text-gray-500`}
         >
-          <Select.Value placeholder={placeholder}>{getDisplayValue()}</Select.Value>
+          <Select.Value placeholder={placeholder}>
+            <Text>{getDisplayValue()}</Text>
+          </Select.Value>
           <Select.Icon className='ml-1'>
             <ChevronDownIcon className={compact ? 'w-3 h-3' : ''} />
           </Select.Icon>

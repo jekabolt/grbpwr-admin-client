@@ -85,7 +85,7 @@ export function OrderDetails() {
             </Text>
           )}
           <Text variant='uppercase' className='font-bold self-end'>
-            cost: {orderDetails?.shipment?.cost?.value} {orderDetails?.order?.currency}
+            shipping cost: {orderDetails?.shipment?.cost?.value} {orderDetails?.order?.currency}
           </Text>
           <div className='block self-end print:hidden'>
             <PromoApplied orderDetails={orderDetails} />
