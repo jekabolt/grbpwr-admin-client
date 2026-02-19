@@ -53,6 +53,12 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
                 asChild
                 className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden'
               >
+                <Link to={ROUTES.shipping}>shipping</Link>
+              </Button>
+              <Button
+                asChild
+                className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden'
+              >
                 <Link to={ROUTES.settings}>settings</Link>
               </Button>
               <Button
