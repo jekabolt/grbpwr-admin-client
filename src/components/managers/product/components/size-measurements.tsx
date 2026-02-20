@@ -10,6 +10,7 @@ import { useEditConfirmation } from '../utility/useEditConfirmation';
 import { useLastSizeOnly } from '../utility/useLastSizeOnly';
 import { useMeasurements } from '../utility/useMeasurements';
 import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle';
+import { StockHistory } from './stock/stock-history';
 import { ToggleSizeNames } from './toggle-sizenames';
 
 const cellClass = 'text-center border-r border-textColor';
@@ -19,16 +20,17 @@ const lastCellClass = 'text-center w-20 lg:w-auto';
 export function SizeMeasurements({
   isEditMode = false,
   isAddingProduct = false,
+  productId,
 }: {
   isEditMode?: boolean;
   isAddingProduct?: boolean;
+  productId?: number;
 } = {}) {
   const { dictionary } = useDictionary();
   const { watch, setValue } = useFormContext<ProductFormData>();
   const values = watch();
   const { requireConfirmation } = useEditConfirmation(isEditMode, isAddingProduct);
   const { measurementsNames, handleToggleChange } = useSizeMeasurementsToggle();
-
   const { measurements, selectedSubCategoryName, selectedTypeName } = useMeasurements(
     dictionary,
     Number(values.product?.productBodyInsert?.topCategoryId) || 0,
@@ -139,82 +141,87 @@ export function SizeMeasurements({
   };
 
   return (
-    <div className='w-full overflow-x-auto'>
-      <table className='w-full border-collapse border-2 border-textColor min-w-max'>
-        <thead className='bg-textInactiveColor'>
-          <tr className='border-b border-text'>
-            <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
-              <ToggleSizeNames
-                subCategoryName={selectedSubCategoryName}
-                typeName={selectedTypeName}
-                measurementsNames={measurementsNames}
-                onToggleChange={handleToggleChange}
-              />
-            </th>
-            <th className={cellClass}>
-              <Text variant='uppercase'>qty</Text>
-            </th>
-            {measurements.map((m, i) => (
-              <th key={m.id} className={i < measurements.length - 1 ? cellClass : lastCellClass}>
-                <Text variant='uppercase'>{m.name}</Text>
+    <div className='w-full space-y-3'>
+      <StockHistory productId={productId} sizes={filteredSizes} />
+      <div className='overflow-x-auto'>
+        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+          <thead className='bg-textInactiveColor'>
+            <tr className='border-b border-text'>
+              <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
+                <ToggleSizeNames
+                  subCategoryName={selectedSubCategoryName}
+                  typeName={selectedTypeName}
+                  measurementsNames={measurementsNames}
+                  onToggleChange={handleToggleChange}
+                />
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className='bg-bgColor'>
-          {filteredSizes.map((size) => {
-            if (!shouldShowSize(size.id)) return null;
+              <th className={cellClass}>
+                <Text variant='uppercase'>qty</Text>
+              </th>
+              {measurements.map((m, i) => (
+                <th key={m.id} className={i < measurements.length - 1 ? cellClass : lastCellClass}>
+                  <Text variant='uppercase'>{m.name}</Text>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className='bg-bgColor'>
+            {filteredSizes.map((size) => {
+              if (!shouldShowSize(size.id)) return null;
 
-            const sizeData = sizeMeasurementsMap.get(size.id);
-            const idx = sizeData?.index ?? -1;
-            const qty = values.sizeMeasurements?.[idx]?.productSize?.quantity?.value;
+              const sizeData = sizeMeasurementsMap.get(size.id);
+              const idx = sizeData?.index ?? -1;
+              const qty = values.sizeMeasurements?.[idx]?.productSize?.quantity?.value;
 
-            return (
-              <tr key={size.id} className='border-b border-text last:border-b-0'>
-                <td className={cn(cellClass, 'sticky left-0 bg-bgColor z-10')}>
-                  <Text variant='uppercase'>{formatSizeName(size.name)}</Text>
-                </td>
-                <td className={cn(cellClass, 'bg-inactive w-12 lg:w-26')}>
-                  <Input
-                    name={`sizeMeasurements[${idx}].productSize.quantity.value`}
-                    value={qty === '0' ? '' : qty || ''}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      if (!e.target.value || /^\d+$/.test(e.target.value)) {
-                        handleSizeChange(e, size.id);
-                      }
-                    }}
-                    className='w-full border-none text-center bg-inactive'
-                    disabled={!isEditMode}
-                  />
-                </td>
-                {measurements.map((m, i) => {
-                  return (
-                    <td
-                      key={m.id}
-                      className={i < measurements.length - 1 ? measurementCellClass : lastCellClass}
-                    >
-                      <Input
-                        value={
-                          values.sizeMeasurements?.[idx]?.measurements?.find(
-                            (measurement) => measurement.measurementNameId === m.id,
-                          )?.measurementValue?.value || ''
+              return (
+                <tr key={size.id} className='border-b border-text last:border-b-0'>
+                  <td className={cn(cellClass, 'sticky left-0 bg-bgColor z-10')}>
+                    <Text variant='uppercase'>{formatSizeName(size.name)}</Text>
+                  </td>
+                  <td className={cn(cellClass, 'bg-inactive w-12 lg:w-26')}>
+                    <Input
+                      name={`sizeMeasurements[${idx}].productSize.quantity.value`}
+                      value={qty === '0' ? '' : qty || ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        if (!e.target.value || /^\d+$/.test(e.target.value)) {
+                          handleSizeChange(e, size.id);
                         }
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                          if (/^\d*$/.test(e.target.value)) {
-                            handleMeasurementChange(e, size.id, m.id);
+                      }}
+                      className='w-full border-none text-center bg-inactive'
+                      disabled={!isEditMode}
+                    />
+                  </td>
+                  {measurements.map((m, i) => {
+                    return (
+                      <td
+                        key={m.id}
+                        className={
+                          i < measurements.length - 1 ? measurementCellClass : lastCellClass
+                        }
+                      >
+                        <Input
+                          value={
+                            values.sizeMeasurements?.[idx]?.measurements?.find(
+                              (measurement) => measurement.measurementNameId === m.id,
+                            )?.measurementValue?.value || ''
                           }
-                        }}
-                        className='w-full border-none text-center'
-                        disabled={!isEditMode}
-                      />
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                            if (/^\d*$/.test(e.target.value)) {
+                              handleMeasurementChange(e, size.id, m.id);
+                            }
+                          }}
+                          className='w-full border-none text-center'
+                          disabled={!isEditMode}
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

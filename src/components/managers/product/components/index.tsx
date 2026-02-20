@@ -176,7 +176,11 @@ export function ProductForm({
               />
             </div>
           </div>
-          <SizeMeasurements isAddingProduct={isAddingProduct} isEditMode={isEditMode} />
+          <SizeMeasurements
+            isAddingProduct={isAddingProduct}
+            isEditMode={isEditMode}
+            productId={productId ? Number(productId) : undefined}
+          />
         </div>
       </form>
     </Form>
