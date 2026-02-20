@@ -3,6 +3,7 @@ import {
   common_HeroType,
   common_OrderFactor,
   common_SortFactor,
+  common_StockChangeSource,
 } from 'api/proto-http/admin';
 
 export type OrderFactorOption = {
@@ -116,4 +117,25 @@ export const REASONS = [
   'ordered by mistake',
   'partial refund',
   'other',
+];
+
+export const LIMIT_OPTIONS = [0, 10, 30, 50, 100].map((n) => ({
+  value: String(n),
+  label: String(n),
+}));
+
+export const ORDER_FACTOR_OPTIONS: { value: common_OrderFactor; label: string }[] = [
+  { value: 'ORDER_FACTOR_DESC', label: 'Newest first' },
+  { value: 'ORDER_FACTOR_ASC', label: 'Oldest first' },
+];
+
+export const SOURCE_OPTIONS: { value: common_StockChangeSource; label: string }[] = [
+  { value: 'STOCK_CHANGE_SOURCE_UNSPECIFIED', label: 'All sources' },
+  { value: 'STOCK_CHANGE_SOURCE_ADMIN_ADD_PRODUCT', label: 'Admin add product' },
+  { value: 'STOCK_CHANGE_SOURCE_ADMIN_UPDATE_PRODUCT', label: 'Admin update product' },
+  { value: 'STOCK_CHANGE_SOURCE_ADMIN_UPDATE_SIZE_STOCK', label: 'Admin update size stock' },
+  { value: 'STOCK_CHANGE_SOURCE_ORDER_PLACED', label: 'Order placed' },
+  { value: 'STOCK_CHANGE_SOURCE_ORDER_CANCELLED', label: 'Order cancelled' },
+  { value: 'STOCK_CHANGE_SOURCE_ORDER_EXPIRED', label: 'Order expired' },
+  { value: 'STOCK_CHANGE_SOURCE_ORDER_REFUNDED', label: 'Order refunded' },
 ];
