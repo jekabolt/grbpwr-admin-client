@@ -102,11 +102,12 @@ export const useOrderDetails = (uuid: string) => {
     }
   }
 
-  async function refundOrder() {
+  async function refundOrder(reason?: string) {
     try {
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,
         orderItemIds: selectedProductIds.length ? selectedProductIds : [],
+        reason,
       });
       fetchOrderDetails();
       setSelectedProductIds([]);

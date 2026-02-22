@@ -71,7 +71,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
       </div>
-      <div className='h-full pt-26 px-2.5'>{children}</div>
+      <div className='h-full print:h-full print:pt-0 pt-26 px-2.5'>{children}</div>
       <SnackBar />
     </>
   );

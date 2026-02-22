@@ -1,5 +1,6 @@
 // import { DataGrid } from '@mui/x-data-grid';
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -51,18 +52,17 @@ export function OrderDetails() {
     setIsRefundModalOpen(true);
   };
 
-  const handleRefundConfirm = () => {
-    refundOrder();
+  const handleRefundConfirm = (reason?: string) => {
+    refundOrder(reason);
   };
 
   return (
     <FormProvider {...form}>
       <div className='flex flex-col gap-4 w-full pb-16'>
-        {isPrinting && (
-          <div className='self-start h-10 pt-2'>
-            <Logo />
-          </div>
-        )}
+        <div className='self-start h-10 print:block hidden'>
+          <Logo />
+        </div>
+
         <div className='flex flex-col gap-4'>
           <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
           <OrderTable
@@ -144,10 +144,16 @@ export function OrderDetails() {
           onOpenChange={setIsRefundModalOpen}
           refundOrder={handleRefundConfirm}
         />
-        <Text variant='uppercase' className='font-bold hidden print:block'>
-          If you have any questions, please send an email to customercare@grbpwr.com
-        </Text>
       </div>
+      {createPortal(
+        <Text
+          variant='uppercase'
+          className='font-bold hidden print:block print:absolute print:bottom-0 print:inset-x-0'
+        >
+          If you have any questions, please send an email to customercare@grbpwr.com
+        </Text>,
+        document.body,
+      )}
     </FormProvider>
   );
 }
