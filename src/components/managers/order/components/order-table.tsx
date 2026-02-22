@@ -50,11 +50,12 @@ export function OrderTable({
       {
         label: 'THUMBNAIL',
         showOnPrint: true,
+        className: 'print:!w-24 print:min-w-0 print:overflow-hidden print:max-w-24',
         accessor: ({ item }) => (
           <Link
             to={`${BASE_PATH}/products/${item.orderItem?.productId}`}
             target='_blank'
-            className='cursor-pointer flex items-center justify-center w-24 h-full mx-auto'
+            className='cursor-pointer flex items-center justify-center w-24 max-w-full h-full mx-auto overflow-hidden print:block print:max-h-24'
           >
             <Media src={item.thumbnail || ''} alt='thumbnail' aspectRatio='1/1' fit='contain' />
           </Link>
@@ -138,7 +139,7 @@ export function OrderTable({
   return (
     <div className='w-full'>
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+        <table className='w-full border-collapse border-2 border-textColor min-w-max print:border-separate print:border-spacing-0 print:[border:1px_solid_currentColor]'>
           <thead className='bg-textInactiveColor h-10'>
             <tr className='border-b border-textColor'>
               {showRefundSelection && !isPrinting && (
@@ -151,7 +152,11 @@ export function OrderTable({
               {COLUMNS.map((col) => (
                 <th
                   key={col.label}
-                  className={`text-center w-auto lg:min-w-26 border border-r border-textColor px-2 ${col.className || ''}`}
+                  className={cn(
+                    'text-center w-auto lg:min-w-26 border border-r border-textColor px-2',
+                    'print:[border:1px_solid_currentColor]',
+                    col.className,
+                  )}
                 >
                   <Text variant='uppercase' className='leading-none'>
                     {col.label}
@@ -210,6 +215,7 @@ export function OrderTable({
                           key={col.label}
                           className={cn(
                             'border border-textColor text-center px-2 w-16 lg:w-auto',
+                            'print:[border:1px_solid_currentColor]',
                             col.className,
                             isRefunded &&
                               isDataCell &&
