@@ -73,7 +73,7 @@ export function Shipping() {
   };
 
   return (
-    <div className='w-full flex flex-col gap-4'>
+    <div className='w-full flex flex-col gap-5'>
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='large' className='font-bold'>
           shipment carriers
@@ -129,7 +129,7 @@ export function Shipping() {
                     )}
                   >
                     {col.scroll ? (
-                      <div className='overflow-x-auto overflow-y-hidden max-w-40 h-full px-2 py-1 scrollbar-thin'>
+                      <div className='overflow-x-auto max-w-64 w-full h-full py-1 scrollbar-thin'>
                         <Text className='text-center whitespace-nowrap'>
                           {col.accessor(carrier)}
                         </Text>

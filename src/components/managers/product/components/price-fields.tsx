@@ -5,7 +5,12 @@ import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 
 export function PriceFields({ editMode }: { editMode: boolean }) {
-  const { control, watch, setValue } = useFormContext();
+  const {
+    control,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useFormContext();
   const { replace } = useFieldArray({
     control,
     name: 'prices',
@@ -30,9 +35,14 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
         const updatedPrices = CURRENCIES.map((currency) => {
           const existingPrice = validPrices.find((p: any) => p?.currency === currency.value);
           if (existingPrice) {
+            let value = existingPrice.price?.value ?? '0';
+            if (currency.value === 'JPY' || currency.value === 'KRW') {
+              const n = parseFloat(value);
+              value = (!Number.isNaN(n) ? Math.round(n) : 0).toString();
+            }
             return {
               currency: String(existingPrice.currency),
-              price: { value: existingPrice.price?.value || '0' },
+              price: { value },
             };
           }
           return {
@@ -105,7 +115,7 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
                       min='0'
                       placeholder={placeholder}
                       readOnly={!editMode}
-                      className='text-start w-full'
+                      className='text-start w-full border-none'
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         const fieldName = `prices.${actualIndex}.price.value`;
                         handlePriceChange(fieldName, e.target.value, currency.value, actualIndex);
@@ -118,6 +128,11 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
           </tbody>
         </table>
       </div>
+      {typeof errors.prices?.message === 'string' && (
+        <Text className='text-error' role='alert'>
+          {errors.prices.message}
+        </Text>
+      )}
     </div>
   );
 }

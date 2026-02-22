@@ -60,6 +60,8 @@ const productBodySchema = z.object({
   fit: z.string().optional(),
 });
 
+const INTEGER_CURRENCIES = ['JPY', 'KRW'];
+
 const priceEntrySchema = z.object({
   currency: z.string().min(1, 'Currency is required'),
   price: z.object({
@@ -69,6 +71,10 @@ const priceEntrySchema = z.object({
       .regex(/^\d*\.?\d{0,2}$/, 'Price must be a valid number'),
   }),
 });
+
+const priceEntryIntegerRefine = (entry: { currency: string; price?: { value?: string } }) =>
+  !INTEGER_CURRENCIES.includes(entry.currency) ||
+  /^\d+$/.test(entry.price?.value ?? '');
 
 const allPricesFilledRefine = (arr: { price?: { value?: string } }[]) =>
   arr.every((p) => {
@@ -120,6 +126,16 @@ export const baseProductSchema = z
   .refine((data) => allPricesFilledRefine(data.prices), {
     message: 'All prices must be filled (value greater than 0)',
     path: ['prices'],
+  })
+  .superRefine((data, ctx) => {
+    const hasInvalidIntegerCurrency = data.prices.some((entry) => !priceEntryIntegerRefine(entry));
+    if (hasInvalidIntegerCurrency) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'JPY and KRW must be whole numbers (no decimals)',
+        path: ['prices'],
+      });
+    }
   });
 
 export const productSchema = baseProductSchema;

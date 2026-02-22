@@ -47,13 +47,16 @@ const paymentMethodSchema = z.object({
     .optional(),
 });
 
+const INTEGER_CURRENCIES = ['JPY', 'KRW'];
+
 const shipmentCarrierSchema = z.object({
   allow: z.boolean().optional(),
   carrier: z.string().optional(),
   prices: z.record(z.string(), z.object({ value: z.string().optional() })).optional(),
 });
 
-export const settingsSchema = z.object({
+export const settingsSchema = z
+  .object({
   announce: z
     .object({
       link: z.string().optional(),
@@ -65,7 +68,23 @@ export const settingsSchema = z.object({
   paymentMethods: z.array(paymentMethodSchema).optional(),
   shipmentCarriers: z.array(shipmentCarrierSchema).optional(),
   siteAvailable: z.boolean().optional(),
-});
+})
+  .superRefine((data, ctx) => {
+    data.shipmentCarriers?.forEach((carrier, i) => {
+      if (!carrier.prices) return;
+      const hasInvalid = INTEGER_CURRENCIES.some((currency) => {
+        const v = carrier.prices?.[currency]?.value;
+        return v != null && v !== '' && !/^\d+$/.test(v);
+      });
+      if (hasInvalid) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'JPY and KRW must be whole numbers (no decimals)',
+          path: ['shipmentCarriers', i, 'prices'],
+        });
+      }
+    });
+  });
 
 export const defaultSettings = {
   announce: {
@@ -97,7 +116,12 @@ export function transformDictionaryToSettings(dictionary: any): SettingsSchema {
       const pricesMap: Record<string, { value: string }> = {};
       carrier.prices?.forEach((price: any) => {
         if (price.currency && price.price?.value) {
-          pricesMap[price.currency] = { value: price.price.value };
+          let value = price.price.value;
+          if (INTEGER_CURRENCIES.includes(price.currency)) {
+            const n = parseFloat(value);
+            value = (!Number.isNaN(n) ? Math.round(n) : 0).toString();
+          }
+          pricesMap[price.currency] = { value };
         }
       });
       return {
