@@ -4,9 +4,9 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import TextareaField from 'ui/form/fields/textarea-field';
 import { Logo } from 'ui/icons/logo';
 import { Buyer } from './components/buyer';
+import { Comment } from './components/comment';
 import { Description } from './components/description';
 import { OrderTable } from './components/order-table';
 import { Payment } from './components/payment';
@@ -43,8 +43,8 @@ export function OrderDetails() {
 
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
 
-  const form = useForm<{ refundReason: string }>({
-    defaultValues: { refundReason: '' },
+  const form = useForm<{ refundReason: string; notes: string }>({
+    defaultValues: { refundReason: '', notes: '' },
   });
 
   const handleRefundClick = () => {
@@ -120,14 +120,7 @@ export function OrderDetails() {
           </div>
         )}
         <div className='block print:hidden'>
-          <TextareaField
-            variant='secondary'
-            name='notes'
-            placeholder='leave comments here'
-            showCharCount
-            maxLength={1500}
-            className='placeholder:uppercase placeholder:text-textInactiveColor'
-          />
+          <Comment orderDetails={orderDetails} />
         </div>
 
         {orderStatus === 'SHIPPED' && (

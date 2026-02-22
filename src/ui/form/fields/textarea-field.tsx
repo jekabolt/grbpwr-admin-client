@@ -2,6 +2,7 @@ import { useFormContext } from 'react-hook-form';
 
 import Textarea, { TextareaProps } from 'ui/components/text-area';
 
+import { Button } from 'ui/components/button';
 import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '..';
 
 type Props = TextareaProps & {
@@ -11,6 +12,7 @@ type Props = TextareaProps & {
   srLabel?: boolean;
   maxLength?: number;
   showCharCount?: boolean;
+  upsertButton?: boolean;
 };
 
 export default function TextareaField({
@@ -21,6 +23,8 @@ export default function TextareaField({
   srLabel,
   maxLength,
   showCharCount = false,
+  upsertButton = false,
+  onUpsert,
   ...props
 }: Props) {
   const { control, trigger, watch } = useFormContext();
@@ -48,6 +52,16 @@ export default function TextareaField({
                 onBlur={onBlur}
                 onChange={field.onChange}
               />
+              {upsertButton && (
+                <Button
+                  variant='main'
+                  size='lg'
+                  className='absolute bottom-2 left-2'
+                  onClick={() => onUpsert?.(value)}
+                >
+                  leave comment
+                </Button>
+              )}
               {showCharCount && (
                 <div className='absolute bottom-2 right-2 text-xs text-textInactiveColor'>
                   {value.length}
