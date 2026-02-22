@@ -61,6 +61,25 @@ export function SizeMeasurements({
     return map;
   }, [values.sizeMeasurements]);
 
+  const productSizesForStock = useMemo(() => {
+    const seen = new Set<number>();
+    const result: { id: number; name?: string }[] = [];
+    values.sizeMeasurements?.forEach((sm) => {
+      const sizeId = sm?.productSize?.sizeId;
+      if (sizeId != null && !seen.has(sizeId)) {
+        seen.add(sizeId);
+        const fromFiltered = filteredSizes.find((s) => s.id === sizeId);
+        const fromDict = dictionary?.sizes?.find((s) => s.id === sizeId);
+        const rawName = fromFiltered?.name ?? fromDict?.name ?? String(sizeId);
+        result.push({
+          id: sizeId,
+          name: (formatSizeName(rawName) || rawName) ?? String(sizeId),
+        });
+      }
+    });
+    return result;
+  }, [values.sizeMeasurements, filteredSizes, dictionary?.sizes]);
+
   const handleSizeChange = (
     event: React.ChangeEvent<HTMLInputElement>,
     sizeId: number | undefined,
@@ -142,7 +161,6 @@ export function SizeMeasurements({
 
   return (
     <div className='w-full space-y-3'>
-      <StockHistory productId={productId} sizes={filteredSizes} />
       <div className='overflow-x-auto'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
           <thead className='bg-textInactiveColor'>
@@ -222,6 +240,7 @@ export function SizeMeasurements({
           </tbody>
         </table>
       </div>
+      <StockHistory productId={productId} sizes={productSizesForStock} />
     </div>
   );
 }
