@@ -13,13 +13,29 @@ type CarrierPricesProps =
       basePath?: undefined;
     };
 
+function getErrorAtPath(
+  errors: Record<string, unknown>,
+  path: string,
+): { message?: string } | undefined {
+  return path
+    .split('.')
+    .reduce((acc: unknown, key) => (acc as Record<string, unknown>)?.[key], errors) as
+    | { message?: string }
+    | undefined;
+}
+
 export function CarrierPrices(props: CarrierPricesProps) {
-  const { setValue } = useFormContext();
+  const {
+    setValue,
+    formState: { errors },
+  } = useFormContext();
 
   const basePath =
     'basePath' in props && props.basePath
       ? props.basePath
       : `shipmentCarriers.${props.carrierIndex}.prices`;
+
+  const tableError = getErrorAtPath(errors as Record<string, unknown>, basePath);
 
   const handleShipmentPriceChange = (currency: string, value: string | number) => {
     let stringValue = typeof value === 'number' ? value.toString() : value || '0';
@@ -52,12 +68,16 @@ export function CarrierPrices(props: CarrierPricesProps) {
           <tr>
             {CURRENCIES.map((currency) => {
               const isIntegerCurrency = currency.value === 'JPY' || currency.value === 'KRW';
+              const step = isIntegerCurrency ? '1' : '0.01';
               const placeholder = isIntegerCurrency ? '0' : '0.00';
 
               return (
                 <td key={currency.id} className='border border-textColor px-1 py-1 lg:w-[64px]'>
                   <InputField
                     name={`${basePath}.${currency.value}.value`}
+                    type='number'
+                    step={step}
+                    min='0'
                     placeholder={placeholder}
                     className='w-full border-none text-center'
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,6 +90,11 @@ export function CarrierPrices(props: CarrierPricesProps) {
           </tr>
         </tbody>
       </table>
+      {tableError?.message && (
+        <Text className='text-error' role='alert'>
+          {tableError.message}
+        </Text>
+      )}
     </div>
   );
 }

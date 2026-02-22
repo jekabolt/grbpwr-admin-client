@@ -129,7 +129,7 @@ export function Shipping() {
                     )}
                   >
                     {col.scroll ? (
-                      <div className='overflow-x-auto overflow-y-hidden max-w-40 h-full px-2 py-1 scrollbar-thin'>
+                      <div className='overflow-x-auto max-w-64 w-full h-full py-1 scrollbar-thin'>
                         <Text className='text-center whitespace-nowrap'>
                           {col.accessor(carrier)}
                         </Text>
