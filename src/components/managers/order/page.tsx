@@ -1,13 +1,13 @@
 // import { DataGrid } from '@mui/x-data-grid';
-import { REASONS } from 'constants/constants';
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import TextareaField from 'ui/form/fields/textarea-field';
 import { Logo } from 'ui/icons/logo';
 import { Buyer } from './components/buyer';
+import { Comment } from './components/comment';
 import { Description } from './components/description';
 import { OrderTable } from './components/order-table';
 import { Payment } from './components/payment';
@@ -44,26 +44,25 @@ export function OrderDetails() {
 
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
 
-  const form = useForm<{ refundReason: string }>({
-    defaultValues: { refundReason: '' },
+  const form = useForm<{ refundReason: string; notes: string }>({
+    defaultValues: { refundReason: '', notes: '' },
   });
 
   const handleRefundClick = () => {
     setIsRefundModalOpen(true);
   };
 
-  const handleRefundConfirm = () => {
-    refundOrder();
+  const handleRefundConfirm = (reason?: string) => {
+    refundOrder(reason);
   };
 
   return (
     <FormProvider {...form}>
       <div className='flex flex-col gap-4 w-full pb-16'>
-        {isPrinting && (
-          <div className='self-start h-10 pt-2'>
-            <Logo />
-          </div>
-        )}
+        <div className='self-start h-10 print:block hidden'>
+          <Logo />
+        </div>
+
         <div className='flex flex-col gap-4'>
           <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
           <OrderTable
@@ -90,6 +89,11 @@ export function OrderDetails() {
           <div className='block self-end print:hidden'>
             <PromoApplied orderDetails={orderDetails} />
           </div>
+          {orderDetails?.order?.refundReason && (
+            <Text variant='uppercase' className='font-bold self-end'>
+              refund reason: {orderDetails?.order?.refundReason}
+            </Text>
+          )}
           <div className='flex gap-10 lg:gap-0 lg:flex-row flex-col lg:items-end lg:justify-between w-full'>
             <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
             <ShippingBillingToggle
@@ -105,26 +109,6 @@ export function OrderDetails() {
             <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
           </div>
         </div>
-        {orderStatus === 'REFUNDED' && (
-          <div className='flex flex-col gap-2 w-full lg:w-2/5'>
-            <Text variant='uppercase' className='font-bold'>
-              refund reason:
-            </Text>
-
-            <div className='flex flex-wrap gap-3 w-full lg:w-4/5'>
-              {REASONS.map((l, i) => (
-                <Button
-                  key={i}
-                  type='button'
-                  size='lg'
-                  className='border border-textColor uppercase'
-                >
-                  {l}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
         {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
           <div className='w-full lg:w-1/4'>
             <NewTrackCode
@@ -136,14 +120,7 @@ export function OrderDetails() {
           </div>
         )}
         <div className='block print:hidden'>
-          <TextareaField
-            variant='secondary'
-            name='notes'
-            placeholder='leave comments here'
-            showCharCount
-            maxLength={1500}
-            className='placeholder:uppercase placeholder:text-textInactiveColor'
-          />
+          <Comment orderDetails={orderDetails} />
         </div>
 
         {orderStatus === 'SHIPPED' && (
@@ -167,10 +144,16 @@ export function OrderDetails() {
           onOpenChange={setIsRefundModalOpen}
           refundOrder={handleRefundConfirm}
         />
-        <Text variant='uppercase' className='font-bold hidden print:block'>
-          If you have any questions, please send an email to customercare@grbpwr.com
-        </Text>
       </div>
+      {createPortal(
+        <Text
+          variant='uppercase'
+          className='font-bold hidden print:block print:absolute print:bottom-0 print:inset-x-0'
+        >
+          If you have any questions, please send an email to customercare@grbpwr.com
+        </Text>,
+        document.body,
+      )}
     </FormProvider>
   );
 }

@@ -27,9 +27,22 @@ export function OrderTable({
 }: OrderTableProps) {
   const { dictionary } = useDictionary();
 
+  const expandedRows = useMemo(() => {
+    const rows: { item: common_OrderItem; totalUnits: number }[] = [];
+    orderDetails?.orderItems?.forEach((item) => {
+      const qty = Math.max(1, item.orderItem?.quantity ?? 1);
+      for (let i = 0; i < qty; i++) {
+        rows.push({ item, totalUnits: qty });
+      }
+    });
+    return rows;
+  }, [orderDetails?.orderItems]);
+
+  type Row = { item: common_OrderItem; totalUnits: number };
+
   const ALL_COLUMNS: {
     label: string;
-    accessor: (item: common_OrderItem) => React.ReactNode;
+    accessor: (row: Row) => React.ReactNode;
     showOnPrint?: boolean;
     className?: string;
   }[] = useMemo(
@@ -37,11 +50,12 @@ export function OrderTable({
       {
         label: 'THUMBNAIL',
         showOnPrint: true,
-        accessor: (item) => (
+        className: 'print:!w-24 print:min-w-0 print:overflow-hidden print:max-w-24',
+        accessor: ({ item }) => (
           <Link
             to={`${BASE_PATH}/products/${item.orderItem?.productId}`}
             target='_blank'
-            className='cursor-pointer flex items-center justify-center w-24 h-full mx-auto'
+            className='cursor-pointer flex items-center justify-center w-24 max-w-full h-full mx-auto overflow-hidden print:block print:max-h-24'
           >
             <Media src={item.thumbnail || ''} alt='thumbnail' aspectRatio='1/1' fit='contain' />
           </Link>
@@ -51,17 +65,17 @@ export function OrderTable({
         label: 'SKU',
         showOnPrint: true,
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: (item) => item.sku,
+        accessor: ({ item }) => item.sku,
       },
       {
         label: 'PRODUCT NAME',
         showOnPrint: true,
-        accessor: (item) => item.translations?.[0].name,
+        accessor: ({ item }) => item.translations?.[0].name,
       },
       {
         label: 'SIZE',
         showOnPrint: false,
-        accessor: (item) =>
+        accessor: ({ item }) =>
           dictionary?.sizes
             ?.find((x) => x.id === item.orderItem?.sizeId)
             ?.name?.replace('SIZE_ENUM_', ''),
@@ -70,32 +84,47 @@ export function OrderTable({
         label: 'PRICE',
         showOnPrint: false,
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: (item) =>
-          `${
-            (item as any).aggregatedBasePrice ??
-            ((item as any).productPrice && item.orderItem?.quantity
-              ? (item as any).productPrice * item.orderItem.quantity
-              : 0)
-          } ${orderDetails?.order?.currency || ''}`,
+        accessor: ({ item, totalUnits }) => {
+          const aggregated = (item as any).aggregatedBasePrice;
+          const productPrice = (item as any).productPrice;
+          const total =
+            aggregated != null
+              ? (typeof aggregated === 'number' ? aggregated : Number(aggregated)) / totalUnits
+              : productPrice != null
+                ? typeof productPrice === 'number'
+                  ? productPrice
+                  : Number(productPrice)
+                : 0;
+          return `${total} ${orderDetails?.order?.currency || ''}`;
+        },
       },
       {
         label: 'SALE',
         showOnPrint: false,
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: (item) => (item as any).productSalePercentage,
+        accessor: ({ item }) => (item as any).productSalePercentage,
       },
       {
         label: 'PRICE WITH SALE',
         showOnPrint: true,
-        accessor: (item) =>
-          `${
-            (item as any).aggregatedPriceWithSale ?? (item as any).productPriceWithSale
-          } ${orderDetails?.order?.currency || ''}`,
+        accessor: ({ item, totalUnits }) => {
+          const aggregated = (item as any).aggregatedPriceWithSale;
+          const perUnitPrice = (item as any).productPriceWithSale;
+          const value =
+            aggregated != null
+              ? (typeof aggregated === 'number' ? aggregated : Number(aggregated)) / totalUnits
+              : perUnitPrice != null
+                ? typeof perUnitPrice === 'number'
+                  ? perUnitPrice
+                  : Number(perUnitPrice)
+                : 0;
+          return `${value} ${orderDetails?.order?.currency || ''}`;
+        },
       },
       {
         label: 'REFUNDED',
         showOnPrint: true,
-        accessor: (item) =>
+        accessor: ({ item }) =>
           orderDetails?.refundedOrderItems?.some((r) => r.id === item.id) ? 'Yes' : 'No',
       },
     ],
@@ -110,7 +139,7 @@ export function OrderTable({
   return (
     <div className='w-full'>
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+        <table className='w-full border-collapse border-2 border-textColor min-w-max print:border-separate print:border-spacing-0 print:[border:1px_solid_currentColor]'>
           <thead className='bg-textInactiveColor h-10'>
             <tr className='border-b border-textColor'>
               {showRefundSelection && !isPrinting && (
@@ -123,7 +152,11 @@ export function OrderTable({
               {COLUMNS.map((col) => (
                 <th
                   key={col.label}
-                  className={`text-center w-auto lg:min-w-26 border border-r border-textColor px-2 ${col.className || ''}`}
+                  className={cn(
+                    'text-center w-auto lg:min-w-26 border border-r border-textColor px-2',
+                    'print:[border:1px_solid_currentColor]',
+                    col.className,
+                  )}
                 >
                   <Text variant='uppercase' className='leading-none'>
                     {col.label}
@@ -133,14 +166,18 @@ export function OrderTable({
             </tr>
           </thead>
           <tbody>
-            {orderDetails?.orderItems?.length === 0 ? (
+            {expandedRows.length === 0 ? (
               <tr>
-                <td colSpan={COLUMNS.length} className='text-center py-8'>
+                <td
+                  colSpan={COLUMNS.length + (showRefundSelection && !isPrinting ? 1 : 0)}
+                  className='text-center py-8'
+                >
                   <Text variant='uppercase'>no items found</Text>
                 </td>
               </tr>
             ) : (
-              orderDetails?.orderItems?.map((item, idx) => {
+              expandedRows.map((row, idx) => {
+                const { item } = row;
                 const orderItemId = typeof item.id === 'number' ? item.id : null;
                 const rowOrderItemIds: number[] = orderItemId != null ? [orderItemId] : [];
                 const isRefunded =
@@ -158,7 +195,7 @@ export function OrderTable({
 
                 return (
                   <tr
-                    key={orderItemId ?? idx}
+                    key={orderItemId != null ? `${orderItemId}-${idx}` : idx}
                     className='border-b border-text last:border-b-0 lg:w-24'
                   >
                     {showRefundSelection && !isPrinting && (
@@ -178,21 +215,22 @@ export function OrderTable({
                           key={col.label}
                           className={cn(
                             'border border-textColor text-center px-2 w-16 lg:w-auto',
+                            'print:[border:1px_solid_currentColor]',
                             col.className,
                             isRefunded &&
                               isDataCell &&
                               'relative after:content-[""] after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:bg-current',
                             {
-                              'bg-textInactiveColor/80': orderDetails.refundedOrderItems?.some(
+                              'bg-textInactiveColor/80': orderDetails?.refundedOrderItems?.some(
                                 (refundedItem) => refundedItem.id === orderItemId,
                               ),
                             },
                           )}
                         >
                           {col.label === 'THUMBNAIL' ? (
-                            col.accessor(item)
+                            col.accessor(row)
                           ) : (
-                            <Text>{col.accessor(item)}</Text>
+                            <Text>{col.accessor(row)}</Text>
                           )}
                         </td>
                       );

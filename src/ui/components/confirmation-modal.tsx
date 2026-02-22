@@ -9,9 +9,17 @@ interface Props {
   onCancel?: () => void;
   confirmLabel?: string;
   cancelLabel?: string;
+  confirmDisabled?: boolean;
 }
 
-export function ConfirmationModal({ open, children, onOpenChange, onConfirm, onCancel }: Props) {
+export function ConfirmationModal({
+  open,
+  children,
+  onOpenChange,
+  onConfirm,
+  onCancel,
+  confirmDisabled,
+}: Props) {
   const handleCancel = () => {
     onOpenChange(false);
     onCancel?.();
@@ -33,7 +41,13 @@ export function ConfirmationModal({ open, children, onOpenChange, onConfirm, onC
           <DialogPrimitives.Title className='sr-only'>Confirmation</DialogPrimitives.Title>
           {children}
           <div className='mt-4 flex justify-end gap-2'>
-            <Button type='button' onClick={handleConfirm} variant='main' size='lg'>
+            <Button
+              type='button'
+              onClick={handleConfirm}
+              variant='main'
+              size='lg'
+              disabled={confirmDisabled}
+            >
               confirm
             </Button>
             <Button type='button' onClick={handleCancel} variant='main' size='lg'>
