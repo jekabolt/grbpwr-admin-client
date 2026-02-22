@@ -1,5 +1,4 @@
 import { common_OrderFull } from 'api/proto-http/frontend';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -27,14 +26,13 @@ export function ShippingBillingToggle({
   handleTrackingNumberChange,
   saveTrackingNumber,
 }: Props) {
-  const { dictionary } = useDictionary();
   const [showBilling, setShowBilling] = useState(false);
 
   const shipping = orderDetails?.shipping?.addressInsert;
   const billing = orderDetails?.billing?.addressInsert;
 
   return (
-    <div>
+    <div className='space-y-1'>
       <div className='flex gap-2 mb-4 print:hidden'>
         <Button
           onClick={() => setShowBilling(false)}
@@ -69,19 +67,18 @@ export function ShippingBillingToggle({
               <Shipping shipping={billing} />
             </div>
           )}
-      <div className='border-t-2 border-textColor'>
-        <div className='w-full'>
-          <TrackingNumber
-            isEdit={isEdit}
-            isPrinting={isPrinting}
-            trackingNumber={trackingNumber}
-            orderStatus={orderStatus || ''}
-            orderDetails={orderDetails}
-            toggleTrackNumber={toggleTrackNumber}
-            handleTrackingNumberChange={handleTrackingNumberChange}
-            saveTrackingNumber={saveTrackingNumber}
-          />
-        </div>
+
+      <div className='w-full'>
+        <TrackingNumber
+          isEdit={isEdit}
+          isPrinting={isPrinting}
+          trackingNumber={trackingNumber}
+          orderStatus={orderStatus || ''}
+          orderDetails={orderDetails}
+          toggleTrackNumber={toggleTrackNumber}
+          handleTrackingNumberChange={handleTrackingNumberChange}
+          saveTrackingNumber={saveTrackingNumber}
+        />
       </div>
     </div>
   );

@@ -1,5 +1,4 @@
 // import { DataGrid } from '@mui/x-data-grid';
-import { REASONS } from 'constants/constants';
 import { useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
@@ -90,6 +89,11 @@ export function OrderDetails() {
           <div className='block self-end print:hidden'>
             <PromoApplied orderDetails={orderDetails} />
           </div>
+          {orderDetails?.order?.refundReason && (
+            <Text variant='uppercase' className='font-bold self-end'>
+              refund reason: {orderDetails?.order?.refundReason}
+            </Text>
+          )}
           <div className='flex gap-10 lg:gap-0 lg:flex-row flex-col lg:items-end lg:justify-between w-full'>
             <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
             <ShippingBillingToggle
@@ -105,26 +109,6 @@ export function OrderDetails() {
             <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
           </div>
         </div>
-        {orderStatus === 'REFUNDED' && (
-          <div className='flex flex-col gap-2 w-full lg:w-2/5'>
-            <Text variant='uppercase' className='font-bold'>
-              refund reason:
-            </Text>
-
-            <div className='flex flex-wrap gap-3 w-full lg:w-4/5'>
-              {REASONS.map((l, i) => (
-                <Button
-                  key={i}
-                  type='button'
-                  size='lg'
-                  className='border border-textColor uppercase'
-                >
-                  {l}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
         {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
           <div className='w-full lg:w-1/4'>
             <NewTrackCode
