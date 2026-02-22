@@ -44,11 +44,7 @@ export function getOrderStatusName(
 }
 
 export function getStatusColor(status: string | undefined): string {
-  const key = status
-    ?.replace('ORDER_STATUS_ENUM_', '')
-    .replace(/_/g, ' ')
-    .toUpperCase()
-    .trim();
+  const key = status?.replace('ORDER_STATUS_ENUM_', '').replace(/_/g, ' ').toUpperCase().trim();
   switch (key) {
     case 'PLACED':
       return 'bg-white';
@@ -68,6 +64,8 @@ export function getStatusColor(status: string | undefined): string {
       return 'bg-yellow-500';
     case 'REFUND IN PROGRESS':
       return 'bg-gray-500';
+    case 'PARTIALLY REFUNDED':
+      return 'bg-white-500';
     default:
       return 'bg-white';
   }

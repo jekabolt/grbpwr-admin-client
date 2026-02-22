@@ -48,6 +48,7 @@ export const statusOptions: Array<{ value: common_OrderStatusEnum; label: string
   { value: 'ORDER_STATUS_ENUM_DELIVERED', label: 'delivered' },
   { value: 'ORDER_STATUS_ENUM_CANCELLED', label: 'cancelled' },
   { value: 'ORDER_STATUS_ENUM_REFUNDED', label: 'refunded' },
+  { value: 'ORDER_STATUS_ENUM_PARTIALLY_REFUNDED', label: 'partially refunded' },
   { value: 'ORDER_STATUS_ENUM_PENDING_RETURN', label: 'pending return' },
   { value: 'ORDER_STATUS_ENUM_REFUND_IN_PROGRESS', label: 'refund in progress' },
 ];

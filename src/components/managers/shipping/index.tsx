@@ -27,6 +27,11 @@ export function Shipping() {
     scroll?: boolean;
   }[] = useMemo(
     () => [
+      {
+        label: 'Allow',
+        accessor: (c) => (c.shipmentCarrier?.allowed ? 'allowed' : 'not allowed'),
+        width: 'w-28',
+      },
       { label: 'Carrier', accessor: (c) => c.shipmentCarrier?.carrier, width: 'w-28' },
       {
         label: 'Allowed Regions',
@@ -66,9 +71,9 @@ export function Shipping() {
     setUpsertOpen(true);
   };
 
-  const handleRowClick = (id?: number | null) => {
-    if (!id) return;
-    setEditingCarrierId(id);
+  const handleRowClick = (carrier: common_ShipmentCarrier) => {
+    if (!carrier.id) return;
+    setEditingCarrierId(carrier.id);
     setUpsertOpen(true);
   };
 
@@ -113,41 +118,49 @@ export function Shipping() {
             </tr>
           </thead>
           <tbody>
-            {dictionary?.shipmentCarriers?.map((carrier) => (
-              <tr
-                key={carrier.id}
-                className='border-b border-text last:border-b-0 h-10 cursor-pointer hover:bg-textInactiveColor/20'
-                onClick={() => handleRowClick(carrier.id)}
-              >
-                {COLUMNS.map((col) => (
-                  <td
-                    key={col.label}
-                    className={cn(
-                      'border border-textColor px-2 align-middle',
-                      col.width ?? 'min-w-26',
-                      col.scroll && 'overflow-hidden p-0',
-                    )}
-                  >
-                    {col.scroll ? (
-                      <div className='overflow-x-auto max-w-64 w-full h-full py-1 scrollbar-thin'>
-                        <Text className='text-center whitespace-nowrap'>
+            {dictionary?.shipmentCarriers?.map((carrier) => {
+              const isAllowed = carrier.shipmentCarrier?.allowed ?? false;
+              return (
+                <tr
+                  key={carrier.id}
+                  className={cn(
+                    'border-b border-text last:border-b-0 h-10',
+                    isAllowed
+                      ? 'cursor-pointer hover:bg-textInactiveColor/20'
+                      : 'cursor-default bg-textInactiveColor/60',
+                  )}
+                  onClick={() => handleRowClick(carrier)}
+                >
+                  {COLUMNS.map((col) => (
+                    <td
+                      key={col.label}
+                      className={cn(
+                        'border border-textColor px-2 align-middle',
+                        col.width ?? 'min-w-26',
+                        col.scroll && 'overflow-hidden p-0',
+                      )}
+                    >
+                      {col.scroll ? (
+                        <div className='overflow-x-auto max-w-64 w-full h-full py-1 scrollbar-thin'>
+                          <Text className='text-center whitespace-nowrap'>
+                            {col.accessor(carrier)}
+                          </Text>
+                        </div>
+                      ) : (
+                        <Text
+                          className={cn('text-center', {
+                            'line-clamp-2': col.label === 'Description',
+                            'flex justify-center items-center': col.label === 'Tracking URL',
+                          })}
+                        >
                           {col.accessor(carrier)}
                         </Text>
-                      </div>
-                    ) : (
-                      <Text
-                        className={cn('text-center', {
-                          'line-clamp-2': col.label === 'Description',
-                          'flex justify-center items-center': col.label === 'Tracking URL',
-                        })}
-                      >
-                        {col.accessor(carrier)}
-                      </Text>
-                    )}
-                  </td>
-                ))}
-              </tr>
-            ))}
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
