@@ -302,6 +302,8 @@ export type common_Dictionary = {
   bigMenu: boolean | undefined;
   announce: common_Announce | undefined;
   orderExpirationSeconds: number | undefined;
+  complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
+  isProd: boolean | undefined;
 };
 
 // Category represents a hierarchical category structure
@@ -617,6 +619,7 @@ export type common_Shipment = {
   trackingCode: string | undefined;
   shippingDate: wellKnownTimestamp | undefined;
   estimatedArrivalDate: wellKnownTimestamp | undefined;
+  freeShipping: boolean | undefined;
 };
 
 // PromoCode represents the promo_code table
@@ -671,6 +674,9 @@ export type ValidateOrderItemsInsertResponse = {
   clientSecret: string | undefined;
   paymentIntentId: string | undefined;
   itemAdjustments: common_OrderItemAdjustment[] | undefined;
+  idempotencyKey: string | undefined;
+  freeShipping: boolean | undefined;
+  shippingPrice: googletype_Decimal | undefined;
 };
 
 // OrderItemAdjustment describes a change made during order item validation.
@@ -779,8 +785,16 @@ export type common_SupportTicketInsert = {
   lastName: string | undefined;
   orderReference: string | undefined;
   notes: string | undefined;
+  category: string | undefined;
+  priority: common_SupportTicketPriority | undefined;
 };
 
+export type common_SupportTicketPriority =
+  | "SUPPORT_TICKET_PRIORITY_UNKNOWN"
+  | "SUPPORT_TICKET_PRIORITY_LOW"
+  | "SUPPORT_TICKET_PRIORITY_MEDIUM"
+  | "SUPPORT_TICKET_PRIORITY_HIGH"
+  | "SUPPORT_TICKET_PRIORITY_URGENT";
 export type SubmitSupportTicketResponse = {
 };
 

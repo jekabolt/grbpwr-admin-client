@@ -34,6 +34,8 @@ export type common_Dictionary = {
   bigMenu: boolean | undefined;
   announce: common_Announce | undefined;
   orderExpirationSeconds: number | undefined;
+  complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
+  isProd: boolean | undefined;
 };
 
 // Category represents a hierarchical category structure
@@ -652,6 +654,7 @@ export type common_Shipment = {
   trackingCode: string | undefined;
   shippingDate: wellKnownTimestamp | undefined;
   estimatedArrivalDate: wellKnownTimestamp | undefined;
+  freeShipping: boolean | undefined;
 };
 
 export type common_Buyer = {
@@ -702,6 +705,7 @@ export type ListOrdersRequest = {
   paymentMethod: common_PaymentMethodNameEnum | undefined;
   email: string | undefined;
   orderId: number | undefined;
+  orderUuid: string | undefined;
   limit: number | undefined;
   offset: number | undefined;
   orderFactor: common_OrderFactor | undefined;
@@ -1132,6 +1136,8 @@ export type UpdateSettingsRequest = {
   bigMenu: boolean | undefined;
   announce: common_Announce | undefined;
   orderExpirationSeconds: number | undefined;
+  complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
+  isProd: boolean | undefined;
 };
 
 export type ShipmentCarrierAllowancePrice = {
@@ -1187,20 +1193,45 @@ export type GetSupportTicketsPagedRequest = {
   limit: number | undefined;
   offset: number | undefined;
   orderFactor: common_OrderFactor | undefined;
-  resolved: boolean | undefined;
+  status?: common_SupportTicketStatus;
+  email?: string;
+  orderReference?: string;
+  topic?: string;
+  category?: string;
+  priority?: common_SupportTicketPriority;
+  dateFrom?: string;
+  dateTo?: string;
 };
 
+export type common_SupportTicketStatus =
+  | "SUPPORT_TICKET_STATUS_UNKNOWN"
+  | "SUPPORT_TICKET_STATUS_SUBMITTED"
+  | "SUPPORT_TICKET_STATUS_IN_PROGRESS"
+  | "SUPPORT_TICKET_STATUS_WAITING_CUSTOMER"
+  | "SUPPORT_TICKET_STATUS_RESOLVED"
+  | "SUPPORT_TICKET_STATUS_CLOSED";
+export type common_SupportTicketPriority =
+  | "SUPPORT_TICKET_PRIORITY_UNKNOWN"
+  | "SUPPORT_TICKET_PRIORITY_LOW"
+  | "SUPPORT_TICKET_PRIORITY_MEDIUM"
+  | "SUPPORT_TICKET_PRIORITY_HIGH"
+  | "SUPPORT_TICKET_PRIORITY_URGENT";
 export type GetSupportTicketsPagedResponse = {
   tickets: common_SupportTicket[] | undefined;
+  totalCount: number | undefined;
 };
 
 export type common_SupportTicket = {
   id: number | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
-  status: boolean | undefined;
+  status: common_SupportTicketStatus | undefined;
   resolvedAt: wellKnownTimestamp | undefined;
   supportTicketInsert: common_SupportTicketInsert | undefined;
+  caseNumber: string | undefined;
+  category: string | undefined;
+  priority: common_SupportTicketPriority | undefined;
+  internalNotes: string | undefined;
 };
 
 export type common_SupportTicketInsert = {
@@ -1212,14 +1243,43 @@ export type common_SupportTicketInsert = {
   lastName: string | undefined;
   orderReference: string | undefined;
   notes: string | undefined;
+  category: string | undefined;
+  priority: common_SupportTicketPriority | undefined;
+};
+
+export type GetSupportTicketByIdRequest = {
+  id: number | undefined;
+};
+
+export type GetSupportTicketByIdResponse = {
+  ticket: common_SupportTicket | undefined;
+};
+
+export type GetSupportTicketByCaseNumberRequest = {
+  caseNumber: string | undefined;
+};
+
+export type GetSupportTicketByCaseNumberResponse = {
+  ticket: common_SupportTicket | undefined;
 };
 
 export type UpdateSupportTicketStatusRequest = {
   id: number | undefined;
-  status: boolean | undefined;
+  status: common_SupportTicketStatus | undefined;
+  internalNotes?: string;
 };
 
 export type UpdateSupportTicketStatusResponse = {
+};
+
+export type UpdateSupportTicketRequest = {
+  id: number | undefined;
+  priority?: common_SupportTicketPriority;
+  category?: string;
+  internalNotes?: string;
+};
+
+export type UpdateSupportTicketResponse = {
 };
 
 export interface AdminService {
@@ -1285,7 +1345,10 @@ export interface AdminService {
   // DeleteShipmentCarrier deletes a shipping carrier by ID.
   DeleteShipmentCarrier(request: DeleteShipmentCarrierRequest): Promise<DeleteShipmentCarrierResponse>;
   GetSupportTicketsPaged(request: GetSupportTicketsPagedRequest): Promise<GetSupportTicketsPagedResponse>;
+  GetSupportTicketById(request: GetSupportTicketByIdRequest): Promise<GetSupportTicketByIdResponse>;
+  GetSupportTicketByCaseNumber(request: GetSupportTicketByCaseNumberRequest): Promise<GetSupportTicketByCaseNumberResponse>;
   UpdateSupportTicketStatus(request: UpdateSupportTicketStatusRequest): Promise<UpdateSupportTicketStatusResponse>;
+  UpdateSupportTicket(request: UpdateSupportTicketRequest): Promise<UpdateSupportTicketResponse>;
 }
 
 type RequestType = {
@@ -2024,8 +2087,29 @@ export function createAdminServiceClient(
       if (request.orderFactor) {
         queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
-      if (request.resolved) {
-        queryParams.push(`resolved=${encodeURIComponent(request.resolved.toString())}`)
+      if (request.status) {
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
+      }
+      if (request.email) {
+        queryParams.push(`email=${encodeURIComponent(request.email.toString())}`)
+      }
+      if (request.orderReference) {
+        queryParams.push(`orderReference=${encodeURIComponent(request.orderReference.toString())}`)
+      }
+      if (request.topic) {
+        queryParams.push(`topic=${encodeURIComponent(request.topic.toString())}`)
+      }
+      if (request.category) {
+        queryParams.push(`category=${encodeURIComponent(request.category.toString())}`)
+      }
+      if (request.priority) {
+        queryParams.push(`priority=${encodeURIComponent(request.priority.toString())}`)
+      }
+      if (request.dateFrom) {
+        queryParams.push(`dateFrom=${encodeURIComponent(request.dateFrom.toString())}`)
+      }
+      if (request.dateTo) {
+        queryParams.push(`dateTo=${encodeURIComponent(request.dateTo.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
@@ -2039,6 +2123,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetSupportTicketsPaged",
       }) as Promise<GetSupportTicketsPagedResponse>;
+    },
+    GetSupportTicketById(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/support/tickets/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSupportTicketById",
+      }) as Promise<GetSupportTicketByIdResponse>;
+    },
+    GetSupportTicketByCaseNumber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.caseNumber) {
+        throw new Error("missing required field request.case_number");
+      }
+      const path = `api/admin/support/tickets/case/${request.caseNumber}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSupportTicketByCaseNumber",
+      }) as Promise<GetSupportTicketByCaseNumberResponse>;
     },
     UpdateSupportTicketStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
@@ -2059,6 +2183,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpdateSupportTicketStatus",
       }) as Promise<UpdateSupportTicketStatusResponse>;
+    },
+    UpdateSupportTicket(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/support/tickets/${request.id}/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateSupportTicket",
+      }) as Promise<UpdateSupportTicketResponse>;
     },
   };
 }

@@ -1,82 +1,73 @@
+import { common_SupportTicket } from 'api/proto-http/admin';
+import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { formatDate } from '../orders-catalog/components/utility';
-import { useInfiniteTickets, useUpdateTicketStatus } from './components/utils';
-
-type Ticket = NonNullable<
-  ReturnType<typeof useInfiniteTickets>['data']
->['pages'][number]['tickets'][number];
+import { TicketDetail } from './components/ticket-detail';
+import { TicketsTable } from './components/tickets-table';
+import { TicketFilters, useInfiniteTickets } from './components/utils';
 
 export function CustomerPage() {
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteTickets();
-  const updateStatus = useUpdateTicketStatus();
-  const tickets = data?.pages.flatMap((page) => page.tickets) || [];
+  const [filters, setFilters] = useState<TicketFilters>({});
+  const [debouncedFilters, setDebouncedFilters] = useState<TicketFilters>({});
+  const [selectedTicket, setSelectedTicket] = useState<common_SupportTicket | null>(null);
 
-  const handleToggleStatus = (ticketId: number, currentStatus: boolean) => {
-    updateStatus.mutate({ id: ticketId, status: !currentStatus });
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedFilters(filters);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [filters]);
+
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
+    useInfiniteTickets(50, debouncedFilters);
+  const tickets = data?.pages.flatMap((page) => page.tickets) || [];
+  const totalCount = data?.pages[0]?.totalCount ?? 0;
+
+  const handleFiltersChange = (partial: Partial<TicketFilters>) => {
+    setFilters((prev) => ({ ...prev, ...partial }));
   };
 
-  const COLUMNS: { label: string; accessor: (t: Ticket) => React.ReactNode }[] = [
-    { label: 'ID', accessor: (t) => t.id },
-    {
-      label: 'Status',
-      accessor: (t) => (
-        <Button variant='main' size='lg' onClick={() => handleToggleStatus(t.id!, t.status!)}>
-          {t.status ? 'Resolved' : 'Unresolved'}
-        </Button>
-      ),
-    },
-    { label: 'Created At', accessor: (t) => formatDate(t.createdAt) },
-    { label: 'Updated At', accessor: (t) => formatDate(t.updatedAt) },
-    { label: 'Resolved At', accessor: (t) => formatDate(t.resolvedAt) },
-    { label: 'First Name', accessor: (t) => t.supportTicketInsert?.firstName },
-    { label: 'Last Name', accessor: (t) => t.supportTicketInsert?.lastName },
-    { label: 'Civility', accessor: (t) => t.supportTicketInsert?.civility },
-    { label: 'Email', accessor: (t) => t.supportTicketInsert?.email },
-    { label: 'Subject', accessor: (t) => t.supportTicketInsert?.subject },
-    { label: 'Topic', accessor: (t) => t.supportTicketInsert?.topic },
-    { label: 'Order Reference', accessor: (t) => t.supportTicketInsert?.orderReference },
-    { label: 'Notes', accessor: (t) => t.supportTicketInsert?.notes },
-  ];
+  const handleSelectTicket = (ticket: common_SupportTicket) => {
+    setSelectedTicket(ticket);
+  };
+
+  const handleCloseDetail = () => {
+    setSelectedTicket(null);
+  };
 
   return (
-    <div className='flex flex-col w-full gap-4'>
-      <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
-          <thead className='bg-textInactiveColor h-10 overflow-x-scroll'>
-            <tr className='border-b border-textColor'>
-              {COLUMNS.map((col) => (
-                <th
-                  key={col.label}
-                  className='text-center h-10 min-w-26 border border-r border-textColor px-2'
-                >
-                  <Text variant='uppercase'>{col.label}</Text>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {tickets.map((t) => (
-              <tr key={t.id} className='border-b border-text last:border-b-0 h-10'>
-                {COLUMNS.map((col) => (
-                  <td key={col.label} className='border border-r border-textColor text-center px-2'>
-                    <Text>{col.accessor(t)}</Text>
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className='flex flex-col w-full gap-4 pb-16'>
+      <div className='flex items-center justify-between'>
+        <Text variant='uppercase' size='large'>
+          Support Tickets {totalCount > 0 && `(${totalCount})`}
+        </Text>
       </div>
-      {hasNextPage && (
-        <Button
-          variant='main'
-          size='lg'
-          onClick={() => fetchNextPage()}
-          disabled={isFetchingNextPage}
-        >
-          {isFetchingNextPage ? 'Loading...' : 'Load More'}
-        </Button>
+
+      {selectedTicket ? (
+        <TicketDetail ticket={selectedTicket} onClose={handleCloseDetail} />
+      ) : (
+        <>
+          <TicketsTable
+            tickets={tickets}
+            filters={filters}
+            isLoading={isLoading || isFetchingNextPage}
+            onFiltersChange={handleFiltersChange}
+            onSelectTicket={handleSelectTicket}
+          />
+          {hasNextPage && (
+            <div className='flex justify-center'>
+              <Button
+                variant='main'
+                size='lg'
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                loading={isFetchingNextPage}
+              >
+                Load More
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
