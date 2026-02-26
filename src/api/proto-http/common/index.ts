@@ -113,14 +113,14 @@ export type ArchiveList = {
 
 export type ArchiveFull = {
   archiveList: ArchiveList | undefined;
-  mainMedia: MediaFull | undefined;
+  mainMedia: MediaFull[] | undefined;
   media: MediaFull[] | undefined;
 };
 
 export type ArchiveInsert = {
   tag: string | undefined;
   mediaIds: number[] | undefined;
-  mainMediaId: number | undefined;
+  mainMediaIds: number[] | undefined;
   thumbnailId: number | undefined;
   translations: ArchiveInsertTranslation[] | undefined;
 };

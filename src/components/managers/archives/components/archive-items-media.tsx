@@ -5,15 +5,6 @@ import { isVideo } from 'lib/features/filterContentType';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 
-// Helper function to check if media has 2:1 aspect ratio (main image)
-const isMainImage = (media: common_MediaFull): boolean => {
-  const width = media.media?.fullSize?.width;
-  const height = media.media?.fullSize?.height;
-  if (!width || !height) return false;
-  const ratio = width / height;
-  return Math.abs(ratio - 2) < 0.1; // Allow small tolerance for 2:1 ratio
-};
-
 export function ArchiveMediaDisplay({
   media,
   values,
@@ -26,64 +17,38 @@ export function ArchiveMediaDisplay({
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const video = media.find(
-    (item) => isVideo(item.media?.fullSize?.mediaUrl) && item.id === values.mainMediaId,
-  );
-
-  const mainImage = media.find(
-    (item) =>
-      !isVideo(item.media?.fullSize?.mediaUrl) &&
-      isMainImage(item) &&
-      item.id === values.mainMediaId,
-  );
-
-  const images = media.filter((item) => {
-    if (isVideo(item.media?.fullSize?.mediaUrl)) return false;
-    if (isMainImage(item)) return false;
-    return true;
-  });
+  const mainMediaIds = new Set(values.mainMediaIds ?? []);
+  const mainMedia = media.filter((m) => m.id != null && mainMediaIds.has(m.id));
+  const otherMedia = media.filter((m) => m.id == null || !mainMediaIds.has(m.id));
 
   return (
     <div className='space-y-2'>
-      {video && (
-        <div className='w-full relative'>
-          <Media
-            src={video.media?.fullSize?.mediaUrl || ''}
-            type='video'
-            alt='archive media item'
-            aspectRatio='16/9'
-            fit='cover'
-            autoPlay
-          />
-          <Button
-            onClick={() => remove(video.id || 0, values, true)}
-            className='absolute right-0 top-0'
-          >
-            <Cross1Icon />
-          </Button>
+      {mainMedia.length > 0 && (
+        <div className='space-y-2'>
+          {mainMedia.map((item) => (
+            <div key={item.id} className='w-full relative'>
+              <Media
+                src={item.media?.fullSize?.mediaUrl || ''}
+                type={isVideo(item.media?.fullSize?.mediaUrl) ? 'video' : 'image'}
+                alt='archive main media'
+                aspectRatio={isVideo(item.media?.fullSize?.mediaUrl) ? '16/9' : '2/1'}
+                fit='cover'
+                autoPlay={isVideo(item.media?.fullSize?.mediaUrl)}
+              />
+              <Button
+                onClick={() => remove(item.id || 0, values, isVideo(item.media?.fullSize?.mediaUrl))}
+                className='absolute right-0 top-0'
+              >
+                <Cross1Icon />
+              </Button>
+            </div>
+          ))}
         </div>
       )}
 
-      {mainImage && !video && (
-        <div className='w-full relative'>
-          <Media
-            src={mainImage.media?.fullSize?.mediaUrl || ''}
-            alt='archive main image'
-            aspectRatio='2/1'
-            fit='cover'
-          />
-          <Button
-            onClick={() => remove(mainImage.id || 0, values, false)}
-            className='absolute right-0 top-0'
-          >
-            <Cross1Icon />
-          </Button>
-        </div>
-      )}
-
-      {images.length > 0 && (
+      {otherMedia.length > 0 && (
         <div className={`grid ${isSm ? 'grid-cols-2' : 'grid-cols-4'} gap-2`}>
-          {images.map((item) => (
+          {otherMedia.map((item) => (
             <div key={item.id} className='relative'>
               <Media
                 src={item.media?.fullSize?.mediaUrl || ''}

@@ -1075,7 +1075,7 @@ export type AddArchiveRequest = {
 export type common_ArchiveInsert = {
   tag: string | undefined;
   mediaIds: number[] | undefined;
-  mainMediaId: number | undefined;
+  mainMediaIds: number[] | undefined;
   thumbnailId: number | undefined;
   translations: common_ArchiveInsertTranslation[] | undefined;
 };
@@ -1105,7 +1105,7 @@ export type GetArchiveByIDResponse = {
 
 export type common_ArchiveFull = {
   archiveList: common_ArchiveList | undefined;
-  mainMedia: common_MediaFull | undefined;
+  mainMedia: common_MediaFull[] | undefined;
   media: common_MediaFull[] | undefined;
 };
 
@@ -1344,9 +1344,9 @@ export interface AdminService {
   UpdateShipmentCarrier(request: UpdateShipmentCarrierRequest): Promise<UpdateShipmentCarrierResponse>;
   // DeleteShipmentCarrier deletes a shipping carrier by ID.
   DeleteShipmentCarrier(request: DeleteShipmentCarrierRequest): Promise<DeleteShipmentCarrierResponse>;
-  GetSupportTicketsPaged(request: GetSupportTicketsPagedRequest): Promise<GetSupportTicketsPagedResponse>;
   GetSupportTicketById(request: GetSupportTicketByIdRequest): Promise<GetSupportTicketByIdResponse>;
   GetSupportTicketByCaseNumber(request: GetSupportTicketByCaseNumberRequest): Promise<GetSupportTicketByCaseNumberResponse>;
+  GetSupportTicketsPaged(request: GetSupportTicketsPagedRequest): Promise<GetSupportTicketsPagedResponse>;
   UpdateSupportTicketStatus(request: UpdateSupportTicketStatusRequest): Promise<UpdateSupportTicketStatusResponse>;
   UpdateSupportTicket(request: UpdateSupportTicketRequest): Promise<UpdateSupportTicketResponse>;
 }
@@ -2074,6 +2074,46 @@ export function createAdminServiceClient(
         method: "DeleteShipmentCarrier",
       }) as Promise<DeleteShipmentCarrierResponse>;
     },
+    GetSupportTicketById(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/support/tickets/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSupportTicketById",
+      }) as Promise<GetSupportTicketByIdResponse>;
+    },
+    GetSupportTicketByCaseNumber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.caseNumber) {
+        throw new Error("missing required field request.case_number");
+      }
+      const path = `api/admin/support/tickets/case/${request.caseNumber}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSupportTicketByCaseNumber",
+      }) as Promise<GetSupportTicketByCaseNumberResponse>;
+    },
     GetSupportTicketsPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/support/tickets/paged`; // eslint-disable-line quotes
       const body = null;
@@ -2123,46 +2163,6 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetSupportTicketsPaged",
       }) as Promise<GetSupportTicketsPagedResponse>;
-    },
-    GetSupportTicketById(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      if (!request.id) {
-        throw new Error("missing required field request.id");
-      }
-      const path = `api/admin/support/tickets/${request.id}`; // eslint-disable-line quotes
-      const body = null;
-      const queryParams: string[] = [];
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "GET",
-        body,
-      }, {
-        service: "AdminService",
-        method: "GetSupportTicketById",
-      }) as Promise<GetSupportTicketByIdResponse>;
-    },
-    GetSupportTicketByCaseNumber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      if (!request.caseNumber) {
-        throw new Error("missing required field request.case_number");
-      }
-      const path = `api/admin/support/tickets/case/${request.caseNumber}`; // eslint-disable-line quotes
-      const body = null;
-      const queryParams: string[] = [];
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "GET",
-        body,
-      }, {
-        service: "AdminService",
-        method: "GetSupportTicketByCaseNumber",
-      }) as Promise<GetSupportTicketByCaseNumberResponse>;
     },
     UpdateSupportTicketStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
