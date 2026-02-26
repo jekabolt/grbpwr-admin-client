@@ -490,6 +490,7 @@ export type Shipment = {
   trackingCode: string | undefined;
   shippingDate: wellKnownTimestamp | undefined;
   estimatedArrivalDate: wellKnownTimestamp | undefined;
+  freeShipping: boolean | undefined;
 };
 
 export type OrderItemAdjustmentReasonEnum =
@@ -611,6 +612,8 @@ export type Dictionary = {
   bigMenu: boolean | undefined;
   announce: Announce | undefined;
   orderExpirationSeconds: number | undefined;
+  complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
+  isProd: boolean | undefined;
 };
 
 export type Collection = {
@@ -789,6 +792,19 @@ export type Subscriber = {
   receivePromoEmails: boolean | undefined;
 };
 
+export type SupportTicketStatus =
+  | "SUPPORT_TICKET_STATUS_UNKNOWN"
+  | "SUPPORT_TICKET_STATUS_SUBMITTED"
+  | "SUPPORT_TICKET_STATUS_IN_PROGRESS"
+  | "SUPPORT_TICKET_STATUS_WAITING_CUSTOMER"
+  | "SUPPORT_TICKET_STATUS_RESOLVED"
+  | "SUPPORT_TICKET_STATUS_CLOSED";
+export type SupportTicketPriority =
+  | "SUPPORT_TICKET_PRIORITY_UNKNOWN"
+  | "SUPPORT_TICKET_PRIORITY_LOW"
+  | "SUPPORT_TICKET_PRIORITY_MEDIUM"
+  | "SUPPORT_TICKET_PRIORITY_HIGH"
+  | "SUPPORT_TICKET_PRIORITY_URGENT";
 export type SupportTicketInsert = {
   topic: string | undefined;
   subject: string | undefined;
@@ -798,15 +814,21 @@ export type SupportTicketInsert = {
   lastName: string | undefined;
   orderReference: string | undefined;
   notes: string | undefined;
+  category: string | undefined;
+  priority: SupportTicketPriority | undefined;
 };
 
 export type SupportTicket = {
   id: number | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
-  status: boolean | undefined;
+  status: SupportTicketStatus | undefined;
   resolvedAt: wellKnownTimestamp | undefined;
   supportTicketInsert: SupportTicketInsert | undefined;
+  caseNumber: string | undefined;
+  category: string | undefined;
+  priority: SupportTicketPriority | undefined;
+  internalNotes: string | undefined;
 };
 
 
