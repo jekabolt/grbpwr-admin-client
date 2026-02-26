@@ -11,7 +11,6 @@ import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import ToggleField from 'ui/form/fields/toggle-field';
 import { TranslationField } from 'ui/form/fields/translation-field';
-import { CarrierPrices } from './components/carrier-prices';
 import {
   defaultSettings,
   SettingsSchema,
@@ -74,7 +73,7 @@ export function Settings() {
             ))}
           </div>
         </div>
-        <div className='space-y-4'>
+        {/* <div className='space-y-4'>
           <Text variant='uppercase' className='font-bold' size='large'>
             shipment carriers
           </Text>
@@ -95,7 +94,7 @@ export function Settings() {
               );
             })}
           </div>
-        </div>
+        </div> */}
         <div className='flex items-center gap-4'>
           <Text variant='uppercase' size='large' className='whitespace-nowrap font-bold'>
             max order quantity

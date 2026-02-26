@@ -55,15 +55,20 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
   const onSubmit: SubmitHandler<ShippingSchema> = async (data: ShippingSchema) => {
     try {
       setIsLoading(true);
+      const { from, to, ...rest } = data;
+      const payload = {
+        ...rest,
+        expectedDeliveryTime: `${from}-${to}`,
+      };
       if (id) {
         await adminService.UpdateShipmentCarrier({
-          ...(data as unknown as Omit<UpdateShipmentCarrierRequest, 'id'>),
+          ...(payload as unknown as Omit<UpdateShipmentCarrierRequest, 'id'>),
           id,
         });
         showMessage('Shipping updated successfully', 'success');
       } else {
         await adminService.AddShipmentCarrier({
-          ...(data as unknown as AddShipmentCarrierRequest),
+          ...(payload as unknown as AddShipmentCarrierRequest),
         });
         showMessage('Shipping created successfully', 'success');
       }
@@ -90,7 +95,15 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
             <div className='flex flex-col gap-6'>
               <InputField name='carrier' label='Carrier' />
               <TextareaField name='description' label='Description' />
-              <InputField name='expectedDeliveryTime' label='Expected Delivery Time' />
+              <div className='flex gap-4 flex-col'>
+                <Text variant='uppercase' className='leading-none'>
+                  Expected Delivery Time
+                </Text>
+                <div className='flex gap-4 items-end'>
+                  <InputField name='from' type='number' min='0' placeholder='from' />
+                  <InputField name='to' type='number' min='0' placeholder='to' />
+                </div>
+              </div>
               <InputField name='trackingUrl' label='Tracking URL' />
             </div>
             <div className='flex flex-col gap-6'>
