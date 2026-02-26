@@ -73,28 +73,6 @@ export function Settings() {
             ))}
           </div>
         </div>
-        {/* <div className='space-y-4'>
-          <Text variant='uppercase' className='font-bold' size='large'>
-            shipment carriers
-          </Text>
-          <div className='grid gap-6'>
-            {shipmentCarriers?.map((carrier, index) => {
-              const isFreeCarrier = carrier.carrier?.toString().toUpperCase() === 'FREE';
-
-              return (
-                <div key={carrier.carrier || index} className='space-y-3'>
-                  <div className='flex items-center gap-4'>
-                    <ToggleField name={`shipmentCarriers.${index}.allow`} label={carrier.carrier} />
-                  </div>
-                  {!isFreeCarrier && <CarrierPrices carrierIndex={index} />}
-                  <Text variant='uppercase' className='text-textInactiveColor'>
-                    {dictionary?.shipmentCarriers?.[index]?.shipmentCarrier?.description}
-                  </Text>
-                </div>
-              );
-            })}
-          </div>
-        </div> */}
         <div className='flex items-center gap-4'>
           <Text variant='uppercase' size='large' className='whitespace-nowrap font-bold'>
             max order quantity
