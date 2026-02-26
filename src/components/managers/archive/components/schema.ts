@@ -31,7 +31,7 @@ export const schema = z
   .object({
     tag: z.string().min(1, 'Tag is required'),
     mediaIds: z.array(z.number()).min(1, 'Select at least one media').default([]),
-    mainMediaId: z.number().min(1, 'Select main media').optional(),
+    mainMediaIds: z.array(z.number()).min(1, 'Select at least one main media').default([]),
     thumbnailId: z.number().optional(),
     translations: createStrictTranslationSchema(
       z.object({
@@ -41,16 +41,12 @@ export const schema = z
       }),
       requiredLanguageIds,
     ),
-  })
-  .refine((data) => data.mainMediaId != null && data.mainMediaId >= 1, {
-    message: 'Select main media',
-    path: ['mainMediaId'],
   });
 
 export const defaultData = {
   tag: '',
   mediaIds: [] as number[],
-  mainMediaId: undefined as number | undefined,
+  mainMediaIds: [] as number[],
   thumbnailId: undefined as number | undefined,
   translations: LANGUAGES.map((l) => ({ languageId: l.id, heading: '', description: '' })),
 };
@@ -63,7 +59,7 @@ export function mapArchiveDataToForm(data: CheckoutData) {
   return {
     tag: data.tag,
     mediaIds: data.mediaIds,
-    mainMediaId: data.mainMediaId,
+    mainMediaIds: data.mainMediaIds,
     thumbnailId: firstMediaId,
     translations: data.translations,
   };
@@ -72,8 +68,8 @@ export function mapArchiveDataToForm(data: CheckoutData) {
 export function mapArchive(archive: common_ArchiveFull) {
   return {
     tag: archive.archiveList?.tag || '',
-    mediaIds: archive.media?.map((m) => m.id),
-    mainMediaId: archive.mainMedia?.id,
+    mediaIds: archive.media?.map((m) => m.id).filter((id): id is number => id != null) ?? [],
+    mainMediaIds: archive.mainMedia?.map((m) => m.id).filter((id): id is number => id != null) ?? [],
     thumbnailId: archive.archiveList?.thumbnail?.id,
     translations: archive.archiveList?.translations?.map((t) => ({
       languageId: t.languageId || 0,

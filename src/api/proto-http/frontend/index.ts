@@ -245,7 +245,7 @@ export type common_HeroFeaturedArchiveWithTranslations = {
 
 export type common_ArchiveFull = {
   archiveList: common_ArchiveList | undefined;
-  mainMedia: common_MediaFull | undefined;
+  mainMedia: common_MediaFull[] | undefined;
   media: common_MediaFull[] | undefined;
 };
 
