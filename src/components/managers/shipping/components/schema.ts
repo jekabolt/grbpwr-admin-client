@@ -8,9 +8,21 @@ export const shippingSchema = z
     allowedRegions: z.array(z.string()),
     carrier: z.string(),
     description: z.string(),
-    expectedDeliveryTime: z.string(),
+    from: z.string(),
+    to: z.string(),
     prices: z.record(z.string(), z.object({ value: z.string() })),
     trackingUrl: z.string(),
+  })
+  .superRefine((data, ctx) => {
+    const fromNum = parseFloat(data.from);
+    const toNum = parseFloat(data.to);
+    if (!Number.isNaN(fromNum) && !Number.isNaN(toNum) && fromNum > toNum) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'From cannot be greater than to',
+        path: ['from'],
+      });
+    }
   })
   .superRefine((data, ctx) => {
     const hasInvalid = INTEGER_CURRENCIES.some((currency) => {
@@ -31,7 +43,8 @@ export const defaultShipping = {
   allowedRegions: [],
   carrier: '',
   description: '',
-  expectedDeliveryTime: '',
+  from: '',
+  to: '',
   prices: {},
   trackingUrl: '',
 };
@@ -52,12 +65,15 @@ export function transformDictionaryToShipping(dictionary: any, id?: number): Shi
       return defaultShipping;
     }
 
+    const et = carrier.shipmentCarrier?.expectedDeliveryTime ?? '';
+    const match = /^(\d*)-(\d*)/.exec(et);
     source = {
       allowed: carrier.shipmentCarrier?.allowed,
       allowedRegions: carrier.allowedRegions ?? [],
       carrier: carrier.shipmentCarrier?.carrier,
       description: carrier.shipmentCarrier?.description,
-      expectedDeliveryTime: carrier.shipmentCarrier?.expectedDeliveryTime,
+      from: match ? match[1] : '',
+      to: match ? match[2] : '',
       prices: carrier.prices,
       trackingUrl: carrier.shipmentCarrier?.trackingUrl,
     };
@@ -75,12 +91,26 @@ export function transformDictionaryToShipping(dictionary: any, id?: number): Shi
     }
   });
 
+  let from = '';
+  let to = '';
+  if (source.from != null && source.to != null) {
+    from = String(source.from);
+    to = String(source.to);
+  } else {
+    const et = source.expectedDeliveryTime ?? '';
+    const match = /^(\d*)-(\d*)/.exec(et);
+    if (match) {
+      from = match[1];
+      to = match[2];
+    }
+  }
   return {
     allowed: source.allowed ?? true,
     allowedRegions: source.allowedRegions ?? [],
     carrier: source.carrier ?? '',
     description: source.description ?? '',
-    expectedDeliveryTime: source.expectedDeliveryTime ?? '',
+    from,
+    to,
     prices: pricesMap,
     trackingUrl: source.trackingUrl ?? '',
   };

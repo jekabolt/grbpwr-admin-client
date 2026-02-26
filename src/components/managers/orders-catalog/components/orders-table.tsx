@@ -3,7 +3,6 @@ import { statusOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
@@ -46,21 +45,18 @@ export function OrdersTable({
 
   const statusFilterLabel = status ? statusOptions.find((o) => o.value === status)?.label : null;
 
-  const COLUMNS: { label: string; accessor: (o: Order) => React.ReactNode }[] = useMemo(
-    () => [
-      { label: 'Order ID', accessor: (o: Order) => o.id },
-      {
-        label: 'Order Status',
-        accessor: (o) => statusFilterLabel ?? getOrderStatusName(dictionary, o.orderStatusId),
-      },
-      { label: 'Placed', accessor: (o) => formatDateShort(o.placed) },
-      {
-        label: 'Total',
-        accessor: (o) => `${o.totalPrice?.value} ${o.currency}`,
-      },
-    ],
-    [dictionary, statusFilterLabel],
-  );
+  const COLUMNS: { label: string; accessor: (o: Order) => React.ReactNode }[] = [
+    { label: 'Order ID', accessor: (o: Order) => o.id },
+    {
+      label: 'Order Status',
+      accessor: (o) => statusFilterLabel ?? getOrderStatusName(dictionary, o.orderStatusId),
+    },
+    { label: 'Placed', accessor: (o) => formatDateShort(o.placed) },
+    {
+      label: 'Total',
+      accessor: (o) => `${o.totalPrice?.value} ${o.currency}`,
+    },
+  ];
 
   return (
     <div className='w-full flex flex-col gap-4'>

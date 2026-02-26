@@ -7,10 +7,12 @@ type CarrierPricesProps =
   | {
       basePath: string;
       carrierIndex?: never;
+      disabled?: boolean;
     }
   | {
       carrierIndex: number;
       basePath?: undefined;
+      disabled?: boolean;
     };
 
 function getErrorAtPath(
@@ -34,10 +36,12 @@ export function CarrierPrices(props: CarrierPricesProps) {
     'basePath' in props && props.basePath
       ? props.basePath
       : `shipmentCarriers.${props.carrierIndex}.prices`;
+  const disabled = props.disabled ?? false;
 
   const tableError = getErrorAtPath(errors as Record<string, unknown>, basePath);
 
   const handleShipmentPriceChange = (currency: string, value: string | number) => {
+    if (disabled) return;
     let stringValue = typeof value === 'number' ? value.toString() : value || '0';
 
     if (currency === 'JPY' || currency === 'KRW') {
@@ -80,6 +84,7 @@ export function CarrierPrices(props: CarrierPricesProps) {
                     min='0'
                     placeholder={placeholder}
                     className='w-full border-none text-center'
+                    disabled={disabled}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       handleShipmentPriceChange(currency.value, e.target.value);
                     }}
