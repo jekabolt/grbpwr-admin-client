@@ -1,4 +1,4 @@
-import { LANGUAGES } from 'constants/constants';
+import { CURRENCIES, LANGUAGES } from 'constants/constants';
 import z from 'zod';
 
 const requiredLanguageIds = LANGUAGES.map((l) => l.id);
@@ -55,20 +55,26 @@ const shipmentCarrierSchema = z.object({
   prices: z.record(z.string(), z.object({ value: z.string().optional() })).optional(),
 });
 
+const complimentaryPricesSchema = z
+  .record(z.string(), z.object({ value: z.string().optional() }))
+  .optional();
+
 export const settingsSchema = z
   .object({
-  announce: z
-    .object({
-      link: z.string().optional(),
-      translations: createStrictTranslationSchema(announceTranslationSchema, requiredLanguageIds),
-    })
-    .optional(),
-  bigMenu: z.boolean().optional(),
-  maxOrderItems: z.number().optional(),
-  paymentMethods: z.array(paymentMethodSchema).optional(),
-  shipmentCarriers: z.array(shipmentCarrierSchema).optional(),
-  siteAvailable: z.boolean().optional(),
-})
+    announce: z
+      .object({
+        link: z.string().optional(),
+        translations: createStrictTranslationSchema(announceTranslationSchema, requiredLanguageIds),
+      })
+      .optional(),
+    bigMenu: z.boolean().optional(),
+    complimentaryShippingPrices: complimentaryPricesSchema,
+    maxOrderItems: z.number().optional(),
+    paymentMethods: z.array(paymentMethodSchema).optional(),
+    shipmentCarriers: z.array(shipmentCarrierSchema).optional(),
+    siteAvailable: z.boolean().optional(),
+    isProd: z.boolean().optional(),
+  })
   .superRefine((data, ctx) => {
     data.shipmentCarriers?.forEach((carrier, i) => {
       if (!carrier.prices) return;
@@ -84,6 +90,19 @@ export const settingsSchema = z
         });
       }
     });
+    if (data.complimentaryShippingPrices) {
+      const hasInvalid = INTEGER_CURRENCIES.some((currency) => {
+        const v = data.complimentaryShippingPrices?.[currency]?.value;
+        return v != null && v !== '' && !/^\d+$/.test(v);
+      });
+      if (hasInvalid) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'JPY and KRW must be whole numbers (no decimals)',
+          path: ['complimentaryShippingPrices'],
+        });
+      }
+    }
   });
 
 export const defaultSettings = {
@@ -92,16 +111,33 @@ export const defaultSettings = {
     translations: LANGUAGES.map((l) => ({ languageId: l.id, text: '' })),
   },
   bigMenu: false,
+  complimentaryShippingPrices: CURRENCIES.reduce<Record<string, { value: string }>>(
+    (acc, c) => ({ ...acc, [c.value]: { value: '0' } }),
+    {},
+  ),
   maxOrderItems: 0,
   paymentMethods: [],
   shipmentCarriers: [],
   siteAvailable: true,
+  isProd: false,
 };
 
 export type SettingsSchema = z.infer<typeof settingsSchema>;
 
 export function transformDictionaryToSettings(dictionary: any): SettingsSchema {
+  const complimentaryMap: Record<string, { value: string }> = {};
+  CURRENCIES.forEach((c) => {
+    const raw = dictionary.complimentaryShippingPrices?.[c.value]?.value;
+    let value = raw ?? '0';
+    if (INTEGER_CURRENCIES.includes(c.value)) {
+      const n = parseFloat(value);
+      value = (!Number.isNaN(n) ? Math.round(n) : 0).toString();
+    }
+    complimentaryMap[c.value] = { value };
+  });
+
   return {
+    complimentaryShippingPrices: complimentaryMap,
     paymentMethods: dictionary.paymentMethods
       ?.filter(
         (method: any) =>
@@ -133,6 +169,7 @@ export function transformDictionaryToSettings(dictionary: any): SettingsSchema {
     maxOrderItems: dictionary.maxOrderItems || 0,
     siteAvailable: dictionary.siteEnabled || false,
     bigMenu: dictionary.bigMenu || false,
+    isProd: dictionary.isProd || false,
     announce: {
       link: dictionary.announce?.link || '',
       translations:
