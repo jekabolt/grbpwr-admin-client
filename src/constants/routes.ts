@@ -96,17 +96,14 @@ export const LEFT_SIDE_ITEMS: Manager[] = [
     label: 'hero',
     route: ROUTES.hero,
   },
-];
-
-export const MANAGERS: Manager[] = [
-  {
-    label: 'promo',
-    route: ROUTES.promo,
-  },
-  {
-    label: 'customer support',
-    route: ROUTES.customerSupport,
-  },
+  // {
+  //   label: 'promo',
+  //   route: ROUTES.promo,
+  // },
+  // {
+  //   label: 'support',
+  //   route: ROUTES.customerSupport,
+  // },
 ];
 
 export const RIGHT_SIDE_MANAGERS: Manager[] = [
