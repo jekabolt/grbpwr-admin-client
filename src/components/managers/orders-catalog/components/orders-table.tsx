@@ -19,22 +19,22 @@ interface OrdersTableProps {
   orders: Order[];
   orderFactor: 'ORDER_FACTOR_ASC' | 'ORDER_FACTOR_DESC';
   status: common_OrderStatusEnum | '';
-  orderId: string;
+  orderSearch: string;
   isLoading: boolean;
   onToggleSort: () => void;
   onStatusChange: (value: common_OrderStatusEnum | '') => void;
-  onOrderIdChange: (value: string) => void;
+  onOrderSearchChange: (value: string) => void;
 }
 
 export function OrdersTable({
   orders,
   orderFactor,
   status,
-  orderId,
+  orderSearch,
   isLoading,
   onToggleSort,
   onStatusChange,
-  onOrderIdChange,
+  onOrderSearchChange,
 }: OrdersTableProps) {
   const { dictionary } = useDictionary();
   const navigate = useNavigate();
@@ -95,15 +95,15 @@ export function OrdersTable({
                         <Text variant='uppercase'>{col.label}</Text>
                       </Button>
                       <Input
-                        name='orderId'
-                        type='number'
-                        placeholder='order id'
-                        value={orderId}
+                        name='orderSearch'
+                        type='text'
+                        placeholder='order reference'
+                        value={orderSearch}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          onOrderIdChange(e.target.value)
+                          onOrderSearchChange(e.target.value)
                         }
                         disabled={isLoading}
-                        className='w-16 bg-textInactiveColor [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none placeholder:text-textColor'
+                        className='w-40 bg-textInactiveColor placeholder:text-textColor placeholder:text-center'
                       />
                     </div>
                   ) : col.label === 'Order Status' ? (
