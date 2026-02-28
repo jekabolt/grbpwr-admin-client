@@ -10,10 +10,10 @@ export function OrdersCatalog() {
     'ORDER_FACTOR_DESC',
   );
   const [status, setStatus] = useState<common_OrderStatusEnum | ''>('');
-  const [orderId, setOrderId] = useState<string>('');
+  const [orderSearch, setOrderSearch] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [debouncedEmail, setDebouncedEmail] = useState<string>('');
-  const [debouncedOrderId, setDebouncedOrderId] = useState<string>('');
+  const [debouncedOrderSearch, setDebouncedOrderSearch] = useState<string>('');
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -25,11 +25,11 @@ export function OrdersCatalog() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedOrderId(orderId);
+      setDebouncedOrderSearch(orderSearch);
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [orderId]);
+  }, [orderSearch]);
 
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteOrders(
@@ -37,7 +37,7 @@ export function OrdersCatalog() {
       orderFactor,
       debouncedEmail || undefined,
       status || undefined,
-      debouncedOrderId || undefined,
+      debouncedOrderSearch || undefined,
     );
   const orders = data?.pages.flatMap((page) => page.orders) || [];
 
@@ -66,8 +66,8 @@ export function OrdersCatalog() {
         onToggleSort={toggleSort}
         status={status}
         onStatusChange={setStatus}
-        orderId={orderId}
-        onOrderIdChange={setOrderId}
+        orderSearch={orderSearch}
+        onOrderSearchChange={setOrderSearch}
         isLoading={isLoading || isFetchingNextPage}
       />
       {hasNextPage && (

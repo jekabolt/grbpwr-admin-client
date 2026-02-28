@@ -20,10 +20,19 @@ export function useOrders(limit: number = 50, offset: number = 0) {
         paymentMethod: undefined,
         email: undefined,
         orderId: undefined,
+        orderUuid: undefined,
       });
       return response.orders || [];
     },
   });
+}
+
+/** Parses search value: numeric → orderId, else → orderUuid */
+export function parseOrderSearch(value: string): { orderId?: number; orderUuid?: string } {
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+  if (/^\d+$/.test(trimmed)) return { orderId: Number(trimmed) };
+  return { orderUuid: trimmed };
 }
 
 export function useInfiniteOrders(
@@ -31,10 +40,11 @@ export function useInfiniteOrders(
   orderFactor: 'ORDER_FACTOR_ASC' | 'ORDER_FACTOR_DESC' = 'ORDER_FACTOR_DESC',
   email?: string,
   status?: common_OrderStatusEnum,
-  orderId?: string,
+  orderSearch?: string,
 ) {
+  const { orderId, orderUuid } = parseOrderSearch(orderSearch ?? '');
   return useInfiniteQuery({
-    queryKey: [...ordersKeys.orders(orderFactor), email, status, orderId],
+    queryKey: [...ordersKeys.orders(orderFactor), email, status, orderId, orderUuid],
     queryFn: async ({ pageParam }: { pageParam: number }) => {
       const response = await adminService.ListOrders({
         limit,
@@ -43,7 +53,8 @@ export function useInfiniteOrders(
         status,
         paymentMethod: undefined,
         email,
-        orderId: orderId ? Number(orderId) : undefined,
+        orderId,
+        orderUuid,
       });
       return {
         orders: response.orders || [],
