@@ -29,7 +29,10 @@ const createStrictTranslationSchema = <T extends z.ZodType>(
 
 const announceTranslationSchema = z.object({
   languageId: z.number().min(1, 'Language is required'),
-  text: z.string().min(1, 'Announcement text is required'),
+  text: z
+    .string()
+    .min(1, 'Announcement text is required')
+    .max(110, 'Announcement text cannot exceed 110 characters'),
 });
 
 const paymentMethodSchema = z.object({
