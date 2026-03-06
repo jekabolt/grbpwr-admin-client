@@ -3,6 +3,10 @@
     "installCommand": "yarn install",
     "rewrites": [
         {
+            "source": "/media-proxy",
+            "destination": "/api/media-proxy"
+        },
+        {
             "source": "/(.*)",
             "destination": "/index.html"
         }
