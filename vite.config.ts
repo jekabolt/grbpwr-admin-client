@@ -6,6 +6,7 @@ import { defineConfig, loadEnv } from 'vite';
 function mediaProxyPlugin() {
   return {
     name: 'media-proxy',
+    apply: 'serve' as const,
     configureServer(server: { middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void } }) {
       server.middlewares.use(async (req, res, next) => {
         if (req.url?.startsWith('/media-proxy?')) {
