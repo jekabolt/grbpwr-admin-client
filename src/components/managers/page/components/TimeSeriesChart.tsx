@@ -28,13 +28,19 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
 }) => {
   const formatValue = valueFormat === 'currency' ? formatCurrency : formatNumber;
 
+  // For number format (e.g. orders), backend may use 'count' instead of 'value'
+  const getValue = (p: TimeSeriesPoint) =>
+    valueFormat === 'number'
+      ? parseDecimal(p.value) || (p.count ?? 0)
+      : parseDecimal(p.value);
+
   const chartData = (data ?? []).map((p) => ({
     date: p.date ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '',
-    value: parseDecimal(p.value),
+    value: getValue(p),
     count: p.count ?? 0,
   }));
 
-  const compareValues = (compareData ?? []).map((p) => parseDecimal(p.value));
+  const compareValues = (compareData ?? []).map((p) => getValue(p));
 
   const merged = chartData.map((d, i) => ({
     ...d,

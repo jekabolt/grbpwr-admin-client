@@ -19,40 +19,40 @@ export const OrderSequenceChart: FC<OrderSequenceChartProps> = ({ orderSequence 
   }));
 
   return (
-    <div className='border border-textInactiveColor p-4'>
+    <div className='border border-textInactiveColor p-4 min-h-[480px] w-full min-w-0'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
         Order sequence analysis
       </Text>
       <div className='space-y-6'>
-        <div>
+        <div className='min-h-[220px] w-full'>
           <Text variant='uppercase' className='text-xs mb-2'>Order Count by Sequence</Text>
           <ResponsiveContainer width='100%' height={200}>
             <BarChart data={data}>
-              <CartesianGrid strokeDasharray='3 3' stroke='#333' />
-              <XAxis dataKey='orderNumber' stroke='#999' tick={{ fill: '#999' }} />
-              <YAxis stroke='#999' tick={{ fill: '#999' }} />
+              <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
+              <XAxis dataKey='orderNumber' stroke='#666' tick={{ fill: '#666' }} />
+              <YAxis stroke='#666' tick={{ fill: '#666' }} />
               <Tooltip
-                contentStyle={{ backgroundColor: '#000', border: '1px solid #333' }}
-                labelStyle={{ color: '#fff' }}
+                contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc' }}
+                labelStyle={{ color: '#333' }}
                 formatter={(value: number) => [formatNumber(value), 'Orders']}
               />
-              <Bar dataKey='orderCount' fill='#fff' />
+              <Bar dataKey='orderCount' fill='#333' />
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div>
+        <div className='min-h-[220px] w-full'>
           <Text variant='uppercase' className='text-xs mb-2'>Avg Order Value by Sequence</Text>
           <ResponsiveContainer width='100%' height={200}>
             <LineChart data={data}>
-              <CartesianGrid strokeDasharray='3 3' stroke='#333' />
-              <XAxis dataKey='orderNumber' stroke='#999' tick={{ fill: '#999' }} />
-              <YAxis stroke='#999' tick={{ fill: '#999' }} />
+              <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
+              <XAxis dataKey='orderNumber' stroke='#666' tick={{ fill: '#666' }} />
+              <YAxis stroke='#666' tick={{ fill: '#666' }} />
               <Tooltip
-                contentStyle={{ backgroundColor: '#000', border: '1px solid #333' }}
-                labelStyle={{ color: '#fff' }}
+                contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc' }}
+                labelStyle={{ color: '#333' }}
                 formatter={(value: number) => [formatCurrency(value), 'AOV']}
               />
-              <Line type='monotone' dataKey='avgOrderValue' stroke='#fff' strokeWidth={2} dot={{ fill: '#fff' }} />
+              <Line type='monotone' dataKey='avgOrderValue' stroke='#333' strokeWidth={2} dot={{ fill: '#333' }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
