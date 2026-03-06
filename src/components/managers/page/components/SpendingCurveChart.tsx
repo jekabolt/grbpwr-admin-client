@@ -24,21 +24,21 @@ export const SpendingCurveChart: FC<SpendingCurveChartProps> = ({ spendingCurve 
       </Text>
       <ResponsiveContainer width='100%' height={300}>
         <LineChart data={data}>
-          <CartesianGrid strokeDasharray='3 3' stroke='#333' />
+          <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
           <XAxis 
             dataKey='orderNumber' 
-            stroke='#999' 
-            tick={{ fill: '#999' }}
-            label={{ value: 'Order Number', position: 'insideBottom', offset: -5, fill: '#999' }}
+            stroke='#666' 
+            tick={{ fill: '#666' }}
+            label={{ value: 'Order Number', position: 'insideBottom', offset: -5, fill: '#666' }}
           />
           <YAxis 
-            stroke='#999' 
-            tick={{ fill: '#999' }}
-            label={{ value: 'Cumulative Spend', angle: -90, position: 'insideLeft', fill: '#999' }}
+            stroke='#666' 
+            tick={{ fill: '#666' }}
+            label={{ value: 'Cumulative Spend', angle: -90, position: 'insideLeft', fill: '#666' }}
           />
           <Tooltip
-            contentStyle={{ backgroundColor: '#000', border: '1px solid #333' }}
-            labelStyle={{ color: '#fff' }}
+            contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc' }}
+            labelStyle={{ color: '#333' }}
             formatter={(value: number, name: string) => {
               if (name === 'avgCumulativeSpend') return [formatCurrency(value), 'Avg Cumulative'];
               if (name === 'customerCount') return [formatNumber(value), 'Customers'];
@@ -48,9 +48,9 @@ export const SpendingCurveChart: FC<SpendingCurveChartProps> = ({ spendingCurve 
           <Line 
             type='monotone' 
             dataKey='avgCumulativeSpend' 
-            stroke='#fff' 
+            stroke='#333' 
             strokeWidth={2} 
-            dot={{ fill: '#fff' }} 
+            dot={{ fill: '#333' }} 
           />
         </LineChart>
       </ResponsiveContainer>

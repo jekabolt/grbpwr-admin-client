@@ -31,10 +31,19 @@ export const ProductEngagementTable: FC<ProductEngagementTableProps> = ({ produc
                 <Text variant='uppercase' className='text-[10px]'>Zoom Events</Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Scroll 75%</Text>
+                <Text variant='uppercase' className='text-[10px]'>Time on Page (s)</Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Scroll 100%</Text>
+                <Text variant='uppercase' className='text-[10px]'>Image Swipes</Text>
+              </th>
+              <th className='text-right p-2'>
+                <Text variant='uppercase' className='text-[10px]'>Size Guide</Text>
+              </th>
+              <th className='text-right p-2'>
+                <Text variant='uppercase' className='text-[10px]'>Details Expanded</Text>
+              </th>
+              <th className='text-right p-2'>
+                <Text variant='uppercase' className='text-[10px]'>Notify Me</Text>
               </th>
             </tr>
           </thead>
@@ -53,10 +62,19 @@ export const ProductEngagementTable: FC<ProductEngagementTableProps> = ({ produc
                   <Text>{formatNumber(row.zoomEvents || 0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
-                  <Text>{formatNumber(row.scroll75 || 0)}</Text>
+                  <Text>{row.timeOnPageSeconds != null ? row.timeOnPageSeconds.toFixed(1) : '-'}</Text>
                 </td>
                 <td className='p-2 text-right'>
-                  <Text>{formatNumber(row.scroll100 || 0)}</Text>
+                  <Text>{formatNumber(row.imageSwipes || 0)}</Text>
+                </td>
+                <td className='p-2 text-right'>
+                  <Text>{formatNumber(row.sizeGuideClicks || 0)}</Text>
+                </td>
+                <td className='p-2 text-right'>
+                  <Text>{formatNumber(row.expandedDetails || 0)}</Text>
+                </td>
+                <td className='p-2 text-right'>
+                  <Text>{formatNumber(row.notifyMeIntent || 0)}</Text>
                 </td>
               </tr>
             ))}

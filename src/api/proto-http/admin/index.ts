@@ -42,12 +42,22 @@ export type MetricsSection =
   | "METRICS_SECTION_SIZE_ANALYTICS"
   | "METRICS_SECTION_DEAD_STOCK"
   | "METRICS_SECTION_PRODUCT_TREND"
-  | "METRICS_SECTION_SCROLL_DEPTH"
   | "METRICS_SECTION_ADD_TO_CART_RATE"
   | "METRICS_SECTION_BROWSER_BREAKDOWN"
   | "METRICS_SECTION_NEWSLETTER"
   | "METRICS_SECTION_ABANDONED_CART"
-  | "METRICS_SECTION_CAMPAIGN_ATTRIBUTION";
+  | "METRICS_SECTION_CAMPAIGN_ATTRIBUTION"
+  | "METRICS_SECTION_TIME_ON_PAGE"
+  | "METRICS_SECTION_PRODUCT_ZOOM"
+  | "METRICS_SECTION_IMAGE_SWIPES"
+  | "METRICS_SECTION_SIZE_GUIDE_CLICKS"
+  | "METRICS_SECTION_DETAILS_EXPANSION"
+  | "METRICS_SECTION_NOTIFY_ME_INTENT";
+// TrendGranularity defines time bucket size for trend analysis
+export type TrendGranularity =
+  | "TREND_GRANULARITY_DAILY"
+  | "TREND_GRANULARITY_WEEKLY"
+  | "TREND_GRANULARITY_MONTHLY";
 export type GetDictionaryRequest = {
 };
 
@@ -758,6 +768,7 @@ export type GetMetricsRequest = {
   compareMode: CompareMode | undefined;
   sections: MetricsSection[] | undefined;
   limit: number | undefined;
+  trendGranularity: TrendGranularity | undefined;
 };
 
 export type GetMetricsResponse = {
@@ -791,12 +802,18 @@ export type GetMetricsResponse = {
   sizeAnalytics: SizeAnalyticsRow[] | undefined;
   deadStock: DeadStockRow[] | undefined;
   productTrend: ProductTrendRow[] | undefined;
-  scrollDepth: ScrollDepthRow[] | undefined;
   addToCartRate: AddToCartRateRow[] | undefined;
   browserBreakdown: BrowserBreakdownRow[] | undefined;
   newsletter: NewsletterMetricRow[] | undefined;
   abandonedCart: AbandonedCartRow[] | undefined;
   campaignAttribution: CampaignAttributionRow[] | undefined;
+  addToCartRateAnalysis: AddToCartRateAnalysis | undefined;
+  timeOnPage: TimeOnPageRow[] | undefined;
+  productZoom: ProductZoomRow[] | undefined;
+  imageSwipes: ImageSwipeRow[] | undefined;
+  sizeGuideClicks: SizeGuideClickRow[] | undefined;
+  detailsExpansion: DetailsExpansionRow[] | undefined;
+  notifyMeIntent: NotifyMeIntentRow[] | undefined;
 };
 
 export type BusinessMetrics = {
@@ -1208,12 +1225,9 @@ export type SlowMoverRow = {
 };
 
 export type ReturnByProductRow = {
-  productId: number | undefined;
   productName: string | undefined;
-  totalSold: number | undefined;
-  totalReturned: number | undefined;
-  returnRate: number | undefined;
-  returnValue: googletype_Decimal | undefined;
+  totalReturnRate: number | undefined;
+  reasons: { [key: string]: number } | undefined;
 };
 
 export type ReturnBySizeRow = {
@@ -1252,16 +1266,6 @@ export type ProductTrendRow = {
   changePct: number | undefined;
   currentUnits: number | undefined;
   previousUnits: number | undefined;
-};
-
-export type ScrollDepthRow = {
-  date: wellKnownTimestamp | undefined;
-  pageType: string | undefined;
-  scroll25: number | undefined;
-  scroll50: number | undefined;
-  scroll75: number | undefined;
-  scroll100: number | undefined;
-  totalUsers: number | undefined;
 };
 
 export type AddToCartRateRow = {
@@ -1306,6 +1310,82 @@ export type CampaignAttributionRow = {
   users: number | undefined;
   conversions: number | undefined;
   revenue: googletype_Decimal | undefined;
+  conversionRate: number | undefined;
+};
+
+// AddToCartRateAnalysis contains both per-product aggregate data for scatter plot
+// and store-wide trend data for time series visualization
+export type AddToCartRateAnalysis = {
+  products: AddToCartRateProductRow[] | undefined;
+  globalTrend: AddToCartRateGlobalRow[] | undefined;
+  avgViewCount: number | undefined;
+  avgCartRate: number | undefined;
+};
+
+// AddToCartRateProductRow represents per-product aggregate metrics for scatter plot matrix
+export type AddToCartRateProductRow = {
+  productId: string | undefined;
+  productName: string | undefined;
+  viewCount: number | undefined;
+  addToCartCount: number | undefined;
+  cartRate: number | undefined;
+};
+
+// AddToCartRateGlobalRow represents store-wide daily/weekly/monthly ATC rate for trend line
+export type AddToCartRateGlobalRow = {
+  date: wellKnownTimestamp | undefined;
+  totalViews: number | undefined;
+  totalAddToCarts: number | undefined;
+  globalCartRate: number | undefined;
+};
+
+export type TimeOnPageRow = {
+  date: wellKnownTimestamp | undefined;
+  pagePath: string | undefined;
+  avgVisibleTimeSeconds: number | undefined;
+  avgTotalTimeSeconds: number | undefined;
+  avgEngagementScore: number | undefined;
+  pageViews: number | undefined;
+};
+
+export type ProductZoomRow = {
+  date: wellKnownTimestamp | undefined;
+  productId: string | undefined;
+  productName: string | undefined;
+  zoomMethod: string | undefined;
+  zoomCount: number | undefined;
+};
+
+export type ImageSwipeRow = {
+  date: wellKnownTimestamp | undefined;
+  productId: string | undefined;
+  productName: string | undefined;
+  swipeDirection: string | undefined;
+  swipeCount: number | undefined;
+};
+
+export type SizeGuideClickRow = {
+  date: wellKnownTimestamp | undefined;
+  productId: string | undefined;
+  productName: string | undefined;
+  pageLocation: string | undefined;
+  clickCount: number | undefined;
+};
+
+export type DetailsExpansionRow = {
+  date: wellKnownTimestamp | undefined;
+  productId: string | undefined;
+  productName: string | undefined;
+  sectionName: string | undefined;
+  expandCount: number | undefined;
+};
+
+export type NotifyMeIntentRow = {
+  date: wellKnownTimestamp | undefined;
+  productId: string | undefined;
+  productName: string | undefined;
+  action: string | undefined;
+  count: number | undefined;
   conversionRate: number | undefined;
 };
 
@@ -2260,6 +2340,9 @@ export function createAdminServiceClient(
       }
       if (request.limit) {
         queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.trendGranularity) {
+        queryParams.push(`trendGranularity=${encodeURIComponent(request.trendGranularity.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
