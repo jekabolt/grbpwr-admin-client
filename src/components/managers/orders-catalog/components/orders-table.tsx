@@ -67,12 +67,15 @@ export function OrdersTable({
               {COLUMNS.map((col) => (
                 <th
                   key={col.label}
-                  className={cn('text-center h-10 min-w-26 border border-r border-textColor px-2', {
-                    'sticky left-0 bg-textInactiveColor z-10': col.label === 'Order ID',
-                  })}
+                  className={cn(
+                    'text-center h-10 min-w-26 border border-r border-textColor lg:px-2 px-0',
+                    {
+                      'sticky left-0 bg-textInactiveColor z-10': col.label === 'Order ID',
+                    },
+                  )}
                 >
                   {col.label === 'Order ID' ? (
-                    <div className='flex justify-center gap-3'>
+                    <div className='flex lg:flex-row flex-col justify-center gap-3'>
                       <Button
                         onClick={onToggleSort}
                         disabled={isLoading}

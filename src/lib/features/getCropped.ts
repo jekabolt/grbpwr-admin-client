@@ -1,5 +1,22 @@
 import { Area } from 'react-easy-crop';
 
+const MEDIA_PROXY =
+  (typeof window !== 'undefined' && (import.meta.env.VITE_MEDIA_PROXY_URL as string | undefined)) ||
+  (typeof window !== 'undefined' ? `${window.location.origin}/media-proxy` : '/media-proxy');
+
+function getFetchUrl(url: string): string {
+  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  try {
+    const u = new URL(url);
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const sameOrigin = u.origin === origin || u.hostname === 'localhost';
+    if (sameOrigin) return url;
+    return `${MEDIA_PROXY}?url=${encodeURIComponent(url)}`;
+  } catch {
+    return url;
+  }
+}
+
 async function urlToDataUrl(imageUrl: string): Promise<string> {
   if (imageUrl.startsWith('data:')) {
     return imageUrl;
@@ -9,8 +26,10 @@ async function urlToDataUrl(imageUrl: string): Promise<string> {
     return imageUrl;
   }
 
+  const fetchUrl = getFetchUrl(imageUrl);
+
   try {
-    const response = await fetch(imageUrl, {
+    const response = await fetch(fetchUrl, {
       mode: 'cors',
       credentials: 'omit',
       cache: 'default',

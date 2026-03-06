@@ -17,6 +17,7 @@ export { SpendingCurveChart } from './SpendingCurveChart';
 export { RevenueParetoChart } from './RevenueParetoChart';
 export { ProductTrendTable } from './ProductTrendTable';
 export { ProductEngagementTable } from './ProductEngagementTable';
+<<<<<<< HEAD
 export { ProductEngagementBubbleMatrixChart } from './ProductEngagementBubbleMatrixChart';
 export { AddToCartRateTable } from './AddToCartRateTable';
 export { AddToCartRateMatrixChart } from './AddToCartRateMatrixChart';
@@ -24,6 +25,12 @@ export { AddToCartRateTrendChart } from './AddToCartRateTrendChart';
 export { SizeAnalyticsTable } from './SizeAnalyticsTable';
 export { ReturnBySizeTable } from './ReturnBySizeTable';
 export { ReturnByProductChart } from './ReturnByProductChart';
+=======
+export { AddToCartRateTable } from './AddToCartRateTable';
+export { SizeAnalyticsTable } from './SizeAnalyticsTable';
+export { ReturnBySizeTable } from './ReturnBySizeTable';
+export { ReturnByProductTable } from './ReturnByProductTable';
+>>>>>>> f0891c80561a95c2d46f89010526ca1850264475
 export { SizeConfidenceTable } from './SizeConfidenceTable';
 export { InventoryHealthTable } from './InventoryHealthTable';
 export { SlowMoversTable } from './SlowMoversTable';

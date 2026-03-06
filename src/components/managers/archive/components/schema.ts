@@ -27,21 +27,26 @@ const createStrictTranslationSchema = <T extends z.ZodType>(
     });
 };
 
-export const schema = z
-  .object({
-    tag: z.string().min(1, 'Tag is required'),
-    mediaIds: z.array(z.number()).min(1, 'Select at least one media').default([]),
-    mainMediaIds: z.array(z.number()).min(1, 'Select at least one main media').default([]),
-    thumbnailId: z.number().optional(),
-    translations: createStrictTranslationSchema(
-      z.object({
-        languageId: z.number().min(1, 'Language is required'),
-        heading: z.string().min(1, 'Heading is required'),
-        description: z.string().min(1, 'Description is required'),
-      }),
-      requiredLanguageIds,
-    ),
-  });
+export const schema = z.object({
+  tag: z.string().min(1, 'Tag is required'),
+  mediaIds: z.array(z.number()).min(1, 'Select at least one media').default([]),
+  mainMediaIds: z.array(z.number()).min(1, 'Select at least one main media').default([]),
+  thumbnailId: z.number().optional(),
+  translations: createStrictTranslationSchema(
+    z.object({
+      languageId: z.number().min(1, 'Language is required'),
+      heading: z
+        .string()
+        .min(20, 'Heading is required')
+        .max(90, 'Heading cannot exceed 90 characters'),
+      description: z
+        .string()
+        .min(10, 'Description is required')
+        .max(1000, 'Description cannot exceed 1000 characters'),
+    }),
+    requiredLanguageIds,
+  ),
+});
 
 export const defaultData = {
   tag: '',
@@ -69,7 +74,8 @@ export function mapArchive(archive: common_ArchiveFull) {
   return {
     tag: archive.archiveList?.tag || '',
     mediaIds: archive.media?.map((m) => m.id).filter((id): id is number => id != null) ?? [],
-    mainMediaIds: archive.mainMedia?.map((m) => m.id).filter((id): id is number => id != null) ?? [],
+    mainMediaIds:
+      archive.mainMedia?.map((m) => m.id).filter((id): id is number => id != null) ?? [],
     thumbnailId: archive.archiveList?.thumbnail?.id,
     translations: archive.archiveList?.translations?.map((t) => ({
       languageId: t.languageId || 0,
