@@ -1,64 +1,53 @@
+import type { CompareMode, TimeSeriesPoint } from 'api/proto-http/admin';
 import { subDays } from 'date-fns';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import {
-  CurrencyPaymentCharts,
-  DateRangePicker,
-  GeographyCharts,
-  KpiCards,
-  OrdersByStatusChart,
-  ProductCharts,
-  PromoTable,
-  CrossSellTable,
-  TimeSeriesChart,
-  TrafficCharts,
-  FunnelChart,
   AbandonedCartCard,
+  AddToCartRateMatrixChart,
+  AddToCartRateTable,
+  AddToCartRateTrendChart,
+  BrowserBreakdownTable,
+  CampaignAttributionTable,
   CheckoutTimingsCard,
   CohortRetentionTable,
-  OrderSequenceChart,
-  SpendingCurveChart,
-  RevenueParetoChart,
-  ProductTrendTable,
-  ProductEngagementTable,
-<<<<<<< HEAD
-  ProductEngagementBubbleMatrixChart,
-  AddToCartRateTable,
-  AddToCartRateMatrixChart,
-  AddToCartRateTrendChart,
-  SizeAnalyticsTable,
-  ReturnBySizeTable,
-  ReturnByProductChart,
-=======
-  AddToCartRateTable,
-  SizeAnalyticsTable,
-  ReturnBySizeTable,
-  ReturnByProductTable,
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
-  SizeConfidenceTable,
-  InventoryHealthTable,
-  SlowMoversTable,
+  CrossSellTable,
+  CurrencyPaymentCharts,
+  DateRangePicker,
   DeadStockTable,
-  OOSImpactTable,
-  CampaignAttributionTable,
-  NewsletterCard,
-  WebVitalsCard,
   DeviceFunnelChart,
-  BrowserBreakdownTable,
-  FormErrorsTable,
   ExceptionsTable,
+  FormErrorsTable,
+  FunnelChart,
+  GeographyCharts,
+  InventoryHealthTable,
+  KpiCards,
+  NewsletterCard,
   NotFoundTable,
+  OOSImpactTable,
+  OrdersByStatusChart,
+  OrderSequenceChart,
   PaymentFailuresTable,
+  ProductCharts,
+  ProductEngagementBubbleMatrixChart,
+  ProductEngagementTable,
+  ProductTrendTable,
+  PromoTable,
+  ReturnByProductChart,
+  ReturnBySizeTable,
+  RevenueParetoChart,
   ScrollDepthChart,
   SessionDurationChart,
+  SizeAnalyticsTable,
+  SizeConfidenceTable,
+  SlowMoversTable,
+  SpendingCurveChart,
+  TimeSeriesChart,
+  TrafficCharts,
+  WebVitalsCard,
 } from './components';
 import { useFullMetricsQuery } from './useFullMetricsQuery';
-<<<<<<< HEAD
-import type { CompareMode, TimeSeriesPoint } from 'api/proto-http/admin';
-=======
-import type { CompareMode } from 'api/proto-http/admin';
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
 import type { MetricsPeriod } from './useMetricsQuery';
 
 /** Get time series data with snake_case fallback (backend may return orders_by_day) */
@@ -187,13 +176,8 @@ export function Analitic() {
                 />
                 <TimeSeriesChart
                   title='Orders by day'
-<<<<<<< HEAD
                   data={getTimeSeries(metrics as Record<string, unknown>, 'ordersByDay')}
                   compareData={getTimeSeries(metrics as Record<string, unknown>, 'ordersByDayCompare')}
-=======
-                  data={metrics?.ordersByDay}
-                  compareData={metrics?.ordersByDayCompare}
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
                   valueFormat='number'
                 />
                 <TimeSeriesChart
@@ -282,11 +266,7 @@ export function Analitic() {
               </div>
             </div>
 
-<<<<<<< HEAD
             <ReturnByProductChart returnByProduct={metricsResponse.returnByProduct} />
-=======
-            <ReturnByProductTable returnByProduct={metricsResponse.returnByProduct} />
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
           </div>
 
           {/* Section 2: Product & Inventory */}
@@ -299,7 +279,6 @@ export function Analitic() {
               <Text variant='uppercase' className='font-bold'>
                 Product performance
               </Text>
-<<<<<<< HEAD
               {(() => {
                 const hasProductCharts =
                   (metrics?.topProductsByRevenue?.length ?? 0) > 0 ||
@@ -354,15 +333,6 @@ export function Analitic() {
                   </>
                 );
               })()}
-=======
-              <ProductCharts metrics={metrics} />
-              <div className='grid gap-6 md:grid-cols-2'>
-                <RevenueParetoChart revenuePareto={metricsResponse.revenuePareto} />
-                <ProductTrendTable productTrend={metricsResponse.productTrend} />
-              </div>
-              <ProductEngagementTable productEngagement={metricsResponse.productEngagement} />
-              <AddToCartRateTable addToCartRate={metricsResponse.addToCartRate} />
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
             </div>
 
             <div className='space-y-6'>

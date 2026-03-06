@@ -24,7 +24,6 @@ export const SpendingCurveChart: FC<SpendingCurveChartProps> = ({ spendingCurve 
       </Text>
       <ResponsiveContainer width='100%' height={300}>
         <LineChart data={data}>
-<<<<<<< HEAD
           <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
           <XAxis 
             dataKey='orderNumber' 
@@ -40,23 +39,6 @@ export const SpendingCurveChart: FC<SpendingCurveChartProps> = ({ spendingCurve 
           <Tooltip
             contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc' }}
             labelStyle={{ color: '#333' }}
-=======
-          <CartesianGrid strokeDasharray='3 3' stroke='#333' />
-          <XAxis 
-            dataKey='orderNumber' 
-            stroke='#999' 
-            tick={{ fill: '#999' }}
-            label={{ value: 'Order Number', position: 'insideBottom', offset: -5, fill: '#999' }}
-          />
-          <YAxis 
-            stroke='#999' 
-            tick={{ fill: '#999' }}
-            label={{ value: 'Cumulative Spend', angle: -90, position: 'insideLeft', fill: '#999' }}
-          />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#000', border: '1px solid #333' }}
-            labelStyle={{ color: '#fff' }}
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
             formatter={(value: number, name: string) => {
               if (name === 'avgCumulativeSpend') return [formatCurrency(value), 'Avg Cumulative'];
               if (name === 'customerCount') return [formatNumber(value), 'Customers'];
@@ -66,15 +48,9 @@ export const SpendingCurveChart: FC<SpendingCurveChartProps> = ({ spendingCurve 
           <Line 
             type='monotone' 
             dataKey='avgCumulativeSpend' 
-<<<<<<< HEAD
             stroke='#333' 
             strokeWidth={2} 
             dot={{ fill: '#333' }} 
-=======
-            stroke='#fff' 
-            strokeWidth={2} 
-            dot={{ fill: '#fff' }} 
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
           />
         </LineChart>
       </ResponsiveContainer>

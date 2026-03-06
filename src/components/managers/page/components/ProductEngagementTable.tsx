@@ -31,7 +31,6 @@ export const ProductEngagementTable: FC<ProductEngagementTableProps> = ({ produc
                 <Text variant='uppercase' className='text-[10px]'>Zoom Events</Text>
               </th>
               <th className='text-right p-2'>
-<<<<<<< HEAD
                 <Text variant='uppercase' className='text-[10px]'>Time on Page (s)</Text>
               </th>
               <th className='text-right p-2'>
@@ -45,12 +44,6 @@ export const ProductEngagementTable: FC<ProductEngagementTableProps> = ({ produc
               </th>
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>Notify Me</Text>
-=======
-                <Text variant='uppercase' className='text-[10px]'>Scroll 75%</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Scroll 100%</Text>
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
               </th>
             </tr>
           </thead>
@@ -69,7 +62,6 @@ export const ProductEngagementTable: FC<ProductEngagementTableProps> = ({ produc
                   <Text>{formatNumber(row.zoomEvents || 0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
-<<<<<<< HEAD
                   <Text>{row.timeOnPageSeconds != null ? row.timeOnPageSeconds.toFixed(1) : '-'}</Text>
                 </td>
                 <td className='p-2 text-right'>
@@ -83,12 +75,6 @@ export const ProductEngagementTable: FC<ProductEngagementTableProps> = ({ produc
                 </td>
                 <td className='p-2 text-right'>
                   <Text>{formatNumber(row.notifyMeIntent || 0)}</Text>
-=======
-                  <Text>{formatNumber(row.scroll75 || 0)}</Text>
-                </td>
-                <td className='p-2 text-right'>
-                  <Text>{formatNumber(row.scroll100 || 0)}</Text>
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
                 </td>
               </tr>
             ))}

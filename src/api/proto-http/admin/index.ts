@@ -42,15 +42,10 @@ export type MetricsSection =
   | "METRICS_SECTION_SIZE_ANALYTICS"
   | "METRICS_SECTION_DEAD_STOCK"
   | "METRICS_SECTION_PRODUCT_TREND"
-<<<<<<< HEAD
-=======
-  | "METRICS_SECTION_SCROLL_DEPTH"
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
   | "METRICS_SECTION_ADD_TO_CART_RATE"
   | "METRICS_SECTION_BROWSER_BREAKDOWN"
   | "METRICS_SECTION_NEWSLETTER"
   | "METRICS_SECTION_ABANDONED_CART"
-<<<<<<< HEAD
   | "METRICS_SECTION_CAMPAIGN_ATTRIBUTION"
   | "METRICS_SECTION_TIME_ON_PAGE"
   | "METRICS_SECTION_PRODUCT_ZOOM"
@@ -63,9 +58,6 @@ export type TrendGranularity =
   | "TREND_GRANULARITY_DAILY"
   | "TREND_GRANULARITY_WEEKLY"
   | "TREND_GRANULARITY_MONTHLY";
-=======
-  | "METRICS_SECTION_CAMPAIGN_ATTRIBUTION";
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
 export type GetDictionaryRequest = {
 };
 
@@ -776,10 +768,7 @@ export type GetMetricsRequest = {
   compareMode: CompareMode | undefined;
   sections: MetricsSection[] | undefined;
   limit: number | undefined;
-<<<<<<< HEAD
   trendGranularity: TrendGranularity | undefined;
-=======
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
 };
 
 export type GetMetricsResponse = {
@@ -813,16 +802,11 @@ export type GetMetricsResponse = {
   sizeAnalytics: SizeAnalyticsRow[] | undefined;
   deadStock: DeadStockRow[] | undefined;
   productTrend: ProductTrendRow[] | undefined;
-<<<<<<< HEAD
-=======
-  scrollDepth: ScrollDepthRow[] | undefined;
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
   addToCartRate: AddToCartRateRow[] | undefined;
   browserBreakdown: BrowserBreakdownRow[] | undefined;
   newsletter: NewsletterMetricRow[] | undefined;
   abandonedCart: AbandonedCartRow[] | undefined;
   campaignAttribution: CampaignAttributionRow[] | undefined;
-<<<<<<< HEAD
   addToCartRateAnalysis: AddToCartRateAnalysis | undefined;
   timeOnPage: TimeOnPageRow[] | undefined;
   productZoom: ProductZoomRow[] | undefined;
@@ -830,8 +814,6 @@ export type GetMetricsResponse = {
   sizeGuideClicks: SizeGuideClickRow[] | undefined;
   detailsExpansion: DetailsExpansionRow[] | undefined;
   notifyMeIntent: NotifyMeIntentRow[] | undefined;
-=======
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
 };
 
 export type BusinessMetrics = {
@@ -1243,18 +1225,9 @@ export type SlowMoverRow = {
 };
 
 export type ReturnByProductRow = {
-<<<<<<< HEAD
   productName: string | undefined;
   totalReturnRate: number | undefined;
   reasons: { [key: string]: number } | undefined;
-=======
-  productId: number | undefined;
-  productName: string | undefined;
-  totalSold: number | undefined;
-  totalReturned: number | undefined;
-  returnRate: number | undefined;
-  returnValue: googletype_Decimal | undefined;
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
 };
 
 export type ReturnBySizeRow = {
@@ -1295,19 +1268,6 @@ export type ProductTrendRow = {
   previousUnits: number | undefined;
 };
 
-<<<<<<< HEAD
-=======
-export type ScrollDepthRow = {
-  date: wellKnownTimestamp | undefined;
-  pageType: string | undefined;
-  scroll25: number | undefined;
-  scroll50: number | undefined;
-  scroll75: number | undefined;
-  scroll100: number | undefined;
-  totalUsers: number | undefined;
-};
-
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
 export type AddToCartRateRow = {
   date: wellKnownTimestamp | undefined;
   productId: string | undefined;
@@ -1353,7 +1313,6 @@ export type CampaignAttributionRow = {
   conversionRate: number | undefined;
 };
 
-<<<<<<< HEAD
 // AddToCartRateAnalysis contains both per-product aggregate data for scatter plot
 // and store-wide trend data for time series visualization
 export type AddToCartRateAnalysis = {
@@ -1430,8 +1389,6 @@ export type NotifyMeIntentRow = {
   conversionRate: number | undefined;
 };
 
-=======
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
 export type RefundOrderRequest = {
   orderUuid: string | undefined;
   // Only used when status is PendingReturn. Empty = full refund. Non-empty = partial refund for specified order_item IDs.
@@ -2384,12 +2341,9 @@ export function createAdminServiceClient(
       if (request.limit) {
         queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
-<<<<<<< HEAD
       if (request.trendGranularity) {
         queryParams.push(`trendGranularity=${encodeURIComponent(request.trendGranularity.toString())}`)
       }
-=======
->>>>>>> f0891c80561a95c2d46f89010526ca1850264475
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
