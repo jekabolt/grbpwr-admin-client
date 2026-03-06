@@ -17,6 +17,7 @@ import {
   settingsSchema,
   transformDictionaryToSettings,
 } from './utility/schema';
+import { CarrierPrices } from './components/carrier-prices';
 
 export function Settings() {
   const { dictionary, refetch } = useDictionary();
@@ -34,7 +35,6 @@ export function Settings() {
   });
 
   const paymentMethods = form.watch('paymentMethods');
-  const shipmentCarriers = form.watch('shipmentCarriers');
   const baseCurrency = dictionary?.baseCurrency || 'EUR';
 
   const handleSave = async (data: SettingsSchema) => {
@@ -57,6 +57,7 @@ export function Settings() {
         onSubmit={form.handleSubmit(handleSave)}
         className='grid gap-y-10 justify-center items-center h-full pb-10'
       >
+        <ToggleField name='isProd' label='is prod' />
         <div className='space-y-4'>
           <Text variant='uppercase' className='font-bold' size='large'>
             payment methods
@@ -93,6 +94,15 @@ export function Settings() {
         </div>
         <ToggleField name='siteAvailable' label='site available' />
         <ToggleField name='bigMenu' label='big menu' />
+        <div className='space-y-4'>
+          <Text variant='uppercase' className='font-bold' size='large'>
+            complimentary shipping prices
+          </Text>
+          <Text variant='inactive' className='text-textInactiveColor'>
+            threshold per currency above which shipping is free
+          </Text>
+          <CarrierPrices basePath='complimentaryShippingPrices' />
+        </div>
         <Text variant='uppercase' className='font-bold' size='large'>
           base currency: {baseCurrency}
         </Text>
