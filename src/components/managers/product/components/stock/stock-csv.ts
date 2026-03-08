@@ -1,4 +1,4 @@
-import type { common_StockChange } from 'api/proto-http/admin';
+import type { common_StockChange, StockChangeRow } from 'api/proto-http/admin';
 
 function escapeCsvCell(value: string): string {
   const s = String(value ?? '').replace(/"/g, '""');
@@ -8,6 +8,11 @@ function escapeCsvCell(value: string): string {
 function formatSource(source: string | undefined): string {
   if (!source) return '';
   return source.replace('STOCK_CHANGE_SOURCE_', '').replace(/_/g, ' ').toLowerCase();
+}
+
+function formatReason(reason: string | undefined): string {
+  if (!reason) return '';
+  return reason.replace('STOCK_CHANGE_REASON_', '').replace(/_/g, ' ').toLowerCase();
 }
 
 function formatChange(value: string | undefined): string {
@@ -42,6 +47,23 @@ export function stockChangesToCsv(changes: common_StockChange[], sizes: SizeOpti
   ]);
   const headerLine = headers.map(escapeCsvCell).join(',');
   const dataLines = rows.map((row) => row.map(escapeCsvCell).join(','));
+  return [headerLine, ...dataLines].join('\r\n');
+}
+
+/** Converts StockChangeRow[] from ListStockChanges API to CSV for reporting */
+export function stockChangeRowsToCsv(rows: StockChangeRow[]): string {
+  const headers = ['Date', 'SKU', 'Amount Changed', 'Source', 'Reference', 'Reason', 'Comment'];
+  const data = rows.map((r) => [
+    formatDate(r.date),
+    r.sku ?? '',
+    r.amountChanged?.value ?? '',
+    formatSource(r.source),
+    r.reference ?? '',
+    formatReason(r.reason),
+    r.comment ?? '',
+  ]);
+  const headerLine = headers.map(escapeCsvCell).join(',');
+  const dataLines = data.map((row) => row.map(escapeCsvCell).join(','));
   return [headerLine, ...dataLines].join('\r\n');
 }
 
