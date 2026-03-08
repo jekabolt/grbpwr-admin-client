@@ -9,6 +9,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { FC } from 'react';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
+import { SessionsByCountryMapChart } from './SessionsByCountryMapChart';
 
 interface BarChartWrapperProps {
   title: string;
@@ -90,11 +91,16 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
       <Text variant='uppercase' className='font-bold'>
         GA4 Traffic breakdown
       </Text>
+      <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
+        <SessionsByCountryMapChart sessionsByCountry={metrics.sessionsByCountry} showTitle={false} />
+        <div className='flex-1 min-w-0'>
+          <TrafficBarChart
+            title='Sessions by country'
+            data={sessionsByCountryToData(metrics.sessionsByCountry)}
+          />
+        </div>
+      </div>
       <div className='grid gap-4 md:grid-cols-2'>
-        <TrafficBarChart
-          title='Sessions by country'
-          data={sessionsByCountryToData(metrics.sessionsByCountry)}
-        />
         <TrafficBarChart
           title='Traffic by source'
           data={trafficBySourceToData(metrics.trafficBySource)}

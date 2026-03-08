@@ -900,6 +900,8 @@ export type MetricWithComparison = {
   value: googletype_Decimal | undefined;
   compareValue: googletype_Decimal | undefined;
   changePct: number | undefined;
+  // When true, a negative change is good (e.g. refund rate, bounce rate). Frontend should show green for decrease, red for increase.
+  lowerIsBetter: boolean | undefined;
 };
 
 export type GeographyMetric = {
