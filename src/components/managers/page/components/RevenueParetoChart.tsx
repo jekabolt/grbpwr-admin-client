@@ -3,6 +3,7 @@ import { FC } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Text from 'ui/components/text';
 import { formatCurrency, parseDecimal } from '../utils';
+import { ProductNameLink } from './ProductNameLink';
 
 interface RevenueParetoChartProps {
   revenuePareto: RevenueParetoRow[] | undefined;
@@ -13,7 +14,9 @@ export const RevenueParetoChart: FC<RevenueParetoChartProps> = ({ revenuePareto 
 
   const data = revenuePareto.map((row) => ({
     rank: row.rank || 0,
-    productName: (row.productName || `#${row.productId}`).slice(0, 15),
+    productId: row.productId,
+    productName: row.productName || `#${row.productId}`,
+    productNameShort: (row.productName || `#${row.productId}`).slice(0, 15),
     revenue: parseDecimal(row.revenue),
     cumulativePct: (row.cumulativePct || 0) * 100,
   }));
@@ -55,6 +58,38 @@ export const RevenueParetoChart: FC<RevenueParetoChartProps> = ({ revenuePareto 
           />
         </AreaChart>
       </ResponsiveContainer>
+      <div className='mt-4 overflow-x-auto'>
+        <table className='w-full text-xs'>
+          <thead>
+            <tr className='border-b border-textInactiveColor'>
+              <th className='text-left p-1'>
+                <Text variant='uppercase' className='text-[10px]'>Rank</Text>
+              </th>
+              <th className='text-left p-1'>
+                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+              </th>
+              <th className='text-right p-1'>
+                <Text variant='uppercase' className='text-[10px]'>Revenue</Text>
+              </th>
+              <th className='text-right p-1'>
+                <Text variant='uppercase' className='text-[10px]'>Cumulative %</Text>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 15).map((row) => (
+              <tr key={row.rank} className='border-b border-textInactiveColor/50 hover:bg-bgSecondary'>
+                <td className='p-1'>{row.rank}</td>
+                <td className='p-1'>
+                  <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='140px' />
+                </td>
+                <td className='p-1 text-right'>{formatCurrency(row.revenue)}</td>
+                <td className='p-1 text-right'>{row.cumulativePct.toFixed(1)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <div className='mt-3 text-xs text-textInactiveColor'>
         <Text>Shows cumulative revenue % by product rank (identifies 80/20 rule)</Text>
       </div>

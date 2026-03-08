@@ -2,6 +2,7 @@ import type { SizeConfidenceMetric } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
+import { ProductNameLink } from './ProductNameLink';
 
 interface SizeConfidenceTableProps {
   sizeConfidence: SizeConfidenceMetric[] | undefined;
@@ -11,18 +12,21 @@ export const SizeConfidenceTable: FC<SizeConfidenceTableProps> = ({ sizeConfiden
   if (!sizeConfidence || sizeConfidence.length === 0) return null;
 
   const aggregated = sizeConfidence.reduce((acc, metric) => {
-    const key = metric.productId || 'unknown';
+    const key = metric.productId ?? 'unknown';
     if (!acc[key]) {
       acc[key] = {
         productId: metric.productId,
+        productName: metric.productName,
         sizeGuideViews: 0,
         sizeSelections: 0,
       };
+    } else if (metric.productName && !acc[key].productName) {
+      acc[key].productName = metric.productName;
     }
     acc[key].sizeGuideViews += metric.sizeGuideViews || 0;
     acc[key].sizeSelections += metric.sizeSelections || 0;
     return acc;
-  }, {} as Record<string, { productId: string | undefined; sizeGuideViews: number; sizeSelections: number }>);
+  }, {} as Record<string, { productId: string | undefined; productName: string | undefined; sizeGuideViews: number; sizeSelections: number }>);
 
   const data = Object.values(aggregated).slice(0, 20);
 
@@ -56,7 +60,7 @@ export const SizeConfidenceTable: FC<SizeConfidenceTableProps> = ({ sizeConfiden
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
-                    <Text>Product #{row.productId}</Text>
+                    <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='150px' />
                   </td>
                   <td className='p-2 text-right'>
                     <Text>{formatNumber(row.sizeGuideViews)}</Text>

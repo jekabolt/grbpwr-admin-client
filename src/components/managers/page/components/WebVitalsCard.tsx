@@ -1,7 +1,21 @@
 import type { WebVitalMetric } from 'api/proto-http/admin';
+import Tooltip from '@mui/material/Tooltip';
 import { FC } from 'react';
 import Text from 'ui/components/text';
-import { formatNumber } from '../utils';
+
+const METRIC_DESCRIPTIONS: Record<string, string> = {
+  LCP: 'Largest Contentful Paint — measures loading performance. Time until the largest image or text block is visible. Good: <2.5s',
+  FID: 'First Input Delay — measures interactivity. Time from first user interaction to browser response. Good: <100ms',
+  INP: 'Interaction to Next Paint — measures responsiveness. Replaces FID as the preferred interactivity metric. Good: <200ms',
+  CLS: 'Cumulative Layout Shift — measures visual stability. Unexpected layout shifts during page load. Good: <0.1',
+  FCP: 'First Contentful Paint — measures perceived load speed. When the first text or image is painted. Good: <1.8s',
+  TTFB: 'Time to First Byte — measures server response time. Time until the first byte of the response arrives. Good: <800ms',
+};
+
+function getMetricDescription(metricName: string): string {
+  const key = metricName.toUpperCase();
+  return METRIC_DESCRIPTIONS[key] ?? `${metricName} — Core Web Vitals metric`;
+}
 
 interface WebVitalsCardProps {
   webVitals: WebVitalMetric[] | undefined;
@@ -65,23 +79,25 @@ export const WebVitalsCard: FC<WebVitalsCardProps> = ({ webVitals }) => {
                   </Text>
                 </div>
               </div>
-              <div className='h-4 bg-bgSecondary flex overflow-hidden'>
-                <div
-                  className='bg-green-600'
-                  style={{ width: `${vital.goodPct}%` }}
-                  title={`Good: ${vital.goodPct.toFixed(1)}%`}
-                />
-                <div
-                  className='bg-yellow-600'
-                  style={{ width: `${100 - vital.goodPct - vital.poorPct}%` }}
-                  title={`Needs improvement: ${(100 - vital.goodPct - vital.poorPct).toFixed(1)}%`}
-                />
-                <div
-                  className='bg-error'
-                  style={{ width: `${vital.poorPct}%` }}
-                  title={`Poor: ${vital.poorPct.toFixed(1)}%`}
-                />
-              </div>
+              <Tooltip title={getMetricDescription(vital.metricName)} placement='top' arrow>
+                <div className='h-4 bg-bgSecondary flex overflow-hidden cursor-help'>
+                  <div
+                    className='bg-green-600'
+                    style={{ width: `${vital.goodPct}%` }}
+                    title={`Good: ${vital.goodPct.toFixed(1)}%`}
+                  />
+                  <div
+                    className='bg-yellow-600'
+                    style={{ width: `${100 - vital.goodPct - vital.poorPct}%` }}
+                    title={`Needs improvement: ${(100 - vital.goodPct - vital.poorPct).toFixed(1)}%`}
+                  />
+                  <div
+                    className='bg-error'
+                    style={{ width: `${vital.poorPct}%` }}
+                    title={`Poor: ${vital.poorPct.toFixed(1)}%`}
+                  />
+                </div>
+              </Tooltip>
             </div>
           );
         })}

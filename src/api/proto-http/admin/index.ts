@@ -1137,6 +1137,7 @@ export type HeroFunnelMetric = {
 export type SizeConfidenceMetric = {
   date: wellKnownTimestamp | undefined;
   productId: string | undefined;
+  productName: string | undefined;
   sizeGuideViews: number | undefined;
   sizeSelections: number | undefined;
 };

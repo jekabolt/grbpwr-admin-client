@@ -1,6 +1,7 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
+import { ProductNameLink } from './ProductNameLink';
 
 interface CrossSellTableProps {
   metrics: BusinessMetrics | undefined;
@@ -27,8 +28,12 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
           <tbody>
             {pairs.map((p, i) => (
               <tr key={i} className='border-b border-textInactiveColor last:border-0'>
-                <td className='p-2'>{p.productAName || `#${p.productAId}`}</td>
-                <td className='p-2'>{p.productBName || `#${p.productBId}`}</td>
+                <td className='p-2'>
+                <ProductNameLink productId={p.productAId} productName={p.productAName} />
+              </td>
+              <td className='p-2'>
+                <ProductNameLink productId={p.productBId} productName={p.productBName} />
+              </td>
                 <td className='p-2 text-right'>{p.count ?? 0}</td>
               </tr>
             ))}

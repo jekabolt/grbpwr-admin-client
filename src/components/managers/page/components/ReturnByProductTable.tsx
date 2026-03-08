@@ -40,13 +40,13 @@ export const ReturnByProductTable: FC<ReturnByProductTableProps> = ({ returnByPr
           </thead>
           <tbody>
             {sorted.map((row, idx) => {
-              const returnRate = (row.returnRate || 0) * 100;
+              const returnRate = row.returnRate ?? 0;
               const isHigh = returnRate > 30;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
                     <Text className='truncate max-w-[150px]' title={row.productName || ''}>
-                      {row.productName || `#${row.productId}`}
+                      {row.productName || '—'}
                     </Text>
                   </td>
                   <td className='p-2 text-right'>

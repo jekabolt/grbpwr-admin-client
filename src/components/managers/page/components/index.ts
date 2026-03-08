@@ -24,6 +24,7 @@ export { OrdersByStatusChart } from './OrdersByStatusChart';
 export { OrderSequenceChart } from './OrderSequenceChart';
 export { PaymentFailuresTable } from './PaymentFailuresTable';
 export { ProductCharts } from './ProductCharts';
+export { ProductNameLink } from './ProductNameLink';
 export { ProductEngagementBubbleMatrixChart } from './ProductEngagementBubbleMatrixChart';
 export { ProductEngagementRadarChart } from './ProductEngagementRadarChart';
 export { ProductEngagementTable } from './ProductEngagementTable';

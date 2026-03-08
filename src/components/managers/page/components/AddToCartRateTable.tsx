@@ -2,6 +2,7 @@ import type { AddToCartRateRow } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
+import { ProductNameLink } from './ProductNameLink';
 
 interface AddToCartRateTableProps {
   addToCartRate: AddToCartRateRow[] | undefined;
@@ -42,9 +43,7 @@ export const AddToCartRateTable: FC<AddToCartRateTableProps> = ({ addToCartRate 
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
-                    <Text className='truncate max-w-[150px]' title={row.productName || ''}>
-                      {row.productName || `#${row.productId}`}
-                    </Text>
+                    <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='150px' />
                   </td>
                   <td className='p-2 text-right'>
                     <Text>{formatNumber(row.viewCount || 0)}</Text>

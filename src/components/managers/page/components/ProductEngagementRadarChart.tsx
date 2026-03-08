@@ -10,6 +10,7 @@ import {
   Tooltip,
 } from 'recharts';
 import Text from 'ui/components/text';
+import { ProductNameLink } from './ProductNameLink';
 
 /** Extended metric fields - backend may return these beyond the base proto */
 type ProductEngagementRow = ProductEngagementMetric & {
@@ -138,19 +139,28 @@ export const ProductEngagementRadarChart: FC<ProductEngagementRadarChartProps> =
         {products.slice(0, 15).map((row, idx) => {
           const isSelected = selectedIndices.includes(idx);
           return (
-            <button
+            <div
               key={row.productId ?? idx}
-              type='button'
-              onClick={() => toggleProduct(idx)}
-              className={`px-2 py-1 text-xs rounded border transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded border transition-colors ${
                 isSelected
                   ? 'border-primary bg-primary/10 text-primary'
                   : 'border-textInactiveColor hover:border-textInactiveColor/70'
               }`}
-              title={row.productName || `#${row.productId}`}
             >
-              {row.productName || `#${row.productId}`}
-            </button>
+              <input
+                type='checkbox'
+                checked={isSelected}
+                onChange={() => toggleProduct(idx)}
+                className='shrink-0'
+                aria-label={`Compare ${row.productName || row.productId}`}
+              />
+              <ProductNameLink
+                productId={row.productId}
+                productName={row.productName}
+                maxWidth='120px'
+                className='text-xs'
+              />
+            </div>
           );
         })}
         {products.length > 15 && (

@@ -5,6 +5,7 @@ import type {
 } from 'api/proto-http/admin';
 import { FC, useMemo, useState } from 'react';
 import Text from 'ui/components/text';
+import { ProductNameLink } from './ProductNameLink';
 
 const METRIC_KEYS = [
   'imageSwipes',
@@ -106,9 +107,12 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
               className='grid gap-2 py-1.5 border-b border-textInactiveColor/30 last:border-0 items-center'
               style={{ gridTemplateColumns: `120px repeat(${METRIC_KEYS.length}, minmax(80px, 1fr))` }}
             >
-              <Text className='text-xs truncate max-w-[110px]' title={row.productName ?? ''}>
-                {row.productName ?? `#${row.productId}`}
-              </Text>
+              <ProductNameLink
+                productId={row.productId}
+                productName={row.productName}
+                maxWidth='110px'
+                className='text-xs'
+              />
               {METRIC_KEYS.map((metricKey) => {
                 const pct = getPct(row.metricsAsPctOfViews, metricKey);
                 const avg = getPct(storeAverages, metricKey);
@@ -147,6 +151,40 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
             </div>
           ))}
         </div>
+      </div>
+      <div className='mt-4 overflow-x-auto'>
+        <table className='w-full text-xs'>
+          <thead>
+            <tr className='border-b border-textInactiveColor'>
+              <th className='text-left p-2'>
+                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+              </th>
+              {METRIC_KEYS.map((k) => (
+                <th key={k} className='text-right p-2'>
+                  <Text variant='uppercase' className='text-[10px]'>{METRIC_LABELS[k]}</Text>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((row: ProductEngagementBubbleRow, idx) => (
+              <tr key={row.productId ?? idx} className='border-b border-textInactiveColor/50 hover:bg-bgSecondary'>
+                <td className='p-2'>
+                  <ProductNameLink
+                    productId={row.productId}
+                    productName={row.productName}
+                    maxWidth='140px'
+                  />
+                </td>
+                {METRIC_KEYS.map((k) => (
+                  <td key={k} className='p-2 text-right'>
+                    {getPct(row.metricsAsPctOfViews, k).toFixed(1)}%
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>

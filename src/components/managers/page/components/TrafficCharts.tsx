@@ -5,17 +5,20 @@ import type {
   ProductViewMetric,
   TrafficSourceMetric,
 } from 'api/proto-http/admin';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { BASE_PATH } from 'constants/routes';
 import { FC } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
 import { SessionsByCountryMapChart } from './SessionsByCountryMapChart';
 
 interface BarChartWrapperProps {
   title: string;
-  data: Array<{ name: string; value: number }>;
+  data: Array<{ name: string; value: number; productId?: number }>;
   valueFormat?: 'number' | 'percent';
   maxItems?: number;
+  onBarClick?: (data: { productId?: number }) => void;
 }
 
 const TrafficBarChart: FC<BarChartWrapperProps> = ({
@@ -23,6 +26,7 @@ const TrafficBarChart: FC<BarChartWrapperProps> = ({
   data,
   valueFormat = 'number',
   maxItems = 10,
+  onBarClick,
 }) => {
   const sliced = data.slice(0, maxItems);
   if (sliced.length === 0) return null;
@@ -40,7 +44,13 @@ const TrafficBarChart: FC<BarChartWrapperProps> = ({
           <XAxis type='number' tick={{ fontSize: 10 }} tickFormatter={(v) => formatValue(Number(v))} />
           <YAxis type='category' dataKey='name' width={80} tick={{ fontSize: 10 }} />
           <Tooltip formatter={(value: number | undefined) => [value != null ? formatValue(value) : '', '']} />
-          <Bar dataKey='value' fill='#000' radius={[0, 2, 2, 0]} />
+          <Bar
+          dataKey='value'
+          fill='#000'
+          radius={[0, 2, 2, 0]}
+          onClick={onBarClick ? (d) => d && onBarClick(d) : undefined}
+          cursor={onBarClick ? 'pointer' : undefined}
+        />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -76,6 +86,7 @@ function topProductsByViewsToData(items: ProductViewMetric[] | undefined) {
   return items.map((p) => ({
     name: (p.productName || `#${p.productId}`).slice(0, 20),
     value: p.pageViews ?? 0,
+    productId: p.productId,
   }));
 }
 
@@ -84,7 +95,15 @@ interface TrafficChartsProps {
 }
 
 export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
+  const navigate = useNavigate();
   if (!metrics) return null;
+
+  const handleProductBarClick = (data: { productId?: number }) => {
+    const id = data?.productId;
+    if (id != null && !isNaN(id)) {
+      navigate(`${BASE_PATH}/products/${id}`);
+    }
+  };
 
   return (
     <div className='space-y-6'>
@@ -112,6 +131,7 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
         <TrafficBarChart
           title='Top products by views'
           data={topProductsByViewsToData(metrics.topProductsByViews)}
+          onBarClick={handleProductBarClick}
         />
       </div>
     </div>
