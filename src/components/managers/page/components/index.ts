@@ -25,14 +25,20 @@ export { OrderSequenceChart } from './OrderSequenceChart';
 export { PaymentFailuresTable } from './PaymentFailuresTable';
 export { ProductCharts } from './ProductCharts';
 export { ProductEngagementBubbleMatrixChart } from './ProductEngagementBubbleMatrixChart';
+<<<<<<< HEAD
 export { ProductEngagementRadarChart } from './ProductEngagementRadarChart';
+=======
+>>>>>>> dd4c5324ef62f2b16b02f94f4ce40d773b7650af
 export { ProductEngagementTable } from './ProductEngagementTable';
 export { ProductTrendTable } from './ProductTrendTable';
 export { PromoTable } from './PromoTable';
 export { ReturnByProductChart } from './ReturnByProductChart';
 export { ReturnBySizeTable } from './ReturnBySizeTable';
 export { RevenueParetoChart } from './RevenueParetoChart';
+<<<<<<< HEAD
 export { SessionsByCountryMapChart } from './SessionsByCountryMapChart';
+=======
+>>>>>>> dd4c5324ef62f2b16b02f94f4ce40d773b7650af
 export { ScrollDepthChart } from './ScrollDepthChart';
 export { SessionDurationChart } from './SessionDurationChart';
 export { SizeAnalyticsTable } from './SizeAnalyticsTable';
