@@ -515,8 +515,19 @@ export type UpdateProductSizeStockRequest = {
   productId: number | undefined;
   sizeId: number | undefined;
   quantity: number | undefined;
+  reason: common_StockChangeReason | undefined;
+  comment?: string;
 };
 
+export type common_StockChangeReason =
+  | "STOCK_CHANGE_REASON_UNSPECIFIED"
+  | "STOCK_CHANGE_REASON_DAMAGED"
+  | "STOCK_CHANGE_REASON_LOST"
+  | "STOCK_CHANGE_REASON_FOUND"
+  | "STOCK_CHANGE_REASON_RESTOCK"
+  | "STOCK_CHANGE_REASON_INVENTORY_CORRECTION"
+  | "STOCK_CHANGE_REASON_RETURN_DEFECTIVE"
+  | "STOCK_CHANGE_REASON_THEFT";
 export type UpdateProductSizeStockResponse = {
 };
 
@@ -539,7 +550,13 @@ export type common_StockChangeSource =
   | "STOCK_CHANGE_SOURCE_ORDER_PLACED"
   | "STOCK_CHANGE_SOURCE_ORDER_CANCELLED"
   | "STOCK_CHANGE_SOURCE_ORDER_EXPIRED"
-  | "STOCK_CHANGE_SOURCE_ORDER_REFUNDED";
+  | "STOCK_CHANGE_SOURCE_ORDER_REFUNDED"
+  | "STOCK_CHANGE_SOURCE_RECEIVING"
+  | "STOCK_CHANGE_SOURCE_TRANSFER_IN"
+  | "STOCK_CHANGE_SOURCE_TRANSFER_OUT"
+  | "STOCK_CHANGE_SOURCE_DAMAGE"
+  | "STOCK_CHANGE_SOURCE_LOSS"
+  | "STOCK_CHANGE_SOURCE_MANUAL_ADJUSTMENT";
 export type ListStockChangeHistoryResponse = {
   changes: common_StockChange[] | undefined;
   total: number | undefined;
@@ -557,6 +574,33 @@ export type common_StockChange = {
   orderUuid: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   adminUsername: string | undefined;
+  referenceId: string | undefined;
+  reason?: common_StockChangeReason;
+  comment?: string;
+};
+
+export type ListStockChangesRequest = {
+  from: wellKnownTimestamp | undefined;
+  to: wellKnownTimestamp | undefined;
+  sku?: string;
+  source?: string;
+  limit: number | undefined;
+  offset: number | undefined;
+};
+
+export type StockChangeRow = {
+  date: wellKnownTimestamp | undefined;
+  sku: string | undefined;
+  amountChanged: googletype_Decimal | undefined;
+  source: string | undefined;
+  reference: string | undefined;
+  reason?: common_StockChangeReason;
+  comment?: string;
+};
+
+export type ListStockChangesResponse = {
+  changes: StockChangeRow[] | undefined;
+  total: number | undefined;
 };
 
 export type DeleteProductMediaRequest = {
@@ -1777,6 +1821,8 @@ export interface AdminService {
   UpdateProductSizeStock(request: UpdateProductSizeStockRequest): Promise<UpdateProductSizeStockResponse>;
   // Lists stock change history with optional filters.
   ListStockChangeHistory(request: ListStockChangeHistoryRequest): Promise<ListStockChangeHistoryResponse>;
+  // Lists stock changes with simplified format for reporting.
+  ListStockChanges(request: ListStockChangesRequest): Promise<ListStockChangesResponse>;
   // Adds a new promotional code
   AddPromo(request: AddPromoRequest): Promise<AddPromoResponse>;
   // Lists all promotional codes
@@ -2142,6 +2188,41 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListStockChangeHistory",
       }) as Promise<ListStockChangeHistoryResponse>;
+    },
+    ListStockChanges(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/stock-changes`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      if (request.sku) {
+        queryParams.push(`sku=${encodeURIComponent(request.sku.toString())}`)
+      }
+      if (request.source) {
+        queryParams.push(`source=${encodeURIComponent(request.source.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListStockChanges",
+      }) as Promise<ListStockChangesResponse>;
     },
     AddPromo(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/promo/add`; // eslint-disable-line quotes

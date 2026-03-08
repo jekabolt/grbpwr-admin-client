@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import { OrdersTable } from './components/orders-table';
+import { StockChangesReport } from './components/StockChangesReport';
 import { useInfiniteOrders } from './components/useOrdersQuery';
 
 export function OrdersCatalog() {
@@ -49,6 +50,7 @@ export function OrdersCatalog() {
 
   return (
     <div className='flex flex-col gap-4 pb-16'>
+      <StockChangesReport />
       <div className='flex justify-end'>
         <Input
           name='email'

@@ -164,7 +164,22 @@ export type StockChangeSource =
   | "STOCK_CHANGE_SOURCE_ORDER_PLACED"
   | "STOCK_CHANGE_SOURCE_ORDER_CANCELLED"
   | "STOCK_CHANGE_SOURCE_ORDER_EXPIRED"
-  | "STOCK_CHANGE_SOURCE_ORDER_REFUNDED";
+  | "STOCK_CHANGE_SOURCE_ORDER_REFUNDED"
+  | "STOCK_CHANGE_SOURCE_RECEIVING"
+  | "STOCK_CHANGE_SOURCE_TRANSFER_IN"
+  | "STOCK_CHANGE_SOURCE_TRANSFER_OUT"
+  | "STOCK_CHANGE_SOURCE_DAMAGE"
+  | "STOCK_CHANGE_SOURCE_LOSS"
+  | "STOCK_CHANGE_SOURCE_MANUAL_ADJUSTMENT";
+export type StockChangeReason =
+  | "STOCK_CHANGE_REASON_UNSPECIFIED"
+  | "STOCK_CHANGE_REASON_DAMAGED"
+  | "STOCK_CHANGE_REASON_LOST"
+  | "STOCK_CHANGE_REASON_FOUND"
+  | "STOCK_CHANGE_REASON_RESTOCK"
+  | "STOCK_CHANGE_REASON_INVENTORY_CORRECTION"
+  | "STOCK_CHANGE_REASON_RETURN_DEFECTIVE"
+  | "STOCK_CHANGE_REASON_THEFT";
 // Category represents a hierarchical category structure
 export type Category = {
   id: number | undefined;
@@ -382,6 +397,9 @@ export type StockChange = {
   orderUuid: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   adminUsername: string | undefined;
+  referenceId: string | undefined;
+  reason?: StockChangeReason;
+  comment?: string;
 };
 
 export type OrderFactor =
