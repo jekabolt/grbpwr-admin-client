@@ -37,7 +37,7 @@ export const ReturnBySizeTable: FC<ReturnBySizeTableProps> = ({ returnBySize }) 
           </thead>
           <tbody>
             {sorted.map((row, idx) => {
-              const returnRate = (row.returnRate || 0) * 100;
+              const returnRate = row.returnRate ?? 0;
               const isHigh = returnRate > 20;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>

@@ -1,6 +1,8 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { BASE_PATH } from 'constants/routes';
 import { FC } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Text from 'ui/components/text';
 import { formatCurrency, parseDecimal } from '../utils';
 
@@ -9,6 +11,7 @@ interface ProductChartsProps {
 }
 
 export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
+  const navigate = useNavigate();
   if (!metrics) return null;
 
   const revenueData =
@@ -16,6 +19,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
       name: (p.productName || `#${p.productId}`).slice(0, 20),
       value: parseDecimal(p.value),
       count: p.count ?? 0,
+      productId: p.productId,
     })) ?? [];
 
   const quantityData =
@@ -23,7 +27,15 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
       name: (p.productName || `#${p.productId}`).slice(0, 20),
       value: p.count ?? 0,
       revenue: parseDecimal(p.value),
+      productId: p.productId,
     })) ?? [];
+
+  const handleProductBarClick = (data: { productId?: number }) => {
+    const id = data?.productId;
+    if (id != null && !isNaN(id)) {
+      navigate(`${BASE_PATH}/products/${id}`);
+    }
+  };
 
   const categoryData =
     metrics.revenueByCategory?.map((c) => ({
@@ -49,7 +61,13 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
                 <XAxis type='number' tick={{ fontSize: 10 }} tickFormatter={(v) => formatCurrency(v)} />
                 <YAxis type='category' dataKey='name' width={80} tick={{ fontSize: 10 }} />
                 <Tooltip formatter={(value: number) => [formatCurrency(value), '']} />
-                <Bar dataKey='value' fill='#000' radius={[0, 2, 2, 0]} />
+                <Bar
+                dataKey='value'
+                fill='#000'
+                radius={[0, 2, 2, 0]}
+                onClick={(data) => data && handleProductBarClick(data)}
+                cursor='pointer'
+              />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -65,7 +83,13 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
                 <XAxis type='number' dataKey='value' tick={{ fontSize: 10 }} />
                 <YAxis type='category' dataKey='name' width={80} tick={{ fontSize: 10 }} />
                 <Tooltip />
-                <Bar dataKey='value' fill='#000' radius={[0, 2, 2, 0]} />
+                <Bar
+                dataKey='value'
+                fill='#000'
+                radius={[0, 2, 2, 0]}
+                onClick={(data) => data && handleProductBarClick(data)}
+                cursor='pointer'
+              />
               </BarChart>
             </ResponsiveContainer>
           </div>

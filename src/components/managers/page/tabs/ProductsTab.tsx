@@ -66,15 +66,18 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
               <RevenueParetoChart revenuePareto={metricsResponse.revenuePareto} />
               <ProductTrendTable productTrend={metricsResponse.productTrend} />
             </div>
-            <ProductEngagementBubbleMatrixChart
-              productEngagementBubbleMatrix={
-                (metricsResponse as Record<string, unknown>).productEngagementBubbleMatrix as
-                  | import('api/proto-http/admin').ProductEngagementBubbleMatrix
-                  | undefined
-              }
-            />
-            <ProductEngagementRadarChart productEngagement={metricsResponse.productEngagement} />
-            <ProductEngagementTable productEngagement={metricsResponse.productEngagement} />
+            <div className='space-y-6'>
+              <h3 className='text-sm font-bold uppercase'>Product engagement</h3>
+              <ProductEngagementBubbleMatrixChart
+                productEngagementBubbleMatrix={
+                  (metricsResponse as Record<string, unknown>).productEngagementBubbleMatrix as
+                    | import('api/proto-http/admin').ProductEngagementBubbleMatrix
+                    | undefined
+                }
+              />
+              <ProductEngagementRadarChart productEngagement={metricsResponse.productEngagement} />
+              <ProductEngagementTable productEngagement={metricsResponse.productEngagement} />
+            </div>
             {hasAddToCartRateAnalysis ? (
               <div className='space-y-6'>
                 <AddToCartRateMatrixChart

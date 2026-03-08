@@ -1,5 +1,6 @@
 import type { SizeAnalyticsRow } from 'api/proto-http/admin';
 import { FC, useMemo } from 'react';
+import { ProductNameLink } from './ProductNameLink';
 import {
   Bar,
   BarChart,
@@ -213,9 +214,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
-                    <Text className='truncate max-w-[120px]' title={row.productName || ''}>
-                      {row.productName || `#${row.productId}`}
-                    </Text>
+                    <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='120px' />
                   </td>
                   <td className='p-2'>
                     <Text className='font-bold'>{row.sizeName || `Size #${row.sizeId}`}</Text>
