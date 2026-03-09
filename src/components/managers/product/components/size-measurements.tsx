@@ -11,28 +11,26 @@ import { useLastSizeOnly } from '../utility/useLastSizeOnly';
 import { useMeasurements } from '../utility/useMeasurements';
 import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle';
 import { StockHistory } from './stock/stock-history';
-import { ToggleSizeNames } from './toggle-sizenames';
 import { UpdateStock } from './stock/update-stock';
+import { ToggleSizeNames } from './toggle-sizenames';
 
 const cellClass = 'text-center border-r border-textColor';
 const measurementCellClass = 'text-center border-r border-textColor w-20 lg:w-auto';
 const lastCellClass = 'text-center w-20 lg:w-auto';
 
 export function SizeMeasurements({
-  isEditMode = false,
-  isAddingProduct = false,
+  editMode = false,
   productId,
   onStockUpdated,
 }: {
-  isEditMode?: boolean;
-  isAddingProduct?: boolean;
+  editMode?: boolean;
   productId?: number;
   onStockUpdated?: () => void;
 } = {}) {
   const { dictionary } = useDictionary();
   const { watch, setValue } = useFormContext<ProductFormData>();
   const values = watch();
-  const { requireConfirmation } = useEditConfirmation(isEditMode, isAddingProduct);
+  const { requireConfirmation } = useEditConfirmation(editMode);
   const { measurementsNames, handleToggleChange } = useSizeMeasurementsToggle();
   const { measurements, selectedSubCategoryName, selectedTypeName } = useMeasurements(
     dictionary,
@@ -166,7 +164,11 @@ export function SizeMeasurements({
     <div className='w-full space-y-3'>
       <div className='flex gap-4'>
         <StockHistory productId={productId} sizes={productSizesForStock} />
-        <UpdateStock productId={productId} sizes={productSizesForStock} onStockUpdated={onStockUpdated} />
+        <UpdateStock
+          productId={productId}
+          sizes={productSizesForStock}
+          onStockUpdated={onStockUpdated}
+        />
       </div>
       <div className='overflow-x-auto'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
@@ -213,7 +215,7 @@ export function SizeMeasurements({
                         }
                       }}
                       className='w-full border-none text-center bg-inactive'
-                      disabled={!isEditMode}
+                      disabled={!editMode}
                     />
                   </td>
                   {measurements.map((m, i) => {
@@ -236,7 +238,7 @@ export function SizeMeasurements({
                             }
                           }}
                           className='w-full border-none text-center'
-                          disabled={!isEditMode}
+                          disabled={!editMode}
                         />
                       </td>
                     );
