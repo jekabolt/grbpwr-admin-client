@@ -56,6 +56,8 @@ export function StockTable({ changes = [], isLoading, sizes = [] }: StockTablePr
           label: 'Date',
           accessor: (c) => formatDateShort(c.createdAt),
         },
+        { label: 'Reason', accessor: (c) => c.reason ?? '-' },
+        { label: 'Comment', accessor: (c) => c.comment ?? '-' },
         { label: 'Order', accessor: (c) => c.orderUuid ?? '—' },
         { label: 'Admin', accessor: (c) => c.adminUsername ?? '—' },
       ],
@@ -65,52 +67,52 @@ export function StockTable({ changes = [], isLoading, sizes = [] }: StockTablePr
   return (
     <div className='min-h-0 w-full flex-1 overflow-auto'>
       <table className='w-full border-collapse border-2 border-textColor min-w-max'>
-          <thead className='sticky top-0 z-20 h-10'>
-            <tr className='border-b border-textColor bg-textInactiveColor'>
-              {COLUMNS.map((col, i) => (
-                <th
-                  key={col.label}
-                  className={cn(
-                    'text-center h-10 min-w-26 border border-r border-textColor bg-textInactiveColor px-2',
-                  )}
-                >
-                  <Text variant='uppercase'>{col.label}</Text>
-                </th>
-              ))}
+        <thead className='sticky top-0 z-20 h-10'>
+          <tr className='border-b border-textColor bg-textInactiveColor'>
+            {COLUMNS.map((col, i) => (
+              <th
+                key={col.label}
+                className={cn(
+                  'text-center h-10 min-w-26 border border-r border-textColor bg-textInactiveColor px-2',
+                )}
+              >
+                <Text variant='uppercase'>{col.label}</Text>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {isLoading ? (
+            <tr>
+              <td colSpan={COLUMNS.length} className='text-center py-8'>
+                <Text variant='uppercase'>Loading…</Text>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr>
-                <td colSpan={COLUMNS.length} className='text-center py-8'>
-                  <Text variant='uppercase'>Loading…</Text>
-                </td>
+          ) : list.length === 0 ? (
+            <tr>
+              <td colSpan={COLUMNS.length} className='text-center py-8'>
+                <Text variant='uppercase'>no stock changes</Text>
+              </td>
+            </tr>
+          ) : (
+            list.map((c) => (
+              <tr
+                key={c.id}
+                className='group border-b border-text last:border-b-0 h-10 hover:bg-highlightColor/20 transition-colors'
+              >
+                {COLUMNS.map((col) => (
+                  <td
+                    key={col.label}
+                    className={cn('border border-r border-textColor text-center px-2')}
+                  >
+                    <Text>{col.accessor(c)}</Text>
+                  </td>
+                ))}
               </tr>
-            ) : list.length === 0 ? (
-              <tr>
-                <td colSpan={COLUMNS.length} className='text-center py-8'>
-                  <Text variant='uppercase'>no stock changes</Text>
-                </td>
-              </tr>
-            ) : (
-              list.map((c) => (
-                <tr
-                  key={c.id}
-                  className='group border-b border-text last:border-b-0 h-10 hover:bg-highlightColor/20 transition-colors'
-                >
-                  {COLUMNS.map((col) => (
-                    <td
-                      key={col.label}
-                      className={cn('border border-r border-textColor text-center px-2')}
-                    >
-                      <Text>{col.accessor(c)}</Text>
-                    </td>
-                  ))}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+            ))
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

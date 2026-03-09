@@ -9,6 +9,7 @@ type Props = {
   placeholder?: string;
   loading?: boolean;
   className?: string;
+  valueAsNumber?: boolean;
   items: {
     label: string;
     value: string | number;
@@ -16,7 +17,15 @@ type Props = {
   [k: string]: any;
 };
 
-export default function SelectField({ loading, items, name, label, className, ...props }: Props) {
+export default function SelectField({
+  loading,
+  items,
+  name,
+  label,
+  className,
+  valueAsNumber = false,
+  ...props
+}: Props) {
   const { control, trigger } = useFormContext();
 
   function onBlur() {
@@ -31,9 +40,14 @@ export default function SelectField({ loading, items, name, label, className, ..
         <FormItem>
           <FormLabel>{label}</FormLabel>
           <Select
-            onValueChange={field.onChange}
+            onValueChange={(val: string | undefined) =>
+              field.onChange(valueAsNumber && val != null ? Number(val) : val)
+            }
             items={items}
             {...field}
+            value={
+              valueAsNumber && field.value != null ? String(field.value) : field.value
+            }
             {...props}
             onBlur={onBlur}
           />

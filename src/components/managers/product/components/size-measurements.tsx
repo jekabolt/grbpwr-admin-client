@@ -12,6 +12,7 @@ import { useMeasurements } from '../utility/useMeasurements';
 import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle';
 import { StockHistory } from './stock/stock-history';
 import { ToggleSizeNames } from './toggle-sizenames';
+import { UpdateStock } from './stock/update-stock';
 
 const cellClass = 'text-center border-r border-textColor';
 const measurementCellClass = 'text-center border-r border-textColor w-20 lg:w-auto';
@@ -161,6 +162,10 @@ export function SizeMeasurements({
 
   return (
     <div className='w-full space-y-3'>
+      <div className='flex gap-4'>
+        <StockHistory productId={productId} sizes={productSizesForStock} />
+        <UpdateStock productId={productId} sizes={productSizesForStock} />
+      </div>
       <div className='overflow-x-auto'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
           <thead className='bg-textInactiveColor'>
@@ -240,7 +245,6 @@ export function SizeMeasurements({
           </tbody>
         </table>
       </div>
-      <StockHistory productId={productId} sizes={productSizesForStock} />
     </div>
   );
 }

@@ -8,6 +8,7 @@ type Props = Omit<InputProps, 'name'> & {
   loading?: boolean;
   keyboardRestriction?: RegExp;
   validateOnBlur?: boolean;
+  valueAsNumber?: boolean;
 };
 
 export default function InputField({
@@ -18,6 +19,7 @@ export default function InputField({
   srLabel,
   keyboardRestriction,
   validateOnBlur = true,
+  valueAsNumber = false,
   ...props
 }: Props) {
   const { control, trigger, setValue } = useFormContext();
@@ -59,7 +61,16 @@ export default function InputField({
                 if (validateOnBlur) trigger(name);
               }}
               onKeyDown={handleKeyDown}
-              onChange={keyboardRestriction ? handleChange : field.onChange}
+              onChange={
+                keyboardRestriction
+                  ? handleChange
+                  : valueAsNumber
+                    ? (e: React.ChangeEvent<HTMLInputElement>) =>
+                        field.onChange(
+                          e.target.value === '' ? undefined : e.target.valueAsNumber
+                        )
+                    : field.onChange
+              }
             />
           </FormControl>
           <FormMessage />
