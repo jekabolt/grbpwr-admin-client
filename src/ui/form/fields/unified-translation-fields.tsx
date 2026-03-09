@@ -1,5 +1,5 @@
 import { LANGUAGES } from 'constants/constants';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
@@ -69,6 +69,8 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLanguageId, translationIndex, translations.length, replace, setValue, fieldPrefix]);
 
+  const lastErrorLangIdRef = useRef<number | null>(null);
+
   useEffect(() => {
     const pathParts = fieldPrefix.split('.');
     let node: any = errors;
@@ -84,7 +86,12 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
 
     const langId = translations[idx]?.languageId;
     if (idx !== -1 && typeof langId === 'number') {
-      setSelectedLanguageId(langId);
+      if (lastErrorLangIdRef.current !== langId) {
+        lastErrorLangIdRef.current = langId;
+        setSelectedLanguageId(langId);
+      }
+    } else {
+      lastErrorLangIdRef.current = null;
     }
   }, [errors, fieldPrefix, fields, translations]);
 
