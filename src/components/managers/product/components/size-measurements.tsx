@@ -2,6 +2,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import React, { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { ProductFormData } from '../utility/schema';
@@ -30,7 +31,7 @@ export function SizeMeasurements({
   const { dictionary } = useDictionary();
   const { watch, setValue } = useFormContext<ProductFormData>();
   const values = watch();
-  const { requireConfirmation } = useEditConfirmation(editMode);
+  const { requireConfirmation, confirmationModal } = useEditConfirmation(editMode);
   const { measurementsNames, handleToggleChange } = useSizeMeasurementsToggle();
   const { measurements, selectedSubCategoryName, selectedTypeName } = useMeasurements(
     dictionary,
@@ -81,12 +82,14 @@ export function SizeMeasurements({
     return result;
   }, [values.sizeMeasurements, filteredSizes, dictionary?.sizes]);
 
-  const handleSizeChange = (
+  const handleSizeChange = async (
     event: React.ChangeEvent<HTMLInputElement>,
     sizeId: number | undefined,
   ) => {
     const { value } = event.target;
-    if (!sizeId || !requireConfirmation(sizeId)) return;
+    if (!sizeId) return;
+    const ok = await requireConfirmation(sizeId);
+    if (!ok) return;
 
     const sizeData = sizeMeasurementsMap.get(sizeId);
 
@@ -110,13 +113,15 @@ export function SizeMeasurements({
     handleLastSizeCheck(sizeId, value);
   };
 
-  const handleMeasurementChange = (
+  const handleMeasurementChange = async (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     sizeId: number | undefined,
     measurementNameId: number | undefined,
   ) => {
     const measurementValue = e.target.value;
-    if (!sizeId || !requireConfirmation(sizeId)) return;
+    if (!sizeId) return;
+    const ok = await requireConfirmation(sizeId);
+    if (!ok) return;
 
     let sizeIndex = values.sizeMeasurements?.findIndex(
       (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
@@ -162,6 +167,16 @@ export function SizeMeasurements({
 
   return (
     <div className='w-full space-y-3'>
+      <ConfirmationModal
+        open={confirmationModal.open}
+        onOpenChange={confirmationModal.onOpenChange}
+        onConfirm={confirmationModal.onConfirm}
+        onCancel={confirmationModal.onCancel}
+      >
+        <Text variant='uppercase' className='font-bold'>
+          {confirmationModal.message}
+        </Text>
+      </ConfirmationModal>
       <div className='flex gap-4'>
         <StockHistory productId={productId} sizes={productSizesForStock} />
         <UpdateStock
