@@ -71,7 +71,7 @@ export function ArchiveForm({
               fieldPrefix='translations'
               fields={[
                 { name: 'heading', label: 'heading' },
-                { name: 'description', label: 'description' },
+                { name: 'description', label: 'description', type: 'textarea', rows: 4 },
               ]}
             />
             <InputField name='tag' placeholder='enter tag' label='tag' />

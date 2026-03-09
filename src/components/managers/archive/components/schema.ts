@@ -37,11 +37,11 @@ export const schema = z.object({
       languageId: z.number().min(1, 'Language is required'),
       heading: z
         .string()
-        .min(20, 'Heading is required')
+        .min(20, 'Heading must be at least 20 characters')
         .max(90, 'Heading cannot exceed 90 characters'),
       description: z
         .string()
-        .min(10, 'Description is required')
+        .min(10, 'Description must be at least 10 characters')
         .max(1000, 'Description cannot exceed 1000 characters'),
     }),
     requiredLanguageIds,

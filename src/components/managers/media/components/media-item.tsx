@@ -93,7 +93,7 @@ export function MediaItem({
       <Button
         asChild
         onClick={handleClick}
-        className='relative overflow-hidden w-full h-full group cursor-pointer bg-white'
+        className='relative overflow-hidden w-full h-full group cursor-pointer bg-bgColor'
       >
         <div className='relative w-full h-full'>
           <div>

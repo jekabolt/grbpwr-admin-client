@@ -5,13 +5,13 @@ const textVariants = cva('', {
     variant: {
       default: ['text-text'],
       error: ['text-error', 'uppercase'],
-      selected: ['text-bgColor', 'bg-text', 'uppercase'],
+      selected: ['text-bgColor', 'bg-textColor', 'uppercase'],
       uppercase: ['text-text', 'uppercase'],
       underlined: ['underline', 'text-text'],
       underLineWithColor: ['underline', 'text-blue-500', 'uppercase'],
       strikethrough: ['line-through', 'text-text'],
       strileTroughInactive: ['line-through', 'text-inactive'],
-      inactive: ['text-inactive'],
+      inactive: ['text-textInactiveColor'],
     },
     size: {
       default: ['text-textBaseSize'],

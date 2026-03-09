@@ -21,7 +21,6 @@ export function Archives() {
         <Link to={ROUTES.addArchive}>create new</Link>
       </Button>
       <ListArchive />
-      {/* <ArchiveForm open={isModalOpen} onClose={closeModal} /> */}
     </div>
   );
 }

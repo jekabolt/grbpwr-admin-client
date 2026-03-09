@@ -1,21 +1,14 @@
-import {
-  common_SupportTicket,
-  common_SupportTicketPriority,
-  common_SupportTicketStatus,
-} from 'api/proto-http/admin';
+import { common_SupportTicket } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../orders-catalog/components/utility';
+import { Filter } from './filter';
 import {
   formatPriorityLabel,
   formatStatusLabel,
   getPriorityColor,
   getStatusColor,
-  PRIORITY_OPTIONS,
-  STATUS_OPTIONS,
   TicketFilters,
 } from './utils';
 
@@ -103,78 +96,9 @@ export function TicketsTable({
     [],
   );
 
-  const statusOptions = [{ value: 'all', label: 'All' }, ...STATUS_OPTIONS];
-  const priorityOptions = [{ value: 'all', label: 'All' }, ...PRIORITY_OPTIONS];
-
   return (
     <div className='w-full flex flex-col gap-4'>
-      <div className='flex flex-wrap gap-3 items-end'>
-        <div className='flex flex-col gap-1'>
-          <Text variant='inactive' size='small'>
-            Status
-          </Text>
-          <Selector
-            label='Status'
-            options={statusOptions}
-            value={filters.status ?? 'all'}
-            onChange={(v: string) =>
-              onFiltersChange({
-                status: v === 'all' ? undefined : (v as common_SupportTicketStatus),
-              })
-            }
-            disabled={isLoading}
-          />
-        </div>
-        <div className='flex flex-col gap-1'>
-          <Text variant='inactive' size='small'>
-            Priority
-          </Text>
-          <Selector
-            label='Priority'
-            options={priorityOptions}
-            value={filters.priority ?? 'all'}
-            onChange={(v: string) =>
-              onFiltersChange({
-                priority: v === 'all' ? undefined : (v as common_SupportTicketPriority),
-              })
-            }
-            disabled={isLoading}
-          />
-        </div>
-        <div className='flex flex-col gap-1'>
-          <Text variant='inactive' size='small'>
-            Email
-          </Text>
-          <Input
-            name='email'
-            type='text'
-            placeholder='filter by email'
-            value={filters.email ?? ''}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              onFiltersChange({ email: e.target.value })
-            }
-            disabled={isLoading}
-            className='w-48'
-          />
-        </div>
-        <div className='flex flex-col gap-1'>
-          <Text variant='inactive' size='small'>
-            Order Ref
-          </Text>
-          <Input
-            name='orderRef'
-            type='text'
-            placeholder='filter by order'
-            value={filters.orderReference ?? ''}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              onFiltersChange({ orderReference: e.target.value })
-            }
-            disabled={isLoading}
-            className='w-36'
-          />
-        </div>
-      </div>
-
+      <Filter filters={filters} onFiltersChange={onFiltersChange} isLoading={isLoading} />
       <div className='overflow-x-auto w-full'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
           <thead className='bg-textInactiveColor h-10'>
@@ -182,10 +106,9 @@ export function TicketsTable({
               {COLUMNS.map((col) => (
                 <th
                   key={col.key}
-                  className={cn(
-                    'text-center h-10 min-w-20 border border-r border-textColor px-2',
-                    { 'sticky left-0 bg-textInactiveColor z-10': col.key === 'id' },
-                  )}
+                  className={cn('text-center h-10 min-w-20 border border-r border-textColor px-2', {
+                    'sticky left-0 bg-textInactiveColor z-10': col.key === 'id',
+                  })}
                 >
                   <Text variant='uppercase'>{col.label}</Text>
                 </th>
