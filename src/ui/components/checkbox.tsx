@@ -17,7 +17,7 @@ export default function CheckboxCommon({
       onCheckedChange={onChange}
       {...props}
     >
-      <Checkbox.Indicator className='h-full w-full bg-text'></Checkbox.Indicator>
+      <Checkbox.Indicator className='h-full w-full bg-textColor'></Checkbox.Indicator>
     </Checkbox.Root>
   );
 }
