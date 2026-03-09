@@ -49,7 +49,7 @@ export function MediaPreviewWithSelector({
           <Button
             type='button'
             onClick={onClear}
-            className='absolute top-0 right-0 z-10 cursor-pointer'
+            className='absolute top-0 right-0 z-10 cursor-pointer text-bgColor mix-blend-exclusion'
           >
             [×]
           </Button>

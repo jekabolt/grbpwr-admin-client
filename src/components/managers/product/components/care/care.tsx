@@ -109,10 +109,14 @@ export function Care({ editMode }: CareInterface) {
 
         {editMode && (
           <div className='flex gap-2'>
-            <Button size='lg' onClick={handleClearInstructions}>
+            <Button variant='simple' size='lg' onClick={handleClearInstructions}>
               clear
             </Button>
-            <Button size='lg' onClick={(e: React.MouseEvent) => handleOpenCareTable(e)}>
+            <Button
+              variant='simpleReverseWithBorder'
+              size='lg'
+              onClick={(e: React.MouseEvent) => handleOpenCareTable(e)}
+            >
               select
             </Button>
           </div>

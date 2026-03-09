@@ -58,7 +58,7 @@ export function MediaSelector({
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/80' />
-        <DialogPrimitive.Content className='fixed left-[50%] top-[50%] z-50 w-full max-w-6xl h-[90vh] translate-x-[-50%] translate-y-[-50%] bg-white p-2.5 flex flex-col'>
+        <DialogPrimitive.Content className='fixed left-[50%] top-[50%] z-50 w-full max-w-6xl h-[90vh] translate-x-[-50%] translate-y-[-50%] bg-bgColor p-2.5 flex flex-col'>
           <div className='flex items-center justify-between flex-shrink-0'>
             <DialogPrimitive.Title className='text-lg font-semibold uppercase'>
               <Text variant='uppercase'>select Media</Text>
@@ -79,7 +79,7 @@ export function MediaSelector({
               selectionMode={true}
             />
           </div>
-          <div className='flex items-center justify-end gap-4 pt-4 border-t bg-white flex-shrink-0'>
+          <div className='flex items-center justify-end gap-4 pt-4 border-t bg-bgColor flex-shrink-0'>
             <DialogPrimitive.Close asChild>
               <Button size='lg' className='uppercase' variant='simpleReverse'>
                 cancel

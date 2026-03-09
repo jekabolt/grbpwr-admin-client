@@ -11,10 +11,12 @@ export function Tags({
   isAddingProduct,
   isEditMode,
   isCopyMode,
+  editMode,
 }: {
   isAddingProduct: boolean;
   isEditMode: boolean;
   isCopyMode: boolean;
+  editMode: boolean;
 }) {
   const {
     watch,
@@ -162,8 +164,10 @@ export function Tags({
           </div>
           <Button
             size='lg'
+            variant='main'
+            type='button'
             onClick={(e: React.MouseEvent) => handleAddTag(e)}
-            className='flex-shrink-0  ml-2 '
+            className='flex-shrink-0  ml-2'
           >
             save
           </Button>
@@ -185,6 +189,7 @@ export function Tags({
             <Text>{tag}</Text>
             {(isEditMode || isAddingProduct || isCopyMode) && (
               <Button
+                type='button'
                 className='lg:hidden lg:group-hover:block'
                 onClick={(e: React.MouseEvent) => {
                   handleDeleteTag(tag || '', e);

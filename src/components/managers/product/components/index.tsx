@@ -182,6 +182,7 @@ export function ProductForm({
                 isAddingProduct={isAddingProduct}
                 isEditMode={isEditMode}
                 isCopyMode={isCopyMode}
+                editMode={editMode}
               />
             </div>
           </div>

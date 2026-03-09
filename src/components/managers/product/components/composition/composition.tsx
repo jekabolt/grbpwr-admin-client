@@ -129,10 +129,14 @@ export function Composition({ editMode }: CompositionProps) {
         </div>
         {editMode && (
           <div className='flex gap-2'>
-            <Button size='lg' onClick={handleClearCompositionField}>
+            <Button variant='simple' size='lg' onClick={handleClearCompositionField}>
               clear
             </Button>
-            <Button size='lg' onClick={(e: React.MouseEvent) => handleOpenCompositionModal(e)}>
+            <Button
+              variant='simpleReverseWithBorder'
+              size='lg'
+              onClick={(e: React.MouseEvent) => handleOpenCompositionModal(e)}
+            >
               select
             </Button>
           </div>
