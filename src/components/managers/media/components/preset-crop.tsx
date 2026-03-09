@@ -1,4 +1,4 @@
-import { Slider } from '@mui/material';
+import * as Slider from '@radix-ui/react-slider';
 import { FC, useCallback, useState } from 'react';
 import Cropper, { Area, Point } from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
@@ -36,15 +36,20 @@ export const PresetCrop: FC<PresetCropProps> = ({ selectedFile, aspect, onCropCo
         />
       </div>
       <div className='flex items-center gap-2 pt-4'>
-        <Slider
-          value={zoom}
+        <Slider.Root
+          value={[zoom]}
           min={1}
           max={3}
           step={0.1}
-          aria-labelledby='Zoom'
-          onChange={(_, zoom) => setZoom(Number(zoom))}
-          size='small'
-        />
+          aria-label='Zoom'
+          onValueChange={([value]: number[]) => setZoom(value)}
+          className='relative flex w-full touch-none select-none items-center'
+        >
+          <Slider.Track className='relative h-1.5 grow rounded-full bg-textInactiveColor'>
+            <Slider.Range className='absolute h-full rounded-full bg-textColor' />
+          </Slider.Track>
+          <Slider.Thumb className='block h-4 w-4 rounded-full border border-textColor bg-bgColor shadow focus:outline-none focus:ring-2 focus:ring-textColor/50' />
+        </Slider.Root>
       </div>
     </div>
   );

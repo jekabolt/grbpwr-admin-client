@@ -1,7 +1,5 @@
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
+import { CheckCircledIcon, ClipboardCopyIcon } from '@radix-ui/react-icons';
+import * as Tooltip from '@radix-ui/react-tooltip';
 import { FC, useEffect, useState } from 'react';
 
 import Text from './text';
@@ -41,20 +39,34 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, cutText }) => 
   return (
     <div className='flex items-center'>
       <Text>{cutText ? text.slice(0, 4) + '...' + text.slice(-4) : text}</Text>
-      <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
-        <IconButton
-          onClick={handleCopy}
-          color='primary'
-          size='small'
-          style={{ padding: 0, paddingLeft: '5px', visibility: isPrinting ? 'hidden' : 'visible' }}
-        >
-          {copied ? (
-            <CheckCircleOutlineIcon fontSize='small' />
-          ) : (
-            <ContentCopyIcon fontSize='small' />
-          )}
-        </IconButton>
-      </Tooltip>
+      <Tooltip.Provider delayDuration={300}>
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild>
+            <button
+              type='button'
+              onClick={handleCopy}
+              className='inline-flex p-0 pl-1.5 text-textColor hover:opacity-70 focus:outline-none focus:ring-2 focus:ring-textColor/50'
+              style={{ visibility: isPrinting ? 'hidden' : 'visible' }}
+              aria-label={copied ? 'Copied!' : 'Copy to clipboard'}
+            >
+              {copied ? (
+                <CheckCircledIcon className='h-4 w-4' />
+              ) : (
+                <ClipboardCopyIcon className='h-4 w-4' />
+              )}
+            </button>
+          </Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Content
+              side='top'
+              sideOffset={4}
+              className='rounded border border-textInactiveColor bg-bgColor px-2 py-1 text-sm text-textColor shadow'
+            >
+              {copied ? 'Copied!' : 'Copy to clipboard'}
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     </div>
   );
 };

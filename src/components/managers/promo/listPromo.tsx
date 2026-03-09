@@ -1,6 +1,5 @@
-import DeleteIcon from '@mui/icons-material/Delete';
-import { IconButton } from '@mui/material';
-// import { DataGrid } from '@mui/x-data-grid';
+// import DeleteIcon from '@mui/icons-material/Delete';
+// import { IconButton } from '@mui/material';
 import { adminService } from 'api/api';
 import { common_PromoCode } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -49,25 +48,25 @@ export const ListPromo: FC<ListPromosInterface> = ({ promos, fetchPromos }) => {
     }
   }, []);
 
-  const columns = [
-    { field: 'code', headerName: 'CODE', width: 120 },
-    { field: 'start', headerName: 'START', width: 120 },
-    { field: 'expiration', headerName: 'EXPIRATION', width: 120 },
-    { field: 'discount', headerName: 'DISCOUNT', flex: 1 },
-    { field: 'freeShipping', headerName: 'SHIPPING', flex: 1 },
-    { field: 'allowed', headerName: 'ALLOWED', flex: 1 },
-    { field: 'voucher', headerName: 'VOUCHER', flex: 1 },
-    {
-      field: 'delete',
-      headerName: 'DELETE',
-      flex: 0.5,
-      renderCell: (params: any) => (
-        <IconButton onClick={() => deletePromoFromList(params.row.code)}>
-          <DeleteIcon fontSize='medium' />
-        </IconButton>
-      ),
-    },
-  ];
+  // const columns = [
+  //   { field: 'code', headerName: 'CODE', width: 120 },
+  //   { field: 'start', headerName: 'START', width: 120 },
+  //   { field: 'expiration', headerName: 'EXPIRATION', width: 120 },
+  //   { field: 'discount', headerName: 'DISCOUNT', flex: 1 },
+  //   { field: 'freeShipping', headerName: 'SHIPPING', flex: 1 },
+  //   { field: 'allowed', headerName: 'ALLOWED', flex: 1 },
+  //   { field: 'voucher', headerName: 'VOUCHER', flex: 1 },
+  //   {
+  //     field: 'delete',
+  //     headerName: 'DELETE',
+  //     flex: 0.5,
+  //     renderCell: (params: any) => (
+  //       <IconButton onClick={() => deletePromoFromList(params.row.code)}>
+  //         <DeleteIcon fontSize='medium' />
+  //       </IconButton>
+  //     ),
+  //   },
+  // ];
 
   return (
     <div>promo</div>

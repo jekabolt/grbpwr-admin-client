@@ -1,10 +1,10 @@
 import { common_ArchiveList } from 'api/proto-http/frontend';
-import { useArchives } from 'components/managers/archives/components/useArchiveQuery';
-import { useEffect, useState } from 'react';
+import { useInfiniteArchives } from 'components/managers/archives/components/useArchiveQuery';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
-import { Dialog } from 'ui/components/dialog';
 import MediaComponent from 'ui/components/media';
 import Text from 'ui/components/text';
+import { HeroModal } from './hero-modal';
 
 interface Props {
   open: boolean;
@@ -13,16 +13,19 @@ interface Props {
   selectedArchiveId: number;
 }
 
+const limit = 50;
+
 export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Props) {
   const [selectedArchive, setSelectedArchive] = useState<common_ArchiveList | undefined>(undefined);
-  const [currentPage, setCurrentPage] = useState(0);
-  const limit = 50;
 
-  const { data: archives, isLoading, error, refetch } = useArchives(limit, currentPage * limit);
+  const { data, isLoading, error, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } =
+    useInfiniteArchives(limit);
+
+  const archives = useMemo(() => data?.pages.flatMap((p) => p.archives) ?? [], [data?.pages]);
 
   useEffect(() => {
     if (open) {
-      const initialSelection = archives?.find((archive) => archive.id === selectedArchiveId);
+      const initialSelection = archives.find((archive) => archive.id === selectedArchiveId);
       setSelectedArchive(initialSelection);
       refetch();
     }
@@ -36,34 +39,25 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
 
   const columnLabels = ['select', 'id', 'thumbnail', 'tag', 'heading'];
 
-  if (error) {
-    return (
-      <Dialog open={open} onClose={onClose} title='select archive'>
-        <div className='text-red-500 p-4'>
-          Error loading archives: {error instanceof Error ? error.message : 'Unknown error'}
-        </div>
-      </Dialog>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <Dialog open={open} onClose={onClose} title='select archive'>
-        <div className='p-4 text-center'>
-          <Text>Loading archives...</Text>
-        </div>
-      </Dialog>
-    );
-  }
-
-  return (
-    <Dialog open={open} onClose={onClose} title='select archive' isSaveButton save={handleSave}>
-      <div className='overflow-x-auto'>
-        <table className='w-full border-collapse border border-text'>
-          <thead>
-            <tr className='bg-bgColor border-b border-text'>
+  const content = error ? (
+    <div className='text-red-500 p-4'>
+      Error loading archives: {error instanceof Error ? error.message : 'Unknown error'}
+    </div>
+  ) : isLoading ? (
+    <div className='p-4 text-center'>
+      <Text>Loading archives...</Text>
+    </div>
+  ) : (
+    <div className='w-full'>
+      <div className='overflow-auto w-full max-h-[min(70vh,500px)]'>
+        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+          <thead className='bg-textInactiveColor h-10'>
+            <tr className='border-b border-textColor'>
               {columnLabels.map((label) => (
-                <th key={label} className='border border-text p-2 text-center'>
+                <th
+                  key={label}
+                  className='sticky top-0 z-10 bg-textInactiveColor border border-r border-textColor p-2 text-center'
+                >
                   <Text variant='uppercase'>{label}</Text>
                 </th>
               ))}
@@ -76,9 +70,9 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                 return (
                   <tr
                     key={archive.id}
-                    className='border-b border-text hover:bg-bgColor/50 text-center'
+                    className='border-b border-textColor hover:bg-bgColor/50 text-center'
                   >
-                    <td className='border border-text p-2'>
+                    <td className='border border-textColor p-2'>
                       <input
                         type='checkbox'
                         checked={isSelected}
@@ -86,10 +80,10 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                         className='cursor-pointer'
                       />
                     </td>
-                    <td className='border border-text p-2'>
+                    <td className='border border-textColor p-2'>
                       <Text>{archive.id}</Text>
                     </td>
-                    <td className='border border-text lg:w-16'>
+                    <td className='border border-textColor lg:w-16'>
                       {archive.thumbnail?.media?.thumbnail?.mediaUrl && (
                         <MediaComponent
                           src={archive.thumbnail.media.thumbnail.mediaUrl}
@@ -99,10 +93,10 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                         />
                       )}
                     </td>
-                    <td className='border border-text p-2'>
+                    <td className='border border-textColor p-2'>
                       <Text>{archive.tag || '-'}</Text>
                     </td>
-                    <td className='border border-text p-2'>
+                    <td className='border border-textColor p-2'>
                       <Text>{archive.translations?.[0]?.heading || '-'}</Text>
                     </td>
                   </tr>
@@ -110,33 +104,41 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
               })
             ) : (
               <tr>
-                <td colSpan={columnLabels.length} className='border border-text p-8 text-center'>
+                <td
+                  colSpan={columnLabels.length}
+                  className='border border-textColor p-8 text-center'
+                >
                   <Text>No archives found</Text>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+        <div className='flex justify-center py-2'>
+          <Button
+            type='button'
+            size='lg'
+            variant='simple'
+            className='uppercase'
+            onClick={() => fetchNextPage()}
+            disabled={!hasNextPage || isFetchingNextPage}
+          >
+            Load more
+          </Button>
+        </div>
       </div>
-      <div className='mt-4 flex justify-between items-center'>
-        <Button
-          type='button'
-          variant='simple'
-          onClick={() => setCurrentPage((prev) => Math.max(0, prev - 1))}
-          disabled={currentPage === 0}
-        >
-          Previous
-        </Button>
-        <Text>Page {currentPage + 1}</Text>
-        <Button
-          type='button'
-          variant='simple'
-          onClick={() => setCurrentPage((prev) => prev + 1)}
-          disabled={!archives || archives.length < limit}
-        >
-          Next
-        </Button>
-      </div>
-    </Dialog>
+    </div>
+  );
+
+  return (
+    <HeroModal
+      open={open}
+      onOpenChange={(isOpen) => !isOpen && onClose()}
+      handleSave={error || isLoading ? () => {} : handleSave}
+      title='select archive'
+      trigger={null}
+    >
+      {content}
+    </HeroModal>
   );
 }
