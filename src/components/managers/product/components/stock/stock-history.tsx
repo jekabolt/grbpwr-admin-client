@@ -72,7 +72,7 @@ export function StockHistory({ productId, sizes = [] }: Props) {
   }, [watched.sizeId, sizeItems]);
 
   return (
-    <StockModal>
+    <StockModal title='stock history'>
       <Form {...form}>
         <div className='flex min-h-0 flex-1 flex-col gap-4 lg:flex-row'>
           <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-hidden lg:min-w-0'>

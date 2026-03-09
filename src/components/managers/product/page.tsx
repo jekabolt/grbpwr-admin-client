@@ -38,6 +38,7 @@ export const Product: FC = () => {
       product={product}
       productId={id}
       onEditModeChange={setIsEditMode}
+      onStockUpdated={fetchProduct}
     />
   );
 };
