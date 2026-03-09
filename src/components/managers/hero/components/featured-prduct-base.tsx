@@ -1,6 +1,5 @@
-import { Button } from '@mui/material';
+import { ProductPickerModal } from 'components/managers/hero/components/productPickerModal';
 import { useFormContext } from 'react-hook-form';
-import { ProductPickerModal } from 'ui/components/productPickerModal';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
@@ -84,12 +83,12 @@ export function FeaturedProductBase({
                 {(errors.entities[index] as any)[prefix]?.productIds?.message}
               </Text>
             )}
-          <Button onClick={() => handleOpenProductSelection?.(index)}>add products</Button>
           <ProductPickerModal
             open={isModalOpen && currentEntityIndex === index}
             onClose={handleCloseModal}
             selectedProductIds={(product[index] || []).map((x) => x.id!)}
             onSave={(selectedProduct) => handleSaveNewSelection?.(selectedProduct, index)}
+            onOpenRequest={() => handleOpenProductSelection?.(index)}
           />
         </>
       )}
