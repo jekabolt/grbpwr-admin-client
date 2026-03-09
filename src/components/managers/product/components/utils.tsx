@@ -32,7 +32,7 @@ export function mapProductDataToForm(data: ProductFormData) {
     targetGender: data.product.productBodyInsert.targetGender as common_GenderEnum,
     version: data.product.productBodyInsert.version,
     collection: data.product.productBodyInsert.collection,
-    preorder: data.product.productBodyInsert.preorder || '0001-01-01T00:00:00Z',
+    preorder: toWellKnownTimestamp(data.product.productBodyInsert.preorder),
     fit: data.product.productBodyInsert.fit,
   };
 
@@ -189,6 +189,15 @@ const normalizeDate = (date: string | null): string | null => {
   const parsedDate = new Date(date);
   return parsedDate.toISOString().split('.')[0] + 'Z';
 };
+
+/** Converts date-only (YYYY-MM-DD) to RFC 3339 for protobuf Timestamp */
+function toWellKnownTimestamp(value: string | undefined): string {
+  if (!value || value === '0001-01-01T00:00:00Z') return '0001-01-01T00:00:00Z';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value}T00:00:00.000Z`;
+  }
+  return value;
+}
 
 export const comparisonOfInitialProductValues = (obj1: any, obj2: any): boolean => {
   const normalize = (obj: any): any => {

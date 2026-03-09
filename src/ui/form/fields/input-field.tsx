@@ -62,14 +62,16 @@ export default function InputField({
               }}
               onKeyDown={handleKeyDown}
               onChange={
-                keyboardRestriction
-                  ? handleChange
-                  : valueAsNumber
-                    ? (e: React.ChangeEvent<HTMLInputElement>) =>
-                        field.onChange(
-                          e.target.value === '' ? undefined : e.target.valueAsNumber
-                        )
-                    : field.onChange
+                props.onChange
+                  ? (e: React.ChangeEvent<HTMLInputElement>) => props.onChange!(e)
+                  : keyboardRestriction
+                    ? handleChange
+                    : valueAsNumber
+                      ? (e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(
+                            e.target.value === '' ? undefined : e.target.valueAsNumber
+                          )
+                      : field.onChange
               }
             />
           </FormControl>
