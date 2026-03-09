@@ -37,10 +37,7 @@ export function Tags({
 
   useEffect(() => {
     if (isAddingProduct && !isCopyMode) {
-      setValue(
-        'tags',
-        selectedTags.map((tag) => ({ tag })),
-      );
+      setValue('tags', selectedTags.map((tag) => ({ tag })), { shouldDirty: true });
     }
   }, [isAddingProduct, selectedTags, setValue]);
 
@@ -111,6 +108,7 @@ export function Tags({
     setValue(
       'tags',
       selectedTags.filter((t) => t !== tagToDelete).map((tag) => ({ tag })),
+      { shouldDirty: true },
     );
   };
 
@@ -125,10 +123,7 @@ export function Tags({
 
   useEffect(() => {
     if (isEditMode || isCopyMode) {
-      setValue(
-        'tags',
-        selectedTags.map((tag) => ({ tag })),
-      );
+      setValue('tags', selectedTags.map((tag) => ({ tag })), { shouldDirty: true });
     }
   }, [isAddingProduct, isCopyMode, isEditMode, selectedTags, setValue]);
 
