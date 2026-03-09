@@ -39,7 +39,10 @@ export default function InputField({
       value = value.replace(new RegExp(`[^${keyboardRestriction.source}]`, 'g'), '');
       value = value.replace(/[ .'-]{2,}/g, (match) => match[0]);
     }
-    setValue(name, value);
+    const finalValue = valueAsNumber
+      ? (value === '' ? 0 : parseInt(value, 10))
+      : value;
+    setValue(name, finalValue);
   };
 
   return (

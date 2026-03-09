@@ -11,13 +11,13 @@ import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import ToggleField from 'ui/form/fields/toggle-field';
 import { TranslationField } from 'ui/form/fields/translation-field';
+import { CarrierPrices } from './components/carrier-prices';
 import {
   defaultSettings,
   SettingsSchema,
   settingsSchema,
   transformDictionaryToSettings,
 } from './utility/schema';
-import { CarrierPrices } from './components/carrier-prices';
 
 export function Settings() {
   const { dictionary, refetch } = useDictionary();
@@ -83,6 +83,7 @@ export function Settings() {
             type='text'
             className='w-32'
             keyboardRestriction={/\d/}
+            valueAsNumber
           />
         </div>
         <div className='space-y-4'>

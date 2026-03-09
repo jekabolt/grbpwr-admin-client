@@ -11,7 +11,7 @@ const textVariants = cva('', {
       underLineWithColor: ['underline', 'text-blue-500', 'uppercase'],
       strikethrough: ['line-through', 'text-text'],
       strileTroughInactive: ['line-through', 'text-inactive'],
-      inactive: ['text-inactive'],
+      inactive: ['text-textInactiveColor'],
     },
     size: {
       default: ['text-textBaseSize'],
