@@ -1,4 +1,3 @@
-import { useMediaQuery, useTheme } from '@mui/material';
 import { Cross1Icon } from '@radix-ui/react-icons';
 import { common_ArchiveInsert, common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
@@ -14,9 +13,6 @@ export function ArchiveMediaDisplay({
   values: common_ArchiveInsert;
   remove: (id: number, values: common_ArchiveInsert, isVideo?: boolean) => void;
 }) {
-  const theme = useTheme();
-  const isSm = useMediaQuery(theme.breakpoints.down('sm'));
-
   const mainMediaIds = new Set(values.mainMediaIds ?? []);
   const mainMedia = media.filter((m) => m.id != null && mainMediaIds.has(m.id));
   const otherMedia = media.filter((m) => m.id == null || !mainMediaIds.has(m.id));
@@ -36,7 +32,9 @@ export function ArchiveMediaDisplay({
                 autoPlay={isVideo(item.media?.fullSize?.mediaUrl)}
               />
               <Button
-                onClick={() => remove(item.id || 0, values, isVideo(item.media?.fullSize?.mediaUrl))}
+                onClick={() =>
+                  remove(item.id || 0, values, isVideo(item.media?.fullSize?.mediaUrl))
+                }
                 className='absolute right-0 top-0'
               >
                 <Cross1Icon />
@@ -47,7 +45,7 @@ export function ArchiveMediaDisplay({
       )}
 
       {otherMedia.length > 0 && (
-        <div className={`grid ${isSm ? 'grid-cols-2' : 'grid-cols-4'} gap-2`}>
+        <div className='grid lg:grid-cols-4 grid-cols-2 gap-2'>
           {otherMedia.map((item) => (
             <div key={item.id} className='relative'>
               <Media

@@ -1,5 +1,5 @@
 import { FC, useEffect } from 'react';
-import { CreatePromo } from './createPromo';
+// import { CreatePromo } from './createPromo';
 import { ListPromo } from './listPromo';
 import usePromo from './usePromo';
 
@@ -12,7 +12,7 @@ export const Promo: FC = () => {
 
   return (
     <div className='flex flex-col gap-10'>
-      <CreatePromo createNewPromo={createNewPromo} />
+      {/* <CreatePromo createNewPromo={createNewPromo} /> */}
       <ListPromo promos={promos} fetchPromos={fetchPromos} />
     </div>
   );
