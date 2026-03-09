@@ -1,16 +1,8 @@
-import {
-  FormControl,
-  FormControlLabel,
-  Radio,
-  RadioGroup,
-  useMediaQuery,
-  useTheme,
-} from '@mui/material';
 import { cn } from 'lib/utility';
 import { FC, useState } from 'react';
-import { Dialog } from 'ui/components/dialog';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Button } from 'ui/components/button';
+import { CareCompositionModal } from '../care-composition-modal';
+import { CareMethodsList } from './care-card';
 import { careInstruction } from './careInstruction';
 
 interface SelectedInstructions {
@@ -37,8 +29,6 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
 }) => {
   const careCategories = Object.keys(careInstruction.care_instructions);
   const [selectedCare, setSelectedCare] = useState<string | null>('Washing');
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const nestedCareMethods = Object.values(
     careInstruction.care_instructions[
       selectedCare as keyof typeof careInstruction.care_instructions
@@ -49,92 +39,56 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
     setSelectedCare(category);
   };
 
-  const renderCareMethods = (methods: Record<string, any>, subCategory?: string) => {
-    return Object.entries(methods).map(([method, codeOrSubMethods]) => {
-      if (typeof codeOrSubMethods === 'object' && codeOrSubMethods !== null) {
-        if ('code' in codeOrSubMethods || 'img' in codeOrSubMethods) {
-          const { code, img } = codeOrSubMethods;
-          const selectionKey = subCategory ? `${selectedCare!}-${subCategory}` : selectedCare!;
-          const isSelected = selectedInstructions[selectionKey] === code;
-
-          return (
-            <div
-              key={`${method}-${code}`}
-              onClick={() => onSelectCareInstruction(selectedCare!, method, code, subCategory)}
-              className={cn('border rounded-md cursor-pointer flex flex-col items-center w-full', {
-                'bg-black/50': isSelected,
-              })}
-            >
-              <div className='w-full f-full'>
-                <Media src={img} alt={method} aspectRatio='1/1' fit='cover' />
-              </div>
-              <Text size='small'>{isSelected ? code : method}</Text>
-            </div>
-          );
-        } else {
-          return (
-            <div key={`subcategory-${method}`} className='space-y-3'>
-              <Text variant='uppercase' className='font-bold'>
-                {method}
-              </Text>
-              <div className='grid grid-cols-2 lg:grid-cols-8 gap-2'>
-                {renderCareMethods(codeOrSubMethods, method)}
-              </div>
-            </div>
-          );
-        }
-      }
-      return null;
-    });
-  };
-
   return (
-    <Dialog open={isCareTableOpen} onClose={close} fullWidth>
+    <CareCompositionModal
+      title='care'
+      open={isCareTableOpen}
+      onOpenChange={close}
+      footer={
+        <div className='flex justify-end items-center gap-2'>
+          <Button size='lg' variant='secondary' onClick={close}>
+            Cancel
+          </Button>
+          <Button size='lg' variant='main' onClick={close}>
+            Save
+          </Button>
+        </div>
+      }
+    >
       <div className='space-y-6'>
-        <div>
-          <FormControl>
-            <RadioGroup
-              row={!isMobile}
-              value={selectedCare}
-              onChange={(e) => handleSelectCare(e.target.value)}
-              sx={{
-                gap: isMobile ? 1 : 4,
-                display: isMobile ? 'grid' : 'flex',
-                gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'none',
-              }}
+        <div className='flex gap-3 sticky top-0 bg-bgColor'>
+          {careCategories.map((category) => (
+            <Button
+              key={category}
+              size='lg'
+              variant='secondary'
+              onClick={() => handleSelectCare(category)}
+              className={cn('uppercase', selectedCare === category && 'bg-textInactiveColor')}
             >
-              {careCategories.map((category) => (
-                <FormControlLabel
-                  key={category}
-                  value={category}
-                  control={<Radio />}
-                  label={category.toUpperCase()}
-                  sx={{
-                    '& .MuiFormControlLabel-label': {
-                      fontSize: isMobile ? '0.8rem' : '1rem',
-                      fontWeight: 'bold',
-                    },
-                  }}
-                />
-              ))}
-            </RadioGroup>
-          </FormControl>
+              {category}
+            </Button>
+          ))}
         </div>
         {selectedCare && (
           <div
             className={cn('w-full', {
               'flex flex-col space-y-4': !nestedCareMethods,
-              'grid grid-cols-2  lg:grid-cols-8 gap-2': nestedCareMethods,
+              'grid grid-cols-2 lg:grid-cols-4 gap-2': nestedCareMethods,
             })}
           >
-            {renderCareMethods(
-              careInstruction.care_instructions[
-                selectedCare as keyof typeof careInstruction.care_instructions
-              ],
-            )}
+            <CareMethodsList
+              methods={
+                careInstruction.care_instructions[
+                  selectedCare as keyof typeof careInstruction.care_instructions
+                ]
+              }
+              selectedCare={selectedCare}
+              selectedInstructions={selectedInstructions}
+              onSelectCareInstruction={onSelectCareInstruction}
+            />
           </div>
         )}
       </div>
-    </Dialog>
+    </CareCompositionModal>
   );
 };
