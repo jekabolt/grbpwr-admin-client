@@ -23,6 +23,7 @@ type Props = {
   product: common_ProductFull | undefined;
   productId?: string;
   onEditModeChange: (isEditMode: boolean) => void;
+  onStockUpdated?: () => void;
 };
 
 export function ProductForm({
@@ -32,6 +33,7 @@ export function ProductForm({
   product,
   productId,
   onEditModeChange,
+  onStockUpdated,
 }: Props) {
   const { showMessage } = useSnackBarStore();
   const [isFormChanged, setIsFormChanged] = useState(false);
@@ -51,6 +53,13 @@ export function ProductForm({
   useEffect(() => {
     setIsFormChanged(form.formState.isDirty);
   }, [form.formState.isDirty]);
+
+  useEffect(() => {
+    if (product && !isAddingProduct && !isCopyMode) {
+      const values = mapProductFullToFormData(product);
+      form.reset({ ...form.getValues(), sizeMeasurements: values.sizeMeasurements });
+    }
+  }, [product]);
 
   const filterEmptySizes = (sizes: ProductFormData['sizeMeasurements']) =>
     sizes
@@ -180,6 +189,7 @@ export function ProductForm({
             isAddingProduct={isAddingProduct}
             isEditMode={isEditMode}
             productId={productId ? Number(productId) : undefined}
+            onStockUpdated={onStockUpdated}
           />
         </div>
       </form>

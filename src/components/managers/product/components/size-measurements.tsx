@@ -22,10 +22,12 @@ export function SizeMeasurements({
   isEditMode = false,
   isAddingProduct = false,
   productId,
+  onStockUpdated,
 }: {
   isEditMode?: boolean;
   isAddingProduct?: boolean;
   productId?: number;
+  onStockUpdated?: () => void;
 } = {}) {
   const { dictionary } = useDictionary();
   const { watch, setValue } = useFormContext<ProductFormData>();
@@ -164,7 +166,7 @@ export function SizeMeasurements({
     <div className='w-full space-y-3'>
       <div className='flex gap-4'>
         <StockHistory productId={productId} sizes={productSizesForStock} />
-        <UpdateStock productId={productId} sizes={productSizesForStock} />
+        <UpdateStock productId={productId} sizes={productSizesForStock} onStockUpdated={onStockUpdated} />
       </div>
       <div className='overflow-x-auto'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>

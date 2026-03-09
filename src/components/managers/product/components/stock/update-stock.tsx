@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useForm } from 'react-hook-form';
@@ -7,6 +8,7 @@ import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { stockChangeHistoryKeys } from './useStockChangeHistory';
 import { StockModal } from './stock-modal';
 import {
   defaultData,
@@ -23,10 +25,13 @@ interface SizeOption {
 export function UpdateStock({
   productId,
   sizes = [],
+  onStockUpdated,
 }: {
   productId?: number;
   sizes?: SizeOption[];
+  onStockUpdated?: () => void;
 }) {
+  const queryClient = useQueryClient();
   const sizeItems = sizes
     .filter((s) => s.id != null)
     .map((s) => ({ value: String(s.id), label: s.name ?? String(s.id) }));
@@ -49,6 +54,8 @@ export function UpdateStock({
       });
       showMessage('Stock updated successfully', 'success');
       form.reset();
+      queryClient.invalidateQueries({ queryKey: stockChangeHistoryKeys.all });
+      onStockUpdated?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to update stock';
       showMessage(message, 'error');
