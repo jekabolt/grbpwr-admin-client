@@ -129,7 +129,9 @@ export type common_PaymentMethod = {
 export type common_PaymentMethodNameEnum =
   | "PAYMENT_METHOD_NAME_ENUM_UNKNOWN"
   | "PAYMENT_METHOD_NAME_ENUM_CARD"
-  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST";
+  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST"
+  | "PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE"
+  | "PAYMENT_METHOD_NAME_ENUM_CASH";
 export type common_ShipmentCarrier = {
   id: number | undefined;
   shipmentCarrier: common_ShipmentCarrierInsert | undefined;
@@ -1470,6 +1472,29 @@ export type AddOrderCommentRequest = {
 export type AddOrderCommentResponse = {
 };
 
+export type CreateCustomOrderRequest = {
+  items: common_CustomOrderItemInsert[] | undefined;
+  shippingAddress: common_AddressInsert | undefined;
+  billingAddress: common_AddressInsert | undefined;
+  buyer: common_BuyerInsert | undefined;
+  paymentMethod: common_PaymentMethodNameEnum | undefined;
+  shipmentCarrierId: number | undefined;
+  currency: string | undefined;
+  shipmentCost: googletype_Decimal | undefined;
+};
+
+// CustomOrderItemInsert allows custom pricing per item (admin-only).
+export type common_CustomOrderItemInsert = {
+  productId: number | undefined;
+  quantity: number | undefined;
+  sizeId: number | undefined;
+  customPrice: googletype_Decimal | undefined;
+};
+
+export type CreateCustomOrderResponse = {
+  order: common_Order | undefined;
+};
+
 export type AddHeroRequest = {
   hero: common_HeroFullInsert | undefined;
 };
@@ -1853,6 +1878,8 @@ export interface AdminService {
   CancelOrder(request: CancelOrderRequest): Promise<CancelOrderResponse>;
   // Adds a comment to an order
   AddOrderComment(request: AddOrderCommentRequest): Promise<AddOrderCommentResponse>;
+  // Creates a custom order with bank_invoice or cash payment (admin-only, supports custom prices).
+  CreateCustomOrder(request: CreateCustomOrderRequest): Promise<CreateCustomOrderResponse>;
   // Adds a new hero
   AddHero(request: AddHeroRequest): Promise<AddHeroResponse>;
   // AddArchive creates a new archive.
@@ -2481,6 +2508,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AddOrderComment",
       }) as Promise<AddOrderCommentResponse>;
+    },
+    CreateCustomOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/orders/custom`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateCustomOrder",
+      }) as Promise<CreateCustomOrderResponse>;
     },
     AddHero(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/hero/add`; // eslint-disable-line quotes

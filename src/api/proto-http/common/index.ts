@@ -432,7 +432,9 @@ export type FilterConditions = {
 export type PaymentMethodNameEnum =
   | "PAYMENT_METHOD_NAME_ENUM_UNKNOWN"
   | "PAYMENT_METHOD_NAME_ENUM_CARD"
-  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST";
+  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST"
+  | "PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE"
+  | "PAYMENT_METHOD_NAME_ENUM_CASH";
 // Payment represents the payment table
 export type Payment = {
   createdAt: wellKnownTimestamp | undefined;
@@ -600,6 +602,14 @@ export type OrderStatusHistory = {
   changedAt: wellKnownTimestamp | undefined;
   changedBy: string | undefined;
   notes: string | undefined;
+};
+
+// CustomOrderItemInsert allows custom pricing per item (admin-only).
+export type CustomOrderItemInsert = {
+  productId: number | undefined;
+  quantity: number | undefined;
+  sizeId: number | undefined;
+  customPrice: googletype_Decimal | undefined;
 };
 
 // OrderItemAdjustment describes a change made during order item validation.
