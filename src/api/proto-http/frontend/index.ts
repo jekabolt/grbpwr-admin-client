@@ -350,7 +350,9 @@ export type common_PaymentMethod = {
 export type common_PaymentMethodNameEnum =
   | "PAYMENT_METHOD_NAME_ENUM_UNKNOWN"
   | "PAYMENT_METHOD_NAME_ENUM_CARD"
-  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST";
+  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST"
+  | "PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE"
+  | "PAYMENT_METHOD_NAME_ENUM_CASH";
 export type common_ShipmentCarrier = {
   id: number | undefined;
   shipmentCarrier: common_ShipmentCarrierInsert | undefined;

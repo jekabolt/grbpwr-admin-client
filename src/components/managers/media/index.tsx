@@ -20,7 +20,6 @@ interface MediaLayoutProps {
   showVideos?: boolean;
   selectionMode?: boolean;
   showFilters?: boolean;
-
   onSelectionChange?: (selectedMedia: common_MediaFull[]) => void;
 }
 

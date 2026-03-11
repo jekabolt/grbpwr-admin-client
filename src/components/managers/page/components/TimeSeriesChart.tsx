@@ -1,4 +1,5 @@
 import type { TimeSeriesPoint } from 'api/proto-http/admin';
+import { FC } from 'react';
 import {
   CartesianGrid,
   Legend,
@@ -9,7 +10,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { FC } from 'react';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
@@ -30,12 +30,12 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
 
   // For number format (e.g. orders), backend may use 'count' instead of 'value'
   const getValue = (p: TimeSeriesPoint) =>
-    valueFormat === 'number'
-      ? parseDecimal(p.value) || (p.count ?? 0)
-      : parseDecimal(p.value);
+    valueFormat === 'number' ? parseDecimal(p.value) || (p.count ?? 0) : parseDecimal(p.value);
 
   const chartData = (data ?? []).map((p) => ({
-    date: p.date ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '',
+    date: p.date
+      ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : '',
     value: getValue(p),
     count: p.count ?? 0,
   }));
@@ -60,7 +60,7 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
           <XAxis dataKey='date' tick={{ fontSize: 10 }} />
           <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatValue(v)} />
           <Tooltip
-            formatter={(value: number) => [formatValue(value), '']}
+            formatter={(value?: number) => [formatValue(value ?? 0), '']}
             labelFormatter={(label) => `Date: ${label}`}
           />
           <Legend />
