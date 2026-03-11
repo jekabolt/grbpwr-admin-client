@@ -7,7 +7,7 @@ import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '..';
 
 type Props = {
   name: string;
-  label: string | React.ReactNode;
+  label?: string | React.ReactNode;
   description?: string;
   loading?: boolean;
   disabled?: boolean;
@@ -39,13 +39,15 @@ export default function CheckboxField({ label, name, description, readOnly, ...p
                 {...props}
               />
             </FormControl>
-            <div
-              className={cn('leading-none', {
-                'space-y-1': description,
-              })}
-            >
-              <FormLabel>{label}</FormLabel>
-            </div>
+            {label && (
+              <div
+                className={cn('leading-none', {
+                  'space-y-1': description,
+                })}
+              >
+                <FormLabel>{label}</FormLabel>
+              </div>
+            )}
           </div>
           <FormMessage fieldName={name} />
         </FormItem>

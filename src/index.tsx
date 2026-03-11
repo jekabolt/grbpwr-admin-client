@@ -5,6 +5,7 @@ import ProtectedRoute from 'components/login/protectedRoute';
 import { Archive } from 'components/managers/archive';
 import { Archives } from 'components/managers/archives';
 import { CustomerPage } from 'components/managers/customer-support';
+import { Shipping } from 'components/managers/shipping';
 import { ROUTES } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
@@ -14,7 +15,6 @@ import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { Layout } from 'ui/layout';
 import './global.css';
-import { Shipping } from 'components/managers/shipping';
 
 // Lazy load routes for code splitting
 const Hero = lazy(() =>
@@ -36,9 +36,7 @@ const Product = lazy(() =>
   import('components/managers/product/page').then((m) => ({ default: m.Product })),
 );
 const ProductsCatalog = lazy(() => import('components/managers/products-catalog/page'));
-const Promo = lazy(() =>
-  import('components/managers/promo/promo').then((m) => ({ default: m.Promo })),
-);
+const Promo = lazy(() => import('components/managers/promo').then((m) => ({ default: m.Promo })));
 const Settings = lazy(() =>
   import('components/managers/settings').then((m) => ({ default: m.Settings })),
 );
