@@ -30,9 +30,7 @@ export function ToggleSwitch({
       </Switch.Root>
       {label && (
         <Label htmlFor={id} className='min-w-0 flex-1'>
-          <Text variant='uppercase' className='break-words'>
-            {label}
-          </Text>
+          <Text className='break-words'>{label}</Text>
         </Label>
       )}
     </div>

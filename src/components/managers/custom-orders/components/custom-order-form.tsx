@@ -15,6 +15,7 @@ import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { BillingFieldsGroup } from './billing-fields-group';
 import { ContactFieldsGroup } from './contact-fields-group';
+import { ProductPicker } from './prodcut-picker';
 import { CustomOrderFormData, customOrderSchema, defaultCustomOrder } from './schema';
 import { SelectedProduct } from './selected-product';
 import { ShippingFieldsGroup } from './shipping-fields-group';
@@ -22,6 +23,12 @@ import { ShippingFieldsGroup } from './shipping-fields-group';
 interface CustomOrderFormProps {
   selectedProducts: common_Product[];
   onSuccess?: () => void;
+  productPickerProps?: {
+    products: common_Product[];
+    handleSelectProduct: (p: common_Product) => void;
+    loadMore: () => void;
+    hasMore: boolean;
+  };
 }
 
 function buildItemsFromProducts(
@@ -47,7 +54,11 @@ function buildItemsFromProducts(
   });
 }
 
-export function CustomOrderForm({ selectedProducts, onSuccess }: CustomOrderFormProps) {
+export function CustomOrderForm({
+  selectedProducts,
+  onSuccess,
+  productPickerProps,
+}: CustomOrderFormProps) {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
 
@@ -105,31 +116,67 @@ export function CustomOrderForm({ selectedProducts, onSuccess }: CustomOrderForm
   return (
     <div className='px-2.5 pb-20 lg:relative lg:min-h-screen lg:px-32 lg:pb-24'>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
-          <div className='flex flex-col gap-14 lg:grid lg:grid-cols-2 lg:gap-28'>
+        <form onSubmit={form.handleSubmit(onSubmit)} className='relative'>
+          <div className='flex flex-col gap-14 lg:grid lg:grid-cols-2 lg:gap-28 relative'>
             <div className='space-y-10 lg:space-y-16'>
               <ContactFieldsGroup />
               <ShippingFieldsGroup prefix='shipping' />
               <BillingFieldsGroup />
             </div>
             <div className='space-y-10'>
-              <div className='max-h-[50vh] overflow-y-auto'>
-                {form.watch('items').map((item, idx) => {
-                  return (
-                    <SelectedProduct
-                      key={item.productId}
-                      product={selectedProducts.find((p) => p.id === item.productId)}
-                      itemIdx={idx}
-                    />
-                  );
-                })}
-              </div>
-              <Text variant='uppercase'>
-                {selectedProducts.length} product{selectedProducts.length !== 1 ? 's' : ''} selected
-              </Text>
-              <Button type='submit' variant='main' className='w-full uppercase' size='lg'>
-                create order
-              </Button>
+              {selectedProducts.length === 0 && productPickerProps ? (
+                <>
+                  <Text variant='uppercase' className='text-textInactiveColor'>
+                    select products
+                  </Text>
+                  <ProductPicker
+                    products={productPickerProps.products}
+                    selectedProducts={selectedProducts}
+                    handleSelectProduct={productPickerProps.handleSelectProduct}
+                    loadMore={productPickerProps.loadMore}
+                    hasMore={productPickerProps.hasMore}
+                    triggerClassName='w-full uppercase'
+                  />
+                </>
+              ) : (
+                <>
+                  <div className='max-h-[50vh] overflow-y-auto'>
+                    {form.watch('items').map((item, idx) => {
+                      return (
+                        <SelectedProduct
+                          key={item.productId}
+                          product={selectedProducts.find((p) => p.id === item.productId)}
+                          itemIdx={idx}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className='flex items-center justify-between'>
+                    <Text variant='uppercase' className='w-full'>
+                      {selectedProducts.length} product{selectedProducts.length !== 1 ? 's' : ''}{' '}
+                      selected
+                    </Text>
+                    {selectedProducts.length > 0 && productPickerProps && (
+                      <ProductPicker
+                        products={productPickerProps.products}
+                        selectedProducts={selectedProducts}
+                        handleSelectProduct={productPickerProps.handleSelectProduct}
+                        loadMore={productPickerProps.loadMore}
+                        hasMore={productPickerProps.hasMore}
+                        triggerClassName='w-full uppercase'
+                      />
+                    )}
+                  </div>
+                  <Button
+                    type='submit'
+                    variant='main'
+                    className='w-full uppercase fixed bottom-2.5 inset-x-2.5'
+                    size='lg'
+                  >
+                    create order
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </form>

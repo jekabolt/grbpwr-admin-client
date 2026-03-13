@@ -22,7 +22,7 @@ export function ShippingFieldsGroup({ prefix }: { prefix: string }) {
   );
 
   return (
-    <FieldsGroupContainer stage='2/3' title='shipping address/delivery method'>
+    <FieldsGroupContainer stage='2/3' isOpen title='shipping address/delivery method'>
       <div className='space-y-6'>
         <div className='grid grid-cols-2 gap-6'>
           <div className='col-span-1'>

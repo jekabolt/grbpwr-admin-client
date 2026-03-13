@@ -24,6 +24,7 @@ interface ProductPickerProps {
   loadMore: () => void;
   hasMore: boolean;
   onSave?: () => void;
+  triggerClassName?: string;
 }
 
 export function ProductPicker({
@@ -33,6 +34,7 @@ export function ProductPicker({
   loadMore,
   hasMore,
   onSave,
+  triggerClassName,
 }: ProductPickerProps) {
   const { dictionary } = useDictionary();
   const { ref, inView } = useInView({ rootMargin: '100px' });
@@ -109,7 +111,7 @@ export function ProductPicker({
   return (
     <DialogPrimitives.Root>
       <DialogPrimitives.Trigger asChild>
-        <Button variant='main' size='lg' type='button'>
+        <Button variant='main' size='lg' type='button' className={triggerClassName}>
           select products
         </Button>
       </DialogPrimitives.Trigger>
