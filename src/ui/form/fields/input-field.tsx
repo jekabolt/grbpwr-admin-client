@@ -39,9 +39,7 @@ export default function InputField({
       value = value.replace(new RegExp(`[^${keyboardRestriction.source}]`, 'g'), '');
       value = value.replace(/[ .'-]{2,}/g, (match) => match[0]);
     }
-    const finalValue = valueAsNumber
-      ? (value === '' ? 0 : parseInt(value, 10))
-      : value;
+    const finalValue = valueAsNumber ? (value === '' ? 0 : parseInt(value, 10)) : value;
     setValue(name, finalValue);
   };
 
@@ -71,9 +69,7 @@ export default function InputField({
                     ? handleChange
                     : valueAsNumber
                       ? (e: React.ChangeEvent<HTMLInputElement>) =>
-                          field.onChange(
-                            e.target.value === '' ? undefined : e.target.valueAsNumber
-                          )
+                          field.onChange(e.target.value === '' ? undefined : e.target.valueAsNumber)
                       : field.onChange
               }
             />

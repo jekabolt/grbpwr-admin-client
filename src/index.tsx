@@ -29,6 +29,9 @@ const OrderDetails = lazy(() =>
 const OrdersCatalog = lazy(() =>
   import('components/managers/orders-catalog/page').then((m) => ({ default: m.OrdersCatalog })),
 );
+const CustomOrders = lazy(() =>
+  import('components/managers/custom-orders').then((m) => ({ default: m.CustomOrders })),
+);
 const Analitic = lazy(() =>
   import('components/managers/page/index').then((m) => ({ default: m.Analitic })),
 );
@@ -112,6 +115,7 @@ root.render(
                     <Route path={ROUTES.settings} element={<Settings />} />
                     <Route path={ROUTES.shipping} element={<Shipping />} />
                     <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
+                    <Route path={ROUTES.customOrders} element={<CustomOrders />} />
                     <Route path={ROUTES.orders} element={<OrdersCatalog />} />
                     <Route path={ROUTES.singleArchive} element={<Archive />} />
                     <Route path={ROUTES.archives} element={<Archives />} />

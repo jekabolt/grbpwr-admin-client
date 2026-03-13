@@ -364,6 +364,7 @@ export type common_ProductBodyInsert = {
   composition: string | undefined;
   hidden: boolean | undefined;
   targetGender: common_GenderEnum | undefined;
+  season: common_SeasonEnum | undefined;
   version: string | undefined;
   collection: string | undefined;
   fit: string | undefined;
@@ -374,6 +375,12 @@ export type common_GenderEnum =
   | "GENDER_ENUM_MALE"
   | "GENDER_ENUM_FEMALE"
   | "GENDER_ENUM_UNISEX";
+export type common_SeasonEnum =
+  | "SEASON_ENUM_UNKNOWN"
+  | "SEASON_ENUM_SS"
+  | "SEASON_ENUM_FW"
+  | "SEASON_ENUM_PF"
+  | "SEASON_ENUM_RC";
 export type common_ProductInsertTranslation = {
   languageId: number | undefined;
   name: string | undefined;
@@ -437,6 +444,7 @@ export type common_FilterConditions = {
   preorder: boolean | undefined;
   byTag: string | undefined;
   collections: string[] | undefined;
+  seasons: common_SeasonEnum[] | undefined;
 };
 
 export type GetProductsPagedResponse = {
@@ -515,13 +523,23 @@ export type DeleteProductByIDResponse = {
 };
 
 export type UpdateProductSizeStockRequest = {
+  mode: common_StockAdjustmentMode | undefined;
   productId: number | undefined;
   sizeId: number | undefined;
   quantity: number | undefined;
+  direction: common_StockAdjustmentDirection | undefined;
   reason: common_StockChangeReason | undefined;
   comment?: string;
 };
 
+export type common_StockAdjustmentMode =
+  | "STOCK_ADJUSTMENT_MODE_UNSPECIFIED"
+  | "STOCK_ADJUSTMENT_MODE_SET"
+  | "STOCK_ADJUSTMENT_MODE_ADJUST";
+export type common_StockAdjustmentDirection =
+  | "STOCK_ADJUSTMENT_DIRECTION_UNSPECIFIED"
+  | "STOCK_ADJUSTMENT_DIRECTION_INCREASE"
+  | "STOCK_ADJUSTMENT_DIRECTION_DECREASE";
 export type common_StockChangeReason =
   | "STOCK_CHANGE_REASON_UNSPECIFIED"
   | "STOCK_CHANGE_REASON_DAMAGED"
@@ -530,7 +548,13 @@ export type common_StockChangeReason =
   | "STOCK_CHANGE_REASON_RESTOCK"
   | "STOCK_CHANGE_REASON_INVENTORY_CORRECTION"
   | "STOCK_CHANGE_REASON_RETURN_DEFECTIVE"
-  | "STOCK_CHANGE_REASON_THEFT";
+  | "STOCK_CHANGE_REASON_THEFT"
+  | "STOCK_CHANGE_REASON_STOCK_COUNT"
+  | "STOCK_CHANGE_REASON_DAMAGE"
+  | "STOCK_CHANGE_REASON_LOSS"
+  | "STOCK_CHANGE_REASON_CORRECTION"
+  | "STOCK_CHANGE_REASON_RESERVED_RELEASE"
+  | "STOCK_CHANGE_REASON_OTHER";
 export type UpdateProductSizeStockResponse = {
 };
 
@@ -589,6 +613,7 @@ export type ListStockChangesRequest = {
   source?: string;
   limit: number | undefined;
   offset: number | undefined;
+  orderFactor?: common_OrderFactor;
 };
 
 export type StockChangeRow = {
@@ -2097,6 +2122,11 @@ export function createAdminServiceClient(
           queryParams.push(`filterConditions.collections=${encodeURIComponent(x.toString())}`)
         })
       }
+      if (request.filterConditions?.seasons) {
+        request.filterConditions.seasons.forEach((x) => {
+          queryParams.push(`filterConditions.seasons=${encodeURIComponent(x.toString())}`)
+        })
+      }
       if (request.showHidden) {
         queryParams.push(`showHidden=${encodeURIComponent(request.showHidden.toString())}`)
       }
@@ -2154,13 +2184,7 @@ export function createAdminServiceClient(
       }) as Promise<DeleteProductByIDResponse>;
     },
     UpdateProductSizeStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      if (!request.productId) {
-        throw new Error("missing required field request.product_id");
-      }
-      if (!request.sizeId) {
-        throw new Error("missing required field request.size_id");
-      }
-      const path = `api/admin/product/${request.productId}/size/${request.sizeId}/updatestock`; // eslint-disable-line quotes
+      const path = `api/admin/stock/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
@@ -2238,6 +2262,9 @@ export function createAdminServiceClient(
       }
       if (request.offset) {
         queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {

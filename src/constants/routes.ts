@@ -24,6 +24,7 @@ export enum ROUTES {
   settings = '/settings',
   orders = '/orders',
   orderDetails = '/orders/:uuid',
+  customOrders = '/custom-orders',
   customerSupport = '/customer-support',
   shipping = '/shipping',
 }
