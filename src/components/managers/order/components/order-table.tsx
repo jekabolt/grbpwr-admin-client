@@ -14,31 +14,31 @@ interface OrderTableProps {
   orderDetails: common_OrderFull | undefined;
   isPrinting?: boolean;
   showRefundSelection?: boolean;
-  selectedProductIds?: number[];
-  onToggleOrderItems?: (productIds: number[]) => void;
+  selectedUnitKeys?: string[];
+  onToggleOrderItems?: (unitKeys: string[]) => void;
 }
 
 export function OrderTable({
   orderDetails,
   isPrinting = false,
   showRefundSelection = false,
-  selectedProductIds = [],
+  selectedUnitKeys = [],
   onToggleOrderItems,
 }: OrderTableProps) {
   const { dictionary } = useDictionary();
 
   const expandedRows = useMemo(() => {
-    const rows: { item: common_OrderItem; totalUnits: number }[] = [];
+    const rows: { item: common_OrderItem; totalUnits: number; unitIndex: number }[] = [];
     orderDetails?.orderItems?.forEach((item) => {
       const qty = Math.max(1, item.orderItem?.quantity ?? 1);
       for (let i = 0; i < qty; i++) {
-        rows.push({ item, totalUnits: qty });
+        rows.push({ item, totalUnits: qty, unitIndex: i });
       }
     });
     return rows;
   }, [orderDetails?.orderItems]);
 
-  type Row = { item: common_OrderItem; totalUnits: number };
+  type Row = { item: common_OrderItem; totalUnits: number; unitIndex: number };
 
   const ALL_COLUMNS: {
     label: string;
@@ -177,32 +177,30 @@ export function OrderTable({
               </tr>
             ) : (
               expandedRows.map((row, idx) => {
-                const { item } = row;
+                const { item, unitIndex } = row;
                 const orderItemId = typeof item.id === 'number' ? item.id : null;
-                const rowOrderItemIds: number[] = orderItemId != null ? [orderItemId] : [];
+                const unitKey = orderItemId != null ? `${orderItemId}-${unitIndex}` : null;
                 const isRefunded =
                   orderItemId != null &&
                   orderDetails?.refundedOrderItems?.some((r) => r.id === orderItemId);
 
-                const allSelectedForRow =
-                  rowOrderItemIds.length > 0 &&
-                  rowOrderItemIds.every((id) => selectedProductIds.includes(id));
+                const isSelected = unitKey != null && selectedUnitKeys.includes(unitKey);
 
                 const handleRowToggle = () => {
-                  if (!rowOrderItemIds.length || !onToggleOrderItems) return;
-                  onToggleOrderItems(rowOrderItemIds);
+                  if (!unitKey || !onToggleOrderItems) return;
+                  onToggleOrderItems([unitKey]);
                 };
 
                 return (
                   <tr
-                    key={orderItemId != null ? `${orderItemId}-${idx}` : idx}
+                    key={unitKey ?? idx}
                     className='border-b border-text last:border-b-0 lg:w-24'
                   >
                     {showRefundSelection && !isPrinting && (
                       <td className='border border-textColor text-center px-2 w-10'>
                         <input
                           type='checkbox'
-                          checked={allSelectedForRow}
+                          checked={isSelected}
                           onChange={handleRowToggle}
                           className='cursor-pointer'
                         />

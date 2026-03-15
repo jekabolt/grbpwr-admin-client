@@ -32,7 +32,7 @@ export function OrderDetails() {
     isPrinting,
     isEdit,
     trackingNumber,
-    selectedProductIds,
+    selectedUnitKeys,
     toggleTrackNumber,
     handleTrackingNumberChange,
     saveTrackingNumber,
@@ -71,7 +71,7 @@ export function OrderDetails() {
               DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') &&
               !['CONFIRMED'].includes(orderStatus || '')
             }
-            selectedProductIds={selectedProductIds}
+            selectedUnitKeys={selectedUnitKeys}
             onToggleOrderItems={toggleOrderItemsSelection}
           />
           <Text variant='uppercase' className='font-bold self-end'>
@@ -139,7 +139,7 @@ export function OrderDetails() {
         <RefundConfirmation
           orderDetails={orderDetails}
           open={isRefundModalOpen}
-          selectedProductIds={selectedProductIds}
+          selectedUnitKeys={selectedUnitKeys}
           onOpenChange={setIsRefundModalOpen}
           refundOrder={handleRefundConfirm}
         />

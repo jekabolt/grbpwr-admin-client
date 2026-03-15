@@ -9,17 +9,17 @@ import Text from 'ui/components/text';
 export function RefundConfirmation({
   orderDetails,
   open,
-  selectedProductIds,
+  selectedUnitKeys,
   onOpenChange,
   refundOrder,
 }: {
   orderDetails?: common_OrderFull;
   open: boolean;
-  selectedProductIds: number[];
+  selectedUnitKeys: string[];
   onOpenChange: (open: boolean) => void;
   refundOrder: (reason?: string) => void;
 }) {
-  const isFullRefund = !selectedProductIds.length;
+  const isFullRefund = !selectedUnitKeys.length;
   const existingReason = orderDetails?.order?.refundReason ?? '';
   const [selectedReason, setSelectedReason] = useState('');
 
@@ -46,7 +46,7 @@ export function RefundConfirmation({
     >
       <div className='flex flex-col items-center justify-center gap-6'>
         <Text variant='uppercase' className='font-bold whitespace-nowrap'>
-          are you sure you want to {selectedProductIds.length ? 'partial' : 'full'} refund this
+          are you sure you want to {selectedUnitKeys.length ? 'partial' : 'full'} refund this
           order?
         </Text>
         {isFullRefund && (
