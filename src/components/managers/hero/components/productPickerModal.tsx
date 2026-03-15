@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { common_Product, GetProductsPagedRequest } from 'api/proto-http/admin';
+import { common_Product } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
@@ -41,7 +41,6 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   const categories = dictionary?.categories || [];
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [filter, setFilter] = useState<GetProductsPagedRequest | undefined>(undefined);
   const newLimit = 50;
   const offset = calculateOffset(currentPage, newLimit);
 
@@ -58,10 +57,10 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         const response = await adminService.GetProductsPaged({
           limit: newLimit,
           offset: offset,
-          sortFactors: filter?.sortFactors || ['SORT_FACTOR_CREATED_AT'],
-          orderFactor: filter?.orderFactor || 'ORDER_FACTOR_DESC',
-          filterConditions: filter?.filterConditions || undefined,
-          showHidden: filter?.showHidden || false,
+          sortFactors: ['SORT_FACTOR_CREATED_AT'],
+          orderFactor: 'ORDER_FACTOR_DESC',
+          filterConditions: undefined,
+          showHidden: true,
         });
         if (Array.isArray(response.products)) {
           setAllProducts((prevProducts) => {
@@ -78,7 +77,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       };
       fetchProducts();
     }
-  }, [open, currentPage, filter, newLimit, offset]);
+  }, [open, currentPage, newLimit, offset]);
 
   useEffect(() => {
     const newSelectedProducts = allProducts.filter((product) =>

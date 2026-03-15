@@ -99,7 +99,7 @@ function FormLabel({
 
   return (
     <Label ref={ref} className={cn('leading-none', className)} htmlFor={formItemId} {...props}>
-      <Text variant='uppercase' className='leading-none'>
+      <Text className='leading-none lowercase'>
         {typeof props.children === 'string' ? props.children : null}
       </Text>
     </Label>

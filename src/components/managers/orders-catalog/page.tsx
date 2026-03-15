@@ -1,5 +1,7 @@
 import { common_OrderStatusEnum } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import { OrdersTable } from './components/orders-table';
@@ -50,6 +52,9 @@ export function OrdersCatalog() {
 
   return (
     <div className='flex flex-col gap-4 pb-16'>
+      <Button variant='main' size='lg' asChild className='self-end'>
+        <Link to={ROUTES.customOrders}>create custom order</Link>
+      </Button>
       <StockChangesReport />
       <div className='flex justify-end'>
         <Input

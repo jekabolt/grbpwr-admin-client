@@ -157,6 +157,12 @@ export type GenderEnum =
   | "GENDER_ENUM_MALE"
   | "GENDER_ENUM_FEMALE"
   | "GENDER_ENUM_UNISEX";
+export type SeasonEnum =
+  | "SEASON_ENUM_UNKNOWN"
+  | "SEASON_ENUM_SS"
+  | "SEASON_ENUM_FW"
+  | "SEASON_ENUM_PF"
+  | "SEASON_ENUM_RC";
 export type StockChangeSource =
   | "STOCK_CHANGE_SOURCE_UNSPECIFIED"
   | "STOCK_CHANGE_SOURCE_ADMIN_ADD_PRODUCT"
@@ -180,7 +186,21 @@ export type StockChangeReason =
   | "STOCK_CHANGE_REASON_RESTOCK"
   | "STOCK_CHANGE_REASON_INVENTORY_CORRECTION"
   | "STOCK_CHANGE_REASON_RETURN_DEFECTIVE"
-  | "STOCK_CHANGE_REASON_THEFT";
+  | "STOCK_CHANGE_REASON_THEFT"
+  | "STOCK_CHANGE_REASON_STOCK_COUNT"
+  | "STOCK_CHANGE_REASON_DAMAGE"
+  | "STOCK_CHANGE_REASON_LOSS"
+  | "STOCK_CHANGE_REASON_CORRECTION"
+  | "STOCK_CHANGE_REASON_RESERVED_RELEASE"
+  | "STOCK_CHANGE_REASON_OTHER";
+export type StockAdjustmentMode =
+  | "STOCK_ADJUSTMENT_MODE_UNSPECIFIED"
+  | "STOCK_ADJUSTMENT_MODE_SET"
+  | "STOCK_ADJUSTMENT_MODE_ADJUST";
+export type StockAdjustmentDirection =
+  | "STOCK_ADJUSTMENT_DIRECTION_UNSPECIFIED"
+  | "STOCK_ADJUSTMENT_DIRECTION_INCREASE"
+  | "STOCK_ADJUSTMENT_DIRECTION_DECREASE";
 // Category represents a hierarchical category structure
 export type Category = {
   id: number | undefined;
@@ -236,6 +256,7 @@ export type ProductBodyInsert = {
   composition: string | undefined;
   hidden: boolean | undefined;
   targetGender: GenderEnum | undefined;
+  season: SeasonEnum | undefined;
   version: string | undefined;
   collection: string | undefined;
   fit: string | undefined;
@@ -427,6 +448,7 @@ export type FilterConditions = {
   preorder: boolean | undefined;
   byTag: string | undefined;
   collections: string[] | undefined;
+  seasons: SeasonEnum[] | undefined;
 };
 
 export type PaymentMethodNameEnum =

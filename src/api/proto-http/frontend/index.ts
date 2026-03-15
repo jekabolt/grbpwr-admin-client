@@ -143,6 +143,7 @@ export type common_ProductBodyInsert = {
   composition: string | undefined;
   hidden: boolean | undefined;
   targetGender: common_GenderEnum | undefined;
+  season: common_SeasonEnum | undefined;
   version: string | undefined;
   collection: string | undefined;
   fit: string | undefined;
@@ -207,6 +208,12 @@ export type common_GenderEnum =
   | "GENDER_ENUM_MALE"
   | "GENDER_ENUM_FEMALE"
   | "GENDER_ENUM_UNISEX";
+export type common_SeasonEnum =
+  | "SEASON_ENUM_UNKNOWN"
+  | "SEASON_ENUM_SS"
+  | "SEASON_ENUM_FW"
+  | "SEASON_ENUM_PF"
+  | "SEASON_ENUM_RC";
 export type common_ProductInsertTranslation = {
   languageId: number | undefined;
   name: string | undefined;
@@ -487,6 +494,7 @@ export type common_FilterConditions = {
   preorder: boolean | undefined;
   byTag: string | undefined;
   collections: string[] | undefined;
+  seasons: common_SeasonEnum[] | undefined;
 };
 
 export type GetProductsPagedResponse = {
@@ -959,6 +967,11 @@ export function createFrontendServiceClient(
       if (request.filterConditions?.collections) {
         request.filterConditions.collections.forEach((x) => {
           queryParams.push(`filterConditions.collections=${encodeURIComponent(x.toString())}`)
+        })
+      }
+      if (request.filterConditions?.seasons) {
+        request.filterConditions.seasons.forEach((x) => {
+          queryParams.push(`filterConditions.seasons=${encodeURIComponent(x.toString())}`)
         })
       }
       let uri = path;

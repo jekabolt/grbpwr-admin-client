@@ -30,11 +30,7 @@ export default function SelectComponent({
   const [open, setOpen] = useState(false);
 
   return (
-    <Select.Root
-      {...props}
-      open={open}
-      onOpenChange={(open) => !readOnly && setOpen(open)}
-    >
+    <Select.Root {...props} open={open} onOpenChange={(open) => !readOnly && setOpen(open)}>
       <SelectTrigger
         placeholder={props.placeholder}
         className={className}
@@ -48,7 +44,7 @@ export default function SelectComponent({
       </SelectTrigger>
       <SelectContent fullWidth={fullWidth} customWidth={customWidth}>
         {items.map((item) => (
-          <SelectItem key={item.value} value={item.value}>
+          <SelectItem key={item.value} value={String(item.value)}>
             {item.label}
           </SelectItem>
         ))}
@@ -69,7 +65,7 @@ export function SelectItem({ children, className, ref, ...props }: any) {
       ref={ref}
     >
       <Select.ItemText>
-        <Text>{children}</Text>
+        <Text variant='uppercase'>{children}</Text>
       </Select.ItemText>
     </Select.Item>
   );
@@ -100,8 +96,8 @@ export function SelectTrigger({
   readOnly?: boolean;
 }) {
   let displayValue = null;
-  if (renderValue && value && items) {
-    const selectedItem = items.find((item) => item.value === value);
+  if (renderValue && value != null && value !== '' && items) {
+    const selectedItem = items.find((item) => String(item.value) === String(value));
     displayValue = renderValue(value, selectedItem);
   }
 

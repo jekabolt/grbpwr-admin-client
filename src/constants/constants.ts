@@ -139,3 +139,10 @@ export const SOURCE_OPTIONS: { value: common_StockChangeSource; label: string }[
   { value: 'STOCK_CHANGE_SOURCE_ORDER_EXPIRED', label: 'Order expired' },
   { value: 'STOCK_CHANGE_SOURCE_ORDER_REFUNDED', label: 'Order refunded' },
 ];
+
+export const KEYBOARD_RESTRICTIONS = {
+  nameFields: /[A-Za-z .'-]/,
+  addressField: /[A-Za-z0-9 .','-]/,
+  postalCodeField: /[A-Za-z0-9 \-]/,
+  companyField: /[A-Za-z0-9 .'-]/,
+};

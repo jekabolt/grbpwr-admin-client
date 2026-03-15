@@ -74,6 +74,7 @@ export function getProductPagedParans({
   hidden,
   collections,
   currency,
+  seasons,
 }: {
   sort?: string | null;
   order?: string | null;
@@ -91,6 +92,7 @@ export function getProductPagedParans({
   hidden?: string | null;
   collections?: string | null;
   currency?: string | null;
+  seasons?: string | null;
 }): Pick<
   GetProductsPagedRequest,
   'sortFactors' | 'orderFactor' | 'filterConditions' | 'showHidden'
@@ -116,6 +118,7 @@ export function getProductPagedParans({
       onSale: sale ? sale === 'true' : undefined,
       collections: collections ? collections.split(',') : undefined,
       currency: currency ? currency : undefined,
+      seasons: undefined,
     },
     showHidden: hidden === 'false' ? false : true,
   };

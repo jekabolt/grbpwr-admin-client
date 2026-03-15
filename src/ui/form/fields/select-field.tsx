@@ -45,10 +45,9 @@ export default function SelectField({
             }
             items={items}
             {...field}
-            value={
-              valueAsNumber && field.value != null ? String(field.value) : field.value
-            }
+            value={valueAsNumber && field.value != null ? String(field.value) : field.value}
             {...props}
+            className={className}
             onBlur={onBlur}
           />
           <FormMessage />
