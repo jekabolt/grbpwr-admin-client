@@ -25,9 +25,9 @@ interface CustomOrderFormProps {
   onSuccess?: () => void;
   productPickerProps?: {
     products: common_Product[];
-    handleSelectProduct: (p: common_Product) => void;
-    loadMore: () => void;
     hasMore: boolean;
+    handleSaveProducts: (products: common_Product[]) => void;
+    loadMore: () => void;
   };
 }
 
@@ -56,12 +56,11 @@ function buildItemsFromProducts(
 
 export function CustomOrderForm({
   selectedProducts,
-  onSuccess,
   productPickerProps,
+  onSuccess,
 }: CustomOrderFormProps) {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
-
   const currency = dictionary?.baseCurrency || '';
   const navigate = useNavigate();
 
@@ -70,7 +69,8 @@ export function CustomOrderForm({
     return {
       ...defaultCustomOrder,
       items,
-      shipmentCarrierId: dictionary?.shipmentCarriers?.[0]?.id ?? 0,
+      shipmentCarrierId:
+        dictionary?.shipmentCarriers?.find((c) => c.shipmentCarrier?.allowed === true)?.id ?? 0,
     };
   }, [selectedProducts, dictionary]);
 
@@ -88,7 +88,7 @@ export function CustomOrderForm({
   });
 
   useEffect(() => {
-    form.reset(defaultValues);
+    form.reset(defaultValues, { keepDirtyValues: true });
   }, [defaultValues]);
 
   const onSubmit: SubmitHandler<CustomOrderFormData> = async (data) => {
@@ -124,21 +124,12 @@ export function CustomOrderForm({
               <BillingFieldsGroup />
             </div>
             <div className='space-y-10'>
-              {selectedProducts.length === 0 && productPickerProps ? (
-                <>
-                  <Text variant='uppercase' className='text-textInactiveColor'>
-                    select products
-                  </Text>
-                  <ProductPicker
-                    products={productPickerProps.products}
-                    selectedProducts={selectedProducts}
-                    handleSelectProduct={productPickerProps.handleSelectProduct}
-                    loadMore={productPickerProps.loadMore}
-                    hasMore={productPickerProps.hasMore}
-                    triggerClassName='w-full uppercase'
-                  />
-                </>
-              ) : (
+              {selectedProducts.length === 0 && productPickerProps && (
+                <Text variant='uppercase' className='text-textInactiveColor'>
+                  select products
+                </Text>
+              )}
+              {selectedProducts.length > 0 && (
                 <>
                   <div className='max-h-[50vh] overflow-y-auto'>
                     {form.watch('items').map((item, idx) => {
@@ -156,26 +147,28 @@ export function CustomOrderForm({
                       {selectedProducts.length} product{selectedProducts.length !== 1 ? 's' : ''}{' '}
                       selected
                     </Text>
-                    {selectedProducts.length > 0 && productPickerProps && (
-                      <ProductPicker
-                        products={productPickerProps.products}
-                        selectedProducts={selectedProducts}
-                        handleSelectProduct={productPickerProps.handleSelectProduct}
-                        loadMore={productPickerProps.loadMore}
-                        hasMore={productPickerProps.hasMore}
-                        triggerClassName='w-full uppercase'
-                      />
-                    )}
                   </div>
-                  <Button
-                    type='submit'
-                    variant='main'
-                    className='w-full uppercase fixed bottom-2.5 inset-x-2.5'
-                    size='lg'
-                  >
-                    create order
-                  </Button>
                 </>
+              )}
+              {productPickerProps && (
+                <ProductPicker
+                  products={productPickerProps.products}
+                  selectedProducts={selectedProducts}
+                  handleSaveProducts={productPickerProps.handleSaveProducts}
+                  loadMore={productPickerProps.loadMore}
+                  hasMore={productPickerProps.hasMore}
+                  triggerClassName='w-full uppercase'
+                />
+              )}
+              {selectedProducts.length > 0 && (
+                <Button
+                  type='submit'
+                  variant='main'
+                  className='w-full uppercase fixed bottom-2.5 inset-x-2.5'
+                  size='lg'
+                >
+                  create order
+                </Button>
               )}
             </div>
           </div>

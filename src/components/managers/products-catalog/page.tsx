@@ -2,6 +2,7 @@ import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
 import { DEFAULT_PRODUCT_LIMIT } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import debounce from 'lodash/debounce';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -16,6 +17,8 @@ export default function ProductsCatalog() {
   const [searchParams] = useSearchParams();
   const [products, setProducts] = useState<common_Product[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const { dictionary } = useDictionary();
+  const baseCurrency = dictionary?.baseCurrency || 'USD';
 
   function toggleModal() {
     setIsModalOpen(!isModalOpen);
@@ -38,7 +41,7 @@ export default function ProductsCatalog() {
       const response = await adminService.GetProductsPaged({
         limit,
         offset: 0,
-        ...getProductPagedParans(params),
+        ...getProductPagedParans({ ...params, currency: baseCurrency }),
       });
       setProducts(response.products || []);
     }, 1000),

@@ -2,7 +2,7 @@ import { CustomOrderForm } from './components/custom-order-form';
 import { useCustomOrder } from './components/useCustomOrder';
 
 export function CustomOrders() {
-  const { products, selectedProducts, handleSelectProduct, loadMore, hasMore, clearSelection } =
+  const { products, selectedProducts, hasMore, handleSaveProducts, loadMore, clearSelection } =
     useCustomOrder();
 
   return (
@@ -12,9 +12,9 @@ export function CustomOrders() {
         onSuccess={clearSelection}
         productPickerProps={{
           products,
-          handleSelectProduct,
-          loadMore,
           hasMore,
+          handleSaveProducts,
+          loadMore,
         }}
       />
     </div>

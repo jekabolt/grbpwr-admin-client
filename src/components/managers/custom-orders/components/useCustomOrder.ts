@@ -60,21 +60,16 @@ export function useCustomOrder() {
     setSelectedProducts([]);
   }, []);
 
-  const handleSelectProduct = (product: common_Product) => {
-    const isSelected = selectedProducts.some((p) => p.id === product.id);
-    if (isSelected) {
-      setSelectedProducts((prev) => prev.filter((p) => p.id !== product.id));
-    } else {
-      setSelectedProducts((prev) => [...prev, product]);
-    }
-  };
+  const handleSaveProducts = useCallback((products: common_Product[]) => {
+    setSelectedProducts(products);
+  }, []);
 
   return {
     products,
     selectedProducts,
-    handleSelectProduct,
-    loadMore,
     hasMore,
+    handleSaveProducts,
+    loadMore,
     clearSelection,
   };
 }

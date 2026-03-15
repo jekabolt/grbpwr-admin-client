@@ -14,10 +14,12 @@ export function ShippingFieldsGroup({ prefix }: { prefix: string }) {
 
   const carrierItems = useMemo(
     () =>
-      (dictionary?.shipmentCarriers ?? []).map((c) => ({
-        value: c.id!,
-        label: c.shipmentCarrier?.carrier ?? String(c.id),
-      })),
+      (dictionary?.shipmentCarriers ?? [])
+        .filter((c) => c.shipmentCarrier?.allowed === true)
+        .map((c) => ({
+          value: c.id!,
+          label: c.shipmentCarrier?.carrier ?? String(c.id),
+        })),
     [dictionary?.shipmentCarriers],
   );
 
