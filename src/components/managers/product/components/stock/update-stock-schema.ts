@@ -78,13 +78,30 @@ export const updateStockSchema = z
   .object({
     mode: z.enum(stockAdjustmentModes),
     sizeId: z.number().min(1, 'Size is required'),
-    quantity: z.number().min(1, 'Quantity is required'),
+    quantity: z.number().refine((n) => !Number.isNaN(n), 'Quantity must be a valid number'),
     direction: z.enum(stockAdjustmentDirections).optional(),
     reason: z.enum(stockChangeReasons),
     comment: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    const { mode, direction, reason, comment } = data;
+    const { mode, direction, reason, comment, quantity } = data;
+
+    // quantity: set requires >= 0, adjust requires > 0
+    if (typeof quantity === 'number' && !Number.isNaN(quantity)) {
+      if (mode === 'STOCK_ADJUSTMENT_MODE_SET' && quantity < 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Quantity cannot be negative for Set mode',
+          path: ['quantity'],
+        });
+      } else if (mode === 'STOCK_ADJUSTMENT_MODE_ADJUST' && quantity <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Quantity must be greater than 0 for Adjust mode',
+          path: ['quantity'],
+        });
+      }
+    }
 
     // stock_count: only with mode=set, direction not allowed
     if (reason === REASON_MODE_SET) {

@@ -111,7 +111,8 @@ export function useUpdateStock({
     if (['STOCK_CHANGE_REASON_FOUND', 'STOCK_CHANGE_REASON_RESERVED_RELEASE'].includes(reason)) {
       return DIRECTION_OPTIONS.filter((o) => o.value === 'STOCK_ADJUSTMENT_DIRECTION_INCREASE');
     }
-    return [];
+    // correction, other: both directions allowed
+    return DIRECTION_OPTIONS;
   }
 
   return {
