@@ -71,6 +71,7 @@ export function OrdersTable({
                     'text-center h-10 min-w-26 border border-r border-textColor lg:px-2 px-0',
                     {
                       'sticky left-0 bg-textInactiveColor z-10': col.label === 'Order ID',
+                      'hidden md:table-cell': col.label === 'Placed' || col.label === 'Total',
                     },
                   )}
                 >
@@ -106,7 +107,7 @@ export function OrdersTable({
                           onOrderSearchChange(e.target.value)
                         }
                         disabled={isLoading}
-                        className='w-40 bg-textInactiveColor placeholder:text-textColor placeholder:text-center'
+                        className='lg:w-40 w-full bg-textInactiveColor placeholder:text-textColor placeholder:text-center'
                       />
                     </div>
                   ) : col.label === 'Order Status' ? (
@@ -161,6 +162,7 @@ export function OrdersTable({
                             'sticky left-0 bg-bgColor group-hover:bg-highlightColor/20 z-10':
                               col.label === 'Order ID',
                             uppercase: col.label === 'Order Status',
+                            'hidden md:table-cell': col.label === 'Placed' || col.label === 'Total',
                           },
                         )}
                       >
