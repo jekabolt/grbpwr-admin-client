@@ -18,7 +18,7 @@ export const useOrderDetails = (uuid: string) => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState('');
-  const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
+  const [selectedUnitKeys, setSelectedUnitKeys] = useState<string[]>([]);
 
   async function fetchOrderDetails() {
     setState((prev) => ({ ...prev, isLoading: true }));
@@ -104,13 +104,23 @@ export const useOrderDetails = (uuid: string) => {
 
   async function refundOrder(reason?: string) {
     try {
+      const orderItemIds =
+        selectedUnitKeys.length > 0
+          ? [
+              ...new Set(
+                selectedUnitKeys
+                  .map((k) => parseInt(k.split('-')[0], 10))
+                  .filter((id) => !Number.isNaN(id)),
+              ),
+            ]
+          : [];
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,
-        orderItemIds: selectedProductIds.length ? selectedProductIds : [],
+        orderItemIds: orderItemIds.length ? orderItemIds : [],
         reason,
       });
       fetchOrderDetails();
-      setSelectedProductIds([]);
+      setSelectedUnitKeys([]);
       showMessage('Order refunded successfully', 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to refund order';
@@ -118,20 +128,20 @@ export const useOrderDetails = (uuid: string) => {
     }
   }
 
-  const toggleOrderItemsSelection = (productIds: number[]) => {
-    if (!productIds.length) return;
+  const toggleOrderItemsSelection = (unitKeys: string[]) => {
+    if (!unitKeys.length) return;
 
-    setSelectedProductIds((prev) => {
-      const allSelected = productIds.every((id) => prev.includes(id));
+    setSelectedUnitKeys((prev) => {
+      const allSelected = unitKeys.every((k) => prev.includes(k));
 
       if (allSelected) {
-        return prev.filter((id) => !productIds.includes(id));
+        return prev.filter((k) => !unitKeys.includes(k));
       }
 
       const next = [...prev];
-      productIds.forEach((id) => {
-        if (!next.includes(id)) {
-          next.push(id);
+      unitKeys.forEach((k) => {
+        if (!next.includes(k)) {
+          next.push(k);
         }
       });
 
@@ -144,7 +154,7 @@ export const useOrderDetails = (uuid: string) => {
     isPrinting,
     isEdit,
     trackingNumber,
-    selectedProductIds,
+    selectedUnitKeys,
     saveTrackingNumber,
     toggleTrackNumber,
     handleTrackingNumberChange,
