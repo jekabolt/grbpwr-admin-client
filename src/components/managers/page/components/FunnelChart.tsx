@@ -20,17 +20,48 @@ const FUNNEL_STEPS = [
   { key: 'purchaseUsers', label: 'Purchase' },
 ] as const;
 
+function fmtCount(n: number | undefined): string {
+  return n === undefined ? '—' : formatNumber(n);
+}
+
 export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
   if (!funnel?.aggregate) return null;
 
   const aggregate = funnel.aggregate;
   const maxUsers = aggregate.sessionStartUsers || 1;
 
+  const showOrdersReconcile =
+    funnel.dbOrdersCount !== undefined || aggregate.purchaseUsers !== undefined;
+  const showSessionsReconcile =
+    funnel.ga4Sessions !== undefined || aggregate.sessionStartUsers !== undefined;
+  const caveat = funnel.caveat?.trim();
+
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
         Conversion funnel
       </Text>
+      {(showOrdersReconcile || showSessionsReconcile || caveat) && (
+        <div className='mb-4 space-y-1.5 border-b border-textInactiveColor/40 pb-3'>
+          {showOrdersReconcile && (
+            <Text className='text-[10px] text-textInactiveColor leading-snug'>
+              DB Orders: {fmtCount(funnel.dbOrdersCount)} | GA4 Purchases:{' '}
+              {fmtCount(aggregate.purchaseUsers)}
+            </Text>
+          )}
+          {showSessionsReconcile && (
+            <Text className='text-[10px] text-textInactiveColor leading-snug'>
+              GA4 Sessions: {fmtCount(funnel.ga4Sessions)} | BQ Sessions:{' '}
+              {fmtCount(aggregate.sessionStartUsers)}
+            </Text>
+          )}
+          {caveat && (
+            <Text className='text-[9px] italic text-textInactiveColor leading-snug' title={caveat}>
+              {caveat}
+            </Text>
+          )}
+        </div>
+      )}
       <div className='space-y-2'>
         {FUNNEL_STEPS.map(({ key, label }) => {
           const users = aggregate[key as keyof typeof aggregate] as number | undefined;

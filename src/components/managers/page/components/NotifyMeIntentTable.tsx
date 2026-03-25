@@ -9,7 +9,29 @@ interface NotifyMeIntentTableProps {
 }
 
 export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeIntent }) => {
+<<<<<<< HEAD
+  if (!notifyMeIntent || notifyMeIntent.length === 0) {
+    return (
+      <div className='border border-textInactiveColor p-4'>
+        <Text variant='uppercase' className='font-bold mb-4 block'>
+          Notify me intent
+        </Text>
+        <div className='py-8 text-center'>
+          <Text className='text-textInactiveColor'>
+            No restock demand signals in this period
+          </Text>
+        </div>
+        <div className='mt-3 text-xs text-textInactiveColor'>
+          <Text>
+            "Notify me" / back-in-stock intent signals — high demand items currently unavailable
+          </Text>
+        </div>
+      </div>
+    );
+  }
+=======
   if (!notifyMeIntent || notifyMeIntent.length === 0) return null;
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
 
   const aggregated = notifyMeIntent.reduce(
     (acc, row) => {

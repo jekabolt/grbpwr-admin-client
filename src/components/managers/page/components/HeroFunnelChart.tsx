@@ -1,18 +1,40 @@
+<<<<<<< HEAD
+import type { HeroFunnelSection } from 'api/proto-http/admin';
+=======
 import type { HeroFunnelMetric } from 'api/proto-http/admin';
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
 import { FC } from 'react';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
 
 interface HeroFunnelChartProps {
+<<<<<<< HEAD
+  heroFunnel: HeroFunnelSection | undefined;
+}
+
+const STEPS: { key: 'heroClickUsers' | 'viewItemUsers' | 'purchaseUsers'; label: string }[] = [
+=======
   heroFunnel: HeroFunnelMetric[] | undefined;
 }
 
 const STEPS: { key: keyof Totals; label: string }[] = [
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
   { key: 'heroClickUsers', label: 'Hero Click' },
   { key: 'viewItemUsers', label: 'View Item' },
   { key: 'purchaseUsers', label: 'Purchase' },
 ];
 
+<<<<<<< HEAD
+export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
+  const agg = heroFunnel?.aggregate;
+  if (!agg) return null;
+
+  const totals = {
+    heroClickUsers: agg.heroClickUsers ?? 0,
+    viewItemUsers: agg.viewItemUsers ?? 0,
+    purchaseUsers: agg.purchaseUsers ?? 0,
+  };
+=======
 type Totals = { heroClickUsers: number; viewItemUsers: number; purchaseUsers: number };
 
 function rowDateMs(date: string | undefined): number {
@@ -51,6 +73,7 @@ export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
   if (!heroFunnel || heroFunnel.length === 0) return null;
 
   const { totals, latestDayLabel } = pickHeroFunnelDisplay(heroFunnel);
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
 
   const maxUsers = totals.heroClickUsers || 1;
 
@@ -88,9 +111,14 @@ export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
           );
         })}
       </div>
+<<<<<<< HEAD
+      <div className='mt-3 text-xs text-textInactiveColor'>
+        <Text>Hero banner click → product view → purchase conversion path</Text>
+=======
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>Hero banner click → product view → purchase conversion path</Text>
         {latestDayLabel && <Text className='text-warning'>{latestDayLabel}</Text>}
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
       </div>
     </div>
   );
