@@ -15,6 +15,7 @@ import {
   RevenueParetoChart,
   SizeAnalyticsTable,
   SizeConfidenceTable,
+  SizeRunEfficiencyTable,
   SlowMoversTable,
 } from '../components';
 
@@ -30,12 +31,9 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
     (metrics?.revenueByCategory?.length ?? 0) > 0;
   const hasRevenuePareto = (metricsResponse.revenuePareto?.length ?? 0) > 0;
   const hasProductTrend = (metricsResponse.productTrend?.length ?? 0) > 0;
-  const bubbleMatrix = (metricsResponse as Record<string, unknown>).productEngagementBubbleMatrix as
-    | { products?: unknown[] }
-    | undefined;
   const hasProductEngagement =
     (metricsResponse.productEngagement?.length ?? 0) > 0 ||
-    (bubbleMatrix?.products?.length ?? 0) > 0;
+    (metricsResponse.productEngagementBubbleMatrix?.rows?.length ?? 0) > 0;
   const hasAddToCartRate = (metricsResponse.addToCartRate?.length ?? 0) > 0;
   const hasAddToCartRateAnalysis =
     (metricsResponse.addToCartRateAnalysis?.products?.length ?? 0) > 0 ||
@@ -69,11 +67,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
             <div className='space-y-6'>
               <h3 className='text-sm font-bold uppercase'>Product engagement</h3>
               <ProductEngagementBubbleMatrixChart
-                productEngagementBubbleMatrix={
-                  (metricsResponse as Record<string, unknown>).productEngagementBubbleMatrix as
-                    | import('api/proto-http/admin').ProductEngagementBubbleMatrix
-                    | undefined
-                }
+                productEngagementBubbleMatrix={metricsResponse.productEngagementBubbleMatrix}
               />
               <ProductEngagementRadarChart productEngagement={metricsResponse.productEngagement} />
               <ProductEngagementTable productEngagement={metricsResponse.productEngagement} />
@@ -111,6 +105,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
           <DeadStockTable deadStock={metricsResponse.deadStock} />
         </div>
         <OOSImpactTable oosImpact={metricsResponse.oosImpact} />
+        <SizeRunEfficiencyTable sizeRunEfficiency={metricsResponse.sizeRunEfficiency} />
       </div>
     </div>
   );

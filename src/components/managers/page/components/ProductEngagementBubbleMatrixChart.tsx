@@ -7,27 +7,34 @@ import { FC, useMemo, useState } from 'react';
 import Text from 'ui/components/text';
 import { ProductNameLink } from './ProductNameLink';
 
-const METRIC_KEYS = [
-  'imageSwipes',
-  'zoomEvents',
-  'expandedDetails',
-  'sizeGuideClicks',
-  'notifyMeIntent',
-] as const;
+const METRIC_KEYS = ['zoomRatePct', 'scroll75RatePct', 'scroll100RatePct', 'avgTimeOnPageSeconds'] as const;
+type MetricKey = (typeof METRIC_KEYS)[number];
 
-const METRIC_LABELS: Record<(typeof METRIC_KEYS)[number], string> = {
-  imageSwipes: 'Image swipes',
-  zoomEvents: 'Zoom events',
-  expandedDetails: 'Details expansion',
-  sizeGuideClicks: 'Size guide',
-  notifyMeIntent: 'Notify me',
+const METRIC_LABELS: Record<MetricKey, string> = {
+  zoomRatePct: 'Zoom rate %',
+  scroll75RatePct: 'Scroll 75% rate',
+  scroll100RatePct: 'Scroll 100% rate',
+  avgTimeOnPageSeconds: 'Avg time (s)',
 };
 
-const ABOVE_AVG_COLOR = '#ef4444'; // red - outperforming
-const BELOW_AVG_COLOR = '#94a3b8'; // grey - below average
+const OVERALL_KEYS: Record<MetricKey, keyof ProductEngagementMetricsPct> = {
+  zoomRatePct: 'avgZoomRatePct',
+  scroll75RatePct: 'avgScroll75RatePct',
+  scroll100RatePct: 'avgScroll100RatePct',
+  avgTimeOnPageSeconds: 'avgTimeOnPageSeconds',
+};
 
-function getPct(m: ProductEngagementMetricsPct | undefined, key: (typeof METRIC_KEYS)[number]): number {
-  const v = m?.[key];
+const ABOVE_AVG_COLOR = '#ef4444';
+const BELOW_AVG_COLOR = '#94a3b8';
+
+function getVal(row: ProductEngagementBubbleRow, key: MetricKey): number {
+  const v = row[key];
+  return typeof v === 'number' ? v : 0;
+}
+
+function getOverallVal(overall: ProductEngagementMetricsPct | undefined, key: MetricKey): number {
+  if (!overall) return 0;
+  const v = overall[OVERALL_KEYS[key]];
   return typeof v === 'number' ? v : 0;
 }
 
@@ -38,35 +45,29 @@ interface ProductEngagementBubbleMatrixChartProps {
 export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatrixChartProps> = ({
   productEngagementBubbleMatrix,
 }) => {
-  const [hovered, setHovered] = useState<{ productIdx: number; metricKey: (typeof METRIC_KEYS)[number] } | null>(
-    null,
-  );
+  const [hovered, setHovered] = useState<{ rowIdx: number; metricKey: MetricKey } | null>(null);
 
-  const products = productEngagementBubbleMatrix?.products ?? [];
-  const storeAverages = productEngagementBubbleMatrix?.storeAverages ?? {};
+  const rows = productEngagementBubbleMatrix?.rows ?? [];
+  const overall = productEngagementBubbleMatrix?.overall;
 
-  const maxPct = useMemo(() => {
+  const maxVal = useMemo(() => {
     let max = 0;
-    for (const p of products) {
-      const m = p.metricsAsPctOfViews;
+    for (const row of rows) {
       for (const k of METRIC_KEYS) {
-        const v = getPct(m, k);
+        const v = getVal(row, k);
         if (v > max) max = v;
       }
     }
     for (const k of METRIC_KEYS) {
-      const v = getPct(storeAverages, k);
+      const v = getOverallVal(overall, k);
       if (v > max) max = v;
     }
     return max || 100;
-  }, [products, storeAverages]);
+  }, [rows, overall]);
 
-  const bubbleSize = (pct: number) => {
-    const radius = Math.max(4, Math.min(24, (pct / maxPct) * 24));
-    return radius;
-  };
+  const bubbleSize = (val: number) => Math.max(4, Math.min(24, (val / maxVal) * 24));
 
-  if (products.length === 0) return null;
+  if (rows.length === 0) return null;
 
   return (
     <div className='border border-textInactiveColor p-4'>
@@ -91,8 +92,10 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
       </div>
       <div className='overflow-x-auto'>
         <div className='min-w-[600px]'>
-          {/* Header row: metric names */}
-          <div className='grid gap-2 mb-2' style={{ gridTemplateColumns: `120px repeat(${METRIC_KEYS.length}, minmax(80px, 1fr))` }}>
+          <div
+            className='grid gap-2 mb-2'
+            style={{ gridTemplateColumns: `120px repeat(${METRIC_KEYS.length}, minmax(80px, 1fr))` }}
+          >
             <div className='text-xs font-medium text-textInactiveColor' />
             {METRIC_KEYS.map((k) => (
               <div key={k} className='text-xs font-medium text-center'>
@@ -100,10 +103,9 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
               </div>
             ))}
           </div>
-          {/* Data rows: product × metric bubbles */}
-          {products.map((row: ProductEngagementBubbleRow, productIdx: number) => (
+          {rows.map((row, rowIdx) => (
             <div
-              key={row.productId ?? productIdx}
+              key={row.productId ?? rowIdx}
               className='grid gap-2 py-1.5 border-b border-textInactiveColor/30 last:border-0 items-center'
               style={{ gridTemplateColumns: `120px repeat(${METRIC_KEYS.length}, minmax(80px, 1fr))` }}
             >
@@ -114,18 +116,21 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
                 className='text-xs'
               />
               {METRIC_KEYS.map((metricKey) => {
-                const pct = getPct(row.metricsAsPctOfViews, metricKey);
-                const avg = getPct(storeAverages, metricKey);
-                const isAboveAvg = avg > 0 && pct >= avg;
+                const val = getVal(row, metricKey);
+                const avg = getOverallVal(overall, metricKey);
+                const isAboveAvg = avg > 0 && val >= avg;
                 const color = isAboveAvg ? ABOVE_AVG_COLOR : BELOW_AVG_COLOR;
-                const radius = bubbleSize(pct);
-                const isHovered =
-                  hovered?.productIdx === productIdx && hovered?.metricKey === metricKey;
+                const radius = bubbleSize(val);
+                const isHovered = hovered?.rowIdx === rowIdx && hovered?.metricKey === metricKey;
+                const label =
+                  metricKey === 'avgTimeOnPageSeconds' ? `${val.toFixed(1)}s` : `${val.toFixed(1)}%`;
+                const avgLabel =
+                  metricKey === 'avgTimeOnPageSeconds' ? `${avg.toFixed(1)}s` : `${avg.toFixed(1)}%`;
                 return (
                   <div
                     key={metricKey}
                     className='flex justify-center items-center h-12'
-                    onMouseEnter={() => setHovered({ productIdx, metricKey })}
+                    onMouseEnter={() => setHovered({ rowIdx, metricKey })}
                     onMouseLeave={() => setHovered(null)}
                   >
                     <div
@@ -137,11 +142,11 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
                         minWidth: 8,
                         minHeight: 8,
                       }}
-                      title={`${row.productName ?? row.productId}: ${METRIC_LABELS[metricKey]} ${pct.toFixed(1)}% (avg ${avg.toFixed(1)}%)`}
+                      title={`${row.productName ?? row.productId}: ${METRIC_LABELS[metricKey]} ${label} (avg ${avgLabel})`}
                     >
                       {isHovered && (
                         <div className='absolute -top-8 left-1/2 -translate-x-1/2 z-10 bg-white border border-textInactiveColor px-2 py-1 shadow-lg text-xs whitespace-nowrap'>
-                          {pct.toFixed(1)}%
+                          {label}
                         </div>
                       )}
                     </div>
@@ -157,18 +162,35 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
+              </th>
+              <th className='text-right p-2'>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Image views
+                </Text>
+              </th>
+              <th className='text-right p-2'>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Zoom events
+                </Text>
               </th>
               {METRIC_KEYS.map((k) => (
                 <th key={k} className='text-right p-2'>
-                  <Text variant='uppercase' className='text-[10px]'>{METRIC_LABELS[k]}</Text>
+                  <Text variant='uppercase' className='text-[10px]'>
+                    {METRIC_LABELS[k]}
+                  </Text>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {products.map((row: ProductEngagementBubbleRow, idx) => (
-              <tr key={row.productId ?? idx} className='border-b border-textInactiveColor/50 hover:bg-bgSecondary'>
+            {rows.map((row, idx) => (
+              <tr
+                key={row.productId ?? idx}
+                className='border-b border-textInactiveColor/50 hover:bg-bgSecondary'
+              >
                 <td className='p-2'>
                   <ProductNameLink
                     productId={row.productId}
@@ -176,9 +198,13 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
                     maxWidth='140px'
                   />
                 </td>
+                <td className='p-2 text-right'>{row.totalImageViews ?? 0}</td>
+                <td className='p-2 text-right'>{row.totalZoomEvents ?? 0}</td>
                 {METRIC_KEYS.map((k) => (
                   <td key={k} className='p-2 text-right'>
-                    {getPct(row.metricsAsPctOfViews, k).toFixed(1)}%
+                    {k === 'avgTimeOnPageSeconds'
+                      ? `${getVal(row, k).toFixed(1)}s`
+                      : `${getVal(row, k).toFixed(1)}%`}
                   </td>
                 ))}
               </tr>
@@ -188,10 +214,8 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>
-          Columns: user journey from photo engagement (swipes/zoom) to intent (size guide, notify me).
-        </Text>
-        <Text>
-          Bubble size = % of viewers. Red = above store average. Grey = below. Scan for anomalies.
+          Columns: engagement metrics as % of image views (except time on page). Red = above store
+          average. Grey = below.
         </Text>
       </div>
     </div>

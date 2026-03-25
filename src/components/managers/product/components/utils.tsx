@@ -6,6 +6,7 @@ import {
   common_ProductInsertTranslation,
   common_ProductNew,
   common_ProductTagInsert,
+  common_SeasonEnum,
   common_SizeWithMeasurementInsert,
   UpsertProductRequest,
 } from 'api/proto-http/admin';
@@ -34,6 +35,7 @@ export function mapProductDataToForm(data: ProductFormData) {
     collection: data.product.productBodyInsert.collection,
     preorder: toWellKnownTimestamp(data.product.productBodyInsert.preorder),
     fit: data.product.productBodyInsert.fit,
+    season: (data.product.productBodyInsert.season as common_SeasonEnum) || undefined,
   };
 
   const translations: common_ProductInsertTranslation[] = data.product.translations.map(
@@ -164,6 +166,7 @@ export function mapProductFullToFormData(
         version: productBodyInsert?.version || '',
         collection: productBodyInsert?.collection || '',
         fit: productBodyInsert?.fit || '',
+        season: productBodyInsert?.season || undefined,
       },
       thumbnailMediaId: productDisplay?.thumbnail?.id || 0,
       secondaryThumbnailMediaId: productDisplay?.secondaryThumbnail?.id || 0,

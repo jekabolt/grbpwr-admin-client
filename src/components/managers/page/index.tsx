@@ -6,6 +6,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { DateRangePicker } from './components';
 import {
+  BehaviourTab,
   CustomerTab,
   FunnelTab,
   OverviewTab,
@@ -26,6 +27,7 @@ const TAB_IDS: MetricsTabId[] = [
   'products',
   'traffic',
   'site-health',
+  'behaviour',
 ];
 
 const TAB_LABELS: Record<MetricsTabId, string> = {
@@ -36,6 +38,7 @@ const TAB_LABELS: Record<MetricsTabId, string> = {
   products: 'Products & Inventory',
   traffic: 'Traffic & Marketing',
   'site-health': 'Site Health',
+  behaviour: 'Behaviour',
 };
 
 function getDefaultCustomRange() {
@@ -161,6 +164,7 @@ export function Analitic() {
           {activeTab === 'products' && <ProductsTab metricsResponse={metricsResponse} />}
           {activeTab === 'traffic' && <TrafficTab metricsResponse={metricsResponse} />}
           {activeTab === 'site-health' && <SiteHealthTab metricsResponse={metricsResponse} />}
+          {activeTab === 'behaviour' && <BehaviourTab metricsResponse={metricsResponse} />}
         </div>
       )}
     </div>

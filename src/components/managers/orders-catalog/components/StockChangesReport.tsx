@@ -40,6 +40,7 @@ export function StockChangesReport() {
       const response = await adminService.ListStockChanges({
         from: toRfc3339DateOnly(dateFrom, false),
         to: toRfc3339DateOnly(dateTo, true),
+        source: undefined,
         limit: -1,
         offset: undefined,
       });

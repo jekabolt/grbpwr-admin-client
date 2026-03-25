@@ -1,7 +1,6 @@
 import type { ReturnByProductRow } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
-import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
 interface ReturnByProductTableProps {
   returnByProduct: ReturnByProductRow[] | undefined;
@@ -10,7 +9,13 @@ interface ReturnByProductTableProps {
 export const ReturnByProductTable: FC<ReturnByProductTableProps> = ({ returnByProduct }) => {
   if (!returnByProduct || returnByProduct.length === 0) return null;
 
-  const sorted = [...returnByProduct].sort((a, b) => (b.returnRate || 0) - (a.returnRate || 0)).slice(0, 20);
+  const sorted = [...returnByProduct]
+    .sort((a, b) => (b.totalReturnRate || 0) - (a.totalReturnRate || 0))
+    .slice(0, 20);
+
+  const allReasonKeys = Array.from(
+    new Set(sorted.flatMap((row) => Object.keys(row.reasons ?? {}))),
+  );
 
   return (
     <div className='border border-textInactiveColor p-4'>
@@ -25,23 +30,19 @@ export const ReturnByProductTable: FC<ReturnByProductTableProps> = ({ returnByPr
                 <Text variant='uppercase' className='text-[10px]'>Product</Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Total Sold</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Returned</Text>
-              </th>
-              <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>Return Rate</Text>
               </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Return Value</Text>
-              </th>
+              {allReasonKeys.map((reason) => (
+                <th key={reason} className='text-right p-2'>
+                  <Text variant='uppercase' className='text-[10px]'>{reason.replace(/_/g, ' ')}</Text>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {sorted.map((row, idx) => {
-              const returnRate = row.returnRate ?? 0;
-              const isHigh = returnRate > 30;
+              const rate = row.totalReturnRate ?? 0;
+              const isHigh = rate > 30;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
@@ -50,19 +51,15 @@ export const ReturnByProductTable: FC<ReturnByProductTableProps> = ({ returnByPr
                     </Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text>{formatNumber(row.totalSold || 0)}</Text>
-                  </td>
-                  <td className='p-2 text-right'>
-                    <Text>{formatNumber(row.totalReturned || 0)}</Text>
-                  </td>
-                  <td className='p-2 text-right'>
                     <Text className={isHigh ? 'text-error font-bold' : ''}>
-                      {returnRate.toFixed(1)}%
+                      {rate.toFixed(1)}%
                     </Text>
                   </td>
-                  <td className='p-2 text-right'>
-                    <Text>{formatCurrency(parseDecimal(row.returnValue))}</Text>
-                  </td>
+                  {allReasonKeys.map((reason) => (
+                    <td key={reason} className='p-2 text-right'>
+                      <Text>{((row.reasons?.[reason] ?? 0) * 100).toFixed(1)}%</Text>
+                    </td>
+                  ))}
                 </tr>
               );
             })}

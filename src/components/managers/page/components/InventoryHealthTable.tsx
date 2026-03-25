@@ -1,7 +1,7 @@
 import type { InventoryHealthRow } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
-import { formatNumber } from '../utils';
+import { DAYS_ON_HAND_NO_SALES_SENTINEL, formatDaysOnHand, formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
 interface InventoryHealthTableProps {
@@ -11,7 +11,7 @@ interface InventoryHealthTableProps {
 export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryHealth }) => {
   if (!inventoryHealth || inventoryHealth.length === 0) return null;
 
-  const atRisk = inventoryHealth.filter((row) => (row.daysOnHand || 0) > 60).slice(0, 20);
+  const atRisk = inventoryHealth.filter((row) => (row.daysOnHand ?? 0) > 60).slice(0, 20);
 
   if (atRisk.length === 0) return null;
 
@@ -43,7 +43,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
           </thead>
           <tbody>
             {atRisk.map((row, idx) => {
-              const daysOnHand = row.daysOnHand || 0;
+              const daysOnHand = row.daysOnHand ?? 0;
               const isVeryHigh = daysOnHand > 90;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
@@ -60,8 +60,11 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
                     <Text>{(row.avgDailySales || 0).toFixed(2)}</Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text className={isVeryHigh ? 'text-error font-bold' : ''}>
-                      {daysOnHand.toFixed(0)}
+                    <Text
+                      className={isVeryHigh ? 'text-error font-bold' : ''}
+                      title={daysOnHand >= DAYS_ON_HAND_NO_SALES_SENTINEL ? '∞' : undefined}
+                    >
+                      {formatDaysOnHand(row.daysOnHand)}
                     </Text>
                   </td>
                 </tr>
@@ -71,7 +74,10 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
         </table>
       </div>
       <div className='mt-3 text-xs text-textInactiveColor'>
-        <Text>Items with &gt;60 days on hand. &gt;90 days highlighted (consider discount/bundling)</Text>
+        <Text>
+          Items with &gt;60 days on hand (including no sales in period). &gt;90 days highlighted (consider
+          discount/bundling)
+        </Text>
       </div>
     </div>
   );

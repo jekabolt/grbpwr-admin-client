@@ -7,6 +7,8 @@ import {
   CheckoutTimingsCard,
   DeviceFunnelChart,
   FunnelChart,
+  HeroFunnelChart,
+  PaymentRecoveryCard,
 } from '../components';
 
 interface FunnelTabProps {
@@ -28,6 +30,14 @@ export function FunnelTab({ metricsResponse }: FunnelTabProps) {
             <AbandonedCartCard abandonedCart={metricsResponse.abandonedCart} />
             <CheckoutTimingsCard checkoutTimings={metricsResponse.checkoutTimings} />
           </div>
+        </div>
+      </div>
+
+      <div className='space-y-6'>
+        <h3 className='text-sm font-bold uppercase'>Hero funnel & recovery</h3>
+        <div className='grid gap-6 md:grid-cols-2'>
+          <HeroFunnelChart heroFunnel={metricsResponse.heroFunnel} />
+          <PaymentRecoveryCard paymentRecovery={metricsResponse.paymentRecovery} />
         </div>
       </div>
 

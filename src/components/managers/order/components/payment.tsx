@@ -49,16 +49,6 @@ export function Payment({ orderDetails, isPrinting }: Props) {
           ),
         ]}
       </Text>
-      {payment?.paymentInsert?.payer && (
-        <Text variant='uppercase' className='flex items-center gap-2'>
-          {[`payer: `, <CopyToClipboard text={payment?.paymentInsert?.payer || ''} />]}
-        </Text>
-      )}
-      {payment?.paymentInsert?.payee && (
-        <Text variant='uppercase' className='flex items-center gap-2'>
-          {[`payee: `, <CopyToClipboard text={payment?.paymentInsert?.payee || ''} />]}
-        </Text>
-      )}
       {payment?.paymentInsert?.isTransactionDone && (
         <Text variant='uppercase' className='flex items-center gap-2'>
           {payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ||

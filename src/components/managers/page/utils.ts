@@ -43,6 +43,23 @@ export function formatNumber(value: number, decimals = 0): string {
   }).format(value);
 }
 
+/** Backend sentinel when there were zero sales in the period (effectively infinite days on hand). */
+export const DAYS_ON_HAND_NO_SALES_SENTINEL = 99999;
+
+export function formatDaysOnHand(days: number | undefined): string {
+  const d = days ?? 0;
+  if (d >= DAYS_ON_HAND_NO_SALES_SENTINEL) return 'No sales';
+  return d.toFixed(0);
+}
+
 export function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+/**
+ * Admin API rates such as `cartRate`, `avgCartRate`, and `globalCartRate` are 0–1 fractions.
+ * Use this for display on a 0–100 percentage scale. If the backend contract changes, update here only.
+ */
+export function toPercentage(fraction: number): number {
+  return fraction * 100;
 }
