@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import Text from 'ui/components/text';
-import { formatCurrency, formatNumber, parseDecimal } from '../utils';
+import { formatCurrency, formatNumber, normalizeSharesTo100, parseDecimal } from '../utils';
 
 interface SizeAnalyticsTableProps {
   sizeAnalytics: SizeAnalyticsRow[] | undefined;
@@ -54,38 +54,77 @@ function PercentBar({ value }: { value: number }) {
   );
 }
 
+function pctRowKey(
+  productId: number | undefined,
+  sizeId: number | undefined,
+  sizeName: string | undefined,
+): string {
+  const label = (sizeName || `Size #${sizeId ?? ''}`).trim();
+  return `${productId ?? 0}:${sizeId ?? 0}:${label}`;
+}
+
 export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics }) => {
-  const { chartData, sizeKeys, topSizes } = useMemo(() => {
+  const { chartData, sizeKeys, topSizes, normalizedPctByProductSize } = useMemo(() => {
     if (!sizeAnalytics || sizeAnalytics.length === 0) {
-      return { chartData: [], sizeKeys: [] as string[], topSizes: [] };
+      return {
+        chartData: [],
+        sizeKeys: [] as string[],
+        topSizes: [],
+        normalizedPctByProductSize: new Map<string, number>(),
+      };
     }
 
-    // Group by product
+    /** Per product: size label → aggregated raw `pctOfProduct` (proto scale may be 0–1, 0–100, or worse). */
     const byProduct = new Map<
       string,
-      { productId: number; productName: string; sizes: Array<{ sizeName: string; pct: number }> }
+      {
+        productId: number;
+        productName: string;
+        sizes: Map<string, { sizeId: number; raw: number }>;
+      }
     >();
 
     for (const row of sizeAnalytics) {
       const name = (row.productName || `#${row.productId}`).trim();
       const sizeName = row.sizeName || `Size #${row.sizeId}`;
-      const pct = (row.pctOfProduct ?? 0) * 100;
+      const raw = row.pctOfProduct ?? 0;
 
       if (!byProduct.has(name)) {
         byProduct.set(name, {
           productId: row.productId ?? 0,
           productName: name,
-          sizes: [],
+          sizes: new Map(),
         });
       }
-      byProduct.get(name)!.sizes.push({ sizeName, pct });
+      const p = byProduct.get(name)!;
+      const prev = p.sizes.get(sizeName);
+      if (prev) {
+        prev.raw += raw;
+      } else {
+        p.sizes.set(sizeName, { sizeId: row.sizeId ?? 0, raw });
+      }
     }
 
     const allSizeNames = new Set<string>();
     for (const p of byProduct.values()) {
-      for (const s of p.sizes) allSizeNames.add(s.sizeName);
+      for (const k of p.sizes.keys()) allSizeNames.add(k);
     }
     const sizeKeys = Array.from(allSizeNames).sort();
+
+    const normalizedPctByProductSize = new Map<string, number>();
+    for (const p of byProduct.values()) {
+      const rowShares = sizeKeys.map((k) => p.sizes.get(k)?.raw ?? 0);
+      const normalized = normalizeSharesTo100(rowShares);
+      sizeKeys.forEach((k, i) => {
+        const agg = p.sizes.get(k);
+        if (agg) {
+          normalizedPctByProductSize.set(
+            pctRowKey(p.productId, agg.sizeId, k),
+            normalized[i] ?? 0,
+          );
+        }
+      });
+    }
 
     const chartData = Array.from(byProduct.entries())
       .map(([, p]) => {
@@ -93,12 +132,11 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
           product: p.productName,
           productId: p.productId,
         };
-        for (const s of p.sizes) {
-          entry[s.sizeName] = s.pct;
-        }
-        for (const k of sizeKeys) {
-          if (!(k in entry)) entry[k] = 0;
-        }
+        const rowShares = sizeKeys.map((k) => p.sizes.get(k)?.raw ?? 0);
+        const normalized = normalizeSharesTo100(rowShares);
+        sizeKeys.forEach((k, i) => {
+          entry[k] = normalized[i] ?? 0;
+        });
         return entry;
       })
       .slice(0, 20);
@@ -107,6 +145,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
       chartData,
       sizeKeys,
       topSizes: sizeAnalytics.slice(0, 50),
+      normalizedPctByProductSize,
     };
   }, [sizeAnalytics]);
 
@@ -132,7 +171,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
                 type='number'
                 domain={[0, 100]}
                 tick={{ fontSize: 10 }}
-                tickFormatter={(v) => `${v}%`}
+                tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
               />
               <YAxis
                 type='category'
@@ -210,7 +249,10 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
           </thead>
           <tbody>
             {topSizes.map((row, idx) => {
-              const pctOfProduct = (row.pctOfProduct || 0) * 100;
+              const pctOfProduct =
+                normalizedPctByProductSize.get(
+                  pctRowKey(row.productId, row.sizeId, row.sizeName),
+                ) ?? 0;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>

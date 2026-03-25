@@ -907,6 +907,9 @@ export type BusinessMetrics = {
   // Share of orders with a promo_code attached (customer_order.promo_id). Unrelated to total_discount
   // when discounts come only from product sale percentages — see product_sale_discount / promo_code_discount.
   promoUsageRate: MetricWithComparison | undefined;
+  // Gross revenue at list prices (before any discounts or refunds) + shipping.
+  // Includes original order value of fully refunded orders (status=Refunded).
+  // Revenue = GrossRevenue - ProductSaleDiscount - PromoCodeDiscount - TotalRefunded.
   grossRevenue: MetricWithComparison | undefined;
   totalRefunded: MetricWithComparison | undefined;
   // Sum of product_sale_discount + promo_code_discount (base currency, net-revenue order statuses).
@@ -999,6 +1002,11 @@ export type MetricWithComparison = {
   changePct: number | undefined;
   // When true, a negative change is good (e.g. refund rate, bounce rate). Frontend should show green for decrease, red for increase.
   lowerIsBetter: boolean | undefined;
+  // Absolute delta (current - previous) for rate metrics. For percentage/ratio metrics, this is the percentage point change (e.g., 5.0% → 3.0% = -2.0 pp).
+  // Frontend should prefer displaying this over change_pct for rate metrics to avoid misleading "rate-of-rates" semantics.
+  changeAbsolute: number | undefined;
+  // Optional tooltip/caveat text to clarify metric interpretation (e.g., data limitations, calculation notes).
+  caveat: string | undefined;
 };
 
 export type GeographyMetric = {
@@ -1056,6 +1064,7 @@ export type CLVStats = {
   mean: googletype_Decimal | undefined;
   median: googletype_Decimal | undefined;
   p90: googletype_Decimal | undefined;
+  sampleSize: number | undefined;
 };
 
 export type PromoMetric = {
@@ -1113,6 +1122,14 @@ export type DeviceMetric = {
 export type FunnelSection = {
   aggregate: FunnelAggregate | undefined;
   daily: DailyFunnel[] | undefined;
+  // DB-sourced order count for the same period; reconcile with aggregate.purchase_users
+  // (GA4 session-scoped) to surface tracking gaps.
+  dbOrdersCount: number | undefined;
+  // GA4 Data API session count for the same period; reconcile with aggregate.session_start_users
+  // (BQ raw event-scoped) to surface counting methodology differences.
+  ga4Sessions: number | undefined;
+  // Human-readable note explaining known discrepancies between funnel and overview metrics.
+  caveat: string | undefined;
 };
 
 export type FunnelAggregate = {

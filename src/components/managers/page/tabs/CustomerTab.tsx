@@ -36,7 +36,7 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
         <h3 className='text-sm font-bold uppercase'>Customer trends</h3>
         <div className='grid gap-4 md:grid-cols-2'>
           <TimeSeriesChart
-            title='Subscribers by day'
+            title='Email opt-ins by day'
             data={metrics?.subscribersByDay}
             compareData={metrics?.subscribersByDayCompare}
             valueFormat='number'

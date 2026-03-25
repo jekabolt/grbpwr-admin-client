@@ -83,7 +83,12 @@ export const WebVitalsCard: FC<WebVitalsCardProps> = ({ webVitals }) => {
                     {vital.metricName}
                   </Text>
                   <div className='flex gap-3 text-xs'>
-                    <Text>Avg: {vital.avgValue.toFixed(0)}ms</Text>
+                    <Text>
+                      Avg:{' '}
+                      {vital.metricName.toUpperCase() === 'CLS'
+                        ? (vital.avgValue / 1000).toFixed(3)
+                        : `${vital.avgValue.toFixed(0)}ms`}
+                    </Text>
                     <Text className={isPoorPerformance ? 'text-error font-bold' : ''}>
                       Poor: {vital.poorPct.toFixed(1)}%
                     </Text>
