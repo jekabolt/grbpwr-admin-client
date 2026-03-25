@@ -9,6 +9,7 @@ interface NotifyMeIntentTableProps {
 }
 
 export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeIntent }) => {
+<<<<<<< HEAD
   if (!notifyMeIntent || notifyMeIntent.length === 0) {
     return (
       <div className='border border-textInactiveColor p-4'>
@@ -28,6 +29,9 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
       </div>
     );
   }
+=======
+  if (!notifyMeIntent || notifyMeIntent.length === 0) return null;
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
 
   const aggregated = notifyMeIntent.reduce(
     (acc, row) => {

@@ -75,11 +75,15 @@ const KPI_GROUPS: Array<{ title: string; items: KpiItem[] }> = [
       },
       { key: 'repeatCustomersRate', label: 'Repeat Rate', format: (v) => `${v.toFixed(1)}%` },
       { key: 'avgOrdersPerCustomer', label: 'Avg Orders/Customer', format: (v) => formatNumber(v, 1) },
+<<<<<<< HEAD
       {
         key: 'avgDaysBetweenOrders',
         label: 'Avg Days Between Orders',
         format: formatAvgDaysBetweenOrders,
       },
+=======
+      { key: 'avgDaysBetweenOrders', label: 'Avg Days Between Orders', format: (v) => formatNumber(v, 1) },
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
     ],
   },
   {
@@ -90,7 +94,11 @@ const KPI_GROUPS: Array<{ title: string; items: KpiItem[] }> = [
       { key: 'emailDeliveryRate', label: 'Delivery Rate', format: (v) => `${v.toFixed(1)}%` },
       { key: 'emailOpenRate', label: 'Open Rate', format: (v) => `${v.toFixed(1)}%` },
       { key: 'emailClickRate', label: 'Click Rate', format: (v) => `${v.toFixed(1)}%` },
+<<<<<<< HEAD
       { key: 'emailBounceRate', label: 'Email Hard Bounce Rate', format: (v) => `${v.toFixed(1)}%` },
+=======
+      { key: 'emailBounceRate', label: 'Bounce Rate', format: (v) => `${v.toFixed(1)}%` },
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
     ],
   },
 ];
@@ -135,12 +143,15 @@ function KpiCard({
   }
   const changeSuffix =
     changeLabel != null ? changeLabel : changePct != null ? formatPercent(changePct) : '';
+<<<<<<< HEAD
   const compareLine =
     compareValue !== undefined
       ? changeSuffix !== ''
         ? `${format(value)} vs ${format(compareValue)} · ${changeSuffix}`
         : `${format(value)} vs ${format(compareValue)}`
       : changeSuffix;
+=======
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
   return (
     <div className='border border-textInactiveColor p-4 flex flex-col gap-1 min-w-0'>
       <Text
@@ -155,6 +166,7 @@ function KpiCard({
       >
         {label}
       </Text>
+<<<<<<< HEAD
       <Text className='font-bold truncate' title={caveat}>
         {format(value)}
       </Text>
@@ -166,6 +178,14 @@ function KpiCard({
       {caveat && (
         <Text className='text-textInactiveColor text-[9px] italic truncate' title={caveat}>
           {caveat}
+=======
+      <Text className='font-bold truncate'>{format(value)}</Text>
+      {hasCompare && changeSuffix !== '' && (
+        <Text variant='uppercase' className={`text-[10px] ${changeToneClass}`}>
+          {compareValue !== undefined
+            ? `${format(value)} vs ${format(compareValue)} · ${changeSuffix}`
+            : changeSuffix}
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
         </Text>
       )}
     </div>
@@ -206,6 +226,7 @@ export const KpiCards: FC<KpiCardsProps> = ({ metrics, compareEnabled = false })
             } else {
               changePct = backendChangePct ?? null;
             }
+<<<<<<< HEAD
             // Same-day / sub-day avg gap vs a longer prior period: −100% reads like a bug, not "faster repeat".
             if (
               key === 'avgDaysBetweenOrders' &&
@@ -216,6 +237,8 @@ export const KpiCards: FC<KpiCardsProps> = ({ metrics, compareEnabled = false })
               changePct = null;
               changeLabel = null;
             }
+=======
+>>>>>>> 6f967a554fd452e6126117481150c4091aa2b964
             return (
               <KpiCard
                 key={key}
