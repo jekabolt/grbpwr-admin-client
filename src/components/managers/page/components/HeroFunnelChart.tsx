@@ -1,27 +1,56 @@
-import type { HeroFunnelSection } from 'api/proto-http/admin';
+import type { HeroFunnelMetric } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
 
 interface HeroFunnelChartProps {
-  heroFunnel: HeroFunnelSection | undefined;
+  heroFunnel: HeroFunnelMetric[] | undefined;
 }
 
-const STEPS: { key: 'heroClickUsers' | 'viewItemUsers' | 'purchaseUsers'; label: string }[] = [
+type Totals = { heroClickUsers: number; viewItemUsers: number; purchaseUsers: number };
+
+const STEPS: { key: keyof Totals; label: string }[] = [
   { key: 'heroClickUsers', label: 'Hero Click' },
   { key: 'viewItemUsers', label: 'View Item' },
   { key: 'purchaseUsers', label: 'Purchase' },
 ];
 
-export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
-  const agg = heroFunnel?.aggregate;
-  if (!agg) return null;
+function rowDateMs(date: string | undefined): number {
+  if (!date) return -Infinity;
+  const ms = Date.parse(date);
+  return Number.isFinite(ms) ? ms : -Infinity;
+}
 
-  const totals = {
-    heroClickUsers: agg.heroClickUsers ?? 0,
-    viewItemUsers: agg.viewItemUsers ?? 0,
-    purchaseUsers: agg.purchaseUsers ?? 0,
+type HeroFunnelDisplay = {
+  totals: Totals;
+  latestDayLabel: string | null;
+};
+
+function pickHeroFunnelDisplay(rows: HeroFunnelMetric[]): HeroFunnelDisplay {
+  const totals = rows.reduce<Totals>(
+    (acc, row) => ({
+      heroClickUsers: acc.heroClickUsers + (row.heroClickUsers ?? 0),
+      viewItemUsers: acc.viewItemUsers + (row.viewItemUsers ?? 0),
+      purchaseUsers: acc.purchaseUsers + (row.purchaseUsers ?? 0),
+    }),
+    { heroClickUsers: 0, viewItemUsers: 0, purchaseUsers: 0 },
+  );
+
+  const dated = rows.filter((r) => rowDateMs(r.date) > -Infinity);
+  const showWarning = dated.length > 1;
+
+  return {
+    totals,
+    latestDayLabel: showWarning
+      ? 'Note: Daily unique users summed — may over-count repeat visitors across days'
+      : null,
   };
+}
+
+export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
+  if (!heroFunnel || heroFunnel.length === 0) return null;
+
+  const { totals, latestDayLabel } = pickHeroFunnelDisplay(heroFunnel);
 
   const maxUsers = totals.heroClickUsers || 1;
 
@@ -59,8 +88,9 @@ export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
           );
         })}
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor'>
+      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>Hero banner click → product view → purchase conversion path</Text>
+        {latestDayLabel && <Text className='text-warning'>{latestDayLabel}</Text>}
       </div>
     </div>
   );
