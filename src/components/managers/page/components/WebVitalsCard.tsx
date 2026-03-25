@@ -68,54 +68,56 @@ export const WebVitalsCard: FC<WebVitalsCardProps> = ({ webVitals }) => {
   }));
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Core web vitals
-      </Text>
-      <div className='space-y-4'>
-        {vitals.map((vital) => {
-          const isPoorPerformance = vital.poorPct > 25;
-          return (
-            <div key={vital.metricName} className='space-y-1'>
-              <div className='flex justify-between items-center'>
-                <Text variant='uppercase' className='text-xs'>
-                  {vital.metricName}
-                </Text>
-                <div className='flex gap-3 text-xs'>
-                  <Text>Avg: {vital.avgValue.toFixed(0)}ms</Text>
-                  <Text className={isPoorPerformance ? 'text-error font-bold' : ''}>
-                    Poor: {vital.poorPct.toFixed(1)}%
+    <Tooltip.Provider delayDuration={300}>
+      <div className='border border-textInactiveColor p-4'>
+        <Text variant='uppercase' className='font-bold mb-4 block'>
+          Core web vitals
+        </Text>
+        <div className='space-y-4'>
+          {vitals.map((vital) => {
+            const isPoorPerformance = vital.poorPct > 25;
+            return (
+              <div key={vital.metricName} className='space-y-1'>
+                <div className='flex justify-between items-center'>
+                  <Text variant='uppercase' className='text-xs'>
+                    {vital.metricName}
                   </Text>
-                </div>
-              </div>
-              <Tooltip.Root>
-                <Tooltip.Trigger asChild>
-                  <div className='h-4 bg-bgSecondary flex overflow-hidden cursor-help'>
-                    <div className='bg-green-600' style={{ width: `${vital.goodPct}%` }} />
-                    <div
-                      className='bg-yellow-600'
-                      style={{ width: `${100 - vital.goodPct - vital.poorPct}%` }}
-                    />
-                    <div className='bg-error' style={{ width: `${vital.poorPct}%` }} />
+                  <div className='flex gap-3 text-xs'>
+                    <Text>Avg: {vital.avgValue.toFixed(0)}ms</Text>
+                    <Text className={isPoorPerformance ? 'text-error font-bold' : ''}>
+                      Poor: {vital.poorPct.toFixed(1)}%
+                    </Text>
                   </div>
-                </Tooltip.Trigger>
-                <Tooltip.Portal>
-                  <Tooltip.Content
-                    side='top'
-                    sideOffset={4}
-                    className='rounded border border-textInactiveColor bg-bgColor px-2 py-1 text-sm text-textColor shadow'
-                  >
-                    {getMetricDescription(vital.metricName)}
-                  </Tooltip.Content>
-                </Tooltip.Portal>
-              </Tooltip.Root>
-            </div>
-          );
-        })}
+                </div>
+                <Tooltip.Root>
+                  <Tooltip.Trigger asChild>
+                    <div className='h-4 bg-bgSecondary flex overflow-hidden cursor-help'>
+                      <div className='bg-green-600' style={{ width: `${vital.goodPct}%` }} />
+                      <div
+                        className='bg-yellow-600'
+                        style={{ width: `${100 - vital.goodPct - vital.poorPct}%` }}
+                      />
+                      <div className='bg-error' style={{ width: `${vital.poorPct}%` }} />
+                    </div>
+                  </Tooltip.Trigger>
+                  <Tooltip.Portal>
+                    <Tooltip.Content
+                      side='top'
+                      sideOffset={4}
+                      className='rounded border border-textInactiveColor bg-bgColor px-2 py-1 text-sm text-textColor shadow'
+                    >
+                      {getMetricDescription(vital.metricName)}
+                    </Tooltip.Content>
+                  </Tooltip.Portal>
+                </Tooltip.Root>
+              </div>
+            );
+          })}
+        </div>
+        <div className='mt-3 text-xs text-textInactiveColor'>
+          <Text>Target: LCP &lt;2.5s, FID &lt;100ms, CLS &lt;0.1</Text>
+        </div>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor'>
-        <Text>Target: LCP &lt;2.5s, FID &lt;100ms, CLS &lt;0.1</Text>
-      </div>
-    </div>
+    </Tooltip.Provider>
   );
 };

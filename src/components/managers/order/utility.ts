@@ -118,6 +118,7 @@ export const useOrderDetails = (uuid: string) => {
         orderUuid: state.orderDetails?.order?.uuid,
         orderItemIds: orderItemIds.length ? orderItemIds : [],
         reason,
+        refundShipping: undefined,
       });
       fetchOrderDetails();
       setSelectedUnitKeys([]);

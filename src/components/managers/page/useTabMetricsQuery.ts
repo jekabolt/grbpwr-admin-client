@@ -11,7 +11,8 @@ export type MetricsTabId =
   | 'customers'
   | 'products'
   | 'traffic'
-  | 'site-health';
+  | 'site-health'
+  | 'behaviour';
 
 export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
   overview: ['METRICS_SECTION_BUSINESS'],
@@ -22,6 +23,8 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     'METRICS_SECTION_CHECKOUT_TIMINGS',
     'METRICS_SECTION_DEVICE_FUNNEL',
     'METRICS_SECTION_ADD_TO_CART_RATE',
+    'METRICS_SECTION_HERO_FUNNEL',
+    'METRICS_SECTION_PAYMENT_RECOVERY',
   ],
   customers: [
     'METRICS_SECTION_BUSINESS',
@@ -29,6 +32,8 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     'METRICS_SECTION_ORDER_SEQUENCE',
     'METRICS_SECTION_SPENDING_CURVE',
     'METRICS_SECTION_NEWSLETTER',
+    'METRICS_SECTION_ENTRY_PRODUCTS',
+    'METRICS_SECTION_CATEGORY_LOYALTY',
   ],
   products: [
     'METRICS_SECTION_BUSINESS',
@@ -43,6 +48,7 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     'METRICS_SECTION_SLOW_MOVERS',
     'METRICS_SECTION_DEAD_STOCK',
     'METRICS_SECTION_OOS_IMPACT',
+    'METRICS_SECTION_SIZE_RUN_EFFICIENCY',
   ],
   traffic: ['METRICS_SECTION_BUSINESS', 'METRICS_SECTION_CAMPAIGN_ATTRIBUTION'],
   'site-health': [
@@ -53,6 +59,15 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     'METRICS_SECTION_NOT_FOUND',
     'METRICS_SECTION_PAYMENT_FAILURES',
     'METRICS_SECTION_SESSION_DURATION',
+  ],
+  behaviour: [
+    'METRICS_SECTION_USER_JOURNEYS',
+    'METRICS_SECTION_TIME_ON_PAGE',
+    'METRICS_SECTION_PRODUCT_ZOOM',
+    'METRICS_SECTION_IMAGE_SWIPES',
+    'METRICS_SECTION_SIZE_GUIDE_CLICKS',
+    'METRICS_SECTION_DETAILS_EXPANSION',
+    'METRICS_SECTION_NOTIFY_ME_INTENT',
   ],
 };
 
@@ -98,6 +113,7 @@ export function useTabMetricsQuery(
         compareMode: options?.compareMode,
         sections,
         limit: options?.limit,
+        trendGranularity: undefined,
       });
       return response;
     },

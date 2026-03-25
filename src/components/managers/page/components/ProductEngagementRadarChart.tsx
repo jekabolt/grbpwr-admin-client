@@ -4,6 +4,7 @@ import {
   Legend,
   PolarAngleAxis,
   PolarGrid,
+  PolarRadiusAxis,
   Radar,
   RadarChart,
   ResponsiveContainer,
@@ -12,50 +13,45 @@ import {
 import Text from 'ui/components/text';
 import { ProductNameLink } from './ProductNameLink';
 
-/** Extended metric fields - backend may return these beyond the base proto */
-type ProductEngagementRow = ProductEngagementMetric & {
-  timeOnPageSeconds?: number;
-  imageSwipes?: number;
-  sizeGuideClicks?: number;
-  expandedDetails?: number;
-  notifyMeIntent?: number;
-};
-
 const METRIC_KEYS = [
   'imageViews',
   'zoomEvents',
-  'timeOnPageSeconds',
-  'imageSwipes',
-  'sizeGuideClicks',
-  'expandedDetails',
-  'notifyMeIntent',
+  'scroll75',
+  'scroll100',
+  'avgTimeOnPageSeconds',
 ] as const;
+type MetricKey = (typeof METRIC_KEYS)[number];
 
-const METRIC_LABELS: Record<(typeof METRIC_KEYS)[number], string> = {
+const METRIC_LABELS: Record<MetricKey, string> = {
   imageViews: 'Image Views',
   zoomEvents: 'Zoom Events',
-  timeOnPageSeconds: 'Time on Page (s)',
-  imageSwipes: 'Image Swipes',
-  sizeGuideClicks: 'Size Guide',
-  expandedDetails: 'Details Expanded',
-  notifyMeIntent: 'Notify Me',
+  scroll75: 'Scroll 75%',
+  scroll100: 'Scroll 100%',
+  avgTimeOnPageSeconds: 'Avg Time (s)',
 };
 
-/** Backend may return snake_case (image_views, time_on_page_seconds, etc.) */
-function toSnakeCase(s: string): string {
-  return s.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
-}
+/** Proto JSON often sends int64 as strings; API may use snake_case. */
+const METRIC_SNAKE: Record<MetricKey, string> = {
+  imageViews: 'image_views',
+  zoomEvents: 'zoom_events',
+  scroll75: 'scroll_75',
+  scroll100: 'scroll_100',
+  avgTimeOnPageSeconds: 'avg_time_on_page_seconds',
+};
 
-function getMetricValue(row: Record<string, unknown>, key: (typeof METRIC_KEYS)[number]): number {
-  const camel = row[key];
-  const snake = row[toSnakeCase(key)];
-  const raw = camel ?? snake;
-  if (typeof raw === 'number') return raw;
-  if (typeof raw === 'string') {
-    const n = parseFloat(raw);
+function toFiniteNumber(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
     return Number.isFinite(n) ? n : 0;
   }
   return 0;
+}
+
+function getMetricValue(row: ProductEngagementMetric, key: MetricKey): number {
+  const r = row as Record<string, unknown>;
+  const raw = r[key] ?? r[METRIC_SNAKE[key]];
+  return toFiniteNumber(raw);
 }
 
 interface ProductEngagementRadarChartProps {
@@ -70,19 +66,10 @@ export const ProductEngagementRadarChart: FC<ProductEngagementRadarChartProps> =
   const [selectedIndices, setSelectedIndices] = useState<number[]>([0]);
 
   const { chartData, products } = useMemo(() => {
-    const rows = (productEngagement ?? []) as ProductEngagementRow[];
+    const rows = productEngagement ?? [];
     if (rows.length === 0) return { chartData: [], products: [] };
 
-    // Compute max per metric across all products (for 0–100 normalization)
-    const maxValues: Record<(typeof METRIC_KEYS)[number], number> = {
-      imageViews: 0,
-      zoomEvents: 0,
-      timeOnPageSeconds: 0,
-      imageSwipes: 0,
-      sizeGuideClicks: 0,
-      expandedDetails: 0,
-      notifyMeIntent: 0,
-    };
+    const maxValues = Object.fromEntries(METRIC_KEYS.map((k) => [k, 0])) as Record<MetricKey, number>;
 
     for (const row of rows) {
       for (const k of METRIC_KEYS) {
@@ -91,13 +78,11 @@ export const ProductEngagementRadarChart: FC<ProductEngagementRadarChartProps> =
       }
     }
 
-    const safeMax = (k: (typeof METRIC_KEYS)[number]) => Math.max(1, maxValues[k]);
+    const safeMax = (k: MetricKey) => Math.max(1, maxValues[k]);
 
-    // Build recharts radar data: one row per metric
     const chartData = METRIC_KEYS.map((key) => {
       const subject = METRIC_LABELS[key];
-      const fullMark = 100;
-      const point: Record<string, string | number> = { subject, fullMark };
+      const point: Record<string, string | number> = { subject };
       rows.forEach((row, idx) => {
         const raw = getMetricValue(row, key);
         const normalized = Math.round((raw / safeMax(key)) * 100);
@@ -130,8 +115,8 @@ export const ProductEngagementRadarChart: FC<ProductEngagementRadarChartProps> =
         Product engagement radar
       </Text>
       <p className='text-xs text-textInactiveColor mb-3'>
-        Normalized 0–100 vs highest-performing product in catalog. Compare visual scrutiny (Image
-        Swipes, Zoom) vs sizing clarity (Size Guide) vs intent (Notify Me).
+        Normalized 0–100 vs highest-performing product. Compare visual engagement (Image Views, Zoom)
+        vs scroll depth (75%, 100%) vs time on page.
       </p>
 
       <div className='mb-3 flex flex-wrap items-center gap-2'>
@@ -178,6 +163,7 @@ export const ProductEngagementRadarChart: FC<ProductEngagementRadarChartProps> =
             margin={{ top: 20, right: 30, bottom: 20, left: 30 }}
           >
             <PolarGrid stroke='#94a3b8' strokeOpacity={0.4} />
+            <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 10 }} tickCount={5} />
             <PolarAngleAxis
               dataKey='subject'
               tick={{ fontSize: 11, fill: 'currentColor' }}

@@ -1,7 +1,9 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import {
+  CategoryLoyaltyTable,
   CohortRetentionTable,
   CrossSellTable,
+  EntryProductsTable,
   NewsletterCard,
   OrderSequenceChart,
   SpendingCurveChart,
@@ -56,6 +58,14 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
 
       <CrossSellTable metrics={metrics} />
       <NewsletterCard newsletter={metricsResponse.newsletter} />
+
+      <div className='space-y-6'>
+        <h3 className='text-sm font-bold uppercase'>Acquisition & loyalty</h3>
+        <div className='grid gap-6 md:grid-cols-2'>
+          <EntryProductsTable entryProducts={metricsResponse.entryProducts} />
+          <CategoryLoyaltyTable categoryLoyalty={metricsResponse.categoryLoyalty} />
+        </div>
+      </div>
     </div>
   );
 }

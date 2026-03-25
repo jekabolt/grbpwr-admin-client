@@ -14,19 +14,19 @@ import {
   ReferenceLine,
 } from 'recharts';
 import Text from 'ui/components/text';
-import { formatNumber } from '../utils';
+import { formatNumber, toPercentage } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
 type Quadrant = 'stars' | 'hidden_gems' | 'underperformers' | 'duds';
 
 function getQuadrant(
   viewCount: number,
-  cartRate: number,
+  cartRatePct: number,
   avgViewCount: number,
-  avgCartRate: number,
+  avgCartRatePct: number,
 ): Quadrant {
   const aboveAvgViews = viewCount >= avgViewCount;
-  const aboveAvgRate = cartRate >= avgCartRate;
+  const aboveAvgRate = cartRatePct >= avgCartRatePct;
   if (aboveAvgViews && aboveAvgRate) return 'stars';
   if (!aboveAvgViews && aboveAvgRate) return 'hidden_gems';
   if (aboveAvgViews && !aboveAvgRate) return 'underperformers';
@@ -69,16 +69,15 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
       }
     }
   };
-  const avgCartRate = addToCartRateAnalysis.avgCartRate ?? 0;
-  const avgCartRatePct = avgCartRate * 100;
+  const avgCartRatePct = toPercentage(addToCartRateAnalysis.avgCartRate ?? 0);
 
   const chartData = products.map((p: AddToCartRateProductRow) => {
     const viewCount = p.viewCount ?? 0;
-    const cartRate = (p.cartRate ?? 0) * 100;
-    const quadrant = getQuadrant(viewCount, cartRate, avgViewCount, avgCartRatePct);
+    const cartRatePct = toPercentage(p.cartRate ?? 0);
+    const quadrant = getQuadrant(viewCount, cartRatePct, avgViewCount, avgCartRatePct);
     return {
       viewCount,
-      cartRatePct: cartRate,
+      cartRatePct,
       productName: p.productName || `#${p.productId}`,
       productId: p.productId,
       addToCartCount: p.addToCartCount ?? 0,

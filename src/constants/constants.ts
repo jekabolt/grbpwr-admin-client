@@ -131,13 +131,12 @@ export const ORDER_FACTOR_OPTIONS: { value: common_OrderFactor; label: string }[
 
 export const SOURCE_OPTIONS: { value: common_StockChangeSource; label: string }[] = [
   { value: 'STOCK_CHANGE_SOURCE_UNSPECIFIED', label: 'All sources' },
-  { value: 'STOCK_CHANGE_SOURCE_ADMIN_ADD_PRODUCT', label: 'Admin add product' },
-  { value: 'STOCK_CHANGE_SOURCE_ADMIN_UPDATE_PRODUCT', label: 'Admin update product' },
-  { value: 'STOCK_CHANGE_SOURCE_ADMIN_UPDATE_SIZE_STOCK', label: 'Admin update size stock' },
-  { value: 'STOCK_CHANGE_SOURCE_ORDER_PLACED', label: 'Order placed' },
+  { value: 'STOCK_CHANGE_SOURCE_ADMIN_NEW_PRODUCT', label: 'Admin new product' },
+  { value: 'STOCK_CHANGE_SOURCE_MANUAL_ADJUSTMENT', label: 'Manual adjustment' },
+  { value: 'STOCK_CHANGE_SOURCE_ORDER_PAID', label: 'Order paid' },
+  { value: 'STOCK_CHANGE_SOURCE_ORDER_CUSTOM', label: 'Custom order' },
+  { value: 'STOCK_CHANGE_SOURCE_ORDER_RETURNED', label: 'Order returned' },
   { value: 'STOCK_CHANGE_SOURCE_ORDER_CANCELLED', label: 'Order cancelled' },
-  { value: 'STOCK_CHANGE_SOURCE_ORDER_EXPIRED', label: 'Order expired' },
-  { value: 'STOCK_CHANGE_SOURCE_ORDER_REFUNDED', label: 'Order refunded' },
 ];
 
 export const KEYBOARD_RESTRICTIONS = {

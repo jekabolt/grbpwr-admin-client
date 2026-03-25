@@ -58,6 +58,7 @@ const productBodySchema = z.object({
   modelWearsHeightCm: z.string().optional(),
   modelWearsSizeId: z.string().optional(),
   fit: z.string().optional(),
+  season: z.string().optional(),
 });
 
 const INTEGER_CURRENCIES = ['JPY', 'KRW'];
@@ -161,6 +162,7 @@ export const defaultData = {
       version: '',
       collection: '',
       fit: '',
+      season: undefined,
     },
     thumbnailMediaId: 0,
     secondaryThumbnailMediaId: 0,

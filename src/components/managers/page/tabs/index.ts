@@ -1,3 +1,4 @@
+export { BehaviourTab } from './BehaviourTab';
 export { CustomerTab } from './CustomerTab';
 export { FunnelTab } from './FunnelTab';
 export { OverviewTab } from './OverviewTab';

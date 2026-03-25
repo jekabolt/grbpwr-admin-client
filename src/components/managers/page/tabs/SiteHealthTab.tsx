@@ -5,7 +5,6 @@ import {
   FormErrorsTable,
   NotFoundTable,
   PaymentFailuresTable,
-  ScrollDepthChart,
   SessionDurationChart,
   WebVitalsCard,
 } from '../components';
@@ -15,9 +14,6 @@ interface SiteHealthTabProps {
 }
 
 export function SiteHealthTab({ metricsResponse }: SiteHealthTabProps) {
-  const metricsRecord = metricsResponse as Record<string, unknown>;
-  const scrollDepth = metricsRecord.scrollDepth;
-
   return (
     <div className='space-y-6'>
       <div className='space-y-6'>
@@ -42,10 +38,7 @@ export function SiteHealthTab({ metricsResponse }: SiteHealthTabProps) {
 
       <div className='space-y-6'>
         <h3 className='text-sm font-bold uppercase'>UX engagement</h3>
-        <div className='grid gap-6 md:grid-cols-2'>
-          <ScrollDepthChart scrollDepth={scrollDepth} />
-          <SessionDurationChart sessionDuration={metricsResponse.sessionDuration} />
-        </div>
+        <SessionDurationChart sessionDuration={metricsResponse.sessionDuration} />
       </div>
     </div>
   );

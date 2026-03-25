@@ -23,6 +23,8 @@ const KPI_GROUPS: Array<{ title: string; items: KpiItem[] }> = [
       { key: 'avgOrderValue', label: 'Avg Order Value', format: formatCurrency },
       { key: 'totalRefunded', label: 'Total Refunded', format: formatCurrency },
       { key: 'totalDiscount', label: 'Total Discount', format: formatCurrency },
+      { key: 'productSaleDiscount', label: 'Sale Discount', format: formatCurrency },
+      { key: 'promoCodeDiscount', label: 'Promo Discount', format: formatCurrency },
       { key: 'revenuePerSession', label: 'Revenue/Session', format: formatCurrency },
     ],
   },
@@ -30,7 +32,7 @@ const KPI_GROUPS: Array<{ title: string; items: KpiItem[] }> = [
     title: 'Orders',
     items: [
       { key: 'ordersCount', label: 'Orders', format: formatNumber },
-      { key: 'itemsPerOrder', label: 'Items/Order', format: formatNumber },
+      { key: 'itemsPerOrder', label: 'Items/Order', format: (v) => formatNumber(v, 1) },
       { key: 'refundRate', label: 'Refund Rate', format: (v) => `${v.toFixed(1)}%` },
       { key: 'promoUsageRate', label: 'Promo Usage', format: (v) => `${v.toFixed(1)}%` },
     ],
@@ -44,7 +46,7 @@ const KPI_GROUPS: Array<{ title: string; items: KpiItem[] }> = [
       { key: 'pageViews', label: 'Page Views', format: formatNumber },
       { key: 'bounceRate', label: 'Bounce Rate', format: (v) => `${v.toFixed(1)}%` },
       { key: 'avgSessionDuration', label: 'Avg Session (s)', format: formatNumber },
-      { key: 'pagesPerSession', label: 'Pages/Session', format: formatNumber },
+      { key: 'pagesPerSession', label: 'Pages/Session', format: (v) => formatNumber(v, 1) },
     ],
   },
   {
@@ -56,8 +58,19 @@ const KPI_GROUPS: Array<{ title: string; items: KpiItem[] }> = [
     items: [
       { key: 'newSubscribers', label: 'New Subscribers', format: formatNumber },
       { key: 'repeatCustomersRate', label: 'Repeat Rate', format: (v) => `${v.toFixed(1)}%` },
-      { key: 'avgOrdersPerCustomer', label: 'Avg Orders/Customer', format: formatNumber },
-      { key: 'avgDaysBetweenOrders', label: 'Avg Days Between Orders', format: formatNumber },
+      { key: 'avgOrdersPerCustomer', label: 'Avg Orders/Customer', format: (v) => formatNumber(v, 1) },
+      { key: 'avgDaysBetweenOrders', label: 'Avg Days Between Orders', format: (v) => formatNumber(v, 1) },
+    ],
+  },
+  {
+    title: 'Email Delivery',
+    items: [
+      { key: 'emailsSent', label: 'Sent', format: formatNumber },
+      { key: 'emailsDelivered', label: 'Delivered', format: formatNumber },
+      { key: 'emailDeliveryRate', label: 'Delivery Rate', format: (v) => `${v.toFixed(1)}%` },
+      { key: 'emailOpenRate', label: 'Open Rate', format: (v) => `${v.toFixed(1)}%` },
+      { key: 'emailClickRate', label: 'Click Rate', format: (v) => `${v.toFixed(1)}%` },
+      { key: 'emailBounceRate', label: 'Bounce Rate', format: (v) => `${v.toFixed(1)}%` },
     ],
   },
 ];
@@ -68,6 +81,7 @@ function KpiCard({
   format,
   compareValue,
   changePct,
+  changeLabel,
   lowerIsBetter,
   compareEnabled,
 }: {
@@ -76,34 +90,36 @@ function KpiCard({
   format: (v: number) => string;
   compareValue?: number;
   changePct: number | null;
+  /** Shown instead of a % when baseline is 0 (undefined relative change). */
+  changeLabel?: string | null;
   lowerIsBetter?: boolean;
   compareEnabled: boolean;
 }) {
-  const hasCompare = compareEnabled && (compareValue !== undefined || changePct != null);
+  const hasCompare =
+    compareEnabled && (compareValue !== undefined || changePct != null || changeLabel != null);
+  let changeToneClass = 'text-textColor';
+  if (changeLabel == null && changePct != null) {
+    if (changePct === 0) {
+      changeToneClass = 'text-textColor';
+    } else if (lowerIsBetter) {
+      changeToneClass = changePct < 0 ? 'text-green-600' : 'text-error';
+    } else {
+      changeToneClass = changePct > 0 ? 'text-green-600' : 'text-error';
+    }
+  }
+  const changeSuffix =
+    changeLabel != null ? changeLabel : changePct != null ? formatPercent(changePct) : '';
   return (
     <div className='border border-textInactiveColor p-4 flex flex-col gap-1 min-w-0'>
       <Text variant='uppercase' className='text-textColor text-[10px] truncate'>
         {label}
       </Text>
       <Text className='font-bold truncate'>{format(value)}</Text>
-      {hasCompare && changePct != null && (
-        <Text
-          variant='uppercase'
-          className={`text-[10px] ${
-            changePct === 0
-              ? 'text-textColor'
-              : lowerIsBetter
-                ? changePct < 0
-                  ? 'text-green-600'
-                  : 'text-error'
-                : changePct > 0
-                  ? 'text-green-600'
-                  : 'text-error'
-          }`}
-        >
+      {hasCompare && changeSuffix !== '' && (
+        <Text variant='uppercase' className={`text-[10px] ${changeToneClass}`}>
           {compareValue !== undefined
-            ? `${format(value)} vs ${format(compareValue)} · ${formatPercent(changePct)}`
-            : formatPercent(changePct)}
+            ? `${format(value)} vs ${format(compareValue)} · ${changeSuffix}`
+            : changeSuffix}
         </Text>
       )}
     </div>
@@ -126,11 +142,24 @@ export const KpiCards: FC<KpiCardsProps> = ({ metrics, compareEnabled = false })
             const { value, compareValue, changePct: backendChangePct, lowerIsBetter } =
               getMetricComparison(m as unknown as Record<string, unknown>);
             const hasCompareValue = compareValue !== undefined;
-            const changePct = hasCompareValue
-              ? compareValue === 0
-                ? (value > 0 ? 100 : 0)
-                : (backendChangePct ?? ((value - compareValue) / compareValue) * 100)
-              : backendChangePct ?? null;
+            let changePct: number | null = null;
+            let changeLabel: string | null = null;
+            if (hasCompareValue) {
+              if (compareValue === 0) {
+                if (value === 0) {
+                  changePct = 0;
+                } else if (value > 0) {
+                  changeLabel = 'new';
+                } else {
+                  changeLabel = 'N/A';
+                }
+              } else {
+                changePct =
+                  backendChangePct ?? ((value - compareValue) / compareValue) * 100;
+              }
+            } else {
+              changePct = backendChangePct ?? null;
+            }
             return (
               <KpiCard
                 key={key}
@@ -139,6 +168,7 @@ export const KpiCards: FC<KpiCardsProps> = ({ metrics, compareEnabled = false })
                 format={format}
                 compareValue={compareValue}
                 changePct={changePct}
+                changeLabel={changeLabel}
                 lowerIsBetter={lowerIsBetter}
                 compareEnabled={compareEnabled}
               />

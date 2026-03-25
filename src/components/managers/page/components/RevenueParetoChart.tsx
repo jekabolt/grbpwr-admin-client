@@ -5,6 +5,17 @@ import Text from 'ui/components/text';
 import { formatCurrency, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
+/**
+ * `cumulative_pct` from the API is defined as a fraction in [0, 1]. If a value
+ * is already in percent form (> 1), use it as-is so the chart does not blow up.
+ */
+function cumulativePctToDisplayPercent(raw: number | undefined): number {
+  const v = raw ?? 0;
+  if (!Number.isFinite(v)) return 0;
+  const pct = v > 1 ? v : v * 100;
+  return Math.max(0, Math.min(100, pct));
+}
+
 interface RevenueParetoChartProps {
   revenuePareto: RevenueParetoRow[] | undefined;
 }
@@ -18,7 +29,7 @@ export const RevenueParetoChart: FC<RevenueParetoChartProps> = ({ revenuePareto 
     productName: row.productName || `#${row.productId}`,
     productNameShort: (row.productName || `#${row.productId}`).slice(0, 15),
     revenue: parseDecimal(row.revenue),
-    cumulativePct: (row.cumulativePct || 0) * 100,
+    cumulativePct: cumulativePctToDisplayPercent(row.cumulativePct),
   }));
 
   return (

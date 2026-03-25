@@ -1,7 +1,7 @@
 import type { AddToCartRateRow } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
-import { formatNumber } from '../utils';
+import { formatNumber, toPercentage } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
 interface AddToCartRateTableProps {
@@ -38,8 +38,8 @@ export const AddToCartRateTable: FC<AddToCartRateTableProps> = ({ addToCartRate 
           </thead>
           <tbody>
             {sorted.map((row, idx) => {
-              const cartRate = (row.cartRate || 0) * 100;
-              const isLow = cartRate < 5;
+              const cartRatePct = toPercentage(row.cartRate ?? 0);
+              const isLow = cartRatePct < 5;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
@@ -52,7 +52,7 @@ export const AddToCartRateTable: FC<AddToCartRateTableProps> = ({ addToCartRate 
                     <Text>{formatNumber(row.addToCartCount || 0)}</Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text className={isLow ? 'text-error' : ''}>{cartRate.toFixed(1)}%</Text>
+                    <Text className={isLow ? 'text-error' : ''}>{cartRatePct.toFixed(1)}%</Text>
                   </td>
                 </tr>
               );

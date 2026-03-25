@@ -10,6 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 import Text from 'ui/components/text';
+import { toPercentage } from '../utils';
 
 interface AddToCartRateTrendChartProps {
   addToCartRateAnalysis: AddToCartRateAnalysis | undefined;
@@ -23,7 +24,7 @@ export const AddToCartRateTrendChart: FC<AddToCartRateTrendChartProps> = ({
 
   const chartData = globalTrend.map((row: AddToCartRateGlobalRow) => ({
     date: row.date ? new Date(row.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '',
-    globalCartRatePct: ((row.globalCartRate ?? 0) * 100),
+    globalCartRatePct: toPercentage(row.globalCartRate ?? 0),
     totalViews: row.totalViews ?? 0,
     totalAddToCarts: row.totalAddToCarts ?? 0,
   }));

@@ -55,8 +55,16 @@ export const SizeConfidenceTable: FC<SizeConfidenceTableProps> = ({ sizeConfiden
           </thead>
           <tbody>
             {data.map((row, idx) => {
-              const ratio = row.sizeSelections > 0 ? row.sizeGuideViews / row.sizeSelections : 0;
-              const isHighUncertainty = ratio > 0.5;
+              const ratio =
+                row.sizeSelections === 0 && row.sizeGuideViews === 0
+                  ? null // CASE 3: No data
+                  : row.sizeSelections > 0 && row.sizeGuideViews === 0
+                    ? null // CASE 2: Guide not used (distinct signal)
+                    : row.sizeSelections > 0
+                      ? row.sizeGuideViews / row.sizeSelections // CASE 1: Normal ratio
+                      : null; // Edge case: guide views but no selections
+              const isHighUncertainty = ratio !== null && ratio > 0.5;
+              const isGuideNotUsed = row.sizeSelections > 0 && row.sizeGuideViews === 0;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
@@ -69,9 +77,15 @@ export const SizeConfidenceTable: FC<SizeConfidenceTableProps> = ({ sizeConfiden
                     <Text>{formatNumber(row.sizeSelections)}</Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text className={isHighUncertainty ? 'text-error' : ''}>
-                      {ratio.toFixed(2)}
-                    </Text>
+                    {ratio === null ? (
+                      isGuideNotUsed ? (
+                        <Text className='text-warning'>—</Text>
+                      ) : (
+                        <Text className='text-textInactiveColor'>—</Text>
+                      )
+                    ) : (
+                      <Text className={isHighUncertainty ? 'text-error' : ''}>{ratio.toFixed(2)}</Text>
+                    )}
                   </td>
                 </tr>
               );
@@ -80,7 +94,11 @@ export const SizeConfidenceTable: FC<SizeConfidenceTableProps> = ({ sizeConfiden
         </table>
       </div>
       <div className='mt-3 text-xs text-textInactiveColor'>
-        <Text>High ratios (&gt;0.5) indicate customer uncertainty about sizing</Text>
+        <Text>
+          High ratios (&gt;0.5) indicate customer uncertainty. Amber &quot;—&quot; means guide not consulted
+          (sizes selected without viewing the guide). Gray &quot;—&quot; means no ratio (no activity or guide
+          views without selections).
+        </Text>
       </div>
     </div>
   );
