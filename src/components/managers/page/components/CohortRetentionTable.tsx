@@ -7,13 +7,34 @@ interface CohortRetentionTableProps {
   cohortRetention: CohortRetentionRow[] | undefined;
 }
 
+function cohortMonthHeaderTitle(month: number): string {
+  return `Month ${month} after cohort month: customers from this cohort with at least one order in that calendar month. Count and % are shares of cohort size.`;
+}
+
+function RetentionMonthHeader({ month }: { month: number }) {
+  return (
+    <th className='text-right p-2' title={cohortMonthHeaderTitle(month)}>
+      <Text
+        variant='uppercase'
+        component='span'
+        className='text-[10px] cursor-help border-b border-dotted border-textInactiveColor/60'
+      >
+        M{month}
+      </Text>
+    </th>
+  );
+}
+
 export const CohortRetentionTable: FC<CohortRetentionTableProps> = ({ cohortRetention }) => {
   if (!cohortRetention || cohortRetention.length === 0) return null;
 
   return (
     <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Cohort retention
+      <Text className='font-bold mb-2 block text-sm leading-snug'>
+        Do customers come back? (Month 1–6)
+      </Text>
+      <Text className='text-textInactiveColor text-[10px] mb-3 block'>
+        Order activity in each month after the cohort month — hover a column header for definitions.
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>
@@ -25,24 +46,12 @@ export const CohortRetentionTable: FC<CohortRetentionTableProps> = ({ cohortRete
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>Size</Text>
               </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>M1</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>M2</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>M3</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>M4</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>M5</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>M6</Text>
-              </th>
+              <RetentionMonthHeader month={1} />
+              <RetentionMonthHeader month={2} />
+              <RetentionMonthHeader month={3} />
+              <RetentionMonthHeader month={4} />
+              <RetentionMonthHeader month={5} />
+              <RetentionMonthHeader month={6} />
             </tr>
           </thead>
           <tbody>
@@ -91,6 +100,9 @@ export const CohortRetentionTable: FC<CohortRetentionTableProps> = ({ cohortRete
             })}
           </tbody>
         </table>
+      </div>
+      <div className='mt-3 text-xs text-textInactiveColor'>
+        <Text>Snapshot for selected period — no prior-period breakdown in this view.</Text>
       </div>
     </div>
   );

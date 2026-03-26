@@ -5,13 +5,17 @@ import { formatNumber } from '../utils';
 
 interface HeroFunnelChartProps {
   heroFunnel: HeroFunnelMetric[] | undefined;
+  /** When true, show that prior-period comparison is not available for this chart. */
+  compareEnabled?: boolean;
 }
 
 type Totals = { heroClickUsers: number; viewItemUsers: number; purchaseUsers: number };
 
+type Totals = { heroClickUsers: number; viewItemUsers: number; purchaseUsers: number };
+
 const STEPS: { key: keyof Totals; label: string }[] = [
-  { key: 'heroClickUsers', label: 'Hero Click' },
-  { key: 'viewItemUsers', label: 'View Item' },
+  { key: 'heroClickUsers', label: 'Banner click' },
+  { key: 'viewItemUsers', label: 'Product view' },
   { key: 'purchaseUsers', label: 'Purchase' },
 ];
 
@@ -47,7 +51,7 @@ function pickHeroFunnelDisplay(rows: HeroFunnelMetric[]): HeroFunnelDisplay {
   };
 }
 
-export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
+export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel, compareEnabled = false }) => {
   if (!heroFunnel || heroFunnel.length === 0) return null;
 
   const { totals, latestDayLabel } = pickHeroFunnelDisplay(heroFunnel);
@@ -56,9 +60,16 @@ export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
 
   return (
     <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Hero funnel
-      </Text>
+      <div className='mb-4'>
+        <Text variant='uppercase' className='font-bold block'>
+          Homepage banner funnel
+        </Text>
+        {compareEnabled && (
+          <Text className='text-[10px] text-textInactiveColor mt-1 block'>
+            Prior period comparison is not available for this chart yet.
+          </Text>
+        )}
+      </div>
       <div className='space-y-2'>
         {STEPS.map(({ key, label }) => {
           const users = totals[key];
@@ -89,7 +100,10 @@ export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel }) => {
         })}
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
-        <Text>Hero banner click → product view → purchase conversion path</Text>
+        <Text>
+          Unique users: homepage banner click → product page view → purchase (same scope as analytics
+          funnel)
+        </Text>
         {latestDayLabel && <Text className='text-warning'>{latestDayLabel}</Text>}
       </div>
     </div>

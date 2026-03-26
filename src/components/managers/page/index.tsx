@@ -4,15 +4,13 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { DateRangePicker } from './components';
+import { DateRangePicker, PersistentKpiBar } from './components';
 import {
-  BehaviourTab,
   CustomerTab,
-  FunnelTab,
-  OverviewTab,
   ProductsTab,
   RevenueTab,
-  SiteHealthTab,
+  TechnicalTab,
+  ThisWeekTab,
   TrafficTab,
 } from './tabs';
 import type { MetricsPeriod } from './useMetricsQuery';
@@ -20,25 +18,21 @@ import type { MetricsTabId } from './useTabMetricsQuery';
 import { useTabMetricsQuery } from './useTabMetricsQuery';
 
 const TAB_IDS: MetricsTabId[] = [
-  'overview',
+  'this-week',
   'revenue',
-  'funnel',
-  'customers',
   'products',
+  'customers',
   'traffic',
-  'site-health',
-  'behaviour',
+  'technical',
 ];
 
 const TAB_LABELS: Record<MetricsTabId, string> = {
-  overview: 'Overview',
-  revenue: 'Revenue & Sales',
-  funnel: 'Conversion Funnel',
+  'this-week': 'This Week',
+  revenue: 'Revenue & Orders',
+  products: 'Products',
   customers: 'Customers',
-  products: 'Products & Inventory',
-  traffic: 'Traffic & Marketing',
-  'site-health': 'Site Health',
-  behaviour: 'Behaviour',
+  traffic: 'Traffic & Channels',
+  technical: 'Technical',
 };
 
 function getDefaultCustomRange() {
@@ -51,7 +45,7 @@ function parseTabFromUrl(tabParam: string | null): MetricsTabId {
   if (tabParam && TAB_IDS.includes(tabParam as MetricsTabId)) {
     return tabParam as MetricsTabId;
   }
-  return 'overview';
+  return 'this-week';
 }
 
 export function Analitic() {
@@ -117,6 +111,7 @@ export function Analitic() {
           onCompareModeChange={setCompareMode}
           onCustomRangeChange={handleCustomRangeChange}
         />
+        <PersistentKpiBar metrics={metricsResponse?.business} compareEnabled={compareEnabled} />
       </div>
 
       <div className='border-b border-textInactiveColor'>
@@ -155,16 +150,25 @@ export function Analitic() {
 
       {!isLoading && !isError && metricsResponse && (
         <div className='space-y-6'>
-          {activeTab === 'overview' && (
-            <OverviewTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+          {activeTab === 'this-week' && (
+            <ThisWeekTab
+              metricsResponse={metricsResponse}
+              compareEnabled={compareEnabled}
+              period={period}
+              compareMode={compareMode}
+              customFrom={customFrom}
+              customTo={customTo}
+            />
           )}
-          {activeTab === 'revenue' && <RevenueTab metricsResponse={metricsResponse} />}
-          {activeTab === 'funnel' && <FunnelTab metricsResponse={metricsResponse} />}
-          {activeTab === 'customers' && <CustomerTab metricsResponse={metricsResponse} />}
+          {activeTab === 'revenue' && (
+            <RevenueTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+          )}
           {activeTab === 'products' && <ProductsTab metricsResponse={metricsResponse} />}
-          {activeTab === 'traffic' && <TrafficTab metricsResponse={metricsResponse} />}
-          {activeTab === 'site-health' && <SiteHealthTab metricsResponse={metricsResponse} />}
-          {activeTab === 'behaviour' && <BehaviourTab metricsResponse={metricsResponse} />}
+          {activeTab === 'customers' && <CustomerTab metricsResponse={metricsResponse} />}
+          {activeTab === 'traffic' && (
+            <TrafficTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+          )}
+          {activeTab === 'technical' && <TechnicalTab metricsResponse={metricsResponse} />}
         </div>
       )}
     </div>

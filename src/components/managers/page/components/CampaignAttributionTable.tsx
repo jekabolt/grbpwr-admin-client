@@ -1,5 +1,6 @@
 import type { CampaignAttributionRow } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
@@ -8,6 +9,9 @@ interface CampaignAttributionTableProps {
 }
 
 export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ campaignAttribution }) => {
+  const { pathname } = useLocation();
+  const atcMatrixHref = `${pathname}?tab=products#atc-matrix`;
+
   if (!campaignAttribution || campaignAttribution.length === 0) return null;
 
   const aggregated = campaignAttribution.reduce((acc, row) => {
@@ -44,6 +48,10 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
 
   return (
     <div className='border border-textInactiveColor p-4'>
+      <Text className='text-textInactiveColor text-xs leading-relaxed mb-3 block'>
+        Each row is UTM source / medium / campaign with session and conversion totals. Product engagement is
+        not split out by row; top product views elsewhere on this tab are site-wide.
+      </Text>
       <Text variant='uppercase' className='font-bold mb-4 block'>
         Campaign attribution
       </Text>
@@ -114,6 +122,13 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
           </tbody>
         </table>
       </div>
+      <Text className='text-textInactiveColor text-xs leading-relaxed mt-4 block'>
+        Low conversion on a source?{' '}
+        <Link to={atcMatrixHref} replace className='underline underline-offset-2 hover:text-textColor'>
+          Review add-to-cart performance by product
+        </Link>{' '}
+        on Products &amp; Inventory to spot weak view-to-cart products.
+      </Text>
     </div>
   );
 };

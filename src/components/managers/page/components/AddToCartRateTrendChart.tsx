@@ -32,7 +32,7 @@ export const AddToCartRateTrendChart: FC<AddToCartRateTrendChartProps> = ({
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Global ATC rate trend
+        Store-wide add to cart rate trend
       </Text>
       <ResponsiveContainer width='100%' height={280}>
         <LineChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -43,7 +43,7 @@ export const AddToCartRateTrendChart: FC<AddToCartRateTrendChartProps> = ({
             tickFormatter={(v) => `${v.toFixed(1)}%`}
           />
           <Tooltip
-            formatter={(value: number) => [`${value.toFixed(1)}%`, 'ATC rate']}
+            formatter={(value: number) => [`${value.toFixed(1)}%`, 'Add to cart rate']}
             labelFormatter={(label) => `Date: ${label}`}
             content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
@@ -51,7 +51,7 @@ export const AddToCartRateTrendChart: FC<AddToCartRateTrendChartProps> = ({
               return (
                 <div className='bg-white border border-textInactiveColor p-3 shadow-lg text-xs'>
                   <div className='font-bold mb-2'>{d.date}</div>
-                  <div className='mb-1'>ATC rate: {d.globalCartRatePct.toFixed(1)}%</div>
+                  <div className='mb-1'>Add to cart rate: {d.globalCartRatePct.toFixed(1)}%</div>
                   <div className='text-textInactiveColor'>
                     Views: {d.totalViews.toLocaleString()} · Add to carts: {d.totalAddToCarts.toLocaleString()}
                   </div>
@@ -65,7 +65,7 @@ export const AddToCartRateTrendChart: FC<AddToCartRateTrendChartProps> = ({
             stroke='#333'
             strokeWidth={2}
             dot={{ fill: '#333', r: 3 }}
-            name='ATC rate'
+            name='Add to cart rate'
           />
         </LineChart>
       </ResponsiveContainer>

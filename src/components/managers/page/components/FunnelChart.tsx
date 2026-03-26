@@ -5,6 +5,7 @@ import { formatNumber } from '../utils';
 
 interface FunnelChartProps {
   funnel: FunnelSection | undefined;
+  compareEnabled?: boolean;
 }
 
 const FUNNEL_STEPS = [
@@ -24,7 +25,7 @@ function fmtCount(n: number | undefined): string {
   return n === undefined ? '—' : formatNumber(n);
 }
 
-export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
+export const FunnelChart: FC<FunnelChartProps> = ({ funnel, compareEnabled = false }) => {
   if (!funnel?.aggregate) return null;
 
   const aggregate = funnel.aggregate;
@@ -38,9 +39,16 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
 
   return (
     <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Conversion funnel
-      </Text>
+      <div className='mb-4'>
+        <Text variant='uppercase' className='font-bold block'>
+          Conversion funnel
+        </Text>
+        {compareEnabled && (
+          <Text className='text-[10px] text-textInactiveColor mt-1 block'>
+            Prior period comparison is not available for this funnel yet.
+          </Text>
+        )}
+      </div>
       {(showOrdersReconcile || showSessionsReconcile || caveat) && (
         <div className='mb-4 space-y-1.5 border-b border-textInactiveColor/40 pb-3'>
           {showOrdersReconcile && (

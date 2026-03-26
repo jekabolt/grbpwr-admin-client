@@ -7,6 +7,7 @@ import 'react-day-picker/style.css';
 import Text from 'ui/components/text';
 import type { MetricsPeriod } from '../useMetricsQuery';
 import { COMPARE_MODE_OPTIONS, PERIOD_OPTIONS } from '../useMetricsQuery';
+import { compareModeHintLine } from '../utils';
 
 interface MetricsPeriodPickerProps {
   period: MetricsPeriod;
@@ -54,6 +55,7 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
   };
 
   const isCustom = period === 'custom';
+  const compareHint = compareModeHintLine(compareMode, period, customFrom, customTo);
 
   return (
     <div className='flex flex-wrap items-end gap-4 pb-6'>
@@ -105,7 +107,7 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
           )}
         </div>
       </div>
-      <div className='flex flex-col gap-1'>
+      <div className='flex flex-col gap-1 max-w-md'>
         <Text variant='uppercase' className='text-textInactiveColor'>
           compare
         </Text>
@@ -120,6 +122,9 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
             </option>
           ))}
         </select>
+        {compareHint && (
+          <Text className='text-[10px] text-textInactiveColor leading-snug mt-0.5'>{compareHint}</Text>
+        )}
       </div>
     </div>
   );
