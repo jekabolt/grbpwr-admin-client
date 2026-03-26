@@ -1,9 +1,10 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
+import { Link, useLocation } from 'react-router-dom';
+import Text from 'ui/components/text';
 import {
   CurrencyPaymentCharts,
   OrdersByStatusChart,
   PromoTable,
-  ReturnByProductChart,
   TimeSeriesChart,
 } from '../components';
 
@@ -13,11 +14,20 @@ interface RevenueTabProps {
 
 export function RevenueTab({ metricsResponse }: RevenueTabProps) {
   const metrics = metricsResponse.business;
+  const { pathname } = useLocation();
+  const funnelHref = `${pathname}?tab=funnel`;
 
   return (
     <div className='space-y-6'>
       <div className='space-y-6'>
         <h3 className='text-sm font-bold uppercase'>Revenue & sales trends</h3>
+        <Text className='text-textInactiveColor text-xs'>
+          Product return rates sit with abandoned carts on{' '}
+          <Link to={funnelHref} replace className='underline underline-offset-2 hover:text-textColor'>
+            Conversion Funnel
+          </Link>{' '}
+          (Abandonment &amp; returns).
+        </Text>
         <div className='grid gap-4 md:grid-cols-2'>
           <TimeSeriesChart
             title='Revenue by day'
@@ -68,7 +78,6 @@ export function RevenueTab({ metricsResponse }: RevenueTabProps) {
       </div>
 
       <PromoTable metrics={metrics} />
-      <ReturnByProductChart returnByProduct={metricsResponse.returnByProduct} />
     </div>
   );
 }

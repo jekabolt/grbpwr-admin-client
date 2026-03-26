@@ -1,9 +1,12 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
+import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   AddToCartRateMatrixChart,
   AddToCartRateTable,
   AddToCartRateTrendChart,
   DeadStockTable,
+  ImageSwipesTable,
   InventoryHealthTable,
   OOSImpactTable,
   ProductCharts,
@@ -11,12 +14,14 @@ import {
   ProductEngagementRadarChart,
   ProductEngagementTable,
   ProductTrendTable,
+  ProductZoomTable,
   ReturnBySizeTable,
   RevenueParetoChart,
   SizeAnalyticsTable,
   SizeConfidenceTable,
   SizeRunEfficiencyTable,
   SlowMoversTable,
+  TimeOnPageTable,
 } from '../components';
 
 interface ProductsTabProps {
@@ -24,6 +29,26 @@ interface ProductsTabProps {
 }
 
 export function ProductsTab({ metricsResponse }: ProductsTabProps) {
+  const { hash } = useLocation();
+
+  useEffect(() => {
+    const id = hash.replace(/^#/, '');
+    if (!id) return;
+
+    const scrollToTarget = () => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    scrollToTarget();
+    const raf = requestAnimationFrame(() => requestAnimationFrame(scrollToTarget));
+    const timeoutId = window.setTimeout(scrollToTarget, 200);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timeoutId);
+    };
+  }, [hash, metricsResponse]);
+
   const metrics = metricsResponse.business;
   const hasProductCharts =
     (metrics?.topProductsByRevenue?.length ?? 0) > 0 ||
@@ -33,7 +58,10 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
   const hasProductTrend = (metricsResponse.productTrend?.length ?? 0) > 0;
   const hasProductEngagement =
     (metricsResponse.productEngagement?.length ?? 0) > 0 ||
-    (metricsResponse.productEngagementBubbleMatrix?.rows?.length ?? 0) > 0;
+    (metricsResponse.productEngagementBubbleMatrix?.rows?.length ?? 0) > 0 ||
+    (metricsResponse.timeOnPage?.length ?? 0) > 0 ||
+    (metricsResponse.productZoom?.length ?? 0) > 0 ||
+    (metricsResponse.imageSwipes?.length ?? 0) > 0;
   const hasAddToCartRate = (metricsResponse.addToCartRate?.length ?? 0) > 0;
   const hasAddToCartRateAnalysis =
     (metricsResponse.addToCartRateAnalysis?.products?.length ?? 0) > 0 ||
@@ -48,10 +76,11 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
 
   return (
     <div className='space-y-6'>
-      <div className='space-y-6'>
+      <div id='product-performance' className='scroll-mt-24 space-y-6'>
         <h3 className='text-sm font-bold uppercase'>Product performance</h3>
         {!hasAnyProductData ? (
           <div className='border border-textInactiveColor p-8 text-center'>
+            <div id='atc-matrix' className='scroll-mt-24 -mt-8 h-0' aria-hidden />
             <span className='text-textInactiveColor'>
               No product performance data available for this period. Data appears when there are
               orders and product sales.
@@ -64,26 +93,33 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
               <RevenueParetoChart revenuePareto={metricsResponse.revenuePareto} />
               <ProductTrendTable productTrend={metricsResponse.productTrend} />
             </div>
-            <div className='space-y-6'>
+            <div id='product-engagement' className='scroll-mt-24 space-y-6'>
               <h3 className='text-sm font-bold uppercase'>Product engagement</h3>
               <ProductEngagementBubbleMatrixChart
                 productEngagementBubbleMatrix={metricsResponse.productEngagementBubbleMatrix}
               />
               <ProductEngagementRadarChart productEngagement={metricsResponse.productEngagement} />
               <ProductEngagementTable productEngagement={metricsResponse.productEngagement} />
-            </div>
-            {hasAddToCartRateAnalysis ? (
-              <div className='space-y-6'>
-                <AddToCartRateMatrixChart
-                  addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
-                />
-                <AddToCartRateTrendChart
-                  addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
-                />
+              <TimeOnPageTable timeOnPage={metricsResponse.timeOnPage} />
+              <div className='grid gap-6 md:grid-cols-2'>
+                <ProductZoomTable productZoom={metricsResponse.productZoom} />
+                <ImageSwipesTable imageSwipes={metricsResponse.imageSwipes} />
               </div>
-            ) : (
-              <AddToCartRateTable addToCartRate={metricsResponse.addToCartRate} />
-            )}
+            </div>
+            <section id='atc-matrix' className='scroll-mt-24 space-y-6'>
+              {hasAddToCartRateAnalysis ? (
+                <>
+                  <AddToCartRateMatrixChart
+                    addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
+                  />
+                  <AddToCartRateTrendChart
+                    addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
+                  />
+                </>
+              ) : (
+                <AddToCartRateTable addToCartRate={metricsResponse.addToCartRate} />
+              )}
+            </section>
           </>
         )}
       </div>

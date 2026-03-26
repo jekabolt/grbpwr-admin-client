@@ -88,7 +88,7 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Add to cart actionability matrix
+        Add-to-cart performance by product
       </Text>
       <div className='mb-3 flex flex-wrap gap-4 text-xs'>
         {(['stars', 'hidden_gems', 'underperformers', 'duds'] as Quadrant[]).map((q) => (
@@ -114,7 +114,7 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
           <YAxis
             type='number'
             dataKey='cartRatePct'
-            name='ATC rate'
+            name='Add to cart rate'
             unit='%'
             tickFormatter={(v) => `${v.toFixed(1)}%`}
             domain={['auto', 'auto']}
@@ -134,9 +134,9 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
                 <div className='bg-white border border-textInactiveColor p-3 shadow-lg text-xs'>
                   <div className='font-bold mb-2'>{d.productName}</div>
                   <div className='mb-1'>
-                    Views: {formatNumber(d.viewCount)} · ATC: {formatNumber(d.addToCartCount)}
+                    Views: {formatNumber(d.viewCount)} · Added to cart: {formatNumber(d.addToCartCount)}
                   </div>
-                  <div className='mb-1'>ATC rate: {d.cartRatePct.toFixed(1)}%</div>
+                  <div className='mb-1'>Add to cart rate: {d.cartRatePct.toFixed(1)}%</div>
                   <div
                     className='font-medium'
                     style={{ color: QUADRANT_COLORS[d.quadrant] }}
@@ -210,7 +210,7 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
                 <Text variant='uppercase' className='text-[10px]'>Add to Cart</Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>ATC Rate</Text>
+                <Text variant='uppercase' className='text-[10px]'>Cart rate %</Text>
               </th>
               <th className='text-left p-2'>
                 <Text variant='uppercase' className='text-[10px]'>Quadrant</Text>
@@ -245,7 +245,7 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>
-          X-axis: Product views. Y-axis: ATC rate (%). Dashed lines: store averages.
+          X-axis: Product views. Y-axis: Add to cart rate (%). Dashed lines: store averages.
         </Text>
         <Text>
           Underperformers (bottom right): high traffic, low conversion — fix design, price, or photos.

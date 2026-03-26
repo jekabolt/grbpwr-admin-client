@@ -18,7 +18,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Size run efficiency
+        Which sizes are selling
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>
@@ -34,7 +34,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
                 <Text variant='uppercase' className='text-[10px]'>Sold through</Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Efficiency</Text>
+                <Text variant='uppercase' className='text-[10px]'>Sell-through %</Text>
               </th>
             </tr>
           </thead>
@@ -67,11 +67,12 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor'>
+      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>
-          Percentage of available sizes that sold — low efficiency may indicate overbuying on
-          certain sizes
+          Share of distinct sizes that sold at least once vs total sizes offered — low sell-through may
+          indicate overbuying on certain sizes
         </Text>
+        <Text>Snapshot for selected period — no prior-period breakdown in this view.</Text>
       </div>
     </div>
   );

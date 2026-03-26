@@ -1,7 +1,7 @@
 import type { UserJourneyMetric } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
-import { formatNumber } from '../utils';
+import { formatNumber, humanizeGa4JourneyPath } from '../utils';
 
 interface UserJourneysTableProps {
   userJourneys: UserJourneyMetric[] | undefined;
@@ -33,14 +33,14 @@ export const UserJourneysTable: FC<UserJourneysTableProps> = ({ userJourneys }) 
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        User journeys
+        How customers browse
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Journey path</Text>
+                <Text variant='uppercase' className='text-[10px]'>Steps</Text>
               </th>
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>Sessions</Text>
@@ -56,9 +56,9 @@ export const UserJourneysTable: FC<UserJourneysTableProps> = ({ userJourneys }) 
           <tbody>
             {rows.map((row, idx) => (
               <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
-                <td className='p-2 max-w-[250px]'>
-                  <Text className='font-mono text-[10px] truncate block' title={row.path}>
-                    {row.path}
+                <td className='p-2 max-w-[280px]'>
+                  <Text className='text-[10px] leading-snug block' title={row.path}>
+                    {humanizeGa4JourneyPath(row.path)}
                   </Text>
                 </td>
                 <td className='p-2 text-right'>

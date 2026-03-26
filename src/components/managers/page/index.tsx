@@ -9,6 +9,7 @@ import {
   BehaviourTab,
   CustomerTab,
   FunnelTab,
+  MerchandisingTab,
   OverviewTab,
   ProductsTab,
   RevenueTab,
@@ -21,6 +22,7 @@ import { useTabMetricsQuery } from './useTabMetricsQuery';
 
 const TAB_IDS: MetricsTabId[] = [
   'overview',
+  'merchandising',
   'revenue',
   'funnel',
   'customers',
@@ -32,13 +34,14 @@ const TAB_IDS: MetricsTabId[] = [
 
 const TAB_LABELS: Record<MetricsTabId, string> = {
   overview: 'Overview',
+  merchandising: 'Merchandising',
   revenue: 'Revenue & Sales',
   funnel: 'Conversion Funnel',
   customers: 'Customers',
   products: 'Products & Inventory',
   traffic: 'Traffic & Marketing',
-  'site-health': 'Site Health',
-  behaviour: 'Behaviour',
+  'site-health': 'Technical Issues & Page Speed',
+  behaviour: 'How Customers Browse',
 };
 
 function getDefaultCustomRange() {
@@ -156,13 +159,25 @@ export function Analitic() {
       {!isLoading && !isError && metricsResponse && (
         <div className='space-y-6'>
           {activeTab === 'overview' && (
-            <OverviewTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+            <OverviewTab
+              metricsResponse={metricsResponse}
+              compareEnabled={compareEnabled}
+              period={period}
+              compareMode={compareMode}
+              customFrom={customFrom}
+              customTo={customTo}
+            />
           )}
+          {activeTab === 'merchandising' && <MerchandisingTab metricsResponse={metricsResponse} />}
           {activeTab === 'revenue' && <RevenueTab metricsResponse={metricsResponse} />}
-          {activeTab === 'funnel' && <FunnelTab metricsResponse={metricsResponse} />}
+          {activeTab === 'funnel' && (
+            <FunnelTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+          )}
           {activeTab === 'customers' && <CustomerTab metricsResponse={metricsResponse} />}
           {activeTab === 'products' && <ProductsTab metricsResponse={metricsResponse} />}
-          {activeTab === 'traffic' && <TrafficTab metricsResponse={metricsResponse} />}
+          {activeTab === 'traffic' && (
+            <TrafficTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+          )}
           {activeTab === 'site-health' && <SiteHealthTab metricsResponse={metricsResponse} />}
           {activeTab === 'behaviour' && <BehaviourTab metricsResponse={metricsResponse} />}
         </div>

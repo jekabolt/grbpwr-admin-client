@@ -27,6 +27,18 @@ const OVERALL_KEYS: Record<MetricKey, keyof ProductEngagementMetricsPct> = {
 const ABOVE_AVG_COLOR = '#ef4444';
 const BELOW_AVG_COLOR = '#94a3b8';
 
+/** Cap % metrics when mapping to bubble radius only (table + tooltips stay raw). */
+const PCT_RADIUS_CAP = 100;
+
+const PCT_METRIC_KEYS = new Set<MetricKey>(['zoomRatePct', 'scroll75RatePct', 'scroll100RatePct']);
+
+function scaleValueForBubbleRadius(metricKey: MetricKey, val: number): number {
+  if (metricKey === 'avgTimeOnPageSeconds') {
+    return Math.sqrt(Math.max(0, val));
+  }
+  return Math.min(Math.max(0, val), PCT_RADIUS_CAP);
+}
+
 function getVal(row: ProductEngagementBubbleRow, key: MetricKey): number {
   const v = row[key];
   return typeof v === 'number' ? v : 0;
@@ -50,22 +62,27 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
   const rows = productEngagementBubbleMatrix?.rows ?? [];
   const overall = productEngagementBubbleMatrix?.overall;
 
-  const maxVal = useMemo(() => {
-    let max = 0;
-    for (const row of rows) {
-      for (const k of METRIC_KEYS) {
-        const v = getVal(row, k);
-        if (v > max) max = v;
-      }
-    }
+  const maxByMetric = useMemo(() => {
+    const out = {} as Record<MetricKey, number>;
     for (const k of METRIC_KEYS) {
-      const v = getOverallVal(overall, k);
-      if (v > max) max = v;
+      let max = 0;
+      for (const row of rows) {
+        const scaled = scaleValueForBubbleRadius(k, getVal(row, k));
+        if (scaled > max) max = scaled;
+      }
+      const ov = scaleValueForBubbleRadius(k, getOverallVal(overall, k));
+      if (ov > max) max = ov;
+      const fallback = k === 'avgTimeOnPageSeconds' ? 1 : PCT_RADIUS_CAP;
+      out[k] = max > 0 ? max : fallback;
     }
-    return max || 100;
+    return out;
   }, [rows, overall]);
 
-  const bubbleSize = (val: number) => Math.max(4, Math.min(24, (val / maxVal) * 24));
+  const bubbleSize = (metricKey: MetricKey, val: number) => {
+    const scaled = scaleValueForBubbleRadius(metricKey, val);
+    const max = maxByMetric[metricKey];
+    return Math.max(4, Math.min(24, (scaled / max) * 24));
+  };
 
   if (rows.length === 0) return null;
 
@@ -120,12 +137,16 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
                 const avg = getOverallVal(overall, metricKey);
                 const isAboveAvg = avg > 0 && val >= avg;
                 const color = isAboveAvg ? ABOVE_AVG_COLOR : BELOW_AVG_COLOR;
-                const radius = bubbleSize(val);
+                const radius = bubbleSize(metricKey, val);
                 const isHovered = hovered?.rowIdx === rowIdx && hovered?.metricKey === metricKey;
                 const label =
                   metricKey === 'avgTimeOnPageSeconds' ? `${val.toFixed(1)}s` : `${val.toFixed(1)}%`;
                 const avgLabel =
                   metricKey === 'avgTimeOnPageSeconds' ? `${avg.toFixed(1)}s` : `${avg.toFixed(1)}%`;
+                const cappedForRadius =
+                  PCT_METRIC_KEYS.has(metricKey) && val > PCT_RADIUS_CAP
+                    ? ` Bubble size capped at ${PCT_RADIUS_CAP}% for scale.`
+                    : '';
                 return (
                   <div
                     key={metricKey}
@@ -142,7 +163,7 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
                         minWidth: 8,
                         minHeight: 8,
                       }}
-                      title={`${row.productName ?? row.productId}: ${METRIC_LABELS[metricKey]} ${label} (avg ${avgLabel})`}
+                      title={`${row.productName ?? row.productId}: ${METRIC_LABELS[metricKey]} ${label} (avg ${avgLabel})${cappedForRadius}`}
                     >
                       {isHovered && (
                         <div className='absolute -top-8 left-1/2 -translate-x-1/2 z-10 bg-white border border-textInactiveColor px-2 py-1 shadow-lg text-xs whitespace-nowrap'>
@@ -215,7 +236,8 @@ export const ProductEngagementBubbleMatrixChart: FC<ProductEngagementBubbleMatri
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>
           Columns: engagement metrics as % of image views (except time on page). Red = above store
-          average. Grey = below.
+          average. Grey = below. Bubble size is per column; % bubbles cap at {PCT_RADIUS_CAP}% for scale
+          (values above still shown in the table).
         </Text>
       </div>
     </div>

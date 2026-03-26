@@ -20,7 +20,9 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
   return (
     <div className='space-y-6'>
       <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Cohort retention</h3>
+        <h3 className='text-sm font-bold leading-snug'>
+          Do customers come back? (Month 1–6)
+        </h3>
         <CohortRetentionTable cohortRetention={metricsResponse.cohortRetention} />
       </div>
 

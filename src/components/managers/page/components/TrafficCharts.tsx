@@ -107,33 +107,62 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
 
   return (
     <div className='space-y-6'>
-      <Text variant='uppercase' className='font-bold'>
-        GA4 Traffic breakdown
-      </Text>
-      <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
-        <SessionsByCountryMapChart sessionsByCountry={metrics.sessionsByCountry} showTitle={false} />
-        <div className='flex-1 min-w-0'>
+      <div className='space-y-1'>
+        <Text variant='uppercase' className='font-bold'>
+          Where your visits come from
+        </Text>
+        <Text className='text-textInactiveColor text-xs leading-relaxed'>
+          Sessions by geography, marketing channel, and device for this period.
+        </Text>
+      </div>
+      <div className='space-y-3'>
+        <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor tracking-wide'>
+          Geography
+        </Text>
+        <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
+          <SessionsByCountryMapChart sessionsByCountry={metrics.sessionsByCountry} showTitle={false} />
+          <div className='flex-1 min-w-0'>
+            <TrafficBarChart
+              title='Sessions by country'
+              data={sessionsByCountryToData(metrics.sessionsByCountry)}
+            />
+          </div>
+        </div>
+      </div>
+      <div className='grid gap-6 md:grid-cols-2'>
+        <div className='space-y-3 min-w-0'>
+          <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor tracking-wide'>
+            Marketing channels
+          </Text>
           <TrafficBarChart
-            title='Sessions by country'
-            data={sessionsByCountryToData(metrics.sessionsByCountry)}
+            title='Traffic by source'
+            data={trafficBySourceToData(metrics.trafficBySource)}
+          />
+        </div>
+        <div className='space-y-3 min-w-0'>
+          <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor tracking-wide'>
+            Devices
+          </Text>
+          <TrafficBarChart
+            title='Traffic by device'
+            data={trafficByDeviceToData(metrics.trafficByDevice)}
           />
         </div>
       </div>
-      <div className='grid gap-4 md:grid-cols-2'>
-        <TrafficBarChart
-          title='Traffic by source'
-          data={trafficBySourceToData(metrics.trafficBySource)}
-        />
-        <TrafficBarChart
-          title='Traffic by device'
-          data={trafficByDeviceToData(metrics.trafficByDevice)}
-        />
+      <div className='space-y-3'>
+        <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor tracking-wide'>
+          Product interest
+        </Text>
         <TrafficBarChart
           title='Top products by views'
           data={topProductsByViewsToData(metrics.topProductsByViews)}
           onBarClick={handleProductBarClick}
         />
       </div>
+      <Text className='text-textInactiveColor text-xs leading-relaxed'>
+        Top products by views are ranked across all traffic sources and sessions — not filtered to a single
+        channel (e.g. Instagram vs organic). Per-source product breakdown requires additional reporting.
+      </Text>
     </div>
   );
 };

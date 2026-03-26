@@ -18,7 +18,7 @@ export const EntryProductsTable: FC<EntryProductsTableProps> = ({ entryProducts 
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Entry products
+        First purchase products
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>

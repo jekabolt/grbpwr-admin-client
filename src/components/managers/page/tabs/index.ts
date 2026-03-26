@@ -1,6 +1,7 @@
 export { BehaviourTab } from './BehaviourTab';
 export { CustomerTab } from './CustomerTab';
 export { FunnelTab } from './FunnelTab';
+export { MerchandisingTab } from './MerchandisingTab';
 export { OverviewTab } from './OverviewTab';
 export { ProductsTab } from './ProductsTab';
 export { RevenueTab } from './RevenueTab';

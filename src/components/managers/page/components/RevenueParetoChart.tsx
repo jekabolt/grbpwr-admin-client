@@ -35,7 +35,7 @@ export const RevenueParetoChart: FC<RevenueParetoChartProps> = ({ revenuePareto 
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Revenue pareto (80/20)
+        Top products driving revenue
       </Text>
       <ResponsiveContainer width='100%' height={300}>
         <AreaChart data={data}>
@@ -102,7 +102,9 @@ export const RevenueParetoChart: FC<RevenueParetoChartProps> = ({ revenuePareto 
         </table>
       </div>
       <div className='mt-3 text-xs text-textInactiveColor'>
-        <Text>Shows cumulative revenue % by product rank (identifies 80/20 rule)</Text>
+        <Text>
+          Cumulative share of revenue by best-selling products — a small set often drives most sales.
+        </Text>
       </div>
     </div>
   );

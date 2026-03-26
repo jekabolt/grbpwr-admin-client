@@ -3,18 +3,25 @@ import type { WebVitalMetric } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
 
+/** Plain-language copy: what shoppers experience, not browser jargon. */
 const METRIC_DESCRIPTIONS: Record<string, string> = {
-  LCP: 'Largest Contentful Paint — measures loading performance. Time until the largest image or text block is visible. Good: <2.5s',
-  FID: 'First Input Delay — measures interactivity. Time from first user interaction to browser response. Good: <100ms',
-  INP: 'Interaction to Next Paint — measures responsiveness. Replaces FID as the preferred interactivity metric. Good: <200ms',
-  CLS: 'Cumulative Layout Shift — measures visual stability. Unexpected layout shifts during page load. Good: <0.1',
-  FCP: 'First Contentful Paint — measures perceived load speed. When the first text or image is painted. Good: <1.8s',
-  TTFB: 'Time to First Byte — measures server response time. Time until the first byte of the response arrives. Good: <800ms',
+  LCP:
+    'How quickly the main thing on the page (hero image, big headline, etc.) becomes visible. If this is slow, people wait on a blank or half-empty screen. Aim for under about 2.5 seconds.',
+  FID:
+    "Delay between someone's first tap or click and the page actually responding. Lower feels instant; high feels frozen. (Older metric; INP is the usual focus now.) Aim under about 100 ms.",
+  INP:
+    'How snappy the page feels when people tap buttons, open menus, or type — time until the screen updates after each action. Aim under about 200 ms so interactions feel immediate.',
+  CLS:
+    'Whether content jumps or shifts while the page is still loading (e.g. a button moves under your finger). Lower is better — stable layouts feel trustworthy. Aim for a low score (under about 0.1).',
+  FCP:
+    'How soon the first bit of real content appears (text or an image). It’s the first sign that the page is “showing up,” before the main block is fully ready. Aim under about 1.8 seconds.',
+  TTFB:
+    'How long it takes from asking for the page until the site starts sending data back. Slow here makes everything downstream feel sluggish. Aim under about 800 ms.',
 };
 
 function getMetricDescription(metricName: string): string {
   const key = metricName.toUpperCase();
-  return METRIC_DESCRIPTIONS[key] ?? `${metricName} — Core Web Vitals metric`;
+  return METRIC_DESCRIPTIONS[key] ?? `Speed or experience measure for this page (${metricName}). Hover other rows for examples.`;
 }
 
 interface WebVitalsCardProps {
@@ -79,9 +86,26 @@ export const WebVitalsCard: FC<WebVitalsCardProps> = ({ webVitals }) => {
             return (
               <div key={vital.metricName} className='space-y-1'>
                 <div className='flex justify-between items-center'>
-                  <Text variant='uppercase' className='text-xs'>
-                    {vital.metricName}
-                  </Text>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger asChild>
+                      <Text
+                        variant='uppercase'
+                        component='span'
+                        className='text-xs cursor-help border-b border-dotted border-textInactiveColor/60'
+                      >
+                        {vital.metricName}
+                      </Text>
+                    </Tooltip.Trigger>
+                    <Tooltip.Portal>
+                      <Tooltip.Content
+                        side='top'
+                        sideOffset={4}
+                        className='rounded border border-textInactiveColor bg-bgColor px-3 py-2 text-sm text-textColor shadow max-w-sm z-50 leading-relaxed'
+                      >
+                        {getMetricDescription(vital.metricName)}
+                      </Tooltip.Content>
+                    </Tooltip.Portal>
+                  </Tooltip.Root>
                   <div className='flex gap-3 text-xs'>
                     <Text>
                       Avg:{' '}
@@ -109,7 +133,7 @@ export const WebVitalsCard: FC<WebVitalsCardProps> = ({ webVitals }) => {
                     <Tooltip.Content
                       side='top'
                       sideOffset={4}
-                      className='rounded border border-textInactiveColor bg-bgColor px-2 py-1 text-sm text-textColor shadow'
+                      className='rounded border border-textInactiveColor bg-bgColor px-3 py-2 text-sm text-textColor shadow max-w-sm leading-relaxed'
                     >
                       {getMetricDescription(vital.metricName)}
                     </Tooltip.Content>
@@ -119,8 +143,11 @@ export const WebVitalsCard: FC<WebVitalsCardProps> = ({ webVitals }) => {
             );
           })}
         </div>
-        <div className='mt-3 text-xs text-textInactiveColor'>
-          <Text>Target: LCP &lt;2.5s, FID &lt;100ms, CLS &lt;0.1</Text>
+        <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+          <Text>
+            Green = most visits felt fast/stable; red = a larger share felt slow or jumpy. Hover each label
+            for a plain-English explanation and rough targets.
+          </Text>
         </div>
       </div>
     </Tooltip.Provider>
