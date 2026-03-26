@@ -11,6 +11,8 @@ interface HeroFunnelChartProps {
 
 type Totals = { heroClickUsers: number; viewItemUsers: number; purchaseUsers: number };
 
+type Totals = { heroClickUsers: number; viewItemUsers: number; purchaseUsers: number };
+
 const STEPS: { key: keyof Totals; label: string }[] = [
   { key: 'heroClickUsers', label: 'Banner click' },
   { key: 'viewItemUsers', label: 'Product view' },

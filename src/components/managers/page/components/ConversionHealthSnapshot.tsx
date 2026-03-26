@@ -42,7 +42,7 @@ export const ConversionHealthSnapshot: FC<ConversionHealthSnapshotProps> = ({
   exceptions,
 }) => {
   const location = useLocation();
-  const healthHref = `${location.pathname}?tab=site-health`;
+  const healthHref = `${location.pathname}?tab=technical`;
 
   const fcp = fcpAvgMs(webVitals);
   const hits404 = total404Hits(notFound);

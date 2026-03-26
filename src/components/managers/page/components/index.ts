@@ -33,6 +33,7 @@ export { OrdersByStatusChart } from './OrdersByStatusChart';
 export { OrderSequenceChart } from './OrderSequenceChart';
 export { PaymentFailuresTable } from './PaymentFailuresTable';
 export { PaymentRecoveryCard } from './PaymentRecoveryCard';
+export { PersistentKpiBar } from './PersistentKpiBar';
 export { ProductCharts } from './ProductCharts';
 export { ProductNameLink } from './ProductNameLink';
 export { ProductEngagementBubbleMatrixChart } from './ProductEngagementBubbleMatrixChart';
