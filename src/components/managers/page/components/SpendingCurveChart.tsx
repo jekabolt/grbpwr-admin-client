@@ -20,7 +20,7 @@ export const SpendingCurveChart: FC<SpendingCurveChartProps> = ({ spendingCurve 
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Customer spending curve
+        Average spend by order number
       </Text>
       <ResponsiveContainer width='100%' height={300}>
         <LineChart data={data}>

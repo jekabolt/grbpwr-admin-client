@@ -6,6 +6,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { DateRangePicker, PersistentKpiBar } from './components';
 import {
+  AudienceTab,
   CustomerTab,
   ProductsTab,
   RevenueTab,
@@ -17,22 +18,26 @@ import type { MetricsPeriod } from './useMetricsQuery';
 import type { MetricsTabId } from './useTabMetricsQuery';
 import { useTabMetricsQuery } from './useTabMetricsQuery';
 
-const TAB_IDS: MetricsTabId[] = [
-  'this-week',
-  'revenue',
-  'products',
-  'customers',
-  'traffic',
+const MAIN_TAB_IDS: MetricsTabId[] = [
+  'today-week',
+  'sales-funnel',
+  'products-inventory',
+  'audience',
+  'channels-campaigns',
+];
+
+const ALL_TAB_IDS: MetricsTabId[] = [
+  ...MAIN_TAB_IDS,
   'technical',
 ];
 
 const TAB_LABELS: Record<MetricsTabId, string> = {
-  'this-week': 'This Week',
-  revenue: 'Revenue & Orders',
-  products: 'Products',
-  customers: 'Customers',
-  traffic: 'Traffic & Channels',
-  technical: 'Technical',
+  'today-week': 'Today & This Week',
+  'sales-funnel': 'Sales & Funnel',
+  'products-inventory': 'Products & Inventory',
+  audience: 'Audience',
+  'channels-campaigns': 'Channels & Campaigns',
+  technical: 'Site Health',
 };
 
 function getDefaultCustomRange() {
@@ -42,10 +47,10 @@ function getDefaultCustomRange() {
 }
 
 function parseTabFromUrl(tabParam: string | null): MetricsTabId {
-  if (tabParam && TAB_IDS.includes(tabParam as MetricsTabId)) {
+  if (tabParam && ALL_TAB_IDS.includes(tabParam as MetricsTabId)) {
     return tabParam as MetricsTabId;
   }
-  return 'this-week';
+  return 'today-week';
 }
 
 export function Analitic() {
@@ -116,7 +121,7 @@ export function Analitic() {
 
       <div className='border-b border-textInactiveColor'>
         <nav className='flex gap-1 overflow-x-auto' aria-label='Metrics tabs'>
-          {TAB_IDS.map((tabId) => (
+          {MAIN_TAB_IDS.map((tabId) => (
             <button
               key={tabId}
               type='button'
@@ -149,27 +154,42 @@ export function Analitic() {
       )}
 
       {!isLoading && !isError && metricsResponse && (
-        <div className='space-y-6'>
-          {activeTab === 'this-week' && (
-            <ThisWeekTab
-              metricsResponse={metricsResponse}
-              compareEnabled={compareEnabled}
-              period={period}
-              compareMode={compareMode}
-              customFrom={customFrom}
-              customTo={customTo}
-            />
-          )}
-          {activeTab === 'revenue' && (
-            <RevenueTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
-          )}
-          {activeTab === 'products' && <ProductsTab metricsResponse={metricsResponse} />}
-          {activeTab === 'customers' && <CustomerTab metricsResponse={metricsResponse} />}
-          {activeTab === 'traffic' && (
-            <TrafficTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
-          )}
-          {activeTab === 'technical' && <TechnicalTab metricsResponse={metricsResponse} />}
-        </div>
+        <>
+          <div className='space-y-6'>
+            {activeTab === 'today-week' && (
+              <ThisWeekTab
+                metricsResponse={metricsResponse}
+                compareEnabled={compareEnabled}
+                period={period}
+                compareMode={compareMode}
+                customFrom={customFrom}
+                customTo={customTo}
+              />
+            )}
+            {activeTab === 'sales-funnel' && (
+              <RevenueTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+            )}
+            {activeTab === 'products-inventory' && <ProductsTab metricsResponse={metricsResponse} />}
+            {activeTab === 'audience' && (
+              <AudienceTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+            )}
+            {activeTab === 'channels-campaigns' && (
+              <TrafficTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+            )}
+            {activeTab === 'technical' && <TechnicalTab metricsResponse={metricsResponse} />}
+          </div>
+
+          <div className='mt-12 pt-6 border-t border-textInactiveColor/40'>
+            <button
+              type='button'
+              onClick={() => setActiveTab('technical')}
+              className='text-xs text-textInactiveColor hover:text-textColor underline underline-offset-2 flex items-center gap-1'
+            >
+              <span>⚙</span>
+              <span>{TAB_LABELS.technical}</span>
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

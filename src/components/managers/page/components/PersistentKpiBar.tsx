@@ -1,7 +1,6 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { type FC } from 'react';
 import Text from 'ui/components/text';
-import { orderCancellationSharePercent } from '../executiveAlerts';
 import { formatCurrency, formatNumber, formatPercent, getMetricComparison } from '../utils';
 
 export interface PersistentKpiBarProps {
@@ -30,7 +29,13 @@ function getKpiMetrics(
   const aov = getMetricComparison(metrics.avgOrderValue as any);
   const sessions = getMetricComparison(metrics.sessions as any);
 
-  const cancellationPct = orderCancellationSharePercent(metrics);
+  const newCustomersTimeSeries = metrics.newCustomersByDay || [];
+  const newCustomersTimeSeriesCompare = metrics.newCustomersByDayCompare || [];
+  
+  const newCustomersValue = newCustomersTimeSeries.reduce((sum, point) => sum + (point.count ?? 0), 0);
+  const newCustomersCompareValue = compareEnabled && newCustomersTimeSeriesCompare.length > 0
+    ? newCustomersTimeSeriesCompare.reduce((sum, point) => sum + (point.count ?? 0), 0)
+    : undefined;
 
   const getChangePct = (comp: ReturnType<typeof getMetricComparison>) => {
     if (!compareEnabled || comp.compareValue === undefined) return null;
@@ -39,6 +44,15 @@ function getKpiMetrics(
       return null;
     }
     return comp.changePct ?? ((comp.value - comp.compareValue) / comp.compareValue) * 100;
+  };
+
+  const getNewCustomersChangePct = () => {
+    if (!compareEnabled || newCustomersCompareValue === undefined) return null;
+    if (newCustomersCompareValue === 0) {
+      if (newCustomersValue === 0) return 0;
+      return null;
+    }
+    return ((newCustomersValue - newCustomersCompareValue) / newCustomersCompareValue) * 100;
   };
 
   return [
@@ -73,11 +87,10 @@ function getKpiMetrics(
       changePct: getChangePct(sessions),
     },
     {
-      label: 'Cancellation Rate',
-      value: cancellationPct ?? 0,
-      format: (v) => `${v.toFixed(1)}%`,
-      changePct: null,
-      isCritical: (cancellationPct ?? 0) > 20,
+      label: 'New Customers',
+      value: newCustomersValue,
+      format: formatNumber,
+      changePct: getNewCustomersChangePct(),
     },
   ];
 }

@@ -5,22 +5,26 @@ import Text from 'ui/components/text';
 import {
   AddToCartRateMatrixChart,
   AddToCartRateTable,
+  AddToCartRateTrendChart,
   DeadStockTable,
   DetailsExpansionTable,
   ImageSwipesTable,
   InventoryHealthTable,
   NotifyMeIntentTable,
   OOSImpactTable,
+  ProductActionItems,
   ProductCharts,
   ProductEngagementBubbleMatrixChart,
   ProductEngagementRadarChart,
   ProductEngagementTable,
   ProductTrendTable,
   ProductZoomTable,
+  ReturnBySizeTable,
   RevenueParetoChart,
   SizeAnalyticsTable,
   SizeConfidenceTable,
   SizeGuideClicksTable,
+  SizeRunEfficiencyTable,
   SlowMoversTable,
   TimeOnPageTable,
 } from '../components';
@@ -80,31 +84,58 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
         </div>
       ) : (
         <>
+          <ProductActionItems
+            productTrend={metricsResponse.productTrend}
+            addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
+          />
+
           <details className='border border-textInactiveColor' open>
             <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
-              What's Selling
+              Add-to-Cart Performance
             </summary>
             <div className='space-y-6 p-4'>
-              {hasProductCharts && <ProductCharts metrics={metrics} />}
-              {hasRevenuePareto && <RevenueParetoChart revenuePareto={metricsResponse.revenuePareto} />}
-              
               <section id='atc-matrix' className='scroll-mt-24'>
                 {hasAddToCartRateAnalysis ? (
-                  <AddToCartRateMatrixChart
-                    addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
-                  />
+                  <>
+                    <AddToCartRateMatrixChart
+                      addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
+                    />
+                    <AddToCartRateTrendChart
+                      addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
+                    />
+                  </>
                 ) : (
                   <AddToCartRateTable addToCartRate={metricsResponse.addToCartRate} />
                 )}
               </section>
-
-              <SlowMoversTable slowMovers={metricsResponse.slowMovers} />
-              <DeadStockTable deadStock={metricsResponse.deadStock} />
-              {hasProductTrend && <ProductTrendTable productTrend={metricsResponse.productTrend} />}
             </div>
           </details>
 
           <details className='border border-textInactiveColor' open>
+            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+              Inventory Health
+            </summary>
+            <div className='space-y-6 p-4'>
+              <InventoryHealthTable inventoryHealth={metricsResponse.inventoryHealth} />
+              <NotifyMeIntentTable notifyMeIntent={metricsResponse.notifyMeIntent} />
+              <OOSImpactTable oosImpact={metricsResponse.oosImpact} />
+            </div>
+          </details>
+
+          <details className='border border-textInactiveColor' open>
+            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+              Top Products
+            </summary>
+            <div className='space-y-6 p-4'>
+              {hasProductCharts && <ProductCharts metrics={metrics} />}
+              {hasRevenuePareto && <RevenueParetoChart revenuePareto={metricsResponse.revenuePareto} />}
+              <ProductTrendTable productTrend={metricsResponse.productTrend} />
+              <SlowMoversTable slowMovers={metricsResponse.slowMovers} />
+              <DeadStockTable deadStock={metricsResponse.deadStock} />
+            </div>
+          </details>
+
+          <details className='border border-textInactiveColor'>
             <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
               Product Engagement
             </summary>
@@ -113,19 +144,9 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
                 productEngagementBubbleMatrix={metricsResponse.productEngagementBubbleMatrix}
               />
               <SizeAnalyticsTable sizeAnalytics={metricsResponse.sizeAnalytics} />
+              <SizeRunEfficiencyTable sizeRunEfficiency={metricsResponse.sizeRunEfficiency} />
               <SizeGuideClicksTable sizeGuideClicks={metricsResponse.sizeGuideClicks} />
               <DetailsExpansionTable detailsExpansion={metricsResponse.detailsExpansion} />
-            </div>
-          </details>
-
-          <details className='border border-textInactiveColor' open>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
-              Inventory
-            </summary>
-            <div className='space-y-6 p-4'>
-              <InventoryHealthTable inventoryHealth={metricsResponse.inventoryHealth} />
-              <NotifyMeIntentTable notifyMeIntent={metricsResponse.notifyMeIntent} />
-              <OOSImpactTable oosImpact={metricsResponse.oosImpact} />
             </div>
           </details>
 
@@ -141,6 +162,15 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
                 <ProductZoomTable productZoom={metricsResponse.productZoom} />
                 <ImageSwipesTable imageSwipes={metricsResponse.imageSwipes} />
               </div>
+            </div>
+          </details>
+
+          <details className='border border-textInactiveColor'>
+            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+              Returns Analysis
+            </summary>
+            <div className='space-y-6 p-4'>
+              <ReturnBySizeTable returnBySize={metricsResponse.returnBySize} />
             </div>
           </details>
 

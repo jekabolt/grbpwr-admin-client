@@ -1,11 +1,18 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import Text from 'ui/components/text';
 import {
+  AbandonedCartCard,
+  CheckoutTimingsCard,
   CurrencyPaymentCharts,
+  DeviceFunnelChart,
   FunnelChart,
+  HeroFunnelChart,
   OrdersByStatusChart,
+  PaymentRecoveryCard,
   PromoTable,
+  ReturnByProductChart,
   TimeSeriesChart,
+  UserJourneysTable,
 } from '../components';
 import { orderCancellationSharePercent } from '../executiveAlerts';
 import { formatCurrency, formatNumber, getMetricComparison } from '../utils';
@@ -84,27 +91,57 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
           />
         </div>
         
-        <div className='grid gap-6 md:grid-cols-2'>
-          <OrdersByStatusChart metrics={metrics} />
-          <TimeSeriesChart
-            title='Gross revenue by day'
-            data={metrics?.grossRevenueByDay}
-            compareData={metrics?.grossRevenueByDayCompare}
-          />
-        </div>
+        <OrdersByStatusChart metrics={metrics} />
+        <CurrencyPaymentCharts metrics={metrics} />
       </div>
 
       <details className='border border-textInactiveColor' open>
         <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
-          Purchase Funnel
+          Conversion Funnel
         </summary>
-        <div className='space-y-3 p-4'>
-          <Text className='text-xs text-textInactiveColor leading-relaxed'>
-            Conversion rate shown in persistent bar above. Step-by-step drop-off here.
-          </Text>
-          <FunnelChart funnel={metricsResponse.funnel} compareEnabled={compareEnabled} />
+        <div className='space-y-6 p-4'>
+          <div>
+            <Text className='text-xs text-textInactiveColor leading-relaxed mb-3'>
+              Step-by-step conversion path showing where visitors drop off
+            </Text>
+            <FunnelChart funnel={metricsResponse.funnel} compareEnabled={compareEnabled} />
+          </div>
+          <CheckoutTimingsCard checkoutTimings={metricsResponse.checkoutTimings} />
         </div>
       </details>
+
+      <details className='border border-textInactiveColor'>
+        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+          Abandonment &amp; Recovery
+        </summary>
+        <div className='space-y-6 p-4'>
+          <div className='grid gap-6 md:grid-cols-2'>
+            <AbandonedCartCard abandonedCart={metricsResponse.abandonedCart} />
+            <PaymentRecoveryCard paymentRecovery={metricsResponse.paymentRecovery} />
+          </div>
+          <ReturnByProductChart returnByProduct={metricsResponse.returnByProduct} />
+        </div>
+      </details>
+
+      <details className='border border-textInactiveColor'>
+        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+          Device &amp; Entry Funnels
+        </summary>
+        <div className='space-y-6 p-4'>
+          <div className='grid gap-6 md:grid-cols-2'>
+            <HeroFunnelChart heroFunnel={metricsResponse.heroFunnel} compareEnabled={compareEnabled} />
+            <DeviceFunnelChart deviceFunnel={metricsResponse.deviceFunnel} />
+          </div>
+        </div>
+      </details>
+
+      <div className='space-y-3'>
+        <h3 className='text-sm font-bold uppercase'>How customers browse</h3>
+        <Text className='text-xs text-textInactiveColor leading-relaxed'>
+          Most common navigation paths through your site and their conversion rates
+        </Text>
+        <UserJourneysTable userJourneys={metricsResponse.userJourneys} />
+      </div>
 
       <details className='border border-textInactiveColor'>
         <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
@@ -138,18 +175,6 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
               />
             </div>
           </div>
-        </div>
-      </details>
-
-      <details className='border border-textInactiveColor'>
-        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
-          Payment Methods
-        </summary>
-        <div className='space-y-3 p-4'>
-          <Text className='text-xs text-textInactiveColor leading-relaxed'>
-            Single currency/method business — expand when multi-currency launches
-          </Text>
-          <CurrencyPaymentCharts metrics={metrics} />
         </div>
       </details>
 

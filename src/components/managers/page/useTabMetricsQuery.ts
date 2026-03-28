@@ -5,21 +5,35 @@ import type { MetricsPeriod } from './useMetricsQuery';
 import { dateRangeToIso8601Duration } from './useMetricsQuery';
 
 export type MetricsTabId =
-  | 'this-week'
-  | 'revenue'
-  | 'products'
-  | 'customers'
-  | 'traffic'
+  | 'today-week'
+  | 'sales-funnel'
+  | 'products-inventory'
+  | 'audience'
+  | 'channels-campaigns'
   | 'technical';
 
 export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
-  'this-week': [
+  'today-week': [
     'METRICS_SECTION_BUSINESS',
     'METRICS_SECTION_REVENUE_PARETO',
     'METRICS_SECTION_CAMPAIGN_ATTRIBUTION',
+    'METRICS_SECTION_NOT_FOUND',
+    'METRICS_SECTION_EXCEPTIONS',
+    'METRICS_SECTION_OOS_IMPACT',
+    'METRICS_SECTION_ABANDONED_CART',
+    'METRICS_SECTION_PAYMENT_FAILURES',
   ],
-  revenue: ['METRICS_SECTION_BUSINESS', 'METRICS_SECTION_FUNNEL'],
-  products: [
+  'sales-funnel': [
+    'METRICS_SECTION_BUSINESS',
+    'METRICS_SECTION_FUNNEL',
+    'METRICS_SECTION_USER_JOURNEYS',
+    'METRICS_SECTION_DEVICE_FUNNEL',
+    'METRICS_SECTION_HERO_FUNNEL',
+    'METRICS_SECTION_PAYMENT_RECOVERY',
+    'METRICS_SECTION_CHECKOUT_TIMINGS',
+    'METRICS_SECTION_ABANDONED_CART',
+  ],
+  'products-inventory': [
     'METRICS_SECTION_BUSINESS',
     'METRICS_SECTION_REVENUE_PARETO',
     'METRICS_SECTION_PRODUCT_TREND',
@@ -37,16 +51,24 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     'METRICS_SECTION_SIZE_GUIDE_CLICKS',
     'METRICS_SECTION_DETAILS_EXPANSION',
     'METRICS_SECTION_SIZE_CONFIDENCE',
+    'METRICS_SECTION_SIZE_RUN_EFFICIENCY',
+    'METRICS_SECTION_RETURN_ANALYSIS',
   ],
-  customers: [
+  audience: [
     'METRICS_SECTION_BUSINESS',
     'METRICS_SECTION_COHORT_RETENTION',
     'METRICS_SECTION_ORDER_SEQUENCE',
     'METRICS_SECTION_SPENDING_CURVE',
     'METRICS_SECTION_ENTRY_PRODUCTS',
     'METRICS_SECTION_CATEGORY_LOYALTY',
+    'METRICS_SECTION_CUSTOMER_SEGMENTATION',
+    'METRICS_SECTION_RFM',
   ],
-  traffic: ['METRICS_SECTION_BUSINESS', 'METRICS_SECTION_CAMPAIGN_ATTRIBUTION'],
+  'channels-campaigns': [
+    'METRICS_SECTION_BUSINESS',
+    'METRICS_SECTION_CAMPAIGN_ATTRIBUTION',
+    'METRICS_SECTION_NEWSLETTER',
+  ],
   technical: [
     'METRICS_SECTION_WEB_VITALS',
     'METRICS_SECTION_BROWSER_BREAKDOWN',

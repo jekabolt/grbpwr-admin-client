@@ -53,7 +53,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
         not split out by row; top product views elsewhere on this tab are site-wide.
       </Text>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Campaign attribution
+        Where did our visitors come from?
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>

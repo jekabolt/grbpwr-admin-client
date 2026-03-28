@@ -317,6 +317,8 @@ export type common_Dictionary = {
   orderExpirationSeconds: number | undefined;
   complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
   isProd: boolean | undefined;
+  // Hero section background color for the storefront (CSS). Empty if unset.
+  backgroundHeroColor: string | undefined;
 };
 
 // Category represents a hierarchical category structure

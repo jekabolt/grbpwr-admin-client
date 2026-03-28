@@ -130,18 +130,18 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
 
       <div className='space-y-2 border-t border-textInactiveColor/40 pt-3'>
         <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor'>
-          Story of the period
+          What happened this week
         </Text>
         <div className='grid gap-4 sm:grid-cols-3'>
           <div className='space-y-1.5 min-w-0'>
             <Text variant='uppercase' className='text-[9px] font-semibold text-textInactiveColor'>
-              Headwinds
+              What's working against us
             </Text>
             <BulletList items={headwinds} emptyLabel={compareEnabled ? 'No major drags vs comparison.' : '—'} />
           </div>
           <div className='space-y-1.5 min-w-0'>
             <Text variant='uppercase' className='text-[9px] font-semibold text-textInactiveColor'>
-              Tailwinds
+              What's working for us
             </Text>
             <BulletList items={tailwinds} emptyLabel={compareEnabled ? 'No strong lifts vs comparison.' : '—'} />
           </div>

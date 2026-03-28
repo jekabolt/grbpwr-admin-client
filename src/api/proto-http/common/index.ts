@@ -730,6 +730,8 @@ export type Dictionary = {
   orderExpirationSeconds: number | undefined;
   complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
   isProd: boolean | undefined;
+  // Hero section background color for the storefront (CSS). Empty if unset.
+  backgroundHeroColor: string | undefined;
 };
 
 export type Collection = {
@@ -751,17 +753,6 @@ export type OrderFactors = {
 export type SortFactors = {
   id: SortFactor | undefined;
   name: string | undefined;
-};
-
-// CurrencyRate represents the rate of a currency with a description.
-export type CurrencyRate = {
-  description: string | undefined;
-  rate: googletype_Decimal | undefined;
-};
-
-// CurrencyMap represents a map of currency codes to their rates.
-export type CurrencyMap = {
-  currencies: { [key: string]: CurrencyRate } | undefined;
 };
 
 export type HeroType =
