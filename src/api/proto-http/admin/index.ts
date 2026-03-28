@@ -52,7 +52,10 @@ export type MetricsSection =
   | "METRICS_SECTION_IMAGE_SWIPES"
   | "METRICS_SECTION_SIZE_GUIDE_CLICKS"
   | "METRICS_SECTION_DETAILS_EXPANSION"
-  | "METRICS_SECTION_NOTIFY_ME_INTENT";
+  | "METRICS_SECTION_NOTIFY_ME_INTENT"
+  | "METRICS_SECTION_GEOGRAPHY"
+  | "METRICS_SECTION_CUSTOMER_SEGMENTATION"
+  | "METRICS_SECTION_RFM";
 // TrendGranularity defines time bucket size for trend analysis
 export type TrendGranularity =
   | "TREND_GRANULARITY_DAILY"
@@ -63,7 +66,6 @@ export type GetDictionaryRequest = {
 
 export type GetDictionaryResponse = {
   dictionary: common_Dictionary | undefined;
-  rates: common_CurrencyMap | undefined;
 };
 
 export type common_Dictionary = {
@@ -83,6 +85,8 @@ export type common_Dictionary = {
   orderExpirationSeconds: number | undefined;
   complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
   isProd: boolean | undefined;
+  // Hero section background color for the storefront (CSS). Empty if unset.
+  backgroundHeroColor: string | undefined;
 };
 
 // Category represents a hierarchical category structure
@@ -241,17 +245,6 @@ export type common_Announce = {
 export type common_AnnounceTranslation = {
   languageId: number | undefined;
   text: string | undefined;
-};
-
-// CurrencyMap represents a map of currency codes to their rates.
-export type common_CurrencyMap = {
-  currencies: { [key: string]: common_CurrencyRate } | undefined;
-};
-
-// CurrencyRate represents the rate of a currency with a description.
-export type common_CurrencyRate = {
-  description: string | undefined;
-  rate: googletype_Decimal | undefined;
 };
 
 export type UploadContentImageRequest = {
@@ -894,6 +887,9 @@ export type GetMetricsResponse = {
   detailsExpansion: DetailsExpansionRow[] | undefined;
   notifyMeIntent: NotifyMeIntentRow[] | undefined;
   productEngagementBubbleMatrix: ProductEngagementBubbleMatrix | undefined;
+  geography: GeographySection | undefined;
+  customerSegments: CustomerSegmentRow[] | undefined;
+  rfmAnalysis: RFMSegmentRow[] | undefined;
 };
 
 export type BusinessMetrics = {
@@ -989,6 +985,11 @@ export type BusinessMetrics = {
   emailOpenRate: MetricWithComparison | undefined;
   emailClickRate: MetricWithComparison | undefined;
   emailBounceRate: MetricWithComparison | undefined;
+  // Customer acquisition aggregate (sum of new_customers_by_day series)
+  newCustomers: MetricWithComparison | undefined;
+  // Shipping / logistics metrics
+  avgShippingCost: MetricWithComparison | undefined;
+  totalShippingCost: MetricWithComparison | undefined;
 };
 
 export type TimeRange = {
@@ -1017,6 +1018,8 @@ export type GeographyMetric = {
   compareValue: googletype_Decimal | undefined;
   count: number | undefined;
   compareCount: number | undefined;
+  sharePct: number | undefined;
+  avgOrderValue: googletype_Decimal | undefined;
 };
 
 export type RegionMetric = {
@@ -1050,6 +1053,7 @@ export type CategoryMetric = {
   categoryName: string | undefined;
   value: googletype_Decimal | undefined;
   count: number | undefined;
+  categoryDisplayName: string | undefined;
 };
 
 export type CrossSellPair = {
@@ -1279,6 +1283,12 @@ export type CohortRetentionRow = {
   m4: number | undefined;
   m5: number | undefined;
   m6: number | undefined;
+  m1Revenue: googletype_Decimal | undefined;
+  m2Revenue: googletype_Decimal | undefined;
+  m3Revenue: googletype_Decimal | undefined;
+  m4Revenue: googletype_Decimal | undefined;
+  m5Revenue: googletype_Decimal | undefined;
+  m6Revenue: googletype_Decimal | undefined;
 };
 
 export type OrderSequenceMetric = {
@@ -1340,6 +1350,8 @@ export type SlowMoverRow = {
   unitsSold: number | undefined;
   daysInStock: number | undefined;
   lastSaleDate: wellKnownTimestamp | undefined;
+  productHidden: boolean | undefined;
+  totalViews: number | undefined;
 };
 
 export type ReturnByProductRow = {
@@ -1530,6 +1542,30 @@ export type ProductEngagementMetricsPct = {
   avgScroll75RatePct: number | undefined;
   avgScroll100RatePct: number | undefined;
   avgTimeOnPageSeconds: number | undefined;
+};
+
+export type GeographySection = {
+  byCountry: GeographyMetric[] | undefined;
+  sessionsByCountry: GeographySessionMetric[] | undefined;
+};
+
+export type CustomerSegmentRow = {
+  email: string | undefined;
+  orderCount: number | undefined;
+  totalRevenue: googletype_Decimal | undefined;
+  avgOrderValue: googletype_Decimal | undefined;
+  segment: string | undefined;
+};
+
+export type RFMSegmentRow = {
+  email: string | undefined;
+  recencyScore: number | undefined;
+  frequencyScore: number | undefined;
+  monetaryScore: number | undefined;
+  rfmLabel: string | undefined;
+  lastPurchase: wellKnownTimestamp | undefined;
+  orderCount: number | undefined;
+  totalSpent: googletype_Decimal | undefined;
 };
 
 export type RefundOrderRequest = {
@@ -1791,6 +1827,22 @@ export type PaymentMethodAllowance = {
 };
 
 export type UpdateSettingsResponse = {
+};
+
+export type GetBackgroundHeroColorRequest = {
+};
+
+export type GetBackgroundHeroColorResponse = {
+  // CSS color string (e.g. "#0a0a0a", "rgb(0,0,0)"). Empty if unset.
+  color: string | undefined;
+};
+
+export type SetBackgroundHeroColorRequest = {
+  // CSS color string; empty clears to default (none).
+  color: string | undefined;
+};
+
+export type SetBackgroundHeroColorResponse = {
 };
 
 export type AddShipmentCarrierRequest = {
@@ -2078,6 +2130,8 @@ export interface AdminService {
   DeleteArchiveById(request: DeleteArchiveByIdRequest): Promise<DeleteArchiveByIdResponse>;
   GetArchiveByID(request: GetArchiveByIDRequest): Promise<GetArchiveByIDResponse>;
   UpdateSettings(request: UpdateSettingsRequest): Promise<UpdateSettingsResponse>;
+  GetBackgroundHeroColor(request: GetBackgroundHeroColorRequest): Promise<GetBackgroundHeroColorResponse>;
+  SetBackgroundHeroColor(request: SetBackgroundHeroColorRequest): Promise<SetBackgroundHeroColorResponse>;
   // AddShipmentCarrier adds a new shipping carrier.
   AddShipmentCarrier(request: AddShipmentCarrierRequest): Promise<AddShipmentCarrierResponse>;
   // UpdateShipmentCarrier updates an existing shipping carrier.
@@ -2838,6 +2892,40 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpdateSettings",
       }) as Promise<UpdateSettingsResponse>;
+    },
+    GetBackgroundHeroColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/settings/background-hero-color`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetBackgroundHeroColor",
+      }) as Promise<GetBackgroundHeroColorResponse>;
+    },
+    SetBackgroundHeroColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/settings/background-hero-color`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetBackgroundHeroColor",
+      }) as Promise<SetBackgroundHeroColorResponse>;
     },
     AddShipmentCarrier(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/shipment-carrier/add`; // eslint-disable-line quotes

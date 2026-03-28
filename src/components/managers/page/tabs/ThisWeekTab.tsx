@@ -3,7 +3,7 @@ import { BASE_PATH } from 'constants/routes';
 import { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Text from 'ui/components/text';
-import { ExecutiveHealthStrip, TimeSeriesChart } from '../components';
+import { ExecutiveHealthStrip, MetricSparkline, UrgentAlertsSection } from '../components';
 import type { MetricsPeriod } from '../useMetricsQuery';
 import { formatCurrency, formatNumber, getTimeSeries, parseDecimal, resolveAnalyticsPeriodLabels } from '../utils';
 import { ProductNameLink } from '../components/ProductNameLink';
@@ -96,32 +96,19 @@ export function ThisWeekTab({
         comparePeriodLabel={comparePeriodLabel}
       />
 
-      <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Orders at a glance</h3>
-        <div className='max-w-xl'>
-          <TimeSeriesChart
-            title='Orders by day'
-            data={getTimeSeries(metricsRecord, 'ordersByDay')}
-            compareData={getTimeSeries(metricsRecord, 'ordersByDayCompare')}
-            valueFormat='number'
-          />
-        </div>
-      </div>
+      <UrgentAlertsSection metricsResponse={metricsResponse} />
 
-      <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Acquisition &amp; retention</h3>
-        <div className='grid gap-4 md:grid-cols-2'>
-          <TimeSeriesChart
-            title='New customers by day'
-            data={metrics?.newCustomersByDay}
-            compareData={metrics?.newCustomersByDayCompare}
-            valueFormat='number'
-          />
-          <TimeSeriesChart
-            title='Returning customers by day'
-            data={metrics?.returningCustomersByDay}
-            compareData={metrics?.returningCustomersByDayCompare}
-            valueFormat='number'
+      <div className='space-y-4'>
+        <h3 className='text-sm font-bold uppercase'>Revenue Trend</h3>
+        <div className='border border-textInactiveColor p-4'>
+          <Text variant='uppercase' className='text-[10px] text-textInactiveColor mb-3 block'>
+            7-Day Revenue
+          </Text>
+          <MetricSparkline
+            data={metricsRecord?.revenueByDay || []}
+            compareData={metricsRecord?.revenueByDayCompare}
+            valueFormat='currency'
+            showCompare={compareEnabled && (metricsRecord?.revenueByDayCompare?.length ?? 0) > 0}
           />
         </div>
       </div>

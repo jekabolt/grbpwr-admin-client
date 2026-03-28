@@ -35,7 +35,7 @@ export const SizeGuideClicksTable: FC<SizeGuideClicksTableProps> = ({ sizeGuideC
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Size guide clicks
+        Size guide usage rate
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>

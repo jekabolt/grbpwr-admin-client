@@ -1,3 +1,4 @@
+export { AudienceTab } from './AudienceTab';
 export { CustomerTab } from './CustomerTab';
 export { ProductsTab } from './ProductsTab';
 export { RevenueTab } from './RevenueTab';

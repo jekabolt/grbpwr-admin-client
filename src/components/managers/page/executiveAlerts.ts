@@ -21,6 +21,12 @@ const CONVERSION_DROP_ALERT_PCT = -15;
 const REFUND_RATE_SPIKE_CHANGE_PCT = 12;
 const CANCELLATION_SHARE_ALERT = 15;
 const REFUND_RATE_LEVEL_WARNING = 8;
+const AOV_DROP_ALERT_PCT = -15;
+const BOUNCE_RATE_SPIKE_ALERT_PCT = 15;
+const NEW_CUSTOMERS_DROP_ALERT_PCT = -25;
+const REPEAT_RATE_DROP_ALERT_PCT = -20;
+const DISCOUNT_DEPTH_ALERT_PCT = 25;
+const PROMO_USAGE_ALERT_PCT = 40;
 
 function asMetricRecord(m: unknown): Record<string, unknown> | undefined {
   if (!m || typeof m !== 'object' || !('value' in m)) return undefined;
@@ -131,6 +137,63 @@ export function computeExecutiveAlerts(
         title: `Refund rate up ${formatPercent(refundCh)} vs comparison period`,
       });
     }
+    const aovPct = effectiveChangePct(metrics.avgOrderValue);
+    if (aovPct != null && aovPct <= AOV_DROP_ALERT_PCT) {
+      alerts.push({
+        severity: 'warning',
+        title: `Avg order value ${formatPercent(aovPct)} vs comparison period`,
+        detail: 'Basket size shrinking — check pricing, upsells, or product mix.',
+      });
+    }
+    const bouncePct = effectiveChangePct(metrics.bounceRate);
+    const bounceLower = asMetricRecord(metrics.bounceRate)
+      ? getMetricComparison(asMetricRecord(metrics.bounceRate)).lowerIsBetter
+      : true;
+    if (bouncePct != null && bounceLower && bouncePct > BOUNCE_RATE_SPIKE_ALERT_PCT) {
+      alerts.push({
+        severity: 'warning',
+        title: `Bounce rate up ${formatPercent(bouncePct)} vs comparison period`,
+        detail: 'More visitors leaving immediately — check landing pages and load times.',
+      });
+    }
+    const newCustPct = effectiveChangePct(metrics.newCustomers);
+    if (newCustPct != null && newCustPct <= NEW_CUSTOMERS_DROP_ALERT_PCT) {
+      alerts.push({
+        severity: 'warning',
+        title: `New customers ${formatPercent(newCustPct)} vs comparison period`,
+        detail: 'Acquisition slowing — review ad spend and channel performance.',
+      });
+    }
+    const repeatPct = effectiveChangePct(metrics.repeatCustomersRate);
+    if (repeatPct != null && repeatPct <= REPEAT_RATE_DROP_ALERT_PCT) {
+      alerts.push({
+        severity: 'warning',
+        title: `Repeat customer rate ${formatPercent(repeatPct)} vs comparison period`,
+        detail: 'Loyalty weakening — review retention campaigns and post-purchase flow.',
+      });
+    }
+  }
+
+  const grossRev = getMetricComparison(asMetricRecord(metrics.grossRevenue)).value;
+  const totalDiscountVal = getMetricComparison(asMetricRecord(metrics.totalDiscount)).value;
+  if (grossRev > 0) {
+    const discountDepth = (totalDiscountVal / grossRev) * 100;
+    if (discountDepth > DISCOUNT_DEPTH_ALERT_PCT) {
+      alerts.push({
+        severity: 'warning',
+        title: `Discount depth at ${discountDepth.toFixed(0)}% of gross revenue`,
+        detail: 'Heavy discounting erodes margin and brand equity.',
+      });
+    }
+  }
+
+  const promoUsage = getMetricComparison(asMetricRecord(metrics.promoUsageRate));
+  if (promoUsage.value > PROMO_USAGE_ALERT_PCT) {
+    alerts.push({
+      severity: 'warning',
+      title: `${promoUsage.value.toFixed(0)}% of orders used a promo code`,
+      detail: 'High promo reliance — customers may be trained to wait for discounts.',
+    });
   }
 
   alerts.sort((a, b) => {

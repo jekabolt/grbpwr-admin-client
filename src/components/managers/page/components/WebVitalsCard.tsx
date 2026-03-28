@@ -78,7 +78,7 @@ export const WebVitalsCard: FC<WebVitalsCardProps> = ({ webVitals }) => {
     <Tooltip.Provider delayDuration={300}>
       <div className='border border-textInactiveColor p-4'>
         <Text variant='uppercase' className='font-bold mb-4 block'>
-          Core web vitals
+          Site speed &amp; stability
         </Text>
         <div className='space-y-4'>
           {vitals.map((vital) => {

@@ -88,7 +88,7 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Add-to-cart performance by product
+        Shopper engagement per product
       </Text>
       <div className='mb-3 flex flex-wrap gap-4 text-xs'>
         {(['stars', 'hidden_gems', 'underperformers', 'duds'] as Quadrant[]).map((q) => (

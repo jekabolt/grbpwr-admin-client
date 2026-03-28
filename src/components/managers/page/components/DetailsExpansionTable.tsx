@@ -35,7 +35,7 @@ export const DetailsExpansionTable: FC<DetailsExpansionTableProps> = ({ detailsE
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Details expansion
+        What info are shoppers looking for?
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>

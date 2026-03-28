@@ -13,7 +13,7 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
     return (
       <div className='border border-textInactiveColor p-4'>
         <Text variant='uppercase' className='font-bold mb-4 block'>
-          Notify me intent
+          Back-in-Stock Demand
         </Text>
         <div className='py-8 text-center'>
           <Text className='text-textInactiveColor'>
@@ -62,7 +62,7 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Notify me intent
+        Back-in-Stock Demand
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>

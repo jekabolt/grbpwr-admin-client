@@ -3,7 +3,7 @@ import Text from 'ui/components/text';
 import {
   CampaignAttributionTable,
   GeographyCharts,
-  KpiCards,
+  NewsletterCard,
   TimeSeriesChart,
   TrafficCharts,
 } from '../components';
@@ -32,6 +32,9 @@ export function TrafficTab({ metricsResponse, compareEnabled }: TrafficTabProps)
         </div>
       </div>
 
+      <TrafficCharts metrics={metrics} />
+      <GeographyCharts metrics={metrics} />
+
       <div className='space-y-6'>
         <h3 className='text-sm font-bold uppercase'>Traffic &amp; engagement over time</h3>
         <div className='grid gap-4 md:grid-cols-2'>
@@ -56,17 +59,7 @@ export function TrafficTab({ metricsResponse, compareEnabled }: TrafficTabProps)
         </div>
       </div>
 
-      <TrafficCharts metrics={metrics} />
-      <GeographyCharts metrics={metrics} />
-
-      <div className='space-y-3'>
-        <h3 className='text-sm font-bold uppercase'>Email Performance</h3>
-        <KpiCards
-          metrics={metrics}
-          compareEnabled={compareEnabled}
-          visibleGroupIds={['email']}
-        />
-      </div>
+      <NewsletterCard newsletter={metricsResponse.newsletter} />
     </div>
   );
 }

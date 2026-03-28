@@ -21,7 +21,7 @@ export const OrderSequenceChart: FC<OrderSequenceChartProps> = ({ orderSequence 
   return (
     <div className='border border-textInactiveColor p-4 min-h-[480px] w-full min-w-0'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Order sequence analysis
+        Do customers spend more over time?
       </Text>
       <div className='space-y-6'>
         <div className='min-h-[220px] w-full'>
