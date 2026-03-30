@@ -11,8 +11,6 @@ interface HeroFunnelChartProps {
 
 type Totals = { heroClickUsers: number; viewItemUsers: number; purchaseUsers: number };
 
-type Totals = { heroClickUsers: number; viewItemUsers: number; purchaseUsers: number };
-
 const STEPS: { key: keyof Totals; label: string }[] = [
   { key: 'heroClickUsers', label: 'Banner click' },
   { key: 'viewItemUsers', label: 'Product view' },
@@ -51,7 +49,10 @@ function pickHeroFunnelDisplay(rows: HeroFunnelMetric[]): HeroFunnelDisplay {
   };
 }
 
-export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel, compareEnabled = false }) => {
+export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({
+  heroFunnel,
+  compareEnabled = false,
+}) => {
   if (!heroFunnel || heroFunnel.length === 0) return null;
 
   const { totals, latestDayLabel } = pickHeroFunnelDisplay(heroFunnel);
@@ -75,9 +76,7 @@ export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel, compareE
           const users = totals[key];
           const percentage = maxUsers > 0 ? (users / maxUsers) * 100 : 0;
           const dropOff =
-            key !== 'heroClickUsers' && maxUsers > 0
-              ? ((maxUsers - users) / maxUsers) * 100
-              : 0;
+            key !== 'heroClickUsers' && maxUsers > 0 ? ((maxUsers - users) / maxUsers) * 100 : 0;
 
           return (
             <div key={key} className='space-y-1'>
@@ -101,8 +100,8 @@ export const HeroFunnelChart: FC<HeroFunnelChartProps> = ({ heroFunnel, compareE
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>
-          Unique users: homepage banner click → product page view → purchase (same scope as analytics
-          funnel)
+          Unique users: homepage banner click → product page view → purchase (same scope as
+          analytics funnel)
         </Text>
         {latestDayLabel && <Text className='text-warning'>{latestDayLabel}</Text>}
       </div>

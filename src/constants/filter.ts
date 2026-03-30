@@ -2,6 +2,7 @@ import {
   common_GenderEnum,
   common_OrderFactor,
   common_OrderStatusEnum,
+  common_SeasonEnum,
   common_SortFactor,
 } from 'api/proto-http/admin';
 
@@ -38,6 +39,13 @@ export const genderOptions: Array<{ value: common_GenderEnum; label: string }> =
   { value: 'GENDER_ENUM_FEMALE', label: 'women' },
   { value: 'GENDER_ENUM_MALE', label: 'men' },
   { value: 'GENDER_ENUM_UNISEX', label: 'unisex' },
+];
+
+export const SEASON_OPTIONS: Array<{ value: common_SeasonEnum; label: string }> = [
+  { value: 'SEASON_ENUM_SS', label: 'spring/summer' },
+  { value: 'SEASON_ENUM_FW', label: 'fall/winter' },
+  { value: 'SEASON_ENUM_PF', label: 'pre-fall' },
+  { value: 'SEASON_ENUM_RC', label: 'resort/cruise' },
 ];
 
 export const statusOptions: Array<{ value: common_OrderStatusEnum; label: string }> = [

@@ -1,4 +1,4 @@
-import { common_GenderEnum } from 'api/proto-http/admin';
+import { common_GenderEnum, common_SeasonEnum } from 'api/proto-http/admin';
 import { currencySymbols, LANGUAGES } from 'constants/constants';
 import { z } from 'zod';
 
@@ -74,8 +74,7 @@ const priceEntrySchema = z.object({
 });
 
 const priceEntryIntegerRefine = (entry: { currency: string; price?: { value?: string } }) =>
-  !INTEGER_CURRENCIES.includes(entry.currency) ||
-  /^\d+$/.test(entry.price?.value ?? '');
+  !INTEGER_CURRENCIES.includes(entry.currency) || /^\d+$/.test(entry.price?.value ?? '');
 
 const allPricesFilledRefine = (arr: { price?: { value?: string } }[]) =>
   arr.every((p) => {
@@ -162,7 +161,7 @@ export const defaultData = {
       version: '',
       collection: '',
       fit: '',
-      season: undefined,
+      season: '' as common_SeasonEnum,
     },
     thumbnailMediaId: 0,
     secondaryThumbnailMediaId: 0,
