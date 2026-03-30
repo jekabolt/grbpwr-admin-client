@@ -46,7 +46,7 @@ export function OrdersTable({
   const statusFilterLabel = status ? statusOptions.find((o) => o.value === status)?.label : null;
 
   const COLUMNS: { label: string; accessor: (o: Order) => React.ReactNode }[] = [
-    { label: 'Order ID', accessor: (o: Order) => o.id },
+    { label: 'Order UUID', accessor: (o: Order) => o.uuid },
     {
       label: 'Order Status',
       accessor: (o) => statusFilterLabel ?? getOrderStatusName(dictionary, o.orderStatusId),
@@ -70,12 +70,12 @@ export function OrdersTable({
                   className={cn(
                     'text-center h-10 min-w-26 border border-r border-textColor lg:px-2 px-0',
                     {
-                      'sticky left-0 bg-textInactiveColor z-10': col.label === 'Order ID',
+                      'sticky left-0 bg-textInactiveColor z-10': col.label === 'Order UUID',
                       'hidden md:table-cell': col.label === 'Placed' || col.label === 'Total',
                     },
                   )}
                 >
-                  {col.label === 'Order ID' ? (
+                  {col.label === 'Order UUID' ? (
                     <div className='flex lg:flex-row flex-col justify-center gap-3'>
                       <Button
                         onClick={onToggleSort}
@@ -160,7 +160,7 @@ export function OrdersTable({
                           bgColor,
                           {
                             'sticky left-0 bg-bgColor group-hover:bg-highlightColor/20 z-10':
-                              col.label === 'Order ID',
+                              col.label === 'Order UUID',
                             uppercase: col.label === 'Order Status',
                             'hidden md:table-cell': col.label === 'Placed' || col.label === 'Total',
                           },

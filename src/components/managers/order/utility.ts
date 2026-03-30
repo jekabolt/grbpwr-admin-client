@@ -102,10 +102,11 @@ export const useOrderDetails = (uuid: string) => {
     }
   }
 
-  async function refundOrder(reason?: string) {
+  async function refundOrder(payload: { reason: string; refundShipping?: boolean }) {
     try {
+      const isPartial = selectedUnitKeys.length > 0;
       const orderItemIds =
-        selectedUnitKeys.length > 0
+        isPartial
           ? [
               ...new Set(
                 selectedUnitKeys
@@ -117,8 +118,8 @@ export const useOrderDetails = (uuid: string) => {
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,
         orderItemIds: orderItemIds.length ? orderItemIds : [],
-        reason,
-        refundShipping: undefined,
+        reason: payload.reason || undefined,
+        refundShipping: isPartial ? payload.refundShipping ?? false : undefined,
       });
       fetchOrderDetails();
       setSelectedUnitKeys([]);
