@@ -187,8 +187,6 @@ export function ProductForm({
             </div>
           </div>
           <SizeMeasurements
-            // isAddingProduct={isAddingProduct}
-            // isEditMode={isEditMode}
             editMode={editMode}
             productId={productId ? Number(productId) : undefined}
             onStockUpdated={onStockUpdated}

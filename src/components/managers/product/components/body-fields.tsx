@@ -1,4 +1,4 @@
-import { genderOptions } from 'constants/filter';
+import { genderOptions, SEASON_OPTIONS } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -53,6 +53,12 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
         <InputField
           name='product.productBodyInsert.collection'
           label='collection'
+          readOnly={!editMode}
+        />
+        <SelectField
+          name='product.productBodyInsert.season'
+          label='season'
+          items={SEASON_OPTIONS}
           readOnly={!editMode}
         />
         <SelectField
