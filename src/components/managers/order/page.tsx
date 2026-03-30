@@ -51,8 +51,8 @@ export function OrderDetails() {
     setIsRefundModalOpen(true);
   };
 
-  const handleRefundConfirm = (reason?: string) => {
-    refundOrder(reason);
+  const handleRefundConfirm = (payload: { reason: string; refundShipping?: boolean }) => {
+    refundOrder(payload);
   };
 
   return (

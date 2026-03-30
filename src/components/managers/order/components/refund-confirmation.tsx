@@ -3,6 +3,7 @@ import { REASONS } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
+import Checkbox from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
@@ -17,25 +18,30 @@ export function RefundConfirmation({
   open: boolean;
   selectedUnitKeys: string[];
   onOpenChange: (open: boolean) => void;
-  refundOrder: (reason?: string) => void;
+  refundOrder: (payload: { reason: string; refundShipping?: boolean }) => void;
 }) {
   const isFullRefund = !selectedUnitKeys.length;
   const existingReason = orderDetails?.order?.refundReason ?? '';
   const [selectedReason, setSelectedReason] = useState('');
+  const [refundShipping, setRefundShipping] = useState(false);
 
   useEffect(() => {
     if (open) {
       setSelectedReason(existingReason);
+      setRefundShipping(false);
     } else {
       setSelectedReason('');
+      setRefundShipping(false);
     }
   }, [open, existingReason]);
 
   const handleRefundConfirm = () => {
-    refundOrder(isFullRefund ? selectedReason : undefined);
+    refundOrder(
+      isFullRefund ? { reason: selectedReason } : { reason: selectedReason, refundShipping },
+    );
   };
 
-  const canConfirm = !isFullRefund || selectedReason.length > 0;
+  const canConfirm = selectedReason.length > 0;
 
   return (
     <ConfirmationModal
@@ -46,36 +52,47 @@ export function RefundConfirmation({
     >
       <div className='flex flex-col items-center justify-center gap-6'>
         <Text variant='uppercase' className='font-bold whitespace-nowrap'>
-          are you sure you want to {selectedUnitKeys.length ? 'partial' : 'full'} refund this
-          order?
+          are you sure you want to {selectedUnitKeys.length ? 'partial' : 'full'} refund this order?
         </Text>
-        {isFullRefund && (
-          <div className='flex flex-col gap-2'>
-            {existingReason && (
-              <Text variant='uppercase' className='font-bold'>
-                current refund reason: {existingReason}
-              </Text>
-            )}
+        {!isFullRefund && (
+          <label htmlFor='refund-shipping' className='flex items-center gap-2 cursor-pointer'>
+            <Checkbox
+              name='refund-shipping'
+              checked={refundShipping}
+              onCheckedChange={(checked: boolean | 'indeterminate') =>
+                setRefundShipping(checked === true)
+              }
+            />
             <Text variant='uppercase' className='font-bold'>
-              {existingReason ? 'change refund reason:' : 'refund reason:'}
+              include shipping fee in refund
             </Text>
-            <div className='grid grid-cols-2 justify-center gap-3 w-full '>
-              {REASONS.map((l, i) => (
-                <Button
-                  key={i}
-                  type='button'
-                  size='lg'
-                  className={cn('border border-textColor uppercase', {
-                    'bg-textColor text-bgColor': selectedReason === l,
-                  })}
-                  onClick={() => setSelectedReason(l)}
-                >
-                  {l}
-                </Button>
-              ))}
-            </div>
-          </div>
+          </label>
         )}
+        <div className='flex flex-col gap-2'>
+          {existingReason && (
+            <Text variant='uppercase' className='font-bold'>
+              current refund reason: {existingReason}
+            </Text>
+          )}
+          <Text variant='uppercase' className='font-bold'>
+            {existingReason ? 'change refund reason:' : 'refund reason:'}
+          </Text>
+          <div className='grid grid-cols-2 justify-center gap-3 w-full '>
+            {REASONS.map((l, i) => (
+              <Button
+                key={i}
+                type='button'
+                size='lg'
+                className={cn('border border-textColor uppercase', {
+                  'bg-textColor text-bgColor': selectedReason === l,
+                })}
+                onClick={() => setSelectedReason(l)}
+              >
+                {l}
+              </Button>
+            ))}
+          </div>
+        </div>
       </div>
     </ConfirmationModal>
   );

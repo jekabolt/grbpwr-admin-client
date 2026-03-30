@@ -136,13 +136,17 @@ export function OrderTable({
     [ALL_COLUMNS, isPrinting],
   );
 
+  const orderLineCount = orderDetails?.orderItems?.length ?? 0;
+  const showPartialRefundCheckboxes =
+    showRefundSelection && !isPrinting && orderLineCount > 1;
+
   return (
     <div className='w-full'>
       <div className='overflow-x-auto w-full'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max print:border-separate print:border-spacing-0 print:[border:1px_solid_currentColor]'>
           <thead className='bg-textInactiveColor h-10'>
             <tr className='border-b border-textColor'>
-              {showRefundSelection && !isPrinting && (
+              {showPartialRefundCheckboxes && (
                 <th className='text-center w-10 border border-r border-textColor px-2'>
                   <Text variant='uppercase' className='leading-none'>
                     refund
@@ -169,7 +173,7 @@ export function OrderTable({
             {expandedRows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={COLUMNS.length + (showRefundSelection && !isPrinting ? 1 : 0)}
+                  colSpan={COLUMNS.length + (showPartialRefundCheckboxes ? 1 : 0)}
                   className='text-center py-8'
                 >
                   <Text variant='uppercase'>no items found</Text>
@@ -196,7 +200,7 @@ export function OrderTable({
                     key={unitKey ?? idx}
                     className='border-b border-text last:border-b-0 lg:w-24'
                   >
-                    {showRefundSelection && !isPrinting && (
+                    {showPartialRefundCheckboxes && (
                       <td className='border border-textColor text-center px-2 w-10'>
                         <input
                           type='checkbox'
