@@ -44,7 +44,7 @@ export function ShippingFieldsGroup({ prefix }: { prefix: string }) {
         <InputField name={`${prefix}Address.postalCode`} label='postal code' />
         <SelectField
           name='paymentMethod'
-          label='shipping method'
+          label='payment method'
           items={[
             { value: 'PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE', label: 'Bank invoice' },
             { value: 'PAYMENT_METHOD_NAME_ENUM_CASH', label: 'Cash' },

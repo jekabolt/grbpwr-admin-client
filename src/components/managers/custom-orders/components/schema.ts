@@ -61,7 +61,7 @@ const emptyBuyer = {
   lastName: '',
   email: '',
   phone: '',
-  receivePromoEmails: false,
+  receivePromoEmails: true,
 };
 
 export const defaultCustomOrder = {
