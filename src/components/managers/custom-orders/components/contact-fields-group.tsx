@@ -4,10 +4,7 @@ import InputField from 'ui/form/fields/input-field';
 export function ContactFieldsGroup() {
   return (
     <FieldsGroupContainer stage='1/3' title='contact' isOpen={true}>
-      {/* <div className='space-y-2'> */}
       <InputField name='buyer.email' label='email' type='email' />
-      {/* <ToggleField name='buyer.receivePromoEmails' label='receive promo emails' /> */}
-      {/* </div> */}
     </FieldsGroupContainer>
   );
 }
