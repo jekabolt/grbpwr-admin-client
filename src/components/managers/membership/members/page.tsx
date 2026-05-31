@@ -38,19 +38,22 @@ export function Members() {
   const hasNext = offset + PAGE_SIZE < total;
 
   return (
-    <div className='flex flex-col w-full gap-4 pb-16'>
-      <div className='flex items-center justify-between'>
-        <Text variant='uppercase' size='large'>
-          Members {total > 0 && `(${total})`}
-        </Text>
-        <div className='flex gap-2'>
-          <Button variant='secondary' size='lg' asChild>
+    <div className='flex flex-col w-full gap-6 pb-16'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+        <div className='flex items-baseline gap-2'>
+          <Text variant='uppercase' size='large'>
+            members
+          </Text>
+          {total > 0 && <Text variant='inactive'>{total}</Text>}
+        </div>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Button variant='secondary' size='lg' className='uppercase' asChild>
             <Link to={ROUTES.tierConfig}>tier config</Link>
           </Button>
-          <Button variant='secondary' size='lg' asChild>
+          <Button variant='secondary' size='lg' className='uppercase' asChild>
             <Link to={ROUTES.hacker}>hacker</Link>
           </Button>
-          <Button variant='secondary' size='lg' asChild>
+          <Button variant='secondary' size='lg' className='uppercase' asChild>
             <Link to={ROUTES.tierAudit}>audit</Link>
           </Button>
         </div>
@@ -74,18 +77,20 @@ export function Members() {
             <Button
               variant='secondary'
               size='lg'
+              className='uppercase'
               disabled={!hasPrev || isFetching}
               onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
             >
-              Prev
+              prev
             </Button>
             <Button
               variant='secondary'
               size='lg'
+              className='uppercase'
               disabled={!hasNext || isFetching}
               onClick={() => setOffset((o) => o + PAGE_SIZE)}
             >
-              Next
+              next
             </Button>
           </div>
         </div>

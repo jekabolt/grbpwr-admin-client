@@ -7,6 +7,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
   onCancel?: () => void;
+  title?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   confirmDisabled?: boolean;
@@ -18,6 +19,9 @@ export function ConfirmationModal({
   onOpenChange,
   onConfirm,
   onCancel,
+  title,
+  confirmLabel = 'confirm',
+  cancelLabel = 'cancel',
   confirmDisabled,
 }: Props) {
   const handleCancel = () => {
@@ -38,9 +42,23 @@ export function ConfirmationModal({
           <DialogPrimitives.Description className='sr-only'>
             Confirmation
           </DialogPrimitives.Description>
-          <DialogPrimitives.Title className='sr-only'>Confirmation</DialogPrimitives.Title>
+          {title ? (
+            <div className='mb-3 flex items-center justify-between gap-2 border-b border-textColor pb-2'>
+              <DialogPrimitives.Title className='text-lg uppercase'>{title}</DialogPrimitives.Title>
+              <DialogPrimitives.Close asChild>
+                <Button type='button' className='cursor-pointer'>
+                  [x]
+                </Button>
+              </DialogPrimitives.Close>
+            </div>
+          ) : (
+            <DialogPrimitives.Title className='sr-only'>Confirmation</DialogPrimitives.Title>
+          )}
           {children}
           <div className='mt-4 flex justify-end gap-2'>
+            <Button type='button' onClick={handleCancel} variant='secondary' size='lg'>
+              {cancelLabel}
+            </Button>
             <Button
               type='button'
               onClick={handleConfirm}
@@ -48,10 +66,7 @@ export function ConfirmationModal({
               size='lg'
               disabled={confirmDisabled}
             >
-              confirm
-            </Button>
-            <Button type='button' onClick={handleCancel} variant='main' size='lg'>
-              cancel
+              {confirmLabel}
             </Button>
           </div>
         </DialogPrimitives.Content>

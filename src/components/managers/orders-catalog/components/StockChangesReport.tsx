@@ -58,7 +58,7 @@ export function StockChangesReport() {
   };
 
   return (
-    <div className='flex flex-wrap items-end gap-3 rounded border border-textInactiveColor bg-bgColor p-4'>
+    <div className='flex flex-wrap items-end gap-3 border border-textColor bg-bgColor p-4'>
       <Text variant='uppercase' className='shrink-0 font-medium'>
         Stock changes report
       </Text>

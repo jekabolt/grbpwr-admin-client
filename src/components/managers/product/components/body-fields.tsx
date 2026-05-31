@@ -3,7 +3,6 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
 import CountryList from 'react-select-country-list';
-import CheckboxField from 'ui/form/fields/checkbox-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
@@ -14,6 +13,8 @@ import { ColorFields } from './color-fields';
 import { Composition } from './composition/composition';
 import { PriceFields } from './price-fields';
 import { SalePreorderFields } from './sale-preorder-fields';
+import { TierAccessFields } from './tier-access-fields';
+import { VisibilityField } from './visibility-field';
 
 const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped', 'tailored'];
 
@@ -37,7 +38,7 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
 
   return (
     <div className='space-y-10'>
-      <CheckboxField name='product.productBodyInsert.hidden' label='hidden' readOnly={!editMode} />
+      <VisibilityField editMode={editMode} />
       <UnifiedTranslationFields
         fieldPrefix='product.translations'
         fields={[
@@ -104,6 +105,7 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
         />
         <Care editMode={editMode} />
         <Composition editMode={editMode} />
+        <TierAccessFields editMode={editMode} />
       </div>
     </div>
   );

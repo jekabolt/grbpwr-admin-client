@@ -16,6 +16,7 @@ import { UpdateStock } from './stock/update-stock';
 import { ToggleSizeNames } from './toggle-sizenames';
 
 const cellClass = 'text-center border-r border-textColor';
+const qtyCellClass = 'text-center border-r-2 border-textColor';
 const measurementCellClass = 'text-center border-r border-textColor w-20 lg:w-auto';
 const lastCellClass = 'text-center w-20 lg:w-auto';
 
@@ -81,6 +82,17 @@ export function SizeMeasurements({
     });
     return result;
   }, [values.sizeMeasurements, filteredSizes, dictionary?.sizes]);
+
+  const { totalUnits, sizesInStock } = useMemo(() => {
+    let units = 0;
+    let inStock = 0;
+    (values.sizeMeasurements || []).forEach((sm) => {
+      const q = parseInt(sm?.productSize?.quantity?.value || '0', 10) || 0;
+      units += q;
+      if (q > 0) inStock += 1;
+    });
+    return { totalUnits: units, sizesInStock: inStock };
+  }, [values.sizeMeasurements]);
 
   const handleSizeChange = async (
     event: React.ChangeEvent<HTMLInputElement>,
@@ -177,28 +189,40 @@ export function SizeMeasurements({
           {confirmationModal.message}
         </Text>
       </ConfirmationModal>
-      <div className='flex gap-4'>
-        <StockHistory productId={productId} sizes={productSizesForStock} />
-        <UpdateStock
-          productId={productId}
-          sizes={productSizesForStock}
-          onStockUpdated={onStockUpdated}
-        />
+      <div className='flex flex-wrap items-center justify-between gap-3'>
+        <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
+          <ToggleSizeNames
+            subCategoryName={selectedSubCategoryName}
+            typeName={selectedTypeName}
+            measurementsNames={measurementsNames}
+            onToggleChange={handleToggleChange}
+          />
+          <Text variant='inactive' size='small'>
+            {sizesInStock} size{sizesInStock === 1 ? '' : 's'} in stock · {totalUnits} unit
+            {totalUnits === 1 ? '' : 's'}
+            {productId != null && ' · stock is read-only here — use “update stock”'}
+          </Text>
+        </div>
+        {productId != null && (
+          <div className='flex gap-2'>
+            <StockHistory productId={productId} sizes={productSizesForStock} />
+            <UpdateStock
+              productId={productId}
+              sizes={productSizesForStock}
+              onStockUpdated={onStockUpdated}
+            />
+          </div>
+        )}
       </div>
       <div className='overflow-x-auto'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
           <thead className='bg-textInactiveColor'>
             <tr className='border-b border-text'>
               <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
-                <ToggleSizeNames
-                  subCategoryName={selectedSubCategoryName}
-                  typeName={selectedTypeName}
-                  measurementsNames={measurementsNames}
-                  onToggleChange={handleToggleChange}
-                />
+                <Text variant='uppercase'>size</Text>
               </th>
-              <th className={cellClass}>
-                <Text variant='uppercase'>qty</Text>
+              <th className={qtyCellClass}>
+                <Text variant='uppercase'>stock</Text>
               </th>
               {measurements.map((m, i) => (
                 <th key={m.id} className={i < measurements.length - 1 ? cellClass : lastCellClass}>
@@ -214,13 +238,19 @@ export function SizeMeasurements({
               const sizeData = sizeMeasurementsMap.get(size.id);
               const idx = sizeData?.index ?? -1;
               const qty = values.sizeMeasurements?.[idx]?.productSize?.quantity?.value;
+              const isOutOfStock = !qty || qty === '0';
 
               return (
                 <tr key={size.id} className='border-b border-text last:border-b-0'>
                   <td className={cn(cellClass, 'sticky left-0 bg-bgColor z-10')}>
-                    <Text variant='uppercase'>{formatSizeName(size.name)}</Text>
+                    <Text
+                      variant='uppercase'
+                      className={cn({ 'text-textInactiveColor': isOutOfStock })}
+                    >
+                      {formatSizeName(size.name)}
+                    </Text>
                   </td>
-                  <td className={cn(cellClass, 'bg-inactive w-12 lg:w-26')}>
+                  <td className={cn(qtyCellClass, 'bg-inactive w-12 lg:w-26')}>
                     <Input
                       name={`sizeMeasurements[${idx}].productSize.quantity.value`}
                       value={qty === '0' ? '' : qty || ''}
@@ -229,8 +259,8 @@ export function SizeMeasurements({
                           handleSizeChange(e, size.id);
                         }
                       }}
-                      className='w-full border-none text-center bg-inactive'
-                      disabled={!editMode}
+                      className='w-full border-none text-center bg-inactive disabled:text-textColor'
+                      disabled={!editMode || productId != null}
                     />
                   </td>
                   {measurements.map((m, i) => {

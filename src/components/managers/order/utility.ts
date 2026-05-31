@@ -105,16 +105,12 @@ export const useOrderDetails = (uuid: string) => {
   async function refundOrder(payload: { reason: string; refundShipping?: boolean }) {
     try {
       const isPartial = selectedUnitKeys.length > 0;
-      const orderItemIds =
-        isPartial
-          ? [
-              ...new Set(
-                selectedUnitKeys
-                  .map((k) => parseInt(k.split('-')[0], 10))
-                  .filter((id) => !Number.isNaN(id)),
-              ),
-            ]
-          : [];
+      // One order_item id per selected unit (duplicates encode quantity — e.g. refund 1 of 2).
+      const orderItemIds = isPartial
+        ? selectedUnitKeys
+            .map((k) => parseInt(k.split('-')[0], 10))
+            .filter((id) => !Number.isNaN(id))
+        : [];
       await adminService.RefundOrder({
         orderUuid: state.orderDetails?.order?.uuid,
         orderItemIds: orderItemIds.length ? orderItemIds : [],

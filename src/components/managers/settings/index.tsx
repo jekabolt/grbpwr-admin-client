@@ -19,6 +19,32 @@ import {
   transformDictionaryToSettings,
 } from './utility/schema';
 
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className='space-y-4 border border-textColor p-4'>
+      <div className='space-y-1'>
+        <Text variant='uppercase' size='large'>
+          {title}
+        </Text>
+        {description && (
+          <Text variant='inactive' size='small'>
+            {description}
+          </Text>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 export function Settings() {
   const { dictionary, refetch } = useDictionary();
   const showMessage = useSnackBarStore((state) => state.showMessage);
@@ -36,6 +62,7 @@ export function Settings() {
 
   const paymentMethods = form.watch('paymentMethods');
   const baseCurrency = dictionary?.baseCurrency || 'EUR';
+  const isDirty = form.formState.isDirty;
 
   const handleSave = async (data: SettingsSchema) => {
     try {
@@ -55,14 +82,42 @@ export function Settings() {
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(handleSave)}
-        className='grid gap-y-10 justify-center items-center h-full pb-10'
+        className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
       >
-        <ToggleField name='isProd' label='is prod' />
-        <div className='space-y-4'>
-          <Text variant='uppercase' className='font-bold' size='large'>
-            payment methods
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
+          <Text variant='uppercase' size='large'>
+            settings
           </Text>
-          <div className='grid gap-3 lg:grid-cols-2 grid-cols-1'>
+          <div className='flex items-center gap-2'>
+            <Text variant='inactive' size='small'>
+              base currency
+            </Text>
+            <span className='border border-textColor px-1.5 py-0.5'>
+              <Text variant='uppercase'>{baseCurrency}</Text>
+            </span>
+          </div>
+        </div>
+
+        <Section title='general'>
+          <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+            <ToggleField name='siteAvailable' label='site available' />
+            <ToggleField name='bigMenu' label='big menu' />
+            <ToggleField name='isProd' label='is prod' />
+            <div className='flex items-center gap-3'>
+              <Text variant='inactive'>max order quantity</Text>
+              <InputField
+                name='maxOrderItems'
+                type='text'
+                className='w-24'
+                keyboardRestriction={/\d/}
+                valueAsNumber
+              />
+            </div>
+          </div>
+        </Section>
+
+        <Section title='payment methods'>
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
             {paymentMethods?.map((method, index) => (
               <ToggleField
                 key={method.paymentMethod || index}
@@ -73,52 +128,37 @@ export function Settings() {
               />
             ))}
           </div>
-        </div>
-        <div className='flex items-center gap-4'>
-          <Text variant='uppercase' size='large' className='whitespace-nowrap font-bold'>
-            max order quantity
-          </Text>
-          <InputField
-            name='maxOrderItems'
-            type='text'
-            className='w-32'
-            keyboardRestriction={/\d/}
-            valueAsNumber
-          />
-        </div>
-        <div className='space-y-4'>
-          <Text variant='uppercase' className='font-bold' size='large'>
-            announce
-          </Text>
-          <InputField name='announce.link' label='' placeholder='Enter link URL' />
-          <TranslationField label='' fieldPrefix='announce.translations' fieldName='text' />
-        </div>
-        <ToggleField name='siteAvailable' label='site available' />
-        <ToggleField name='bigMenu' label='big menu' />
-        <div className='space-y-4'>
-          <Text variant='uppercase' className='font-bold' size='large'>
-            complimentary shipping prices
-          </Text>
-          <Text variant='inactive' className='text-textInactiveColor'>
-            threshold per currency above which shipping is free
-          </Text>
-          <CarrierPrices basePath='complimentaryShippingPrices' />
-        </div>
-        <Text variant='uppercase' className='font-bold' size='large'>
-          base currency: {baseCurrency}
-        </Text>
+        </Section>
 
+        <Section title='announce'>
+          <InputField name='announce.link' label='link' placeholder='Enter link URL' />
+          <TranslationField label='text' fieldPrefix='announce.translations' fieldName='text' />
+        </Section>
+
+        <Section
+          title='complimentary shipping'
+          description='threshold per currency above which shipping is free'
+        >
+          <CarrierPrices basePath='complimentaryShippingPrices' />
+        </Section>
+      </form>
+
+      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
+        <Text variant='inactive' size='small'>
+          {isDirty ? 'unsaved changes' : ' '}
+        </Text>
         <Button
-          type='submit'
+          type='button'
           size='lg'
           variant='main'
-          className='fixed bottom-3 right-3 z-50 cursor-pointer uppercase'
-          disabled={isLoading}
+          className='uppercase cursor-pointer'
+          disabled={isLoading || !isDirty}
           loading={isLoading}
+          onClick={() => form.handleSubmit(handleSave)()}
         >
           save
         </Button>
-      </form>
+      </div>
     </Form>
   );
 }

@@ -5,14 +5,17 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useSearchParams } from 'react-router-dom';
+import Text from 'ui/components/text';
 import { ProductGrid } from './product-grid';
 import { getProductPagedParans } from './utility';
 
 interface Props {
   firstItems: common_Product[];
+  initialLoading?: boolean;
+  onCountChange?: (count: number, hasMore: boolean) => void;
 }
 
-export function InfinityScroll({ firstItems }: Props) {
+export function InfinityScroll({ firstItems, initialLoading = false, onCountChange }: Props) {
   const [searchParams] = useSearchParams();
   const [items, setItems] = useState<common_Product[]>(firstItems);
   const [isLoading, setIsLoading] = useState(false);
@@ -87,12 +90,38 @@ export function InfinityScroll({ firstItems }: Props) {
     setItems(items.filter((item) => item.id !== id));
   }
 
+  useEffect(() => {
+    onCountChange?.(items.length, hasMore);
+  }, [items.length, hasMore, onCountChange]);
+
+  const showEmpty = !initialLoading && !isLoading && items.length === 0;
+
   return (
     <div>
-      <ProductGrid products={items} refresh={refreshAfterDeletetion} />
-      {hasMore && (
-        <div ref={ref} className='text-center' style={{ minHeight: '100px' }}>
-          loading...
+      {showEmpty ? (
+        <div className='flex flex-col items-center justify-center gap-2 py-20'>
+          <Text variant='uppercase'>no products found</Text>
+          <Text variant='inactive' size='small'>
+            try adjusting or clearing the filters
+          </Text>
+        </div>
+      ) : (
+        <ProductGrid products={items} refresh={refreshAfterDeletetion} />
+      )}
+      {hasMore && items.length > 0 && (
+        <div ref={ref} className='flex justify-center py-6' style={{ minHeight: '80px' }}>
+          {isLoading && (
+            <Text variant='inactive' className='animate-pulse'>
+              loading more…
+            </Text>
+          )}
+        </div>
+      )}
+      {initialLoading && items.length === 0 && (
+        <div className='flex justify-center py-20'>
+          <Text variant='inactive' className='animate-pulse'>
+            loading products…
+          </Text>
         </div>
       )}
     </div>

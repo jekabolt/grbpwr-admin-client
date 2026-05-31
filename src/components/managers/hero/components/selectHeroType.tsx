@@ -1,9 +1,8 @@
 import { common_HeroEntityInsert, common_HeroType } from 'api/proto-http/admin';
 import { heroTypes } from 'constants/constants';
+import { cn } from 'lib/utility';
 import React, { FC, useEffect, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { validationForSelectHeroType } from '../utility/validationForSelectHeroType';
 import { HeroSchema } from './schema';
@@ -16,6 +15,14 @@ interface SelectHeroTypeProps {
   deletedIndicesRef: React.MutableRefObject<Set<number>>;
 }
 
+const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
+  HERO_TYPE_MAIN: 'Full-width hero — landscape + portrait media, headline & description',
+  HERO_TYPE_SINGLE: 'Single media block with headline and explore link',
+  HERO_TYPE_DOUBLE: 'Two square media blocks side by side',
+  HERO_TYPE_FEATURED_PRODUCTS: 'Hand-picked products with a headline',
+  HERO_TYPE_FEATURED_PRODUCTS_TAG: 'Products auto-filled by a tag',
+};
+
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({
   append,
   insert,
@@ -23,7 +30,6 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
   entityRefs,
   deletedIndicesRef,
 }) => {
-  const [entityType, setEntityType] = useState<string>('');
   const [addedEntityIndex, setAddedEntityIndex] = useState<number | null>(null);
 
   const entities = form.watch('entities');
@@ -38,12 +44,12 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
     return validateEntity ? validateEntity(entity as common_HeroEntityInsert) : false;
   });
 
-  const handleAddEntity = () => {
-    if (entityType === 'HERO_TYPE_MAIN' && isMainAddExists) {
-      return;
-    }
-    const newEntity = { type: entityType as common_HeroType };
-    if (entityType === 'HERO_TYPE_MAIN') {
+  const addEntity = (type: common_HeroType) => {
+    if (type === 'HERO_TYPE_MAIN' && isMainAddExists) return;
+    if (isEntityIncomplete) return;
+
+    const newEntity = { type };
+    if (type === 'HERO_TYPE_MAIN') {
       insert(0, newEntity);
       setAddedEntityIndex(0);
     } else {
@@ -57,10 +63,7 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
       setTimeout(() => {
         const element = entityRefs.current[addedEntityIndex];
         if (element) {
-          element.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start',
-          });
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
         setAddedEntityIndex(null);
       }, 100);
@@ -68,41 +71,46 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
   }, [entities?.length, addedEntityIndex, entityRefs]);
 
   return (
-    <div className='flex gap-4 items-end justify-between'>
-      <Text variant='uppercase' size='large'>
-        hero entities
-      </Text>
-      <div className='border border-2 border-text flex items-center gap-2 p-2'>
-        <div>
-          <SelectComponent
-            name='entityType'
-            placeholder='SELECT ENTITY TYPE'
-            className='border border-none'
-            customWidth={250}
-            value={entityType}
-            onValueChange={setEntityType}
-            items={heroTypes
-              .filter((type) => {
-                if (type.value === 'HERO_TYPE_MAIN' && isMainAddExists) {
-                  return false;
-                }
-                return true;
-              })
-              .map((type) => ({
-                value: type.value,
-                label: type.label.toUpperCase(),
-              }))}
-          />
-        </div>
+    <div className='flex flex-col gap-3'>
+      <div className='flex flex-wrap items-baseline justify-between gap-2'>
+        <Text variant='uppercase' size='large'>
+          add a block
+        </Text>
+        {isEntityIncomplete && (
+          <Text variant='inactive' size='small'>
+            finish the current block before adding another
+          </Text>
+        )}
+      </div>
 
-        <Button
-          variant='main'
-          onClick={handleAddEntity}
-          disabled={!entityType || isEntityIncomplete}
-          className='px-2 py-1'
-        >
-          +
-        </Button>
+      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'>
+        {heroTypes.map((type) => {
+          const mainTaken = type.value === 'HERO_TYPE_MAIN' && isMainAddExists;
+          const disabled = mainTaken || isEntityIncomplete;
+          return (
+            <button
+              key={type.value}
+              type='button'
+              disabled={disabled}
+              onClick={() => addEntity(type.value)}
+              className={cn(
+                'group flex h-full flex-col items-start gap-1 border border-textColor p-3 text-left transition-colors',
+                'hover:bg-textColor hover:text-bgColor',
+                'disabled:cursor-not-allowed disabled:border-textInactiveColor disabled:bg-bgColor disabled:text-textInactiveColor',
+              )}
+            >
+              <div className='flex w-full items-center justify-between'>
+                <Text variant='uppercase' className='group-hover:text-bgColor group-disabled:text-textInactiveColor'>
+                  {type.label}
+                </Text>
+                <span className='text-lg leading-none'>+</span>
+              </div>
+              <span className='text-small leading-tight'>
+                {mainTaken ? 'already added (only one allowed)' : HERO_TYPE_DESCRIPTIONS[type.value]}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

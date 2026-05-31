@@ -34,27 +34,38 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
   return (
     <div
       onClick={() => handleArchiveClick(archive.slug || '')}
-      className='cursor-pointer overflow-hidden border border-text relative group'
+      className='group relative flex cursor-pointer flex-col overflow-hidden border border-textColor transition-colors hover:bg-highlightColor/5'
     >
-      {archive.thumbnail?.media?.fullSize?.mediaUrl && (
-        <div className='w-full'>
+      <div className='aspect-[4/5] w-full overflow-hidden border-b border-textColor bg-bgColor'>
+        {archive.thumbnail?.media?.fullSize?.mediaUrl && (
           <Media
             src={archive.thumbnail.media.fullSize.mediaUrl}
             alt={archive.translations?.[0]?.heading || 'Archive'}
-            className='w-full h-full'
+            aspectRatio='auto'
+            fit='cover'
           />
-        </div>
-      )}
-      <div className='px-2'>
-        <Text variant='uppercase'>{archive.translations?.[0]?.heading}</Text>
-        <Text className='line-clamp-1 '>{archive.translations?.[0]?.description}</Text>
-        <Text variant='uppercase'>{archive.tag}</Text>
+        )}
+      </div>
+      <div className='flex flex-col gap-1 p-2'>
+        <Text variant='uppercase' className='line-clamp-1'>
+          {archive.translations?.[0]?.heading}
+        </Text>
+        <Text variant='inactive' size='small' className='line-clamp-2'>
+          {archive.translations?.[0]?.description}
+        </Text>
+        {archive.tag && (
+          <span className='mt-1 inline-block w-fit border border-textColor px-1.5 py-0.5'>
+            <Text size='small' variant='uppercase'>
+              {archive.tag}
+            </Text>
+          </span>
+        )}
       </div>
       <Button
         onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
           handleDeleteArchive(e, archive.id || 0)
         }
-        className='absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-bgColor mix-blend-exclusion cursor-pointer'
+        className='absolute right-1 top-1 z-20 cursor-pointer border border-textColor bg-bgColor px-1 leading-none opacity-0 transition-opacity group-hover:opacity-100'
         disabled={deleteArchiveMutation.isPending}
       >
         [x]

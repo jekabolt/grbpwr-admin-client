@@ -5,6 +5,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { Entities } from './entities';
 import { mapFormFieldsToHeroData, mapHeroFullToFormData } from './map-schema-to-hero-data';
@@ -153,34 +154,51 @@ export function Hero() {
 
   return (
     <Form {...form}>
-      <form
-        onSubmit={form.handleSubmit(handleSubmit, onError)}
-        className='flex flex-col gap-y-16  '
-      >
-        <NavFeatured hero={heroData?.hero} />
-        <SelectHeroType
-          append={append}
-          insert={insert}
-          form={form}
-          entityRefs={entityRefs}
-          deletedIndicesRef={deletedIndicesRef}
-        />
-        <Entities
-          entityRefs={entityRefs}
-          arrayHelpers={{ remove, move, insert }}
-          initialProducts={productsByEntityIndexRef.current}
-          deletedIndicesRef={deletedIndicesRef}
-          onDeletedIndicesChange={handleDeletedIndicesChange}
-        />
-        <Button
-          size='lg'
-          variant='main'
-          type='submit'
-          disabled={form.formState.isSubmitting || saveHero.isPending}
-          className='fixed bottom-3 right-3 z-50 cursor-pointer uppercase'
-        >
-          save
-        </Button>
+      <form onSubmit={form.handleSubmit(handleSubmit, onError)} className='flex flex-col'>
+        <div className='-mx-2.5 mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+          <div className='flex items-baseline gap-2'>
+            <Text variant='uppercase' size='large'>
+              hero
+            </Text>
+            {hasUserMadeChanges && <Text variant='inactive'>unsaved changes</Text>}
+          </div>
+          <Button
+            size='lg'
+            variant='main'
+            type='submit'
+            disabled={isLoading || form.formState.isSubmitting || saveHero.isPending}
+            loading={saveHero.isPending}
+            className='uppercase'
+          >
+            save
+          </Button>
+        </div>
+
+        {isLoading ? (
+          <div className='flex justify-center py-20'>
+            <Text variant='inactive' className='animate-pulse'>
+              loading hero…
+            </Text>
+          </div>
+        ) : (
+          <div className='flex flex-col gap-y-16'>
+            <NavFeatured hero={heroData?.hero} />
+            <SelectHeroType
+              append={append}
+              insert={insert}
+              form={form}
+              entityRefs={entityRefs}
+              deletedIndicesRef={deletedIndicesRef}
+            />
+            <Entities
+              entityRefs={entityRefs}
+              arrayHelpers={{ remove, move, insert }}
+              initialProducts={productsByEntityIndexRef.current}
+              deletedIndicesRef={deletedIndicesRef}
+              onDeletedIndicesChange={handleDeletedIndicesChange}
+            />
+          </div>
+        )}
       </form>
     </Form>
   );

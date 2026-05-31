@@ -1,7 +1,7 @@
 import { common_OrderFull } from 'api/proto-http/admin';
 import { REASONS } from 'constants/constants';
 import { cn } from 'lib/utility';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Checkbox from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -25,6 +25,19 @@ export function RefundConfirmation({
   const [selectedReason, setSelectedReason] = useState('');
   const [refundShipping, setRefundShipping] = useState(false);
 
+  // Units selected for partial refund, grouped per order line (qty = how many of that item).
+  const selectedSummary = useMemo(() => {
+    const counts = new Map<number, number>();
+    selectedUnitKeys.forEach((k) => {
+      const id = parseInt(k.split('-')[0], 10);
+      if (!Number.isNaN(id)) counts.set(id, (counts.get(id) || 0) + 1);
+    });
+    return Array.from(counts.entries()).map(([id, qty]) => {
+      const item = orderDetails?.orderItems?.find((oi) => oi.id === id);
+      return { id, qty, name: item?.translations?.[0]?.name ?? `item ${id}` };
+    });
+  }, [selectedUnitKeys, orderDetails?.orderItems]);
+
   useEffect(() => {
     if (open) {
       setSelectedReason(existingReason);
@@ -43,17 +56,53 @@ export function RefundConfirmation({
 
   const canConfirm = selectedReason.length > 0;
 
+  const order = orderDetails?.order;
+  const currency = order?.currency ?? '';
+  const total = order?.totalPrice?.value;
+  const unitCount = selectedUnitKeys.length;
+  const confirmLabel = isFullRefund
+    ? `refund whole order${total ? ` · ${total} ${currency}` : ''}`
+    : `refund ${unitCount} unit${unitCount === 1 ? '' : 's'}`;
+
   return (
     <ConfirmationModal
       open={open}
       onOpenChange={onOpenChange}
       onConfirm={handleRefundConfirm}
+      title={isFullRefund ? 'full refund' : 'partial refund'}
+      confirmLabel={confirmLabel}
+      cancelLabel='cancel'
       confirmDisabled={!canConfirm}
     >
-      <div className='flex flex-col items-center justify-center gap-6'>
-        <Text variant='uppercase' className='font-bold whitespace-nowrap'>
-          are you sure you want to {selectedUnitKeys.length ? 'partial' : 'full'} refund this order?
-        </Text>
+      <div className='flex flex-col gap-4 lg:w-[420px]'>
+        {/* Scope — full refund is loud, partial lists exactly what's affected */}
+        {isFullRefund ? (
+          <div className='space-y-1 border border-error p-3'>
+            <Text variant='error' className='font-bold'>
+              full refund — entire order
+            </Text>
+            <Text size='small'>
+              Refunds ALL items{total ? ` (${total} ${currency})` : ''} including shipping. This
+              can’t be undone. To refund only some units, close this and tick them in the items
+              table.
+            </Text>
+          </div>
+        ) : (
+          <div className='space-y-2 border border-textColor p-3'>
+            <Text variant='uppercase' className='font-bold'>
+              partial refund — {unitCount} unit{unitCount === 1 ? '' : 's'}
+            </Text>
+            <div className='space-y-1'>
+              {selectedSummary.map((s) => (
+                <div key={s.id} className='flex items-center justify-between gap-3'>
+                  <Text size='small'>{s.name}</Text>
+                  <Text size='small'>×{s.qty}</Text>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {!isFullRefund && (
           <label htmlFor='refund-shipping' className='flex items-center gap-2 cursor-pointer'>
             <Checkbox
@@ -63,21 +112,18 @@ export function RefundConfirmation({
                 setRefundShipping(checked === true)
               }
             />
-            <Text variant='uppercase' className='font-bold'>
-              include shipping fee in refund
-            </Text>
+            <Text variant='uppercase'>include shipping fee in refund</Text>
           </label>
         )}
+
         <div className='flex flex-col gap-2'>
           {existingReason && (
-            <Text variant='uppercase' className='font-bold'>
-              current refund reason: {existingReason}
+            <Text variant='inactive' size='small'>
+              current reason: {existingReason}
             </Text>
           )}
-          <Text variant='uppercase' className='font-bold'>
-            {existingReason ? 'change refund reason:' : 'refund reason:'}
-          </Text>
-          <div className='grid grid-cols-2 justify-center gap-3 w-full '>
+          <Text variant='uppercase'>refund reason {canConfirm ? '' : '(required)'}</Text>
+          <div className='grid grid-cols-2 gap-2'>
             {REASONS.map((l, i) => (
               <Button
                 key={i}

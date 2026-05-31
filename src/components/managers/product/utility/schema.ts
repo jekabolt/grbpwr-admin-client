@@ -55,6 +55,8 @@ const productBodySchema = z.object({
   composition: z.string().min(1, 'Composition is required'),
   preorder: z.string().optional(),
   hidden: z.boolean().optional(),
+  // Minimum loyalty tier code required to buy (0 / 1 / 2 / 99).
+  minTier: z.string().optional(),
   modelWearsHeightCm: z.string().optional(),
   modelWearsSizeId: z.string().optional(),
   fit: z.string().optional(),
@@ -136,6 +138,30 @@ export const baseProductSchema = z
         path: ['prices'],
       });
     }
+
+    // Integer-only currencies (JPY/KRW) cannot end up with a fractional sale price.
+    const sale = Math.max(
+      0,
+      Math.min(99, parseFloat(data.product?.productBodyInsert?.salePercentage?.value ?? '0') || 0),
+    );
+    if (sale > 0) {
+      const offending = data.prices
+        .filter((entry) => {
+          if (!INTEGER_CURRENCIES.includes(entry.currency)) return false;
+          const base = parseFloat(entry.price?.value ?? '0') || 0;
+          if (base <= 0) return false;
+          return !Number.isInteger((base * (100 - sale)) / 100);
+        })
+        .map((entry) => entry.currency);
+
+      if (offending.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Sale price for ${offending.join('/')} must be a whole number — adjust the base price or sale %`,
+          path: ['prices'],
+        });
+      }
+    }
   });
 
 export const productSchema = baseProductSchema;
@@ -155,6 +181,7 @@ export const defaultData = {
       subCategoryId: '',
       typeId: '',
       hidden: false,
+      minTier: '0',
       targetGender: '' as common_GenderEnum,
       modelWearsHeightCm: undefined,
       modelWearsSizeId: undefined,

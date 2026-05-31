@@ -1,6 +1,8 @@
 import { LANGUAGES } from 'constants/constants';
+import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { LanguageButtons } from '../../components/language-buttons';
@@ -11,6 +13,10 @@ type FieldConfig = {
   type?: 'input' | 'textarea';
   placeholder?: string;
   rows?: number;
+  /** Show a live character counter and flag overflow. */
+  maxLength?: number;
+  /** Whether this field counts toward "language complete". Defaults to true. */
+  required?: boolean;
 };
 
 type Props = {
@@ -125,15 +131,38 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     setValue(fieldPath, value, { shouldDirty: true });
   };
 
-  const isLanguageFilled = (languageId: number) => {
+  const requiredFields = fields.filter((f) => f.required !== false);
+
+  const isLanguageComplete = (languageId: number) => {
     const index = translations.findIndex((t: any) => t?.languageId === languageId);
     if (index < 0) return false;
-
-    return fields.some((field) => {
+    return requiredFields.every((field) => {
       const value = watch(`${fieldPrefix}.${index}.${field.name}`);
       return value && value.trim().length > 0;
     });
   };
+
+  const completedCount = LANGUAGES.filter((l) => isLanguageComplete(l.id)).length;
+  const allComplete = completedCount === LANGUAGES.length;
+
+  // Copy the language currently being edited into every other language.
+  const handleCopyToAll = () => {
+    const source: Record<string, string> = {};
+    fields.forEach((field) => {
+      source[field.name] =
+        fieldValues[field.name] ??
+        watch(`${fieldPrefix}.${actualTranslationIndex}.${field.name}`) ??
+        '';
+    });
+    translations.forEach((t: any, i: number) => {
+      if (t?.languageId === selectedLanguageId) return;
+      fields.forEach((field) => {
+        setValue(`${fieldPrefix}.${i}.${field.name}`, source[field.name], { shouldDirty: true });
+      });
+    });
+  };
+
+  const hasAnyValue = fields.some((f) => (fieldValues[f.name] || '').trim().length > 0);
 
   const getFieldError = (fieldName: string) => {
     const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
@@ -149,43 +178,81 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
   };
 
   return (
-    <div className='space-y-3'>
+    <div className='space-y-3 border border-textColor p-3'>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <div className='flex items-center gap-2'>
+          <Text variant='uppercase'>translations</Text>
+          <Text variant={allComplete ? 'default' : 'inactive'} size='small'>
+            {completedCount}/{LANGUAGES.length} complete
+          </Text>
+        </div>
+        {editMode && (
+          <Button
+            type='button'
+            variant='secondary'
+            onClick={handleCopyToAll}
+            disabled={!hasAnyValue}
+            className='px-2 py-1'
+          >
+            copy {selectedLanguage?.code.toUpperCase()} → all
+          </Button>
+        )}
+      </div>
+
       <LanguageButtons
         selectedLanguageId={selectedLanguageId}
-        isLanguageFilled={isLanguageFilled}
+        isLanguageFilled={isLanguageComplete}
         onLanguageChange={handleLanguageChange}
       />
 
-      <div className='space-y-4'>
+      <div className='space-y-4 pt-1'>
         {fields.map((field) => {
           const fieldValue = fieldValues[field.name] || '';
           const placeholder =
             field.placeholder || `enter ${field.label.toLowerCase()} in ${selectedLanguage?.name}`;
           const errorMessage = getFieldError(field.name);
+          const over = field.maxLength !== undefined && fieldValue.length > field.maxLength;
+
+          const labelRow = (
+            <div className='flex items-center justify-between'>
+              <Text component='label' size='small' variant='inactive'>
+                {field.label}
+                {field.required === false ? '' : ' *'}
+              </Text>
+              {field.maxLength !== undefined && (
+                <Text size='small' className={cn({ 'text-error': over })}>
+                  {fieldValue.length}/{field.maxLength}
+                </Text>
+              )}
+            </div>
+          );
 
           if (field.type === 'textarea') {
             return (
-              <div key={field.name} className='space-y-2'>
-                <Text component='label'>{field.label}</Text>
+              <div key={field.name} className='space-y-1'>
+                {labelRow}
                 <textarea
                   value={fieldValue}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                     handleFieldChange(field.name, e.target.value)
                   }
                   placeholder={placeholder}
-                  className={`w-full border ${errorMessage ? 'border-red-500' : 'border-text'} leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2`}
+                  className={cn(
+                    'w-full border leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2',
+                    errorMessage || over ? 'border-error' : 'border-textColor',
+                  )}
                   rows={field.rows || 4}
                   readOnly={!editMode}
                 />
-                {errorMessage && <Text className='text-red-500'>{errorMessage}</Text>}
+                {errorMessage && <Text variant='error'>{errorMessage}</Text>}
               </div>
             );
           }
 
           return (
-            <div key={field.name} className='space-y-2'>
-              <Text component='label'>{field.label}</Text>
-              <div className={`border-b ${errorMessage ? 'border-red-500' : 'border-textColor'}`}>
+            <div key={field.name} className='space-y-1'>
+              {labelRow}
+              <div className={cn('border-b', errorMessage || over ? 'border-error' : 'border-textColor')}>
                 <Input
                   value={fieldValue}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -196,7 +263,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
                   readOnly={!editMode}
                 />
               </div>
-              {errorMessage && <Text className='text-red-500'>{errorMessage}</Text>}
+              {errorMessage && <Text variant='error'>{errorMessage}</Text>}
             </div>
           );
         })}

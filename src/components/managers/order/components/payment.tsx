@@ -12,6 +12,10 @@ interface Props {
 
 export function Payment({ orderDetails, isPrinting }: Props) {
   const payment = orderDetails?.payment;
+  const isCard =
+    payment?.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD' ||
+    payment?.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST';
+  const currency = orderDetails?.order?.currency ?? '';
   return (
     <div
       className={cn('flex flex-col gap-1', {
@@ -39,28 +43,18 @@ export function Payment({ orderDetails, isPrinting }: Props) {
         {payment?.paymentInsert?.paymentMethod?.replace('PAYMENT_METHOD_NAME_ENUM_', '')}
       </Text>
       <Text variant='uppercase'>
-        {[
-          `amount: `,
-          payment?.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD' ||
-          payment?.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ? (
-            <span>{payment?.paymentInsert?.transactionAmountPaymentCurrency?.value}</span>
-          ) : (
-            <span>{payment?.paymentInsert?.transactionAmount?.value}</span>
-          ),
-        ]}
+        amount:{' '}
+        <span>
+          {isCard
+            ? payment?.paymentInsert?.transactionAmountPaymentCurrency?.value
+            : payment?.paymentInsert?.transactionAmount?.value}{' '}
+          {currency}
+        </span>
       </Text>
-      {payment?.paymentInsert?.isTransactionDone && (
+      {payment?.paymentInsert?.isTransactionDone && isCard && (
         <Text variant='uppercase' className='flex items-center gap-2'>
-          {payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST' ||
-          payment.paymentInsert?.paymentMethod === 'PAYMENT_METHOD_NAME_ENUM_CARD'
-            ? [
-                `client secret: `,
-                <CopyToClipboard text={payment?.paymentInsert?.clientSecret || ''} cutText />,
-              ]
-            : [
-                `txid: `,
-                <CopyToClipboard text={payment?.paymentInsert?.transactionId || ''} cutText />,
-              ]}
+          client secret:{' '}
+          <CopyToClipboard text={payment?.paymentInsert?.clientSecret || ''} cutText />
         </Text>
       )}
     </div>

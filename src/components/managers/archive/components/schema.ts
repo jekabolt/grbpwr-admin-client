@@ -42,7 +42,7 @@ export const schema = z.object({
       description: z
         .string()
         .min(10, 'Description must be at least 10 characters')
-        .max(1000, 'Description cannot exceed 1000 characters'),
+        .max(10000, 'Description cannot exceed 10000 characters'),
     }),
     requiredLanguageIds,
   ),

@@ -62,6 +62,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
             allowMultiple={false}
             showVideos={false}
             alt={`${gender} media preview`}
+            purpose={`${gender} media`}
             onSaveMedia={saveMedia}
           />
         </div>
@@ -80,6 +81,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
             label='explore text'
             fieldPrefix={`navFeatured.${gender}.translations`}
             fieldName='exploreText'
+            maxLength={25}
           />
         </div>
       </div>
@@ -106,7 +108,7 @@ export function NavFeatured({ hero }: { hero?: common_HeroFullWithTranslations }
   };
 
   return (
-    <div className='border border-2 border-text p-4 space-y-6'>
+    <div className='border-2 border-textColor p-4 space-y-6'>
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' className='text-xl font-bold leading-none'>
           navigation featured

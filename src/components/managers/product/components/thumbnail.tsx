@@ -83,6 +83,7 @@ export function Thumbnail({ product, control, variant = 'primary', editMode }: P
         allowMultiple={false}
         showVideos={false}
         alt='Thumbnail preview'
+        purpose={variant === 'primary' ? 'thumbnail' : 'secondary thumbnail'}
         editMode={editMode}
         showSelectorWhenEmpty={editMode || !!mediaLink}
         onSaveMedia={handleThumbnail}
