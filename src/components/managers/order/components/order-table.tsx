@@ -102,7 +102,10 @@ export function OrderTable({
         label: 'SALE',
         showOnPrint: false,
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: ({ item }) => (item as any).productSalePercentage,
+        accessor: ({ item }) => {
+          const sale = (item as any).productSalePercentage;
+          return sale != null && sale !== '' && Number(sale) > 0 ? `${sale}%` : '—';
+        },
       },
       {
         label: 'PRICE WITH SALE',
@@ -125,7 +128,11 @@ export function OrderTable({
         label: 'REFUNDED',
         showOnPrint: true,
         accessor: ({ item }) =>
-          orderDetails?.refundedOrderItems?.some((r) => r.id === item.id) ? 'Yes' : 'No',
+          orderDetails?.refundedOrderItems?.some((r) => r.id === item.id) ? (
+            <span className='inline-block bg-textColor px-1 text-bgColor'>yes</span>
+          ) : (
+            '—'
+          ),
       },
     ],
     [dictionary, orderDetails?.order?.currency, orderDetails?.refundedOrderItems],
@@ -136,9 +143,10 @@ export function OrderTable({
     [ALL_COLUMNS, isPrinting],
   );
 
-  const orderLineCount = orderDetails?.orderItems?.length ?? 0;
+  // Partial refund is per unit, so offer selection whenever there's more than one unit
+  // (e.g. a single line with quantity 2 — refund 1 of 2).
   const showPartialRefundCheckboxes =
-    showRefundSelection && !isPrinting && orderLineCount > 1;
+    showRefundSelection && !isPrinting && expandedRows.length > 1;
 
   return (
     <div className='w-full'>
@@ -188,25 +196,29 @@ export function OrderTable({
                   orderItemId != null &&
                   orderDetails?.refundedOrderItems?.some((r) => r.id === orderItemId);
 
+                // Refund is per unit — each unit row can be selected independently.
                 const isSelected = unitKey != null && selectedUnitKeys.includes(unitKey);
 
-                const handleRowToggle = () => {
-                  if (!unitKey || !onToggleOrderItems) return;
+                const handleUnitToggle = () => {
+                  if (!unitKey || !onToggleOrderItems || isRefunded) return;
                   onToggleOrderItems([unitKey]);
                 };
 
                 return (
                   <tr
                     key={unitKey ?? idx}
-                    className='border-b border-text last:border-b-0 lg:w-24'
+                    className={cn('border-b border-textColor last:border-b-0', {
+                      'bg-highlightColor/10': isSelected,
+                    })}
                   >
                     {showPartialRefundCheckboxes && (
                       <td className='border border-textColor text-center px-2 w-10'>
                         <input
                           type='checkbox'
                           checked={isSelected}
-                          onChange={handleRowToggle}
-                          className='cursor-pointer'
+                          disabled={!!isRefunded}
+                          onChange={handleUnitToggle}
+                          className='cursor-pointer disabled:cursor-not-allowed'
                         />
                       </td>
                     )}

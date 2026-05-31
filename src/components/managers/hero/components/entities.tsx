@@ -1,4 +1,5 @@
 import { common_MediaFull } from 'api/proto-http/admin';
+import { heroTypes } from 'constants/constants';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -16,10 +17,40 @@ export const Entities: FC<EntitiesProps> = ({
   deletedIndicesRef,
   onDeletedIndicesChange,
 }) => {
-  const { setValue, control } = useFormContext<HeroSchema>();
+  const {
+    setValue,
+    control,
+    formState: { errors },
+  } = useFormContext<HeroSchema>();
   const entities = useWatch({ control, name: 'entities' }) || [];
   const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set());
+  const [collapsedIndices, setCollapsedIndices] = useState<Set<number>>(new Set());
   const prevDeletedIndicesRef = useRef<Set<number>>(new Set());
+
+  const entityErrors = errors.entities as Record<number, unknown> | undefined;
+
+  // Auto-expand any block that has validation errors so they are visible after a failed save.
+  useEffect(() => {
+    if (!entityErrors) return;
+    setCollapsedIndices((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      Object.keys(entityErrors).forEach((key) => next.delete(Number(key)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [entityErrors]);
+
+  const toggleCollapsed = useCallback((index: number) => {
+    setCollapsedIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
+  const typeLabel = (type: string) =>
+    heroTypes.find((t) => t.value === type)?.label ?? type;
 
   useEffect(() => {
     deletedIndicesRef.current = deletedIndices;
@@ -241,20 +272,18 @@ export const Entities: FC<EntitiesProps> = ({
   };
 
   return (
-    <div className='space-y-24'>
+    <div className='space-y-6'>
       {entities.map((entity, index) => {
         const isDeleted = deletedIndices.has(index);
         if (isDeleted) {
           return (
-            <div
-              key={index}
-              className='border border-text relative opacity-50 bg-gray-100 dark:bg-gray-800'
-            >
+            <div key={index} className='border-2 border-dashed border-textInactiveColor relative'>
               <div className='p-4 flex items-center justify-between'>
-                <span className='text-sm italic'>Entity marked for deletion</span>
+                <Text variant='inactive'>entity marked for deletion</Text>
                 <Button
-                  variant='simple'
-                  className='py-1 px-3 cursor-pointer'
+                  variant='secondary'
+                  size='lg'
+                  className='cursor-pointer'
                   onClick={() => handleRestoreEntity(index)}
                 >
                   restore
@@ -264,22 +293,48 @@ export const Entities: FC<EntitiesProps> = ({
           );
         }
 
+        const isCollapsed = collapsedIndices.has(index);
+        const hasError = !!entityErrors?.[index];
+
         return (
-          <div key={index} className='border border-2 border-text relative'>
-            <div
-              ref={(el: HTMLDivElement | null) => {
-                entityRefs.current[index] = el;
-              }}
-            >
-              {renderEntity(entity, index)}
+          <div
+            key={index}
+            ref={(el: HTMLDivElement | null) => {
+              entityRefs.current[index] = el;
+            }}
+            className='border-2 border-textColor scroll-mt-4'
+          >
+            <div className='flex items-center justify-between gap-2 border-b border-textColor px-3 py-2'>
+              <div className='flex items-center gap-2'>
+                <Text variant='inactive'>#{index + 1}</Text>
+                <Text variant='uppercase'>{typeLabel(entity.type)}</Text>
+                {hasError && (
+                  <span className='inline-block px-1.5 py-0.5 bg-error text-bgColor'>
+                    <Text className='!text-bgColor' size='small'>
+                      incomplete
+                    </Text>
+                  </span>
+                )}
+              </div>
+              <div className='flex items-center gap-2'>
+                <Button
+                  variant='secondary'
+                  className='py-1 px-2 cursor-pointer'
+                  onClick={() => toggleCollapsed(index)}
+                >
+                  {isCollapsed ? 'expand' : 'collapse'}
+                </Button>
+                <Button
+                  variant='main'
+                  className='py-1 px-2 cursor-pointer'
+                  onClick={() => handleRemoveEntity(index)}
+                >
+                  [x]
+                </Button>
+              </div>
             </div>
-            <Button
-              variant='main'
-              className='absolute top-2 right-2 py-1 px-3 cursor-pointer'
-              onClick={() => handleRemoveEntity(index)}
-            >
-              [x]
-            </Button>
+
+            {!isCollapsed && <div>{renderEntity(entity, index)}</div>}
           </div>
         );
       })}

@@ -9,9 +9,10 @@ type Props = {
   label: string;
   fieldPrefix: string;
   fieldName: string;
+  maxLength?: number;
 };
 
-export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
+export function TranslationField({ label, fieldPrefix, fieldName, maxLength }: Props) {
   const {
     control,
     watch,
@@ -127,19 +128,28 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
   };
 
   const errorMessage = getFieldError();
+  const over = maxLength !== undefined && currentInputValue.length > maxLength;
 
   return (
-    <div className='space-y-3'>
-      <Text>{label}</Text>
+    <div className='space-y-2'>
+      <div className='flex items-center justify-between'>
+        <Text component='label' size='small' variant='inactive'>
+          {label}
+        </Text>
+        {maxLength !== undefined && (
+          <Text size='small' className={over ? 'text-error' : ''}>
+            {currentInputValue.length}/{maxLength}
+          </Text>
+        )}
+      </div>
 
       <LanguageButtons
         selectedLanguageId={selectedLanguageId}
         isLanguageFilled={isLanguageFilled}
         onLanguageChange={handleLanguageChange}
-        showRedBorderForUnfilled={true}
       />
 
-      <div className={`border-b ${errorMessage ? 'border-red-500' : 'border-textColor'}`}>
+      <div className={`border-b ${errorMessage || over ? 'border-error' : 'border-textColor'}`}>
         <Input
           name={fieldNameWithIndex}
           value={currentInputValue}
@@ -150,7 +160,7 @@ export function TranslationField({ label, fieldPrefix, fieldName }: Props) {
         />
       </div>
 
-      {errorMessage && <Text className='text-red-500'>{errorMessage}</Text>}
+      {errorMessage && <Text variant='error'>{errorMessage}</Text>}
     </div>
   );
 }

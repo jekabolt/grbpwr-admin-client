@@ -1,5 +1,6 @@
 import { useArchiveDetails } from 'components/managers/archives/components/useArchiveQuery';
 import { useParams } from 'react-router-dom';
+import Text from 'ui/components/text';
 import { ArchiveForm } from './components';
 
 export function Archive() {
@@ -10,7 +11,13 @@ export function Archive() {
   const { data, isLoading } = useArchiveDetails(numId, { heading, tag });
 
   if (isEditMode && (isLoading || !data)) {
-    return <div>Loading...</div>;
+    return (
+      <div className='flex justify-center py-20'>
+        <Text variant='inactive' className='animate-pulse'>
+          loading timeline entry…
+        </Text>
+      </div>
+    );
   }
 
   return (

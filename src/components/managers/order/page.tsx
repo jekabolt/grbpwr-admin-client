@@ -1,8 +1,15 @@
+import {
+  formatDateShort,
+  getStatusColor,
+} from 'components/managers/orders-catalog/components/utility';
+import { ROUTES } from 'constants/routes';
+import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FormProvider, useForm } from 'react-hook-form';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
 import { Logo } from 'ui/icons/logo';
 import { Buyer } from './components/buyer';
@@ -14,6 +21,7 @@ import { PromoApplied } from './components/promo-applied';
 import { RefundConfirmation } from './components/refund-confirmation';
 import { ShippingBillingToggle } from './components/shipping-billing-toggle';
 import { NewTrackCode } from './components/shipping-information/new-track-code';
+import { StatusHistory } from './components/status-history';
 import { useOrderDetails } from './utility';
 
 const DISPLAY_REFUND_BUTTON_STATUSES = [
@@ -23,12 +31,43 @@ const DISPLAY_REFUND_BUTTON_STATUSES = [
   'REFUND IN PROGRESS',
 ];
 
+function Section({
+  title,
+  className,
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={cn('space-y-3 border border-textColor p-4 print:border-0 print:p-0', className)}
+    >
+      <Text variant='uppercase' size='large' className='print:hidden'>
+        {title}
+      </Text>
+      {children}
+    </section>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className='flex items-center justify-between gap-4'>
+      <Text variant='inactive'>{label}</Text>
+      <Text variant='uppercase'>{value}</Text>
+    </div>
+  );
+}
+
 export function OrderDetails() {
   const { uuid } = useParams<{ uuid: string }>();
 
   const {
     orderDetails,
     orderStatus,
+    isLoading,
     isPrinting,
     isEdit,
     trackingNumber,
@@ -47,95 +86,185 @@ export function OrderDetails() {
     defaultValues: { refundReason: '', notes: '' },
   });
 
-  const handleRefundClick = () => {
-    setIsRefundModalOpen(true);
-  };
-
+  const handleRefundClick = () => setIsRefundModalOpen(true);
   const handleRefundConfirm = (payload: { reason: string; refundShipping?: boolean }) => {
     refundOrder(payload);
   };
 
+  const order = orderDetails?.order;
+  const currency = order?.currency ?? '';
+  const statusColor = getStatusColor(orderStatus);
+  const orderPlaced = formatDateShort(order?.placed, true);
+  const isRefunded = orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED';
+  const showDeliver = orderStatus === 'SHIPPED';
+  const showRefund = DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '');
+  const canPartialRefund = showRefund && orderStatus !== 'CONFIRMED';
+  const selectedUnits = selectedUnitKeys.length;
+
   return (
     <FormProvider {...form}>
-      <div className='flex flex-col gap-4 w-full pb-16'>
-        <div className='self-start h-10 print:block hidden'>
+      <div className='flex w-full flex-col gap-6 pb-24'>
+        <div className='hidden h-10 self-start print:block'>
           <Logo />
         </div>
 
-        <div className='flex flex-col gap-4'>
-          <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
-          <OrderTable
-            orderDetails={orderDetails}
-            isPrinting={isPrinting}
-            showRefundSelection={
-              DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') &&
-              !['CONFIRMED'].includes(orderStatus || '')
-            }
-            selectedUnitKeys={selectedUnitKeys}
-            onToggleOrderItems={toggleOrderItemsSelection}
-          />
-          <Text variant='uppercase' className='font-bold self-end'>
-            {`Total: ${orderDetails?.order?.totalPrice?.value} ${orderDetails?.order?.currency}`}
-          </Text>
-          {(orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED') && (
-            <Text variant='uppercase' className='font-bold self-end'>
-              {`refunded amount: ${orderDetails?.order?.refundedAmount?.value} ${orderDetails?.order?.currency}`}
+        {/* Screen header */}
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3 print:hidden'>
+          <div className='flex flex-wrap items-center gap-3'>
+            <Button asChild variant='secondary' size='lg'>
+              <Link to={ROUTES.orders}>← orders</Link>
+            </Button>
+            <Text variant='uppercase' size='large'>
+              order #{order?.id ?? ''}
             </Text>
-          )}
-          <Text variant='uppercase' className='font-bold self-end'>
-            shipping cost: {orderDetails?.shipment?.cost?.value} {orderDetails?.order?.currency}
-          </Text>
-          <div className='block self-end print:hidden'>
-            <PromoApplied orderDetails={orderDetails} />
+            {orderStatus && (
+              <span className={cn('px-1.5 py-0.5', statusColor)}>
+                <Text variant='uppercase'>{orderStatus}</Text>
+              </span>
+            )}
+            <StatusHistory orderDetails={orderDetails} />
           </div>
-          {orderDetails?.order?.refundReason && (
-            <Text variant='uppercase' className='font-bold self-end'>
-              refund reason: {orderDetails?.order?.refundReason}
+          <div className='flex flex-wrap items-center gap-3'>
+            <span className='flex items-center gap-1'>
+              <Text variant='inactive' size='small'>
+                ref
+              </Text>
+              <CopyToClipboard text={order?.uuid || ''} />
+            </span>
+            <Text variant='inactive' size='small'>
+              placed {orderPlaced}
             </Text>
-          )}
-          <div className='flex gap-10 lg:gap-0 lg:flex-row flex-col lg:items-end lg:justify-between w-full'>
-            <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
-            <ShippingBillingToggle
-              orderDetails={orderDetails}
-              isPrinting={isPrinting}
-              orderStatus={orderStatus}
-              isEdit={isEdit}
-              trackingNumber={trackingNumber}
-              toggleTrackNumber={toggleTrackNumber}
-              handleTrackingNumberChange={handleTrackingNumberChange}
-              saveTrackingNumber={saveTrackingNumber}
-            />
-            <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
+            <Button
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => window.print()}
+            >
+              print
+            </Button>
           </div>
-        </div>
-        {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
-          <div className='w-full lg:w-1/4'>
-            <NewTrackCode
-              isPrinting={isPrinting}
-              trackingNumber={trackingNumber}
-              handleTrackingNumberChange={handleTrackingNumberChange}
-              saveTrackingNumber={saveTrackingNumber}
-            />
-          </div>
-        )}
-        <div className='block print:hidden'>
-          <Comment orderDetails={orderDetails} />
         </div>
 
-        {orderStatus === 'SHIPPED' && (
-          <div className='fixed right-2.5 bottom-2.5 print:hidden'>
-            <Button variant='main' size='lg' onClick={markAsDelivered}>
-              mark as delivered
-            </Button>
+        {/* Print-only header (keeps the original print document layout) */}
+        <div className='hidden print:block'>
+          <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
+        </div>
+
+        {isLoading && !order ? (
+          <div className='flex justify-center py-20'>
+            <Text variant='inactive' className='animate-pulse'>
+              loading order…
+            </Text>
+          </div>
+        ) : (
+          <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+            {/* Left — items + summary */}
+            <div className='w-full space-y-6 lg:flex-1'>
+              <Section title='items'>
+                {canPartialRefund && (
+                  <Text variant='inactive' size='small' className='print:hidden'>
+                    select units to refund, or leave all unselected to refund the whole order
+                    {selectedUnits > 0 ? ` · ${selectedUnits} selected` : ''}
+                  </Text>
+                )}
+                <OrderTable
+                  orderDetails={orderDetails}
+                  isPrinting={isPrinting}
+                  showRefundSelection={canPartialRefund}
+                  selectedUnitKeys={selectedUnitKeys}
+                  onToggleOrderItems={toggleOrderItemsSelection}
+                />
+              </Section>
+
+              <Section title='summary'>
+                <div className='space-y-1'>
+                  <SummaryRow
+                    label='shipping cost'
+                    value={`${orderDetails?.shipment?.cost?.value ?? '-'} ${currency}`}
+                  />
+                  <div className='flex items-center justify-between gap-4 print:hidden'>
+                    <Text variant='inactive'>promo</Text>
+                    <PromoApplied orderDetails={orderDetails} />
+                  </div>
+                  {isRefunded && (
+                    <SummaryRow
+                      label='refunded amount'
+                      value={`${order?.refundedAmount?.value ?? '-'} ${currency}`}
+                    />
+                  )}
+                  {order?.refundReason && (
+                    <SummaryRow label='refund reason' value={order.refundReason} />
+                  )}
+                  <div className='mt-2 flex items-center justify-between gap-4 border-t border-textColor pt-2'>
+                    <Text variant='uppercase' className='font-bold'>
+                      total
+                    </Text>
+                    <Text variant='uppercase' className='font-bold'>
+                      {order?.totalPrice?.value} {currency}
+                    </Text>
+                  </div>
+                </div>
+              </Section>
+
+              <Section title='comment' className='print:hidden'>
+                <Comment orderDetails={orderDetails} />
+              </Section>
+            </div>
+
+            {/* Right — customer / shipping / payment / comment */}
+            <div className='w-full space-y-6 lg:w-[360px]'>
+              <Section title='customer'>
+                <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
+              </Section>
+
+              <Section title='shipping & billing'>
+                <ShippingBillingToggle
+                  orderDetails={orderDetails}
+                  isPrinting={isPrinting}
+                  orderStatus={orderStatus}
+                  isEdit={isEdit}
+                  trackingNumber={trackingNumber}
+                  toggleTrackNumber={toggleTrackNumber}
+                  handleTrackingNumberChange={handleTrackingNumberChange}
+                  saveTrackingNumber={saveTrackingNumber}
+                />
+              </Section>
+
+              <Section title='payment' className='print:hidden'>
+                <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
+              </Section>
+
+              {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
+                <Section title='tracking' className='print:hidden'>
+                  <NewTrackCode
+                    isPrinting={isPrinting}
+                    trackingNumber={trackingNumber}
+                    handleTrackingNumberChange={handleTrackingNumberChange}
+                    saveTrackingNumber={saveTrackingNumber}
+                  />
+                </Section>
+              )}
+            </div>
           </div>
         )}
-        {DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '') && (
-          <div className='fixed right-2.5 bottom-2.5 print:hidden'>
-            <Button variant='main' size='lg' onClick={handleRefundClick}>
-              refund order
-            </Button>
+
+        {(showDeliver || showRefund) && (
+          <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-end gap-2 border-t border-textColor bg-bgColor px-3 py-2 print:hidden'>
+            {showDeliver && (
+              <Button variant='main' size='lg' className='uppercase' onClick={markAsDelivered}>
+                mark as delivered
+              </Button>
+            )}
+            {showRefund && (
+              <Button variant='main' size='lg' className='uppercase' onClick={handleRefundClick}>
+                {selectedUnits > 0
+                  ? `refund ${selectedUnits} unit${selectedUnits === 1 ? '' : 's'}`
+                  : 'refund order'}
+              </Button>
+            )}
           </div>
         )}
+
         <RefundConfirmation
           orderDetails={orderDetails}
           open={isRefundModalOpen}

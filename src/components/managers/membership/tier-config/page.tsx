@@ -26,22 +26,26 @@ export function TierConfig() {
   const numberOrZero = (v: string) => (v === '' ? 0 : Number(v));
 
   return (
-    <div className='flex flex-col w-full gap-4 pb-16'>
-      <div className='flex items-center justify-between'>
+    <div className='flex flex-col w-full gap-6 pb-24'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
         <Text variant='uppercase' size='large'>
-          Tier configuration
+          tier configuration
         </Text>
-        <Button variant='secondary' size='lg' asChild>
-          <Link to={ROUTES.members}>Back to members</Link>
+        <Button variant='secondary' size='lg' className='uppercase' asChild>
+          <Link to={ROUTES.members}>← members</Link>
         </Button>
       </div>
 
-      <Text variant='inactive'>
+      <Text variant='inactive' size='small'>
         Changing thresholds does not auto-rebalance existing memberships. Changes are logged to the
         config audit log.
       </Text>
 
-      {isLoading && <Text variant='inactive'>Loading…</Text>}
+      {isLoading && (
+        <Text variant='inactive' className='animate-pulse'>
+          loading…
+        </Text>
+      )}
       {isError && (
         <Text variant='error'>{error instanceof Error ? error.message : 'Failed to load'}</Text>
       )}
@@ -143,24 +147,31 @@ export function TierConfig() {
       </div>
 
       {entries.length > 0 && (
-        <div className='flex gap-2'>
-          <Button
-            variant='main'
-            size='lg'
-            onClick={() => update.mutate(entries)}
-            disabled={!dirty}
-            loading={update.isPending}
-          >
-            Save configuration
-          </Button>
-          <Button
-            variant='secondary'
-            size='lg'
-            onClick={() => setEntries((data?.entries ?? []).map((e) => ({ ...e })))}
-            disabled={!dirty}
-          >
-            Reset
-          </Button>
+        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
+          <Text variant='inactive' size='small'>
+            {dirty ? 'unsaved changes' : ' '}
+          </Text>
+          <div className='flex items-center gap-2'>
+            <Button
+              variant='secondary'
+              size='lg'
+              className='uppercase cursor-pointer'
+              onClick={() => setEntries((data?.entries ?? []).map((e) => ({ ...e })))}
+              disabled={!dirty}
+            >
+              reset
+            </Button>
+            <Button
+              variant='main'
+              size='lg'
+              className='uppercase cursor-pointer'
+              onClick={() => update.mutate(entries)}
+              disabled={!dirty}
+              loading={update.isPending}
+            >
+              save
+            </Button>
+          </div>
         </div>
       )}
     </div>

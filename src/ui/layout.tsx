@@ -47,7 +47,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
         </div>
 
         <div className='flex grow basis-0 items-center justify-end'>
-          <div className='relative w-full lg:w-auto flex'>
+          <div className='relative w-full lg:w-auto flex justify-end lg:justify-start'>
             <Button
               asChild
               className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden whitespace-nowrap'

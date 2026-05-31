@@ -365,6 +365,8 @@ export type common_ProductBodyInsert = {
   version: string | undefined;
   collection: string | undefined;
   fit: string | undefined;
+  // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
+  minTier: number | undefined;
 };
 
 export type common_GenderEnum =
@@ -2267,15 +2269,6 @@ export type GetTierAuditLogResponse = {
   total: number | undefined;
 };
 
-export type SetProductTierAccessRequest = {
-  productId: number | undefined;
-  minTier: TierCode | undefined;
-  hiddenForNonQualified: boolean | undefined;
-};
-
-export type SetProductTierAccessResponse = {
-};
-
 export type RunTierBackfillRequest = {
   confirm: boolean | undefined;
 };
@@ -2397,8 +2390,6 @@ export interface AdminService {
   RevokeHackerStatus(request: RevokeHackerStatusRequest): Promise<RevokeHackerStatusResponse>;
   // Tier transition audit log (all members).
   GetTierAuditLog(request: GetTierAuditLogRequest): Promise<GetTierAuditLogResponse>;
-  // Per-product tier gating.
-  SetProductTierAccess(request: SetProductTierAccessRequest): Promise<SetProductTierAccessResponse>;
   // One-time legacy backfill (admin-triggered).
   RunTierBackfill(request: RunTierBackfillRequest): Promise<RunTierBackfillResponse>;
 }
@@ -3788,26 +3779,6 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetTierAuditLog",
       }) as Promise<GetTierAuditLogResponse>;
-    },
-    SetProductTierAccess(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      if (!request.productId) {
-        throw new Error("missing required field request.product_id");
-      }
-      const path = `api/admin/product/${request.productId}/access`; // eslint-disable-line quotes
-      const body = JSON.stringify(request);
-      const queryParams: string[] = [];
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "POST",
-        body,
-      }, {
-        service: "AdminService",
-        method: "SetProductTierAccess",
-      }) as Promise<SetProductTierAccessResponse>;
     },
     RunTierBackfill(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tier-backfill`; // eslint-disable-line quotes

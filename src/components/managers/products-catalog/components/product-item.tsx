@@ -4,6 +4,7 @@ import { common_Product } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -55,7 +56,7 @@ export function ProductItem({
   };
 
   return (
-    <div className='space-y-1' onClick={() => handleProductClick(product.id)}>
+    <div className='space-y-1 cursor-pointer' onClick={() => handleProductClick(product.id)}>
       <div className='relative w-full h-full group'>
         <Media
           src={thumbnail || ''}
@@ -63,9 +64,19 @@ export function ProductItem({
           type={isVideo(thumbnail) ? 'video' : 'image'}
           controls={isVideo(thumbnail)}
         />
+        {isHidden && (
+          <span className='absolute top-1 left-1 z-30 bg-textColor px-1.5 py-0.5'>
+            <Text className='!text-bgColor' size='small' variant='uppercase'>
+              hidden
+            </Text>
+          </span>
+        )}
         <Button
           onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
-          className='absolute top-0 right-0 p-1 md:group-hover:block md:hidden block'
+          className={cn(
+            'absolute top-1 right-1 z-30 border border-textColor bg-bgColor px-1 leading-none block md:hidden md:group-hover:block',
+            { '!block !bg-textColor !text-bgColor': confirmDelete === product.id },
+          )}
         >
           {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
         </Button>

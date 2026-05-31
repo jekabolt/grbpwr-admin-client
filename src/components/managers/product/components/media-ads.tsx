@@ -1,11 +1,7 @@
 import { common_MediaFull, common_ProductFull } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
-import { cn } from 'lib/utility';
+import { MediaGallerySelector } from 'components/managers/media/components/media-gallery-selector';
 import { useEffect, useState } from 'react';
 import { Control, useController } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
 import { ProductFormData } from '../utility/schema';
 
 type Props = {
@@ -57,45 +53,16 @@ export function MediaAds({ product, control, clearKey, editMode }: Props) {
     field.onChange(updatedMediaIds);
   }
   return (
-    <div className='grid  grid-cols-2 gap-2'>
-      {mediaLinks?.map((m, id) => (
-        <div key={m.id} className='relative w-full border border-text aspect-[4/5] overflow-hidden'>
-          <Media
-            type='image'
-            src={m.media?.thumbnail?.mediaUrl || ''}
-            alt={m.media?.blurhash || ''}
-            fit='contain'
-          />
-
-          <Button
-            type='button'
-            onClick={() => deleteMediaAds(m.id || 0)}
-            className={cn(
-              'absolute top-0 right-0 flex items-center justify-center z-50 cursor-pointer text-bgColor mix-blend-difference',
-              {
-                hidden: !editMode,
-              },
-            )}
-          >
-            [x]
-          </Button>
-          <Text size='small' className='absolute bottom-0 left-0 mix-blend-difference text-bgColor'>
-            {id + 1}
-          </Text>
-        </div>
-      ))}
-      {editMode && (
-        <div className='relative w-full aspect-[4/5] flex items-center justify-center border border-text'>
-          <MediaSelector
-            label='select media'
-            aspectRatio={['4:5', 'Custom']}
-            isDeleteAccepted={false}
-            allowMultiple={true}
-            saveSelectedMedia={handleMediaAds}
-            showVideos={true}
-          />
-        </div>
-      )}
-    </div>
+    <MediaGallerySelector
+      media={mediaLinks}
+      editMode={editMode}
+      aspectRatio={['4:5', 'Custom']}
+      frameAspect='4/5'
+      purpose='additional photo'
+      ratioCaption='any ratio'
+      fit='contain'
+      onSelect={handleMediaAds}
+      onDelete={deleteMediaAds}
+    />
   );
 }

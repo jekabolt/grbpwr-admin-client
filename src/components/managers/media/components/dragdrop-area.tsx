@@ -96,9 +96,15 @@ export function DragDropArea({
       {children}
 
       {mediaLength === 0 && !previews.length && (
-        <div className='col-span-2 lg:col-span-4 flex flex-col items-center justify-center gap-4 text-gray-400'>
-          <div>dragdrop here</div>
-        </div>
+        <button
+          type='button'
+          onClick={handleAddButtonClick}
+          className='col-span-2 flex min-h-[300px] flex-col items-center justify-center gap-2 border-2 border-dashed border-textInactiveColor text-textInactiveColor transition-colors hover:border-textColor hover:text-textColor lg:col-span-4'
+        >
+          <span className='text-4xl leading-none'>+</span>
+          <span className='uppercase'>drag &amp; drop media here</span>
+          <span className='text-small'>or click to browse</span>
+        </button>
       )}
       {showAddButton && (
         <Button
@@ -112,7 +118,9 @@ export function DragDropArea({
       )}
 
       {isDragging && (
-        <div className='absolute inset-0 bg-textInactiveColor/90 flex items-center justify-center pointer-events-none z-10' />
+        <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-textColor bg-bgColor/90'>
+          <span className='uppercase text-textColor'>drop files to upload</span>
+        </div>
       )}
     </div>
   );

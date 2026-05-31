@@ -1,26 +1,39 @@
 import { ROUTES } from 'constants/routes';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import { ListArchive } from './components/archive-list';
 
 export function Archives() {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const openModal = () => setIsModalOpen(true);
-  const closeModal = () => setIsModalOpen(false);
+  const [count, setCount] = useState({ loaded: 0, hasMore: false });
+
+  const handleCount = useCallback((loaded: number, hasMore: boolean) => {
+    setCount((prev) =>
+      prev.loaded === loaded && prev.hasMore === hasMore ? prev : { loaded, hasMore },
+    );
+  }, []);
 
   return (
-    <div>
-      <Button
-        size='lg'
-        variant='main'
-        onClick={openModal}
-        asChild
-        className='fixed bottom-4 right-4 lg:bottom-2 lg:right-2 z-30'
-      >
-        <Link to={ROUTES.addArchive}>create new</Link>
-      </Button>
-      <ListArchive />
+    <div className='flex flex-col gap-6 pb-16'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+        <div className='flex items-baseline gap-2'>
+          <Text variant='uppercase' size='large'>
+            timeline
+          </Text>
+          {count.loaded > 0 && (
+            <Text variant='inactive'>
+              {count.loaded}
+              {count.hasMore ? '+' : ''}
+            </Text>
+          )}
+        </div>
+        <Button size='lg' variant='main' className='uppercase' asChild>
+          <Link to={ROUTES.addArchive}>create new</Link>
+        </Button>
+      </div>
+
+      <ListArchive onCountChange={handleCount} />
     </div>
   );
 }

@@ -5,8 +5,9 @@ import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { defaultData, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
@@ -95,6 +96,9 @@ export function ProductForm({
         setMediaClearKey((k) => k + 1);
       } else if (isCopyMode) {
         navigate(ROUTES.product, { replace: true });
+      } else {
+        // Existing product saved — drop back to read-only view.
+        onEditModeChange(false);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to save product';
@@ -127,72 +131,163 @@ export function ProductForm({
     showMessage(message, 'error');
   };
 
+  const productDisplayBody = product?.product?.productDisplay?.productBody;
+  const productHidden = productDisplayBody?.productBodyInsert?.hidden;
+  const headerTitle = isAddingProduct
+    ? isCopyMode
+      ? 'copy product'
+      : 'new product'
+    : `[${product?.product?.id ?? productId ?? ''}] ${
+        productDisplayBody?.productBodyInsert?.brand ?? ''
+      } ${productDisplayBody?.translations?.[0]?.name ?? ''}`.trim();
+
+  const handleCancel = () => {
+    if (isAddingProduct) {
+      navigate(ROUTES.product);
+      return;
+    }
+    form.reset(initialValues);
+    setIsFormChanged(false);
+    onEditModeChange(false);
+  };
+
+  const submitForm = () => form.handleSubmit(handleSubmit, handleFormError)();
+
   return (
     <Form {...form}>
       <form
-        className='relative lg:py-16 lg:px-10'
+        className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
         onSubmit={form.handleSubmit(handleSubmit, handleFormError)}
       >
-        <div className='w-full flex justify-between'>
-          <Button
-            variant='main'
-            size='lg'
-            disabled={isEditMode && !isFormChanged}
-            className='fixed bottom-3 right-3 z-50 cursor-pointer'
-            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.preventDefault();
-              if (editMode || isCopyMode) {
-                form.handleSubmit(handleSubmit, handleFormError)();
-              } else if (onEditModeChange) {
-                onEditModeChange(true);
-              }
-            }}
-          >
-            {editMode ? 'save' : 'edit'}
-          </Button>
+        {/* Header — identity + status */}
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
+          <div className='flex flex-wrap items-center gap-3'>
+            <Button asChild variant='secondary' size='lg'>
+              <Link to={ROUTES.product}>← products</Link>
+            </Button>
+            <Text variant='uppercase' size='large'>
+              {headerTitle || 'product'}
+            </Text>
+            {productHidden && (
+              <span className='bg-textColor px-1.5 py-0.5'>
+                <Text className='!text-bgColor' size='small' variant='uppercase'>
+                  hidden
+                </Text>
+              </span>
+            )}
+            {!editMode && (
+              <Text variant='inactive' size='small'>
+                view only
+              </Text>
+            )}
+          </div>
         </div>
 
-        <div className='space-y-5'>
-          <div className='flex flex-col lg:flex-row lg:justify-between lg:items-start gap-5'>
-            <div className='w-full lg:w-1/2 space-y-8'>
-              <div className='flex flex-row gap-5'>
-                <Thumbnail
-                  product={product}
-                  control={form.control}
-                  variant='primary'
-                  editMode={editMode}
-                />
-                <Thumbnail
-                  product={product}
-                  control={form.control}
-                  variant='secondary'
-                  editMode={editMode}
-                />
-              </div>
-              <MediaAds
+        <div className='flex flex-col lg:flex-row lg:items-start gap-6'>
+          <Section title='media' className='w-full lg:w-1/2'>
+            <div className='flex flex-row gap-5'>
+              <Thumbnail
                 product={product}
                 control={form.control}
-                clearKey={mediaClearKey}
+                variant='primary'
+                editMode={editMode}
+              />
+              <Thumbnail
+                product={product}
+                control={form.control}
+                variant='secondary'
                 editMode={editMode}
               />
             </div>
-            <div className='w-full lg:w-1/2 space-y-3'>
-              <BodyFields editMode={editMode} />
-              <Tags
-                isAddingProduct={isAddingProduct}
-                isEditMode={isEditMode}
-                isCopyMode={isCopyMode}
-                editMode={editMode}
-              />
-            </div>
-          </div>
+            <MediaAds
+              product={product}
+              control={form.control}
+              clearKey={mediaClearKey}
+              editMode={editMode}
+            />
+          </Section>
+
+          <Section title='details' className='w-full lg:w-1/2'>
+            <BodyFields editMode={editMode} />
+            <Tags
+              isAddingProduct={isAddingProduct}
+              isEditMode={isEditMode}
+              isCopyMode={isCopyMode}
+              editMode={editMode}
+            />
+          </Section>
+        </div>
+
+        <Section title='sizes & stock'>
           <SizeMeasurements
             editMode={editMode}
             productId={productId ? Number(productId) : undefined}
             onStockUpdated={onStockUpdated}
           />
-        </div>
+        </Section>
       </form>
+
+      {/* Sticky action bar */}
+      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2 print:hidden'>
+        <Text variant='inactive' size='small'>
+          {editMode && isFormChanged ? 'unsaved changes' : ' '}
+        </Text>
+        <div className='flex items-center gap-2'>
+          {!editMode ? (
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              className='uppercase cursor-pointer'
+              onClick={() => onEditModeChange(true)}
+            >
+              edit
+            </Button>
+          ) : (
+            <>
+              <Button
+                type='button'
+                variant='secondary'
+                size='lg'
+                className='uppercase cursor-pointer'
+                onClick={handleCancel}
+              >
+                cancel
+              </Button>
+              <Button
+                type='button'
+                variant='main'
+                size='lg'
+                className='uppercase cursor-pointer'
+                disabled={(isEditMode && !isFormChanged) || form.formState.isSubmitting}
+                loading={form.formState.isSubmitting}
+                onClick={submitForm}
+              >
+                {isAddingProduct ? (isCopyMode ? 'create copy' : 'create') : 'save'}
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
     </Form>
+  );
+}
+
+function Section({
+  title,
+  className,
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={`space-y-4 border border-textColor p-4 ${className ?? ''}`}>
+      <Text variant='uppercase' size='large'>
+        {title}
+      </Text>
+      {children}
+    </section>
   );
 }

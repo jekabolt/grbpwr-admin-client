@@ -89,7 +89,7 @@ export function MediaItem({
   };
 
   return (
-    <div className='w-full h-full'>
+    <div className='w-full h-full border border-textColor'>
       <Button
         asChild
         onClick={handleClick}
@@ -132,7 +132,12 @@ export function MediaItem({
                 : 'ratio: unknown'}
           </Text>
           <Button
-            className='absolute top-0 right-0 hidden group-hover:block cursor-pointer text-bgColor mix-blend-exclusion'
+            className={cn(
+              'absolute top-1 right-1 z-20 px-1.5 py-0.5 cursor-pointer border border-textColor bg-bgColor text-textColor opacity-0 group-hover:opacity-100 transition-opacity',
+              {
+                '!opacity-100 !bg-textColor !text-bgColor': confirmDelete === media.id,
+              },
+            )}
             onClick={handleDelete}
           >
             {confirmDelete === media.id ? <CheckIcon /> : '[x]'}

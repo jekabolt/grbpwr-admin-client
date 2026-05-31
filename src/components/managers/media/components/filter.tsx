@@ -10,19 +10,23 @@ interface FilterProps {
 
 export function Filter({ type, order, setType, setOrder }: FilterProps) {
   return (
-    <div className='flex lg:flex-row flex-col gap-2 justify-end w-full'>
-      <Selector
-        label='Media Type'
-        value={type}
-        options={FILTER_TYPES.map((type) => ({ label: type, value: type }))}
-        onChange={(value) => setType(value)}
-      />
-      <Selector
-        label='Order'
-        value={order}
-        options={SORT_ORDERS.map((order) => ({ label: order, value: order }))}
-        onChange={(value) => setOrder(value)}
-      />
+    <div className='flex flex-row gap-2'>
+      <div className='w-32'>
+        <Selector
+          label='Media Type'
+          value={type}
+          options={FILTER_TYPES.map((type) => ({ label: type, value: type }))}
+          onChange={(value) => setType(value)}
+        />
+      </div>
+      <div className='w-28'>
+        <Selector
+          label='Order'
+          value={order}
+          options={SORT_ORDERS.map((order) => ({ label: order, value: order }))}
+          onChange={(value) => setOrder(value)}
+        />
+      </div>
     </div>
   );
 }

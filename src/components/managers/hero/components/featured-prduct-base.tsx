@@ -9,8 +9,8 @@ import { HeroSchema } from './schema';
 import { useProductsByTag } from './useProductsByTag';
 
 const FEATURED_PRODUCTS_TRANSLATION_FIELDS = [
-  { name: 'headline', label: 'headline', type: 'input' as const },
-  { name: 'exploreText', label: 'explore text', type: 'input' as const },
+  { name: 'headline', label: 'headline', type: 'input' as const, maxLength: 30 },
+  { name: 'exploreText', label: 'explore text', type: 'input' as const, maxLength: 8 },
 ];
 
 export function FeaturedProductBase({

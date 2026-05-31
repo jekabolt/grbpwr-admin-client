@@ -1,12 +1,8 @@
-import { common_OrderStatusEnum } from 'api/proto-http/admin';
-import { statusOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { useInfiniteOrders } from './useOrdersQuery';
 import { formatDateShort, getOrderStatusName, getStatusColor } from './utility';
@@ -18,164 +14,82 @@ type Order = NonNullable<
 interface OrdersTableProps {
   orders: Order[];
   orderFactor: 'ORDER_FACTOR_ASC' | 'ORDER_FACTOR_DESC';
-  status: common_OrderStatusEnum | '';
-  orderSearch: string;
   isLoading: boolean;
   onToggleSort: () => void;
-  onStatusChange: (value: common_OrderStatusEnum | '') => void;
-  onOrderSearchChange: (value: string) => void;
 }
 
-export function OrdersTable({
-  orders,
-  orderFactor,
-  status,
-  orderSearch,
-  isLoading,
-  onToggleSort,
-  onStatusChange,
-  onOrderSearchChange,
-}: OrdersTableProps) {
+export function OrdersTable({ orders, orderFactor, isLoading, onToggleSort }: OrdersTableProps) {
   const { dictionary } = useDictionary();
   const navigate = useNavigate();
 
-  const handleRowClick = (order: Order) => {
-    navigate(`${ROUTES.orders}/${order.uuid}`);
-  };
-
-  const statusFilterLabel = status ? statusOptions.find((o) => o.value === status)?.label : null;
-
-  const COLUMNS: { label: string; accessor: (o: Order) => React.ReactNode }[] = [
-    { label: 'Order UUID', accessor: (o: Order) => o.uuid },
-    {
-      label: 'Order Status',
-      accessor: (o) => statusFilterLabel ?? getOrderStatusName(dictionary, o.orderStatusId),
-    },
-    { label: 'Placed', accessor: (o) => formatDateShort(o.placed) },
-    {
-      label: 'Total',
-      accessor: (o) => `${o.totalPrice?.value} ${o.currency}`,
-    },
-  ];
+  const handleRowClick = (order: Order) => navigate(`${ROUTES.orders}/${order.uuid}`);
 
   return (
-    <div className='w-full flex flex-col gap-4'>
-      <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
-          <thead className='bg-textInactiveColor h-10 overflow-x-scroll'>
-            <tr className='border-b border-textColor'>
-              {COLUMNS.map((col) => (
-                <th
-                  key={col.label}
-                  className={cn(
-                    'text-center h-10 min-w-26 border border-r border-textColor lg:px-2 px-0',
-                    {
-                      'sticky left-0 bg-textInactiveColor z-10': col.label === 'Order UUID',
-                      'hidden md:table-cell': col.label === 'Placed' || col.label === 'Total',
-                    },
-                  )}
-                >
-                  {col.label === 'Order UUID' ? (
-                    <div className='flex lg:flex-row flex-col justify-center gap-3'>
-                      <Button
-                        onClick={onToggleSort}
-                        disabled={isLoading}
-                        className='flex items-center justify-center gap-1 whitespace-nowrap hover:opacity-70 transition-opacity'
-                      >
-                        <div className='flex items-center gap-1 leading-none'>
-                          {['↑', '↓'].map((arrow, idx) => (
-                            <Text
-                              key={arrow}
-                              className={cn('text-textColor', {
-                                'opacity-50':
-                                  (idx === 0 && orderFactor === 'ORDER_FACTOR_DESC') ||
-                                  (idx === 1 && orderFactor === 'ORDER_FACTOR_ASC'),
-                              })}
-                            >
-                              {arrow}
-                            </Text>
-                          ))}
-                        </div>
-                        <Text variant='uppercase'>{col.label}</Text>
-                      </Button>
-                      <Input
-                        name='orderSearch'
-                        type='text'
-                        placeholder='order reference'
-                        value={orderSearch}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          onOrderSearchChange(e.target.value)
-                        }
-                        disabled={isLoading}
-                        className='lg:w-40 w-full bg-textInactiveColor placeholder:text-textColor placeholder:text-center'
-                      />
-                    </div>
-                  ) : col.label === 'Order Status' ? (
-                    <div className='flex items-center justify-center gap-3'>
-                      <Text className='' variant='uppercase'>
-                        {col.label}
-                      </Text>
-                      <Selector
-                        label=''
-                        options={[{ value: 'all', label: 'all' }, ...statusOptions]}
-                        onChange={(value) =>
-                          onStatusChange(value === 'all' ? '' : (value as common_OrderStatusEnum))
-                        }
-                        value={status || 'all'}
-                        compact
-                        disabled={isLoading}
-                      />
-                    </div>
-                  ) : (
-                    <Text variant='uppercase'>{col.label}</Text>
-                  )}
-                </th>
-              ))}
+    <div className='overflow-x-auto w-full'>
+      <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+        <thead className='bg-textInactiveColor h-10'>
+          <tr className='border-b border-textColor'>
+            <th className='sticky left-0 z-10 min-w-26 border border-textColor bg-textInactiveColor px-2 text-center'>
+              <Text variant='uppercase'>order</Text>
+            </th>
+            <th className='min-w-26 border border-textColor px-2 text-center'>
+              <Text variant='uppercase'>status</Text>
+            </th>
+            <th className='hidden min-w-26 border border-textColor px-2 text-center md:table-cell'>
+              <Button
+                onClick={onToggleSort}
+                disabled={isLoading}
+                className='mx-auto flex items-center gap-1 whitespace-nowrap transition-opacity hover:opacity-70'
+              >
+                <Text variant='uppercase'>placed</Text>
+                <Text className='leading-none'>
+                  {orderFactor === 'ORDER_FACTOR_DESC' ? '↓' : '↑'}
+                </Text>
+              </Button>
+            </th>
+            <th className='hidden min-w-26 border border-textColor px-2 text-center md:table-cell'>
+              <Text variant='uppercase'>total</Text>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.length === 0 ? (
+            <tr>
+              <td colSpan={4} className='text-center py-8'>
+                <Text variant='uppercase'>{isLoading ? 'loading…' : 'no orders found'}</Text>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {orders.length === 0 ? (
-              <tr>
-                <td colSpan={COLUMNS.length} className='text-center py-8'>
-                  <Text variant='uppercase'>no orders found</Text>
-                </td>
-              </tr>
-            ) : (
-              orders.map((o) => (
+          ) : (
+            orders.map((o) => {
+              const statusName = getOrderStatusName(dictionary, o.orderStatusId);
+              return (
                 <tr
                   key={o.id}
-                  className='group border-b border-text last:border-b-0 h-10 hover:bg-highlightColor/20 cursor-pointer transition-colors'
+                  className='group h-10 cursor-pointer border-b border-textColor last:border-b-0 transition-colors hover:bg-highlightColor/20'
                   onClick={() => handleRowClick(o)}
                 >
-                  {COLUMNS.map((col) => {
-                    const cellValue = col.accessor(o as Order);
-                    const bgColor =
-                      col.label === 'Order Status' ? getStatusColor(String(cellValue)) : '';
-
-                    return (
-                      <td
-                        key={col.label}
-                        className={cn(
-                          'border border-r border-textColor text-center px-2',
-                          bgColor,
-                          {
-                            'sticky left-0 bg-bgColor group-hover:bg-highlightColor/20 z-10':
-                              col.label === 'Order UUID',
-                            uppercase: col.label === 'Order Status',
-                            'hidden md:table-cell': col.label === 'Placed' || col.label === 'Total',
-                          },
-                        )}
-                      >
-                        <Text>{cellValue}</Text>
-                      </td>
-                    );
-                  })}
+                  <td className='sticky left-0 z-10 border border-textColor bg-bgColor px-2 text-center group-hover:bg-highlightColor/20'>
+                    <Text>{o.uuid}</Text>
+                  </td>
+                  <td className='border border-textColor px-2 text-center'>
+                    <span className={cn('inline-block px-1.5 py-0.5', getStatusColor(statusName))}>
+                      <Text variant='uppercase'>{statusName}</Text>
+                    </span>
+                  </td>
+                  <td className='hidden border border-textColor px-2 text-center md:table-cell'>
+                    <Text>{formatDateShort(o.placed)}</Text>
+                  </td>
+                  <td className='hidden border border-textColor px-2 text-center md:table-cell'>
+                    <Text>
+                      {o.totalPrice?.value} {o.currency}
+                    </Text>
+                  </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              );
+            })
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

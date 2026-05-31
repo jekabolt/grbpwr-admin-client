@@ -1,4 +1,4 @@
-import { CURRENCIES } from 'constants/constants';
+import { CURRENCIES, currencySymbols } from 'constants/constants';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
@@ -57,44 +57,35 @@ export function CarrierPrices(props: CarrierPricesProps) {
   };
 
   return (
-    <div className='w-full overflow-x-auto'>
-      <table className='w-full lg:w-auto table-fixed border-collapse border-2 border-textColor'>
-        <thead className='bg-textInactiveColor'>
-          <tr>
-            {CURRENCIES.map((c) => (
-              <th key={c.id} className='border border-textColor px-1 py-1 lg:w-[64px]'>
-                <Text>{c.value}</Text>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className='bg-white'>
-          <tr>
-            {CURRENCIES.map((currency) => {
-              const isIntegerCurrency = currency.value === 'JPY' || currency.value === 'KRW';
-              const step = isIntegerCurrency ? '1' : '0.01';
-              const placeholder = isIntegerCurrency ? '0' : '0.00';
+    <div className='space-y-2'>
+      <div className='grid grid-cols-2 gap-x-4 gap-y-3 border border-textColor p-3 sm:grid-cols-3'>
+        {CURRENCIES.map((currency) => {
+          const isIntegerCurrency = currency.value === 'JPY' || currency.value === 'KRW';
+          const step = isIntegerCurrency ? '1' : '0.01';
+          const placeholder = isIntegerCurrency ? '0' : '0.00';
+          const symbol = currencySymbols[currency.value] ?? '';
 
-              return (
-                <td key={currency.id} className='border border-textColor px-1 py-1 lg:w-[64px]'>
-                  <InputField
-                    name={`${basePath}.${currency.value}.value`}
-                    type='number'
-                    step={step}
-                    min='0'
-                    placeholder={placeholder}
-                    className='w-full border-none text-center'
-                    disabled={disabled}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      handleShipmentPriceChange(currency.value, e.target.value);
-                    }}
-                  />
-                </td>
-              );
-            })}
-          </tr>
-        </tbody>
-      </table>
+          return (
+            <div key={currency.id} className='flex flex-col gap-1'>
+              <Text variant='inactive' size='small'>
+                {currency.value} {symbol}
+              </Text>
+              <InputField
+                name={`${basePath}.${currency.value}.value`}
+                type='number'
+                step={step}
+                min='0'
+                placeholder={placeholder}
+                className='w-full'
+                disabled={disabled}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  handleShipmentPriceChange(currency.value, e.target.value);
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
       {tableError?.message && (
         <Text className='text-error' role='alert'>
           {tableError.message}
