@@ -18,7 +18,10 @@ export function TrafficTab({ metricsResponse, compareEnabled }: TrafficTabProps)
 
   return (
     <div className='space-y-6'>
-      <CampaignAttributionTable campaignAttribution={metricsResponse.campaignAttribution} />
+      <div className='space-y-6'>
+        <h3 className='text-sm font-bold uppercase'>Campaign attribution</h3>
+        <CampaignAttributionTable campaignAttribution={metricsResponse.campaignAttribution} />
+      </div>
 
       <div className='space-y-6'>
         <h3 className='text-sm font-bold uppercase'>Conversion Rate Trend</h3>
@@ -28,6 +31,7 @@ export function TrafficTab({ metricsResponse, compareEnabled }: TrafficTabProps)
             data={metrics?.conversionRateByDay}
             compareData={metrics?.conversionRateByDayCompare}
             valueFormat='number'
+            maxSane={100}
           />
         </div>
       </div>

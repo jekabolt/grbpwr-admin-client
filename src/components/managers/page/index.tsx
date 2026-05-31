@@ -27,7 +27,7 @@ const TAB_IDS: MetricsTabId[] = [
 ];
 
 const TAB_LABELS: Record<MetricsTabId, string> = {
-  'this-week': 'This Week',
+  'this-week': 'Overview',
   revenue: 'Revenue & Orders',
   products: 'Products',
   customers: 'Customers',
@@ -134,8 +134,23 @@ export function Analitic() {
       </div>
 
       {isLoading && (
-        <div className='border border-textInactiveColor p-8 text-center'>
-          <Text>Loading metrics...</Text>
+        <div className='space-y-6' aria-busy='true'>
+          <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className='h-20 animate-pulse border border-textInactiveColor bg-textInactiveColor/10'
+              />
+            ))}
+          </div>
+          <div className='grid gap-4 md:grid-cols-2'>
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div
+                key={i}
+                className='h-56 animate-pulse border border-textInactiveColor bg-textInactiveColor/10'
+              />
+            ))}
+          </div>
         </div>
       )}
 
