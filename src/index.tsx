@@ -43,6 +43,23 @@ const Promo = lazy(() => import('components/managers/promo').then((m) => ({ defa
 const Settings = lazy(() =>
   import('components/managers/settings').then((m) => ({ default: m.Settings })),
 );
+const Members = lazy(() =>
+  import('components/managers/membership/members/page').then((m) => ({ default: m.Members })),
+);
+const MemberDetails = lazy(() =>
+  import('components/managers/membership/member-details/page').then((m) => ({
+    default: m.MemberDetails,
+  })),
+);
+const TierConfig = lazy(() =>
+  import('components/managers/membership/tier-config/page').then((m) => ({ default: m.TierConfig })),
+);
+const HackerManager = lazy(() =>
+  import('components/managers/membership/hacker/page').then((m) => ({ default: m.HackerManager })),
+);
+const TierAudit = lazy(() =>
+  import('components/managers/membership/audit/page').then((m) => ({ default: m.TierAudit })),
+);
 
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
@@ -121,6 +138,11 @@ root.render(
                     <Route path={ROUTES.archives} element={<Archives />} />
                     <Route path={ROUTES.addArchive} element={<Archive />} />
                     <Route path={ROUTES.customerSupport} element={<CustomerPage />} />
+                    <Route path={ROUTES.members} element={<Members />} />
+                    <Route path={ROUTES.memberDetails} element={<MemberDetails />} />
+                    <Route path={ROUTES.tierConfig} element={<TierConfig />} />
+                    <Route path={ROUTES.hacker} element={<HackerManager />} />
+                    <Route path={ROUTES.tierAudit} element={<TierAudit />} />
                   </Route>
                 </Routes>
               </Suspense>

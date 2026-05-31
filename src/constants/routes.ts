@@ -27,6 +27,11 @@ export enum ROUTES {
   customOrders = '/custom-orders',
   customerSupport = '/customer-support',
   shipping = '/shipping',
+  members = '/members',
+  memberDetails = '/members/:id',
+  tierConfig = '/tier-config',
+  hacker = '/hacker',
+  tierAudit = '/tier-audit',
 }
 
 export const SIDE_BAR_ITEMS = [
@@ -70,6 +75,22 @@ export const SIDE_BAR_ITEMS = [
     label: 'CUSTOMER SUPPORT',
     route: ROUTES.customerSupport,
   },
+  {
+    label: 'MEMBERS',
+    route: ROUTES.members,
+  },
+  {
+    label: 'TIER CONFIG',
+    route: ROUTES.tierConfig,
+  },
+  {
+    label: 'HACKER',
+    route: ROUTES.hacker,
+  },
+  {
+    label: 'TIER AUDIT',
+    route: ROUTES.tierAudit,
+  },
 ];
 
 export const LEFT_SIDE_ITEMS: Manager[] = [
@@ -96,6 +117,10 @@ export const LEFT_SIDE_ITEMS: Manager[] = [
   {
     label: 'hero',
     route: ROUTES.hero,
+  },
+  {
+    label: 'members',
+    route: ROUTES.members,
   },
   // {
   //   label: 'promo',
