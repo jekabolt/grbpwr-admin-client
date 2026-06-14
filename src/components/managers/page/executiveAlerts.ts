@@ -51,16 +51,20 @@ function isTailwind(changePct: number, lowerIsBetter: boolean): boolean {
 export function orderCancellationSharePercent(metrics: BusinessMetrics | undefined): number | null {
   const rows = metrics?.ordersByStatus;
   if (!rows?.length) return null;
-  let total = 0;
+  let statusSum = 0;
   let cancelled = 0;
   for (const r of rows) {
     const c = r.count ?? 0;
-    total += c;
+    statusSum += c;
     const name = (r.statusName ?? '').toUpperCase();
     if (name.includes('CANCELLED')) cancelled += c;
   }
-  if (total <= 0) return null;
-  return (cancelled / total) * 100;
+  // `ordersByStatus` counts status transitions (its sum exceeds the order count), so the share of
+  // cancelled orders must be divided by the real order total, not by the sum of all status rows.
+  const totalOrders = getMetricComparison(asMetricRecord(metrics?.ordersCount)).value;
+  const denom = totalOrders > 0 ? totalOrders : statusSum;
+  if (denom <= 0) return null;
+  return Math.min(100, (cancelled / denom) * 100);
 }
 
 export function computeExecutiveAlerts(

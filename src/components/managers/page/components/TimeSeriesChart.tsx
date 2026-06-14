@@ -18,6 +18,8 @@ interface TimeSeriesChartProps {
   data: TimeSeriesPoint[] | undefined;
   compareData?: TimeSeriesPoint[] | undefined;
   valueFormat?: 'currency' | 'number';
+  /** Values above this are flagged as likely-invalid (e.g. a daily % that exceeds 100). */
+  maxSane?: number;
 }
 
 export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
@@ -25,6 +27,7 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
   data,
   compareData,
   valueFormat = 'currency',
+  maxSane,
 }) => {
   const formatValue = valueFormat === 'currency' ? formatCurrency : formatNumber;
 
@@ -49,11 +52,22 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
 
   if (merged.length === 0) return null;
 
+  const hasInvalid =
+    maxSane != null && merged.some((d) => Number.isFinite(d.value) && d.value > maxSane);
+
   return (
     <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
+      <Text variant='uppercase' className='font-bold mb-1 block'>
         {title}
       </Text>
+      {hasInvalid && (
+        <Text
+          className='text-warning text-[10px] mb-3 block'
+          title={`Some values exceed ${maxSane} — likely a backend calculation error; treat this chart as unreliable.`}
+        >
+          ⚠ values above {maxSane} look invalid — unreliable
+        </Text>
+      )}
       <ResponsiveContainer width='100%' height={220}>
         <LineChart data={merged} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
           <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />

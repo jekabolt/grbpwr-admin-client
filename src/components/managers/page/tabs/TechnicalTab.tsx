@@ -17,7 +17,7 @@ interface TechnicalTabProps {
 
 export function TechnicalTab({ metricsResponse }: TechnicalTabProps) {
   return (
-    <div className='space-y-6 opacity-90'>
+    <div className='space-y-6'>
       <Text className='text-textInactiveColor text-xs border-l-2 border-warning pl-3'>
         This tab is primarily for engineers and site reliability monitoring.
       </Text>

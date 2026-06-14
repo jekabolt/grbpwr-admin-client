@@ -47,6 +47,26 @@ export function formatNumber(value: number, decimals = 0): string {
   }).format(value);
 }
 
+/** Compact number for big headline KPIs (e.g. 1.2K, 3.4M). Use for glanceable values, not exact tables. */
+export function formatCompact(value: number, decimals = 1): string {
+  if (Math.abs(value) < 1000) return formatNumber(value, Number.isInteger(value) ? 0 : decimals);
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: decimals,
+  }).format(value);
+}
+
+/** Compact currency for big headline KPIs (e.g. €1.2K, €3.4M). */
+export function formatCurrencyCompact(value: number, currency = 'EUR'): string {
+  if (Math.abs(value) < 1000) return formatCurrency(value, currency);
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency,
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 /** True when we show "Same day" or "< 1 day" instead of a numeric day count. */
 export function isAvgDaysBetweenOrdersNearZeroDisplay(value: number): boolean {
   return value === 0 || (value > 0 && Math.round(value * 10) / 10 === 0);
@@ -216,9 +236,9 @@ export function compareModeHintLine(
   const compare = fallbackComparePeriodLabel(period, compareMode, customFrom, customTo);
   if (!compare) return null;
   if (compareMode === 'COMPARE_MODE_SAME_PERIOD_LAST_YEAR') {
-    return `Baseline ≈ ${compare} (same calendar span, prior year — estimate).`;
+    return `Deltas compare to ${compare} (same dates last year).`;
   }
-  return `Baseline ≈ ${compare} (same length, immediately before current window — estimate).`;
+  return `Deltas compare to ${compare} (previous period of equal length).`;
 }
 
 /** GA4 event names → readable step labels for journey paths (e.g. view_item → add_to_cart). */
