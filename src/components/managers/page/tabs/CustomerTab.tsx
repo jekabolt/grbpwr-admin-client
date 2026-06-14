@@ -17,9 +17,19 @@ interface CustomerTabProps {
 
 export function CustomerTab({ metricsResponse }: CustomerTabProps) {
   const metrics = metricsResponse.business;
+  const sampleSize = metrics?.clvDistribution?.sampleSize ?? 0;
 
   return (
     <div className='space-y-6'>
+      {sampleSize > 0 && sampleSize < 30 && (
+        <div className='border border-warning bg-warning/10 p-2'>
+          <Text className='text-warning text-xs'>
+            Low sample (n={sampleSize}): customer metrics below (CLV, repeat rate, orders/customer)
+            are directional only, not statistically reliable yet.
+          </Text>
+        </div>
+      )}
+
       <div className='space-y-6'>
         <h3 className='text-sm font-bold uppercase'>Customer Lifetime Value</h3>
         <div className='border border-textInactiveColor p-4'>
@@ -133,7 +143,10 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
         </div>
       </div>
 
-      <CrossSellTable metrics={metrics} />
+      <div className='space-y-6'>
+        <h3 className='text-sm font-bold uppercase'>Frequently bought together</h3>
+        <CrossSellTable metrics={metrics} />
+      </div>
       {/* Removed: NewsletterCard - deduplication error produces misleading data. Re-add when backend fixed. */}
 
       <div className='space-y-6'>

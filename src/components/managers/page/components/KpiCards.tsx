@@ -154,6 +154,19 @@ const KPI_GROUPS: Array<{ id: KpiGroupId; title: string; items: KpiItem[] }> = [
   },
 ];
 
+/** Rate metrics that cannot exceed 100% — used to flag impossible backend values (e.g. 117% delivery). */
+const RATE_KEYS_MAX_100 = new Set<keyof BusinessMetrics>([
+  'conversionRate',
+  'refundRate',
+  'promoUsageRate',
+  'bounceRate',
+  'repeatCustomersRate',
+  'emailDeliveryRate',
+  'emailOpenRate',
+  'emailClickRate',
+  'emailBounceRate',
+]);
+
 function effectiveTier(item: KpiItem, layout: KpiLayout): KpiTier {
   if (layout !== 'overview' && item.tier === 'featured') return 'standard';
   return item.tier ?? 'standard';
@@ -190,6 +203,7 @@ function KpiCard({
   tier,
   sparkline,
   momentumLabel,
+  maxSane,
 }: {
   label: string;
   labelTooltip?: string;
@@ -204,7 +218,9 @@ function KpiCard({
   tier: KpiTier;
   sparkline?: ReactNode;
   momentumLabel?: string | null;
+  maxSane?: number;
 }) {
+  const impossible = maxSane != null && value > maxSane;
   const hasCompare =
     compareEnabled && (compareValue !== undefined || changePct != null || changeLabel != null);
   let changeToneClass = 'text-textColor';
@@ -244,18 +260,30 @@ function KpiCard({
   return (
     <div className={shell}>
       <div className='flex flex-wrap items-start justify-between gap-1'>
-        <Text
-          variant='uppercase'
-          component='span'
-          className={
-            labelTooltip
-              ? 'text-textColor text-[10px] truncate cursor-help border-b border-dotted border-textInactiveColor/60'
-              : 'text-textColor text-[10px] truncate'
-          }
-          title={labelTooltip}
-        >
-          {label}
-        </Text>
+        <span className='flex min-w-0 items-center gap-1'>
+          <Text
+            variant='uppercase'
+            component='span'
+            className={
+              labelTooltip
+                ? 'text-textColor text-[10px] truncate cursor-help border-b border-dotted border-textInactiveColor/60'
+                : 'text-textColor text-[10px] truncate'
+            }
+            title={labelTooltip}
+          >
+            {label}
+          </Text>
+          {lowerIsBetter && (
+            <Text
+              variant='uppercase'
+              component='span'
+              className='text-[9px] text-textInactiveColor shrink-0'
+              title='Lower is better — a decrease is good (shown green)'
+            >
+              ↓ better
+            </Text>
+          )}
+        </span>
         {momentumLabel && (
           <Text
             variant='uppercase'
@@ -266,9 +294,20 @@ function KpiCard({
           </Text>
         )}
       </div>
-      <Text className={valueClass} title={caveat}>
+      <Text
+        className={`${valueClass}${impossible ? ' text-warning' : ''}`}
+        title={caveat ?? format(value)}
+      >
         {format(value)}
       </Text>
+      {impossible && (
+        <Text
+          className='text-warning text-[9px]'
+          title='This rate exceeds 100% — likely a backend calculation error, not a real value'
+        >
+          ⚠ exceeds 100% — data error
+        </Text>
+      )}
       {sparkline}
       {hasCompare && compareLine !== '' && (
         <Text variant='uppercase' className={`text-[10px] ${changeToneClass}`}>
@@ -363,6 +402,7 @@ function buildCardForItem(
       tier={tier}
       sparkline={sparklineEl}
       momentumLabel={momentumLabel}
+      maxSane={RATE_KEYS_MAX_100.has(item.key) ? 100 : undefined}
     />
   );
 }

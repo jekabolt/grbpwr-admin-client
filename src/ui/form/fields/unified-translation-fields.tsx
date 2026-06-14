@@ -1,4 +1,6 @@
 import { LANGUAGES } from 'constants/constants';
+import { useSnackBarStore } from 'lib/stores/store';
+import { translateToAllLanguages } from 'lib/translate';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
@@ -37,9 +39,11 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     name: fieldPrefix,
   });
 
+  const { showMessage } = useSnackBarStore();
   const translations = watch(fieldPrefix) || [];
   const [selectedLanguageId, setSelectedLanguageId] = useState<number>(LANGUAGES[0].id);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [isTranslating, setIsTranslating] = useState(false);
 
   const selectedLanguage = LANGUAGES.find((lang) => lang.id === selectedLanguageId);
   const translationIndex = translations.findIndex((t: any) => t?.languageId === selectedLanguageId);
@@ -162,6 +166,44 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     });
   };
 
+  // Translate the language currently being edited into every other language
+  // using the model behind /api/translate (per-language, not a verbatim copy).
+  const handleTranslateToAll = async () => {
+    const fieldsToTranslate = fields.map((f) => ({
+      name: f.name,
+      value:
+        fieldValues[f.name] ??
+        watch(`${fieldPrefix}.${actualTranslationIndex}.${f.name}`) ??
+        '',
+      maxLength: f.maxLength,
+    }));
+
+    setIsTranslating(true);
+    try {
+      const translated = await translateToAllLanguages({
+        sourceLanguageId: selectedLanguageId,
+        fields: fieldsToTranslate,
+      });
+
+      translations.forEach((t: any, i: number) => {
+        const result = translated[t?.languageId];
+        if (!result) return;
+        fields.forEach((field) => {
+          const value = result[field.name];
+          if (typeof value === 'string') {
+            setValue(`${fieldPrefix}.${i}.${field.name}`, value, { shouldDirty: true });
+          }
+        });
+      });
+
+      showMessage('translated into all languages', 'success');
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : 'translation failed', 'error');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
   const hasAnyValue = fields.some((f) => (fieldValues[f.name] || '').trim().length > 0);
 
   const getFieldError = (fieldName: string) => {
@@ -187,15 +229,27 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
           </Text>
         </div>
         {editMode && (
-          <Button
-            type='button'
-            variant='secondary'
-            onClick={handleCopyToAll}
-            disabled={!hasAnyValue}
-            className='px-2 py-1'
-          >
-            copy {selectedLanguage?.code.toUpperCase()} → all
-          </Button>
+          <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant='secondary'
+              onClick={handleCopyToAll}
+              disabled={!hasAnyValue || isTranslating}
+              className='px-2 py-1'
+            >
+              copy {selectedLanguage?.code.toUpperCase()} → all
+            </Button>
+            <Button
+              type='button'
+              variant='main'
+              onClick={handleTranslateToAll}
+              disabled={!hasAnyValue || isTranslating}
+              loading={isTranslating}
+              className='px-2 py-1'
+            >
+              translate {selectedLanguage?.code.toUpperCase()} → all
+            </Button>
+          </div>
         )}
       </div>
 
