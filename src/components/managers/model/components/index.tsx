@@ -19,6 +19,7 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { MeasurementsFields } from './measurements-fields';
+import { ModelMedia } from './model-media';
 import {
   mapFormToModelInsert,
   mapModelToForm,
@@ -130,6 +131,12 @@ export function ModelForm({
               valueAsNumber
             />
             <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={1000} />
+            <div className='space-y-1'>
+              <Text variant='uppercase' size='small'>
+                photos
+              </Text>
+              <ModelMedia model={model} />
+            </div>
           </Section>
 
           <Section title='measurements' className='w-full lg:w-1/2'>

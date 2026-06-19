@@ -1887,6 +1887,8 @@ export type common_ModelInsert = {
   gender: common_GenderEnum | undefined;
   defaultSampleSizeId: number | undefined;
   measurements: common_ModelMeasurement[] | undefined;
+  thumbnailId: number | undefined;
+  mediaIds: number[] | undefined;
 };
 
 // ModelMeasurement is a single body measurement value, in millimetres.
@@ -1945,6 +1947,8 @@ export type common_Model = {
   model: common_ModelInsert | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  thumbnail: common_MediaFull | undefined;
+  media: common_MediaFull[] | undefined;
 };
 
 export type GetModelRequest = {

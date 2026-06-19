@@ -14,6 +14,8 @@ export const modelSchema = z.object({
   gender: z.string().optional().default(''),
   defaultSampleSizeId: z.number().optional().default(0),
   measurements: z.record(z.string(), z.number().min(0).optional()).default({}),
+  // Photo gallery; the first item is treated as the thumbnail.
+  mediaIds: z.array(z.number()).default([]),
 });
 
 export type ModelFormData = z.input<typeof modelSchema>;
@@ -24,6 +26,7 @@ export const modelDefaultData: ModelFormData = {
   gender: '',
   defaultSampleSizeId: 0,
   measurements: {},
+  mediaIds: [],
 };
 
 export function mapModelToForm(model: common_Model): ModelFormData {
@@ -34,6 +37,18 @@ export function mapModelToForm(model: common_Model): ModelFormData {
       measurements[m.name] = m.valueMm;
     }
   }
+
+  // Order the gallery so the thumbnail is first (first = thumbnail invariant).
+  const galleryIds =
+    model.media?.map((m) => m.id).filter((id): id is number => id != null) ??
+    insert?.mediaIds ??
+    [];
+  const thumbId = model.thumbnail?.id ?? insert?.thumbnailId;
+  const mediaIds =
+    thumbId && galleryIds.includes(thumbId)
+      ? [thumbId, ...galleryIds.filter((id) => id !== thumbId)]
+      : galleryIds;
+
   return {
     name: insert?.name || '',
     comment: insert?.comment || '',
@@ -41,6 +56,7 @@ export function mapModelToForm(model: common_Model): ModelFormData {
       insert?.gender && insert.gender !== 'GENDER_ENUM_UNKNOWN' ? insert.gender : '',
     defaultSampleSizeId: insert?.defaultSampleSizeId || 0,
     measurements,
+    mediaIds,
   };
 }
 
@@ -52,11 +68,15 @@ export function mapFormToModelInsert(data: ModelFormData): common_ModelInsert {
       valueMm: Math.round(value as number),
     }));
 
+  const mediaIds = data.mediaIds ?? [];
+
   return {
     name: data.name.trim(),
     comment: data.comment?.trim() || '',
     gender: (data.gender || 'GENDER_ENUM_UNKNOWN') as common_GenderEnum,
     defaultSampleSizeId: data.defaultSampleSizeId || 0,
     measurements,
+    thumbnailId: mediaIds[0] ?? 0,
+    mediaIds,
   };
 }

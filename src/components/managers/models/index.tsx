@@ -2,7 +2,7 @@ import { ROUTES } from 'constants/routes';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { ModelTable } from './components/model-table';
+import { ModelCardList } from './components/model-card-list';
 
 export function Models() {
   return (
@@ -16,7 +16,7 @@ export function Models() {
         </Button>
       </div>
 
-      <ModelTable />
+      <ModelCardList />
     </div>
   );
 }
