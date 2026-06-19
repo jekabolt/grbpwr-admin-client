@@ -444,6 +444,7 @@ export type common_FilterConditions = {
   byTag: string | undefined;
   collections: string[] | undefined;
   seasons: common_SeasonEnum[] | undefined;
+  excludeTopCategoryIds: number[] | undefined;
 };
 
 export type GetProductsPagedResponse = {
@@ -992,6 +993,11 @@ export type BusinessMetrics = {
   avgDaysBetweenOrders: MetricWithComparison | undefined;
   clvDistribution: CLVStats | undefined;
   revenueByPromo: PromoMetric[] | undefined;
+  // orders_by_status is every order PLACED in the period bucketed by its current status
+  // (one order per bucket), so it sums to total_placed_orders, NOT to orders_count.
+  // orders_count counts only net-revenue statuses (confirmed/shipped/delivered/partially_refunded),
+  // so cancelled/refunded/pending_return orders are excluded from it. Use total_placed_orders
+  // as the denominator for status shares such as cancellation% / refund%.
   ordersByStatus: StatusCount[] | undefined;
   revenueByDay: TimeSeriesPoint[] | undefined;
   ordersByDay: TimeSeriesPoint[] | undefined;
@@ -1052,6 +1058,10 @@ export type BusinessMetrics = {
   // Shipping / logistics metrics
   avgShippingCost: MetricWithComparison | undefined;
   totalShippingCost: MetricWithComparison | undefined;
+  // Total orders PLACED in the period, regardless of status (sum of orders_by_status).
+  // Distinct from orders_count, which counts only net-revenue statuses. Use this as the
+  // denominator when deriving status shares (cancellation rate, refund rate, etc.).
+  totalPlacedOrders: MetricWithComparison | undefined;
 };
 
 export type TimeRange = {
@@ -1865,6 +1875,192 @@ export type DeleteArchiveByIdRequest = {
 export type DeleteArchiveByIdResponse = {
 };
 
+export type AddModelRequest = {
+  model: common_ModelInsert | undefined;
+};
+
+// ModelInsert is the writable payload for a fit-model profile. Measurements are
+// sparse: include only the ones that are filled in.
+export type common_ModelInsert = {
+  name: string | undefined;
+  comment: string | undefined;
+  gender: common_GenderEnum | undefined;
+  measurements: common_ModelMeasurement[] | undefined;
+  thumbnailId: number | undefined;
+  mediaIds: number[] | undefined;
+  defaultSizeIds: number[] | undefined;
+};
+
+// ModelMeasurement is a single body measurement value, in millimetres.
+export type common_ModelMeasurement = {
+  name: common_BodyMeasurementName | undefined;
+  valueMm: number | undefined;
+};
+
+// BodyMeasurementName enumerates the body-measurement types captured for a fit
+// model. It is intentionally separate from the garment MeasurementName dictionary.
+export type common_BodyMeasurementName =
+  | "BODY_MEASUREMENT_NAME_UNKNOWN"
+  // Torso
+  | "BODY_MEASUREMENT_NAME_CHEST"
+  | "BODY_MEASUREMENT_NAME_UNDER_BUST"
+  | "BODY_MEASUREMENT_NAME_WAIST"
+  | "BODY_MEASUREMENT_NAME_HIGH_HIP"
+  | "BODY_MEASUREMENT_NAME_HIP"
+  | "BODY_MEASUREMENT_NAME_NECK_BASE"
+  // Arms
+  | "BODY_MEASUREMENT_NAME_ACROSS_SHOULDER"
+  | "BODY_MEASUREMENT_NAME_SLEEVE_LENGTH"
+  | "BODY_MEASUREMENT_NAME_BICEP"
+  | "BODY_MEASUREMENT_NAME_WRIST"
+  // Legs
+  | "BODY_MEASUREMENT_NAME_INSEAM"
+  | "BODY_MEASUREMENT_NAME_THIGH"
+  | "BODY_MEASUREMENT_NAME_KNEE"
+  | "BODY_MEASUREMENT_NAME_CALF"
+  | "BODY_MEASUREMENT_NAME_ANKLE"
+  // Vertical / lengths
+  | "BODY_MEASUREMENT_NAME_HEIGHT"
+  | "BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT"
+  | "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST"
+  // Widths (front / back)
+  | "BODY_MEASUREMENT_NAME_ACROSS_FRONT"
+  | "BODY_MEASUREMENT_NAME_ACROSS_BACK";
+export type AddModelResponse = {
+  id: number | undefined;
+};
+
+export type ListModelsRequest = {
+  limit: number | undefined;
+  offset: number | undefined;
+  orderFactor: common_OrderFactor | undefined;
+  gender: common_GenderEnum | undefined;
+  name: string | undefined;
+};
+
+export type ListModelsResponse = {
+  models: common_Model[] | undefined;
+  total: number | undefined;
+};
+
+// Model is a stored fit-model profile.
+export type common_Model = {
+  id: number | undefined;
+  model: common_ModelInsert | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  thumbnail: common_MediaFull | undefined;
+  media: common_MediaFull[] | undefined;
+};
+
+export type GetModelRequest = {
+  id: number | undefined;
+};
+
+export type GetModelResponse = {
+  model: common_Model | undefined;
+};
+
+export type UpdateModelRequest = {
+  id: number | undefined;
+  model: common_ModelInsert | undefined;
+};
+
+export type UpdateModelResponse = {
+};
+
+export type DeleteModelRequest = {
+  id: number | undefined;
+};
+
+export type DeleteModelResponse = {
+};
+
+export type AddFittingRequest = {
+  fitting: common_FittingInsert | undefined;
+};
+
+// FittingInsert is the writable payload for a fitting session.
+export type common_FittingInsert = {
+  productId: number | undefined;
+  modelId: number | undefined;
+  fittingDate: wellKnownTimestamp | undefined;
+  comment: string | undefined;
+  status: common_FittingStatus | undefined;
+  verdict: common_FittingVerdict | undefined;
+  recordedBy: string | undefined;
+  sizes: common_FittingSizeInsert[] | undefined;
+  mediaIds: number[] | undefined;
+};
+
+// FittingStatus is the lifecycle state of a fitting session.
+export type common_FittingStatus =
+  | "FITTING_STATUS_UNKNOWN"
+  | "FITTING_STATUS_PLANNED"
+  | "FITTING_STATUS_DONE"
+  | "FITTING_STATUS_CANCELLED";
+// FittingVerdict is the outcome of a fitting session.
+export type common_FittingVerdict =
+  | "FITTING_VERDICT_UNKNOWN"
+  | "FITTING_VERDICT_PENDING"
+  | "FITTING_VERDICT_APPROVED"
+  | "FITTING_VERDICT_NEEDS_REWORK"
+  | "FITTING_VERDICT_REJECTED";
+// FittingSizeInsert is one size tried in a fitting, with an optional per-size note.
+export type common_FittingSizeInsert = {
+  sizeId: number | undefined;
+  fitNote: string | undefined;
+};
+
+export type AddFittingResponse = {
+  id: number | undefined;
+};
+
+export type ListFittingsRequest = {
+  limit: number | undefined;
+  offset: number | undefined;
+  orderFactor: common_OrderFactor | undefined;
+  productId: number | undefined;
+  modelId: number | undefined;
+};
+
+export type ListFittingsResponse = {
+  fittings: common_Fitting[] | undefined;
+  total: number | undefined;
+};
+
+// Fitting is a stored try-on session with resolved media for display.
+export type common_Fitting = {
+  id: number | undefined;
+  fitting: common_FittingInsert | undefined;
+  media: common_MediaFull[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+export type GetFittingRequest = {
+  id: number | undefined;
+};
+
+export type GetFittingResponse = {
+  fitting: common_Fitting | undefined;
+};
+
+export type UpdateFittingRequest = {
+  id: number | undefined;
+  fitting: common_FittingInsert | undefined;
+};
+
+export type UpdateFittingResponse = {
+};
+
+export type DeleteFittingRequest = {
+  id: number | undefined;
+};
+
+export type DeleteFittingResponse = {
+};
+
 export type UpdateSettingsRequest = {
   shipmentCarriers: ShipmentCarrierAllowancePrice[] | undefined;
   paymentMethods: PaymentMethodAllowance[] | undefined;
@@ -2343,6 +2539,29 @@ export interface AdminService {
   // DeleteArchiveById deletes an archive by ID.
   DeleteArchiveById(request: DeleteArchiveByIdRequest): Promise<DeleteArchiveByIdResponse>;
   GetArchiveByID(request: GetArchiveByIDRequest): Promise<GetArchiveByIDResponse>;
+  // AddModel creates a new fit-model profile.
+  AddModel(request: AddModelRequest): Promise<AddModelResponse>;
+  // GetModel returns a fit-model profile by id.
+  GetModel(request: GetModelRequest): Promise<GetModelResponse>;
+  // UpdateModel updates a fit-model profile.
+  UpdateModel(request: UpdateModelRequest): Promise<UpdateModelResponse>;
+  // DeleteModel deletes a fit-model profile by id.
+  DeleteModel(request: DeleteModelRequest): Promise<DeleteModelResponse>;
+  // ListModels lists fit-model profiles (paged). Declared last on purpose (see
+  // ordering note above) so GET /model/list is not shadowed by GET /model/{id}.
+  ListModels(request: ListModelsRequest): Promise<ListModelsResponse>;
+  // AddFitting creates a new fitting session.
+  AddFitting(request: AddFittingRequest): Promise<AddFittingResponse>;
+  // GetFitting returns a fitting session by id.
+  GetFitting(request: GetFittingRequest): Promise<GetFittingResponse>;
+  // UpdateFitting updates a fitting session.
+  UpdateFitting(request: UpdateFittingRequest): Promise<UpdateFittingResponse>;
+  // DeleteFitting deletes a fitting session by id.
+  DeleteFitting(request: DeleteFittingRequest): Promise<DeleteFittingResponse>;
+  // ListFittings lists fitting sessions (paged, optional product/model filter).
+  // Declared last on purpose (see ListModels ordering note) so GET /fitting/list
+  // is not shadowed by GET /fitting/{id}.
+  ListFittings(request: ListFittingsRequest): Promise<ListFittingsResponse>;
   UpdateSettings(request: UpdateSettingsRequest): Promise<UpdateSettingsResponse>;
   GetBackgroundHeroColor(request: GetBackgroundHeroColorRequest): Promise<GetBackgroundHeroColorResponse>;
   SetBackgroundHeroColor(request: SetBackgroundHeroColorRequest): Promise<SetBackgroundHeroColorResponse>;
@@ -2592,6 +2811,11 @@ export function createAdminServiceClient(
       if (request.filterConditions?.seasons) {
         request.filterConditions.seasons.forEach((x) => {
           queryParams.push(`filterConditions.seasons=${encodeURIComponent(x.toString())}`)
+        })
+      }
+      if (request.filterConditions?.excludeTopCategoryIds) {
+        request.filterConditions.excludeTopCategoryIds.forEach((x) => {
+          queryParams.push(`filterConditions.excludeTopCategoryIds=${encodeURIComponent(x.toString())}`)
         })
       }
       if (request.showHidden) {
@@ -3116,6 +3340,218 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetArchiveByID",
       }) as Promise<GetArchiveByIDResponse>;
+    },
+    AddModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/model/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddModel",
+      }) as Promise<AddModelResponse>;
+    },
+    GetModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/model/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetModel",
+      }) as Promise<GetModelResponse>;
+    },
+    UpdateModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/model/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateModel",
+      }) as Promise<UpdateModelResponse>;
+    },
+    DeleteModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/model/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteModel",
+      }) as Promise<DeleteModelResponse>;
+    },
+    ListModels(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/model/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      if (request.gender) {
+        queryParams.push(`gender=${encodeURIComponent(request.gender.toString())}`)
+      }
+      if (request.name) {
+        queryParams.push(`name=${encodeURIComponent(request.name.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListModels",
+      }) as Promise<ListModelsResponse>;
+    },
+    AddFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fitting/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddFitting",
+      }) as Promise<AddFittingResponse>;
+    },
+    GetFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/fitting/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFitting",
+      }) as Promise<GetFittingResponse>;
+    },
+    UpdateFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fitting/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateFitting",
+      }) as Promise<UpdateFittingResponse>;
+    },
+    DeleteFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/fitting/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFitting",
+      }) as Promise<DeleteFittingResponse>;
+    },
+    ListFittings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fitting/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      if (request.productId) {
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      }
+      if (request.modelId) {
+        queryParams.push(`modelId=${encodeURIComponent(request.modelId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFittings",
+      }) as Promise<ListFittingsResponse>;
     },
     UpdateSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/update`; // eslint-disable-line quotes

@@ -62,3 +62,4 @@ Thumbs.db
 # Vite
 .vite
 .vercel
+.env*

@@ -60,6 +60,18 @@ const HackerManager = lazy(() =>
 const TierAudit = lazy(() =>
   import('components/managers/membership/audit/page').then((m) => ({ default: m.TierAudit })),
 );
+const Models = lazy(() =>
+  import('components/managers/models').then((m) => ({ default: m.Models })),
+);
+const Model = lazy(() =>
+  import('components/managers/model/page').then((m) => ({ default: m.Model })),
+);
+const Fittings = lazy(() =>
+  import('components/managers/fittings').then((m) => ({ default: m.Fittings })),
+);
+const Fitting = lazy(() =>
+  import('components/managers/fitting/page').then((m) => ({ default: m.Fitting })),
+);
 
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
@@ -143,6 +155,12 @@ root.render(
                     <Route path={ROUTES.tierConfig} element={<TierConfig />} />
                     <Route path={ROUTES.hacker} element={<HackerManager />} />
                     <Route path={ROUTES.tierAudit} element={<TierAudit />} />
+                    <Route path={ROUTES.models} element={<Models />} />
+                    <Route path={ROUTES.addModel} element={<Model />} />
+                    <Route path={ROUTES.singleModel} element={<Model />} />
+                    <Route path={ROUTES.fittings} element={<Fittings />} />
+                    <Route path={ROUTES.addFitting} element={<Fitting />} />
+                    <Route path={ROUTES.singleFitting} element={<Fitting />} />
                   </Route>
                 </Routes>
               </Suspense>

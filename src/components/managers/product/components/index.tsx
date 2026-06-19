@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { common_ProductFull, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
+import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
@@ -225,6 +226,12 @@ export function ProductForm({
             onStockUpdated={onStockUpdated}
           />
         </Section>
+
+        {productId && !isCopyMode && (
+          <Section title='fittings'>
+            <FittingsReadonlyList productId={Number(productId)} />
+          </Section>
+        )}
       </form>
 
       {/* Sticky action bar */}
