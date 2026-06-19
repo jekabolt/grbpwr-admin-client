@@ -1885,10 +1885,10 @@ export type common_ModelInsert = {
   name: string | undefined;
   comment: string | undefined;
   gender: common_GenderEnum | undefined;
-  defaultSampleSizeId: number | undefined;
   measurements: common_ModelMeasurement[] | undefined;
   thumbnailId: number | undefined;
   mediaIds: number[] | undefined;
+  defaultSizeIds: number[] | undefined;
 };
 
 // ModelMeasurement is a single body measurement value, in millimetres.
@@ -1934,6 +1934,8 @@ export type ListModelsRequest = {
   limit: number | undefined;
   offset: number | undefined;
   orderFactor: common_OrderFactor | undefined;
+  gender: common_GenderEnum | undefined;
+  name: string | undefined;
 };
 
 export type ListModelsResponse = {
@@ -3425,6 +3427,12 @@ export function createAdminServiceClient(
       }
       if (request.orderFactor) {
         queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      if (request.gender) {
+        queryParams.push(`gender=${encodeURIComponent(request.gender.toString())}`)
+      }
+      if (request.name) {
+        queryParams.push(`name=${encodeURIComponent(request.name.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {

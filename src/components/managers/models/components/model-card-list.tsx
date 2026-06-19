@@ -1,7 +1,8 @@
 import { genderOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -9,9 +10,10 @@ import Input from 'ui/components/input';
 import Media from 'ui/components/media';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
-import { useAllModels, useDeleteModel } from './useModelQuery';
+import { useDeleteModel, useInfiniteModels } from './useModelQuery';
 
 const ALL = 'ALL';
+const LIMIT = 24;
 
 function genderLabel(gender?: string) {
   if (!gender || gender === 'GENDER_ENUM_UNKNOWN') return '—';
@@ -23,25 +25,39 @@ export function ModelCardList() {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
   const deleteModel = useDeleteModel();
-  const { data: models, isLoading } = useAllModels();
 
   const [gender, setGender] = useState<string>(ALL);
   const [name, setName] = useState('');
+  const [debouncedName, setDebouncedName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
 
-  const sizeName = (sizeId?: number) => {
-    if (!sizeId) return '—';
-    return dictionary?.sizes?.find((s) => s.id === sizeId)?.name ?? `#${sizeId}`;
-  };
+  // Debounce the name search so we don't hit the API on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedName(name), 300);
+    return () => clearTimeout(t);
+  }, [name]);
 
-  const filtered = useMemo(() => {
-    const q = name.trim().toLowerCase();
-    return (models ?? []).filter((m) => {
-      if (gender !== ALL && m.model?.gender !== gender) return false;
-      if (q && !(m.model?.name ?? '').toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [models, gender, name]);
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteModels(
+    { gender: gender === ALL ? '' : gender, name: debouncedName },
+    LIMIT,
+  );
+  const { ref, inView } = useInView({ rootMargin: '200px' });
+
+  useEffect(() => {
+    if (inView && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const models = data?.pages.flatMap((page) => page.models) ?? [];
+  const total = data?.pages[0]?.total ?? models.length;
+
+  const sizesLabel = (ids?: number[]) => {
+    if (!ids?.length) return '—';
+    return ids
+      .map((id) => dictionary?.sizes?.find((s) => s.id === id)?.name ?? `#${id}`)
+      .join(', ');
+  };
 
   function confirmDelete() {
     if (!pendingDelete) return;
@@ -76,7 +92,7 @@ export function ModelCardList() {
           />
         </div>
         <Text variant='inactive' size='small'>
-          {filtered.length} of {models?.length ?? 0}
+          {models.length} of {total}
         </Text>
       </div>
 
@@ -86,7 +102,7 @@ export function ModelCardList() {
             loading models…
           </Text>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : models.length === 0 ? (
         <div className='flex justify-center py-20'>
           <Text variant='inactive' className='uppercase'>
             no models
@@ -94,7 +110,7 @@ export function ModelCardList() {
         </div>
       ) : (
         <div className='grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4'>
-          {filtered.map((model) => {
+          {models.map((model) => {
             const id = model.id ?? 0;
             const insert = model.model;
             const thumb = model.thumbnail?.media?.thumbnail?.mediaUrl || '';
@@ -113,7 +129,7 @@ export function ModelCardList() {
                     {insert?.name || '—'} <span className='text-textInactiveColor'>#{id}</span>
                   </Text>
                   <Text variant='inactive' size='small'>
-                    {genderLabel(insert?.gender)} · sample {sizeName(insert?.defaultSampleSizeId)} ·{' '}
+                    {genderLabel(insert?.gender)} · sizes {sizesLabel(insert?.defaultSizeIds)} ·{' '}
                     {insert?.measurements?.length ?? 0} meas.
                   </Text>
                 </div>
@@ -131,6 +147,12 @@ export function ModelCardList() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {hasNextPage && (
+        <div ref={ref} className='flex justify-center py-4'>
+          {isFetchingNextPage && <Text variant='inactive'>loading more…</Text>}
         </div>
       )}
 

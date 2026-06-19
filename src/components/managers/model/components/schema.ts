@@ -12,7 +12,7 @@ export const modelSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   comment: z.string().optional().default(''),
   gender: z.string().optional().default(''),
-  defaultSampleSizeId: z.number().optional().default(0),
+  defaultSizeIds: z.array(z.number()).default([]),
   measurements: z.record(z.string(), z.number().min(0).optional()).default({}),
   // Photo gallery; the first item is treated as the thumbnail.
   mediaIds: z.array(z.number()).default([]),
@@ -24,7 +24,7 @@ export const modelDefaultData: ModelFormData = {
   name: '',
   comment: '',
   gender: '',
-  defaultSampleSizeId: 0,
+  defaultSizeIds: [],
   measurements: {},
   mediaIds: [],
 };
@@ -54,7 +54,7 @@ export function mapModelToForm(model: common_Model): ModelFormData {
     comment: insert?.comment || '',
     gender:
       insert?.gender && insert.gender !== 'GENDER_ENUM_UNKNOWN' ? insert.gender : '',
-    defaultSampleSizeId: insert?.defaultSampleSizeId || 0,
+    defaultSizeIds: insert?.defaultSizeIds ?? [],
     measurements,
     mediaIds,
   };
@@ -74,7 +74,7 @@ export function mapFormToModelInsert(data: ModelFormData): common_ModelInsert {
     name: data.name.trim(),
     comment: data.comment?.trim() || '',
     gender: (data.gender || 'GENDER_ENUM_UNKNOWN') as common_GenderEnum,
-    defaultSampleSizeId: data.defaultSampleSizeId || 0,
+    defaultSizeIds: data.defaultSizeIds ?? [],
     measurements,
     thumbnailId: mediaIds[0] ?? 0,
     mediaIds,

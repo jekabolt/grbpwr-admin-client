@@ -977,10 +977,10 @@ export type ModelInsert = {
   name: string | undefined;
   comment: string | undefined;
   gender: GenderEnum | undefined;
-  defaultSampleSizeId: number | undefined;
   measurements: ModelMeasurement[] | undefined;
   thumbnailId: number | undefined;
   mediaIds: number[] | undefined;
+  defaultSizeIds: number[] | undefined;
 };
 
 // Model is a stored fit-model profile.
