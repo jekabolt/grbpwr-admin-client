@@ -109,11 +109,15 @@ const LoadingFallback = () => (
 
 const ProtectedLayout = () => (
   <ProtectedRoute>
-    <Layout>
-      <Suspense fallback={<LoadingFallback />}>
-        <Outlet />
-      </Suspense>
-    </Layout>
+    {/* Mounted inside the auth gate so the dictionary is fetched only once a
+        valid token exists (after login), not at app boot before login. */}
+    <DictionaryProvider>
+      <Layout>
+        <Suspense fallback={<LoadingFallback />}>
+          <Outlet />
+        </Suspense>
+      </Layout>
+    </DictionaryProvider>
   </ProtectedRoute>
 );
 
@@ -125,12 +129,11 @@ const root = createRoot(container);
 root.render(
   <StrictMode>
     <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => (window.location.href = '/')}>
-      <DictionaryProvider>
-        <ContextProvider>
-          <QueryClientProvider client={queryClient}>
-            <BrowserRouter>
-              <Suspense fallback={<LoadingFallback />}>
-                <Routes>
+      <ContextProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <Suspense fallback={<LoadingFallback />}>
+              <Routes>
                   <Route path={ROUTES.login} element={<LoginBlock />} />
                   <Route path='/' element={<ProtectedLayout />}>
                     <Route path={ROUTES.main} element={<Analitic />} />
@@ -167,8 +170,7 @@ root.render(
             </BrowserRouter>
             <ReactQueryDevtools initialIsOpen={false} />
           </QueryClientProvider>
-        </ContextProvider>
-      </DictionaryProvider>
+      </ContextProvider>
     </ErrorBoundary>
   </StrictMode>,
 );
