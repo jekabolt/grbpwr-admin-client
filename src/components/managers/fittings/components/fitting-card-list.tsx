@@ -87,7 +87,7 @@ export function FittingCardList() {
                 tabIndex={0}
                 onClick={() => navigate(`/fittings/${id}`)}
                 onKeyDown={(e) => e.key === 'Enter' && navigate(`/fittings/${id}`)}
-                className='flex cursor-pointer flex-col border border-textColor hover:bg-textInactiveColor'
+                className='group relative flex cursor-pointer flex-col overflow-hidden border border-textColor transition-colors hover:bg-highlightColor/5'
               >
                 <Media
                   src={productThumb(insert?.productId)}
@@ -104,19 +104,18 @@ export function FittingCardList() {
                     {statusLabel(insert?.status)} · {verdictLabel(insert?.verdict)} ·{' '}
                     {fitting.media?.length ?? 0} photo(s)
                   </Text>
-                  <div className='flex justify-end'>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      onClick={(e: React.MouseEvent) => {
-                        e.stopPropagation();
-                        setPendingDelete({ id });
-                      }}
-                    >
-                      delete
-                    </Button>
-                  </div>
                 </div>
+                <Button
+                  type='button'
+                  aria-label='delete fitting'
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    setPendingDelete({ id });
+                  }}
+                  className='absolute right-1 top-1 z-20 border border-textColor bg-bgColor px-1.5 leading-none opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100'
+                >
+                  ✕
+                </Button>
               </div>
             );
           })}
