@@ -148,7 +148,7 @@ export function FittingForm({
 
           <div className='flex w-full flex-col gap-6 lg:w-1/2'>
             <Section title='sizes'>
-              <SizesFields />
+              <SizesFields modelGender={selectedModel?.model?.gender} />
             </Section>
             <Section title='photos'>
               <FittingMedia fitting={fitting} />
