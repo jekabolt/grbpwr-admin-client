@@ -2,7 +2,7 @@ import { ROUTES } from 'constants/routes';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { FittingTable } from './components/fitting-table';
+import { FittingCardList } from './components/fitting-card-list';
 
 export function Fittings() {
   return (
@@ -16,7 +16,7 @@ export function Fittings() {
         </Button>
       </div>
 
-      <FittingTable />
+      <FittingCardList />
     </div>
   );
 }

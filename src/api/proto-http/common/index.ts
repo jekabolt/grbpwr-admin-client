@@ -979,6 +979,8 @@ export type ModelInsert = {
   gender: GenderEnum | undefined;
   defaultSampleSizeId: number | undefined;
   measurements: ModelMeasurement[] | undefined;
+  thumbnailId: number | undefined;
+  mediaIds: number[] | undefined;
 };
 
 // Model is a stored fit-model profile.
@@ -987,6 +989,8 @@ export type Model = {
   model: ModelInsert | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  thumbnail: MediaFull | undefined;
+  media: MediaFull[] | undefined;
 };
 
 // Subscriber represents the subscriber table
