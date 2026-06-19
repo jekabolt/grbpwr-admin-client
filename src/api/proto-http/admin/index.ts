@@ -2535,24 +2535,27 @@ export interface AdminService {
   GetArchiveByID(request: GetArchiveByIDRequest): Promise<GetArchiveByIDResponse>;
   // AddModel creates a new fit-model profile.
   AddModel(request: AddModelRequest): Promise<AddModelResponse>;
-  // ListModels lists fit-model profiles (paged).
-  ListModels(request: ListModelsRequest): Promise<ListModelsResponse>;
   // GetModel returns a fit-model profile by id.
   GetModel(request: GetModelRequest): Promise<GetModelResponse>;
   // UpdateModel updates a fit-model profile.
   UpdateModel(request: UpdateModelRequest): Promise<UpdateModelResponse>;
   // DeleteModel deletes a fit-model profile by id.
   DeleteModel(request: DeleteModelRequest): Promise<DeleteModelResponse>;
+  // ListModels lists fit-model profiles (paged). Declared last on purpose (see
+  // ordering note above) so GET /model/list is not shadowed by GET /model/{id}.
+  ListModels(request: ListModelsRequest): Promise<ListModelsResponse>;
   // AddFitting creates a new fitting session.
   AddFitting(request: AddFittingRequest): Promise<AddFittingResponse>;
-  // ListFittings lists fitting sessions (paged, optional product/model filter).
-  ListFittings(request: ListFittingsRequest): Promise<ListFittingsResponse>;
   // GetFitting returns a fitting session by id.
   GetFitting(request: GetFittingRequest): Promise<GetFittingResponse>;
   // UpdateFitting updates a fitting session.
   UpdateFitting(request: UpdateFittingRequest): Promise<UpdateFittingResponse>;
   // DeleteFitting deletes a fitting session by id.
   DeleteFitting(request: DeleteFittingRequest): Promise<DeleteFittingResponse>;
+  // ListFittings lists fitting sessions (paged, optional product/model filter).
+  // Declared last on purpose (see ListModels ordering note) so GET /fitting/list
+  // is not shadowed by GET /fitting/{id}.
+  ListFittings(request: ListFittingsRequest): Promise<ListFittingsResponse>;
   UpdateSettings(request: UpdateSettingsRequest): Promise<UpdateSettingsResponse>;
   GetBackgroundHeroColor(request: GetBackgroundHeroColorRequest): Promise<GetBackgroundHeroColorResponse>;
   SetBackgroundHeroColor(request: SetBackgroundHeroColorRequest): Promise<SetBackgroundHeroColorResponse>;
@@ -3349,32 +3352,6 @@ export function createAdminServiceClient(
         method: "AddModel",
       }) as Promise<AddModelResponse>;
     },
-    ListModels(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/model/list`; // eslint-disable-line quotes
-      const body = null;
-      const queryParams: string[] = [];
-      if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
-      }
-      if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
-      }
-      if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
-      }
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "GET",
-        body,
-      }, {
-        service: "AdminService",
-        method: "ListModels",
-      }) as Promise<ListModelsResponse>;
-    },
     GetModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
         throw new Error("missing required field request.id");
@@ -3432,6 +3409,32 @@ export function createAdminServiceClient(
         method: "DeleteModel",
       }) as Promise<DeleteModelResponse>;
     },
+    ListModels(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/model/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListModels",
+      }) as Promise<ListModelsResponse>;
+    },
     AddFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fitting/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -3448,38 +3451,6 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AddFitting",
       }) as Promise<AddFittingResponse>;
-    },
-    ListFittings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/fitting/list`; // eslint-disable-line quotes
-      const body = null;
-      const queryParams: string[] = [];
-      if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
-      }
-      if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
-      }
-      if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
-      }
-      if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
-      }
-      if (request.modelId) {
-        queryParams.push(`modelId=${encodeURIComponent(request.modelId.toString())}`)
-      }
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "GET",
-        body,
-      }, {
-        service: "AdminService",
-        method: "ListFittings",
-      }) as Promise<ListFittingsResponse>;
     },
     GetFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
@@ -3537,6 +3508,38 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteFitting",
       }) as Promise<DeleteFittingResponse>;
+    },
+    ListFittings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fitting/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      if (request.productId) {
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      }
+      if (request.modelId) {
+        queryParams.push(`modelId=${encodeURIComponent(request.modelId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFittings",
+      }) as Promise<ListFittingsResponse>;
     },
     UpdateSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/update`; // eslint-disable-line quotes
