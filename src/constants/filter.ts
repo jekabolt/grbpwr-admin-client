@@ -1,4 +1,6 @@
 import {
+  common_FittingStatus,
+  common_FittingVerdict,
   common_GenderEnum,
   common_OrderFactor,
   common_OrderStatusEnum,
@@ -59,6 +61,21 @@ export const statusOptions: Array<{ value: common_OrderStatusEnum; label: string
   { value: 'ORDER_STATUS_ENUM_PARTIALLY_REFUNDED', label: 'partially refunded' },
   { value: 'ORDER_STATUS_ENUM_PENDING_RETURN', label: 'pending return' },
   { value: 'ORDER_STATUS_ENUM_REFUND_IN_PROGRESS', label: 'refund in progress' },
+];
+
+// Selectable fitting-session statuses (excludes the UNKNOWN/unset sentinel).
+export const fittingStatusOptions: Array<{ value: common_FittingStatus; label: string }> = [
+  { value: 'FITTING_STATUS_PLANNED', label: 'planned' },
+  { value: 'FITTING_STATUS_DONE', label: 'done' },
+  { value: 'FITTING_STATUS_CANCELLED', label: 'cancelled' },
+];
+
+// Selectable fitting-session verdicts (excludes the UNKNOWN/unset sentinel).
+export const fittingVerdictOptions: Array<{ value: common_FittingVerdict; label: string }> = [
+  { value: 'FITTING_VERDICT_PENDING', label: 'pending' },
+  { value: 'FITTING_VERDICT_APPROVED', label: 'approved' },
+  { value: 'FITTING_VERDICT_NEEDS_REWORK', label: 'needs rework' },
+  { value: 'FITTING_VERDICT_REJECTED', label: 'rejected' },
 ];
 
 export const colors: Colors[] = [

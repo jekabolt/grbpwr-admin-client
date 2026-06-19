@@ -15,6 +15,8 @@ interface ProductPickerProps {
   selectedProducts: common_Product[];
   hasMore: boolean;
   triggerClassName?: string;
+  /** When true, only one product can be selected (picking another replaces it). */
+  singleSelect?: boolean;
   handleSaveProducts: (products: common_Product[]) => void;
   loadMore: () => void;
 }
@@ -24,6 +26,7 @@ export function ProductPicker({
   selectedProducts,
   hasMore,
   triggerClassName,
+  singleSelect = false,
   handleSaveProducts,
   loadMore,
 }: ProductPickerProps) {
@@ -44,15 +47,18 @@ export function ProductPicker({
     }
   }, [open, selectedProducts]);
 
-  const togglePending = useCallback((product: common_Product) => {
-    setPendingSelection((prev) => {
-      const isSelected = prev.some((p) => p.id === product.id);
-      if (isSelected) {
-        return prev.filter((p) => p.id !== product.id);
-      }
-      return [...prev, product];
-    });
-  }, []);
+  const togglePending = useCallback(
+    (product: common_Product) => {
+      setPendingSelection((prev) => {
+        const isSelected = prev.some((p) => p.id === product.id);
+        if (isSelected) {
+          return prev.filter((p) => p.id !== product.id);
+        }
+        return singleSelect ? [product] : [...prev, product];
+      });
+    },
+    [singleSelect],
+  );
 
   const handleSave = () => {
     handleSaveProducts(pendingSelection);
@@ -78,7 +84,7 @@ export function ProductPicker({
     <DialogPrimitives.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitives.Trigger asChild>
         <Button variant='main' size='lg' type='button' className={triggerClassName}>
-          select products
+          {singleSelect ? 'select product' : 'select products'}
         </Button>
       </DialogPrimitives.Trigger>
       <DialogPrimitives.Portal>
@@ -90,12 +96,14 @@ export function ProductPicker({
             'lg:inset-x-auto lg:left-1/2 lg:top-1/2 lg:bottom-auto lg:h-[min(85vh,600px)] lg:w-[min(90vw,900px)] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-2.5',
           )}
         >
-          <DialogPrimitives.Title className='sr-only'>Select products</DialogPrimitives.Title>
+          <DialogPrimitives.Title className='sr-only'>
+            {singleSelect ? 'Select product' : 'Select products'}
+          </DialogPrimitives.Title>
           <DialogPrimitives.Description className='sr-only'>
-            Pick products for custom order
+            {singleSelect ? 'Pick a product' : 'Pick products for custom order'}
           </DialogPrimitives.Description>
           <div className='flex shrink-0 items-center justify-between'>
-            <Text variant='uppercase'>select products</Text>
+            <Text variant='uppercase'>{singleSelect ? 'select product' : 'select products'}</Text>
             <DialogPrimitives.Close asChild>
               <Button>[x]</Button>
             </DialogPrimitives.Close>
