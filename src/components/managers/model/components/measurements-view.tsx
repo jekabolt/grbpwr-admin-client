@@ -23,7 +23,7 @@ export function ModelMeasurementsView({
   }
 
   return (
-    <div className='space-y-3 border border-textColor bg-bgColor p-3'>
+    <div className='space-y-6 border border-textColor bg-bgColor p-3'>
       <Text variant='uppercase' size='small'>
         model measurements · mm
       </Text>
@@ -31,16 +31,13 @@ export function ModelMeasurementsView({
         const present = group.measurements.filter((m) => values.has(m.name));
         if (present.length === 0) return null;
         return (
-          <div key={group.title} className='space-y-1.5'>
-            <Text variant='inactive' size='small' className='uppercase tracking-wide'>
+          <div key={group.title} className='space-y-2'>
+            <Text variant='uppercase' size='small' className='border-b border-textColor pb-1'>
               {group.title}
             </Text>
-            <div className='grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3'>
+            <div className='grid grid-cols-2 gap-x-10 gap-y-2 sm:grid-cols-3'>
               {present.map((m) => (
-                <div
-                  key={m.name}
-                  className='flex items-baseline justify-between gap-2 border-b border-dashed border-textInactiveColor pb-0.5'
-                >
+                <div key={m.name} className='flex items-baseline justify-between gap-2'>
                   <Text variant='inactive' size='small'>
                     {m.label}
                   </Text>
