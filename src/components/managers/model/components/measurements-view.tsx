@@ -23,26 +23,28 @@ export function ModelMeasurementsView({
   }
 
   return (
-    <div className='space-y-2 border border-textInactiveColor p-3'>
+    <div className='space-y-3 border border-textColor bg-bgColor p-3'>
       <Text variant='uppercase' size='small'>
-        model measurements (mm)
+        model measurements · mm
       </Text>
       {BODY_MEASUREMENT_GROUPS.map((group) => {
         const present = group.measurements.filter((m) => values.has(m.name));
         if (present.length === 0) return null;
         return (
-          <div key={group.title} className='space-y-1'>
-            <Text variant='inactive' size='small'>
+          <div key={group.title} className='space-y-1.5'>
+            <Text variant='inactive' size='small' className='uppercase tracking-wide'>
               {group.title}
             </Text>
-            <div className='grid grid-cols-2 gap-x-4 gap-y-1 lg:grid-cols-3'>
+            <div className='grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3'>
               {present.map((m) => (
                 <div
                   key={m.name}
-                  className='flex justify-between gap-2 border-b border-textInactiveColor/40'
+                  className='flex items-baseline justify-between gap-2 border-b border-dashed border-textInactiveColor pb-0.5'
                 >
-                  <Text size='small'>{m.label}</Text>
-                  <Text size='small'>{values.get(m.name)}</Text>
+                  <Text variant='inactive' size='small'>
+                    {m.label}
+                  </Text>
+                  <Text>{values.get(m.name)}</Text>
                 </div>
               ))}
             </div>

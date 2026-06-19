@@ -85,7 +85,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                 tabIndex={0}
                 onClick={() => navigate(`/fittings/${id}`)}
                 onKeyDown={(e) => e.key === 'Enter' && navigate(`/fittings/${id}`)}
-                className='cursor-pointer border-b border-textColor hover:bg-textInactiveColor'
+                className='cursor-pointer border-b border-textColor transition-colors hover:bg-highlightColor/5'
               >
                 <td className='border border-textColor px-2 py-1'>
                   <Text>{formatFittingDate(insert?.fittingDate)}</Text>
