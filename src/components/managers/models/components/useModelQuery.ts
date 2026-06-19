@@ -1,6 +1,11 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_ModelInsert } from 'api/proto-http/admin';
+import { common_GenderEnum, common_ModelInsert } from 'api/proto-http/admin';
+
+export type ModelFilter = {
+  gender?: string; // common_GenderEnum or '' for any
+  name?: string; // substring search
+};
 
 export const modelKeys = {
   all: ['models'] as const,
@@ -9,16 +14,20 @@ export const modelKeys = {
   detail: (id: number) => [...modelKeys.details(), id] as const,
 };
 
-// Infinite list for the models table. ListModels returns `total` (count ignoring
-// pagination), so we page by offset until the loaded count reaches total.
-export function useInfiniteModels(limit: number = 30) {
+// Infinite list with server-side gender + name filters. ListModels returns `total`
+// (count ignoring pagination), so we page by offset until the loaded count reaches it.
+export function useInfiniteModels(filter: ModelFilter = {}, limit: number = 30) {
+  const gender = (filter.gender || 'GENDER_ENUM_UNKNOWN') as common_GenderEnum;
+  const name = filter.name?.trim() || '';
   return useInfiniteQuery({
-    queryKey: [...modelKeys.lists(), 'infinite', limit],
+    queryKey: [...modelKeys.lists(), 'infinite', { gender, name, limit }],
     queryFn: async ({ pageParam }: { pageParam: number }) => {
       const response = await adminService.ListModels({
         limit,
         offset: pageParam,
         orderFactor: 'ORDER_FACTOR_DESC',
+        gender,
+        name,
       });
       const models = response.models || [];
       const total = response.total ?? 0;
@@ -44,6 +53,8 @@ export function useAllModels(limit: number = 500) {
         limit,
         offset: 0,
         orderFactor: 'ORDER_FACTOR_DESC',
+        gender: 'GENDER_ENUM_UNKNOWN',
+        name: '',
       });
       return response.models || [];
     },

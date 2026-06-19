@@ -7,9 +7,7 @@ import {
 } from 'components/managers/models/components/useModelQuery';
 import { genderOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -18,6 +16,7 @@ import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { DefaultSizesField } from './default-sizes-field';
 import { MeasurementsFields } from './measurements-fields';
 import { ModelMedia } from './model-media';
 import {
@@ -58,7 +57,6 @@ export function ModelForm({
 }) {
   const { showMessage } = useSnackBarStore();
   const navigate = useNavigate();
-  const { dictionary } = useDictionary();
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
 
@@ -67,17 +65,6 @@ export function ModelForm({
     defaultValues: model ? mapModelToForm(model) : modelDefaultData,
     mode: 'onSubmit',
   });
-
-  const sizeOptions = useMemo(
-    () => [
-      { value: 0, label: '— none —' },
-      ...(dictionary?.sizes ?? []).map((s) => ({
-        value: s.id ?? 0,
-        label: s.name ?? `size ${s.id}`,
-      })),
-    ],
-    [dictionary?.sizes],
-  );
 
   async function handleSubmit(data: ModelFormData) {
     const modelInsert = mapFormToModelInsert(data);
@@ -124,12 +111,7 @@ export function ModelForm({
               items={genderOptions}
               placeholder='select gender'
             />
-            <SelectField
-              name='defaultSampleSizeId'
-              label='default sample size (optional)'
-              items={sizeOptions}
-              valueAsNumber
-            />
+            <DefaultSizesField />
             <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={1000} />
             <div className='space-y-1'>
               <Text variant='uppercase' size='small'>
