@@ -32,6 +32,12 @@ export enum ROUTES {
   tierConfig = '/tier-config',
   hacker = '/hacker',
   tierAudit = '/tier-audit',
+  models = '/models',
+  addModel = '/add-model',
+  singleModel = '/models/:id',
+  fittings = '/fittings',
+  addFitting = '/add-fitting',
+  singleFitting = '/fittings/:id',
 }
 
 export const SIDE_BAR_ITEMS = [
@@ -80,6 +86,14 @@ export const SIDE_BAR_ITEMS = [
     route: ROUTES.members,
   },
   {
+    label: 'MODELS',
+    route: ROUTES.models,
+  },
+  {
+    label: 'FITTINGS',
+    route: ROUTES.fittings,
+  },
+  {
     label: 'TIER CONFIG',
     route: ROUTES.tierConfig,
   },
@@ -121,6 +135,14 @@ export const LEFT_SIDE_ITEMS: Manager[] = [
   {
     label: 'members',
     route: ROUTES.members,
+  },
+  {
+    label: 'models',
+    route: ROUTES.models,
+  },
+  {
+    label: 'fittings',
+    route: ROUTES.fittings,
   },
   // {
   //   label: 'promo',

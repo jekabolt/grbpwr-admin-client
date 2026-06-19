@@ -1,0 +1,189 @@
+import { zodResolver } from '@hookform/resolvers/zod';
+import { common_Fitting } from 'api/proto-http/admin';
+import {
+  useCreateFitting,
+  useUpdateFitting,
+} from 'components/managers/fittings/components/useFittingQuery';
+import { ModelMeasurementsView } from 'components/managers/model/components/measurements-view';
+import { useAllModels } from 'components/managers/models/components/useModelQuery';
+import { fittingStatusOptions, fittingVerdictOptions } from 'constants/filter';
+import { ROUTES } from 'constants/routes';
+import { useSnackBarStore } from 'lib/stores/store';
+import { useMemo } from 'react';
+import { useForm } from 'react-hook-form';
+import { Link, useNavigate } from 'react-router-dom';
+import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
+import { Form } from 'ui/form';
+import InputField from 'ui/form/fields/input-field';
+import SelectField from 'ui/form/fields/select-field';
+import TextareaField from 'ui/form/fields/textarea-field';
+import { FittingMedia } from './fitting-media';
+import { ProductField } from './product-field';
+import {
+  FittingFormData,
+  fittingDefaultData,
+  fittingSchema,
+  mapFittingToForm,
+  mapFormToFittingInsert,
+  todayDateInput,
+} from './schema';
+import { SizesFields } from './sizes-fields';
+
+function Section({
+  title,
+  className,
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={`space-y-4 border border-textColor p-4 ${className ?? ''}`}>
+      <Text variant='uppercase' size='large'>
+        {title}
+      </Text>
+      {children}
+    </section>
+  );
+}
+
+export function FittingForm({
+  isEditMode,
+  id,
+  fitting,
+}: {
+  isEditMode: boolean;
+  id?: string;
+  fitting?: common_Fitting;
+}) {
+  const { showMessage } = useSnackBarStore();
+  const navigate = useNavigate();
+  const createFitting = useCreateFitting();
+  const updateFitting = useUpdateFitting();
+  const { data: models } = useAllModels();
+
+  const form = useForm<FittingFormData>({
+    resolver: zodResolver(fittingSchema),
+    defaultValues: fitting
+      ? mapFittingToForm(fitting)
+      : { ...fittingDefaultData, fittingDate: todayDateInput() },
+    mode: 'onSubmit',
+  });
+
+  const modelOptions = useMemo(
+    () => [
+      { value: 0, label: '— none —' },
+      ...(models ?? []).map((m) => ({
+        value: m.id ?? 0,
+        label: m.model?.name ? `${m.model.name} (#${m.id})` : `#${m.id}`,
+      })),
+    ],
+    [models],
+  );
+
+  const selectedModelId = form.watch('modelId');
+  const selectedModel = (models ?? []).find((m) => m.id === selectedModelId);
+
+  async function handleSubmit(data: FittingFormData) {
+    const fittingInsert = mapFormToFittingInsert(data);
+    try {
+      if (isEditMode) {
+        await updateFitting.mutateAsync({ id: parseInt(id || '0', 10), fitting: fittingInsert });
+        showMessage('fitting updated', 'success');
+        form.reset(data);
+      } else {
+        await createFitting.mutateAsync(fittingInsert);
+        showMessage('fitting created', 'success');
+        navigate(ROUTES.fittings);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to submit fitting';
+      showMessage(msg, 'error');
+      console.error('Failed to submit fitting', error);
+    }
+  }
+
+  return (
+    <Form {...form}>
+      <form
+        className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
+        onSubmit={form.handleSubmit(handleSubmit)}
+      >
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
+          <div className='flex flex-wrap items-center gap-3'>
+            <Button asChild variant='secondary' size='lg'>
+              <Link to={ROUTES.fittings}>← fittings</Link>
+            </Button>
+            <Text variant='uppercase' size='large'>
+              {isEditMode ? 'edit fitting' : 'new fitting'}
+            </Text>
+          </div>
+        </div>
+
+        <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+          <Section title='session' className='w-full lg:w-1/2'>
+            <div className='space-y-1'>
+              <Text variant='uppercase' size='small'>
+                product
+              </Text>
+              <ProductField />
+            </div>
+            <SelectField
+              name='modelId'
+              label='model (optional)'
+              items={modelOptions}
+              valueAsNumber
+            />
+            {!!selectedModelId && (
+              <ModelMeasurementsView measurements={selectedModel?.model?.measurements} />
+            )}
+            <InputField name='fittingDate' type='date' label='fitting date' />
+            <SelectField name='status' label='status' items={fittingStatusOptions} />
+            <SelectField name='verdict' label='verdict' items={fittingVerdictOptions} />
+            <InputField name='recordedBy' label='recorded by (optional)' placeholder='name' />
+            <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={2000} />
+          </Section>
+
+          <div className='flex w-full flex-col gap-6 lg:w-1/2'>
+            <Section title='sizes'>
+              <SizesFields />
+            </Section>
+            <Section title='photos'>
+              <FittingMedia fitting={fitting} />
+            </Section>
+          </div>
+        </div>
+      </form>
+
+      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
+        <Text variant='inactive' size='small'>
+          {form.formState.isDirty ? 'unsaved changes' : ' '}
+        </Text>
+        <div className='flex items-center gap-2'>
+          <Button
+            type='button'
+            variant='secondary'
+            size='lg'
+            className='uppercase cursor-pointer'
+            onClick={() => navigate(ROUTES.fittings)}
+          >
+            cancel
+          </Button>
+          <Button
+            type='button'
+            variant='main'
+            size='lg'
+            className='uppercase cursor-pointer'
+            disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
+            loading={form.formState.isSubmitting}
+            onClick={() => form.handleSubmit(handleSubmit)()}
+          >
+            {isEditMode ? 'save' : 'add'}
+          </Button>
+        </div>
+      </div>
+    </Form>
+  );
+}

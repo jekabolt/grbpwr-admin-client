@@ -448,6 +448,7 @@ export type FilterConditions = {
   byTag: string | undefined;
   collections: string[] | undefined;
   seasons: SeasonEnum[] | undefined;
+  excludeTopCategoryIds: number[] | undefined;
 };
 
 export type PaymentMethodNameEnum =
@@ -758,6 +759,47 @@ export type SortFactors = {
   name: string | undefined;
 };
 
+// FittingStatus is the lifecycle state of a fitting session.
+export type FittingStatus =
+  | "FITTING_STATUS_UNKNOWN"
+  | "FITTING_STATUS_PLANNED"
+  | "FITTING_STATUS_DONE"
+  | "FITTING_STATUS_CANCELLED";
+// FittingVerdict is the outcome of a fitting session.
+export type FittingVerdict =
+  | "FITTING_VERDICT_UNKNOWN"
+  | "FITTING_VERDICT_PENDING"
+  | "FITTING_VERDICT_APPROVED"
+  | "FITTING_VERDICT_NEEDS_REWORK"
+  | "FITTING_VERDICT_REJECTED";
+// FittingSizeInsert is one size tried in a fitting, with an optional per-size note.
+export type FittingSizeInsert = {
+  sizeId: number | undefined;
+  fitNote: string | undefined;
+};
+
+// FittingInsert is the writable payload for a fitting session.
+export type FittingInsert = {
+  productId: number | undefined;
+  modelId: number | undefined;
+  fittingDate: wellKnownTimestamp | undefined;
+  comment: string | undefined;
+  status: FittingStatus | undefined;
+  verdict: FittingVerdict | undefined;
+  recordedBy: string | undefined;
+  sizes: FittingSizeInsert[] | undefined;
+  mediaIds: number[] | undefined;
+};
+
+// Fitting is a stored try-on session with resolved media for display.
+export type Fitting = {
+  id: number | undefined;
+  fitting: FittingInsert | undefined;
+  media: MediaFull[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
 export type HeroType =
   | "HERO_TYPE_UNKNOWN"
   | "HERO_TYPE_SINGLE"
@@ -892,6 +934,59 @@ export type HeroFeaturedArchiveInsert = {
   archiveId: number | undefined;
   tag: string | undefined;
   translations: HeroFeaturedArchiveInsertTranslation[] | undefined;
+};
+
+// BodyMeasurementName enumerates the body-measurement types captured for a fit
+// model. It is intentionally separate from the garment MeasurementName dictionary.
+export type BodyMeasurementName =
+  | "BODY_MEASUREMENT_NAME_UNKNOWN"
+  // Torso
+  | "BODY_MEASUREMENT_NAME_CHEST"
+  | "BODY_MEASUREMENT_NAME_UNDER_BUST"
+  | "BODY_MEASUREMENT_NAME_WAIST"
+  | "BODY_MEASUREMENT_NAME_HIGH_HIP"
+  | "BODY_MEASUREMENT_NAME_HIP"
+  | "BODY_MEASUREMENT_NAME_NECK_BASE"
+  // Arms
+  | "BODY_MEASUREMENT_NAME_ACROSS_SHOULDER"
+  | "BODY_MEASUREMENT_NAME_SLEEVE_LENGTH"
+  | "BODY_MEASUREMENT_NAME_BICEP"
+  | "BODY_MEASUREMENT_NAME_WRIST"
+  // Legs
+  | "BODY_MEASUREMENT_NAME_INSEAM"
+  | "BODY_MEASUREMENT_NAME_THIGH"
+  | "BODY_MEASUREMENT_NAME_KNEE"
+  | "BODY_MEASUREMENT_NAME_CALF"
+  | "BODY_MEASUREMENT_NAME_ANKLE"
+  // Vertical / lengths
+  | "BODY_MEASUREMENT_NAME_HEIGHT"
+  | "BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT"
+  | "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST"
+  // Widths (front / back)
+  | "BODY_MEASUREMENT_NAME_ACROSS_FRONT"
+  | "BODY_MEASUREMENT_NAME_ACROSS_BACK";
+// ModelMeasurement is a single body measurement value, in millimetres.
+export type ModelMeasurement = {
+  name: BodyMeasurementName | undefined;
+  valueMm: number | undefined;
+};
+
+// ModelInsert is the writable payload for a fit-model profile. Measurements are
+// sparse: include only the ones that are filled in.
+export type ModelInsert = {
+  name: string | undefined;
+  comment: string | undefined;
+  gender: GenderEnum | undefined;
+  defaultSampleSizeId: number | undefined;
+  measurements: ModelMeasurement[] | undefined;
+};
+
+// Model is a stored fit-model profile.
+export type Model = {
+  id: number | undefined;
+  model: ModelInsert | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
 };
 
 // Subscriber represents the subscriber table

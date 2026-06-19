@@ -110,6 +110,7 @@ export function getProductPagedParans({
       gender: isGenderFilter(genderEnum) ? [genderEnum] : undefined,
       color: color && color !== 'all' ? color : undefined,
       topCategoryIds: topCategory ? topCategory.split(',').map((id) => parseInt(id)) : undefined, //done
+      excludeTopCategoryIds: undefined,
       subCategoryIds: subCategory ? subCategory.split(',').map((id) => parseInt(id)) : undefined, //done
       typeIds: type ? type.split(',').map((id) => parseInt(id)) : undefined, //done
       sizesIds: sizes ? sizes.split(',').map((id) => parseInt(id)) : undefined, //done
