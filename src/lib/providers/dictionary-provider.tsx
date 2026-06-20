@@ -1,7 +1,8 @@
 import { adminService } from 'api/api';
 import { common_Dictionary } from 'api/proto-http/admin';
+import { isTokenExpired } from 'components/login/protectedRoute';
 
-import { createContext, FC, ReactNode, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, FC, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 interface DictionaryContextValue {
   dictionary: common_Dictionary | undefined;
@@ -16,40 +17,58 @@ interface Props {
   children: ReactNode;
 }
 
+const MAX_ATTEMPTS = 3;
+
 export const DictionaryProvider: FC<Props> = ({ children }) => {
   const [dictionary, setDictionary] = useState<common_Dictionary | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasFetched = useRef(false);
 
-  const fetchDictionary = async () => {
-    // Prevent duplicate fetches (especially in StrictMode)
+  const fetchDictionary = useCallback(async () => {
+    // Prevent duplicate fetches (especially in StrictMode).
     if (hasFetched.current) return;
-    hasFetched.current = true;
 
+    // Don't attempt without a valid token: the request would 401 and leave the
+    // dictionary empty with no recovery. It will run once the provider mounts
+    // inside the authenticated area (after login).
+    if (isTokenExpired(localStorage.getItem('authToken'))) {
+      setLoading(false);
+      return;
+    }
+
+    hasFetched.current = true;
     setLoading(true);
     setError(null);
-    try {
-      const response = await adminService.GetDictionary({});
-      setDictionary(response.dictionary);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to fetch dictionary';
-      setError(msg);
-      hasFetched.current = false; // Allow retry on error
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const refetch = async () => {
-    hasFetched.current = false; // Reset to allow refetch
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await adminService.GetDictionary({});
+        setDictionary(response.dictionary);
+        setLoading(false);
+        return;
+      } catch (err) {
+        if (attempt < MAX_ATTEMPTS) {
+          // Transient failure — back off briefly and retry.
+          await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+          continue;
+        }
+        const msg = err instanceof Error ? err.message : 'Failed to fetch dictionary';
+        setError(msg);
+        hasFetched.current = false; // Allow retry on next mount / manual refetch.
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  const refetch = useCallback(async () => {
+    hasFetched.current = false; // Reset to allow refetch.
     await fetchDictionary();
-  };
+  }, [fetchDictionary]);
 
   useEffect(() => {
     fetchDictionary();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchDictionary]);
 
   return (
     <DictionaryContext.Provider value={{ dictionary, loading, error, refetch }}>
