@@ -116,7 +116,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
     if (m.mediaId != null) captionById.set(m.mediaId, { caption: m.caption, kind: m.kind });
 
   return (
-    <div id='techpack-print' className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
+    <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
       {/* COVER / IDENTITY */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
