@@ -5,20 +5,18 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { TechPackDocument } from './components/tech-pack-document';
 
-// When printing, hide all app chrome and show only the tech-pack document, sized to the
-// page. `visibility` (not `display`) keeps the document's own layout intact; the absolute
-// repositioning drops it to the page origin so the sidebar/nav don't leave a gap.
+// This page renders OUTSIDE the app Layout (see ProtectedBare in index.tsx), so the tech
+// pack is plain top-level content in normal flow. Printing then needs no isolation tricks
+// (no portal / absolute / #root hiding — those print blank in Safari): we just hide the
+// toolbar and let the document paginate. The doc's own max-width/padding is dropped in
+// print so it fills the @page content box.
 const PRINT_CSS = `
 @media print {
   @page { size: A4 portrait; margin: 12mm; }
   html, body { background: #fff !important; }
-  body * { visibility: hidden !important; }
-  #techpack-print, #techpack-print * { visibility: visible !important; }
-  #techpack-print {
-    position: absolute; left: 0; top: 0; width: 100%; max-width: none;
-    margin: 0; padding: 0;
-  }
-  .techpack-print-hidden { display: none !important; }
+  .techpack-toolbar { display: none !important; }
+  .techpack-doc { border: 0 !important; box-shadow: none !important; }
+  .techpack-doc > * { max-width: none !important; margin: 0 !important; padding: 0 !important; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
 `;
@@ -29,10 +27,10 @@ export function TechCardPrint() {
   const { data: techCard, isLoading, isError } = useTechCard(numId);
 
   return (
-    <div className='flex flex-col gap-4 pb-10'>
+    <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
       <style>{PRINT_CSS}</style>
 
-      <div className='techpack-print-hidden flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
+      <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
         <div className='flex items-center gap-3'>
           <Button asChild variant='secondary' size='lg'>
             <Link to={id ? `/tech-cards/${id}` : ROUTES.techCards}>← back</Link>
@@ -73,7 +71,7 @@ export function TechCardPrint() {
           </Button>
         </div>
       ) : (
-        <div className='border border-textInactiveColor shadow-sm'>
+        <div className='techpack-doc border border-textInactiveColor shadow-sm'>
           <TechPackDocument techCard={techCard} />
         </div>
       )}

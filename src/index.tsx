@@ -132,6 +132,18 @@ const ProtectedLayout = () => (
   </ProtectedRoute>
 );
 
+// Authed + dictionary, but WITHOUT the Layout chrome — for full-page surfaces like the
+// printable tech pack that must render in clean normal flow.
+const ProtectedBare = () => (
+  <ProtectedRoute>
+    <DictionaryProvider>
+      <Suspense fallback={<LoadingFallback />}>
+        <Outlet />
+      </Suspense>
+    </DictionaryProvider>
+  </ProtectedRoute>
+);
+
 const container = document.getElementById('root');
 if (!container) throw new Error('Root element not found');
 
@@ -177,8 +189,13 @@ root.render(
                   <Route path={ROUTES.singleFitting} element={<Fitting />} />
                   <Route path={ROUTES.techCards} element={<TechCards />} />
                   <Route path={ROUTES.addTechCard} element={<TechCard />} />
-                  <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
+                </Route>
+                {/* Layout-less protected route: a standalone page so the browser print
+                    engine (Safari especially) renders the document in normal flow, with
+                    no app chrome to isolate via fragile print CSS. */}
+                <Route path='/' element={<ProtectedBare />}>
+                  <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
                 </Route>
               </Routes>
             </Suspense>
