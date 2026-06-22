@@ -479,11 +479,15 @@ export function TechCardForm({
 
           {/* HISTORY */}
           <div hidden={activeTab !== 'history'} className='flex flex-col gap-6'>
-            {isEditMode && numId ? (
-              <Section title='fittings'>
+            <Section title='fittings'>
+              {isEditMode && numId ? (
                 <TechCardFittings techCardId={numId} />
-              </Section>
-            ) : null}
+              ) : (
+                <Text variant='inactive' size='small'>
+                  save this tech card first, then you can link fittings to it
+                </Text>
+              )}
+            </Section>
             <Section title='revision log'>
               <RevisionsField />
             </Section>
