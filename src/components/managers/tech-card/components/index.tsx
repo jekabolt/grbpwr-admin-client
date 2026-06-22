@@ -232,6 +232,13 @@ export function TechCardForm({
                 disabled={frozen}
               />
             </div>
+            {isEditMode && numId && (
+              <Button asChild variant='secondary' size='lg' className='uppercase'>
+                <Link to={`/tech-cards/${numId}/print`} target='_blank' rel='noopener'>
+                  pdf
+                </Link>
+              </Button>
+            )}
             {frozen ? (
               <Button
                 type='button'

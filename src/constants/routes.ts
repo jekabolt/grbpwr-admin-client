@@ -41,6 +41,7 @@ export enum ROUTES {
   techCards = '/tech-cards',
   addTechCard = '/add-tech-card',
   singleTechCard = '/tech-cards/:id',
+  techCardPrint = '/tech-cards/:id/print',
 }
 
 export const SIDE_BAR_ITEMS = [
