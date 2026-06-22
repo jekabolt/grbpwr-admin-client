@@ -52,7 +52,9 @@ const MemberDetails = lazy(() =>
   })),
 );
 const TierConfig = lazy(() =>
-  import('components/managers/membership/tier-config/page').then((m) => ({ default: m.TierConfig })),
+  import('components/managers/membership/tier-config/page').then((m) => ({
+    default: m.TierConfig,
+  })),
 );
 const HackerManager = lazy(() =>
   import('components/managers/membership/hacker/page').then((m) => ({ default: m.HackerManager })),
@@ -71,6 +73,12 @@ const Fittings = lazy(() =>
 );
 const Fitting = lazy(() =>
   import('components/managers/fitting/page').then((m) => ({ default: m.Fitting })),
+);
+const TechCards = lazy(() =>
+  import('components/managers/tech-cards').then((m) => ({ default: m.TechCards })),
+);
+const TechCard = lazy(() =>
+  import('components/managers/tech-card/page').then((m) => ({ default: m.TechCard })),
 );
 
 // Configure QueryClient with best practices
@@ -134,42 +142,45 @@ root.render(
           <BrowserRouter>
             <Suspense fallback={<LoadingFallback />}>
               <Routes>
-                  <Route path={ROUTES.login} element={<LoginBlock />} />
-                  <Route path='/' element={<ProtectedLayout />}>
-                    <Route path={ROUTES.main} element={<Analitic />} />
-                    <Route path={ROUTES.media} element={<MediaManager disabled={true} />} />
-                    <Route path={ROUTES.singleProduct} element={<Product />} />
-                    <Route path={ROUTES.product} element={<ProductsCatalog />} />
-                    <Route path={ROUTES.addProduct} element={<Product />} />
-                    <Route path={`${ROUTES.copyProduct}/:id`} element={<Product />} />
-                    <Route path={ROUTES.hero} element={<Hero />} />
-                    <Route path={ROUTES.promo} element={<Promo />} />
-                    <Route path={ROUTES.settings} element={<Settings />} />
-                    <Route path={ROUTES.shipping} element={<Shipping />} />
-                    <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
-                    <Route path={ROUTES.customOrders} element={<CustomOrders />} />
-                    <Route path={ROUTES.orders} element={<OrdersCatalog />} />
-                    <Route path={ROUTES.singleArchive} element={<Archive />} />
-                    <Route path={ROUTES.archives} element={<Archives />} />
-                    <Route path={ROUTES.addArchive} element={<Archive />} />
-                    <Route path={ROUTES.customerSupport} element={<CustomerPage />} />
-                    <Route path={ROUTES.members} element={<Members />} />
-                    <Route path={ROUTES.memberDetails} element={<MemberDetails />} />
-                    <Route path={ROUTES.tierConfig} element={<TierConfig />} />
-                    <Route path={ROUTES.hacker} element={<HackerManager />} />
-                    <Route path={ROUTES.tierAudit} element={<TierAudit />} />
-                    <Route path={ROUTES.models} element={<Models />} />
-                    <Route path={ROUTES.addModel} element={<Model />} />
-                    <Route path={ROUTES.singleModel} element={<Model />} />
-                    <Route path={ROUTES.fittings} element={<Fittings />} />
-                    <Route path={ROUTES.addFitting} element={<Fitting />} />
-                    <Route path={ROUTES.singleFitting} element={<Fitting />} />
-                  </Route>
-                </Routes>
-              </Suspense>
-            </BrowserRouter>
-            <ReactQueryDevtools initialIsOpen={false} />
-          </QueryClientProvider>
+                <Route path={ROUTES.login} element={<LoginBlock />} />
+                <Route path='/' element={<ProtectedLayout />}>
+                  <Route path={ROUTES.main} element={<Analitic />} />
+                  <Route path={ROUTES.media} element={<MediaManager disabled={true} />} />
+                  <Route path={ROUTES.singleProduct} element={<Product />} />
+                  <Route path={ROUTES.product} element={<ProductsCatalog />} />
+                  <Route path={ROUTES.addProduct} element={<Product />} />
+                  <Route path={`${ROUTES.copyProduct}/:id`} element={<Product />} />
+                  <Route path={ROUTES.hero} element={<Hero />} />
+                  <Route path={ROUTES.promo} element={<Promo />} />
+                  <Route path={ROUTES.settings} element={<Settings />} />
+                  <Route path={ROUTES.shipping} element={<Shipping />} />
+                  <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
+                  <Route path={ROUTES.customOrders} element={<CustomOrders />} />
+                  <Route path={ROUTES.orders} element={<OrdersCatalog />} />
+                  <Route path={ROUTES.singleArchive} element={<Archive />} />
+                  <Route path={ROUTES.archives} element={<Archives />} />
+                  <Route path={ROUTES.addArchive} element={<Archive />} />
+                  <Route path={ROUTES.customerSupport} element={<CustomerPage />} />
+                  <Route path={ROUTES.members} element={<Members />} />
+                  <Route path={ROUTES.memberDetails} element={<MemberDetails />} />
+                  <Route path={ROUTES.tierConfig} element={<TierConfig />} />
+                  <Route path={ROUTES.hacker} element={<HackerManager />} />
+                  <Route path={ROUTES.tierAudit} element={<TierAudit />} />
+                  <Route path={ROUTES.models} element={<Models />} />
+                  <Route path={ROUTES.addModel} element={<Model />} />
+                  <Route path={ROUTES.singleModel} element={<Model />} />
+                  <Route path={ROUTES.fittings} element={<Fittings />} />
+                  <Route path={ROUTES.addFitting} element={<Fitting />} />
+                  <Route path={ROUTES.singleFitting} element={<Fitting />} />
+                  <Route path={ROUTES.techCards} element={<TechCards />} />
+                  <Route path={ROUTES.addTechCard} element={<TechCard />} />
+                  <Route path={ROUTES.singleTechCard} element={<TechCard />} />
+                </Route>
+              </Routes>
+            </Suspense>
+          </BrowserRouter>
+          <ReactQueryDevtools initialIsOpen={false} />
+        </QueryClientProvider>
       </ContextProvider>
     </ErrorBoundary>
   </StrictMode>,

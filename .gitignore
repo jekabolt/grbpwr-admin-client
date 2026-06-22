@@ -6,6 +6,7 @@ angular-8-jwt-authentication-example
 #
 layout
 
+tmp/
 *.log
 
 # compiled output
