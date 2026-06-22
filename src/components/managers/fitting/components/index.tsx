@@ -11,7 +11,7 @@ import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
@@ -20,6 +20,7 @@ import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { FittingMedia } from './fitting-media';
 import { ProductField } from './product-field';
+import { TechCardField } from './tech-card-field';
 import {
   FittingFormData,
   fittingDefaultData,
@@ -63,12 +64,15 @@ export function FittingForm({
   const createFitting = useCreateFitting();
   const updateFitting = useUpdateFitting();
   const { data: models } = useAllModels();
+  const [searchParams] = useSearchParams();
+  // Deep-link from the tech card editor: /add-fitting?techCardId=123 pre-links the style.
+  const initialTechCardId = Number(searchParams.get('techCardId')) || 0;
 
   const form = useForm<FittingFormData>({
     resolver: zodResolver(fittingSchema),
     defaultValues: fitting
       ? mapFittingToForm(fitting)
-      : { ...fittingDefaultData, fittingDate: todayDateInput() },
+      : { ...fittingDefaultData, fittingDate: todayDateInput(), techCardId: initialTechCardId },
     mode: 'onSubmit',
   });
 
@@ -129,6 +133,12 @@ export function FittingForm({
                 product
               </Text>
               <ProductField />
+            </div>
+            <div className='space-y-1'>
+              <Text variant='uppercase' size='small'>
+                tech card (style, optional)
+              </Text>
+              <TechCardField />
             </div>
             <SelectField
               name='modelId'

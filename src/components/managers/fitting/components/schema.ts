@@ -14,6 +14,7 @@ const fittingSizeSchema = z.object({
 
 export const fittingSchema = z.object({
   productId: z.number().int().min(1, 'Product is required'),
+  techCardId: z.number().int().optional().default(0), // optional link to the tech card (style)
   modelId: z.number().int().optional().default(0),
   fittingDate: z.string().optional().default(''), // YYYY-MM-DD in the UI
   comment: z.string().optional().default(''),
@@ -28,6 +29,7 @@ export type FittingFormData = z.input<typeof fittingSchema>;
 
 export const fittingDefaultData: FittingFormData = {
   productId: 0,
+  techCardId: 0,
   modelId: 0,
   fittingDate: '',
   comment: '',
@@ -60,6 +62,7 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
   const insert = fitting.fitting;
   return {
     productId: insert?.productId || 0,
+    techCardId: insert?.techCardId || 0,
     modelId: insert?.modelId || 0,
     fittingDate: timestampToDateInput(insert?.fittingDate),
     comment: insert?.comment || '',
@@ -86,6 +89,7 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
 export function mapFormToFittingInsert(data: FittingFormData): common_FittingInsert {
   return {
     productId: data.productId,
+    techCardId: data.techCardId || 0,
     modelId: data.modelId || 0,
     fittingDate: dateInputToTimestamp(data.fittingDate),
     comment: data.comment?.trim() || '',

@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_FittingInsert } from 'api/proto-http/admin';
+import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 
 export type FittingFilter = {
   productId?: number;
@@ -27,6 +28,7 @@ export function useInfiniteFittings(filter: FittingFilter = {}, limit: number = 
         orderFactor: 'ORDER_FACTOR_DESC',
         productId: filter.productId ?? 0,
         modelId: filter.modelId ?? 0,
+        techCardId: 0,
       });
       const fittings = response.fittings || [];
       const total = response.total ?? 0;
@@ -58,8 +60,13 @@ export function useCreateFitting() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (fitting: common_FittingInsert) => adminService.AddFitting({ fitting }),
-    onSuccess: () => {
+    onSuccess: (_data, fitting) => {
       queryClient.invalidateQueries({ queryKey: fittingKeys.lists() });
+      if (fitting.techCardId) {
+        queryClient.invalidateQueries({
+          queryKey: [...techCardKeys.detail(fitting.techCardId), 'fittings'],
+        });
+      }
     },
   });
 }
@@ -72,6 +79,11 @@ export function useUpdateFitting() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: fittingKeys.lists() });
       queryClient.invalidateQueries({ queryKey: fittingKeys.detail(variables.id) });
+      if (variables.fitting.techCardId) {
+        queryClient.invalidateQueries({
+          queryKey: [...techCardKeys.detail(variables.fitting.techCardId), 'fittings'],
+        });
+      }
     },
   });
 }
