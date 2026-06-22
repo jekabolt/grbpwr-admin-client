@@ -6,6 +6,18 @@ import {
   common_OrderStatusEnum,
   common_SeasonEnum,
   common_SortFactor,
+  common_TechCardApprovalState,
+  common_TechCardBomSection,
+  common_TechCardFabricDirection,
+  common_TechCardIssueSeverity,
+  common_TechCardIssueStatus,
+  common_TechCardLabDipStatus,
+  common_TechCardLabelType,
+  common_TechCardSignoffSection,
+  common_TechCardSignoffState,
+  common_TechCardMeasurementUnit,
+  common_TechCardMediaKind,
+  common_TechCardStage,
 } from 'api/proto-http/admin';
 
 interface Colors {
@@ -76,6 +88,149 @@ export const fittingVerdictOptions: Array<{ value: common_FittingVerdict; label:
   { value: 'FITTING_VERDICT_APPROVED', label: 'approved' },
   { value: 'FITTING_VERDICT_NEEDS_REWORK', label: 'needs rework' },
   { value: 'FITTING_VERDICT_REJECTED', label: 'rejected' },
+];
+
+// Tech-card development stage (excludes the UNKNOWN sentinel; server defaults UNKNOWN→PROTO).
+export const techCardStageOptions: Array<{ value: common_TechCardStage; label: string }> = [
+  { value: 'TECH_CARD_STAGE_PROTO', label: 'proto' },
+  { value: 'TECH_CARD_STAGE_FIT', label: 'fit sample' },
+  { value: 'TECH_CARD_STAGE_SMS', label: 'salesman sample' },
+  { value: 'TECH_CARD_STAGE_PP', label: 'pre-production' },
+  { value: 'TECH_CARD_STAGE_PROD', label: 'production' },
+];
+
+// Tech-card release gate, orthogonal to stage (server defaults UNKNOWN→DRAFT).
+export const techCardApprovalStateOptions: Array<{
+  value: common_TechCardApprovalState;
+  label: string;
+}> = [
+  { value: 'TECH_CARD_APPROVAL_STATE_DRAFT', label: 'draft' },
+  { value: 'TECH_CARD_APPROVAL_STATE_IN_REVIEW', label: 'in review' },
+  { value: 'TECH_CARD_APPROVAL_STATE_APPROVED', label: 'approved' },
+  { value: 'TECH_CARD_APPROVAL_STATE_RELEASED', label: 'released' },
+  { value: 'TECH_CARD_APPROVAL_STATE_OBSOLETE', label: 'obsolete' },
+];
+
+// Tech-card geometry unit for callouts and the POM chart (server defaults UNKNOWN→CM).
+export const techCardMeasurementUnitOptions: Array<{
+  value: common_TechCardMeasurementUnit;
+  label: string;
+}> = [
+  { value: 'TECH_CARD_MEASUREMENT_UNIT_CM', label: 'cm' },
+  { value: 'TECH_CARD_MEASUREMENT_UNIT_MM', label: 'mm' },
+];
+
+// Gender select including an explicit unset sentinel (tech-card target gender is optional).
+export const techCardGenderOptions: Array<{ value: common_GenderEnum; label: string }> = [
+  { value: 'GENDER_ENUM_UNKNOWN', label: '— unset —' },
+  ...genderOptions,
+];
+
+// Tech-card sketch-media kind (excludes the UNKNOWN sentinel; new media defaults to FRONT).
+export const techCardMediaKindOptions: Array<{ value: common_TechCardMediaKind; label: string }> = [
+  { value: 'TECH_CARD_MEDIA_KIND_FRONT', label: 'front' },
+  { value: 'TECH_CARD_MEDIA_KIND_BACK', label: 'back' },
+  { value: 'TECH_CARD_MEDIA_KIND_DETAIL', label: 'detail' },
+  { value: 'TECH_CARD_MEDIA_KIND_LINING', label: 'lining' },
+  { value: 'TECH_CARD_MEDIA_KIND_PREVIEW', label: 'preview' },
+  { value: 'TECH_CARD_MEDIA_KIND_MOODBOARD', label: 'moodboard' },
+  { value: 'TECH_CARD_MEDIA_KIND_REFERENCE', label: 'reference' },
+  { value: 'TECH_CARD_MEDIA_KIND_SWATCH', label: 'swatch' },
+];
+
+// BOM material family (Sheet «Спецификация»); required on each BOM line. New lines
+// default to FABRIC. Excludes the UNKNOWN sentinel.
+export const techCardBomSectionOptions: Array<{ value: common_TechCardBomSection; label: string }> =
+  [
+    { value: 'TECH_CARD_BOM_SECTION_FABRIC', label: 'fabric' },
+    { value: 'TECH_CARD_BOM_SECTION_LINING', label: 'lining' },
+    { value: 'TECH_CARD_BOM_SECTION_INTERLINING', label: 'interlining' },
+    { value: 'TECH_CARD_BOM_SECTION_INSULATION', label: 'insulation' },
+    { value: 'TECH_CARD_BOM_SECTION_HARDWARE', label: 'hardware' },
+    { value: 'TECH_CARD_BOM_SECTION_THREAD', label: 'thread' },
+    { value: 'TECH_CARD_BOM_SECTION_LABEL', label: 'label' },
+    { value: 'TECH_CARD_BOM_SECTION_PACKAGING', label: 'packaging' },
+  ];
+
+// BOM fabric cutting layout (Sheet «Спецификация», fabric lines). Includes an explicit
+// unset so a non-fabric line can stay blank.
+export const techCardFabricDirectionOptions: Array<{
+  value: common_TechCardFabricDirection;
+  label: string;
+}> = [
+  { value: 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN', label: '— unset —' },
+  { value: 'TECH_CARD_FABRIC_DIRECTION_ANY', label: 'any (no nap)' },
+  { value: 'TECH_CARD_FABRIC_DIRECTION_ONE_WAY', label: 'one-way' },
+  { value: 'TECH_CARD_FABRIC_DIRECTION_TWO_WAY', label: 'two-way' },
+];
+
+// Colourway lab-dip approval lifecycle (excludes UNKNOWN; server defaults UNKNOWN→PENDING).
+export const techCardLabDipStatusOptions: Array<{
+  value: common_TechCardLabDipStatus;
+  label: string;
+}> = [
+  { value: 'TECH_CARD_LAB_DIP_STATUS_PENDING', label: 'pending' },
+  { value: 'TECH_CARD_LAB_DIP_STATUS_SUBMITTED', label: 'submitted' },
+  { value: 'TECH_CARD_LAB_DIP_STATUS_APPROVED', label: 'approved' },
+  { value: 'TECH_CARD_LAB_DIP_STATUS_REJECTED', label: 'rejected' },
+];
+
+// Maker-flagged issue severity (excludes UNKNOWN; server defaults UNKNOWN→MEDIUM).
+export const techCardIssueSeverityOptions: Array<{
+  value: common_TechCardIssueSeverity;
+  label: string;
+}> = [
+  { value: 'TECH_CARD_ISSUE_SEVERITY_LOW', label: 'low' },
+  { value: 'TECH_CARD_ISSUE_SEVERITY_MEDIUM', label: 'medium' },
+  { value: 'TECH_CARD_ISSUE_SEVERITY_HIGH', label: 'high' },
+];
+
+// Issue resolution state (excludes UNKNOWN; server defaults UNKNOWN→OPEN).
+export const techCardIssueStatusOptions: Array<{
+  value: common_TechCardIssueStatus;
+  label: string;
+}> = [
+  { value: 'TECH_CARD_ISSUE_STATUS_OPEN', label: 'open' },
+  { value: 'TECH_CARD_ISSUE_STATUS_RESOLVED', label: 'resolved' },
+  { value: 'TECH_CARD_ISSUE_STATUS_WONTFIX', label: "won't fix" },
+];
+
+// Per-section sign-off sheet (one row per section, unique per card).
+export const techCardSignoffSectionOptions: Array<{
+  value: common_TechCardSignoffSection;
+  label: string;
+}> = [
+  { value: 'TECH_CARD_SIGNOFF_SECTION_DESIGN', label: 'design' },
+  { value: 'TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION', label: 'construction' },
+  { value: 'TECH_CARD_SIGNOFF_SECTION_POM', label: 'POM' },
+  { value: 'TECH_CARD_SIGNOFF_SECTION_MATERIALS', label: 'materials' },
+  { value: 'TECH_CARD_SIGNOFF_SECTION_COLOUR', label: 'colour' },
+  { value: 'TECH_CARD_SIGNOFF_SECTION_LABELS', label: 'labels' },
+  { value: 'TECH_CARD_SIGNOFF_SECTION_PACKAGING', label: 'packaging' },
+  { value: 'TECH_CARD_SIGNOFF_SECTION_COSTING', label: 'costing' },
+];
+
+// Sign-off decision (excludes UNKNOWN; server defaults UNKNOWN→PENDING).
+export const techCardSignoffStateOptions: Array<{
+  value: common_TechCardSignoffState;
+  label: string;
+}> = [
+  { value: 'TECH_CARD_SIGNOFF_STATE_PENDING', label: 'pending' },
+  { value: 'TECH_CARD_SIGNOFF_STATE_APPROVED', label: 'approved' },
+  { value: 'TECH_CARD_SIGNOFF_STATE_REJECTED', label: 'rejected' },
+];
+
+// Label / tag type (Sheet «Этикетки и упаковка»); required on each label. New labels
+// default to MAIN. Excludes the UNKNOWN sentinel.
+export const techCardLabelTypeOptions: Array<{ value: common_TechCardLabelType; label: string }> = [
+  { value: 'TECH_CARD_LABEL_TYPE_MAIN', label: 'main (brand)' },
+  { value: 'TECH_CARD_LABEL_TYPE_SIZE', label: 'size' },
+  { value: 'TECH_CARD_LABEL_TYPE_CARE', label: 'care' },
+  { value: 'TECH_CARD_LABEL_TYPE_ORIGIN', label: 'origin' },
+  { value: 'TECH_CARD_LABEL_TYPE_FLAG', label: 'flag' },
+  { value: 'TECH_CARD_LABEL_TYPE_HANGTAG', label: 'hangtag' },
+  { value: 'TECH_CARD_LABEL_TYPE_BARCODE', label: 'barcode / RFID' },
+  { value: 'TECH_CARD_LABEL_TYPE_SPECIAL', label: 'special' },
 ];
 
 export const colors: Colors[] = [

@@ -38,6 +38,9 @@ export enum ROUTES {
   fittings = '/fittings',
   addFitting = '/add-fitting',
   singleFitting = '/fittings/:id',
+  techCards = '/tech-cards',
+  addTechCard = '/add-tech-card',
+  singleTechCard = '/tech-cards/:id',
 }
 
 export const SIDE_BAR_ITEMS = [
@@ -94,6 +97,10 @@ export const SIDE_BAR_ITEMS = [
     route: ROUTES.fittings,
   },
   {
+    label: 'TECH CARDS',
+    route: ROUTES.techCards,
+  },
+  {
     label: 'TIER CONFIG',
     route: ROUTES.tierConfig,
   },
@@ -143,6 +150,10 @@ export const LEFT_SIDE_ITEMS: Manager[] = [
   {
     label: 'fittings',
     route: ROUTES.fittings,
+  },
+  {
+    label: 'tech cards',
+    route: ROUTES.techCards,
   },
   // {
   //   label: 'promo',

@@ -1980,7 +1980,9 @@ export type AddFittingRequest = {
   fitting: common_FittingInsert | undefined;
 };
 
-// FittingInsert is the writable payload for a fitting session.
+// FittingInsert is the writable payload for a fitting session. A fitting anchors
+// to a tech card (the style) and/or a specific product (the colour/SKU sample);
+// at least one of tech_card_id / product_id must be set.
 export type common_FittingInsert = {
   productId: number | undefined;
   modelId: number | undefined;
@@ -1991,6 +1993,7 @@ export type common_FittingInsert = {
   recordedBy: string | undefined;
   sizes: common_FittingSizeInsert[] | undefined;
   mediaIds: number[] | undefined;
+  techCardId: number | undefined;
 };
 
 // FittingStatus is the lifecycle state of a fitting session.
@@ -2022,6 +2025,7 @@ export type ListFittingsRequest = {
   orderFactor: common_OrderFactor | undefined;
   productId: number | undefined;
   modelId: number | undefined;
+  techCardId: number | undefined;
 };
 
 export type ListFittingsResponse = {
@@ -2475,6 +2479,486 @@ export type RunTierBackfillResponse = {
   accountsUpgraded: number | undefined;
 };
 
+export type CreateTechCardRequest = {
+  techCard: common_TechCardInsert | undefined;
+};
+
+export type common_TechCardInsert = {
+  // identification (Sheet «Титул»)
+  styleNumber: string | undefined;
+  name: string | undefined;
+  brand: string | undefined;
+  season: string | undefined;
+  collection: string | undefined;
+  categoryId: number | undefined;
+  targetGender: common_GenderEnum | undefined;
+  stage: common_TechCardStage | undefined;
+  status: string | undefined;
+  approvalState: common_TechCardApprovalState | undefined;
+  approvedBy: string | undefined;
+  releasedAt: wellKnownTimestamp | undefined;
+  measurementUnit: common_TechCardMeasurementUnit | undefined;
+  version: string | undefined;
+  revisionDate: wellKnownTimestamp | undefined;
+  baseModelId: number | undefined;
+  baseSampleSizeId: number | undefined;
+  designer: string | undefined;
+  constructor: string | undefined;
+  technologist: string | undefined;
+  targetCost: googletype_Decimal | undefined;
+  targetRetailPrice: googletype_Decimal | undefined;
+  currency: string | undefined;
+  // construction description (lower block of Sheet «Титул»)
+  description: string | undefined;
+  silhouette: string | undefined;
+  collar: string | undefined;
+  fastening: string | undefined;
+  pockets: string | undefined;
+  sleeveCuff: string | undefined;
+  extraDetails: string | undefined;
+  topstitching: string | undefined;
+  auxMaterials: string | undefined;
+  notes: string | undefined;
+  // children (full-replace on update)
+  sizeIds: number[] | undefined;
+  productIds: number[] | undefined;
+  media: common_TechCardMediaItem[] | undefined;
+  callouts: common_TechCardCallout[] | undefined;
+  revisions: common_TechCardRevision[] | undefined;
+  // materials (Phase 2): bill of materials, colourways, points of measure.
+  bomItems: common_TechCardBomItem[] | undefined;
+  colorways: common_TechCardColorway[] | undefined;
+  pomPoints: common_TechCardPomPoint[] | undefined;
+  // production (Phase 3): construction, operations, labels, packaging, costing.
+  construction: common_TechCardConstruction | undefined;
+  operations: common_TechCardOperation[] | undefined;
+  labels: common_TechCardLabel[] | undefined;
+  packaging: common_TechCardPackaging | undefined;
+  costing: common_TechCardCosting | undefined;
+  // hardening (Phase 3.5a)
+  approvedAt: wellKnownTimestamp | undefined;
+  concept: string | undefined;
+  issues: common_TechCardIssue[] | undefined;
+  sizeQuantities: common_TechCardSizeQuantity[] | undefined;
+  signoffs: common_TechCardSignoff[] | undefined;
+};
+
+// TechCardStage is the development stage of a tech pack: prototype, fit sample,
+// salesman sample, pre-production, production.
+export type common_TechCardStage =
+  | "TECH_CARD_STAGE_UNKNOWN"
+  | "TECH_CARD_STAGE_PROTO"
+  | "TECH_CARD_STAGE_FIT"
+  | "TECH_CARD_STAGE_SMS"
+  | "TECH_CARD_STAGE_PP"
+  | "TECH_CARD_STAGE_PROD";
+// TechCardApprovalState is the gating release state of a tech card, orthogonal to
+// TechCardStage (which tracks development progress). A factory must only receive a
+// card in the RELEASED state.
+export type common_TechCardApprovalState =
+  | "TECH_CARD_APPROVAL_STATE_UNKNOWN"
+  | "TECH_CARD_APPROVAL_STATE_DRAFT"
+  | "TECH_CARD_APPROVAL_STATE_IN_REVIEW"
+  | "TECH_CARD_APPROVAL_STATE_APPROVED"
+  | "TECH_CARD_APPROVAL_STATE_RELEASED"
+  | "TECH_CARD_APPROVAL_STATE_OBSOLETE";
+// TechCardMeasurementUnit is the unit for the card's geometry (callout dimensions
+// and the POM chart). Metric only — the brand works in cm and mm, never inches.
+export type common_TechCardMeasurementUnit =
+  | "TECH_CARD_MEASUREMENT_UNIT_UNKNOWN"
+  | "TECH_CARD_MEASUREMENT_UNIT_CM"
+  | "TECH_CARD_MEASUREMENT_UNIT_MM";
+// TechCardMediaItem is a writable sketch-media reference (id + kind).
+export type common_TechCardMediaItem = {
+  mediaId: number | undefined;
+  kind: common_TechCardMediaKind | undefined;
+  caption: string | undefined;
+};
+
+// TechCardMediaKind classifies a tech-card sketch image.
+export type common_TechCardMediaKind =
+  | "TECH_CARD_MEDIA_KIND_UNKNOWN"
+  | "TECH_CARD_MEDIA_KIND_FRONT"
+  | "TECH_CARD_MEDIA_KIND_BACK"
+  | "TECH_CARD_MEDIA_KIND_DETAIL"
+  | "TECH_CARD_MEDIA_KIND_LINING"
+  | "TECH_CARD_MEDIA_KIND_PREVIEW"
+  | "TECH_CARD_MEDIA_KIND_MOODBOARD"
+  | "TECH_CARD_MEDIA_KIND_REFERENCE"
+  | "TECH_CARD_MEDIA_KIND_SWATCH";
+// TechCardCallout is a numbered detail note pointing at the technical sketch.
+export type common_TechCardCallout = {
+  number: number | undefined;
+  part: string | undefined;
+  description: string | undefined;
+  dimensions: string | undefined;
+  mediaId: number | undefined;
+  posX: googletype_Decimal | undefined;
+  posY: googletype_Decimal | undefined;
+};
+
+// TechCardRevision is one entry in the spec-document changelog (what changed in
+// which section, by whom). This is NOT fit history — fitting verdicts and
+// measurements live in the separate fitting feature.
+export type common_TechCardRevision = {
+  version: string | undefined;
+  revisionDate: wellKnownTimestamp | undefined;
+  author: string | undefined;
+  section: string | undefined;
+  changeNote: string | undefined;
+};
+
+// TechCardBomItem is one bill-of-materials line (Sheet «Спецификация»).
+export type common_TechCardBomItem = {
+  section: common_TechCardBomSection | undefined;
+  name: string | undefined;
+  placement: string | undefined;
+  supplier: string | undefined;
+  supplierRef: string | undefined;
+  color: string | undefined;
+  composition: string | undefined;
+  spec: string | undefined;
+  // consumption vs quantity: fill ONE per line. consumption = per-garment rate of
+  // a measured material (fabric/lining/interlining/insulation/thread) in `unit`
+  // (м/см/г); quantity = discrete count of a countable trim (hardware/label/
+  // packaging), `unit` then = pcs. line_total uses quantity when set, else consumption.
+  consumption: googletype_Decimal | undefined;
+  unit: string | undefined;
+  quantity: googletype_Decimal | undefined;
+  unitPrice: googletype_Decimal | undefined;
+  currency: string | undefined;
+  comment: string | undefined;
+  colorwayColors: common_TechCardBomColorwayColor[] | undefined;
+  lineTotal: googletype_Decimal | undefined;
+  // fabric data for the cutter / marker (Phase 3.5c)
+  fabricWidth: googletype_Decimal | undefined;
+  fabricWeightGsm: googletype_Decimal | undefined;
+  fabricDirection: common_TechCardFabricDirection | undefined;
+  wastagePercent: googletype_Decimal | undefined;
+};
+
+// TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
+export type common_TechCardBomSection =
+  | "TECH_CARD_BOM_SECTION_UNKNOWN"
+  | "TECH_CARD_BOM_SECTION_FABRIC"
+  | "TECH_CARD_BOM_SECTION_LINING"
+  | "TECH_CARD_BOM_SECTION_INTERLINING"
+  | "TECH_CARD_BOM_SECTION_INSULATION"
+  | "TECH_CARD_BOM_SECTION_HARDWARE"
+  | "TECH_CARD_BOM_SECTION_THREAD"
+  | "TECH_CARD_BOM_SECTION_LABEL"
+  | "TECH_CARD_BOM_SECTION_PACKAGING";
+// TechCardBomColorwayColor is one «Колористика» matrix cell: the colour of a BOM
+// material in a colourway. colorway_index points into TechCardInsert.colorways — a
+// full-replace upsert has no stable colourway ids to reference on write.
+export type common_TechCardBomColorwayColor = {
+  colorwayIndex: number | undefined;
+  color: string | undefined;
+  pantone: string | undefined;
+};
+
+// TechCardFabricDirection is the cutting layout a fabric requires.
+export type common_TechCardFabricDirection =
+  | "TECH_CARD_FABRIC_DIRECTION_UNKNOWN"
+  | "TECH_CARD_FABRIC_DIRECTION_ANY"
+  | "TECH_CARD_FABRIC_DIRECTION_ONE_WAY"
+  | "TECH_CARD_FABRIC_DIRECTION_TWO_WAY";
+// TechCardColorway is a development colourway (Sheet «Колористика» columns). It is
+// distinct from tech_card_product (published catalog SKUs); product_id optionally
+// links the published SKU that realises this colourway.
+export type common_TechCardColorway = {
+  code: string | undefined;
+  name: string | undefined;
+  labDipStatus: common_TechCardLabDipStatus | undefined;
+  productId: number | undefined;
+  comment: string | undefined;
+  pantone: string | undefined;
+  pantoneSystem: string | undefined;
+  hex: string | undefined;
+  swatchMediaId: number | undefined;
+  labDipRound: number | undefined;
+  labDipSubmittedAt: wellKnownTimestamp | undefined;
+  labDipDecidedAt: wellKnownTimestamp | undefined;
+  labDipDecidedBy: string | undefined;
+  labDipRejectReason: string | undefined;
+};
+
+// TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
+export type common_TechCardLabDipStatus =
+  | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
+  | "TECH_CARD_LAB_DIP_STATUS_PENDING"
+  | "TECH_CARD_LAB_DIP_STATUS_SUBMITTED"
+  | "TECH_CARD_LAB_DIP_STATUS_APPROVED"
+  | "TECH_CARD_LAB_DIP_STATUS_REJECTED";
+// TechCardPomPoint is a point of measure with its grade and actuals (Sheet «Измерения»).
+// Values are in TechCardInsert.measurement_unit.
+export type common_TechCardPomPoint = {
+  section: string | undefined;
+  code: string | undefined;
+  name: string | undefined;
+  howToMeasure: string | undefined;
+  baseValue: googletype_Decimal | undefined;
+  tolerancePlus: googletype_Decimal | undefined;
+  toleranceMinus: googletype_Decimal | undefined;
+  grades: common_TechCardPomGrade[] | undefined;
+  actuals: common_TechCardPomActual[] | undefined;
+};
+
+// TechCardPomGrade is the graded value of a POM point for one size.
+export type common_TechCardPomGrade = {
+  sizeId: number | undefined;
+  value: googletype_Decimal | undefined;
+};
+
+// TechCardPomActual is an actual measured value, optionally taken in a fitting and
+// at a specific size (so QC can compare it to that size's grade ± tolerance).
+export type common_TechCardPomActual = {
+  fittingId: number | undefined;
+  label: string | undefined;
+  value: googletype_Decimal | undefined;
+  sizeId: number | undefined;
+  // OUTPUT-ONLY: deviation = value - target (grade at size_id, else base_value);
+  // verdict compares the deviation against tolerance_plus / tolerance_minus.
+  deviation: googletype_Decimal | undefined;
+  verdict: common_TechCardPomVerdict | undefined;
+};
+
+// TechCardPomVerdict is the computed in/out-of-tolerance result of an actual.
+export type common_TechCardPomVerdict =
+  | "TECH_CARD_POM_VERDICT_UNKNOWN"
+  | "TECH_CARD_POM_VERDICT_IN_TOLERANCE"
+  | "TECH_CARD_POM_VERDICT_OVER"
+  | "TECH_CARD_POM_VERDICT_UNDER";
+// TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
+export type common_TechCardConstruction = {
+  mainStitchType: string | undefined;
+  stitchDensity: string | undefined;
+  overlockThreads: string | undefined;
+  seamAllowances: string | undefined;
+  hemFinish: string | undefined;
+  pressing: string | undefined;
+  machineClass: string | undefined;
+  notes: string | undefined;
+  labourRate: googletype_Decimal | undefined;
+  labourRateCurrency: string | undefined;
+};
+
+// TechCardOperation is one per-node sewing operation (Sheet «Обработка»).
+export type common_TechCardOperation = {
+  node: string | undefined;
+  description: string | undefined;
+  seamType: string | undefined;
+  stitchesPerCm: googletype_Decimal | undefined;
+  topstitchWidth: string | undefined;
+  thread: string | undefined;
+  note: string | undefined;
+  operationNumber: number | undefined;
+  machine: string | undefined;
+  seamAllowance: string | undefined;
+  needle: string | undefined;
+  timeNorm: googletype_Decimal | undefined;
+};
+
+// TechCardLabel is one label / tag spec (Sheet «Этикетки и упаковка»).
+export type common_TechCardLabel = {
+  labelType: common_TechCardLabelType | undefined;
+  content: string | undefined;
+  placement: string | undefined;
+  attachment: string | undefined;
+  size: string | undefined;
+  note: string | undefined;
+};
+
+// TechCardLabelType classifies a label / tag (Sheet «Этикетки и упаковка»).
+export type common_TechCardLabelType =
+  | "TECH_CARD_LABEL_TYPE_UNKNOWN"
+  | "TECH_CARD_LABEL_TYPE_MAIN"
+  | "TECH_CARD_LABEL_TYPE_SIZE"
+  | "TECH_CARD_LABEL_TYPE_CARE"
+  | "TECH_CARD_LABEL_TYPE_ORIGIN"
+  | "TECH_CARD_LABEL_TYPE_FLAG"
+  | "TECH_CARD_LABEL_TYPE_HANGTAG"
+  | "TECH_CARD_LABEL_TYPE_BARCODE"
+  | "TECH_CARD_LABEL_TYPE_SPECIAL";
+// TechCardPackaging holds the packaging spec (Sheet «Этикетки и упаковка»).
+export type common_TechCardPackaging = {
+  foldingMethod: string | undefined;
+  polybag: string | undefined;
+  bagSticker: string | undefined;
+  inserts: string | undefined;
+  unitsPerBox: number | undefined;
+  boxMarking: string | undefined;
+  boxDimensions: string | undefined;
+  weightNet: googletype_Decimal | undefined;
+  weightGross: googletype_Decimal | undefined;
+  notes: string | undefined;
+};
+
+// TechCardCosting holds the manually-entered cost articles (Sheet «Калькуляция»).
+// The materials rollup and total are COMPUTED on read from the BOM; they are
+// output-only (ignored on write) and never converted across currencies.
+export type common_TechCardCosting = {
+  cmtCost: googletype_Decimal | undefined;
+  hardwareCost: googletype_Decimal | undefined;
+  packagingCost: googletype_Decimal | undefined;
+  logisticsCost: googletype_Decimal | undefined;
+  overheadCost: googletype_Decimal | undefined;
+  defectPercent: googletype_Decimal | undefined;
+  markupMultiplier: googletype_Decimal | undefined;
+  wholesalePrice: googletype_Decimal | undefined;
+  retailPrice: googletype_Decimal | undefined;
+  currency: string | undefined;
+  notes: string | undefined;
+  // OUTPUT-ONLY computed rollup (ignored on write; no currency conversion).
+  materialsTotal: common_TechCardCostLine[] | undefined;
+  materialsCost: googletype_Decimal | undefined;
+  totalCost: googletype_Decimal | undefined;
+  hasUnconvertedCurrencies: boolean | undefined;
+  totalSam: googletype_Decimal | undefined;
+  labourCost: googletype_Decimal | undefined;
+};
+
+// TechCardCostLine is one currency bucket of the materials rollup.
+export type common_TechCardCostLine = {
+  currency: string | undefined;
+  amount: googletype_Decimal | undefined;
+};
+
+// TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
+// operation or callout (Sheet «Обработка» / «Тех. эскиз»).
+export type common_TechCardIssue = {
+  operationNumber: number | undefined;
+  calloutNumber: number | undefined;
+  raisedBy: string | undefined;
+  severity: common_TechCardIssueSeverity | undefined;
+  status: common_TechCardIssueStatus | undefined;
+  description: string | undefined;
+  resolutionNote: string | undefined;
+};
+
+// TechCardIssueSeverity ranks a flagged construction issue.
+export type common_TechCardIssueSeverity =
+  | "TECH_CARD_ISSUE_SEVERITY_UNKNOWN"
+  | "TECH_CARD_ISSUE_SEVERITY_LOW"
+  | "TECH_CARD_ISSUE_SEVERITY_MEDIUM"
+  | "TECH_CARD_ISSUE_SEVERITY_HIGH";
+// TechCardIssueStatus is the resolution state of a flagged issue.
+export type common_TechCardIssueStatus =
+  | "TECH_CARD_ISSUE_STATUS_UNKNOWN"
+  | "TECH_CARD_ISSUE_STATUS_OPEN"
+  | "TECH_CARD_ISSUE_STATUS_RESOLVED"
+  | "TECH_CARD_ISSUE_STATUS_WONTFIX";
+// TechCardSizeQuantity is the production order quantity for a size (size run).
+export type common_TechCardSizeQuantity = {
+  sizeId: number | undefined;
+  orderQty: number | undefined;
+};
+
+// TechCardSignoff records one responsible role's sign-off of a sheet, so the
+// header approval_state isn't the only gate (Sheet «Титул» coordination).
+export type common_TechCardSignoff = {
+  section: common_TechCardSignoffSection | undefined;
+  state: common_TechCardSignoffState | undefined;
+  signedBy: string | undefined;
+  signedAt: wellKnownTimestamp | undefined;
+  note: string | undefined;
+};
+
+// TechCardInsert is the writable payload for a tech card. Nested lists are full
+// replacements on update (like ProductNew).
+// TechCardSignoffSection is the sheet a sign-off covers.
+export type common_TechCardSignoffSection =
+  | "TECH_CARD_SIGNOFF_SECTION_UNKNOWN"
+  | "TECH_CARD_SIGNOFF_SECTION_DESIGN"
+  | "TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION"
+  | "TECH_CARD_SIGNOFF_SECTION_POM"
+  | "TECH_CARD_SIGNOFF_SECTION_MATERIALS"
+  | "TECH_CARD_SIGNOFF_SECTION_COLOUR"
+  | "TECH_CARD_SIGNOFF_SECTION_LABELS"
+  | "TECH_CARD_SIGNOFF_SECTION_PACKAGING"
+  | "TECH_CARD_SIGNOFF_SECTION_COSTING";
+// TechCardSignoffState is the sign-off decision for a section.
+export type common_TechCardSignoffState =
+  | "TECH_CARD_SIGNOFF_STATE_UNKNOWN"
+  | "TECH_CARD_SIGNOFF_STATE_PENDING"
+  | "TECH_CARD_SIGNOFF_STATE_APPROVED"
+  | "TECH_CARD_SIGNOFF_STATE_REJECTED";
+export type CreateTechCardResponse = {
+  id: number | undefined;
+};
+
+export type GetTechCardRequest = {
+  id: number | undefined;
+};
+
+export type GetTechCardResponse = {
+  techCard: common_TechCard | undefined;
+};
+
+// TechCard is a stored tech card with resolved sketch media.
+export type common_TechCard = {
+  id: number | undefined;
+  techCard: common_TechCardInsert | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  resolvedMedia: common_TechCardMediaFull[] | undefined;
+  lockVersion: number | undefined;
+};
+
+// TechCardMediaFull is a resolved sketch-media reference for display.
+export type common_TechCardMediaFull = {
+  media: common_MediaFull | undefined;
+  kind: common_TechCardMediaKind | undefined;
+};
+
+export type UpdateTechCardRequest = {
+  id: number | undefined;
+  techCard: common_TechCardInsert | undefined;
+  expectedLockVersion: number | undefined;
+};
+
+export type UpdateTechCardResponse = {
+};
+
+export type DeleteTechCardRequest = {
+  id: number | undefined;
+};
+
+export type DeleteTechCardResponse = {
+};
+
+export type ListTechCardsRequest = {
+  limit: number | undefined;
+  offset: number | undefined;
+  orderFactor: common_OrderFactor | undefined;
+  stage: common_TechCardStage | undefined;
+  gender: common_GenderEnum | undefined;
+  brand: string | undefined;
+  season: string | undefined;
+  name: string | undefined;
+  productId: number | undefined;
+};
+
+export type ListTechCardsResponse = {
+  techCards: common_TechCardListItem[] | undefined;
+  total: number | undefined;
+};
+
+// TechCardListItem is a lightweight tech-card header for list views.
+export type common_TechCardListItem = {
+  id: number | undefined;
+  styleNumber: string | undefined;
+  name: string | undefined;
+  brand: string | undefined;
+  stage: common_TechCardStage | undefined;
+  status: string | undefined;
+  targetGender: common_GenderEnum | undefined;
+  season: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  approvalState: common_TechCardApprovalState | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -2562,6 +3046,19 @@ export interface AdminService {
   // Declared last on purpose (see ListModels ordering note) so GET /fitting/list
   // is not shadowed by GET /fitting/{id}.
   ListFittings(request: ListFittingsRequest): Promise<ListFittingsResponse>;
+  // CreateTechCard creates a new tech card (техкарта) with its nested sections.
+  CreateTechCard(request: CreateTechCardRequest): Promise<CreateTechCardResponse>;
+  // GetTechCard returns a tech card by id with its nested sections resolved.
+  GetTechCard(request: GetTechCardRequest): Promise<GetTechCardResponse>;
+  // UpdateTechCard updates a tech card, replacing its nested sections.
+  UpdateTechCard(request: UpdateTechCardRequest): Promise<UpdateTechCardResponse>;
+  // DeleteTechCard deletes a tech card by id (nested sections cascade).
+  DeleteTechCard(request: DeleteTechCardRequest): Promise<DeleteTechCardResponse>;
+  // ListTechCards lists tech cards (paged, optional filters). Declared AFTER
+  // GetTechCard so the mux (which prepends handlers, first-match wins) checks
+  // /tech-card/list before /tech-card/{id}. Guarded by
+  // TestTechCardListRouteNotShadowed.
+  ListTechCards(request: ListTechCardsRequest): Promise<ListTechCardsResponse>;
   UpdateSettings(request: UpdateSettingsRequest): Promise<UpdateSettingsResponse>;
   GetBackgroundHeroColor(request: GetBackgroundHeroColorRequest): Promise<GetBackgroundHeroColorResponse>;
   SetBackgroundHeroColor(request: SetBackgroundHeroColorRequest): Promise<SetBackgroundHeroColorResponse>;
@@ -3540,6 +4037,9 @@ export function createAdminServiceClient(
       if (request.modelId) {
         queryParams.push(`modelId=${encodeURIComponent(request.modelId.toString())}`)
       }
+      if (request.techCardId) {
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -3552,6 +4052,124 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListFittings",
       }) as Promise<ListFittingsResponse>;
+    },
+    CreateTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateTechCard",
+      }) as Promise<CreateTechCardResponse>;
+    },
+    GetTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/tech-card/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCard",
+      }) as Promise<GetTechCardResponse>;
+    },
+    UpdateTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTechCard",
+      }) as Promise<UpdateTechCardResponse>;
+    },
+    DeleteTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/tech-card/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCard",
+      }) as Promise<DeleteTechCardResponse>;
+    },
+    ListTechCards(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      if (request.stage) {
+        queryParams.push(`stage=${encodeURIComponent(request.stage.toString())}`)
+      }
+      if (request.gender) {
+        queryParams.push(`gender=${encodeURIComponent(request.gender.toString())}`)
+      }
+      if (request.brand) {
+        queryParams.push(`brand=${encodeURIComponent(request.brand.toString())}`)
+      }
+      if (request.season) {
+        queryParams.push(`season=${encodeURIComponent(request.season.toString())}`)
+      }
+      if (request.name) {
+        queryParams.push(`name=${encodeURIComponent(request.name.toString())}`)
+      }
+      if (request.productId) {
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCards",
+      }) as Promise<ListTechCardsResponse>;
     },
     UpdateSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/update`; // eslint-disable-line quotes
