@@ -5,10 +5,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { MediaField } from './media-field';
+import { pieceCodeOptions } from './piece-codes';
 import { TechCardFormData } from './schema';
 
 const kindLabels: Record<string, string> = Object.fromEntries(
@@ -222,7 +224,11 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
                   valueAsNumber
                   label='number'
                 />
-                <InputField name={`callouts.${index}.part`} label='part' />
+                <ComboField
+                  name={`callouts.${index}.part`}
+                  label='part (код детали)'
+                  options={pieceCodeOptions}
+                />
                 <InputField name={`callouts.${index}.dimensions`} label='dimensions' />
                 <SelectField
                   name={`callouts.${index}.mediaId`}

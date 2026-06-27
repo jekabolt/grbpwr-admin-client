@@ -1,3 +1,4 @@
+import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 
@@ -6,6 +7,10 @@ import TextareaField from 'ui/form/fields/textarea-field';
 export function ConstructionField() {
   return (
     <div className='space-y-3'>
+      <Text variant='inactive' size='small'>
+        Общие параметры обработки по умолчанию. Конкретные значения по шагам задавайте в операциях
+        ниже.
+      </Text>
       <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
         <InputField name='construction.mainStitchType' label='main stitch type' />
         <InputField name='construction.stitchDensity' label='stitch density (st/cm)' />

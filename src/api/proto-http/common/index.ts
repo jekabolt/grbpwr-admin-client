@@ -1089,7 +1089,8 @@ export type TechCardBomSection =
   | "TECH_CARD_BOM_SECTION_HARDWARE"
   | "TECH_CARD_BOM_SECTION_THREAD"
   | "TECH_CARD_BOM_SECTION_LABEL"
-  | "TECH_CARD_BOM_SECTION_PACKAGING";
+  | "TECH_CARD_BOM_SECTION_PACKAGING"
+  | "TECH_CARD_BOM_SECTION_TRIM";
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
@@ -1120,6 +1121,31 @@ export type TechCardLabelType =
   | "TECH_CARD_LABEL_TYPE_HANGTAG"
   | "TECH_CARD_LABEL_TYPE_BARCODE"
   | "TECH_CARD_LABEL_TYPE_SPECIAL";
+// TechCardOperationType classifies an operation by its machine / stitch class
+// (replaces the coarse seaming/overlock/decorative split with the real sewing
+// taxonomy the factory works in).
+export type TechCardOperationType =
+  | "TECH_CARD_OPERATION_TYPE_UNKNOWN"
+  | "TECH_CARD_OPERATION_TYPE_LOCKSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE"
+  | "TECH_CARD_OPERATION_TYPE_OVERLOCK"
+  | "TECH_CARD_OPERATION_TYPE_COVERSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_CHAINSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_BLINDHEM"
+  | "TECH_CARD_OPERATION_TYPE_BARTACK"
+  | "TECH_CARD_OPERATION_TYPE_BUTTONHOLE"
+  | "TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH"
+  | "TECH_CARD_OPERATION_TYPE_FUSING"
+  | "TECH_CARD_OPERATION_TYPE_HANDWORK"
+  | "TECH_CARD_OPERATION_TYPE_OTHER";
+// TechCardConstructionZone groups an operation for display only. Construction stays
+// a single ordered list; the zone is just a visual band (outer shell, lining, …).
+export type TechCardConstructionZone =
+  | "TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN"
+  | "TECH_CARD_CONSTRUCTION_ZONE_OUTER"
+  | "TECH_CARD_CONSTRUCTION_ZONE_LINING"
+  | "TECH_CARD_CONSTRUCTION_ZONE_INTERLINING"
+  | "TECH_CARD_CONSTRUCTION_ZONE_OTHER";
 // TechCardIssueSeverity ranks a flagged construction issue.
 export type TechCardIssueSeverity =
   | "TECH_CARD_ISSUE_SEVERITY_UNKNOWN"
@@ -1311,6 +1337,16 @@ export type TechCardOperation = {
   seamAllowance: string | undefined;
   needle: string | undefined;
   timeNorm: googletype_Decimal | undefined;
+  attachment: string | undefined;
+  operationType: TechCardOperationType | undefined;
+  // 0-based index into TechCardInsert.bom_items of the material this operation
+  // applies (thread / binding (бейка) / interlining / zipper). Uses proto3 explicit
+  // presence so index 0 (the first BOM line) is distinguishable from "no material":
+  // unset = no reference. Mirrors TechCardBomColorwayColor.colorway_index, which —
+  // being always present — needs no presence flag.
+  bomItemIndex?: number;
+  calloutNumber: number | undefined;
+  zone: TechCardConstructionZone | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -1472,6 +1508,7 @@ export type TechCardListItem = {
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   approvalState: TechCardApprovalState | undefined;
+  lockVersion: number | undefined;
 };
 
 

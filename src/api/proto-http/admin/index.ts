@@ -2647,7 +2647,8 @@ export type common_TechCardBomSection =
   | "TECH_CARD_BOM_SECTION_HARDWARE"
   | "TECH_CARD_BOM_SECTION_THREAD"
   | "TECH_CARD_BOM_SECTION_LABEL"
-  | "TECH_CARD_BOM_SECTION_PACKAGING";
+  | "TECH_CARD_BOM_SECTION_PACKAGING"
+  | "TECH_CARD_BOM_SECTION_TRIM";
 // TechCardBomColorwayColor is one «Колористика» matrix cell: the colour of a BOM
 // material in a colourway. colorway_index points into TechCardInsert.colorways — a
 // full-replace upsert has no stable colourway ids to reference on write.
@@ -2757,8 +2758,43 @@ export type common_TechCardOperation = {
   seamAllowance: string | undefined;
   needle: string | undefined;
   timeNorm: googletype_Decimal | undefined;
+  attachment: string | undefined;
+  operationType: common_TechCardOperationType | undefined;
+  // 0-based index into TechCardInsert.bom_items of the material this operation
+  // applies (thread / binding (бейка) / interlining / zipper). Uses proto3 explicit
+  // presence so index 0 (the first BOM line) is distinguishable from "no material":
+  // unset = no reference. Mirrors TechCardBomColorwayColor.colorway_index, which —
+  // being always present — needs no presence flag.
+  bomItemIndex?: number;
+  calloutNumber: number | undefined;
+  zone: common_TechCardConstructionZone | undefined;
 };
 
+// TechCardOperationType classifies an operation by its machine / stitch class
+// (replaces the coarse seaming/overlock/decorative split with the real sewing
+// taxonomy the factory works in).
+export type common_TechCardOperationType =
+  | "TECH_CARD_OPERATION_TYPE_UNKNOWN"
+  | "TECH_CARD_OPERATION_TYPE_LOCKSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE"
+  | "TECH_CARD_OPERATION_TYPE_OVERLOCK"
+  | "TECH_CARD_OPERATION_TYPE_COVERSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_CHAINSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_BLINDHEM"
+  | "TECH_CARD_OPERATION_TYPE_BARTACK"
+  | "TECH_CARD_OPERATION_TYPE_BUTTONHOLE"
+  | "TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH"
+  | "TECH_CARD_OPERATION_TYPE_FUSING"
+  | "TECH_CARD_OPERATION_TYPE_HANDWORK"
+  | "TECH_CARD_OPERATION_TYPE_OTHER";
+// TechCardConstructionZone groups an operation for display only. Construction stays
+// a single ordered list; the zone is just a visual band (outer shell, lining, …).
+export type common_TechCardConstructionZone =
+  | "TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN"
+  | "TECH_CARD_CONSTRUCTION_ZONE_OUTER"
+  | "TECH_CARD_CONSTRUCTION_ZONE_LINING"
+  | "TECH_CARD_CONSTRUCTION_ZONE_INTERLINING"
+  | "TECH_CARD_CONSTRUCTION_ZONE_OTHER";
 // TechCardLabel is one label / tag spec (Sheet «Этикетки и упаковка»).
 export type common_TechCardLabel = {
   labelType: common_TechCardLabelType | undefined;
@@ -2957,6 +2993,7 @@ export type common_TechCardListItem = {
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   approvalState: common_TechCardApprovalState | undefined;
+  lockVersion: number | undefined;
 };
 
 export interface AdminService {
