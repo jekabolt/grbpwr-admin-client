@@ -148,6 +148,7 @@ export const techCardBomSectionOptions: Array<{ value: common_TechCardBomSection
     { value: 'TECH_CARD_BOM_SECTION_INSULATION', label: 'insulation' },
     { value: 'TECH_CARD_BOM_SECTION_HARDWARE', label: 'hardware' },
     { value: 'TECH_CARD_BOM_SECTION_THREAD', label: 'thread' },
+    { value: 'TECH_CARD_BOM_SECTION_TRIM', label: 'trim (бейка / тесьма / резинка)' },
     { value: 'TECH_CARD_BOM_SECTION_LABEL', label: 'label' },
     { value: 'TECH_CARD_BOM_SECTION_PACKAGING', label: 'packaging' },
   ];

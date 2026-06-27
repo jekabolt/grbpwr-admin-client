@@ -29,12 +29,11 @@ import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { BomField } from './bom-field';
 import { ColorwaysField } from './colorways-field';
-import { ConstructionField } from './construction-field';
+import { ConstructionTab } from './construction-tab';
 import { CostingField } from './costing-field';
 import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
 import { LabelsField } from './labels-field';
-import { OperationsField } from './operations-field';
 import { PackagingField } from './packaging-field';
 import { PomField } from './pom-field';
 import { ProductIdsField } from './product-ids-field';
@@ -441,13 +440,8 @@ export function TechCardForm({
           </div>
 
           {/* CONSTRUCTION */}
-          <div hidden={activeTab !== 'construction'} className='flex flex-col gap-6'>
-            <Section title='construction'>
-              <ConstructionField />
-            </Section>
-            <Section title='operations'>
-              <OperationsField />
-            </Section>
+          <div hidden={activeTab !== 'construction'}>
+            <ConstructionTab techCard={techCard} />
           </div>
 
           {/* LABELS & PACKAGING */}

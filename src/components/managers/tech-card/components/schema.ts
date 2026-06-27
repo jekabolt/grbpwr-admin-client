@@ -4,6 +4,7 @@ import {
   common_TechCardApprovalState,
   common_TechCardBomSection,
   common_TechCardConstruction,
+  common_TechCardConstructionZone,
   common_TechCardCosting,
   common_TechCardFabricDirection,
   common_TechCardInsert,
@@ -13,6 +14,7 @@ import {
   common_TechCardLabelType,
   common_TechCardMeasurementUnit,
   common_TechCardMediaKind,
+  common_TechCardOperationType,
   common_TechCardPackaging,
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
@@ -31,7 +33,7 @@ import { z } from 'zod';
 
 const DEFAULT_STAGE: common_TechCardStage = 'TECH_CARD_STAGE_PROTO';
 const DEFAULT_APPROVAL_STATE: common_TechCardApprovalState = 'TECH_CARD_APPROVAL_STATE_DRAFT';
-const DEFAULT_MEASUREMENT_UNIT: common_TechCardMeasurementUnit = 'TECH_CARD_MEASUREMENT_UNIT_CM';
+const DEFAULT_MEASUREMENT_UNIT: common_TechCardMeasurementUnit = 'TECH_CARD_MEASUREMENT_UNIT_MM';
 const UNSET_GENDER: common_GenderEnum = 'GENDER_ENUM_UNKNOWN';
 
 function timestampToDateInput(timestamp?: string): string {
@@ -216,6 +218,12 @@ const operationSchema = z.object({
   seamAllowance: z.string().optional().default(''),
   needle: z.string().optional().default(''),
   timeNorm: z.string().optional().default(''), // SAM minutes, decimal as string
+  // classification + links (Phase 3.5d)
+  operationType: z.string().optional().default('TECH_CARD_OPERATION_TYPE_UNKNOWN'),
+  zone: z.string().optional().default('TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
+  attachment: z.string().optional().default(''), // приспособление (binder / folder / hemmer)
+  bomItemIndex: z.number().optional().default(-1), // index into bomItems; -1 = none
+  calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
 });
 
 const labelSchema = z.object({
@@ -565,6 +573,11 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       seamAllowance: o.seamAllowance || '',
       needle: o.needle || '',
       timeNorm: decimalToInput(o.timeNorm),
+      operationType: o.operationType || 'TECH_CARD_OPERATION_TYPE_UNKNOWN',
+      zone: o.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
+      attachment: o.attachment || '',
+      bomItemIndex: o.bomItemIndex ?? -1,
+      calloutNumber: o.calloutNumber || 0,
     })),
     labels: (insert?.labels ?? []).map((l) => ({
       labelType:
@@ -885,6 +898,13 @@ export function mapFormToTechCardInsert(
       seamAllowance: o.seamAllowance?.trim() || '',
       needle: o.needle?.trim() || '',
       timeNorm: inputToDecimal(o.timeNorm),
+      operationType: (o.operationType ||
+        'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType,
+      zone: (o.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN') as common_TechCardConstructionZone,
+      attachment: o.attachment?.trim() || '',
+      bomItemIndex:
+        typeof o.bomItemIndex === 'number' && o.bomItemIndex >= 0 ? o.bomItemIndex : undefined,
+      calloutNumber: o.calloutNumber || 0,
     })),
     labels: (data.labels ?? []).map((l) => ({
       labelType: (l.labelType || 'TECH_CARD_LABEL_TYPE_UNKNOWN') as common_TechCardLabelType,
