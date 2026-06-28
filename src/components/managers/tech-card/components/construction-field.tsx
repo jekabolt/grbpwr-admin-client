@@ -1,9 +1,17 @@
 import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
+import ComboField from 'ui/form/fields/combo-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { seamAllowanceOptions, stitchDensityOptions } from './operation-options';
+import {
+  hemFinishOptions,
+  machineClassOptions,
+  mainStitchTypeOptions,
+  overlockThreadsOptions,
+  pressingOptions,
+} from './tech-card-options';
 
 // General workmanship parameters (Sheet «Обработка», upper block). 1:1 — sent as
-// unset when every field is blank (see mapConstructionOut).
+// unset when every field is blank (see mapConstructionOut). Guided combos, not closed sets.
 export function ConstructionField() {
   return (
     <div className='space-y-3'>
@@ -12,22 +20,36 @@ export function ConstructionField() {
         ниже.
       </Text>
       <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
-        <InputField name='construction.mainStitchType' label='main stitch type' />
-        <InputField name='construction.stitchDensity' label='stitch density (st/cm)' />
-        <InputField name='construction.overlockThreads' label='overlock threads' />
-        <InputField name='construction.seamAllowances' label='seam allowances' />
-        <InputField name='construction.hemFinish' label='hem finish' />
-        <InputField name='construction.pressing' label='pressing / finish' />
-        <InputField name='construction.machineClass' label='machine class' />
-        <InputField
-          name='construction.labourRate'
-          label='labour rate (cost / min)'
-          placeholder='0.50'
+        <ComboField
+          name='construction.mainStitchType'
+          label='main stitch type'
+          options={mainStitchTypeOptions}
         />
-        <InputField
-          name='construction.labourRateCurrency'
-          label='labour currency'
-          placeholder='EUR'
+        <ComboField
+          name='construction.stitchDensity'
+          label='stitch density (st/cm)'
+          options={stitchDensityOptions}
+        />
+        <ComboField
+          name='construction.overlockThreads'
+          label='overlock threads'
+          options={overlockThreadsOptions}
+        />
+        <ComboField
+          name='construction.seamAllowances'
+          label='seam allowances'
+          options={seamAllowanceOptions}
+        />
+        <ComboField name='construction.hemFinish' label='hem finish' options={hemFinishOptions} />
+        <ComboField
+          name='construction.pressing'
+          label='pressing / finish'
+          options={pressingOptions}
+        />
+        <ComboField
+          name='construction.machineClass'
+          label='machine class'
+          options={machineClassOptions}
         />
       </div>
       <TextareaField name='construction.notes' label='notes' rows={2} maxLength={2000} />

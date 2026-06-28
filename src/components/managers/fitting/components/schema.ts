@@ -12,18 +12,36 @@ const fittingSizeSchema = z.object({
   fitNote: z.string().optional().default(''),
 });
 
-export const fittingSchema = z.object({
-  productId: z.number().int().min(1, 'Product is required'),
-  techCardId: z.number().int().optional().default(0), // optional link to the tech card (style)
-  modelId: z.number().int().optional().default(0),
-  fittingDate: z.string().optional().default(''), // YYYY-MM-DD in the UI
-  comment: z.string().optional().default(''),
-  status: z.string().optional().default('FITTING_STATUS_PLANNED'),
-  verdict: z.string().optional().default('FITTING_VERDICT_PENDING'),
-  recordedBy: z.string().optional().default(''),
-  sizes: z.array(fittingSizeSchema).default([]),
-  mediaIds: z.array(z.number()).default([]),
+// The iteration выкройка actually tried on in this fitting (a snapshot, independent of the
+// card's final pattern). sizeId is optional here: 0 = not tied to a specific size.
+const fittingPatternSchema = z.object({
+  sizeId: z.number().int().optional().default(0),
+  url: z.string().optional().default(''),
+  filename: z.string().optional().default(''),
+  sizeBytes: z.number().optional().default(0),
 });
+
+export const fittingSchema = z
+  .object({
+    // A fitting anchors to a product AND/OR a tech card — at least one must be set
+    // (backend contract). Product is optional so accessories without a catalog product
+    // (пыльники, кофры, …) can be fitted against their tech card instead.
+    productId: z.number().int().optional().default(0), // 0 = unset
+    techCardId: z.number().int().optional().default(0), // optional link to the tech card (style)
+    modelId: z.number().int().optional().default(0),
+    fittingDate: z.string().optional().default(''), // YYYY-MM-DD in the UI
+    comment: z.string().optional().default(''),
+    status: z.string().optional().default('FITTING_STATUS_PLANNED'),
+    verdict: z.string().optional().default('FITTING_VERDICT_PENDING'),
+    recordedBy: z.string().optional().default(''),
+    sizes: z.array(fittingSizeSchema).default([]),
+    patterns: z.array(fittingPatternSchema).default([]),
+    mediaIds: z.array(z.number()).default([]),
+  })
+  .refine((data) => !!data.productId || !!data.techCardId, {
+    message: 'Укажите продукт или тех карту',
+    path: ['productId'],
+  });
 
 export type FittingFormData = z.input<typeof fittingSchema>;
 
@@ -37,6 +55,7 @@ export const fittingDefaultData: FittingFormData = {
   verdict: 'FITTING_VERDICT_PENDING',
   recordedBy: '',
   sizes: [],
+  patterns: [],
   mediaIds: [],
 };
 
@@ -79,6 +98,13 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       sizeId: s.sizeId || 0,
       fitNote: s.fitNote || '',
     })),
+    patterns: (insert?.patterns ?? []).map((p) => ({
+      sizeId: p.sizeId || 0,
+      url: p.url || '',
+      filename: p.filename || '',
+      // int64 → string from grpc-gateway; coerce so z.number() doesn't block save
+      sizeBytes: Number(p.sizeBytes) || 0,
+    })),
     mediaIds:
       fitting.media?.map((m) => m.id).filter((id): id is number => id != null) ??
       insert?.mediaIds ??
@@ -88,7 +114,7 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
 
 export function mapFormToFittingInsert(data: FittingFormData): common_FittingInsert {
   return {
-    productId: data.productId,
+    productId: data.productId || 0,
     techCardId: data.techCardId || 0,
     modelId: data.modelId || 0,
     fittingDate: dateInputToTimestamp(data.fittingDate),
@@ -100,6 +126,14 @@ export function mapFormToFittingInsert(data: FittingFormData): common_FittingIns
       sizeId: s.sizeId,
       fitNote: s.fitNote?.trim() || '',
     })),
+    patterns: (data.patterns ?? [])
+      .filter((p) => p.url?.trim())
+      .map((p) => ({
+        sizeId: p.sizeId || 0,
+        url: p.url?.trim() || '',
+        filename: p.filename?.trim() || '',
+        sizeBytes: p.sizeBytes || 0,
+      })),
     mediaIds: data.mediaIds ?? [],
   };
 }

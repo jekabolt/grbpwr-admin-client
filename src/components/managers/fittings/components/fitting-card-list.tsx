@@ -39,10 +39,10 @@ export function FittingCardList() {
   const modelMap = useModelsByIds(fittings.map((f) => f.fitting?.modelId ?? 0));
 
   const productName = (id?: number) =>
-    id ? (productMap.get(id)?.productDisplay?.productBody?.translations?.[0]?.name ?? `#${id}`) : '—';
+    id ? productMap.get(id)?.productDisplay?.productBody?.translations?.[0]?.name ?? `#${id}` : '—';
   const productThumb = (id?: number) =>
     (id && productMap.get(id)?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl) || '';
-  const modelName = (id?: number) => (id ? (modelMap.get(id)?.model?.name || `#${id}`) : '—');
+  const modelName = (id?: number) => (id ? modelMap.get(id)?.model?.name || `#${id}` : '—');
 
   function confirmDelete() {
     if (!pendingDelete) return;
@@ -96,7 +96,13 @@ export function FittingCardList() {
                   fit='cover'
                 />
                 <div className='flex flex-col gap-1 p-2'>
-                  <Text>{productName(insert?.productId)}</Text>
+                  <Text>
+                    {insert?.productId
+                      ? productName(insert.productId)
+                      : insert?.techCardId
+                        ? `тех карта #${insert.techCardId}`
+                        : '—'}
+                  </Text>
                   <Text variant='inactive' size='small'>
                     {modelName(insert?.modelId)} · {formatFittingDate(insert?.fittingDate)}
                   </Text>

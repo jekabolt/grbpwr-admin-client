@@ -1,9 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_TechCard } from 'api/proto-http/admin';
-import { formatFittingDate } from 'components/managers/fittings/components/utils';
 import {
   useCreateTechCard,
-  useTechCardFittings,
   useUpdateTechCard,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
@@ -18,7 +16,7 @@ import {
 } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -31,14 +29,16 @@ import { BomField } from './bom-field';
 import { ColorwaysField } from './colorways-field';
 import { ConstructionTab } from './construction-tab';
 import { CostingField } from './costing-field';
+import { DetailsEditor } from './details-editor';
 import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
 import { LabelsField } from './labels-field';
 import { PackagingField } from './packaging-field';
-import { PomField } from './pom-field';
+import { PatternsField } from './patterns-field';
 import { ProductIdsField } from './product-ids-field';
 import { RevisionsField } from './revisions-field';
 import { SignoffsField } from './signoffs-field';
+import { SeasonField } from './season-field';
 import { SizeQuantitiesField } from './size-quantities-field';
 import { SketchTab } from './sketch-tab';
 import {
@@ -54,9 +54,9 @@ import { TechCardFittings } from './tech-card-fittings';
 const TABS = [
   { id: 'header', label: 'header' },
   { id: 'sketch', label: 'sketch' },
+  { id: 'patterns', label: 'patterns' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
-  { id: 'pom', label: 'POM' },
   { id: 'construction', label: 'construction' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
@@ -70,9 +70,12 @@ type TabId = (typeof TABS)[number]['id'];
 const ERROR_TAB: Record<string, TabId> = {
   media: 'sketch',
   callouts: 'sketch',
+  patterns: 'patterns',
+  sizeIds: 'patterns',
+  sizeQuantities: 'patterns',
   bomItems: 'bom',
   colorways: 'colorways',
-  pomPoints: 'pom',
+  details: 'header',
   construction: 'construction',
   operations: 'construction',
   labels: 'labels',
@@ -121,15 +124,6 @@ export function TechCardForm({
   const updateTechCard = useUpdateTechCard();
 
   const numId = id ? parseInt(id, 10) : undefined;
-  const { data: fittings } = useTechCardFittings(numId);
-  const fittingOptions = useMemo(
-    () =>
-      (fittings ?? []).map((f) => ({
-        value: f.id ?? 0,
-        label: `#${f.id} · ${formatFittingDate(f.fitting?.fittingDate)}`,
-      })),
-    [fittings],
-  );
 
   const form = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema),
@@ -139,6 +133,12 @@ export function TechCardForm({
 
   const [activeTab, setActiveTab] = useState<TabId>('header');
   const [conflict, setConflict] = useState(false);
+  // bump to jump to the BOM tab and pulse the empty composition fields (from labels care-gen)
+  const [bomHighlight, setBomHighlight] = useState(0);
+  const goToBomComposition = () => {
+    setActiveTab('bom');
+    setBomHighlight((n) => n + 1);
+  };
 
   // The loaded card's server state freezes the body; the user's in-form approval value
   // drives the Release gate. Lab-dips must all be approved to release (empty = allowed).
@@ -183,11 +183,23 @@ export function TechCardForm({
     }
   }
 
-  const save = () => form.handleSubmit(doSubmit)();
-  const submitWithApproval = (next: string) => {
-    form.setValue('approvalState', next, { shouldDirty: true });
-    form.handleSubmit(doSubmit)();
+  // Surface validation failures — otherwise clicking Save with an invalid field (e.g. a tab the
+  // user can't see) does nothing and looks like a broken button.
+  const onInvalid = () => {
+    const tabs = Array.from(
+      new Set(Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header')),
+    );
+    showMessage(
+      `Проверьте поля с ошибками${tabs.length ? ` (вкладки: ${tabs.join(', ')})` : ''}`,
+      'error',
+    );
   };
+  const save = () => form.handleSubmit(doSubmit, onInvalid)();
+  // Pass the approval override INTO the validated submit (don't mutate form state before
+  // validation — on failure that would leave the card stuck in an ungated state that a later
+  // plain save would persist).
+  const submitWithApproval = (next: string) =>
+    form.handleSubmit((data) => doSubmit({ ...data, approvalState: next }), onInvalid)();
 
   const saving = form.formState.isSubmitting;
 
@@ -344,7 +356,7 @@ export function TechCardForm({
                 <InputField name='styleNumber' label='style number *' placeholder='артикул' />
                 <InputField name='name' label='name *' placeholder='название изделия' />
                 <InputField name='brand' label='brand' />
-                <InputField name='season' label='season' />
+                <SeasonField />
                 <InputField name='collection' label='collection' />
                 <InputField name='version' label='version' />
                 <InputField name='designer' label='designer' />
@@ -368,49 +380,18 @@ export function TechCardForm({
               </Section>
             </div>
 
-            <Section title='classification & targets'>
+            <Section title='category & base model'>
               <HeaderMetaFields />
             </Section>
 
             <Section title='construction description'>
-              <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-                <TextareaField name='description' label='description' rows={3} maxLength={2000} />
-                <TextareaField name='silhouette' label='silhouette' rows={3} maxLength={1000} />
-                <TextareaField name='collar' label='collar' rows={2} maxLength={1000} />
-                <TextareaField name='fastening' label='fastening' rows={2} maxLength={1000} />
-                <TextareaField name='pockets' label='pockets' rows={2} maxLength={1000} />
-                <TextareaField name='sleeveCuff' label='sleeve / cuff' rows={2} maxLength={1000} />
-                <TextareaField
-                  name='extraDetails'
-                  label='extra details'
-                  rows={2}
-                  maxLength={1000}
-                />
-                <TextareaField name='topstitching' label='topstitching' rows={2} maxLength={1000} />
-                <TextareaField
-                  name='auxMaterials'
-                  label='aux materials'
-                  rows={2}
-                  maxLength={1000}
-                />
-                <TextareaField name='notes' label='notes' rows={2} maxLength={2000} />
-              </div>
+              <DetailsEditor techCard={techCard} />
+              <TextareaField name='notes' label='notes' rows={2} maxLength={2000} />
             </Section>
 
-            <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
-              <Section title='size range' className='w-full lg:w-1/2'>
-                <SizeIdsField />
-                <div className='space-y-2 border-t border-textInactiveColor pt-3'>
-                  <Text variant='uppercase' size='small'>
-                    size run (order qty)
-                  </Text>
-                  <SizeQuantitiesField />
-                </div>
-              </Section>
-              <Section title='linked products' className='w-full lg:w-1/2'>
-                <ProductIdsField />
-              </Section>
-            </div>
+            <Section title='linked products'>
+              <ProductIdsField />
+            </Section>
           </div>
 
           {/* SKETCH */}
@@ -418,24 +399,33 @@ export function TechCardForm({
             <SketchTab techCard={techCard} />
           </div>
 
+          {/* PATTERNS (size range + per-size PDF выкройки) */}
+          <div hidden={activeTab !== 'patterns'} className='flex flex-col gap-6'>
+            <Section title='size range'>
+              <SizeIdsField />
+              <div className='space-y-2 border-t border-textInactiveColor pt-3'>
+                <Text variant='uppercase' size='small'>
+                  size run (order qty)
+                </Text>
+                <SizeQuantitiesField />
+              </div>
+            </Section>
+            <Section title='выкройки (PDF) — по размерам'>
+              <PatternsField />
+            </Section>
+          </div>
+
           {/* BOM */}
           <div hidden={activeTab !== 'bom'}>
-            <Section title='bill of materials'>
-              <BomField />
+            <Section title='bill of materials — справочник артикулов'>
+              <BomField highlightComposition={bomHighlight} />
             </Section>
           </div>
 
-          {/* COLORWAYS */}
+          {/* COLORWAYS — рецепты: какой артикул на какую часть, цвет и расход */}
           <div hidden={activeTab !== 'colorways'}>
-            <Section title='colourways'>
+            <Section title='колорвеи — рецепты (материалы по частям)'>
               <ColorwaysField />
-            </Section>
-          </div>
-
-          {/* POM */}
-          <div hidden={activeTab !== 'pom'}>
-            <Section title='points of measure'>
-              <PomField fittingOptions={fittingOptions} techCard={techCard} />
             </Section>
           </div>
 
@@ -450,7 +440,7 @@ export function TechCardForm({
             className='flex flex-col gap-6 lg:flex-row lg:items-start'
           >
             <Section title='labels' className='w-full lg:w-1/2'>
-              <LabelsField />
+              <LabelsField onMissingComposition={goToBomComposition} />
             </Section>
             <Section title='packaging' className='w-full lg:w-1/2'>
               <PackagingField />

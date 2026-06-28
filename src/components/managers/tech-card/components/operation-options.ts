@@ -123,23 +123,3 @@ export const attachmentOptions = [
   'лапка для канта',
   'лапка для резинки',
 ];
-
-// "BLK: чёрная · WHT: белая" — the per-colourway colours of a BOM material, so a single
-// (colourway-agnostic) operation tells the sewer which colour to use for which colourway.
-// Construction stays one process; only the colour differs, and that lives in the BOM.
-export function colorwayColorSummary(
-  colorwayColors: Array<{ colorwayIndex?: number; color?: string; pantone?: string }> | undefined,
-  colorwayLabels: string[],
-): string {
-  if (!colorwayColors?.length) return '';
-  return colorwayColors
-    .map((cc) => {
-      const color = cc.color?.trim() || cc.pantone?.trim();
-      if (!color) return '';
-      const i = cc.colorwayIndex ?? -1;
-      const label = colorwayLabels[i] ?? `#${i + 1}`;
-      return `${label}: ${color}`;
-    })
-    .filter(Boolean)
-    .join(' · ');
-}
