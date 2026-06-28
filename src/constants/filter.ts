@@ -111,7 +111,7 @@ export const techCardApprovalStateOptions: Array<{
   { value: 'TECH_CARD_APPROVAL_STATE_OBSOLETE', label: 'obsolete' },
 ];
 
-// Tech-card geometry unit for callouts and the POM chart (server defaults UNKNOWN→CM).
+// Tech-card geometry unit for callout dimensions (server defaults UNKNOWN→CM).
 export const techCardMeasurementUnitOptions: Array<{
   value: common_TechCardMeasurementUnit;
   label: string;
@@ -203,7 +203,6 @@ export const techCardSignoffSectionOptions: Array<{
 }> = [
   { value: 'TECH_CARD_SIGNOFF_SECTION_DESIGN', label: 'design' },
   { value: 'TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION', label: 'construction' },
-  { value: 'TECH_CARD_SIGNOFF_SECTION_POM', label: 'POM' },
   { value: 'TECH_CARD_SIGNOFF_SECTION_MATERIALS', label: 'materials' },
   { value: 'TECH_CARD_SIGNOFF_SECTION_COLOUR', label: 'colour' },
   { value: 'TECH_CARD_SIGNOFF_SECTION_LABELS', label: 'labels' },
