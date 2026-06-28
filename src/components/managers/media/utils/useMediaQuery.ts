@@ -1,5 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { common_MediaFull } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
+import { useMemo } from 'react';
 
 const ITEMS_PER_PAGE = 50;
 
@@ -42,6 +44,20 @@ export function useInfiniteMedia(limit: number = ITEMS_PER_PAGE) {
     initialPageParam: 0,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+// id → MediaFull map over the most-recent `limit` library items. Used to resolve media
+// referenced only by id (colourway swatches, construction-description reference images) that
+// the tech card's resolvedMedia (sketch media only) doesn't carry. Best-effort: media older
+// than `limit` items back won't resolve — the proper fix is the backend resolving all
+// referenced media. One cached request (5 min).
+export function useMediaMap(limit = 500) {
+  const { data } = useMedia(limit, 0);
+  return useMemo(() => {
+    const m = new Map<number, common_MediaFull>();
+    for (const item of data ?? []) if (item?.id != null) m.set(item.id, item);
+    return m;
+  }, [data]);
 }
 
 export function useDeleteMedia() {

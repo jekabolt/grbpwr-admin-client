@@ -3,9 +3,9 @@ import { techCardBomSectionOptions, techCardMediaKindOptions } from 'constants/f
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { ConstructionField } from './construction-field';
-import { colorwayColorSummary } from './operation-options';
 import { OperationsField } from './operations-field';
 import { PieceLegend } from './piece-legend';
 import { TechCardFormData } from './schema';
@@ -13,6 +13,13 @@ import { TechCardFormData } from './schema';
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
 );
+
+const bomSectionLabels: Record<string, string> = Object.fromEntries(
+  techCardBomSectionOptions.map((o) => [o.value, o.label]),
+);
+
+// normalize a part name the same way the backend join does (trim + lower)
+const norm = (s?: string) => (s ?? '').trim().toLowerCase();
 
 // Only technical views belong on the construction assembly map; mood / reference / cover /
 // swatch images stay on the Sketch tab.
@@ -43,8 +50,7 @@ type FormCallout = {
 };
 
 // Read-only sketch with numbered pins, shown beside the operations list so the assembly
-// map and the steps live on one screen. Pins are created on the Sketch tab; here they are
-// the index: hovering a pin highlights the operations that reference it, and vice-versa.
+// map and the steps live on one screen.
 function ConstructionSketch({
   mediaById,
   usedPins,
@@ -70,8 +76,6 @@ function ConstructionSketch({
   });
   const [viewId, setViewId] = useState<number | null>(null);
 
-  // When an operation is hovered (activePin set), auto-switch to the sketch view that
-  // carries that pin — so the right picture is shown without manual view switching.
   const pinnedViewId = (() => {
     if (!activePin) return null;
     const c = callouts.find((cl) => (cl.number || 0) === activePin);
@@ -158,73 +162,116 @@ function ConstructionSketch({
   );
 }
 
-const bomSectionLabels: Record<string, string> = Object.fromEntries(
-  techCardBomSectionOptions.map((o) => [o.value, o.label]),
-);
+type FormUsage = {
+  bomItemIndex?: number;
+  placement?: string;
+  color?: string;
+  pantone?: string;
+  consumption?: string;
+  quantity?: string;
+  sizeConsumptions?: Array<{ sizeId?: number; consumption?: string }>;
+};
+type FormOperation = {
+  node?: string;
+  placement?: string;
+  bomItemIndex?: number;
+  operationNumber?: number;
+};
 
-// Compact, read-only BOM list shown in the construction workspace so an operation can be
-// linked to a material — and the link seen — without leaving for the BOM tab. Hovering a
-// line highlights the operations that use it, and vice-versa.
-function ConstructionBom({
+// Materials of the SELECTED colourway: for each filled usage show its article, the part it
+// sits on, the colour it takes here, the consumption, and which operations work that part
+// (placement match) or link the article directly. Usages with no article chosen yet are
+// skipped (they aren't a real material yet). Client-side mirror of the backend resolve.
+function ColorwayMaterialsPanel({
+  usages,
+  bomItems,
+  operations,
   activeBom,
   onActiveBomChange,
-  usedBomIndexes,
+  onAddOperation,
 }: {
+  usages: FormUsage[];
+  bomItems: Array<{ name?: string; section?: string }>;
+  operations: FormOperation[];
   activeBom: number | null;
   onActiveBomChange: (n: number | null) => void;
-  usedBomIndexes: Set<number>;
+  onAddOperation: (placement: string) => void;
 }) {
-  const { control } = useFormContext<TechCardFormData>();
-  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
-    name?: string;
-    section?: string;
-    colorwayColors?: Array<{ colorwayIndex?: number; color?: string; pantone?: string }>;
-  }>;
-  const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
-    code?: string;
-    name?: string;
-  }>;
-  const colorwayLabels = colorways.map((c, i) => c.code?.trim() || c.name?.trim() || `#${i + 1}`);
+  // only usages with a chosen article are real materials
+  const filled = usages
+    .map((u, ui) => ({ u, ui, bi: u.bomItemIndex ?? -1 }))
+    .filter(({ bi }) => bi >= 0);
 
-  if (bomItems.length === 0) {
+  if (filled.length === 0) {
     return (
       <Text variant='inactive' size='small'>
-        добавьте материалы на вкладке BOM — они появятся здесь, и операции можно будет к ним
-        привязывать
+        в этом колорвее нет заполненных материалов — выберите артикулы в карточке колорвея (вкладка
+        colorways)
       </Text>
     );
   }
 
+  const consumptionLabel = (u: FormUsage): string => {
+    if ((u.sizeConsumptions ?? []).some((sc) => sc.consumption?.trim())) return 'по размерам';
+    if (u.consumption?.trim()) return `${u.consumption} на изделие`;
+    if (u.quantity?.trim()) return `${u.quantity} шт`;
+    return '—';
+  };
+
   return (
-    <ul className='max-h-72 space-y-1 overflow-auto'>
-      {bomItems.map((b, i) => {
-        const active = activeBom === i;
-        const used = usedBomIndexes.has(i);
-        const summary = colorwayColorSummary(b.colorwayColors, colorwayLabels);
+    <ul className='max-h-96 space-y-1 overflow-auto'>
+      {filled.map(({ u, ui, bi }) => {
+        const article = bomItems[bi];
+        const colour = u.color?.trim() || u.pantone?.trim();
+        const matchedOps = operations
+          .map((o, oi) => ({ o, oi }))
+          .filter(
+            ({ o }) =>
+              (norm(o.placement) && norm(o.placement) === norm(u.placement)) ||
+              (o.bomItemIndex ?? -1) === bi,
+          );
+        const active = activeBom === bi;
         return (
-          <li key={i}>
-            <button
-              type='button'
-              onMouseEnter={() => onActiveBomChange(i)}
-              onMouseLeave={() => onActiveBomChange(null)}
-              className={cn(
-                'flex w-full flex-col gap-0.5 border px-2 py-1 text-left text-sm transition-colors',
-                active
-                  ? 'border-textColor bg-textColor text-bgColor'
-                  : 'border-textInactiveColor hover:border-textColor',
-              )}
-            >
-              <span className='flex w-full items-center justify-between gap-2'>
-                <span className='truncate'>
-                  {i + 1}. {b.name?.trim() || '—'}
+          <li
+            key={ui}
+            onMouseEnter={() => onActiveBomChange(bi)}
+            onMouseLeave={() => onActiveBomChange(null)}
+            className={cn(
+              'flex flex-col gap-0.5 border px-2 py-1 text-sm transition-colors',
+              active ? 'border-textColor bg-textColor text-bgColor' : 'border-textInactiveColor',
+            )}
+          >
+            <span className='flex items-center justify-between gap-2'>
+              <span className='truncate'>
+                <span className='font-semibold uppercase'>
+                  {u.placement?.trim() || 'без части'}
                 </span>
-                <span className='shrink-0 text-xs uppercase opacity-70'>
-                  {bomSectionLabels[b.section ?? ''] ?? ''}
-                  {used ? ' · ✓' : ''}
-                </span>
+                {' · '}
+                {article?.name?.trim() || `артикул #${bi + 1}`}
               </span>
-              {summary && <span className='text-xs opacity-70'>{summary}</span>}
-            </button>
+              <span className='shrink-0 text-xs uppercase opacity-70'>
+                {bomSectionLabels[article?.section ?? ''] ?? ''}
+              </span>
+            </span>
+            <span className='text-xs opacity-80'>
+              цвет: {colour || '—'} · расход: {consumptionLabel(u)}
+            </span>
+            {matchedOps.length > 0 ? (
+              <span className='text-xs opacity-70'>
+                операции:{' '}
+                {matchedOps
+                  .map(({ o, oi }) => `оп.${o.operationNumber || (oi + 1) * 10}`)
+                  .join(', ')}
+              </span>
+            ) : u.placement?.trim() ? (
+              <button
+                type='button'
+                onClick={() => onAddOperation(u.placement!.trim())}
+                className='text-left text-xs text-amber-600 underline hover:opacity-70'
+              >
+                нет операций на часть «{u.placement.trim()}» — добавить операцию?
+              </button>
+            ) : null}
           </li>
         );
       })}
@@ -232,24 +279,41 @@ function ConstructionBom({
   );
 }
 
-// Construction workspace: the sketch (assembly map) and the BOM (materials) on the left, the
-// general defaults and the ordered operations on the right — so a step, its place on the
-// drawing, and the material it uses are all visible together, without switching tabs.
+// Construction workspace: the sketch (assembly map) and the selected colourway's materials on
+// the left, the general defaults and the ordered operations on the right — so a step, its
+// place on the drawing, and the real material it uses (for the chosen colourway + size) are
+// visible together, without switching tabs.
 export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   const { control } = useFormContext<TechCardFormData>();
-  const operations = (useWatch({ control, name: 'operations' }) ?? []) as Array<{
-    calloutNumber?: number;
-    bomItemIndex?: number;
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as Array<
+    FormOperation & { calloutNumber?: number }
+  >;
+  const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
+    code?: string;
+    name?: string;
+    hex?: string;
+    usages?: FormUsage[];
   }>;
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
+    name?: string;
+    section?: string;
+  }>;
+
   const [activePin, setActivePin] = useState<number | null>(null);
   const [activeBom, setActiveBom] = useState<number | null>(null);
+  const [colorwayIdx, setColorwayIdx] = useState(0);
+  const [addPart, setAddPart] = useState<string | null>(null);
+  // Signal OperationsField to append (it owns the operations field array — a separate
+  // useFieldArray here would not sync with its rendered list). The nonce makes repeated adds
+  // of the same part distinct.
+  const [addRequest, setAddRequest] = useState<{ placement: string; nonce: number } | null>(null);
+  const confirmAddOperation = () => {
+    if (addPart) setAddRequest((r) => ({ placement: addPart, nonce: (r?.nonce ?? 0) + 1 }));
+    setAddPart(null);
+  };
 
   const usedPins = useMemo(
     () => new Set(operations.map((o) => o.calloutNumber || 0).filter((n) => n > 0)),
-    [operations],
-  );
-  const usedBomIndexes = useMemo(
-    () => new Set(operations.map((o) => o.bomItemIndex ?? -1).filter((i) => i >= 0)),
     [operations],
   );
 
@@ -260,6 +324,9 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
     }
     return m;
   }, [techCard?.resolvedMedia]);
+
+  const cwIdx = colorwayIdx < colorways.length ? colorwayIdx : 0;
+  const selectedUsages = colorways[cwIdx]?.usages ?? [];
 
   return (
     <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
@@ -272,12 +339,58 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
             onActivePinChange={setActivePin}
           />
         </Section>
-        <Section title='materials (BOM)'>
-          <ConstructionBom
-            activeBom={activeBom}
-            onActiveBomChange={setActiveBom}
-            usedBomIndexes={usedBomIndexes}
-          />
+        <Section title='materials — selected colourway'>
+          {colorways.length === 0 ? (
+            <Text variant='inactive' size='small'>
+              добавьте колорвеи и их материалы на вкладке colorways — здесь покажется реальная
+              ткань/цвет/расход каждой операции
+            </Text>
+          ) : (
+            <div className='space-y-3'>
+              <Text variant='inactive' size='small'>
+                предпросмотр (не редактируется) — выберите колорвей, чтобы увидеть его материалы и
+                какие операции их шьют
+              </Text>
+              {/* colourway picker = swatch + name chips */}
+              <div className='flex flex-wrap gap-2'>
+                {colorways.map((c, i) => {
+                  const valid = /^#?[0-9a-fA-F]{3,8}$/.test((c.hex ?? '').trim());
+                  const hexCss = (c.hex ?? '').trim().startsWith('#')
+                    ? (c.hex ?? '').trim()
+                    : `#${(c.hex ?? '').trim()}`;
+                  return (
+                    <button
+                      key={i}
+                      type='button'
+                      onClick={() => setColorwayIdx(i)}
+                      className={cn(
+                        'flex items-center gap-2 border px-2 py-1 text-sm transition-colors',
+                        i === cwIdx
+                          ? 'border-textColor ring-1 ring-textColor'
+                          : 'border-textInactiveColor hover:border-textColor',
+                      )}
+                    >
+                      <span
+                        className='size-4 shrink-0 border border-textColor'
+                        style={valid ? { backgroundColor: hexCss } : undefined}
+                      />
+                      <span className='uppercase'>
+                        {c.name?.trim() || c.code?.trim() || `#${i + 1}`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <ColorwayMaterialsPanel
+                usages={selectedUsages}
+                bomItems={bomItems}
+                operations={operations}
+                activeBom={activeBom}
+                onActiveBomChange={setActiveBom}
+                onAddOperation={setAddPart}
+              />
+            </div>
+          )}
         </Section>
         <PieceLegend />
       </div>
@@ -291,9 +404,27 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
             onActivePinChange={setActivePin}
             activeBom={activeBom}
             onActiveBomChange={setActiveBom}
+            addRequest={addRequest}
+            onAdded={() => setAddRequest(null)}
           />
         </Section>
       </div>
+
+      <ConfirmationModal
+        open={addPart != null}
+        onOpenChange={(o) => {
+          if (!o) setAddPart(null);
+        }}
+        onConfirm={confirmAddOperation}
+        title='добавить операцию?'
+        confirmLabel='добавить'
+        cancelLabel='отмена'
+      >
+        <Text size='small'>
+          Создать операцию для части «{addPart}»? Она появится в списке операций — заполните тип,
+          машину и остальное.
+        </Text>
+      </ConfirmationModal>
     </div>
   );
 }

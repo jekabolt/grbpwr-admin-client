@@ -19,9 +19,13 @@ import {
   techCardSignoffSectionOptions,
   techCardSignoffStateOptions,
 } from 'constants/filter';
+import { CARE_CODE_META } from 'components/managers/product/components/care/care-picker';
+import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useMemo } from 'react';
 import { decimalToInput } from 'utils/decimal';
+import { PatternQR } from 'ui/components/pattern-qr';
+import { detailKeyLabel } from './tech-card-options';
 
 const mapOf = (opts: ReadonlyArray<{ value: string; label: string }>) =>
   Object.fromEntries(opts.map((o) => [o.value, o.label])) as Record<string, string>;
@@ -101,13 +105,17 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
       if (rm.media?.id != null) m.set(rm.media.id, rm.media);
     return m;
   }, [techCard.resolvedMedia]);
+  // detail reference images (and swatches) are library media ids not carried in resolvedMedia
+  // (sketch only) — resolve them from the library so they print.
+  const libraryMap = useMediaMap();
+  const resolveMedia = (id: number) => mediaById.get(id) ?? libraryMap.get(id);
 
   if (!tc) return null;
 
   // `constructor` is an Object.prototype key — when the backend omits it, tc.constructor is
   // the Object constructor function, not a string. Guard so React never renders a function.
   const patternMaker = typeof tc.constructor === 'string' ? tc.constructor : '';
-  const sizeName = (id?: number) => (id ? (sizeById.get(id) ?? `#${id}`) : '—');
+  const sizeName = (id?: number) => (id ? sizeById.get(id) ?? `#${id}` : '—');
   const unitAbbr = tc.measurementUnit === 'TECH_CARD_MEASUREMENT_UNIT_MM' ? 'mm' : 'cm';
   const sizeIds = tc.sizeIds ?? [];
   const colorways = tc.colorways ?? [];
@@ -124,7 +132,9 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
             <div className='text-[10px] uppercase tracking-[0.2em] text-neutral-500'>
               {tc.brand || 'GRBPWR'} · tech pack
             </div>
-            <div className='text-2xl font-bold uppercase leading-tight'>{tc.name || 'untitled'}</div>
+            <div className='text-2xl font-bold uppercase leading-tight'>
+              {tc.name || 'untitled'}
+            </div>
             <div className='text-sm'>
               style <span className='font-semibold'>{tc.styleNumber || '—'}</span>
               {tc.collection ? ` · ${tc.collection}` : ''}
@@ -155,50 +165,40 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
           <KV k='pattern maker' v={patternMaker} />
           <KV k='technologist' v={tc.technologist} />
           <KV k='approved by' v={tc.approvedBy} />
-          <KV
-            k='target cost'
-            v={dec(tc.targetCost) && `${dec(tc.targetCost)} ${tc.currency ?? ''}`.trim()}
-          />
-          <KV
-            k='target retail'
-            v={
-              dec(tc.targetRetailPrice) &&
-              `${dec(tc.targetRetailPrice)} ${tc.currency ?? ''}`.trim()
-            }
-          />
         </div>
       </div>
 
       {/* DESCRIPTION */}
-      {(tc.concept ||
-        tc.description ||
-        tc.silhouette ||
-        tc.collar ||
-        tc.fastening ||
-        tc.pockets ||
-        tc.sleeveCuff ||
-        tc.extraDetails ||
-        tc.topstitching ||
-        tc.auxMaterials ||
-        tc.notes) && (
+      {(tc.concept || has(tc.details) || tc.notes) && (
         <div className='mb-5 mt-4'>
           <Sheet title='description'>
             {tc.concept && <p className='mb-2 text-xs italic'>{tc.concept}</p>}
-            <div className='grid grid-cols-2 gap-x-8'>
-              <div>
-                <KV k='description' v={tc.description} />
-                <KV k='silhouette' v={tc.silhouette} />
-                <KV k='collar' v={tc.collar} />
-                <KV k='fastening' v={tc.fastening} />
-                <KV k='pockets' v={tc.pockets} />
-              </div>
-              <div>
-                <KV k='sleeve / cuff' v={tc.sleeveCuff} />
-                <KV k='topstitching' v={tc.topstitching} />
-                <KV k='extra details' v={tc.extraDetails} />
-                <KV k='aux materials' v={tc.auxMaterials} />
-                <KV k='notes' v={tc.notes} />
-              </div>
+            <div className='space-y-2'>
+              {(tc.details ?? []).map((d, i) => {
+                const imgs = (d.mediaIds ?? [])
+                  .map((id) => resolveMedia(id))
+                  .map((f) => f?.media?.thumbnail?.mediaUrl || f?.media?.fullSize?.mediaUrl || '')
+                  .filter(Boolean);
+                if (!d.text?.trim() && imgs.length === 0) return null;
+                return (
+                  <div key={i} className='break-inside-avoid'>
+                    <KV k={detailKeyLabel(d.key)} v={d.text} />
+                    {imgs.length > 0 && (
+                      <div className='mt-1 flex flex-wrap gap-2'>
+                        {imgs.map((url, j) => (
+                          <img
+                            key={j}
+                            src={url}
+                            alt=''
+                            className='block max-h-[140px] w-auto border border-black'
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {tc.notes && <KV k='notes' v={tc.notes} />}
             </div>
           </Sheet>
         </div>
@@ -297,26 +297,48 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
         </Sheet>
       )}
 
-      {/* BILL OF MATERIALS */}
+      {/* PATTERNS (выкройки) — per-size PDF, QR-linked for the factory */}
+      {has(tc.patterns) && (
+        <Sheet title='patterns (выкройки)'>
+          <div className='flex flex-wrap gap-4'>
+            {(tc.patterns ?? [])
+              .filter((p) => p.url?.trim())
+              .map((p, i) => (
+                <figure key={i} className='break-inside-avoid border border-black p-2 text-center'>
+                  <PatternQR value={p.url ?? ''} />
+                  <figcaption className='mt-1 text-[10px] uppercase'>
+                    <div className='font-semibold'>{sizeName(p.sizeId)}</div>
+                    {p.filename && (
+                      <div className='max-w-[120px] truncate text-neutral-500'>{p.filename}</div>
+                    )}
+                  </figcaption>
+                </figure>
+              ))}
+          </div>
+          <p className='mt-2 text-[9px] text-neutral-500'>
+            наведите камеру на QR, чтобы открыть PDF-выкройку этого размера
+          </p>
+        </Sheet>
+      )}
+
+      {/* BILL OF MATERIALS — article catalog (recipe/consumption is per colourway below) */}
       {has(tc.bomItems) && (
-        <Sheet title='bill of materials'>
+        <Sheet title='bill of materials (article catalog)'>
           <table className='w-full border-collapse text-[10px]'>
             <thead>
               <tr>
+                <th className={`${TH} w-6`}>#</th>
                 <th className={TH}>section</th>
                 <th className={TH}>material</th>
-                <th className={TH}>placement</th>
                 <th className={TH}>supplier</th>
-                <th className={TH}>colour</th>
+                <th className={TH}>base colour</th>
                 <th className={TH}>fabric</th>
-                <th className={`${TH} text-right`}>cons. / qty</th>
+                <th className={TH}>unit</th>
                 <th className={`${TH} text-right`}>unit price</th>
-                <th className={`${TH} text-right`}>total</th>
               </tr>
             </thead>
             <tbody>
               {(tc.bomItems ?? []).map((b, i) => {
-                const consumption = dec(b.quantity) || dec(b.consumption);
                 const fabric = [
                   dec(b.fabricWidth) && `${dec(b.fabricWidth)}cm`,
                   dec(b.fabricWeightGsm) && `${dec(b.fabricWeightGsm)}g/m²`,
@@ -329,27 +351,22 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                   .join(' · ');
                 return (
                   <tr key={i} className='break-inside-avoid'>
+                    <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
                     <td className={TD}>{bomSectionL[b.section ?? ''] ?? '—'}</td>
                     <td className={TD}>
                       <div className='font-medium'>{b.name || '—'}</div>
                       {b.composition && <div className='text-neutral-500'>{b.composition}</div>}
                     </td>
-                    <td className={TD}>{b.placement || '—'}</td>
                     <td className={TD}>
                       {b.supplier || '—'}
                       {b.supplierRef ? ` (${b.supplierRef})` : ''}
                     </td>
                     <td className={TD}>{b.color || '—'}</td>
                     <td className={TD}>{fabric || '—'}</td>
-                    <td className={`${TD} whitespace-nowrap text-right`}>
-                      {consumption ? `${consumption} ${b.unit ?? ''}` : '—'}
-                    </td>
+                    <td className={TD}>{b.unit || '—'}</td>
                     <td className={`${TD} whitespace-nowrap text-right`}>
                       {dec(b.unitPrice) ? `${dec(b.unitPrice)} ${b.currency ?? ''}` : '—'}
                     </td>
-                    <td className={`${TD} whitespace-nowrap text-right font-medium`}>
-                      {dec(b.lineTotal) ? `${dec(b.lineTotal)} ${b.currency ?? ''}` : '—'}
-                    </td>
                   </tr>
                 );
               })}
@@ -358,99 +375,77 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
         </Sheet>
       )}
 
-      {/* COLOURWAYS */}
+      {/* COLOURWAYS — each colourway is a recipe (usages over the BOM catalog) */}
       {has(colorways) && (
         <Sheet title='colourways'>
-          <table className='w-full border-collapse text-[10px]'>
-            <thead>
-              <tr>
-                <th className={TH}>code</th>
-                <th className={TH}>name</th>
-                <th className={TH}>pantone</th>
-                <th className={TH}>hex</th>
-                <th className={TH}>lab-dip</th>
-                <th className={TH}>round</th>
-                <th className={TH}>decided</th>
-              </tr>
-            </thead>
-            <tbody>
-              {colorways.map((c, i) => (
-                <tr key={i} className='break-inside-avoid'>
-                  <td className={TD}>{c.code || '—'}</td>
-                  <td className={TD}>{c.name || '—'}</td>
-                  <td className={TD}>
-                    {c.pantone || '—'}
-                    {c.pantoneSystem ? ` ${c.pantoneSystem}` : ''}
-                  </td>
-                  <td className={TD}>
-                    <span className='inline-flex items-center gap-1'>
-                      {c.hex && (
-                        <span
-                          className='inline-block size-3 border border-black'
-                          style={{ backgroundColor: c.hex }}
-                        />
-                      )}
-                      {c.hex || '—'}
+          <div className='space-y-4'>
+            {colorways.map((c, i) => {
+              const usages = c.usages ?? [];
+              return (
+                <div key={i} className='break-inside-avoid'>
+                  <div className='mb-1 flex items-center gap-2 border-b border-black pb-1 text-[11px]'>
+                    {c.hex && (
+                      <span
+                        className='inline-block size-4 border border-black'
+                        style={{ backgroundColor: c.hex }}
+                      />
+                    )}
+                    <span className='font-bold uppercase'>{c.name || c.code || `#${i + 1}`}</span>
+                    {c.code && <span className='text-neutral-500'>{c.code}</span>}
+                    {c.pantone && (
+                      <span className='text-neutral-500'>
+                        · {c.pantone}
+                        {c.pantoneSystem ? ` ${c.pantoneSystem}` : ''}
+                      </span>
+                    )}
+                    <span className='ml-auto text-neutral-500'>
+                      {labDipL[c.labDipStatus ?? ''] ?? ''}
+                      {c.labDipRound ? ` · round ${c.labDipRound}` : ''}
                     </span>
-                  </td>
-                  <td className={TD}>{labDipL[c.labDipStatus ?? ''] ?? '—'}</td>
-                  <td className={`${TD} text-center`}>{c.labDipRound || '—'}</td>
-                  <td className={TD}>
-                    {formatTechCardDate(c.labDipDecidedAt)}
-                    {c.labDipDecidedBy ? ` · ${c.labDipDecidedBy}` : ''}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Sheet>
-      )}
-
-      {/* POINTS OF MEASURE */}
-      {has(tc.pomPoints) && (
-        <Sheet title={`points of measure (${unitAbbr})`}>
-          <table className='w-full border-collapse text-[10px]'>
-            <thead>
-              <tr>
-                <th className={`${TH} w-10`}>code</th>
-                <th className={TH}>point</th>
-                <th className={`${TH} text-right`}>tol ±</th>
-                {sizeIds.map((id) => (
-                  <th key={id} className={`${TH} text-right`}>
-                    {sizeName(id)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {(tc.pomPoints ?? []).map((p, i) => {
-                const gradeBySize = new Map<number, string>();
-                for (const g of p.grades ?? [])
-                  if (g.sizeId != null) gradeBySize.set(g.sizeId, dec(g.value));
-                const tol =
-                  dec(p.tolerancePlus) || dec(p.toleranceMinus)
-                    ? `+${dec(p.tolerancePlus) || '0'} / -${dec(p.toleranceMinus) || '0'}`
-                    : '—';
-                return (
-                  <tr key={i} className='break-inside-avoid'>
-                    <td className={`${TD} font-semibold`}>{p.code || i + 1}</td>
-                    <td className={TD}>
-                      <div className='font-medium'>{p.name || '—'}</div>
-                      {p.howToMeasure && (
-                        <div className='text-neutral-500'>{p.howToMeasure}</div>
-                      )}
-                    </td>
-                    <td className={`${TD} whitespace-nowrap text-right`}>{tol}</td>
-                    {sizeIds.map((id) => (
-                      <td key={id} className={`${TD} text-right`}>
-                        {gradeBySize.get(id) || '—'}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                  </div>
+                  {usages.length === 0 ? (
+                    <p className='text-[10px] text-neutral-500'>нет материалов</p>
+                  ) : (
+                    <table className='w-full border-collapse text-[10px]'>
+                      <thead>
+                        <tr>
+                          <th className={TH}>part</th>
+                          <th className={TH}>material</th>
+                          <th className={TH}>colour</th>
+                          <th className={`${TH} text-right`}>cons. / qty</th>
+                          <th className={`${TH} text-right`}>run total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {usages.map((u, j) => {
+                          const bi = u.bomItemIndex ?? -1;
+                          const art = bi >= 0 ? (tc.bomItems ?? [])[bi] : undefined;
+                          const cons =
+                            dec(u.quantity) ||
+                            dec(u.consumption) ||
+                            (has(u.sizeConsumptions) ? 'по размерам' : '');
+                          const colour = u.color || u.pantone || '—';
+                          return (
+                            <tr key={j} className='break-inside-avoid'>
+                              <td className={TD}>{u.placement || '—'}</td>
+                              <td className={TD}>{art?.name || (bi >= 0 ? `#${bi + 1}` : '—')}</td>
+                              <td className={TD}>{colour}</td>
+                              <td className={`${TD} whitespace-nowrap text-right`}>
+                                {cons ? `${cons} ${art?.unit ?? ''}`.trim() : '—'}
+                              </td>
+                              <td className={`${TD} whitespace-nowrap text-right`}>
+                                {dec(u.sizeRunTotal) || dec(u.lineTotal) || '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </Sheet>
       )}
 
@@ -469,13 +464,6 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               <div>
                 <KV k='pressing' v={tc.construction.pressing} />
                 <KV k='machine class' v={tc.construction.machineClass} />
-                <KV
-                  k='labour rate'
-                  v={
-                    dec(tc.construction.labourRate) &&
-                    `${dec(tc.construction.labourRate)} ${tc.construction.labourRateCurrency ?? ''}`.trim()
-                  }
-                />
                 <KV k='notes' v={tc.construction.notes} />
               </div>
             </div>
@@ -486,6 +474,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
                   <th className={TH}>node</th>
+                  <th className={TH}>part</th>
                   <th className={TH}>operation</th>
                   <th className={TH}>machine</th>
                   <th className={TH}>seam / needle</th>
@@ -495,8 +484,9 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               <tbody>
                 {(tc.operations ?? []).map((o, i) => (
                   <tr key={i} className='break-inside-avoid'>
-                    <td className={`${TD} text-center`}>{o.operationNumber || i + 1}</td>
+                    <td className={`${TD} text-center`}>{o.operationNumber || (i + 1) * 10}</td>
                     <td className={TD}>{o.node || '—'}</td>
+                    <td className={TD}>{o.placement || '—'}</td>
                     <td className={TD}>
                       <div>{o.description || '—'}</div>
                       {o.seamType && <div className='text-neutral-500'>{o.seamType}</div>}
@@ -529,15 +519,46 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                 </tr>
               </thead>
               <tbody>
-                {(tc.labels ?? []).map((l, i) => (
-                  <tr key={i} className='break-inside-avoid'>
-                    <td className={TD}>{labelTypeL[l.labelType ?? ''] ?? '—'}</td>
-                    <td className={TD}>{l.content || '—'}</td>
-                    <td className={TD}>{l.placement || '—'}</td>
-                    <td className={TD}>{l.attachment || '—'}</td>
-                    <td className={TD}>{l.size || '—'}</td>
-                  </tr>
-                ))}
+                {(tc.labels ?? []).map((l, i) => {
+                  const isCare = l.labelType === 'TECH_CARD_LABEL_TYPE_CARE';
+                  const careCodes = isCare
+                    ? (l.content ?? '')
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean)
+                    : [];
+                  return (
+                    <tr key={i} className='break-inside-avoid'>
+                      <td className={TD}>{labelTypeL[l.labelType ?? ''] ?? '—'}</td>
+                      <td className={TD}>
+                        {isCare && careCodes.length > 0 ? (
+                          <div className='flex flex-wrap items-center gap-1'>
+                            {careCodes.map((code, k) => {
+                              const m = CARE_CODE_META[code];
+                              return m?.img ? (
+                                <img
+                                  key={k}
+                                  src={m.img}
+                                  alt={m.name}
+                                  title={m.name}
+                                  className='h-5 w-5'
+                                />
+                              ) : (
+                                <span key={k}>{code}</span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          l.content || '—'
+                        )}
+                        {l.note?.trim() && <div className='text-neutral-500'>{l.note}</div>}
+                      </td>
+                      <td className={TD}>{l.placement || '—'}</td>
+                      <td className={TD}>{l.attachment || '—'}</td>
+                      <td className={TD}>{l.size || '—'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -579,14 +600,47 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               <KV k='defect %' v={dec(tc.costing.defectPercent)} />
             </div>
             <div>
-              <KV k='materials (computed)' v={dec(tc.costing.materialsCost)} />
-              <KV k='total SAM' v={dec(tc.costing.totalSam)} />
-              <KV k='labour cost' v={dec(tc.costing.labourCost)} />
+              <KV k='materials (primary cw)' v={dec(tc.costing.materialsCost)} />
+              <KV k='total SAM (min)' v={dec(tc.costing.totalSam)} />
               <KV k='markup ×' v={dec(tc.costing.markupMultiplier)} />
               <KV k='wholesale' v={dec(tc.costing.wholesalePrice)} />
               <KV k='retail' v={dec(tc.costing.retailPrice)} />
             </div>
           </div>
+
+          {/* per-colourway material cost */}
+          {has(tc.costing.colorwayCosts) && (
+            <table className='mt-3 w-full border-collapse text-[10px]'>
+              <thead>
+                <tr>
+                  <th className={TH}>colourway</th>
+                  <th className={`${TH} text-right`}>materials / garment</th>
+                  <th className={`${TH} text-right`}>materials / run</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(tc.costing.colorwayCosts ?? []).map((cc, i) => {
+                  const cw = colorways[cc.colorwayIndex ?? -1];
+                  return (
+                    <tr key={i} className='break-inside-avoid'>
+                      <td className={TD}>
+                        {cw?.name || cw?.code || `#${(cc.colorwayIndex ?? 0) + 1}`}
+                        {cc.colorwayIndex === 0 ? ' (primary)' : ''}
+                      </td>
+                      <td className={`${TD} whitespace-nowrap text-right`}>
+                        {dec(cc.materialsCost) || '—'}
+                        {cc.hasUnconvertedCurrencies ? ' ⚠' : ''}
+                      </td>
+                      <td className={`${TD} whitespace-nowrap text-right`}>
+                        {dec(cc.sizeRunTotal) || '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
           <div className='mt-2 flex items-center justify-between border-t-2 border-black pt-1 text-sm'>
             <span className='font-bold uppercase'>total cost</span>
             <span className='font-bold'>

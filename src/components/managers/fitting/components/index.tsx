@@ -19,6 +19,7 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { FittingMedia } from './fitting-media';
+import { PatternsFields } from './patterns-fields';
 import { ProductField } from './product-field';
 import { TechCardField } from './tech-card-field';
 import {
@@ -130,16 +131,20 @@ export function FittingForm({
           <Section title='session' className='w-full lg:w-1/2'>
             <div className='space-y-1'>
               <Text variant='uppercase' size='small'>
-                product
+                product (optional)
               </Text>
               <ProductField />
             </div>
             <div className='space-y-1'>
               <Text variant='uppercase' size='small'>
-                tech card (style, optional)
+                tech card (style)
               </Text>
               <TechCardField />
             </div>
+            <Text variant='inactive' size='small'>
+              укажите продукт или тех карту (для пыльников, кофров и т.п. — по тех карте, без
+              продукта)
+            </Text>
             <SelectField
               name='modelId'
               label='model (optional)'
@@ -159,6 +164,9 @@ export function FittingForm({
           <div className='flex w-full flex-col gap-6 lg:w-1/2'>
             <Section title='sizes'>
               <SizesFields modelGender={selectedModel?.model?.gender} />
+            </Section>
+            <Section title='выкройка (что мерили)'>
+              <PatternsFields />
             </Section>
             <Section title='photos'>
               <FittingMedia fitting={fitting} />

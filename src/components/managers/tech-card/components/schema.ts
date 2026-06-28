@@ -25,11 +25,12 @@ import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 
 // Tech-card form. Covers the full TechCardInsert: header ("Титул"), sketch media +
-// callouts, size range, linked products, colourways, BOM, POM, construction,
-// operations, labels, packaging, costing, and the revision log. The backend does a
-// full replace on update, so mapFormToTechCardInsert sends every section. Costing
-// rollups (materials_total/materials_cost/total_cost) and BOM line_total are
-// output-only — shown read-only, never sent.
+// callouts, size range + patterns, linked products, colourways (recipe = usages), BOM
+// (article catalog), construction, operations, labels, packaging, costing, details,
+// and the revision log. The backend does a full replace on update, so
+// mapFormToTechCardInsert sends every section. Computed fields — costing rollups
+// (materials_total/materials_cost/total_cost/colorway_costs) and usage line/run totals —
+// are output-only: shown read-only, never sent.
 
 const DEFAULT_STAGE: common_TechCardStage = 'TECH_CARD_STAGE_PROTO';
 const DEFAULT_APPROVAL_STATE: common_TechCardApprovalState = 'TECH_CARD_APPROVAL_STATE_DRAFT';
@@ -73,6 +74,22 @@ const sizeQuantitySchema = z.object({
   orderQty: z.number().optional().default(0),
 });
 
+// Per-size consumption (норма расхода) of a measured material in a colourway usage —
+// different sizes consume different amounts of fabric. sizeId ∈ size_ids. Decimal string.
+const sizeConsumptionSchema = z.object({
+  sizeId: z.number().optional().default(0),
+  consumption: z.string().optional().default(''), // decimal as string
+});
+
+// A downloadable PDF выкройка (cut pattern) for one size. url/filename/sizeBytes are
+// produced by Admin.UploadPattern (never hand-typed); sizeId ∈ size_ids.
+const patternSchema = z.object({
+  sizeId: z.number().optional().default(0),
+  url: z.string().optional().default(''),
+  filename: z.string().optional().default(''),
+  sizeBytes: z.number().optional().default(0),
+});
+
 const DEFAULT_ISSUE_SEVERITY: common_TechCardIssueSeverity = 'TECH_CARD_ISSUE_SEVERITY_MEDIUM';
 const DEFAULT_ISSUE_STATUS: common_TechCardIssueStatus = 'TECH_CARD_ISSUE_STATUS_OPEN';
 const DEFAULT_SIGNOFF_SECTION: common_TechCardSignoffSection = 'TECH_CARD_SIGNOFF_SECTION_DESIGN';
@@ -112,13 +129,31 @@ const calloutSchema = z.object({
   posY: z.string().optional().default(''), // carried (v2)
 });
 
+// One usage line of a colourway's "recipe": which catalog article (bomItemIndex) goes on
+// which garment part (placement), the colour it takes in THIS colourway, and how much is
+// consumed (per-garment and/or per-size). lineTotal/sizeRunTotal are output-only.
+const colorwayUsageSchema = z.object({
+  bomItemIndex: z.number().optional().default(-1), // index into bomItems; -1 = none
+  placement: z.string().optional().default(''),
+  color: z.string().optional().default(''),
+  pantone: z.string().optional().default(''),
+  consumption: z.string().optional().default(''), // per-garment rate, decimal as string
+  quantity: z.string().optional().default(''), // count (countable trims), decimal as string
+  // per-size grading of a measured material's consumption. When set, the size-run cost
+  // folds these against the size run; `consumption` above is the per-garment fallback.
+  sizeConsumptions: z.array(sizeConsumptionSchema).default([]),
+  // OUTPUT-ONLY: server-computed spend per garment / over the whole size run.
+  lineTotal: z.string().optional().default(''),
+  sizeRunTotal: z.string().optional().default(''),
+});
+
 const colorwaySchema = z.object({
   code: z.string().optional().default(''),
   name: z.string().min(1, 'Colourway name is required'),
   labDipStatus: z.string().optional().default(DEFAULT_LAB_DIP),
   productId: z.number().optional().default(0), // FK product(id); 0 = not yet published
   comment: z.string().optional().default(''),
-  // lab-dip lifecycle / colour identity (edited in ColorwaysField)
+  // lab-dip lifecycle / headline colour identity (swatch), independent of usage colours
   pantone: z.string().optional().default(''),
   pantoneSystem: z.string().optional().default(''),
   hex: z.string().optional().default(''),
@@ -128,33 +163,24 @@ const colorwaySchema = z.object({
   labDipDecidedAt: z.string().optional().default(''),
   labDipDecidedBy: z.string().optional().default(''),
   labDipRejectReason: z.string().optional().default(''),
+  // the colour's material recipe
+  usages: z.array(colorwayUsageSchema).default([]),
 });
 
-// One «Колористика» matrix cell: the colour of a BOM material in a colourway.
-// colorwayIndex points into TechCardFormData.colorways (full-replace upsert has no
-// stable colourway ids on write).
-const bomColorwayColorSchema = z.object({
-  colorwayIndex: z.number().optional().default(0),
-  color: z.string().optional().default(''),
-  pantone: z.string().optional().default(''),
-});
-
+// One BOM article — a pure material-catalog entry. The per-colourway colour, placement and
+// consumption live on colourway usages, not here.
 const bomItemSchema = z.object({
   section: z.string().optional().default(DEFAULT_BOM_SECTION),
   name: z.string().min(1, 'Material name is required'),
-  placement: z.string().optional().default(''),
   supplier: z.string().optional().default(''),
   supplierRef: z.string().optional().default(''),
-  color: z.string().optional().default(''),
+  color: z.string().optional().default(''), // base/reference colour (per-colourway colour is on the usage)
   composition: z.string().optional().default(''),
   spec: z.string().optional().default(''),
-  consumption: z.string().optional().default(''), // decimal as string
   unit: z.string().optional().default(''),
-  quantity: z.string().optional().default(''), // decimal as string
   unitPrice: z.string().optional().default(''), // decimal as string
   currency: z.string().optional().default(''),
   comment: z.string().optional().default(''),
-  colorwayColors: z.array(bomColorwayColorSchema).default([]),
   // fabric data for the cutter (edited in BomItemRow)
   fabricWidth: z.string().optional().default(''),
   fabricWeightGsm: z.string().optional().default(''),
@@ -162,31 +188,12 @@ const bomItemSchema = z.object({
   wastagePercent: z.string().optional().default(''),
 });
 
-// POM grade: the graded value of a point of measure for one size. sizeId must be one
-// of TechCardFormData.sizeIds (cross-validated server-side).
-const pomGradeSchema = z.object({
-  sizeId: z.number().optional().default(0),
-  value: z.string().optional().default(''), // decimal as string
-});
-
-// POM actual: a measured value, optionally taken in a fitting.
-const pomActualSchema = z.object({
-  fittingId: z.number().optional().default(0), // FK fitting(id); 0 = none
-  label: z.string().optional().default(''),
-  value: z.string().optional().default(''), // decimal as string
-  sizeId: z.number().optional().default(0), // carried (v2; QC measured-at size; 0 = unset)
-});
-
-const pomPointSchema = z.object({
-  section: z.string().optional().default(''),
-  code: z.string().optional().default(''),
-  name: z.string().min(1, 'Measurement name is required'),
-  howToMeasure: z.string().optional().default(''),
-  baseValue: z.string().optional().default(''), // decimal as string
-  tolerancePlus: z.string().optional().default(''), // decimal as string
-  toleranceMinus: z.string().optional().default(''), // decimal as string
-  grades: z.array(pomGradeSchema).default([]),
-  actuals: z.array(pomActualSchema).default([]),
+// One construction-description aspect (Sheet «Титул», lower block): freeform text + optional
+// reference images. key is silhouette/collar/fastening/… or a custom aspect.
+const detailSchema = z.object({
+  key: z.string().optional().default(''),
+  text: z.string().optional().default(''),
+  mediaIds: z.array(z.number()).default([]),
 });
 
 const DEFAULT_LABEL_TYPE: common_TechCardLabelType = 'TECH_CARD_LABEL_TYPE_MAIN';
@@ -200,8 +207,6 @@ const constructionSchema = z.object({
   pressing: z.string().optional().default(''),
   machineClass: z.string().optional().default(''),
   notes: z.string().optional().default(''),
-  labourRate: z.string().optional().default(''), // cost per minute, decimal as string
-  labourRateCurrency: z.string().optional().default(''),
 });
 
 const operationSchema = z.object({
@@ -212,7 +217,7 @@ const operationSchema = z.object({
   topstitchWidth: z.string().optional().default(''),
   thread: z.string().optional().default(''),
   note: z.string().optional().default(''),
-  // machine / SAM detail (edited in OperationsField)
+  // operationNumber is server-assigned ((position+1)*10) — carried read-only, not edited.
   operationNumber: z.number().optional().default(0),
   machine: z.string().optional().default(''),
   seamAllowance: z.string().optional().default(''),
@@ -224,6 +229,9 @@ const operationSchema = z.object({
   attachment: z.string().optional().default(''), // приспособление (binder / folder / hemmer)
   bomItemIndex: z.number().optional().default(-1), // index into bomItems; -1 = none
   calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
+  // garment part this operation works on; resolves its real material via the selected
+  // colourway's usage on the same part.
+  placement: z.string().optional().default(''),
 });
 
 const labelSchema = z.object({
@@ -271,8 +279,6 @@ export const emptyConstruction: z.input<typeof constructionSchema> = {
   pressing: '',
   machineClass: '',
   notes: '',
-  labourRate: '',
-  labourRateCurrency: '',
 };
 
 export const emptyPackaging: z.input<typeof packagingSchema> = {
@@ -317,40 +323,27 @@ export const techCardSchema = z.object({
   constructorName: z.string().optional().default(''),
   technologist: z.string().optional().default(''),
   status: z.string().optional().default(''),
-  // classification FKs (0 = unset)
+  // classification FKs (0 = unset). categoryId is the selected LEAF category.
   categoryId: z.number().optional().default(0),
   baseModelId: z.number().optional().default(0),
   baseSampleSizeId: z.number().optional().default(0),
-  // targets
-  targetCost: z.string().optional().default(''), // decimal as string
-  targetRetailPrice: z.string().optional().default(''), // decimal as string
-  currency: z.string().optional().default(''), // ISO 4217 for target cost/price
   // classification
   targetGender: z.string().optional().default(UNSET_GENDER),
   stage: z.string().optional().default(DEFAULT_STAGE),
   approvalState: z.string().optional().default(DEFAULT_APPROVAL_STATE),
   measurementUnit: z.string().optional().default(DEFAULT_MEASUREMENT_UNIT),
   approvedBy: z.string().optional().default(''),
-  // construction description (lower block of «Титул»)
-  description: z.string().optional().default(''),
-  silhouette: z.string().optional().default(''),
-  collar: z.string().optional().default(''),
-  fastening: z.string().optional().default(''),
-  pockets: z.string().optional().default(''),
-  sleeveCuff: z.string().optional().default(''),
-  extraDetails: z.string().optional().default(''),
-  topstitching: z.string().optional().default(''),
-  auxMaterials: z.string().optional().default(''),
   notes: z.string().optional().default(''),
   // children
   sizeIds: z.array(z.number()).default([]),
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
+  patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
   productIds: z.array(z.number()).default([]),
   media: z.array(mediaItemSchema).default([]),
   callouts: z.array(calloutSchema).default([]),
   colorways: z.array(colorwaySchema).default([]),
   bomItems: z.array(bomItemSchema).default([]),
-  pomPoints: z.array(pomPointSchema).default([]),
+  details: z.array(detailSchema).default([]), // construction-description aspects (text + images)
   construction: constructionSchema,
   operations: z.array(operationSchema).default([]),
   labels: z.array(labelSchema).default([]),
@@ -377,32 +370,21 @@ export const techCardDefaultData: TechCardFormData = {
   categoryId: 0,
   baseModelId: 0,
   baseSampleSizeId: 0,
-  targetCost: '',
-  targetRetailPrice: '',
-  currency: '',
   targetGender: UNSET_GENDER,
   stage: DEFAULT_STAGE,
   approvalState: DEFAULT_APPROVAL_STATE,
   measurementUnit: DEFAULT_MEASUREMENT_UNIT,
   approvedBy: '',
-  description: '',
-  silhouette: '',
-  collar: '',
-  fastening: '',
-  pockets: '',
-  sleeveCuff: '',
-  extraDetails: '',
-  topstitching: '',
-  auxMaterials: '',
   notes: '',
   sizeIds: [],
   sizeQuantities: [],
+  patterns: [],
   productIds: [],
   media: [],
   callouts: [],
   colorways: [],
   bomItems: [],
-  pomPoints: [],
+  details: [],
   construction: { ...emptyConstruction },
   operations: [],
   labels: [],
@@ -439,28 +421,24 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     categoryId: insert?.categoryId || 0,
     baseModelId: insert?.baseModelId || 0,
     baseSampleSizeId: insert?.baseSampleSizeId || 0,
-    targetCost: decimalToInput(insert?.targetCost),
-    targetRetailPrice: decimalToInput(insert?.targetRetailPrice),
-    currency: insert?.currency || '',
     targetGender: insert?.targetGender || UNSET_GENDER,
     stage: stageOrDefault(insert?.stage),
     approvalState: approvalStateOrDefault(insert?.approvalState),
     measurementUnit: measurementUnitOrDefault(insert?.measurementUnit),
     approvedBy: insert?.approvedBy || '',
-    description: insert?.description || '',
-    silhouette: insert?.silhouette || '',
-    collar: insert?.collar || '',
-    fastening: insert?.fastening || '',
-    pockets: insert?.pockets || '',
-    sleeveCuff: insert?.sleeveCuff || '',
-    extraDetails: insert?.extraDetails || '',
-    topstitching: insert?.topstitching || '',
-    auxMaterials: insert?.auxMaterials || '',
     notes: insert?.notes || '',
     sizeIds: insert?.sizeIds ?? [],
     sizeQuantities: (insert?.sizeQuantities ?? []).map((q) => ({
       sizeId: q.sizeId || 0,
       orderQty: q.orderQty || 0,
+    })),
+    patterns: (insert?.patterns ?? []).map((p) => ({
+      sizeId: p.sizeId || 0,
+      url: p.url || '',
+      filename: p.filename || '',
+      // size_bytes is int64 → arrives as a string from grpc-gateway; coerce to a real number
+      // so the form value passes z.number() (a string would silently block save).
+      sizeBytes: Number(p.sizeBytes) || 0,
     })),
     productIds: insert?.productIds ?? [],
     media: (insert?.media ?? []).map((m) => ({
@@ -495,6 +473,20 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       labDipDecidedAt: timestampToDateInput(c.labDipDecidedAt),
       labDipDecidedBy: c.labDipDecidedBy || '',
       labDipRejectReason: c.labDipRejectReason || '',
+      usages: (c.usages ?? []).map((u) => ({
+        bomItemIndex: u.bomItemIndex ?? -1,
+        placement: u.placement || '',
+        color: u.color || '',
+        pantone: u.pantone || '',
+        consumption: decimalToInput(u.consumption),
+        quantity: decimalToInput(u.quantity),
+        sizeConsumptions: (u.sizeConsumptions ?? []).map((sc) => ({
+          sizeId: sc.sizeId || 0,
+          consumption: decimalToInput(sc.consumption),
+        })),
+        lineTotal: decimalToInput(u.lineTotal),
+        sizeRunTotal: decimalToInput(u.sizeRunTotal),
+      })),
     })),
     bomItems: (insert?.bomItems ?? []).map((b) => ({
       section:
@@ -502,23 +494,15 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           ? b.section
           : DEFAULT_BOM_SECTION,
       name: b.name || '',
-      placement: b.placement || '',
       supplier: b.supplier || '',
       supplierRef: b.supplierRef || '',
       color: b.color || '',
       composition: b.composition || '',
       spec: b.spec || '',
-      consumption: decimalToInput(b.consumption),
       unit: b.unit || '',
-      quantity: decimalToInput(b.quantity),
       unitPrice: decimalToInput(b.unitPrice),
       currency: b.currency || '',
       comment: b.comment || '',
-      colorwayColors: (b.colorwayColors ?? []).map((cc) => ({
-        colorwayIndex: cc.colorwayIndex || 0,
-        color: cc.color || '',
-        pantone: cc.pantone || '',
-      })),
       fabricWidth: decimalToInput(b.fabricWidth),
       fabricWeightGsm: decimalToInput(b.fabricWeightGsm),
       fabricDirection:
@@ -527,24 +511,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
       wastagePercent: decimalToInput(b.wastagePercent),
     })),
-    pomPoints: (insert?.pomPoints ?? []).map((p) => ({
-      section: p.section || '',
-      code: p.code || '',
-      name: p.name || '',
-      howToMeasure: p.howToMeasure || '',
-      baseValue: decimalToInput(p.baseValue),
-      tolerancePlus: decimalToInput(p.tolerancePlus),
-      toleranceMinus: decimalToInput(p.toleranceMinus),
-      grades: (p.grades ?? []).map((g) => ({
-        sizeId: g.sizeId || 0,
-        value: decimalToInput(g.value),
-      })),
-      actuals: (p.actuals ?? []).map((a) => ({
-        fittingId: a.fittingId || 0,
-        label: a.label || '',
-        value: decimalToInput(a.value),
-        sizeId: a.sizeId || 0,
-      })),
+    details: (insert?.details ?? []).map((d) => ({
+      key: d.key || '',
+      text: d.text || '',
+      mediaIds: d.mediaIds ?? [],
     })),
     construction: insert?.construction
       ? {
@@ -556,8 +526,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           pressing: insert.construction.pressing || '',
           machineClass: insert.construction.machineClass || '',
           notes: insert.construction.notes || '',
-          labourRate: decimalToInput(insert.construction.labourRate),
-          labourRateCurrency: insert.construction.labourRateCurrency || '',
         }
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
@@ -578,6 +546,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       attachment: o.attachment || '',
       bomItemIndex: o.bomItemIndex ?? -1,
       calloutNumber: o.calloutNumber || 0,
+      placement: o.placement || '',
     })),
     labels: (insert?.labels ?? []).map((l) => ({
       labelType:
@@ -666,21 +635,17 @@ function mapConstructionOut(
     pressing: c?.pressing?.trim() || '',
     machineClass: c?.machineClass?.trim() || '',
     notes: c?.notes?.trim() || '',
-    labourRate: inputToDecimal(c?.labourRate),
-    labourRateCurrency: c?.labourRateCurrency?.trim() || '',
   };
-  const content =
-    hasContent([
-      out.mainStitchType,
-      out.stitchDensity,
-      out.overlockThreads,
-      out.seamAllowances,
-      out.hemFinish,
-      out.pressing,
-      out.machineClass,
-      out.notes,
-      out.labourRateCurrency,
-    ]) || !!out.labourRate?.value;
+  const content = hasContent([
+    out.mainStitchType,
+    out.stitchDensity,
+    out.overlockThreads,
+    out.seamAllowances,
+    out.hemFinish,
+    out.pressing,
+    out.machineClass,
+    out.notes,
+  ]);
   return content ? out : undefined;
 }
 
@@ -715,8 +680,8 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
   };
 }
 
-// costing rollup fields (materials_total/materials_cost/total_cost) are output-only —
-// never sent on write.
+// costing rollup fields (materials_total/materials_cost/total_cost/colorway_costs/total_sam)
+// are output-only — never sent on write.
 function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting | undefined {
   if (
     !hasContent([
@@ -752,12 +717,12 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     totalCost: undefined,
     hasUnconvertedCurrencies: undefined,
     totalSam: undefined,
-    labourCost: undefined,
+    colorwayCosts: undefined,
   };
 }
 
-// Merge the edited fields over the original insert. With Phase 3 in, every section is
-// now form-managed; `original` is still spread so any future-added proto field survives.
+// Merge the edited fields over the original insert. Every section is form-managed;
+// `original` is still spread so any future-added proto field survives.
 export function mapFormToTechCardInsert(
   data: TechCardFormData,
   original?: common_TechCardInsert,
@@ -777,9 +742,6 @@ export function mapFormToTechCardInsert(
     categoryId: data.categoryId || 0,
     baseModelId: data.baseModelId || 0,
     baseSampleSizeId: data.baseSampleSizeId || 0,
-    targetCost: inputToDecimal(data.targetCost),
-    targetRetailPrice: inputToDecimal(data.targetRetailPrice),
-    currency: data.currency?.trim() || '',
     targetGender: (data.targetGender || UNSET_GENDER) as common_GenderEnum,
     stage: (data.stage || 'TECH_CARD_STAGE_UNKNOWN') as common_TechCardStage,
     approvalState: (data.approvalState ||
@@ -787,15 +749,6 @@ export function mapFormToTechCardInsert(
     measurementUnit: (data.measurementUnit ||
       'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN') as common_TechCardMeasurementUnit,
     approvedBy: data.approvedBy?.trim() || '',
-    description: data.description?.trim() || '',
-    silhouette: data.silhouette?.trim() || '',
-    collar: data.collar?.trim() || '',
-    fastening: data.fastening?.trim() || '',
-    pockets: data.pockets?.trim() || '',
-    sleeveCuff: data.sleeveCuff?.trim() || '',
-    extraDetails: data.extraDetails?.trim() || '',
-    topstitching: data.topstitching?.trim() || '',
-    auxMaterials: data.auxMaterials?.trim() || '',
     notes: data.notes?.trim() || '',
     // children edited here — override the echoed `original` values
     sizeIds: data.sizeIds ?? [],
@@ -803,6 +756,14 @@ export function mapFormToTechCardInsert(
       sizeId: q.sizeId || 0,
       orderQty: q.orderQty || 0,
     })),
+    patterns: (data.patterns ?? [])
+      .filter((p) => p.url?.trim())
+      .map((p) => ({
+        sizeId: p.sizeId || 0,
+        url: p.url?.trim() || '',
+        filename: p.filename?.trim() || '',
+        sizeBytes: p.sizeBytes || 0,
+      })),
     productIds: data.productIds ?? [],
     media: (data.media ?? []).map((m) => ({
       mediaId: m.mediaId,
@@ -836,56 +797,53 @@ export function mapFormToTechCardInsert(
       labDipDecidedAt: c.labDipDecidedAt ? dateInputToTimestamp(c.labDipDecidedAt) : undefined,
       labDipDecidedBy: c.labDipDecidedBy?.trim() || '',
       labDipRejectReason: c.labDipRejectReason?.trim() || '',
+      usages: (c.usages ?? []).map((u) => ({
+        bomItemIndex:
+          typeof u.bomItemIndex === 'number' && u.bomItemIndex >= 0 ? u.bomItemIndex : undefined,
+        placement: u.placement?.trim() || '',
+        color: u.color?.trim() || '',
+        pantone: u.pantone?.trim() || '',
+        consumption: inputToDecimal(u.consumption),
+        quantity: inputToDecimal(u.quantity),
+        // per-size grading — drop blank cells; an all-blank set sends [] (per-garment fallback)
+        sizeConsumptions: (u.sizeConsumptions ?? [])
+          .filter((sc) => sc.consumption?.trim())
+          .map((sc) => ({
+            sizeId: sc.sizeId || 0,
+            consumption: inputToDecimal(sc.consumption),
+          })),
+        // lineTotal + sizeRunTotal are output-only (server-computed) — never sent
+        lineTotal: undefined,
+        sizeRunTotal: undefined,
+      })),
     })),
     bomItems: (data.bomItems ?? []).map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
       name: b.name?.trim() || '',
-      placement: b.placement?.trim() || '',
       supplier: b.supplier?.trim() || '',
       supplierRef: b.supplierRef?.trim() || '',
       color: b.color?.trim() || '',
       composition: b.composition?.trim() || '',
       spec: b.spec?.trim() || '',
-      consumption: inputToDecimal(b.consumption),
       unit: b.unit?.trim() || '',
-      quantity: inputToDecimal(b.quantity),
       unitPrice: inputToDecimal(b.unitPrice),
       currency: b.currency?.trim() || '',
       comment: b.comment?.trim() || '',
-      colorwayColors: (b.colorwayColors ?? []).map((cc) => ({
-        colorwayIndex: cc.colorwayIndex || 0,
-        color: cc.color?.trim() || '',
-        pantone: cc.pantone?.trim() || '',
-      })),
       fabricWidth: inputToDecimal(b.fabricWidth),
       fabricWeightGsm: inputToDecimal(b.fabricWeightGsm),
       fabricDirection: (b.fabricDirection ||
         'TECH_CARD_FABRIC_DIRECTION_UNKNOWN') as common_TechCardFabricDirection,
       wastagePercent: inputToDecimal(b.wastagePercent),
-      // lineTotal is output-only (server-computed) — omitted on write
     })),
-    pomPoints: (data.pomPoints ?? []).map((p) => ({
-      section: p.section?.trim() || '',
-      code: p.code?.trim() || '',
-      name: p.name?.trim() || '',
-      howToMeasure: p.howToMeasure?.trim() || '',
-      baseValue: inputToDecimal(p.baseValue),
-      tolerancePlus: inputToDecimal(p.tolerancePlus),
-      toleranceMinus: inputToDecimal(p.toleranceMinus),
-      grades: (p.grades ?? []).map((g) => ({
-        sizeId: g.sizeId || 0,
-        value: inputToDecimal(g.value),
-      })),
-      actuals: (p.actuals ?? []).map((a) => ({
-        fittingId: a.fittingId || 0,
-        label: a.label?.trim() || '',
-        value: inputToDecimal(a.value),
-        sizeId: a.sizeId || 0,
-        // deviation/verdict are output-only — omitted on write
-      })),
-    })),
+    details: (data.details ?? [])
+      .map((d) => ({
+        key: d.key?.trim() || '',
+        text: d.text?.trim() || '',
+        mediaIds: d.mediaIds ?? [],
+      }))
+      .filter((d) => d.key || d.text || d.mediaIds.length > 0),
     construction: mapConstructionOut(data.construction),
-    operations: (data.operations ?? []).map((o) => ({
+    operations: (data.operations ?? []).map((o, i) => ({
       node: o.node?.trim() || '',
       description: o.description?.trim() || '',
       seamType: o.seamType?.trim() || '',
@@ -893,7 +851,9 @@ export function mapFormToTechCardInsert(
       topstitchWidth: o.topstitchWidth?.trim() || '',
       thread: o.thread?.trim() || '',
       note: o.note?.trim() || '',
-      operationNumber: o.operationNumber || 0,
+      // operation number is positional (server is authoritative); send (i+1)*10 so a
+      // freshly-created card reads back sensibly before the server recomputes.
+      operationNumber: (i + 1) * 10,
       machine: o.machine?.trim() || '',
       seamAllowance: o.seamAllowance?.trim() || '',
       needle: o.needle?.trim() || '',
@@ -905,6 +865,7 @@ export function mapFormToTechCardInsert(
       bomItemIndex:
         typeof o.bomItemIndex === 'number' && o.bomItemIndex >= 0 ? o.bomItemIndex : undefined,
       calloutNumber: o.calloutNumber || 0,
+      placement: o.placement?.trim() || '',
     })),
     labels: (data.labels ?? []).map((l) => ({
       labelType: (l.labelType || 'TECH_CARD_LABEL_TYPE_UNKNOWN') as common_TechCardLabelType,
@@ -939,10 +900,8 @@ export function mapFormToTechCardInsert(
       section: r.section?.trim() || '',
       changeNote: r.changeNote?.trim() || '',
     })),
-    // Cast: TechCardInsert keys are required-but-nullable; we set the header + the
-    // children above and echo the still-unbuilt sections (bom_items, colorways,
-    // pom_points, construction, operations, labels, packaging, costing) from
-    // `original`. Untouched keys are omitted on create (absent == empty on the wire),
-    // which the structural type can't express without the cast.
+    // Cast: TechCardInsert keys are required-but-nullable; we set every section above and
+    // echo any still-unhandled proto field from `original`. Untouched keys are omitted on
+    // create (absent == empty on the wire), which the structural type can't express.
   } as common_TechCardInsert;
 }

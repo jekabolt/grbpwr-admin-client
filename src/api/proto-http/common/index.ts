@@ -792,6 +792,21 @@ export type FittingInsert = {
   sizes: FittingSizeInsert[] | undefined;
   mediaIds: number[] | undefined;
   techCardId: number | undefined;
+  // PDF выкройки measured in this fitting. The tech card holds the FINAL pattern per
+  // size; a fitting captures the ITERATION that was actually tried on (so you know which
+  // pattern you measured). A fitting may carry several (it can span sizes). Each PDF is
+  // uploaded via Admin.UploadPattern; the url is stored as a snapshot (immune to later
+  // tech-card edits).
+  patterns: FittingPattern[] | undefined;
+};
+
+// FittingPattern is one PDF выкройка iteration tried in a fitting (snapshot of the
+// uploaded file, not a live reference to a tech-card pattern).
+export type FittingPattern = {
+  sizeId: number | undefined;
+  url: string | undefined;
+  filename: string | undefined;
+  sizeBytes: number | undefined;
 };
 
 // Fitting is a stored try-on session with resolved media for display.
@@ -1062,8 +1077,8 @@ export type TechCardApprovalState =
   | "TECH_CARD_APPROVAL_STATE_APPROVED"
   | "TECH_CARD_APPROVAL_STATE_RELEASED"
   | "TECH_CARD_APPROVAL_STATE_OBSOLETE";
-// TechCardMeasurementUnit is the unit for the card's geometry (callout dimensions
-// and the POM chart). Metric only — the brand works in cm and mm, never inches.
+// TechCardMeasurementUnit is the unit for the card's geometry (callout dimensions).
+// Metric only — the brand works in cm and mm, never inches.
 export type TechCardMeasurementUnit =
   | "TECH_CARD_MEASUREMENT_UNIT_UNKNOWN"
   | "TECH_CARD_MEASUREMENT_UNIT_CM"
@@ -1090,7 +1105,9 @@ export type TechCardBomSection =
   | "TECH_CARD_BOM_SECTION_THREAD"
   | "TECH_CARD_BOM_SECTION_LABEL"
   | "TECH_CARD_BOM_SECTION_PACKAGING"
-  | "TECH_CARD_BOM_SECTION_TRIM";
+  | "TECH_CARD_BOM_SECTION_TRIM"
+  | "TECH_CARD_BOM_SECTION_DECORATION"
+  | "TECH_CARD_BOM_SECTION_OTHER";
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
@@ -1104,12 +1121,6 @@ export type TechCardFabricDirection =
   | "TECH_CARD_FABRIC_DIRECTION_ANY"
   | "TECH_CARD_FABRIC_DIRECTION_ONE_WAY"
   | "TECH_CARD_FABRIC_DIRECTION_TWO_WAY";
-// TechCardPomVerdict is the computed in/out-of-tolerance result of an actual.
-export type TechCardPomVerdict =
-  | "TECH_CARD_POM_VERDICT_UNKNOWN"
-  | "TECH_CARD_POM_VERDICT_IN_TOLERANCE"
-  | "TECH_CARD_POM_VERDICT_OVER"
-  | "TECH_CARD_POM_VERDICT_UNDER";
 // TechCardLabelType classifies a label / tag (Sheet «Этикетки и упаковка»).
 export type TechCardLabelType =
   | "TECH_CARD_LABEL_TYPE_UNKNOWN"
@@ -1165,7 +1176,6 @@ export type TechCardSignoffSection =
   | "TECH_CARD_SIGNOFF_SECTION_UNKNOWN"
   | "TECH_CARD_SIGNOFF_SECTION_DESIGN"
   | "TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION"
-  | "TECH_CARD_SIGNOFF_SECTION_POM"
   | "TECH_CARD_SIGNOFF_SECTION_MATERIALS"
   | "TECH_CARD_SIGNOFF_SECTION_COLOUR"
   | "TECH_CARD_SIGNOFF_SECTION_LABELS"
@@ -1230,39 +1240,62 @@ export type TechCardColorway = {
   labDipDecidedAt: wellKnownTimestamp | undefined;
   labDipDecidedBy: string | undefined;
   labDipRejectReason: string | undefined;
+  // the colour's material recipe: which catalog article (bom_item_index) goes on which
+  // garment part, in what colour, at what consumption. Per-colourway divergence lives here.
+  usages: TechCardColorwayUsage[] | undefined;
 };
 
-// TechCardBomColorwayColor is one «Колористика» matrix cell: the colour of a BOM
-// material in a colourway. colorway_index points into TechCardInsert.colorways — a
-// full-replace upsert has no stable colourway ids to reference on write.
-export type TechCardBomColorwayColor = {
-  colorwayIndex: number | undefined;
+// TechCardColorwayUsage is one material use inside a colourway: which catalog article
+// (bom_item_index) goes on which garment part (placement), the colour it takes HERE, and
+// how much is consumed (per-garment and/or per-size). The BOM is a pure article catalog;
+// per-colourway divergence lives here.
+export type TechCardColorwayUsage = {
+  // explicit presence: index 0 is a real BOM line, distinct from "unset"
+  // (mirrors TechCardOperation.bom_item_index).
+  bomItemIndex?: number;
+  placement: string | undefined;
+  // matched (trim+lower) against TechCardOperation.placement
   color: string | undefined;
+  // independent of TechCardColorway.pantone (the swatch colour)
   pantone: string | undefined;
+  consumption: googletype_Decimal | undefined;
+  quantity: googletype_Decimal | undefined;
+  sizeConsumptions: TechCardBomSizeConsumption[] | undefined;
+  lineTotal: googletype_Decimal | undefined;
+  sizeRunTotal: googletype_Decimal | undefined;
 };
 
-// TechCardBomItem is one bill-of-materials line (Sheet «Спецификация»).
+// TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
+// material — different sizes consume different amounts of fabric.
+export type TechCardBomSizeConsumption = {
+  sizeId: number | undefined;
+  consumption: googletype_Decimal | undefined;
+};
+
+// TechCardDetail is one aspect of the construction description (Sheet «Титул», lower block)
+// with optional reference images. key is freeform (silhouette/collar/fastening/pockets/
+// sleeve_cuff/topstitching/extra_details … or a custom aspect).
+export type TechCardDetail = {
+  key: string | undefined;
+  text: string | undefined;
+  mediaIds: number[] | undefined;
+};
+
+// TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
+// The per-colourway colour, placement and consumption live on TechCardColorwayUsage; the
+// BOM line is now a pure material-article catalog entry.
 export type TechCardBomItem = {
   section: TechCardBomSection | undefined;
   name: string | undefined;
-  placement: string | undefined;
   supplier: string | undefined;
   supplierRef: string | undefined;
   color: string | undefined;
   composition: string | undefined;
   spec: string | undefined;
-  // consumption vs quantity: fill ONE per line. consumption = per-garment rate of
-  // a measured material (fabric/lining/interlining/insulation/thread) in `unit`
-  // (м/см/г); quantity = discrete count of a countable trim (hardware/label/
-  // packaging), `unit` then = pcs. line_total uses quantity when set, else consumption.
-  consumption: googletype_Decimal | undefined;
   unit: string | undefined;
-  quantity: googletype_Decimal | undefined;
   unitPrice: googletype_Decimal | undefined;
   currency: string | undefined;
   comment: string | undefined;
-  colorwayColors: TechCardBomColorwayColor[] | undefined;
-  lineTotal: googletype_Decimal | undefined;
   // fabric data for the cutter / marker (Phase 3.5c)
   fabricWidth: googletype_Decimal | undefined;
   fabricWeightGsm: googletype_Decimal | undefined;
@@ -1276,37 +1309,15 @@ export type TechCardSizeQuantity = {
   orderQty: number | undefined;
 };
 
-// TechCardPomGrade is the graded value of a POM point for one size.
-export type TechCardPomGrade = {
+// TechCardSizePattern is a downloadable PDF выкройка (cut pattern) for one size of a
+// tech card — the FINAL pattern for that size. A size can carry many patterns (pieces
+// split across sheets). The PDF is uploaded via Admin.UploadPattern, which returns the
+// url stored here; the binary lives in object storage, not the media library.
+export type TechCardSizePattern = {
   sizeId: number | undefined;
-  value: googletype_Decimal | undefined;
-};
-
-// TechCardPomActual is an actual measured value, optionally taken in a fitting and
-// at a specific size (so QC can compare it to that size's grade ± tolerance).
-export type TechCardPomActual = {
-  fittingId: number | undefined;
-  label: string | undefined;
-  value: googletype_Decimal | undefined;
-  sizeId: number | undefined;
-  // OUTPUT-ONLY: deviation = value - target (grade at size_id, else base_value);
-  // verdict compares the deviation against tolerance_plus / tolerance_minus.
-  deviation: googletype_Decimal | undefined;
-  verdict: TechCardPomVerdict | undefined;
-};
-
-// TechCardPomPoint is a point of measure with its grade and actuals (Sheet «Измерения»).
-// Values are in TechCardInsert.measurement_unit.
-export type TechCardPomPoint = {
-  section: string | undefined;
-  code: string | undefined;
-  name: string | undefined;
-  howToMeasure: string | undefined;
-  baseValue: googletype_Decimal | undefined;
-  tolerancePlus: googletype_Decimal | undefined;
-  toleranceMinus: googletype_Decimal | undefined;
-  grades: TechCardPomGrade[] | undefined;
-  actuals: TechCardPomActual[] | undefined;
+  url: string | undefined;
+  filename: string | undefined;
+  sizeBytes: number | undefined;
 };
 
 // TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
@@ -1319,8 +1330,6 @@ export type TechCardConstruction = {
   pressing: string | undefined;
   machineClass: string | undefined;
   notes: string | undefined;
-  labourRate: googletype_Decimal | undefined;
-  labourRateCurrency: string | undefined;
 };
 
 // TechCardOperation is one per-node sewing operation (Sheet «Обработка»).
@@ -1340,13 +1349,14 @@ export type TechCardOperation = {
   attachment: string | undefined;
   operationType: TechCardOperationType | undefined;
   // 0-based index into TechCardInsert.bom_items of the material this operation
-  // applies (thread / binding (бейка) / interlining / zipper). Uses proto3 explicit
-  // presence so index 0 (the first BOM line) is distinguishable from "no material":
-  // unset = no reference. Mirrors TechCardBomColorwayColor.colorway_index, which —
-  // being always present — needs no presence flag.
+  // applies (thread / binding (бейка) / interlining / zipper) when it is NOT resolved
+  // through a part. Uses proto3 explicit presence so index 0 (the first BOM line) is
+  // distinguishable from "no material": unset = no reference. When set, it wins; the
+  // colour resolves via the selected colourway's usage with the same bom_item_index.
   bomItemIndex?: number;
   calloutNumber: number | undefined;
   zone: TechCardConstructionZone | undefined;
+  placement: string | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -1391,6 +1401,16 @@ export type TechCardCostLine = {
   amount: googletype_Decimal | undefined;
 };
 
+// TechCardColorwayCost is the computed material cost of ONE colourway (Sheet «Калькуляция»).
+// OUTPUT-ONLY (ignored on write). Per-currency buckets; no FX conversion.
+export type TechCardColorwayCost = {
+  colorwayIndex: number | undefined;
+  materialsTotal: TechCardCostLine[] | undefined;
+  materialsCost: googletype_Decimal | undefined;
+  sizeRunTotal: googletype_Decimal | undefined;
+  hasUnconvertedCurrencies: boolean | undefined;
+};
+
 // TechCardCosting holds the manually-entered cost articles (Sheet «Калькуляция»).
 // The materials rollup and total are COMPUTED on read from the BOM; they are
 // output-only (ignored on write) and never converted across currencies.
@@ -1401,18 +1421,24 @@ export type TechCardCosting = {
   logisticsCost: googletype_Decimal | undefined;
   overheadCost: googletype_Decimal | undefined;
   defectPercent: googletype_Decimal | undefined;
+  // Pricing is single (brand policy): markup_multiplier, wholesale_price, retail_price
+  // and currency are the SAME across colourways. Per-SKU pricing, if ever needed, lives
+  // on the published product, not here.
   markupMultiplier: googletype_Decimal | undefined;
   wholesalePrice: googletype_Decimal | undefined;
   retailPrice: googletype_Decimal | undefined;
   currency: string | undefined;
   notes: string | undefined;
-  // OUTPUT-ONLY computed rollup (ignored on write; no currency conversion).
+  // OUTPUT-ONLY computed rollup (ignored on write; no currency conversion). The root
+  // rollup is the PRIMARY colourway (colorways index 0); per-colourway figures are in
+  // colorway_costs. A usage with per-size consumption contributes its whole-run
+  // size_run_total (order-scale); a usage without contributes its per-garment line_total.
   materialsTotal: TechCardCostLine[] | undefined;
   materialsCost: googletype_Decimal | undefined;
   totalCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
-  labourCost: googletype_Decimal | undefined;
+  colorwayCosts: TechCardColorwayCost[] | undefined;
 };
 
 // TechCardSignoff records one responsible role's sign-off of a sheet, so the
@@ -1447,19 +1473,8 @@ export type TechCardInsert = {
   designer: string | undefined;
   constructor: string | undefined;
   technologist: string | undefined;
-  targetCost: googletype_Decimal | undefined;
-  targetRetailPrice: googletype_Decimal | undefined;
-  currency: string | undefined;
-  // construction description (lower block of Sheet «Титул»)
-  description: string | undefined;
-  silhouette: string | undefined;
-  collar: string | undefined;
-  fastening: string | undefined;
-  pockets: string | undefined;
-  sleeveCuff: string | undefined;
-  extraDetails: string | undefined;
-  topstitching: string | undefined;
-  auxMaterials: string | undefined;
+  // construction description (lower block of Sheet «Титул») now lives in details[]; the
+  // header targets / currency were removed (pricing is on costing, single brand policy).
   notes: string | undefined;
   // children (full-replace on update)
   sizeIds: number[] | undefined;
@@ -1467,10 +1482,9 @@ export type TechCardInsert = {
   media: TechCardMediaItem[] | undefined;
   callouts: TechCardCallout[] | undefined;
   revisions: TechCardRevision[] | undefined;
-  // materials (Phase 2): bill of materials, colourways, points of measure.
+  // materials (Phase 2): bill of materials (article catalog) and colourways (recipes).
   bomItems: TechCardBomItem[] | undefined;
   colorways: TechCardColorway[] | undefined;
-  pomPoints: TechCardPomPoint[] | undefined;
   // production (Phase 3): construction, operations, labels, packaging, costing.
   construction: TechCardConstruction | undefined;
   operations: TechCardOperation[] | undefined;
@@ -1483,6 +1497,9 @@ export type TechCardInsert = {
   issues: TechCardIssue[] | undefined;
   sizeQuantities: TechCardSizeQuantity[] | undefined;
   signoffs: TechCardSignoff[] | undefined;
+  patterns: TechCardSizePattern[] | undefined;
+  // construction-description aspects with reference images (replaces the flat strings).
+  details: TechCardDetail[] | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
