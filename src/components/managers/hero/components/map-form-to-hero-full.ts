@@ -235,6 +235,17 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_NEW_ARRIVALS':
+      return {
+        ...emptyEntity(e.type),
+        newArrivals: {
+          // backend-resolved by created_at; not available in the editor preview.
+          products: undefined,
+          exploreLink: e.newArrivals?.exploreLink ?? undefined,
+          translations: (e.newArrivals?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

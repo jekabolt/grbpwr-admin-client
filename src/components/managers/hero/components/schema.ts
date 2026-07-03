@@ -428,6 +428,25 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_NEW_ARRIVALS'),
+    _uid: z.string().optional(),
+    newArrivals: z.object({
+      // products are resolved by the backend (newest by created_at); editor only
+      // sets how many to show.
+      limit: z.number().optional(),
+      exploreLink: z.string().nullable().optional(),
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().optional(),
+          exploreText: z.string().optional(),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

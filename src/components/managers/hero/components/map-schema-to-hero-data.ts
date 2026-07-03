@@ -179,6 +179,15 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           translations: (e.lastChance?.translations || []).map(toCopy),
         },
       };
+    case 'HERO_TYPE_NEW_ARRIVALS':
+      return {
+        ...base,
+        newArrivals: {
+          limit: e.newArrivals?.limit || 0,
+          exploreLink: e.newArrivals?.exploreLink || '',
+          translations: (e.newArrivals?.translations || []).map(toCopy),
+        },
+      };
     default:
       return base;
   }
@@ -426,6 +435,21 @@ export function mapHeroFullToFormData(
                 exploreLink: e.lastChance?.exploreLink,
                 translations:
                   e.lastChance?.translations?.map((t) => ({
+                    languageId: t.languageId || 0,
+                    headline: t.headline,
+                    exploreText: t.exploreText || '',
+                  })) || [],
+              },
+            };
+          case 'HERO_TYPE_NEW_ARRIVALS':
+            return {
+              type: e.type,
+              newArrivals: {
+                // read model returns resolved `products`, not `limit` — write-only.
+                limit: undefined,
+                exploreLink: e.newArrivals?.exploreLink,
+                translations:
+                  e.newArrivals?.translations?.map((t) => ({
                     languageId: t.languageId || 0,
                     headline: t.headline,
                     exploreText: t.exploreText || '',

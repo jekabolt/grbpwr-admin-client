@@ -542,6 +542,45 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
         </div>
       );
 
+    case 'HERO_TYPE_NEW_ARRIVALS':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            new arrivals
+          </Text>
+          <Text variant='inactive' size='small'>
+            products are filled automatically from the newest arrivals.
+          </Text>
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.newArrivals.limit`}
+              label='max products'
+              type='number'
+              valueAsNumber
+              placeholder='e.g. 8'
+            />
+            <InputField
+              name={`entities.${index}.newArrivals.exploreLink`}
+              label='explore link (optional)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.newArrivals.translations`}
+              fields={[
+                { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+                {
+                  name: 'exploreText',
+                  label: 'explore text (optional)',
+                  type: 'input',
+                  required: false,
+                },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }
