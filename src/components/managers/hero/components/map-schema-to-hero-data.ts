@@ -196,6 +196,14 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           intervalMs: e.slideshow?.intervalMs || 0,
         },
       };
+    case 'HERO_TYPE_MOSAIC':
+      return {
+        ...base,
+        mosaic: {
+          tiles: (e.mosaic?.tiles || []).map(toSingleInsert),
+          columns: e.mosaic?.columns || 0,
+        },
+      };
     default:
       return base;
   }
@@ -470,6 +478,14 @@ export function mapHeroFullToFormData(
               slideshow: {
                 slides: e.slideshow?.slides?.map(readSingle) || [],
                 intervalMs: e.slideshow?.intervalMs,
+              },
+            };
+          case 'HERO_TYPE_MOSAIC':
+            return {
+              type: e.type,
+              mosaic: {
+                tiles: e.mosaic?.tiles?.map(readSingle) || [],
+                columns: e.mosaic?.columns,
               },
             };
           default:

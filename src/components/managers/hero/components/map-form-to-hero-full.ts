@@ -255,6 +255,15 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_MOSAIC':
+      return {
+        ...emptyEntity(e.type),
+        mosaic: {
+          tiles: (e.mosaic?.tiles || []).map(toSingle),
+          columns: e.mosaic?.columns ?? undefined,
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

@@ -58,6 +58,25 @@ const createOptionalStrictTranslationSchema = <T extends z.ZodType>(
     );
 };
 
+// A single HeroSingle-shaped form item (media pair + explore link + copy), used
+// by the slideshow / mosaic / lookbook list blocks. The per-item translation
+// fields differ per block, so the copy shape is passed in.
+const heroSingleItemSchema = (translationShape: z.ZodRawShape) =>
+  z.object({
+    mediaLandscapeId: z.number().optional(),
+    mediaPortraitId: z.number().optional(),
+    mediaLandscapeUrl: z.string().optional(),
+    mediaPortraitUrl: z.string().optional(),
+    exploreLink: z.string().nullable().optional(),
+    translations: createStrictTranslationSchema(
+      z.object({
+        languageId: z.number().min(1, 'Language is required'),
+        ...translationShape,
+      }),
+      requiredLanguageIds,
+    ),
+  });
+
 export const navFeatured = z.object({
   men: z.object({
     mediaId: z.number().min(0).optional(),
@@ -470,6 +489,22 @@ const heroEntitySchema = z.discriminatedUnion('type', [
         )
         .min(1, 'At least one slide is required'),
       intervalMs: z.number().optional(),
+    }),
+  }),
+
+  z.object({
+    type: z.literal('HERO_TYPE_MOSAIC'),
+    _uid: z.string().optional(),
+    mosaic: z.object({
+      tiles: z
+        .array(
+          heroSingleItemSchema({
+            headline: z.string().optional(),
+            exploreText: z.string().optional(),
+          }),
+        )
+        .min(1, 'At least one tile is required'),
+      columns: z.number().optional(),
     }),
   }),
 

@@ -611,6 +611,37 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
         </div>
       );
 
+    case 'HERO_TYPE_MOSAIC':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            mosaic
+          </Text>
+          <SlideListField
+            name={`entities.${index}.mosaic.tiles`}
+            itemLabel='tile'
+            landscapeRatio={['1:1']}
+            portraitRatio={['1:1']}
+            translationFields={[
+              { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+              {
+                name: 'exploreText',
+                label: 'explore text (optional)',
+                type: 'input',
+                required: false,
+              },
+            ]}
+          />
+          <InputField
+            name={`entities.${index}.mosaic.columns`}
+            label='columns (optional)'
+            type='number'
+            valueAsNumber
+            placeholder='e.g. 3'
+          />
+        </div>
+      );
+
     default:
       return null;
   }

@@ -60,6 +60,7 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
   { value: 'HERO_TYPE_LAST_CHANCE', label: 'last chance' },
   { value: 'HERO_TYPE_NEW_ARRIVALS', label: 'new arrivals' },
   { value: 'HERO_TYPE_SLIDESHOW', label: 'slideshow' },
+  { value: 'HERO_TYPE_MOSAIC', label: 'mosaic' },
 ];
 
 export const ASPECT_RATIOS = [
