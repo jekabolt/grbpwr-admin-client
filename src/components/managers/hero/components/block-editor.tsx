@@ -411,6 +411,45 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
         </div>
       );
 
+    case 'HERO_TYPE_EMBED':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            embed
+          </Text>
+          <InputField
+            name={`entities.${index}.embed.embedUrl`}
+            label='embed URL'
+            placeholder='https://…'
+          />
+          <div className='space-y-1'>
+            <Text variant='inactive' size='small'>
+              fallback media (optional, shown before the embed loads)
+            </Text>
+            <MediaPairField
+              prefix={`entities.${index}.embed`}
+              landscapeUrl={entity.embed?.mediaLandscapeUrl || ''}
+              portraitUrl={entity.embed?.mediaPortraitUrl || ''}
+            />
+          </div>
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.embed.ctaLink`}
+              label='CTA link (optional)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.embed.translations`}
+              fields={[
+                { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+                { name: 'ctaText', label: 'CTA text (optional)', type: 'input', required: false },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }

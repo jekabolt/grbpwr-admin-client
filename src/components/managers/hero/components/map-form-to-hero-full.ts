@@ -200,6 +200,17 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_EMBED':
+      return {
+        ...emptyEntity(e.type),
+        embed: {
+          embedUrl: e.embed?.embedUrl ?? undefined,
+          fallback: toMediaPair(e.embed),
+          ctaLink: e.embed?.ctaLink ?? undefined,
+          translations: (e.embed?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

@@ -55,6 +55,7 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
   { value: 'HERO_TYPE_VIDEO', label: 'video' },
   { value: 'HERO_TYPE_STATEMENT', label: 'statement' },
   { value: 'HERO_TYPE_NEWSLETTER', label: 'newsletter' },
+  { value: 'HERO_TYPE_EMBED', label: 'embed' },
 ];
 
 export const ASPECT_RATIOS = [
