@@ -12,6 +12,10 @@ interface BlockEditorModalProps {
   editingUid: string | null;
   onOpenChange: (open: boolean) => void;
   featuredProducts: ProductSelectionApi;
+  /** True while editing a freshly-added, unconfirmed block — cancel/close discards it. */
+  isNew?: boolean;
+  /** Confirm/keep the new block (leaves it in the list). */
+  onConfirm?: () => void;
 }
 
 /**
@@ -25,6 +29,8 @@ export function BlockEditorModal({
   editingUid,
   onOpenChange,
   featuredProducts,
+  isNew = false,
+  onConfirm,
 }: BlockEditorModalProps) {
   const { control } = useFormContext<HeroSchema>();
   const entities = (useWatch({ control, name: 'entities' }) || []) as any[];
@@ -65,12 +71,31 @@ export function BlockEditorModal({
                 <BlockEditor index={index} entity={entity} featuredProducts={featuredProducts} />
               )}
             </div>
-            <div className='flex shrink-0 justify-end'>
-              <DialogPrimitives.Close asChild>
-                <Button type='button' variant='main' size='lg' className='cursor-pointer'>
-                  done
-                </Button>
-              </DialogPrimitives.Close>
+            <div className='flex shrink-0 justify-end gap-2'>
+              {isNew ? (
+                <>
+                  <DialogPrimitives.Close asChild>
+                    <Button type='button' variant='secondary' size='lg' className='cursor-pointer'>
+                      cancel
+                    </Button>
+                  </DialogPrimitives.Close>
+                  <Button
+                    type='button'
+                    variant='main'
+                    size='lg'
+                    className='cursor-pointer'
+                    onClick={onConfirm}
+                  >
+                    add block
+                  </Button>
+                </>
+              ) : (
+                <DialogPrimitives.Close asChild>
+                  <Button type='button' variant='main' size='lg' className='cursor-pointer'>
+                    done
+                  </Button>
+                </DialogPrimitives.Close>
+              )}
             </div>
           </div>
         </DialogPrimitives.Content>

@@ -28,6 +28,7 @@ export function Hero() {
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
   const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
   const [editingUid, setEditingUid] = useState<string | null>(null);
+  const [pendingNewUid, setPendingNewUid] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const isResettingRef = useRef(false);
@@ -74,7 +75,7 @@ export function Hero() {
     return () => subscription.unsubscribe();
   }, [form]);
 
-  const { append, move, insert } = useFieldArray({
+  const { append, remove, move, insert } = useFieldArray({
     control: form.control,
     name: 'entities',
   });
@@ -239,7 +240,21 @@ export function Hero() {
         <BlockEditorModal
           editingUid={editingUid}
           onOpenChange={(o) => {
-            if (!o) setEditingUid(null);
+            if (o) return;
+            // Closing a freshly-added block without confirming discards it.
+            if (editingUid && editingUid === pendingNewUid) {
+              const idx = (form.getValues().entities || []).findIndex(
+                (e: any) => e._uid === pendingNewUid,
+              );
+              if (idx >= 0) remove(idx);
+              setPendingNewUid(null);
+            }
+            setEditingUid(null);
+          }}
+          isNew={!!pendingNewUid && editingUid === pendingNewUid}
+          onConfirm={() => {
+            setPendingNewUid(null);
+            setEditingUid(null);
           }}
           featuredProducts={featuredProducts}
         />
@@ -254,6 +269,7 @@ export function Hero() {
             onAdded={(uid) => {
               setAddMenuOpen(false);
               setEditingUid(uid);
+              setPendingNewUid(uid);
             }}
           />
         </HeroSectionModal>
