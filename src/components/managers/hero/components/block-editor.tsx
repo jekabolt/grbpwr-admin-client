@@ -8,6 +8,7 @@ import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fie
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
+import { MediaPairField } from './media-pair-field';
 import { HeroSchema } from './schema';
 import { ProductSelectionApi } from './useProductSelection';
 
@@ -336,64 +337,12 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
           <Text className='font-bold leading-none' variant='uppercase' size='large'>
             statement
           </Text>
-          <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
-            <div className='w-full space-y-1 sm:w-auto'>
-              <Text variant='inactive' size='small'>
-                landscape (optional)
-              </Text>
-              <MediaPreviewWithSelector
-                mediaUrl={entity.statement?.mediaLandscapeUrl || ''}
-                aspectRatio={['2:1']}
-                allowMultiple={false}
-                showVideos={true}
-                alt='landscape'
-                label='select'
-                purpose='landscape'
-                heightClass='sm:h-44'
-                onSaveMedia={(media) =>
-                  saveSingleMedia(
-                    `entities.${index}.statement.mediaLandscapeId`,
-                    `entities.${index}.statement.mediaLandscapeUrl`,
-                    media,
-                  )
-                }
-                onClear={() =>
-                  clearSingleMedia(
-                    `entities.${index}.statement.mediaLandscapeId`,
-                    `entities.${index}.statement.mediaLandscapeUrl`,
-                  )
-                }
-              />
-            </div>
-            <div className='w-full space-y-1 sm:w-auto'>
-              <Text variant='inactive' size='small'>
-                portrait (optional)
-              </Text>
-              <MediaPreviewWithSelector
-                mediaUrl={entity.statement?.mediaPortraitUrl || ''}
-                aspectRatio={['9:16']}
-                allowMultiple={false}
-                showVideos={true}
-                alt='portrait'
-                label='select'
-                purpose='portrait'
-                heightClass='sm:h-44'
-                onSaveMedia={(media) =>
-                  saveSingleMedia(
-                    `entities.${index}.statement.mediaPortraitId`,
-                    `entities.${index}.statement.mediaPortraitUrl`,
-                    media,
-                  )
-                }
-                onClear={() =>
-                  clearSingleMedia(
-                    `entities.${index}.statement.mediaPortraitId`,
-                    `entities.${index}.statement.mediaPortraitUrl`,
-                  )
-                }
-              />
-            </div>
-          </div>
+          <MediaPairField
+            prefix={`entities.${index}.statement`}
+            landscapeUrl={entity.statement?.mediaLandscapeUrl || ''}
+            portraitUrl={entity.statement?.mediaPortraitUrl || ''}
+            optional
+          />
           <div className='space-y-4'>
             <InputField
               name={`entities.${index}.statement.exploreLink`}
@@ -409,6 +358,50 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                   label: 'body (optional)',
                   type: 'textarea',
                   rows: 3,
+                  required: false,
+                },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
+      );
+
+    case 'HERO_TYPE_NEWSLETTER':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            newsletter
+          </Text>
+          <MediaPairField
+            prefix={`entities.${index}.newsletter`}
+            landscapeUrl={entity.newsletter?.mediaLandscapeUrl || ''}
+            portraitUrl={entity.newsletter?.mediaPortraitUrl || ''}
+            optional
+          />
+          <div className='space-y-4'>
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.newsletter.translations`}
+              fields={[
+                { name: 'headline', label: 'headline', type: 'input' },
+                {
+                  name: 'body',
+                  label: 'body (optional)',
+                  type: 'textarea',
+                  rows: 2,
+                  required: false,
+                },
+                {
+                  name: 'placeholder',
+                  label: 'email placeholder (optional)',
+                  type: 'input',
+                  required: false,
+                },
+                { name: 'ctaText', label: 'button text', type: 'input' },
+                {
+                  name: 'successText',
+                  label: 'success message (optional)',
+                  type: 'input',
                   required: false,
                 },
               ]}

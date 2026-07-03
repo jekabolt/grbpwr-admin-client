@@ -191,6 +191,15 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_NEWSLETTER':
+      return {
+        ...emptyEntity(e.type),
+        newsletter: {
+          media: toMediaPair(e.newsletter),
+          translations: (e.newsletter?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

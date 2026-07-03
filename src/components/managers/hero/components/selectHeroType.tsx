@@ -26,6 +26,7 @@ const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
   HERO_TYPE_MARQUEE: 'Thin scrolling announcement bar — one line of text + optional link',
   HERO_TYPE_VIDEO: 'Full-screen video — muted autoplay loop + poster + CTA',
   HERO_TYPE_STATEMENT: 'Manifesto — large statement text, optionally over subtle media',
+  HERO_TYPE_NEWSLETTER: 'Email capture — optional media + headline, button & success copy',
 };
 
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({

@@ -335,6 +335,29 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_NEWSLETTER'),
+    _uid: z.string().optional(),
+    newsletter: z.object({
+      // media is optional — the capture form can sit over media or on a plain bg.
+      mediaLandscapeId: z.number().optional(),
+      mediaPortraitId: z.number().optional(),
+      mediaLandscapeUrl: z.string().optional(),
+      mediaPortraitUrl: z.string().optional(),
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().min(1, 'Headline is required'),
+          body: z.string().optional(),
+          placeholder: z.string().optional(),
+          ctaText: z.string().min(1, 'Button text is required'),
+          successText: z.string().optional(),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),
