@@ -29,6 +29,7 @@ const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
   HERO_TYPE_DROP: 'Countdown to a drop — media bg + release timer, then explore link',
   HERO_TYPE_LAST_CHANCE: 'Low-stock products — auto-filled by stock threshold (no manual picks)',
   HERO_TYPE_NEW_ARRIVALS: 'Newest products — auto-filled by created date (no manual picks)',
+  HERO_TYPE_SLIDESHOW: 'Carousel of media slides with autoplay interval',
 };
 
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRefs, onAdded }) => {

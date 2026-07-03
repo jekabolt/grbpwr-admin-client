@@ -447,6 +447,33 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_SLIDESHOW'),
+    _uid: z.string().optional(),
+    slideshow: z.object({
+      slides: z
+        .array(
+          z.object({
+            mediaLandscapeId: z.number().optional(),
+            mediaPortraitId: z.number().optional(),
+            mediaLandscapeUrl: z.string().optional(),
+            mediaPortraitUrl: z.string().optional(),
+            exploreLink: z.string().nullable().optional(),
+            translations: createStrictTranslationSchema(
+              z.object({
+                languageId: z.number().min(1, 'Language is required'),
+                headline: z.string().optional(),
+                exploreText: z.string().optional(),
+              }),
+              requiredLanguageIds,
+            ),
+          }),
+        )
+        .min(1, 'At least one slide is required'),
+      intervalMs: z.number().optional(),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

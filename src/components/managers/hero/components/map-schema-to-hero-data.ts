@@ -188,6 +188,14 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           translations: (e.newArrivals?.translations || []).map(toCopy),
         },
       };
+    case 'HERO_TYPE_SLIDESHOW':
+      return {
+        ...base,
+        slideshow: {
+          slides: (e.slideshow?.slides || []).map(toSingleInsert),
+          intervalMs: e.slideshow?.intervalMs || 0,
+        },
+      };
     default:
       return base;
   }
@@ -454,6 +462,14 @@ export function mapHeroFullToFormData(
                     headline: t.headline,
                     exploreText: t.exploreText || '',
                   })) || [],
+              },
+            };
+          case 'HERO_TYPE_SLIDESHOW':
+            return {
+              type: e.type,
+              slideshow: {
+                slides: e.slideshow?.slides?.map(readSingle) || [],
+                intervalMs: e.slideshow?.intervalMs,
               },
             };
           default:

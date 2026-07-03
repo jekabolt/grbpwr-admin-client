@@ -10,6 +10,7 @@ import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { MediaPairField } from './media-pair-field';
 import { ReleaseDateField } from './release-date-field';
+import { SlideListField } from './slide-list-field';
 import { HeroSchema } from './schema';
 import { ProductSelectionApi } from './useProductSelection';
 
@@ -578,6 +579,35 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               editMode
             />
           </div>
+        </div>
+      );
+
+    case 'HERO_TYPE_SLIDESHOW':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            slideshow
+          </Text>
+          <SlideListField
+            name={`entities.${index}.slideshow.slides`}
+            itemLabel='slide'
+            translationFields={[
+              { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+              {
+                name: 'exploreText',
+                label: 'explore text (optional)',
+                type: 'input',
+                required: false,
+              },
+            ]}
+          />
+          <InputField
+            name={`entities.${index}.slideshow.intervalMs`}
+            label='autoplay interval (ms, optional)'
+            type='number'
+            valueAsNumber
+            placeholder='e.g. 5000'
+          />
         </div>
       );
 

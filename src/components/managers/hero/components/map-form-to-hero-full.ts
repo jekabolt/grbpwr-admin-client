@@ -246,6 +246,15 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_SLIDESHOW':
+      return {
+        ...emptyEntity(e.type),
+        slideshow: {
+          slides: (e.slideshow?.slides || []).map(toSingle),
+          intervalMs: e.slideshow?.intervalMs ?? undefined,
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }
