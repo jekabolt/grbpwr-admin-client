@@ -361,8 +361,8 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                     name: 'headline',
                     label: 'statement',
                     type: 'textarea',
-                    rows: 5,
-                    maxLength: 550,
+                    rows: 6,
+                    maxLength: 2000,
                   },
                   {
                     name: 'body',

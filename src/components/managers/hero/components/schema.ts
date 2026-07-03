@@ -371,7 +371,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
           headline: z
             .string()
             .min(1, 'Statement text is required')
-            .max(550, 'Statement must be at most 550 characters'),
+            .max(2000, 'Statement must be at most 2000 characters'),
           body: z.string().optional(),
         }),
         requiredLanguageIds,
