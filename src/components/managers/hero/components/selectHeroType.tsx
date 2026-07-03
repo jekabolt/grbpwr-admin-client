@@ -31,6 +31,7 @@ const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
   HERO_TYPE_NEW_ARRIVALS: 'Newest products — auto-filled by created date (no manual picks)',
   HERO_TYPE_SLIDESHOW: 'Carousel of media slides with autoplay interval',
   HERO_TYPE_MOSAIC: 'Grid of media tiles (double / triple as special cases)',
+  HERO_TYPE_LOOKBOOK: 'Story of full-bleed frames, each with a caption',
 };
 
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRefs, onAdded }) => {

@@ -264,6 +264,16 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_LOOKBOOK':
+      return {
+        ...emptyEntity(e.type),
+        lookbook: {
+          frames: (e.lookbook?.frames || []).map(toSingle),
+          exploreLink: e.lookbook?.exploreLink ?? undefined,
+          translations: (e.lookbook?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

@@ -509,6 +509,25 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_LOOKBOOK'),
+    _uid: z.string().optional(),
+    lookbook: z.object({
+      frames: z
+        .array(heroSingleItemSchema({ caption: z.string().optional() }))
+        .min(1, 'At least one frame is required'),
+      exploreLink: z.string().nullable().optional(),
+      // block-level story headline (per-frame copy is the caption).
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().optional(),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

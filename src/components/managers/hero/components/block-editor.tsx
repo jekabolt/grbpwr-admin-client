@@ -642,6 +642,38 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
         </div>
       );
 
+    case 'HERO_TYPE_LOOKBOOK':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            lookbook
+          </Text>
+          <SlideListField
+            name={`entities.${index}.lookbook.frames`}
+            itemLabel='frame'
+            landscapeRatio={['2:1']}
+            portraitRatio={['9:16']}
+            translationFields={[
+              { name: 'caption', label: 'caption (optional)', type: 'input', required: false },
+            ]}
+          />
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.lookbook.exploreLink`}
+              label='explore link (optional)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.lookbook.translations`}
+              fields={[
+                { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }

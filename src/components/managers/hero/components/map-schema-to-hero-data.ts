@@ -204,6 +204,15 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           columns: e.mosaic?.columns || 0,
         },
       };
+    case 'HERO_TYPE_LOOKBOOK':
+      return {
+        ...base,
+        lookbook: {
+          frames: (e.lookbook?.frames || []).map(toSingleInsert),
+          exploreLink: e.lookbook?.exploreLink || '',
+          translations: (e.lookbook?.translations || []).map(toCopy),
+        },
+      };
     default:
       return base;
   }
@@ -237,6 +246,24 @@ export function mapFormFieldsToHeroData(data: HeroSchema): common_HeroFullInsert
 
 // ─── read (resolved) → form ─────────────────────────────────────────────────
 
+// Read a resolved HeroCopyTranslation back into a flat form translation, carrying
+// every copy field so any list block round-trips the fields it uses (e.g. the
+// lookbook's per-frame caption, the slideshow's headline/exploreText).
+function readCopy(t: common_HeroCopyTranslation) {
+  return {
+    languageId: t.languageId || 0,
+    tag: t.tag,
+    headline: t.headline,
+    subhead: t.subhead,
+    body: t.body,
+    ctaText: t.ctaText,
+    exploreText: t.exploreText,
+    caption: t.caption,
+    placeholder: t.placeholder,
+    successText: t.successText,
+  };
+}
+
 // Read a resolved single/main media pair back into the form's flat id+url fields
 // (thumbnail URL, which is all the form keeps).
 function readSingle(s?: common_HeroSingleWithTranslations) {
@@ -246,11 +273,7 @@ function readSingle(s?: common_HeroSingleWithTranslations) {
     mediaLandscapeUrl: s?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
     mediaPortraitUrl: s?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
     exploreLink: s?.exploreLink,
-    translations: (s?.translations || []).map((t) => ({
-      languageId: t.languageId || 0,
-      headline: t.headline,
-      exploreText: t.exploreText || '',
-    })),
+    translations: (s?.translations || []).map(readCopy),
   };
 }
 
@@ -486,6 +509,19 @@ export function mapHeroFullToFormData(
               mosaic: {
                 tiles: e.mosaic?.tiles?.map(readSingle) || [],
                 columns: e.mosaic?.columns,
+              },
+            };
+          case 'HERO_TYPE_LOOKBOOK':
+            return {
+              type: e.type,
+              lookbook: {
+                frames: e.lookbook?.frames?.map(readSingle) || [],
+                exploreLink: e.lookbook?.exploreLink,
+                translations:
+                  e.lookbook?.translations?.map((t) => ({
+                    languageId: t.languageId || 0,
+                    headline: t.headline,
+                  })) || [],
               },
             };
           default:
