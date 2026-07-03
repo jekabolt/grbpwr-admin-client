@@ -14,6 +14,7 @@ import { NavFeatured } from './nav-featured';
 import { defaultData, HeroSchema, heroSchema } from './schema';
 import { SelectHeroType } from './selectHeroType';
 import { useHero, useSaveHero } from './useHero';
+import { useProductSelection } from './useProductSelection';
 
 export function Hero() {
   const { data: heroData, isLoading } = useHero();
@@ -72,6 +73,10 @@ export function Hero() {
     control: form.control,
     name: 'entities',
   });
+
+  // Lifted here (was in Entities) so the editor and the live preview share one
+  // product cache — product edits are reflected in the preview immediately.
+  const featuredProducts = useProductSelection(productsByEntityUidRef.current);
 
   const handleDeletedIndicesChange = useCallback(() => {
     setDeletedIndicesVersion((v) => v + 1);
@@ -212,7 +217,7 @@ export function Hero() {
               <Entities
                 entityRefs={entityRefs}
                 arrayHelpers={{ remove, move, insert }}
-                initialProducts={productsByEntityUidRef.current}
+                featuredProducts={featuredProducts}
                 deletedIndicesRef={deletedIndicesRef}
                 onDeletedIndicesChange={handleDeletedIndicesChange}
               />
@@ -220,7 +225,7 @@ export function Hero() {
             <div className='shrink-0 xl:sticky xl:top-4 xl:w-[44%]'>
               <HeroPreviewPanel
                 control={form.control}
-                productsByUidRef={productsByEntityUidRef}
+                products={featuredProducts.products}
                 deletedIndicesRef={deletedIndicesRef}
                 deletedVersion={deletedIndicesVersion}
                 onBlockClick={handlePreviewBlockClick}

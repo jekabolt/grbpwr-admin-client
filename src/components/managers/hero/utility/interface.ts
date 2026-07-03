@@ -1,6 +1,7 @@
 import { common_MediaFull, common_Product } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveList } from 'api/proto-http/frontend';
 import { UseFieldArrayInsert, UseFieldArrayMove, UseFieldArrayRemove } from 'react-hook-form';
+import { ProductSelectionApi } from '../components/useProductSelection';
 import { HeroSchema } from '../components/schema';
 
 export interface EntitiesProps {
@@ -10,7 +11,8 @@ export interface EntitiesProps {
     move: UseFieldArrayMove;
     insert: UseFieldArrayInsert<HeroSchema, 'entities'>;
   };
-  initialProducts?: Record<string, any[]>;
+  /** Lifted to Hero so the live preview and the editor share one product cache. */
+  featuredProducts: ProductSelectionApi;
   deletedIndicesRef: React.MutableRefObject<Set<string>>;
   onDeletedIndicesChange?: () => void;
 }

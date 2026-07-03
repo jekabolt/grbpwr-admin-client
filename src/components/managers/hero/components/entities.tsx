@@ -24,12 +24,11 @@ import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
-import { useProductSelection } from './useProductSelection';
 
 export const Entities: FC<EntitiesProps> = ({
   entityRefs,
   arrayHelpers,
-  initialProducts,
+  featuredProducts,
   deletedIndicesRef,
   onDeletedIndicesChange,
 }) => {
@@ -105,8 +104,6 @@ export const Entities: FC<EntitiesProps> = ({
       return filtered;
     });
   }, [entities]);
-
-  const featuredProducts = useProductSelection(initialProducts);
 
   const handleSaveMedia = useCallback(
     (

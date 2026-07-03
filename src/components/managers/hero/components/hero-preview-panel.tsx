@@ -6,7 +6,8 @@ import { HeroSchema } from './schema';
 
 interface HeroPreviewPanelProps {
   control: Control<HeroSchema>;
-  productsByUidRef: React.MutableRefObject<Record<string, any[]>>;
+  /** Live uid-keyed product cache (lifted to Hero) so product edits show in the preview. */
+  products: Record<string, any[]>;
   deletedIndicesRef: React.MutableRefObject<Set<string>>;
   /** Bumped when the soft-deleted set changes, so the draft re-excludes/re-includes blocks. */
   deletedVersion: number;
@@ -21,7 +22,7 @@ interface HeroPreviewPanelProps {
  */
 export function HeroPreviewPanel({
   control,
-  productsByUidRef,
+  products,
   deletedIndicesRef,
   deletedVersion,
   onBlockClick,
@@ -32,10 +33,10 @@ export function HeroPreviewPanel({
     const entities = (((values?.entities as any[]) || []) as any[]).filter(
       (e) => !deletedIndicesRef.current.has(e?._uid),
     );
-    return mapFormToHeroFull({ ...(values as HeroSchema), entities }, productsByUidRef.current);
-    // refs are stable; deletedVersion forces a recompute when the soft-deleted set changes
+    return mapFormToHeroFull({ ...(values as HeroSchema), entities }, products);
+    // deletedIndicesRef is stable; deletedVersion forces a recompute on soft-delete change
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [values, deletedVersion]);
+  }, [values, deletedVersion, products]);
 
   return <HeroPreview hero={draft} onBlockClick={onBlockClick} />;
 }
