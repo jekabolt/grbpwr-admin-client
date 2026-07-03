@@ -496,6 +496,52 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
         </div>
       );
 
+    case 'HERO_TYPE_LAST_CHANCE':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            last chance
+          </Text>
+          <Text variant='inactive' size='small'>
+            products are filled automatically from stock — no manual selection.
+          </Text>
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.lastChance.stockThreshold`}
+              label='stock threshold (show items at or below this stock)'
+              type='number'
+              valueAsNumber
+              placeholder='e.g. 5'
+            />
+            <InputField
+              name={`entities.${index}.lastChance.limit`}
+              label='max products'
+              type='number'
+              valueAsNumber
+              placeholder='e.g. 8'
+            />
+            <InputField
+              name={`entities.${index}.lastChance.exploreLink`}
+              label='explore link (optional)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.lastChance.translations`}
+              fields={[
+                { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+                {
+                  name: 'exploreText',
+                  label: 'explore text (optional)',
+                  type: 'input',
+                  required: false,
+                },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }

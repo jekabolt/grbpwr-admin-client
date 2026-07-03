@@ -408,6 +408,26 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_LAST_CHANCE'),
+    _uid: z.string().optional(),
+    lastChance: z.object({
+      // products are resolved by the backend from stock; the editor only sets the
+      // rule (show items at/under this stock, up to `limit`).
+      stockThreshold: z.number().optional(),
+      limit: z.number().optional(),
+      exploreLink: z.string().nullable().optional(),
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().optional(),
+          exploreText: z.string().optional(),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

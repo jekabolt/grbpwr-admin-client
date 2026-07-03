@@ -169,6 +169,16 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           translations: (e.drop?.translations || []).map(toCopy),
         },
       };
+    case 'HERO_TYPE_LAST_CHANCE':
+      return {
+        ...base,
+        lastChance: {
+          stockThreshold: e.lastChance?.stockThreshold || 0,
+          limit: e.lastChance?.limit || 0,
+          exploreLink: e.lastChance?.exploreLink || '',
+          translations: (e.lastChance?.translations || []).map(toCopy),
+        },
+      };
     default:
       return base;
   }
@@ -398,6 +408,24 @@ export function mapHeroFullToFormData(
                 exploreLink: e.drop?.exploreLink,
                 translations:
                   e.drop?.translations?.map((t) => ({
+                    languageId: t.languageId || 0,
+                    headline: t.headline,
+                    exploreText: t.exploreText || '',
+                  })) || [],
+              },
+            };
+          case 'HERO_TYPE_LAST_CHANCE':
+            return {
+              type: e.type,
+              lastChance: {
+                // the read model returns resolved `products`, not the
+                // stockThreshold/limit rule that produced them — those are
+                // write-only, so they reset to blank on edit (contract limit).
+                stockThreshold: undefined,
+                limit: undefined,
+                exploreLink: e.lastChance?.exploreLink,
+                translations:
+                  e.lastChance?.translations?.map((t) => ({
                     languageId: t.languageId || 0,
                     headline: t.headline,
                     exploreText: t.exploreText || '',

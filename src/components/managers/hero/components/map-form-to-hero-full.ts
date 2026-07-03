@@ -223,6 +223,18 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_LAST_CHANCE':
+      return {
+        ...emptyEntity(e.type),
+        lastChance: {
+          // products are backend-resolved from stock; unavailable in the editor,
+          // so the preview renders the copy without product tiles.
+          products: undefined,
+          exploreLink: e.lastChance?.exploreLink ?? undefined,
+          translations: (e.lastChance?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

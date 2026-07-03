@@ -27,6 +27,7 @@ const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
   HERO_TYPE_NEWSLETTER: 'Email capture — optional media + headline, button & success copy',
   HERO_TYPE_EMBED: 'Iframe embed (Spline / 3D / campaign) with fallback media + CTA',
   HERO_TYPE_DROP: 'Countdown to a drop — media bg + release timer, then explore link',
+  HERO_TYPE_LAST_CHANCE: 'Low-stock products — auto-filled by stock threshold (no manual picks)',
 };
 
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRefs, onAdded }) => {
