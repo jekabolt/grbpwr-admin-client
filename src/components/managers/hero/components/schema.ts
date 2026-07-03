@@ -88,6 +88,7 @@ export const navFeatured = z.object({
 const heroEntitySchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('HERO_TYPE_MAIN'),
+    _uid: z.string().optional(),
     main: z.object({
       mediaLandscapeId: z
         .union([z.number(), z.undefined()])
@@ -120,6 +121,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
 
   z.object({
     type: z.literal('HERO_TYPE_SINGLE'),
+    _uid: z.string().optional(),
     single: z.object({
       mediaLandscapeId: z
         .union([z.number(), z.undefined()])
@@ -150,6 +152,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
 
   z.object({
     type: z.literal('HERO_TYPE_DOUBLE'),
+    _uid: z.string().optional(),
     double: z
       .object({
         left: z.object({
@@ -230,6 +233,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
 
   z.object({
     type: z.literal('HERO_TYPE_FEATURED_PRODUCTS'),
+    _uid: z.string().optional(),
     featuredProducts: z.object({
       productIds: z.array(z.number().min(1)).min(1, 'At least one product is required'),
       exploreLink: z.string().nullable().optional(),
@@ -252,6 +256,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
 
   z.object({
     type: z.literal('HERO_TYPE_FEATURED_PRODUCTS_TAG'),
+    _uid: z.string().optional(),
     featuredProductsTag: z.object({
       tag: z.string().min(1, 'Tag is required'),
       translations: createStrictTranslationSchema(
@@ -267,6 +272,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
 
   z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
+    _uid: z.string().optional(),
   }),
 ]);
 

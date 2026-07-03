@@ -7,37 +7,39 @@ import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
-import { Entities } from './entities';
+import { BlockEditorModal } from './block-editor-modal';
+import { BlockRail } from './block-rail';
+import { HeroPreviewPanel } from './hero-preview-panel';
+import { HeroSectionModal } from './hero-section-modal';
 import { mapFormFieldsToHeroData, mapHeroFullToFormData } from './map-schema-to-hero-data';
 import { NavFeatured } from './nav-featured';
 import { defaultData, HeroSchema, heroSchema } from './schema';
 import { SelectHeroType } from './selectHeroType';
 import { useHero, useSaveHero } from './useHero';
+import { useProductSelection } from './useProductSelection';
 
 export function Hero() {
   const { data: heroData, isLoading } = useHero();
   const saveHero = useSaveHero();
   const { showMessage } = useSnackBarStore();
-  const entityRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
-  const productsByEntityIndexRef = useRef<Record<number, any[]>>({});
-  const deletedIndicesRef = useRef<Set<number>>(new Set());
+  const entityRefs = useRef<{ [uid: string]: HTMLDivElement | null }>({});
+  const productsByEntityUidRef = useRef<Record<string, any[]>>({});
+  const deletedIndicesRef = useRef<Set<string>>(new Set());
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
   const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
+  const [editingUid, setEditingUid] = useState<string | null>(null);
+  const [pendingNewUid, setPendingNewUid] = useState<string | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const isResettingRef = useRef(false);
-  const heroZodResolver = useMemo(
-    () =>
-      zodResolver(heroSchema) as any,
-    [],
-  );
+  const heroZodResolver = useMemo(() => zodResolver(heroSchema) as any, []);
 
   const form = useForm<HeroSchema>({
     resolver: async (values, context, options) => {
       // strip entities that are "soft-deleted" so Zod doesn't validate them
       const filteredValues: HeroSchema = {
         ...values,
-        entities: values.entities.filter(
-          (_: any, index: number) => !deletedIndicesRef.current.has(index),
-        ),
+        entities: values.entities.filter((e: any) => !deletedIndicesRef.current.has(e._uid)),
       };
 
       return heroZodResolver(filteredValues, context, options);
@@ -52,7 +54,7 @@ export function Hero() {
     if (heroData) {
       isResettingRef.current = true;
       const mappedData = mapHeroFullToFormData(heroData.hero);
-      productsByEntityIndexRef.current = mappedData.productsByEntityIndex || {};
+      productsByEntityUidRef.current = mappedData.productsByEntityUid || {};
       form.reset(mappedData);
       deletedIndicesRef.current.clear();
       setHasUserMadeChanges(false);
@@ -78,9 +80,26 @@ export function Hero() {
     name: 'entities',
   });
 
+  // Lifted here (was in Entities) so the editor and the live preview share one
+  // product cache — product edits are reflected in the preview immediately.
+  const featuredProducts = useProductSelection(productsByEntityUidRef.current);
+
   const handleDeletedIndicesChange = useCallback(() => {
     setDeletedIndicesVersion((v) => v + 1);
   }, []);
+
+  // Preview reports a click as an index into the (soft-delete-filtered) draft;
+  // map it back to the block's uid and open that block's editor modal.
+  const handlePreviewBlockClick = useCallback(
+    (index: number) => {
+      const live = (form.getValues().entities || []).filter(
+        (e: any) => !deletedIndicesRef.current.has(e._uid),
+      );
+      const uid = (live[index] as any)?._uid;
+      if (uid) setEditingUid(uid);
+    },
+    [form],
+  );
 
   async function handleSubmit(data: HeroSchema) {
     const entities = data.entities;
@@ -88,7 +107,7 @@ export function Hero() {
     // Filter out deleted entities before sending
     const filteredData = {
       ...data,
-      entities: entities.filter((_, index) => !deletedIndicesRef.current.has(index)),
+      entities: entities.filter((e: any) => !deletedIndicesRef.current.has(e._uid)),
     };
 
     const heroData = mapFormFieldsToHeroData(filteredData);
@@ -116,9 +135,7 @@ export function Hero() {
     const values = form.getValues();
     const filteredValues: HeroSchema = {
       ...values,
-      entities: values.entities.filter(
-        (_: any, index: number) => !deletedIndicesRef.current.has(index),
-      ),
+      entities: values.entities.filter((e: any) => !deletedIndicesRef.current.has(e._uid)),
     };
     const result = heroSchema.safeParse(filteredValues);
 
@@ -129,10 +146,12 @@ export function Hero() {
       );
     }
 
-    // Clear errors for deleted entities
+    // Clear errors for deleted entities (RHF error paths are positional -> map uid to index)
     if (errors.entities) {
-      deletedIndicesRef.current.forEach((index) => {
-        form.clearErrors(`entities.${index}` as any);
+      values.entities.forEach((e: any, index: number) => {
+        if (deletedIndicesRef.current.has(e._uid)) {
+          form.clearErrors(`entities.${index}` as any);
+        }
       });
     }
 
@@ -141,10 +160,12 @@ export function Hero() {
     if (errors.entities) {
       const firstErrorIndex = errors.entities.findIndex(
         (entity: any, index: number) =>
-          entity !== undefined && !deletedIndicesRef.current.has(index),
+          entity !== undefined &&
+          !deletedIndicesRef.current.has((values.entities[index] as any)?._uid),
       );
-      if (firstErrorIndex >= 0 && entityRefs.current[firstErrorIndex]) {
-        entityRefs.current[firstErrorIndex]?.scrollIntoView({
+      const firstErrorUid = (values.entities[firstErrorIndex] as any)?._uid;
+      if (firstErrorIndex >= 0 && firstErrorUid && entityRefs.current[firstErrorUid]) {
+        entityRefs.current[firstErrorUid]?.scrollIntoView({
           behavior: 'smooth',
           block: 'center',
         });
@@ -155,23 +176,34 @@ export function Hero() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit, onError)} className='flex flex-col'>
-        <div className='-mx-2.5 mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+        <div className='-mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <Text variant='uppercase' size='large'>
               hero
             </Text>
             {hasUserMadeChanges && <Text variant='inactive'>unsaved changes</Text>}
           </div>
-          <Button
-            size='lg'
-            variant='main'
-            type='submit'
-            disabled={isLoading || form.formState.isSubmitting || saveHero.isPending}
-            loading={saveHero.isPending}
-            className='uppercase'
-          >
-            save
-          </Button>
+          <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => setNavOpen(true)}
+            >
+              nav featured
+            </Button>
+            <Button
+              size='lg'
+              variant='main'
+              type='submit'
+              disabled={isLoading || form.formState.isSubmitting || saveHero.isPending}
+              loading={saveHero.isPending}
+              className='uppercase'
+            >
+              save
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -181,24 +213,70 @@ export function Hero() {
             </Text>
           </div>
         ) : (
-          <div className='flex flex-col gap-y-16'>
-            <NavFeatured hero={heroData?.hero} />
-            <SelectHeroType
-              append={append}
-              insert={insert}
-              form={form}
-              entityRefs={entityRefs}
-              deletedIndicesRef={deletedIndicesRef}
-            />
-            <Entities
-              entityRefs={entityRefs}
-              arrayHelpers={{ remove, move, insert }}
-              initialProducts={productsByEntityIndexRef.current}
-              deletedIndicesRef={deletedIndicesRef}
-              onDeletedIndicesChange={handleDeletedIndicesChange}
-            />
+          <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
+            <div className='shrink-0 lg:sticky lg:top-4 lg:w-[240px]'>
+              <BlockRail
+                entityRefs={entityRefs}
+                arrayHelpers={{ move }}
+                deletedIndicesRef={deletedIndicesRef}
+                onDeletedIndicesChange={handleDeletedIndicesChange}
+                onSelectBlock={(uid) => setEditingUid(uid)}
+                selectedUid={editingUid}
+                onAddClick={() => setAddMenuOpen(true)}
+              />
+            </div>
+            <div className='min-w-0 flex-1'>
+              <HeroPreviewPanel
+                control={form.control}
+                products={featuredProducts.products}
+                deletedIndicesRef={deletedIndicesRef}
+                deletedVersion={deletedIndicesVersion}
+                onBlockClick={handlePreviewBlockClick}
+              />
+            </div>
           </div>
         )}
+
+        <BlockEditorModal
+          editingUid={editingUid}
+          onOpenChange={(o) => {
+            if (o) return;
+            // Closing a freshly-added block without confirming discards it.
+            if (editingUid && editingUid === pendingNewUid) {
+              const idx = (form.getValues().entities || []).findIndex(
+                (e: any) => e._uid === pendingNewUid,
+              );
+              if (idx >= 0) remove(idx);
+              setPendingNewUid(null);
+            }
+            setEditingUid(null);
+          }}
+          isNew={!!pendingNewUid && editingUid === pendingNewUid}
+          onConfirm={() => {
+            setPendingNewUid(null);
+            setEditingUid(null);
+          }}
+          featuredProducts={featuredProducts}
+        />
+
+        <HeroSectionModal open={addMenuOpen} onOpenChange={setAddMenuOpen} title='add a block'>
+          <SelectHeroType
+            append={append}
+            insert={insert}
+            form={form}
+            entityRefs={entityRefs}
+            deletedIndicesRef={deletedIndicesRef}
+            onAdded={(uid) => {
+              setAddMenuOpen(false);
+              setEditingUid(uid);
+              setPendingNewUid(uid);
+            }}
+          />
+        </HeroSectionModal>
+
+        <HeroSectionModal open={navOpen} onOpenChange={setNavOpen} title='nav featured'>
+          <NavFeatured hero={heroData?.hero} />
+        </HeroSectionModal>
       </form>
     </Form>
   );

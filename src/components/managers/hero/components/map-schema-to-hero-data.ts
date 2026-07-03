@@ -1,4 +1,5 @@
 import { common_HeroFullInsert } from 'api/proto-http/admin';
+import { v4 as uuidv4 } from 'uuid';
 import {
   common_HeroEntityWithTranslations,
   common_HeroFullWithTranslations,
@@ -97,19 +98,19 @@ export function mapFormFieldsToHeroData(data: HeroSchema): common_HeroFullInsert
     })),
     navFeatured: {
       men: {
-        mediaId: data.navFeatured.men.mediaId,
-        featuredTag: data.navFeatured.men.featuredTag,
-        featuredArchiveId: data.navFeatured.men.featuredArchiveId,
-        translations: data.navFeatured.men.translations.map((t: any) => ({
+        mediaId: data.navFeatured?.men?.mediaId,
+        featuredTag: data.navFeatured?.men?.featuredTag,
+        featuredArchiveId: data.navFeatured?.men?.featuredArchiveId,
+        translations: (data.navFeatured?.men?.translations || []).map((t: any) => ({
           languageId: t.languageId,
           exploreText: t.exploreText,
         })),
       },
       women: {
-        mediaId: data.navFeatured.women.mediaId,
-        featuredTag: data.navFeatured.women.featuredTag,
-        featuredArchiveId: data.navFeatured.women.featuredArchiveId,
-        translations: data.navFeatured.men.translations.map((t: any) => ({
+        mediaId: data.navFeatured?.women?.mediaId,
+        featuredTag: data.navFeatured?.women?.featuredTag,
+        featuredArchiveId: data.navFeatured?.women?.featuredArchiveId,
+        translations: (data.navFeatured?.women?.translations || []).map((t: any) => ({
           languageId: t.languageId,
           exploreText: t.exploreText,
         })),
@@ -120,9 +121,12 @@ export function mapFormFieldsToHeroData(data: HeroSchema): common_HeroFullInsert
 
 export function mapHeroFullToFormData(
   heroFull?: common_HeroFullWithTranslations,
-): HeroSchema & { productsByEntityIndex?: Record<number, any[]> } {
-  if (!heroFull) return { ...defaultData, productsByEntityIndex: {} };
+): HeroSchema & { productsByEntityUid?: Record<string, any[]> } {
+  if (!heroFull) return { ...defaultData, productsByEntityUid: {} };
 
+  // Products are resolved during the entity map keyed by array index (the only
+  // handle available there), then remapped to _uid below so the display cache
+  // survives a reorder.
   const productsByEntityIndex: Record<number, any[]> = {};
 
   const entities =
@@ -244,8 +248,20 @@ export function mapHeroFullToFormData(
         }
       }) || [];
 
+  // Assign each entity a stable _uid and remap its resolved products (index-keyed
+  // above) onto that uid, so the display cache is addressed the same way as the
+  // rest of the block's side-state.
+  const productsByEntityUid: Record<string, any[]> = {};
+  const entitiesWithUid = entities.map((e, index) => {
+    const _uid = uuidv4();
+    if (productsByEntityIndex[index]) {
+      productsByEntityUid[_uid] = productsByEntityIndex[index];
+    }
+    return { ...e, _uid };
+  });
+
   return {
-    entities,
+    entities: entitiesWithUid,
     navFeatured: {
       men: {
         mediaId: heroFull.navFeatured?.men?.media?.id,
@@ -272,6 +288,6 @@ export function mapHeroFullToFormData(
           })) || [],
       },
     },
-    productsByEntityIndex,
+    productsByEntityUid,
   };
 }
