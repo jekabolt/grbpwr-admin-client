@@ -82,6 +82,9 @@ function emptyInsertEntity(type: any): common_HeroEntityInsert {
 
 function toInsertEntity(e: any): common_HeroEntityInsert {
   const base = emptyInsertEntity(e.type);
+  // TARGETING modifier carries on every entity regardless of variant.
+  base.audience = e.audience || undefined;
+  base.minTierId = e.minTierId || undefined;
   switch (e.type) {
     case 'HERO_TYPE_MAIN':
       return { ...base, main: toSingleInsert(e.main) };
@@ -310,287 +313,296 @@ export function mapHeroFullToFormData(
     heroFull.entities
       ?.filter((e) => e.type)
       .map((e: common_HeroEntityWithTranslations, index: number) => {
-        switch (e.type) {
-          case 'HERO_TYPE_MAIN':
-            return {
-              type: e.type,
-              main: {
-                mediaLandscapeId: e.main?.media?.landscape?.id || 0,
-                mediaPortraitId: e.main?.media?.portrait?.id || 0,
-                mediaLandscapeUrl: e.main?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
-                mediaPortraitUrl: e.main?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
-                exploreLink: e.main?.exploreLink,
-                translations:
-                  e.main?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    tag: t.tag,
-                    description: t.body,
-                    exploreText: t.exploreText || '',
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_SINGLE':
-            return { type: e.type, single: readSingle(e.single) };
-          case 'HERO_TYPE_DOUBLE':
-            return {
-              type: e.type,
-              double: { left: readSingle(e.double?.left), right: readSingle(e.double?.right) },
-            };
-          case 'HERO_TYPE_FEATURED_PRODUCTS': {
-            const products =
-              e.featuredProducts?.products?.filter(
-                (p): p is any => typeof p !== 'number' && p !== undefined,
-              ) || [];
-            if (products.length > 0) {
-              productsByEntityIndex[index] = products;
+        const mapped: any = (() => {
+          switch (e.type) {
+            case 'HERO_TYPE_MAIN':
+              return {
+                type: e.type,
+                main: {
+                  mediaLandscapeId: e.main?.media?.landscape?.id || 0,
+                  mediaPortraitId: e.main?.media?.portrait?.id || 0,
+                  mediaLandscapeUrl: e.main?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+                  mediaPortraitUrl: e.main?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  exploreLink: e.main?.exploreLink,
+                  translations:
+                    e.main?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      tag: t.tag,
+                      description: t.body,
+                      exploreText: t.exploreText || '',
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_SINGLE':
+              return { type: e.type, single: readSingle(e.single) };
+            case 'HERO_TYPE_DOUBLE':
+              return {
+                type: e.type,
+                double: { left: readSingle(e.double?.left), right: readSingle(e.double?.right) },
+              };
+            case 'HERO_TYPE_FEATURED_PRODUCTS': {
+              const products =
+                e.featuredProducts?.products?.filter(
+                  (p): p is any => typeof p !== 'number' && p !== undefined,
+                ) || [];
+              if (products.length > 0) {
+                productsByEntityIndex[index] = products;
+              }
+              return {
+                type: e.type,
+                featuredProducts: {
+                  productIds:
+                    e.featuredProducts?.products
+                      ?.map((p) => (typeof p === 'number' ? p : p.id))
+                      .filter((id): id is number => id !== undefined) || [],
+                  exploreLink: e.featuredProducts?.exploreLink,
+                  translations:
+                    e.featuredProducts?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      exploreText: t.exploreText || '',
+                    })) || [],
+                },
+              };
             }
-            return {
-              type: e.type,
-              featuredProducts: {
-                productIds:
-                  e.featuredProducts?.products
-                    ?.map((p) => (typeof p === 'number' ? p : p.id))
-                    .filter((id): id is number => id !== undefined) || [],
-                exploreLink: e.featuredProducts?.exploreLink,
-                translations:
-                  e.featuredProducts?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    exploreText: t.exploreText || '',
-                  })) || [],
-              },
-            };
-          }
-          case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
-            return {
-              type: e.type,
-              featuredProductsTag: {
-                tag: e.featuredProductsTag?.tag || '',
-                translations:
-                  e.featuredProductsTag?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    exploreText: t.exploreText || '',
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_MARQUEE':
-            return {
-              type: e.type,
-              marquee: {
-                link: e.marquee?.link,
-                speed: e.marquee?.speed,
-                translations:
-                  e.marquee?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_VIDEO':
-            return {
-              type: e.type,
-              video: {
-                mediaId: e.video?.media?.id || 0,
-                mediaUrl: e.video?.media?.media?.thumbnail?.mediaUrl || '',
-                posterId: e.video?.posterMedia?.id || 0,
-                posterUrl: e.video?.posterMedia?.media?.thumbnail?.mediaUrl || '',
-                autoplay: e.video?.autoplay,
-                loop: e.video?.loop,
-                muted: e.video?.muted,
-                ctaLink: e.video?.ctaLink,
-                translations:
-                  e.video?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    ctaText: t.ctaText,
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_STATEMENT':
-            return {
-              type: e.type,
-              statement: {
-                mediaLandscapeId: e.statement?.media?.landscape?.id || 0,
-                mediaPortraitId: e.statement?.media?.portrait?.id || 0,
-                mediaLandscapeUrl: e.statement?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
-                mediaPortraitUrl: e.statement?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
-                exploreLink: e.statement?.exploreLink,
-                translations:
-                  e.statement?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    body: t.body,
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_NEWSLETTER':
-            return {
-              type: e.type,
-              newsletter: {
-                mediaLandscapeId: e.newsletter?.media?.landscape?.id || 0,
-                mediaPortraitId: e.newsletter?.media?.portrait?.id || 0,
-                mediaLandscapeUrl: e.newsletter?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
-                mediaPortraitUrl: e.newsletter?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
-                translations:
-                  e.newsletter?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    body: t.body,
-                    placeholder: t.placeholder,
-                    ctaText: t.ctaText,
-                    successText: t.successText,
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_EMBED':
-            return {
-              type: e.type,
-              embed: {
-                embedUrl: e.embed?.embedUrl || '',
-                mediaLandscapeId: e.embed?.fallback?.landscape?.id || 0,
-                mediaPortraitId: e.embed?.fallback?.portrait?.id || 0,
-                mediaLandscapeUrl: e.embed?.fallback?.landscape?.media?.thumbnail?.mediaUrl || '',
-                mediaPortraitUrl: e.embed?.fallback?.portrait?.media?.thumbnail?.mediaUrl || '',
-                ctaLink: e.embed?.ctaLink,
-                translations:
-                  e.embed?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    ctaText: t.ctaText,
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_DROP':
-            return {
-              type: e.type,
-              drop: {
-                mediaLandscapeId: e.drop?.media?.landscape?.id || 0,
-                mediaPortraitId: e.drop?.media?.portrait?.id || 0,
-                mediaLandscapeUrl: e.drop?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
-                mediaPortraitUrl: e.drop?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
-                releaseAt: e.drop?.releaseAt || '',
-                tag: e.drop?.tag,
-                exploreLink: e.drop?.exploreLink,
-                translations:
-                  e.drop?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    exploreText: t.exploreText || '',
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_LAST_CHANCE':
-            return {
-              type: e.type,
-              lastChance: {
-                // the read model returns resolved `products`, not the
-                // stockThreshold/limit rule that produced them — those are
-                // write-only, so they reset to blank on edit (contract limit).
-                stockThreshold: undefined,
-                limit: undefined,
-                exploreLink: e.lastChance?.exploreLink,
-                translations:
-                  e.lastChance?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    exploreText: t.exploreText || '',
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_NEW_ARRIVALS':
-            return {
-              type: e.type,
-              newArrivals: {
-                // read model returns resolved `products`, not `limit` — write-only.
-                limit: undefined,
-                exploreLink: e.newArrivals?.exploreLink,
-                translations:
-                  e.newArrivals?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    exploreText: t.exploreText || '',
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_SLIDESHOW':
-            return {
-              type: e.type,
-              slideshow: {
-                slides: e.slideshow?.slides?.map(readSingle) || [],
-                intervalMs: e.slideshow?.intervalMs,
-              },
-            };
-          case 'HERO_TYPE_MOSAIC':
-            return {
-              type: e.type,
-              mosaic: {
-                tiles: e.mosaic?.tiles?.map(readSingle) || [],
-                columns: e.mosaic?.columns,
-              },
-            };
-          case 'HERO_TYPE_LOOKBOOK':
-            return {
-              type: e.type,
-              lookbook: {
-                frames: e.lookbook?.frames?.map(readSingle) || [],
-                exploreLink: e.lookbook?.exploreLink,
-                translations:
-                  e.lookbook?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                  })) || [],
-              },
-            };
-          case 'HERO_TYPE_SPLIT': {
-            const products =
-              e.split?.products?.filter(
-                (p): p is any => typeof p !== 'number' && p !== undefined,
-              ) || [];
-            if (products.length > 0) {
-              productsByEntityIndex[index] = products;
+            case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
+              return {
+                type: e.type,
+                featuredProductsTag: {
+                  tag: e.featuredProductsTag?.tag || '',
+                  translations:
+                    e.featuredProductsTag?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      exploreText: t.exploreText || '',
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_MARQUEE':
+              return {
+                type: e.type,
+                marquee: {
+                  link: e.marquee?.link,
+                  speed: e.marquee?.speed,
+                  translations:
+                    e.marquee?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_VIDEO':
+              return {
+                type: e.type,
+                video: {
+                  mediaId: e.video?.media?.id || 0,
+                  mediaUrl: e.video?.media?.media?.thumbnail?.mediaUrl || '',
+                  posterId: e.video?.posterMedia?.id || 0,
+                  posterUrl: e.video?.posterMedia?.media?.thumbnail?.mediaUrl || '',
+                  autoplay: e.video?.autoplay,
+                  loop: e.video?.loop,
+                  muted: e.video?.muted,
+                  ctaLink: e.video?.ctaLink,
+                  translations:
+                    e.video?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      ctaText: t.ctaText,
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_STATEMENT':
+              return {
+                type: e.type,
+                statement: {
+                  mediaLandscapeId: e.statement?.media?.landscape?.id || 0,
+                  mediaPortraitId: e.statement?.media?.portrait?.id || 0,
+                  mediaLandscapeUrl:
+                    e.statement?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+                  mediaPortraitUrl: e.statement?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  exploreLink: e.statement?.exploreLink,
+                  translations:
+                    e.statement?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      body: t.body,
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_NEWSLETTER':
+              return {
+                type: e.type,
+                newsletter: {
+                  mediaLandscapeId: e.newsletter?.media?.landscape?.id || 0,
+                  mediaPortraitId: e.newsletter?.media?.portrait?.id || 0,
+                  mediaLandscapeUrl:
+                    e.newsletter?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+                  mediaPortraitUrl: e.newsletter?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  translations:
+                    e.newsletter?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      body: t.body,
+                      placeholder: t.placeholder,
+                      ctaText: t.ctaText,
+                      successText: t.successText,
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_EMBED':
+              return {
+                type: e.type,
+                embed: {
+                  embedUrl: e.embed?.embedUrl || '',
+                  mediaLandscapeId: e.embed?.fallback?.landscape?.id || 0,
+                  mediaPortraitId: e.embed?.fallback?.portrait?.id || 0,
+                  mediaLandscapeUrl: e.embed?.fallback?.landscape?.media?.thumbnail?.mediaUrl || '',
+                  mediaPortraitUrl: e.embed?.fallback?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  ctaLink: e.embed?.ctaLink,
+                  translations:
+                    e.embed?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      ctaText: t.ctaText,
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_DROP':
+              return {
+                type: e.type,
+                drop: {
+                  mediaLandscapeId: e.drop?.media?.landscape?.id || 0,
+                  mediaPortraitId: e.drop?.media?.portrait?.id || 0,
+                  mediaLandscapeUrl: e.drop?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+                  mediaPortraitUrl: e.drop?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  releaseAt: e.drop?.releaseAt || '',
+                  tag: e.drop?.tag,
+                  exploreLink: e.drop?.exploreLink,
+                  translations:
+                    e.drop?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      exploreText: t.exploreText || '',
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_LAST_CHANCE':
+              return {
+                type: e.type,
+                lastChance: {
+                  // the read model returns resolved `products`, not the
+                  // stockThreshold/limit rule that produced them — those are
+                  // write-only, so they reset to blank on edit (contract limit).
+                  stockThreshold: undefined,
+                  limit: undefined,
+                  exploreLink: e.lastChance?.exploreLink,
+                  translations:
+                    e.lastChance?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      exploreText: t.exploreText || '',
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_NEW_ARRIVALS':
+              return {
+                type: e.type,
+                newArrivals: {
+                  // read model returns resolved `products`, not `limit` — write-only.
+                  limit: undefined,
+                  exploreLink: e.newArrivals?.exploreLink,
+                  translations:
+                    e.newArrivals?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      exploreText: t.exploreText || '',
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_SLIDESHOW':
+              return {
+                type: e.type,
+                slideshow: {
+                  slides: e.slideshow?.slides?.map(readSingle) || [],
+                  intervalMs: e.slideshow?.intervalMs,
+                },
+              };
+            case 'HERO_TYPE_MOSAIC':
+              return {
+                type: e.type,
+                mosaic: {
+                  tiles: e.mosaic?.tiles?.map(readSingle) || [],
+                  columns: e.mosaic?.columns,
+                },
+              };
+            case 'HERO_TYPE_LOOKBOOK':
+              return {
+                type: e.type,
+                lookbook: {
+                  frames: e.lookbook?.frames?.map(readSingle) || [],
+                  exploreLink: e.lookbook?.exploreLink,
+                  translations:
+                    e.lookbook?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                    })) || [],
+                },
+              };
+            case 'HERO_TYPE_SPLIT': {
+              const products =
+                e.split?.products?.filter(
+                  (p): p is any => typeof p !== 'number' && p !== undefined,
+                ) || [];
+              if (products.length > 0) {
+                productsByEntityIndex[index] = products;
+              }
+              return {
+                type: e.type,
+                split: {
+                  media: readSingle(e.split?.media),
+                  productIds:
+                    e.split?.products
+                      ?.map((p) => (typeof p === 'number' ? p : p.id))
+                      .filter((id): id is number => id !== undefined) || [],
+                  mediaLeft: e.split?.mediaLeft,
+                },
+              };
             }
-            return {
-              type: e.type,
-              split: {
-                media: readSingle(e.split?.media),
-                productIds:
-                  e.split?.products
-                    ?.map((p) => (typeof p === 'number' ? p : p.id))
-                    .filter((id): id is number => id !== undefined) || [],
-                mediaLeft: e.split?.mediaLeft,
-              },
-            };
-          }
-          case 'HERO_TYPE_PRODUCT_SPOTLIGHT': {
-            const p = e.productSpotlight?.product;
-            if (p) {
-              productsByEntityIndex[index] = [p];
+            case 'HERO_TYPE_PRODUCT_SPOTLIGHT': {
+              const p = e.productSpotlight?.product;
+              if (p) {
+                productsByEntityIndex[index] = [p];
+              }
+              return {
+                type: e.type,
+                productSpotlight: {
+                  productId: p?.id,
+                  mediaLandscapeId: e.productSpotlight?.media?.landscape?.id || 0,
+                  mediaPortraitId: e.productSpotlight?.media?.portrait?.id || 0,
+                  mediaLandscapeUrl:
+                    e.productSpotlight?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+                  mediaPortraitUrl:
+                    e.productSpotlight?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  exploreLink: e.productSpotlight?.exploreLink,
+                  translations:
+                    e.productSpotlight?.translations?.map((t) => ({
+                      languageId: t.languageId || 0,
+                      headline: t.headline,
+                      exploreText: t.exploreText || '',
+                    })) || [],
+                },
+              };
             }
-            return {
-              type: e.type,
-              productSpotlight: {
-                productId: p?.id,
-                mediaLandscapeId: e.productSpotlight?.media?.landscape?.id || 0,
-                mediaPortraitId: e.productSpotlight?.media?.portrait?.id || 0,
-                mediaLandscapeUrl:
-                  e.productSpotlight?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
-                mediaPortraitUrl:
-                  e.productSpotlight?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
-                exploreLink: e.productSpotlight?.exploreLink,
-                translations:
-                  e.productSpotlight?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    exploreText: t.exploreText || '',
-                  })) || [],
-              },
-            };
+            default:
+              return { type: 'HERO_TYPE_UNKNOWN' as const };
           }
-          default:
-            return { type: 'HERO_TYPE_UNKNOWN' as const };
-        }
+        })();
+        return {
+          ...mapped,
+          audience: e.audience ?? undefined,
+          minTierId: e.minTierId ?? undefined,
+        };
       }) || [];
 
   // Assign each entity a stable _uid and remap its resolved products (index-keyed

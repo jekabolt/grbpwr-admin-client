@@ -66,6 +66,20 @@ export const BlockRail: FC<BlockRailProps> = ({
   const entityErrors = errors.entities as Record<number, unknown> | undefined;
   const typeLabel = (type: string) => heroTypes.find((t) => t.value === type)?.label ?? type;
 
+  // Short badge for the TARGETING modifier; empty for "everyone" (ALL/unset).
+  const audienceBadge = (entity: any): string => {
+    switch (entity?.audience) {
+      case 'HERO_AUDIENCE_GUESTS':
+        return 'guests';
+      case 'HERO_AUDIENCE_MEMBERS':
+        return 'members';
+      case 'HERO_AUDIENCE_TIER':
+        return entity?.minTierId ? `tier ${entity.minTierId}+` : 'tier';
+      default:
+        return '';
+    }
+  };
+
   useEffect(() => {
     deletedIndicesRef.current = deletedIndices;
     const prev = prevDeletedIndicesRef.current;
@@ -192,6 +206,16 @@ export const BlockRail: FC<BlockRailProps> = ({
                           <Text variant='uppercase' size='small' className='truncate'>
                             {typeLabel(entity.type)}
                           </Text>
+                          {audienceBadge(entity) && (
+                            <span
+                              className='shrink-0 border border-textInactiveColor px-1 leading-none text-textInactiveColor'
+                              title='audience-restricted'
+                            >
+                              <Text size='small' variant='uppercase'>
+                                {audienceBadge(entity)}
+                              </Text>
+                            </span>
+                          )}
                           {hasError && (
                             <span
                               className='ml-auto inline-block bg-error px-1 leading-none text-bgColor'
