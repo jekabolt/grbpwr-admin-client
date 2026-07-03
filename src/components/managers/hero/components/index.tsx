@@ -8,6 +8,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { Entities } from './entities';
+import { HeroPreviewPanel } from './hero-preview-panel';
 import { mapFormFieldsToHeroData, mapHeroFullToFormData } from './map-schema-to-hero-data';
 import { NavFeatured } from './nav-featured';
 import { defaultData, HeroSchema, heroSchema } from './schema';
@@ -24,20 +25,14 @@ export function Hero() {
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
   const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
   const isResettingRef = useRef(false);
-  const heroZodResolver = useMemo(
-    () =>
-      zodResolver(heroSchema) as any,
-    [],
-  );
+  const heroZodResolver = useMemo(() => zodResolver(heroSchema) as any, []);
 
   const form = useForm<HeroSchema>({
     resolver: async (values, context, options) => {
       // strip entities that are "soft-deleted" so Zod doesn't validate them
       const filteredValues: HeroSchema = {
         ...values,
-        entities: values.entities.filter(
-          (e: any) => !deletedIndicesRef.current.has(e._uid),
-        ),
+        entities: values.entities.filter((e: any) => !deletedIndicesRef.current.has(e._uid)),
       };
 
       return heroZodResolver(filteredValues, context, options);
@@ -82,6 +77,27 @@ export function Hero() {
     setDeletedIndicesVersion((v) => v + 1);
   }, []);
 
+  // Preview reports a click as an index into the (soft-delete-filtered) draft;
+  // map it back to the block's uid and bring that block into view.
+  const handlePreviewBlockClick = useCallback(
+    (index: number) => {
+      const live = (form.getValues().entities || []).filter(
+        (e: any) => !deletedIndicesRef.current.has(e._uid),
+      );
+      const uid = (live[index] as any)?._uid;
+      const el = uid ? entityRefs.current[uid] : null;
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.outline = '3px solid currentColor';
+      el.style.outlineOffset = '2px';
+      window.setTimeout(() => {
+        el.style.outline = '';
+        el.style.outlineOffset = '';
+      }, 1200);
+    },
+    [form],
+  );
+
   async function handleSubmit(data: HeroSchema) {
     const entities = data.entities;
 
@@ -116,9 +132,7 @@ export function Hero() {
     const values = form.getValues();
     const filteredValues: HeroSchema = {
       ...values,
-      entities: values.entities.filter(
-        (e: any) => !deletedIndicesRef.current.has(e._uid),
-      ),
+      entities: values.entities.filter((e: any) => !deletedIndicesRef.current.has(e._uid)),
     };
     const result = heroSchema.safeParse(filteredValues);
 
@@ -143,7 +157,8 @@ export function Hero() {
     if (errors.entities) {
       const firstErrorIndex = errors.entities.findIndex(
         (entity: any, index: number) =>
-          entity !== undefined && !deletedIndicesRef.current.has((values.entities[index] as any)?._uid),
+          entity !== undefined &&
+          !deletedIndicesRef.current.has((values.entities[index] as any)?._uid),
       );
       const firstErrorUid = (values.entities[firstErrorIndex] as any)?._uid;
       if (firstErrorIndex >= 0 && firstErrorUid && entityRefs.current[firstErrorUid]) {
@@ -184,22 +199,33 @@ export function Hero() {
             </Text>
           </div>
         ) : (
-          <div className='flex flex-col gap-y-16'>
-            <NavFeatured hero={heroData?.hero} />
-            <SelectHeroType
-              append={append}
-              insert={insert}
-              form={form}
-              entityRefs={entityRefs}
-              deletedIndicesRef={deletedIndicesRef}
-            />
-            <Entities
-              entityRefs={entityRefs}
-              arrayHelpers={{ remove, move, insert }}
-              initialProducts={productsByEntityUidRef.current}
-              deletedIndicesRef={deletedIndicesRef}
-              onDeletedIndicesChange={handleDeletedIndicesChange}
-            />
+          <div className='flex flex-col gap-8 xl:flex-row xl:items-start'>
+            <div className='flex min-w-0 flex-col gap-y-16 xl:flex-1'>
+              <NavFeatured hero={heroData?.hero} />
+              <SelectHeroType
+                append={append}
+                insert={insert}
+                form={form}
+                entityRefs={entityRefs}
+                deletedIndicesRef={deletedIndicesRef}
+              />
+              <Entities
+                entityRefs={entityRefs}
+                arrayHelpers={{ remove, move, insert }}
+                initialProducts={productsByEntityUidRef.current}
+                deletedIndicesRef={deletedIndicesRef}
+                onDeletedIndicesChange={handleDeletedIndicesChange}
+              />
+            </div>
+            <div className='shrink-0 xl:sticky xl:top-4 xl:w-[44%]'>
+              <HeroPreviewPanel
+                control={form.control}
+                productsByUidRef={productsByEntityUidRef}
+                deletedIndicesRef={deletedIndicesRef}
+                deletedVersion={deletedIndicesVersion}
+                onBlockClick={handlePreviewBlockClick}
+              />
+            </div>
           </div>
         )}
       </form>
