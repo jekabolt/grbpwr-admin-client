@@ -181,6 +181,16 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_STATEMENT':
+      return {
+        ...emptyEntity(e.type),
+        statement: {
+          media: toMediaPair(e.statement),
+          exploreLink: e.statement?.exploreLink ?? undefined,
+          translations: (e.statement?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

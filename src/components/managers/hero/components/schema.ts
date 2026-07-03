@@ -313,6 +313,28 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_STATEMENT'),
+    _uid: z.string().optional(),
+    statement: z.object({
+      // media is optional — a statement can render as pure typography or over
+      // subtle background media.
+      mediaLandscapeId: z.number().optional(),
+      mediaPortraitId: z.number().optional(),
+      mediaLandscapeUrl: z.string().optional(),
+      mediaPortraitUrl: z.string().optional(),
+      exploreLink: z.string().nullable().optional(),
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().min(1, 'Statement text is required'),
+          body: z.string().optional(),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

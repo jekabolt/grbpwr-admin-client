@@ -330,6 +330,94 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
         </div>
       );
 
+    case 'HERO_TYPE_STATEMENT':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            statement
+          </Text>
+          <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
+            <div className='w-full space-y-1 sm:w-auto'>
+              <Text variant='inactive' size='small'>
+                landscape (optional)
+              </Text>
+              <MediaPreviewWithSelector
+                mediaUrl={entity.statement?.mediaLandscapeUrl || ''}
+                aspectRatio={['2:1']}
+                allowMultiple={false}
+                showVideos={true}
+                alt='landscape'
+                label='select'
+                purpose='landscape'
+                heightClass='sm:h-44'
+                onSaveMedia={(media) =>
+                  saveSingleMedia(
+                    `entities.${index}.statement.mediaLandscapeId`,
+                    `entities.${index}.statement.mediaLandscapeUrl`,
+                    media,
+                  )
+                }
+                onClear={() =>
+                  clearSingleMedia(
+                    `entities.${index}.statement.mediaLandscapeId`,
+                    `entities.${index}.statement.mediaLandscapeUrl`,
+                  )
+                }
+              />
+            </div>
+            <div className='w-full space-y-1 sm:w-auto'>
+              <Text variant='inactive' size='small'>
+                portrait (optional)
+              </Text>
+              <MediaPreviewWithSelector
+                mediaUrl={entity.statement?.mediaPortraitUrl || ''}
+                aspectRatio={['9:16']}
+                allowMultiple={false}
+                showVideos={true}
+                alt='portrait'
+                label='select'
+                purpose='portrait'
+                heightClass='sm:h-44'
+                onSaveMedia={(media) =>
+                  saveSingleMedia(
+                    `entities.${index}.statement.mediaPortraitId`,
+                    `entities.${index}.statement.mediaPortraitUrl`,
+                    media,
+                  )
+                }
+                onClear={() =>
+                  clearSingleMedia(
+                    `entities.${index}.statement.mediaPortraitId`,
+                    `entities.${index}.statement.mediaPortraitUrl`,
+                  )
+                }
+              />
+            </div>
+          </div>
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.statement.exploreLink`}
+              label='explore link (optional)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.statement.translations`}
+              fields={[
+                { name: 'headline', label: 'statement', type: 'textarea', rows: 2, maxLength: 160 },
+                {
+                  name: 'body',
+                  label: 'body (optional)',
+                  type: 'textarea',
+                  rows: 3,
+                  required: false,
+                },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }
