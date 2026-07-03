@@ -7,6 +7,7 @@ import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
+import { BlockEditorModal } from './block-editor-modal';
 import { Entities } from './entities';
 import { HeroPreviewPanel } from './hero-preview-panel';
 import { mapFormFieldsToHeroData, mapHeroFullToFormData } from './map-schema-to-hero-data';
@@ -25,6 +26,7 @@ export function Hero() {
   const deletedIndicesRef = useRef<Set<string>>(new Set());
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
   const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
+  const [editingUid, setEditingUid] = useState<string | null>(null);
   const isResettingRef = useRef(false);
   const heroZodResolver = useMemo(() => zodResolver(heroSchema) as any, []);
 
@@ -83,22 +85,14 @@ export function Hero() {
   }, []);
 
   // Preview reports a click as an index into the (soft-delete-filtered) draft;
-  // map it back to the block's uid and bring that block into view.
+  // map it back to the block's uid and open that block's editor modal.
   const handlePreviewBlockClick = useCallback(
     (index: number) => {
       const live = (form.getValues().entities || []).filter(
         (e: any) => !deletedIndicesRef.current.has(e._uid),
       );
       const uid = (live[index] as any)?._uid;
-      const el = uid ? entityRefs.current[uid] : null;
-      if (!el) return;
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.style.outline = '3px solid currentColor';
-      el.style.outlineOffset = '2px';
-      window.setTimeout(() => {
-        el.style.outline = '';
-        el.style.outlineOffset = '';
-      }, 1200);
+      if (uid) setEditingUid(uid);
     },
     [form],
   );
@@ -233,6 +227,14 @@ export function Hero() {
             </div>
           </div>
         )}
+
+        <BlockEditorModal
+          editingUid={editingUid}
+          onOpenChange={(o) => {
+            if (!o) setEditingUid(null);
+          }}
+          featuredProducts={featuredProducts}
+        />
       </form>
     </Form>
   );
