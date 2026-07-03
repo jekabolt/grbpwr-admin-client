@@ -1,6 +1,8 @@
 import {
+  common_HeroCopyTranslation,
   common_HeroEntityWithTranslations,
   common_HeroFullWithTranslations,
+  common_HeroMediaFull,
   common_HeroSingleWithTranslations,
   common_MediaFull,
   common_NavFeaturedEntityWithTranslations,
@@ -51,17 +53,38 @@ function toMediaFull(id?: number, url?: string | null): common_MediaFull | undef
   };
 }
 
-/** single / double.left / double.right share one shape. */
+// The form's flat portrait/landscape id+url pair → the contract's nested HeroMediaFull.
+function toMediaPair(s: any): common_HeroMediaFull {
+  return {
+    portrait: toMediaFull(s?.mediaPortraitId, s?.mediaPortraitUrl),
+    landscape: toMediaFull(s?.mediaLandscapeId, s?.mediaLandscapeUrl),
+    disableOverlay: s?.disableOverlay ?? false,
+  };
+}
+
+// The form keeps copy flat; the contract uses one shared HeroCopyTranslation.
+// The form's `description` (main) maps to `body` per the proto contract comment.
+function toCopy(t: any): common_HeroCopyTranslation {
+  return {
+    languageId: t.languageId,
+    tag: t.tag ?? undefined,
+    headline: t.headline ?? undefined,
+    subhead: t.subhead ?? undefined,
+    body: t.body ?? t.description ?? undefined,
+    ctaText: t.ctaText ?? undefined,
+    exploreText: t.exploreText ?? undefined,
+    caption: t.caption ?? undefined,
+    placeholder: t.placeholder ?? undefined,
+    successText: t.successText ?? undefined,
+  };
+}
+
+/** single / double.left / double.right / main share one shape. */
 function toSingle(s: any): common_HeroSingleWithTranslations {
   return {
-    mediaLandscape: toMediaFull(s?.mediaLandscapeId, s?.mediaLandscapeUrl),
-    mediaPortrait: toMediaFull(s?.mediaPortraitId, s?.mediaPortraitUrl),
+    media: toMediaPair(s),
     exploreLink: s?.exploreLink ?? undefined,
-    translations: (s?.translations || []).map((t: any) => ({
-      languageId: t.languageId,
-      headline: t.headline ?? undefined,
-      exploreText: t.exploreText ?? undefined,
-    })),
+    translations: (s?.translations || []).map(toCopy),
   };
 }
 
@@ -74,6 +97,21 @@ function emptyEntity(type: any): common_HeroEntityWithTranslations {
     featuredProducts: undefined,
     featuredProductsTag: undefined,
     featuredArchive: undefined,
+    embed: undefined,
+    drop: undefined,
+    lastChance: undefined,
+    marquee: undefined,
+    newArrivals: undefined,
+    slideshow: undefined,
+    mosaic: undefined,
+    split: undefined,
+    video: undefined,
+    productSpotlight: undefined,
+    newsletter: undefined,
+    statement: undefined,
+    lookbook: undefined,
+    audience: undefined,
+    minTierId: undefined,
   };
 }
 
@@ -83,24 +121,7 @@ function mapEntity(
 ): common_HeroEntityWithTranslations {
   switch (e.type) {
     case 'HERO_TYPE_MAIN':
-      return {
-        ...emptyEntity(e.type),
-        main: {
-          single: {
-            mediaLandscape: toMediaFull(e.main?.mediaLandscapeId, e.main?.mediaLandscapeUrl),
-            mediaPortrait: toMediaFull(e.main?.mediaPortraitId, e.main?.mediaPortraitUrl),
-            exploreLink: e.main?.exploreLink ?? undefined,
-            translations: [],
-          },
-          translations: (e.main?.translations || []).map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline ?? undefined,
-            tag: t.tag ?? undefined,
-            description: t.description ?? undefined,
-            exploreText: t.exploreText ?? undefined,
-          })),
-        },
-      };
+      return { ...emptyEntity(e.type), main: toSingle(e.main) };
 
     case 'HERO_TYPE_SINGLE':
       return { ...emptyEntity(e.type), single: toSingle(e.single) };
@@ -117,11 +138,7 @@ function mapEntity(
         featuredProducts: {
           products: productsByUid[e._uid] || [],
           exploreLink: e.featuredProducts?.exploreLink ?? undefined,
-          translations: (e.featuredProducts?.translations || []).map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline ?? undefined,
-            exploreText: t.exploreText ?? undefined,
-          })),
+          translations: (e.featuredProducts?.translations || []).map(toCopy),
         },
       };
 
@@ -134,11 +151,7 @@ function mapEntity(
           // the form has no resolved list, so the preview renders it empty until
           // the tag-products cache is wired in (later pass).
           products: undefined,
-          translations: (e.featuredProductsTag?.translations || []).map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline ?? undefined,
-            exploreText: t.exploreText ?? undefined,
-          })),
+          translations: (e.featuredProductsTag?.translations || []).map(toCopy),
         },
       };
 

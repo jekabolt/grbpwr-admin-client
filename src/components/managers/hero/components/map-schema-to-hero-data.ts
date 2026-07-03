@@ -1,101 +1,122 @@
-import { common_HeroFullInsert } from 'api/proto-http/admin';
-import { v4 as uuidv4 } from 'uuid';
+import {
+  common_HeroCopyTranslation,
+  common_HeroEntityInsert,
+  common_HeroFullInsert,
+  common_HeroMedia,
+} from 'api/proto-http/admin';
 import {
   common_HeroEntityWithTranslations,
   common_HeroFullWithTranslations,
+  common_HeroSingleWithTranslations,
 } from 'api/proto-http/frontend';
+import { v4 as uuidv4 } from 'uuid';
 import { defaultData, HeroSchema } from './schema';
+
+// ─── form → insert (write model) ────────────────────────────────────────────
+
+// The form keeps copy flat (headline/description/exploreText/tag); the contract
+// now uses one shared HeroCopyTranslation for every block. The form's `description`
+// (main only) maps to `body` per the proto contract comment.
+function toCopy(t: any): common_HeroCopyTranslation {
+  return {
+    languageId: t?.languageId,
+    tag: t?.tag ?? undefined,
+    headline: t?.headline ?? undefined,
+    subhead: t?.subhead ?? undefined,
+    body: t?.body ?? t?.description ?? undefined,
+    ctaText: t?.ctaText ?? undefined,
+    exploreText: t?.exploreText ?? undefined,
+    caption: t?.caption ?? undefined,
+    placeholder: t?.placeholder ?? undefined,
+    successText: t?.successText ?? undefined,
+  };
+}
+
+// The form keeps a flat portrait/landscape id+url pair per media slot; the
+// contract nests it under HeroMedia (+ a per-slot overlay toggle).
+function toMedia(s: any): common_HeroMedia {
+  return {
+    portraitId: s?.mediaPortraitId || 0,
+    landscapeId: s?.mediaLandscapeId || 0,
+    disableOverlay: s?.disableOverlay ?? false,
+  };
+}
+
+// single / double.left / double.right / main all share the HeroSingleInsert shape.
+function toSingleInsert(s: any) {
+  return {
+    media: toMedia(s),
+    exploreLink: s?.exploreLink || '',
+    translations: (s?.translations || []).map(toCopy),
+  };
+}
+
+// Every insert entity must carry all variant keys (each present, possibly
+// undefined) plus the targeting modifier; only the active variant is populated.
+function emptyInsertEntity(type: any): common_HeroEntityInsert {
+  return {
+    type,
+    single: undefined,
+    double: undefined,
+    main: undefined,
+    featuredProducts: undefined,
+    featuredProductsTag: undefined,
+    featuredArchive: undefined,
+    embed: undefined,
+    drop: undefined,
+    lastChance: undefined,
+    marquee: undefined,
+    newArrivals: undefined,
+    slideshow: undefined,
+    mosaic: undefined,
+    split: undefined,
+    video: undefined,
+    productSpotlight: undefined,
+    newsletter: undefined,
+    statement: undefined,
+    lookbook: undefined,
+    audience: undefined,
+    minTierId: undefined,
+  };
+}
+
+function toInsertEntity(e: any): common_HeroEntityInsert {
+  const base = emptyInsertEntity(e.type);
+  switch (e.type) {
+    case 'HERO_TYPE_MAIN':
+      return { ...base, main: toSingleInsert(e.main) };
+    case 'HERO_TYPE_SINGLE':
+      return { ...base, single: toSingleInsert(e.single) };
+    case 'HERO_TYPE_DOUBLE':
+      return {
+        ...base,
+        double: { left: toSingleInsert(e.double?.left), right: toSingleInsert(e.double?.right) },
+      };
+    case 'HERO_TYPE_FEATURED_PRODUCTS':
+      return {
+        ...base,
+        featuredProducts: {
+          productIds: e.featuredProducts?.productIds || [],
+          exploreLink: e.featuredProducts?.exploreLink || '',
+          translations: (e.featuredProducts?.translations || []).map(toCopy),
+        },
+      };
+    case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
+      return {
+        ...base,
+        featuredProductsTag: {
+          tag: e.featuredProductsTag?.tag || '',
+          translations: (e.featuredProductsTag?.translations || []).map(toCopy),
+        },
+      };
+    default:
+      return base;
+  }
+}
 
 export function mapFormFieldsToHeroData(data: HeroSchema): common_HeroFullInsert {
   return {
-    entities: data?.entities.map((e: any) => ({
-      type: e.type,
-      main: {
-        mediaLandscapeId: e.main?.mediaLandscapeId || 0,
-        mediaPortraitId: e.main?.mediaPortraitId || 0,
-        mediaLandscapeUrl: e.main?.mediaLandscapeUrl || '',
-        mediaPortraitUrl: e.main?.mediaPortraitUrl || '',
-        exploreLink: e.main?.exploreLink || '',
-        translations:
-          e.main?.translations?.map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline,
-            tag: t.tag,
-            description: t.description,
-            exploreText: t.exploreText,
-          })) || [],
-      },
-      single: {
-        mediaLandscapeId: e.single?.mediaLandscapeId || 0,
-        mediaPortraitId: e.single?.mediaPortraitId || 0,
-        mediaLandscapeUrl: e.single?.mediaLandscapeUrl || '',
-        mediaPortraitUrl: e.single?.mediaPortraitUrl || '',
-        exploreLink: e.single?.exploreLink || '',
-        translations:
-          e.single?.translations?.map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline,
-            exploreText: t.exploreText,
-          })) || [],
-      },
-      double: {
-        left: {
-          mediaLandscapeId: e.double?.left?.mediaLandscapeId || 0,
-          mediaPortraitId: e.double?.left?.mediaPortraitId || 0,
-          mediaLandscapeUrl: e.double?.left?.mediaLandscapeUrl || '',
-          mediaPortraitUrl: e.double?.left?.mediaPortraitUrl || '',
-          exploreLink: e.double?.left?.exploreLink || '',
-          translations:
-            e.double?.left?.translations?.map((t: any) => ({
-              languageId: t.languageId,
-              headline: t.headline,
-              exploreText: t.exploreText,
-            })) || [],
-        },
-        right: {
-          mediaLandscapeId: e.double?.right?.mediaLandscapeId || 0,
-          mediaPortraitId: e.double?.right?.mediaPortraitId || 0,
-          mediaLandscapeUrl: e.double?.right?.mediaLandscapeUrl || '',
-          mediaPortraitUrl: e.double?.right?.mediaPortraitUrl || '',
-          exploreLink: e.double?.right?.exploreLink || '',
-          translations:
-            e.double?.right?.translations?.map((t: any) => ({
-              languageId: t.languageId,
-              headline: t.headline,
-              exploreText: t.exploreText,
-            })) || [],
-        },
-      },
-      featuredProducts: {
-        productIds: e.featuredProducts?.productIds || [],
-        exploreLink: e.featuredProducts?.exploreLink || '',
-        translations:
-          e.featuredProducts?.translations?.map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline,
-            exploreText: t.exploreText,
-          })) || [],
-      },
-      featuredProductsTag: {
-        tag: e.featuredProductsTag?.tag || '',
-        translations:
-          e.featuredProductsTag?.translations?.map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline,
-            exploreText: t.exploreText,
-          })) || [],
-      },
-      featuredArchive: {
-        archiveId: 0,
-        tag: '',
-        translations:
-          e.featuredArchive?.translations?.map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline,
-            exploreText: t.exploreText,
-          })) || [],
-      },
-    })),
+    entities: (data?.entities || []).map(toInsertEntity),
     navFeatured: {
       men: {
         mediaId: data.navFeatured?.men?.mediaId,
@@ -119,6 +140,25 @@ export function mapFormFieldsToHeroData(data: HeroSchema): common_HeroFullInsert
   };
 }
 
+// ─── read (resolved) → form ─────────────────────────────────────────────────
+
+// Read a resolved single/main media pair back into the form's flat id+url fields
+// (thumbnail URL, which is all the form keeps).
+function readSingle(s?: common_HeroSingleWithTranslations) {
+  return {
+    mediaLandscapeId: s?.media?.landscape?.id || 0,
+    mediaPortraitId: s?.media?.portrait?.id || 0,
+    mediaLandscapeUrl: s?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+    mediaPortraitUrl: s?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+    exploreLink: s?.exploreLink,
+    translations: (s?.translations || []).map((t) => ({
+      languageId: t.languageId || 0,
+      headline: t.headline,
+      exploreText: t.exploreText || '',
+    })),
+  };
+}
+
 export function mapHeroFullToFormData(
   heroFull?: common_HeroFullWithTranslations,
 ): HeroSchema & { productsByEntityUid?: Record<string, any[]> } {
@@ -138,72 +178,27 @@ export function mapHeroFullToFormData(
             return {
               type: e.type,
               main: {
-                mediaLandscapeId: e.main?.single?.mediaLandscape?.id || 0,
-                mediaPortraitId: e.main?.single?.mediaPortrait?.id || 0,
-                mediaLandscapeUrl: e.main?.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
-                mediaPortraitUrl: e.main?.single?.mediaPortrait?.media?.thumbnail?.mediaUrl || '',
-                exploreLink: e.main?.single?.exploreLink,
+                mediaLandscapeId: e.main?.media?.landscape?.id || 0,
+                mediaPortraitId: e.main?.media?.portrait?.id || 0,
+                mediaLandscapeUrl: e.main?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+                mediaPortraitUrl: e.main?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                exploreLink: e.main?.exploreLink,
                 translations:
                   e.main?.translations?.map((t) => ({
                     languageId: t.languageId || 0,
                     headline: t.headline,
                     tag: t.tag,
-                    description: t.description,
+                    description: t.body,
                     exploreText: t.exploreText || '',
                   })) || [],
               },
             };
           case 'HERO_TYPE_SINGLE':
-            return {
-              type: e.type,
-              single: {
-                mediaLandscapeId: e.single?.mediaLandscape?.id || 0,
-                mediaPortraitId: e.single?.mediaPortrait?.id || 0,
-                mediaLandscapeUrl: e.single?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
-                mediaPortraitUrl: e.single?.mediaPortrait?.media?.thumbnail?.mediaUrl || '',
-                exploreLink: e.single?.exploreLink,
-                translations:
-                  e.single?.translations?.map((t) => ({
-                    languageId: t.languageId || 0,
-                    headline: t.headline,
-                    exploreText: t.exploreText || '',
-                  })) || [],
-              },
-            };
+            return { type: e.type, single: readSingle(e.single) };
           case 'HERO_TYPE_DOUBLE':
             return {
               type: e.type,
-              double: {
-                left: {
-                  mediaLandscapeId: e.double?.left?.mediaLandscape?.id || 0,
-                  mediaPortraitId: e.double?.left?.mediaPortrait?.id || 0,
-                  mediaLandscapeUrl:
-                    e.double?.left?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
-                  mediaPortraitUrl: e.double?.left?.mediaPortrait?.media?.thumbnail?.mediaUrl || '',
-                  exploreLink: e.double?.left?.exploreLink,
-                  translations:
-                    e.double?.left?.translations?.map((t) => ({
-                      languageId: t.languageId || 0,
-                      headline: t.headline,
-                      exploreText: t.exploreText || '',
-                    })) || [],
-                },
-                right: {
-                  mediaLandscapeId: e.double?.right?.mediaLandscape?.id || 0,
-                  mediaPortraitId: e.double?.right?.mediaPortrait?.id || 0,
-                  mediaLandscapeUrl:
-                    e.double?.right?.mediaLandscape?.media?.thumbnail?.mediaUrl || '',
-                  mediaPortraitUrl:
-                    e.double?.right?.mediaPortrait?.media?.thumbnail?.mediaUrl || '',
-                  exploreLink: e.double?.right?.exploreLink,
-                  translations:
-                    e.double?.right?.translations?.map((t) => ({
-                      languageId: t.languageId || 0,
-                      headline: t.headline,
-                      exploreText: t.exploreText || '',
-                    })) || [],
-                },
-              },
+              double: { left: readSingle(e.double?.left), right: readSingle(e.double?.right) },
             };
           case 'HERO_TYPE_FEATURED_PRODUCTS': {
             const products =

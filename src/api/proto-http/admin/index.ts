@@ -1728,6 +1728,22 @@ export type common_HeroEntityInsert = {
   featuredProducts: common_HeroFeaturedProductsInsert | undefined;
   featuredProductsTag: common_HeroFeaturedProductsTagInsert | undefined;
   featuredArchive: common_HeroFeaturedArchiveInsert | undefined;
+  embed: common_HeroEmbedInsert | undefined;
+  drop: common_HeroDropInsert | undefined;
+  lastChance: common_HeroLastChanceInsert | undefined;
+  marquee: common_HeroMarqueeInsert | undefined;
+  newArrivals: common_HeroNewArrivalsInsert | undefined;
+  slideshow: common_HeroSlideshowInsert | undefined;
+  mosaic: common_HeroMosaicInsert | undefined;
+  split: common_HeroSplitInsert | undefined;
+  video: common_HeroVideoInsert | undefined;
+  productSpotlight: common_HeroProductSpotlightInsert | undefined;
+  newsletter: common_HeroNewsletterInsert | undefined;
+  statement: common_HeroStatementInsert | undefined;
+  lookbook: common_HeroLookbookInsert | undefined;
+  // modifiers
+  audience: common_HeroAudience | undefined;
+  minTierId: number | undefined;
 };
 
 export type common_HeroType =
@@ -1737,18 +1753,54 @@ export type common_HeroType =
   | "HERO_TYPE_MAIN"
   | "HERO_TYPE_FEATURED_PRODUCTS"
   | "HERO_TYPE_FEATURED_PRODUCTS_TAG"
-  | "HERO_TYPE_FEATURED_ARCHIVE";
+  | "HERO_TYPE_FEATURED_ARCHIVE"
+  | "HERO_TYPE_EMBED"
+  | "HERO_TYPE_DROP"
+  | "HERO_TYPE_LAST_CHANCE"
+  | "HERO_TYPE_MARQUEE"
+  | "HERO_TYPE_NEW_ARRIVALS"
+  | "HERO_TYPE_SLIDESHOW"
+  | "HERO_TYPE_MOSAIC"
+  | "HERO_TYPE_SPLIT"
+  | "HERO_TYPE_VIDEO"
+  | "HERO_TYPE_PRODUCT_SPOTLIGHT"
+  | "HERO_TYPE_NEWSLETTER"
+  | "HERO_TYPE_STATEMENT"
+  | "HERO_TYPE_LOOKBOOK";
 export type common_HeroSingleInsert = {
-  mediaPortraitId: number | undefined;
-  mediaLandscapeId: number | undefined;
+  media: common_HeroMedia | undefined;
   exploreLink: string | undefined;
-  translations: common_HeroSingleInsertTranslation[] | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
 };
 
-export type common_HeroSingleInsertTranslation = {
+// HeroMedia is a portrait/landscape media pair addressed by id (write side).
+// disable_overlay lives here so the scrim can be toggled per media slot.
+export type common_HeroMedia = {
+  portraitId: number | undefined;
+  landscapeId: number | undefined;
+  disableOverlay: boolean | undefined;
+};
+
+// HeroCopyTranslation is the single, shared translation for every hero block.
+// Each block type uses only the subset of fields it needs:
+// single/double        -> headline, explore_text
+// main                 -> tag, body, headline, explore_text
+// featured_products    -> headline, explore_text
+// featured_products_tag-> headline, explore_text
+// featured_archive     -> headline, explore_text
+// (further fields — subhead, cta_text, caption, placeholder, success_text —
+// are reserved for the block types added on top of this foundation.)
+export type common_HeroCopyTranslation = {
   languageId: number | undefined;
+  tag: string | undefined;
   headline: string | undefined;
+  subhead: string | undefined;
+  body: string | undefined;
+  ctaText: string | undefined;
   exploreText: string | undefined;
+  caption: string | undefined;
+  placeholder: string | undefined;
+  successText: string | undefined;
 };
 
 export type common_HeroDoubleInsert = {
@@ -1757,55 +1809,121 @@ export type common_HeroDoubleInsert = {
 };
 
 export type common_HeroMainInsert = {
-  mediaPortraitId: number | undefined;
-  mediaLandscapeId: number | undefined;
+  media: common_HeroMedia | undefined;
   exploreLink: string | undefined;
-  translations: common_HeroMainInsertTranslation[] | undefined;
-};
-
-export type common_HeroMainInsertTranslation = {
-  languageId: number | undefined;
-  tag: string | undefined;
-  description: string | undefined;
-  headline: string | undefined;
-  exploreText: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
 };
 
 export type common_HeroFeaturedProductsInsert = {
   productIds: number[] | undefined;
   exploreLink: string | undefined;
-  translations: common_HeroFeaturedProductsInsertTranslation[] | undefined;
-};
-
-export type common_HeroFeaturedProductsInsertTranslation = {
-  languageId: number | undefined;
-  headline: string | undefined;
-  exploreText: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
 };
 
 export type common_HeroFeaturedProductsTagInsert = {
   tag: string | undefined;
-  translations: common_HeroFeaturedProductsTagInsertTranslation[] | undefined;
-};
-
-export type common_HeroFeaturedProductsTagInsertTranslation = {
-  languageId: number | undefined;
-  headline: string | undefined;
-  exploreText: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
 };
 
 export type common_HeroFeaturedArchiveInsert = {
   archiveId: number | undefined;
   tag: string | undefined;
-  translations: common_HeroFeaturedArchiveInsertTranslation[] | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
 };
 
-export type common_HeroFeaturedArchiveInsertTranslation = {
-  languageId: number | undefined;
-  headline: string | undefined;
-  exploreText: string | undefined;
+export type common_HeroEmbedInsert = {
+  embedUrl: string | undefined;
+  fallback: common_HeroMedia | undefined;
+  ctaLink: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
 };
 
+export type common_HeroDropInsert = {
+  media: common_HeroMedia | undefined;
+  releaseAt: wellKnownTimestamp | undefined;
+  exploreLink: string | undefined;
+  tag: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+export type common_HeroLastChanceInsert = {
+  stockThreshold: number | undefined;
+  limit: number | undefined;
+  exploreLink: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+export type common_HeroMarqueeInsert = {
+  link: string | undefined;
+  speed: number | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+export type common_HeroNewArrivalsInsert = {
+  limit: number | undefined;
+  exploreLink: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+export type common_HeroSlideshowInsert = {
+  slides: common_HeroSingleInsert[] | undefined;
+  intervalMs: number | undefined;
+};
+
+export type common_HeroMosaicInsert = {
+  tiles: common_HeroSingleInsert[] | undefined;
+  columns: number | undefined;
+};
+
+export type common_HeroSplitInsert = {
+  media: common_HeroSingleInsert | undefined;
+  productIds: number[] | undefined;
+  mediaLeft: boolean | undefined;
+};
+
+export type common_HeroVideoInsert = {
+  mediaId: number | undefined;
+  posterMediaId: number | undefined;
+  autoplay: boolean | undefined;
+  loop: boolean | undefined;
+  muted: boolean | undefined;
+  ctaLink: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+export type common_HeroProductSpotlightInsert = {
+  productId: number | undefined;
+  media: common_HeroMedia | undefined;
+  exploreLink: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+export type common_HeroNewsletterInsert = {
+  media: common_HeroMedia | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+export type common_HeroStatementInsert = {
+  media: common_HeroMedia | undefined;
+  exploreLink: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+export type common_HeroLookbookInsert = {
+  frames: common_HeroSingleInsert[] | undefined;
+  exploreLink: string | undefined;
+  translations: common_HeroCopyTranslation[] | undefined;
+};
+
+// HeroAudience is the TARGETING modifier: who a block is shown to. Enforcement
+// requires the frontend GetHero to know the viewer (auth → tier); until then it
+// is carried through and may be applied client-side.
+export type common_HeroAudience =
+  | "HERO_AUDIENCE_UNKNOWN"
+  | "HERO_AUDIENCE_ALL"
+  | "HERO_AUDIENCE_GUESTS"
+  | "HERO_AUDIENCE_MEMBERS"
+  | "HERO_AUDIENCE_TIER";
 export type common_NavFeaturedInsert = {
   men: common_NavFeaturedEntityInsert | undefined;
   women: common_NavFeaturedEntityInsert | undefined;
