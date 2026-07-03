@@ -543,6 +543,30 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_PRODUCT_SPOTLIGHT'),
+    _uid: z.string().optional(),
+    productSpotlight: z.object({
+      productId: z.union([z.number(), z.undefined()]).refine((v) => v !== undefined && v >= 1, {
+        message: 'A product is required',
+      }),
+      // large spotlight media — optional (falls back to the product media).
+      mediaLandscapeId: z.number().optional(),
+      mediaPortraitId: z.number().optional(),
+      mediaLandscapeUrl: z.string().optional(),
+      mediaPortraitUrl: z.string().optional(),
+      exploreLink: z.string().nullable().optional(),
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().optional(),
+          exploreText: z.string().optional(),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

@@ -33,6 +33,7 @@ const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
   HERO_TYPE_MOSAIC: 'Grid of media tiles (double / triple as special cases)',
   HERO_TYPE_LOOKBOOK: 'Story of full-bleed frames, each with a caption',
   HERO_TYPE_SPLIT: 'Editorial media beside products from the shoot',
+  HERO_TYPE_PRODUCT_SPOTLIGHT: 'One product — large media + name / price + quick-add',
 };
 
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRefs, onAdded }) => {

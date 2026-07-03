@@ -720,6 +720,52 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
         </div>
       );
 
+    case 'HERO_TYPE_PRODUCT_SPOTLIGHT':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            product spotlight
+          </Text>
+          <div className='space-y-2'>
+            <Text variant='inactive' size='small'>
+              product
+            </Text>
+            <HeroProductPicker
+              uid={uid}
+              api={featuredProducts}
+              formPath={`entities.${index}.productSpotlight.productId`}
+              single
+            />
+          </div>
+          <MediaPairField
+            prefix={`entities.${index}.productSpotlight`}
+            landscapeUrl={entity.productSpotlight?.mediaLandscapeUrl || ''}
+            portraitUrl={entity.productSpotlight?.mediaPortraitUrl || ''}
+            optional
+          />
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.productSpotlight.exploreLink`}
+              label='explore link (optional)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.productSpotlight.translations`}
+              fields={[
+                { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+                {
+                  name: 'exploreText',
+                  label: 'explore text (optional)',
+                  type: 'input',
+                  required: false,
+                },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }

@@ -222,6 +222,16 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           mediaLeft: e.split?.mediaLeft ?? true,
         },
       };
+    case 'HERO_TYPE_PRODUCT_SPOTLIGHT':
+      return {
+        ...base,
+        productSpotlight: {
+          productId: e.productSpotlight?.productId || 0,
+          media: toMedia(e.productSpotlight),
+          exploreLink: e.productSpotlight?.exploreLink || '',
+          translations: (e.productSpotlight?.translations || []).map(toCopy),
+        },
+      };
     default:
       return base;
   }
@@ -550,6 +560,31 @@ export function mapHeroFullToFormData(
                     ?.map((p) => (typeof p === 'number' ? p : p.id))
                     .filter((id): id is number => id !== undefined) || [],
                 mediaLeft: e.split?.mediaLeft,
+              },
+            };
+          }
+          case 'HERO_TYPE_PRODUCT_SPOTLIGHT': {
+            const p = e.productSpotlight?.product;
+            if (p) {
+              productsByEntityIndex[index] = [p];
+            }
+            return {
+              type: e.type,
+              productSpotlight: {
+                productId: p?.id,
+                mediaLandscapeId: e.productSpotlight?.media?.landscape?.id || 0,
+                mediaPortraitId: e.productSpotlight?.media?.portrait?.id || 0,
+                mediaLandscapeUrl:
+                  e.productSpotlight?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+                mediaPortraitUrl:
+                  e.productSpotlight?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                exploreLink: e.productSpotlight?.exploreLink,
+                translations:
+                  e.productSpotlight?.translations?.map((t) => ({
+                    languageId: t.languageId || 0,
+                    headline: t.headline,
+                    exploreText: t.exploreText || '',
+                  })) || [],
               },
             };
           }

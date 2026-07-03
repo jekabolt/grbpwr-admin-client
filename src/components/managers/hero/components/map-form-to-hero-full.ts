@@ -284,6 +284,17 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_PRODUCT_SPOTLIGHT':
+      return {
+        ...emptyEntity(e.type),
+        productSpotlight: {
+          product: (productsByUid[e._uid] || [])[0],
+          media: toMediaPair(e.productSpotlight),
+          exploreLink: e.productSpotlight?.exploreLink ?? undefined,
+          translations: (e.productSpotlight?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }
