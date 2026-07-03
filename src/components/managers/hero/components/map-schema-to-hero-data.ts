@@ -109,6 +109,15 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           translations: (e.featuredProductsTag?.translations || []).map(toCopy),
         },
       };
+    case 'HERO_TYPE_MARQUEE':
+      return {
+        ...base,
+        marquee: {
+          link: e.marquee?.link || '',
+          speed: e.marquee?.speed || 0,
+          translations: (e.marquee?.translations || []).map(toCopy),
+        },
+      };
     default:
       return base;
   }
@@ -235,6 +244,19 @@ export function mapHeroFullToFormData(
                     languageId: t.languageId || 0,
                     headline: t.headline,
                     exploreText: t.exploreText || '',
+                  })) || [],
+              },
+            };
+          case 'HERO_TYPE_MARQUEE':
+            return {
+              type: e.type,
+              marquee: {
+                link: e.marquee?.link,
+                speed: e.marquee?.speed,
+                translations:
+                  e.marquee?.translations?.map((t) => ({
+                    languageId: t.languageId || 0,
+                    headline: t.headline,
                   })) || [],
               },
             };

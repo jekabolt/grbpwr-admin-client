@@ -270,6 +270,23 @@ const heroEntitySchema = z.discriminatedUnion('type', [
     }),
   }),
 
+  // ── v2 blocks ──────────────────────────────────────────────────────────
+  z.object({
+    type: z.literal('HERO_TYPE_MARQUEE'),
+    _uid: z.string().optional(),
+    marquee: z.object({
+      link: z.string().nullable().optional(),
+      speed: z.number().optional(),
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().min(1, 'Marquee text is required'),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
   z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),

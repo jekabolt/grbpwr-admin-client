@@ -155,6 +155,16 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_MARQUEE':
+      return {
+        ...emptyEntity(e.type),
+        marquee: {
+          link: e.marquee?.link ?? undefined,
+          speed: e.marquee?.speed ?? undefined,
+          translations: (e.marquee?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

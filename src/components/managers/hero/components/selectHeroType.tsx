@@ -23,6 +23,7 @@ const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
   HERO_TYPE_DOUBLE: 'Two square media blocks side by side',
   HERO_TYPE_FEATURED_PRODUCTS: 'Hand-picked products with a headline',
   HERO_TYPE_FEATURED_PRODUCTS_TAG: 'Products auto-filled by a tag',
+  HERO_TYPE_MARQUEE: 'Thin scrolling announcement bar — one line of text + optional link',
 };
 
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({

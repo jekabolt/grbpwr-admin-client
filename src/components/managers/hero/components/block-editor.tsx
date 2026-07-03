@@ -2,6 +2,8 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { useCallback } from 'react';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
+import InputField from 'ui/form/fields/input-field';
+import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroSchema } from './schema';
@@ -187,6 +189,34 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
           title='featured products tag'
           prefix='featuredProductsTag'
         />
+      );
+
+    case 'HERO_TYPE_MARQUEE':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            marquee
+          </Text>
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.marquee.link`}
+              label='link (optional)'
+              placeholder='https://…'
+            />
+            <InputField
+              name={`entities.${index}.marquee.speed`}
+              label='speed (optional)'
+              type='number'
+              valueAsNumber
+              placeholder='scroll speed, e.g. 30'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.marquee.translations`}
+              fields={[{ name: 'headline', label: 'marquee text', type: 'input' }]}
+              editMode
+            />
+          </div>
+        </div>
       );
 
     default:
