@@ -15,8 +15,9 @@ const FEATURED_PRODUCTS_TRANSLATION_FIELDS = [
 
 export function FeaturedProductBase({
   index,
+  uid,
   product,
-  currentEntityIndex,
+  currentEntityUid,
   prefix,
   title,
   isModalOpen = false,
@@ -43,7 +44,7 @@ export function FeaturedProductBase({
   const displayProducts =
     prefix?.includes('featuredProductsTag') && productsByTag.length > 0
       ? productsByTag
-      : product[index] || [];
+      : product[uid] || [];
 
   return (
     <div className='lg:px-2.5 lg:pb-8 p-2.5 space-y-6'>
@@ -70,7 +71,7 @@ export function FeaturedProductBase({
           products={displayProducts}
           id={index}
           isFeaturedProducts={prefix === 'featuredProducts'}
-          onReorder={(e: any) => handleProductsReorder?.(e, index)}
+          onReorder={(e: any) => handleProductsReorder?.(e, uid)}
         />
       )}
 
@@ -84,11 +85,11 @@ export function FeaturedProductBase({
               </Text>
             )}
           <ProductPickerModal
-            open={isModalOpen && currentEntityIndex === index}
+            open={isModalOpen && currentEntityUid === uid}
             onClose={handleCloseModal}
-            selectedProductIds={(product[index] || []).map((x) => x.id!)}
-            onSave={(selectedProduct) => handleSaveNewSelection?.(selectedProduct, index)}
-            onOpenRequest={() => handleOpenProductSelection?.(index)}
+            selectedProductIds={(product[uid] || []).map((x) => x.id!)}
+            onSave={(selectedProduct) => handleSaveNewSelection?.(selectedProduct, index, uid)}
+            onOpenRequest={() => handleOpenProductSelection?.(uid)}
           />
         </>
       )}
