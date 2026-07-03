@@ -19,7 +19,7 @@ export function Hero() {
   const saveHero = useSaveHero();
   const { showMessage } = useSnackBarStore();
   const entityRefs = useRef<{ [uid: string]: HTMLDivElement | null }>({});
-  const productsByEntityIndexRef = useRef<Record<number, any[]>>({});
+  const productsByEntityUidRef = useRef<Record<string, any[]>>({});
   const deletedIndicesRef = useRef<Set<string>>(new Set());
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
   const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
@@ -52,7 +52,7 @@ export function Hero() {
     if (heroData) {
       isResettingRef.current = true;
       const mappedData = mapHeroFullToFormData(heroData.hero);
-      productsByEntityIndexRef.current = mappedData.productsByEntityIndex || {};
+      productsByEntityUidRef.current = mappedData.productsByEntityUid || {};
       form.reset(mappedData);
       deletedIndicesRef.current.clear();
       setHasUserMadeChanges(false);
@@ -196,7 +196,7 @@ export function Hero() {
             <Entities
               entityRefs={entityRefs}
               arrayHelpers={{ remove, move, insert }}
-              initialProducts={productsByEntityIndexRef.current}
+              initialProducts={productsByEntityUidRef.current}
               deletedIndicesRef={deletedIndicesRef}
               onDeletedIndicesChange={handleDeletedIndicesChange}
             />

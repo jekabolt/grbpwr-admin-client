@@ -144,13 +144,14 @@ export const Entities: FC<EntitiesProps> = ({
   );
 
   const handleSaveProductSelection = useCallback(
-    (newProducts: any[], index: number) => {
+    (newProducts: any[], index: number, uid: string) => {
       const productIds = newProducts
         .map((product) => product.id)
         .filter((id): id is number => id !== undefined);
 
+      // form path is positional; display cache is keyed by the stable uid
       setValue(`entities.${index}.featuredProducts.productIds` as any, productIds);
-      featuredProducts.saveSelection(newProducts, index);
+      featuredProducts.saveSelection(newProducts, uid);
       featuredProducts.closeSelection();
     },
     [setValue, featuredProducts],
@@ -169,6 +170,7 @@ export const Entities: FC<EntitiesProps> = ({
   }, []);
 
   const renderEntity = (entity: HeroSchema['entities'][number], index: number) => {
+    const uid = (entity as any)._uid as string;
     switch (entity.type) {
       case 'HERO_TYPE_MAIN':
         return (
@@ -245,9 +247,10 @@ export const Entities: FC<EntitiesProps> = ({
         return (
           <FeaturedProductBase
             index={index}
+            uid={uid}
             entity={entity}
             product={featuredProducts.products}
-            currentEntityIndex={featuredProducts.currentIndex}
+            currentEntityUid={featuredProducts.currentUid}
             isModalOpen={featuredProducts.isOpen}
             showProductPicker={true}
             title='featured products'
@@ -263,6 +266,7 @@ export const Entities: FC<EntitiesProps> = ({
         return (
           <FeaturedProductBase
             index={index}
+            uid={uid}
             entity={entity}
             product={{}}
             title='featured products tag'

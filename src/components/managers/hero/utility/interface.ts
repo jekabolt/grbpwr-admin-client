@@ -10,7 +10,7 @@ export interface EntitiesProps {
     move: UseFieldArrayMove;
     insert: UseFieldArrayInsert<HeroSchema, 'entities'>;
   };
-  initialProducts?: Record<number, any[]>;
+  initialProducts?: Record<string, any[]>;
   deletedIndicesRef: React.MutableRefObject<Set<string>>;
   onDeletedIndicesChange?: () => void;
 }
@@ -29,17 +29,18 @@ export interface Props {
 
 export interface HeroProductEntityInterface {
   index: number;
+  uid: string;
   entity: any;
-  product: { [key: number]: common_Product[] };
+  product: { [uid: string]: common_Product[] };
   title: string;
   prefix?: string;
   isModalOpen?: boolean;
   showProductPicker?: boolean;
-  currentEntityIndex?: number | null;
-  handleProductsReorder?: (newProductsOrder: common_Product[], index: number) => void;
-  handleOpenProductSelection?: (index: number) => void;
+  currentEntityUid?: string | null;
+  handleProductsReorder?: (newProductsOrder: common_Product[], uid: string) => void;
+  handleOpenProductSelection?: (uid: string) => void;
   handleCloseModal?: () => void;
-  handleSaveNewSelection?: (selectedProduct: common_Product[], index: number) => void;
+  handleSaveNewSelection?: (selectedProduct: common_Product[], index: number, uid: string) => void;
 }
 
 export interface FeatureArchiveProps {

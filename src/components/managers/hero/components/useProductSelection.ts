@@ -1,11 +1,11 @@
 import { common_Product } from 'api/proto-http/admin';
 import { useEffect, useState } from 'react';
 
-export function useProductSelection(initialProducts?: Record<number, common_Product[]>) {
-  const [products, setProducts] = useState<Record<number, common_Product[]>>(
+export function useProductSelection(initialProducts?: Record<string, common_Product[]>) {
+  const [products, setProducts] = useState<Record<string, common_Product[]>>(
     initialProducts || {},
   );
-  const [currentIndex, setCurrentIndex] = useState<number | null>(null);
+  const [currentUid, setCurrentUid] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
@@ -14,8 +14,8 @@ export function useProductSelection(initialProducts?: Record<number, common_Prod
     }
   }, [initialProducts]);
 
-  const openSelection = (index: number) => {
-    setCurrentIndex(index);
+  const openSelection = (uid: string) => {
+    setCurrentUid(uid);
     setIsOpen(true);
   };
 
@@ -23,17 +23,17 @@ export function useProductSelection(initialProducts?: Record<number, common_Prod
     setIsOpen(false);
   };
 
-  const saveSelection = (newProducts: common_Product[], index: number) => {
-    setProducts((prev) => ({ ...prev, [index]: newProducts }));
+  const saveSelection = (newProducts: common_Product[], uid: string) => {
+    setProducts((prev) => ({ ...prev, [uid]: newProducts }));
   };
 
-  const reorderProducts = (newOrder: common_Product[], index: number) => {
-    setProducts((prev) => ({ ...prev, [index]: newOrder }));
+  const reorderProducts = (newOrder: common_Product[], uid: string) => {
+    setProducts((prev) => ({ ...prev, [uid]: newOrder }));
   };
 
   return {
     products,
-    currentIndex,
+    currentUid,
     isOpen,
     openSelection,
     closeSelection,
