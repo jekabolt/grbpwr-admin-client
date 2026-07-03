@@ -11,7 +11,6 @@ interface HeroPreviewProps {
   /** Storefront base URL; defaults to VITE_STOREFRONT_URL, then the beta stand. */
   storefrontUrl?: string;
   country?: string;
-  locale?: string;
 }
 
 // Logical viewport per view; the iframe renders at this size and is scaled to fit
@@ -21,16 +20,29 @@ const VIEWS = {
   mobile: { width: 390, height: 844 },
 } as const;
 
+// Storefront locale codes — the translation language is chosen by the locale
+// segment in the iframe URL (the draft carries every language). NB: the admin's
+// LANGUAGES use cn/kr for ids 6/7, but the storefront URL expects zh/ko.
+const PREVIEW_LOCALES = [
+  { code: 'en', label: 'EN' },
+  { code: 'fr', label: 'FR' },
+  { code: 'de', label: 'DE' },
+  { code: 'it', label: 'IT' },
+  { code: 'ja', label: 'JA' },
+  { code: 'zh', label: 'CN' },
+  { code: 'ko', label: 'KR' },
+] as const;
+
 export function HeroPreview({
   hero,
   onBlockClick,
   storefrontUrl,
   country = 'gb',
-  locale = 'en',
 }: HeroPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState<'desktop' | 'mobile'>('desktop');
+  const [locale, setLocale] = useState('en');
   const [containerWidth, setContainerWidth] = useState(0);
 
   const baseUrl = (
@@ -67,27 +79,43 @@ export function HeroPreview({
 
   return (
     <div className='flex flex-col gap-3 border-2 border-textColor'>
-      <div className='flex flex-wrap items-center justify-between gap-2 border-b border-textColor px-3 py-2'>
-        <Text variant='uppercase' size='large'>
-          live preview
-        </Text>
-        <div className='flex items-center gap-2'>
-          <Button
-            type='button'
-            variant={view === 'desktop' ? 'main' : 'secondary'}
-            className='cursor-pointer px-2 py-1'
-            onClick={() => setView('desktop')}
-          >
-            desktop
-          </Button>
-          <Button
-            type='button'
-            variant={view === 'mobile' ? 'main' : 'secondary'}
-            className='cursor-pointer px-2 py-1'
-            onClick={() => setView('mobile')}
-          >
-            mobile
-          </Button>
+      <div className='flex flex-col gap-2 border-b border-textColor px-3 py-2'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <Text variant='uppercase' size='large'>
+            live preview
+          </Text>
+          <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant={view === 'desktop' ? 'main' : 'secondary'}
+              className='cursor-pointer px-2 py-1'
+              onClick={() => setView('desktop')}
+            >
+              desktop
+            </Button>
+            <Button
+              type='button'
+              variant={view === 'mobile' ? 'main' : 'secondary'}
+              className='cursor-pointer px-2 py-1'
+              onClick={() => setView('mobile')}
+            >
+              mobile
+            </Button>
+          </div>
+        </div>
+        <div className='flex flex-wrap items-center gap-1'>
+          {PREVIEW_LOCALES.map((l) => (
+            <Button
+              key={l.code}
+              type='button'
+              variant={locale === l.code ? 'main' : 'secondary'}
+              className='cursor-pointer px-2 py-0.5'
+              aria-pressed={locale === l.code}
+              onClick={() => setLocale(l.code)}
+            >
+              {l.label}
+            </Button>
+          ))}
         </div>
       </div>
 
