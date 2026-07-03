@@ -48,7 +48,7 @@ export function HeroPreview({
   const baseUrl = (
     storefrontUrl ||
     import.meta.env.VITE_STOREFRONT_URL ||
-    (import.meta.env.DEV ? 'http://localhost:3000' : 'https://beta.grbpwr.com')
+    (import.meta.env.DEV ? 'http://localhost:3000' : 'https://grbpwr.com')
   ).replace(/\/$/, '');
   const origin = useMemo(() => {
     try {
