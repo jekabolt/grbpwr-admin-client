@@ -8,7 +8,6 @@ import { EntitiesProps } from '../utility/interface';
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroSchema } from './schema';
-import { useEntityMedia } from './useEntityMedia';
 import { useProductSelection } from './useProductSelection';
 
 export const Entities: FC<EntitiesProps> = ({
@@ -84,7 +83,6 @@ export const Entities: FC<EntitiesProps> = ({
     });
   }, [entities]);
 
-  const mediaUrls = useEntityMedia(entities);
   const featuredProducts = useProductSelection(initialProducts);
 
   const handleSaveMedia = useCallback(
@@ -177,8 +175,8 @@ export const Entities: FC<EntitiesProps> = ({
           <CommonEntity
             title='main add'
             prefix={`entities.${index}.main`}
-            landscapeLink={mediaUrls.main.landscape}
-            portraitLink={mediaUrls.main.portrait}
+            landscapeLink={entity.main?.mediaLandscapeUrl || ''}
+            portraitLink={entity.main?.mediaPortraitUrl || ''}
             aspectRatio={{
               Portrait: ['9:16'],
               Landscape: ['2:1'],
@@ -195,8 +193,8 @@ export const Entities: FC<EntitiesProps> = ({
           <CommonEntity
             title='single add'
             prefix={`entities.${index}.single`}
-            landscapeLink={mediaUrls.single[index]?.landscape || ''}
-            portraitLink={mediaUrls.single[index]?.portrait || ''}
+            landscapeLink={entity.single?.mediaLandscapeUrl || ''}
+            portraitLink={entity.single?.mediaPortraitUrl || ''}
             aspectRatio={{
               Portrait: ['9:16'],
               Landscape: ['2:1'],
@@ -219,8 +217,8 @@ export const Entities: FC<EntitiesProps> = ({
             <CommonEntity
               title='left add'
               prefix={`entities.${index}.double.left`}
-              landscapeLink={mediaUrls.double[index]?.left?.landscape || ''}
-              portraitLink={mediaUrls.double[index]?.left?.portrait || ''}
+              landscapeLink={entity.double?.left?.mediaLandscapeUrl || ''}
+              portraitLink={entity.double?.left?.mediaPortraitUrl || ''}
               aspectRatio={['1:1']}
               isDoubleAd={true}
               onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
@@ -231,8 +229,8 @@ export const Entities: FC<EntitiesProps> = ({
             <CommonEntity
               title='right add'
               prefix={`entities.${index}.double.right`}
-              landscapeLink={mediaUrls.double[index]?.right?.landscape || ''}
-              portraitLink={mediaUrls.double[index]?.right?.portrait || ''}
+              landscapeLink={entity.double?.right?.mediaLandscapeUrl || ''}
+              portraitLink={entity.double?.right?.mediaPortraitUrl || ''}
               aspectRatio={['1:1']}
               isDoubleAd
               onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
