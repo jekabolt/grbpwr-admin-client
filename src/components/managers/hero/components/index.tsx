@@ -75,7 +75,7 @@ export function Hero() {
     return () => subscription.unsubscribe();
   }, [form]);
 
-  const { append, remove, move, insert } = useFieldArray({
+  const { append, remove, move } = useFieldArray({
     control: form.control,
     name: 'entities',
   });
@@ -262,10 +262,8 @@ export function Hero() {
         <HeroSectionModal open={addMenuOpen} onOpenChange={setAddMenuOpen} title='add a block'>
           <SelectHeroType
             append={append}
-            insert={insert}
             form={form}
             entityRefs={entityRefs}
-            deletedIndicesRef={deletedIndicesRef}
             onAdded={(uid) => {
               setAddMenuOpen(false);
               setEditingUid(uid);

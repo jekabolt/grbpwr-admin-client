@@ -106,11 +106,8 @@ export const BlockRail: FC<BlockRailProps> = ({
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const fromIndex = entities.findIndex((e: any) => e._uid === active.id);
-    let toIndex = entities.findIndex((e: any) => e._uid === over.id);
+    const toIndex = entities.findIndex((e: any) => e._uid === over.id);
     if (fromIndex < 0 || toIndex < 0) return;
-    // MAIN is pinned to slot 0 — never let another block land above it.
-    const mainPinned = (entities[0] as any)?.type === 'HERO_TYPE_MAIN';
-    if (mainPinned && toIndex === 0) toIndex = 1;
     if (fromIndex === toIndex) return;
     arrayHelpers.move(fromIndex, toIndex);
   };
@@ -133,12 +130,11 @@ export const BlockRail: FC<BlockRailProps> = ({
             {entities.map((entity, index) => {
               const uid = (entity as any)._uid as string;
               const isDeleted = deletedIndices.has(uid);
-              const isMain = entity.type === 'HERO_TYPE_MAIN';
               const isSelected = selectedUid === uid;
               const hasError = !!entityErrors?.[index];
 
               return (
-                <SortableEntity key={uid} uid={uid} disabled={isDeleted || isMain}>
+                <SortableEntity key={uid} uid={uid} disabled={isDeleted}>
                   {({ setNodeRef, style, dragHandleProps }) => {
                     const setRefs = (el: HTMLDivElement | null) => {
                       setNodeRef(el);
@@ -177,24 +173,14 @@ export const BlockRail: FC<BlockRailProps> = ({
                             : 'border border-textInactiveColor',
                         )}
                       >
-                        {isMain ? (
-                          <span
-                            className='px-0.5 leading-none text-textInactiveColor select-none'
-                            title='pinned to top'
-                            aria-label='pinned to top'
-                          >
-                            ⇈
-                          </span>
-                        ) : (
-                          <button
-                            type='button'
-                            className='px-0.5 leading-none cursor-grab touch-none select-none text-textInactiveColor hover:text-textColor active:cursor-grabbing'
-                            aria-label='drag to reorder block'
-                            {...dragHandleProps}
-                          >
-                            ⠿
-                          </button>
-                        )}
+                        <button
+                          type='button'
+                          className='px-0.5 leading-none cursor-grab touch-none select-none text-textInactiveColor hover:text-textColor active:cursor-grabbing'
+                          aria-label='drag to reorder block'
+                          {...dragHandleProps}
+                        >
+                          ⠿
+                        </button>
                         <button
                           type='button'
                           onClick={() => onSelectBlock(uid)}
