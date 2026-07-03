@@ -383,6 +383,31 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_DROP'),
+    _uid: z.string().optional(),
+    drop: z.object({
+      // background media — optional.
+      mediaLandscapeId: z.number().optional(),
+      mediaPortraitId: z.number().optional(),
+      mediaLandscapeUrl: z.string().optional(),
+      mediaPortraitUrl: z.string().optional(),
+      // RFC3339 string; the countdown target.
+      releaseAt: z.string().min(1, 'Release date is required'),
+      // collection/product tag surfaced after the drop goes live.
+      tag: z.string().nullable().optional(),
+      exploreLink: z.string().nullable().optional(),
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().optional(),
+          exploreText: z.string().optional(),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

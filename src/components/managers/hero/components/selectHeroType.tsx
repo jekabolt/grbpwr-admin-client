@@ -26,6 +26,7 @@ const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
   HERO_TYPE_STATEMENT: 'Manifesto — large statement text, optionally over subtle media',
   HERO_TYPE_NEWSLETTER: 'Email capture — optional media + headline, button & success copy',
   HERO_TYPE_EMBED: 'Iframe embed (Spline / 3D / campaign) with fallback media + CTA',
+  HERO_TYPE_DROP: 'Countdown to a drop — media bg + release timer, then explore link',
 };
 
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRefs, onAdded }) => {

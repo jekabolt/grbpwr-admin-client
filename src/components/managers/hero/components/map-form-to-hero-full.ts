@@ -211,6 +211,18 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_DROP':
+      return {
+        ...emptyEntity(e.type),
+        drop: {
+          media: toMediaPair(e.drop),
+          releaseAt: e.drop?.releaseAt || undefined,
+          exploreLink: e.drop?.exploreLink ?? undefined,
+          tag: e.drop?.tag ?? undefined,
+          translations: (e.drop?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

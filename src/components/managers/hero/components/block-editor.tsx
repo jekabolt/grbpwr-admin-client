@@ -9,6 +9,7 @@ import { MediaPreviewWithSelector } from '../../media/components/media-preview-w
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { MediaPairField } from './media-pair-field';
+import { ReleaseDateField } from './release-date-field';
 import { HeroSchema } from './schema';
 import { ProductSelectionApi } from './useProductSelection';
 
@@ -443,6 +444,51 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               fields={[
                 { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
                 { name: 'ctaText', label: 'CTA text (optional)', type: 'input', required: false },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
+      );
+
+    case 'HERO_TYPE_DROP':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            drop
+          </Text>
+          <MediaPairField
+            prefix={`entities.${index}.drop`}
+            landscapeUrl={entity.drop?.mediaLandscapeUrl || ''}
+            portraitUrl={entity.drop?.mediaPortraitUrl || ''}
+            optional
+          />
+          <div className='space-y-4'>
+            <ReleaseDateField
+              name={`entities.${index}.drop.releaseAt`}
+              value={entity.drop?.releaseAt}
+              label='release date & time'
+            />
+            <InputField
+              name={`entities.${index}.drop.tag`}
+              label='collection tag (optional)'
+              placeholder='e.g. ss26-drop'
+            />
+            <InputField
+              name={`entities.${index}.drop.exploreLink`}
+              label='explore link (optional, shown after release)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.drop.translations`}
+              fields={[
+                { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+                {
+                  name: 'exploreText',
+                  label: 'explore text (optional)',
+                  type: 'input',
+                  required: false,
+                },
               ]}
               editMode
             />

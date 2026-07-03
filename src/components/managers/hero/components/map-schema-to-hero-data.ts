@@ -158,6 +158,17 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           translations: (e.embed?.translations || []).map(toCopy),
         },
       };
+    case 'HERO_TYPE_DROP':
+      return {
+        ...base,
+        drop: {
+          media: toMedia(e.drop),
+          releaseAt: e.drop?.releaseAt || undefined,
+          exploreLink: e.drop?.exploreLink || '',
+          tag: e.drop?.tag || '',
+          translations: (e.drop?.translations || []).map(toCopy),
+        },
+      };
     default:
       return base;
   }
@@ -371,6 +382,25 @@ export function mapHeroFullToFormData(
                     languageId: t.languageId || 0,
                     headline: t.headline,
                     ctaText: t.ctaText,
+                  })) || [],
+              },
+            };
+          case 'HERO_TYPE_DROP':
+            return {
+              type: e.type,
+              drop: {
+                mediaLandscapeId: e.drop?.media?.landscape?.id || 0,
+                mediaPortraitId: e.drop?.media?.portrait?.id || 0,
+                mediaLandscapeUrl: e.drop?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
+                mediaPortraitUrl: e.drop?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                releaseAt: e.drop?.releaseAt || '',
+                tag: e.drop?.tag,
+                exploreLink: e.drop?.exploreLink,
+                translations:
+                  e.drop?.translations?.map((t) => ({
+                    languageId: t.languageId || 0,
+                    headline: t.headline,
+                    exploreText: t.exploreText || '',
                   })) || [],
               },
             };
