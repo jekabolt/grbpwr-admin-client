@@ -18,9 +18,9 @@ export function Hero() {
   const { data: heroData, isLoading } = useHero();
   const saveHero = useSaveHero();
   const { showMessage } = useSnackBarStore();
-  const entityRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
+  const entityRefs = useRef<{ [uid: string]: HTMLDivElement | null }>({});
   const productsByEntityIndexRef = useRef<Record<number, any[]>>({});
-  const deletedIndicesRef = useRef<Set<number>>(new Set());
+  const deletedIndicesRef = useRef<Set<string>>(new Set());
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
   const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
   const isResettingRef = useRef(false);
@@ -36,7 +36,7 @@ export function Hero() {
       const filteredValues: HeroSchema = {
         ...values,
         entities: values.entities.filter(
-          (_: any, index: number) => !deletedIndicesRef.current.has(index),
+          (e: any) => !deletedIndicesRef.current.has(e._uid),
         ),
       };
 
@@ -88,7 +88,7 @@ export function Hero() {
     // Filter out deleted entities before sending
     const filteredData = {
       ...data,
-      entities: entities.filter((_, index) => !deletedIndicesRef.current.has(index)),
+      entities: entities.filter((e: any) => !deletedIndicesRef.current.has(e._uid)),
     };
 
     const heroData = mapFormFieldsToHeroData(filteredData);
@@ -117,7 +117,7 @@ export function Hero() {
     const filteredValues: HeroSchema = {
       ...values,
       entities: values.entities.filter(
-        (_: any, index: number) => !deletedIndicesRef.current.has(index),
+        (e: any) => !deletedIndicesRef.current.has(e._uid),
       ),
     };
     const result = heroSchema.safeParse(filteredValues);
@@ -129,10 +129,12 @@ export function Hero() {
       );
     }
 
-    // Clear errors for deleted entities
+    // Clear errors for deleted entities (RHF error paths are positional -> map uid to index)
     if (errors.entities) {
-      deletedIndicesRef.current.forEach((index) => {
-        form.clearErrors(`entities.${index}` as any);
+      values.entities.forEach((e: any, index: number) => {
+        if (deletedIndicesRef.current.has(e._uid)) {
+          form.clearErrors(`entities.${index}` as any);
+        }
       });
     }
 
@@ -141,10 +143,11 @@ export function Hero() {
     if (errors.entities) {
       const firstErrorIndex = errors.entities.findIndex(
         (entity: any, index: number) =>
-          entity !== undefined && !deletedIndicesRef.current.has(index),
+          entity !== undefined && !deletedIndicesRef.current.has((values.entities[index] as any)?._uid),
       );
-      if (firstErrorIndex >= 0 && entityRefs.current[firstErrorIndex]) {
-        entityRefs.current[firstErrorIndex]?.scrollIntoView({
+      const firstErrorUid = (values.entities[firstErrorIndex] as any)?._uid;
+      if (firstErrorIndex >= 0 && firstErrorUid && entityRefs.current[firstErrorUid]) {
+        entityRefs.current[firstErrorUid]?.scrollIntoView({
           behavior: 'smooth',
           block: 'center',
         });

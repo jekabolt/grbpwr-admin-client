@@ -12,8 +12,8 @@ interface SelectHeroTypeProps {
   append: (value: any) => void;
   insert: (index: number, value: any) => void;
   form: UseFormReturn<HeroSchema>;
-  entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
-  deletedIndicesRef: React.MutableRefObject<Set<number>>;
+  entityRefs: React.MutableRefObject<{ [uid: string]: HTMLDivElement | null }>;
+  deletedIndicesRef: React.MutableRefObject<Set<string>>;
 }
 
 const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
@@ -31,15 +31,16 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
   entityRefs,
   deletedIndicesRef,
 }) => {
-  const [addedEntityIndex, setAddedEntityIndex] = useState<number | null>(null);
+  const [addedEntityUid, setAddedEntityUid] = useState<string | null>(null);
 
   const entities = form.watch('entities');
   const isMainAddExists = entities?.some(
-    (entity, index) => entity.type === 'HERO_TYPE_MAIN' && !deletedIndicesRef.current.has(index),
+    (entity) =>
+      entity.type === 'HERO_TYPE_MAIN' && !deletedIndicesRef.current.has((entity as any)._uid),
   );
 
-  const isEntityIncomplete = entities?.some((entity, index) => {
-    if (deletedIndicesRef.current.has(index)) return false;
+  const isEntityIncomplete = entities?.some((entity) => {
+    if (deletedIndicesRef.current.has((entity as any)._uid)) return false;
 
     const validateEntity = validationForSelectHeroType[entity.type as common_HeroType];
     return validateEntity ? validateEntity(entity as common_HeroEntityInsert) : false;
@@ -52,24 +53,23 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
     const newEntity = { type, _uid: uuidv4() };
     if (type === 'HERO_TYPE_MAIN') {
       insert(0, newEntity);
-      setAddedEntityIndex(0);
     } else {
       append(newEntity);
-      setAddedEntityIndex(entities ? entities.length : 0);
     }
+    setAddedEntityUid(newEntity._uid);
   };
 
   useEffect(() => {
-    if (addedEntityIndex !== null) {
+    if (addedEntityUid !== null) {
       setTimeout(() => {
-        const element = entityRefs.current[addedEntityIndex];
+        const element = entityRefs.current[addedEntityUid];
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-        setAddedEntityIndex(null);
+        setAddedEntityUid(null);
       }, 100);
     }
-  }, [entities?.length, addedEntityIndex, entityRefs]);
+  }, [entities?.length, addedEntityUid, entityRefs]);
 
   return (
     <div className='flex flex-col gap-3'>

@@ -4,14 +4,14 @@ import { UseFieldArrayInsert, UseFieldArrayMove, UseFieldArrayRemove } from 'rea
 import { HeroSchema } from '../components/schema';
 
 export interface EntitiesProps {
-  entityRefs: React.MutableRefObject<{ [key: number]: HTMLDivElement | null }>;
+  entityRefs: React.MutableRefObject<{ [uid: string]: HTMLDivElement | null }>;
   arrayHelpers: {
     remove: UseFieldArrayRemove;
     move: UseFieldArrayMove;
     insert: UseFieldArrayInsert<HeroSchema, 'entities'>;
   };
   initialProducts?: Record<number, any[]>;
-  deletedIndicesRef: React.MutableRefObject<Set<number>>;
+  deletedIndicesRef: React.MutableRefObject<Set<string>>;
   onDeletedIndicesChange?: () => void;
 }
 

@@ -23,9 +23,9 @@ export const Entities: FC<EntitiesProps> = ({
     formState: { errors },
   } = useFormContext<HeroSchema>();
   const entities = useWatch({ control, name: 'entities' }) || [];
-  const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set());
-  const [collapsedIndices, setCollapsedIndices] = useState<Set<number>>(new Set());
-  const prevDeletedIndicesRef = useRef<Set<number>>(new Set());
+  const [deletedIndices, setDeletedIndices] = useState<Set<string>>(new Set());
+  const [collapsedIndices, setCollapsedIndices] = useState<Set<string>>(new Set());
+  const prevDeletedIndicesRef = useRef<Set<string>>(new Set());
 
   const entityErrors = errors.entities as Record<number, unknown> | undefined;
 
@@ -35,16 +35,19 @@ export const Entities: FC<EntitiesProps> = ({
     setCollapsedIndices((prev) => {
       if (prev.size === 0) return prev;
       const next = new Set(prev);
-      Object.keys(entityErrors).forEach((key) => next.delete(Number(key)));
+      Object.keys(entityErrors).forEach((key) => {
+        const uid = (entities[Number(key)] as any)?._uid;
+        if (uid) next.delete(uid);
+      });
       return next.size === prev.size ? prev : next;
     });
-  }, [entityErrors]);
+  }, [entityErrors, entities]);
 
-  const toggleCollapsed = useCallback((index: number) => {
+  const toggleCollapsed = useCallback((uid: string) => {
     setCollapsedIndices((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
       return next;
     });
   }, []);
@@ -69,16 +72,17 @@ export const Entities: FC<EntitiesProps> = ({
   }, [deletedIndices, deletedIndicesRef, onDeletedIndicesChange]);
 
   useEffect(() => {
+    const liveUids = new Set(entities.map((e: any) => e._uid));
     setDeletedIndices((prev) => {
-      const filtered = new Set<number>();
-      prev.forEach((index) => {
-        if (index < entities.length) {
-          filtered.add(index);
+      const filtered = new Set<string>();
+      prev.forEach((uid) => {
+        if (liveUids.has(uid)) {
+          filtered.add(uid);
         }
       });
       return filtered;
     });
-  }, [entities.length]);
+  }, [entities]);
 
   const mediaUrls = useEntityMedia(entities);
   const featuredProducts = useProductSelection(initialProducts);
@@ -152,14 +156,14 @@ export const Entities: FC<EntitiesProps> = ({
     [setValue, featuredProducts],
   );
 
-  const handleRemoveEntity = useCallback((index: number) => {
-    setDeletedIndices((prev) => new Set(prev).add(index));
+  const handleRemoveEntity = useCallback((uid: string) => {
+    setDeletedIndices((prev) => new Set(prev).add(uid));
   }, []);
 
-  const handleRestoreEntity = useCallback((index: number) => {
+  const handleRestoreEntity = useCallback((uid: string) => {
     setDeletedIndices((prev) => {
       const newSet = new Set(prev);
-      newSet.delete(index);
+      newSet.delete(uid);
       return newSet;
     });
   }, []);
@@ -274,17 +278,18 @@ export const Entities: FC<EntitiesProps> = ({
   return (
     <div className='space-y-6'>
       {entities.map((entity, index) => {
-        const isDeleted = deletedIndices.has(index);
+        const uid = (entity as any)._uid as string;
+        const isDeleted = deletedIndices.has(uid);
         if (isDeleted) {
           return (
-            <div key={index} className='border-2 border-dashed border-textInactiveColor relative'>
+            <div key={uid} className='border-2 border-dashed border-textInactiveColor relative'>
               <div className='p-4 flex items-center justify-between'>
                 <Text variant='inactive'>entity marked for deletion</Text>
                 <Button
                   variant='secondary'
                   size='lg'
                   className='cursor-pointer'
-                  onClick={() => handleRestoreEntity(index)}
+                  onClick={() => handleRestoreEntity(uid)}
                 >
                   restore
                 </Button>
@@ -293,14 +298,14 @@ export const Entities: FC<EntitiesProps> = ({
           );
         }
 
-        const isCollapsed = collapsedIndices.has(index);
+        const isCollapsed = collapsedIndices.has(uid);
         const hasError = !!entityErrors?.[index];
 
         return (
           <div
-            key={index}
+            key={uid}
             ref={(el: HTMLDivElement | null) => {
-              entityRefs.current[index] = el;
+              entityRefs.current[uid] = el;
             }}
             className='border-2 border-textColor scroll-mt-4'
           >
@@ -320,14 +325,14 @@ export const Entities: FC<EntitiesProps> = ({
                 <Button
                   variant='secondary'
                   className='py-1 px-2 cursor-pointer'
-                  onClick={() => toggleCollapsed(index)}
+                  onClick={() => toggleCollapsed(uid)}
                 >
                   {isCollapsed ? 'expand' : 'collapse'}
                 </Button>
                 <Button
                   variant='main'
                   className='py-1 px-2 cursor-pointer'
-                  onClick={() => handleRemoveEntity(index)}
+                  onClick={() => handleRemoveEntity(uid)}
                 >
                   [x]
                 </Button>
