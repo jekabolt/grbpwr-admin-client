@@ -8,6 +8,7 @@ import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fie
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
+import { HeroProductPicker } from './hero-product-picker';
 import { MediaPairField } from './media-pair-field';
 import { ReleaseDateField } from './release-date-field';
 import { SlideListField } from './slide-list-field';
@@ -669,6 +670,51 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                 { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
               ]}
               editMode
+            />
+          </div>
+        </div>
+      );
+
+    case 'HERO_TYPE_SPLIT':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            split
+          </Text>
+          <ToggleField name={`entities.${index}.split.mediaLeft`} label='media on the left' />
+          <MediaPairField
+            prefix={`entities.${index}.split.media`}
+            landscapeUrl={entity.split?.media?.mediaLandscapeUrl || ''}
+            portraitUrl={entity.split?.media?.mediaPortraitUrl || ''}
+          />
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.split.media.exploreLink`}
+              label='explore link (optional)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.split.media.translations`}
+              fields={[
+                { name: 'headline', label: 'headline (optional)', type: 'input', required: false },
+                {
+                  name: 'exploreText',
+                  label: 'explore text (optional)',
+                  type: 'input',
+                  required: false,
+                },
+              ]}
+              editMode
+            />
+          </div>
+          <div className='space-y-2'>
+            <Text variant='inactive' size='small'>
+              products (from the shoot)
+            </Text>
+            <HeroProductPicker
+              uid={uid}
+              api={featuredProducts}
+              formPath={`entities.${index}.split.productIds`}
             />
           </div>
         </div>

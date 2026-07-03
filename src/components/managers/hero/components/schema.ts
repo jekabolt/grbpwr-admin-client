@@ -528,6 +528,21 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_SPLIT'),
+    _uid: z.string().optional(),
+    split: z.object({
+      // editorial frame (one HeroSingle) shown beside the products.
+      media: heroSingleItemSchema({
+        headline: z.string().optional(),
+        exploreText: z.string().optional(),
+      }),
+      productIds: z.array(z.number().min(1)).min(1, 'At least one product is required'),
+      // media on the left (products right) vs. flipped.
+      mediaLeft: z.boolean().optional(),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

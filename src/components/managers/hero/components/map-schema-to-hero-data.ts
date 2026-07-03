@@ -213,6 +213,15 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           translations: (e.lookbook?.translations || []).map(toCopy),
         },
       };
+    case 'HERO_TYPE_SPLIT':
+      return {
+        ...base,
+        split: {
+          media: toSingleInsert(e.split?.media),
+          productIds: e.split?.productIds || [],
+          mediaLeft: e.split?.mediaLeft ?? true,
+        },
+      };
     default:
       return base;
   }
@@ -524,6 +533,26 @@ export function mapHeroFullToFormData(
                   })) || [],
               },
             };
+          case 'HERO_TYPE_SPLIT': {
+            const products =
+              e.split?.products?.filter(
+                (p): p is any => typeof p !== 'number' && p !== undefined,
+              ) || [];
+            if (products.length > 0) {
+              productsByEntityIndex[index] = products;
+            }
+            return {
+              type: e.type,
+              split: {
+                media: readSingle(e.split?.media),
+                productIds:
+                  e.split?.products
+                    ?.map((p) => (typeof p === 'number' ? p : p.id))
+                    .filter((id): id is number => id !== undefined) || [],
+                mediaLeft: e.split?.mediaLeft,
+              },
+            };
+          }
           default:
             return { type: 'HERO_TYPE_UNKNOWN' as const };
         }

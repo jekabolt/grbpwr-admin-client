@@ -274,6 +274,16 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_SPLIT':
+      return {
+        ...emptyEntity(e.type),
+        split: {
+          media: toSingle(e.split?.media),
+          products: productsByUid[e._uid] || [],
+          mediaLeft: e.split?.mediaLeft ?? true,
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }
