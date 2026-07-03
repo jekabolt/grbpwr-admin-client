@@ -1,4 +1,5 @@
 import { common_HeroFullInsert } from 'api/proto-http/admin';
+import { v4 as uuidv4 } from 'uuid';
 import {
   common_HeroEntityWithTranslations,
   common_HeroFullWithTranslations,
@@ -97,19 +98,19 @@ export function mapFormFieldsToHeroData(data: HeroSchema): common_HeroFullInsert
     })),
     navFeatured: {
       men: {
-        mediaId: data.navFeatured.men.mediaId,
-        featuredTag: data.navFeatured.men.featuredTag,
-        featuredArchiveId: data.navFeatured.men.featuredArchiveId,
-        translations: data.navFeatured.men.translations.map((t: any) => ({
+        mediaId: data.navFeatured?.men?.mediaId,
+        featuredTag: data.navFeatured?.men?.featuredTag,
+        featuredArchiveId: data.navFeatured?.men?.featuredArchiveId,
+        translations: (data.navFeatured?.men?.translations || []).map((t: any) => ({
           languageId: t.languageId,
           exploreText: t.exploreText,
         })),
       },
       women: {
-        mediaId: data.navFeatured.women.mediaId,
-        featuredTag: data.navFeatured.women.featuredTag,
-        featuredArchiveId: data.navFeatured.women.featuredArchiveId,
-        translations: data.navFeatured.men.translations.map((t: any) => ({
+        mediaId: data.navFeatured?.women?.mediaId,
+        featuredTag: data.navFeatured?.women?.featuredTag,
+        featuredArchiveId: data.navFeatured?.women?.featuredArchiveId,
+        translations: (data.navFeatured?.women?.translations || []).map((t: any) => ({
           languageId: t.languageId,
           exploreText: t.exploreText,
         })),
@@ -245,7 +246,7 @@ export function mapHeroFullToFormData(
       }) || [];
 
   return {
-    entities,
+    entities: entities.map((e) => ({ ...e, _uid: uuidv4() })),
     navFeatured: {
       men: {
         mediaId: heroFull.navFeatured?.men?.media?.id,

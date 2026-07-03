@@ -1,4 +1,5 @@
 import { common_HeroEntityInsert, common_HeroType } from 'api/proto-http/admin';
+import { v4 as uuidv4 } from 'uuid';
 import { heroTypes } from 'constants/constants';
 import { cn } from 'lib/utility';
 import React, { FC, useEffect, useState } from 'react';
@@ -48,7 +49,7 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
     if (type === 'HERO_TYPE_MAIN' && isMainAddExists) return;
     if (isEntityIncomplete) return;
 
-    const newEntity = { type };
+    const newEntity = { type, _uid: uuidv4() };
     if (type === 'HERO_TYPE_MAIN') {
       insert(0, newEntity);
       setAddedEntityIndex(0);
