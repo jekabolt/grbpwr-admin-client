@@ -74,6 +74,13 @@ export function HeroPreview({
     return () => ro.disconnect();
   }, []);
 
+  // When the iframe target changes (locale switch), drop the handshake so the
+  // reloaded page's `ready` re-pushes the current draft in the new language.
+  // Deterministic (tied to src), unlike the onLoad reset which can race `ready`.
+  useEffect(() => {
+    handleReload();
+  }, [src, handleReload]);
+
   const { width: logicalWidth, height: logicalHeight } = VIEWS[view];
   const scale = containerWidth ? Math.min(1, containerWidth / logicalWidth) : 1;
 
@@ -125,10 +132,10 @@ export function HeroPreview({
           style={{ width: logicalWidth * scale, height: logicalHeight * scale }}
         >
           <iframe
+            key={src}
             ref={iframeRef}
             title='hero preview'
             src={src}
-            onLoad={handleReload}
             style={{
               width: logicalWidth,
               height: logicalHeight,
