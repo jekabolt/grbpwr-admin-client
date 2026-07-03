@@ -8,8 +8,9 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { BlockEditorModal } from './block-editor-modal';
-import { Entities } from './entities';
+import { BlockRail } from './block-rail';
 import { HeroPreviewPanel } from './hero-preview-panel';
+import { HeroSectionModal } from './hero-section-modal';
 import { mapFormFieldsToHeroData, mapHeroFullToFormData } from './map-schema-to-hero-data';
 import { NavFeatured } from './nav-featured';
 import { defaultData, HeroSchema, heroSchema } from './schema';
@@ -27,6 +28,8 @@ export function Hero() {
   const [deletedIndicesVersion, setDeletedIndicesVersion] = useState(0);
   const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
   const [editingUid, setEditingUid] = useState<string | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const isResettingRef = useRef(false);
   const heroZodResolver = useMemo(() => zodResolver(heroSchema) as any, []);
 
@@ -71,7 +74,7 @@ export function Hero() {
     return () => subscription.unsubscribe();
   }, [form]);
 
-  const { append, remove, move, insert } = useFieldArray({
+  const { append, move, insert } = useFieldArray({
     control: form.control,
     name: 'entities',
   });
@@ -172,23 +175,34 @@ export function Hero() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit, onError)} className='flex flex-col'>
-        <div className='-mx-2.5 mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+        <div className='-mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <Text variant='uppercase' size='large'>
               hero
             </Text>
             {hasUserMadeChanges && <Text variant='inactive'>unsaved changes</Text>}
           </div>
-          <Button
-            size='lg'
-            variant='main'
-            type='submit'
-            disabled={isLoading || form.formState.isSubmitting || saveHero.isPending}
-            loading={saveHero.isPending}
-            className='uppercase'
-          >
-            save
-          </Button>
+          <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => setNavOpen(true)}
+            >
+              nav featured
+            </Button>
+            <Button
+              size='lg'
+              variant='main'
+              type='submit'
+              disabled={isLoading || form.formState.isSubmitting || saveHero.isPending}
+              loading={saveHero.isPending}
+              className='uppercase'
+            >
+              save
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -198,25 +212,19 @@ export function Hero() {
             </Text>
           </div>
         ) : (
-          <div className='flex flex-col gap-8 xl:flex-row xl:items-start'>
-            <div className='flex min-w-0 flex-col gap-y-16 xl:flex-1'>
-              <NavFeatured hero={heroData?.hero} />
-              <SelectHeroType
-                append={append}
-                insert={insert}
-                form={form}
+          <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
+            <div className='shrink-0 lg:sticky lg:top-4 lg:w-[240px]'>
+              <BlockRail
                 entityRefs={entityRefs}
-                deletedIndicesRef={deletedIndicesRef}
-              />
-              <Entities
-                entityRefs={entityRefs}
-                arrayHelpers={{ remove, move, insert }}
-                featuredProducts={featuredProducts}
+                arrayHelpers={{ move }}
                 deletedIndicesRef={deletedIndicesRef}
                 onDeletedIndicesChange={handleDeletedIndicesChange}
+                onSelectBlock={(uid) => setEditingUid(uid)}
+                selectedUid={editingUid}
+                onAddClick={() => setAddMenuOpen(true)}
               />
             </div>
-            <div className='shrink-0 xl:sticky xl:top-4 xl:w-[44%]'>
+            <div className='min-w-0 flex-1'>
               <HeroPreviewPanel
                 control={form.control}
                 products={featuredProducts.products}
@@ -235,6 +243,24 @@ export function Hero() {
           }}
           featuredProducts={featuredProducts}
         />
+
+        <HeroSectionModal open={addMenuOpen} onOpenChange={setAddMenuOpen} title='add a block'>
+          <SelectHeroType
+            append={append}
+            insert={insert}
+            form={form}
+            entityRefs={entityRefs}
+            deletedIndicesRef={deletedIndicesRef}
+            onAdded={(uid) => {
+              setAddMenuOpen(false);
+              setEditingUid(uid);
+            }}
+          />
+        </HeroSectionModal>
+
+        <HeroSectionModal open={navOpen} onOpenChange={setNavOpen} title='nav featured'>
+          <NavFeatured hero={heroData?.hero} />
+        </HeroSectionModal>
       </form>
     </Form>
   );
