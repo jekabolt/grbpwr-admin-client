@@ -352,7 +352,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
             <UnifiedTranslationFields
               fieldPrefix={`entities.${index}.statement.translations`}
               fields={[
-                { name: 'headline', label: 'statement', type: 'textarea', rows: 2, maxLength: 160 },
+                { name: 'headline', label: 'statement', type: 'textarea', rows: 5, maxLength: 550 },
                 {
                   name: 'body',
                   label: 'body (optional)',

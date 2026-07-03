@@ -326,7 +326,10 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       translations: createStrictTranslationSchema(
         z.object({
           languageId: z.number().min(1, 'Language is required'),
-          headline: z.string().min(1, 'Statement text is required'),
+          headline: z
+            .string()
+            .min(1, 'Statement text is required')
+            .max(550, 'Statement must be at most 550 characters'),
           body: z.string().optional(),
         }),
         requiredLanguageIds,
