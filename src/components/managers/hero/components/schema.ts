@@ -288,6 +288,31 @@ const heroEntitySchema = z.discriminatedUnion('type', [
   }),
 
   z.object({
+    type: z.literal('HERO_TYPE_VIDEO'),
+    _uid: z.string().optional(),
+    video: z.object({
+      mediaId: z.union([z.number(), z.undefined()]).refine((v) => v !== undefined && v >= 1, {
+        message: 'Video media is required',
+      }),
+      mediaUrl: z.string().optional(),
+      posterId: z.number().optional(),
+      posterUrl: z.string().optional(),
+      autoplay: z.boolean().optional(),
+      loop: z.boolean().optional(),
+      muted: z.boolean().optional(),
+      ctaLink: z.string().nullable().optional(),
+      translations: createStrictTranslationSchema(
+        z.object({
+          languageId: z.number().min(1, 'Language is required'),
+          headline: z.string().optional(),
+          ctaText: z.string().optional(),
+        }),
+        requiredLanguageIds,
+      ),
+    }),
+  }),
+
+  z.object({
     type: z.literal('HERO_TYPE_UNKNOWN'),
     _uid: z.string().optional(),
   }),

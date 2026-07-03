@@ -3,7 +3,9 @@ import { useCallback } from 'react';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
+import ToggleField from 'ui/form/fields/toggle-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroSchema } from './schema';
@@ -78,6 +80,28 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       setValue(urlPath as any, '', { shouldDirty: true, shouldTouch: true });
     },
     [setValue, index],
+  );
+
+  // Generic single-slot media handlers (used by v2 blocks that address media by
+  // one id rather than a portrait/landscape pair). Store the id + thumbnail url.
+  const saveSingleMedia = useCallback(
+    (idPath: string, urlPath: string, media: common_MediaFull[]) => {
+      if (!media.length) return;
+      setValue(idPath as any, media[0].id, { shouldDirty: true, shouldTouch: true });
+      setValue(urlPath as any, media[0].media?.thumbnail?.mediaUrl || '', {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    },
+    [setValue],
+  );
+
+  const clearSingleMedia = useCallback(
+    (idPath: string, urlPath: string) => {
+      setValue(idPath as any, undefined, { shouldDirty: true, shouldTouch: true });
+      setValue(urlPath as any, '', { shouldDirty: true, shouldTouch: true });
+    },
+    [setValue],
   );
 
   const handleSaveProductSelection = useCallback(
@@ -189,6 +213,93 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
           title='featured products tag'
           prefix='featuredProductsTag'
         />
+      );
+
+    case 'HERO_TYPE_VIDEO':
+      return (
+        <div className='space-y-5 p-3 lg:p-4'>
+          <Text className='font-bold leading-none' variant='uppercase' size='large'>
+            video
+          </Text>
+          <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
+            <div className='w-full space-y-1 sm:w-auto'>
+              <Text variant='inactive' size='small'>
+                video file
+              </Text>
+              <MediaPreviewWithSelector
+                mediaUrl={entity.video?.mediaUrl || ''}
+                aspectRatio={['16:9']}
+                allowMultiple={false}
+                showVideos={true}
+                alt='video'
+                label='select'
+                purpose='video'
+                heightClass='sm:h-44'
+                onSaveMedia={(media) =>
+                  saveSingleMedia(
+                    `entities.${index}.video.mediaId`,
+                    `entities.${index}.video.mediaUrl`,
+                    media,
+                  )
+                }
+                onClear={() =>
+                  clearSingleMedia(
+                    `entities.${index}.video.mediaId`,
+                    `entities.${index}.video.mediaUrl`,
+                  )
+                }
+              />
+            </div>
+            <div className='w-full space-y-1 sm:w-auto'>
+              <Text variant='inactive' size='small'>
+                poster (optional)
+              </Text>
+              <MediaPreviewWithSelector
+                mediaUrl={entity.video?.posterUrl || ''}
+                aspectRatio={['16:9']}
+                allowMultiple={false}
+                showVideos={false}
+                alt='poster'
+                label='select'
+                purpose='poster'
+                heightClass='sm:h-44'
+                onSaveMedia={(media) =>
+                  saveSingleMedia(
+                    `entities.${index}.video.posterId`,
+                    `entities.${index}.video.posterUrl`,
+                    media,
+                  )
+                }
+                onClear={() =>
+                  clearSingleMedia(
+                    `entities.${index}.video.posterId`,
+                    `entities.${index}.video.posterUrl`,
+                  )
+                }
+              />
+            </div>
+          </div>
+          <div className='flex flex-wrap items-center gap-6'>
+            <ToggleField name={`entities.${index}.video.autoplay`} label='autoplay' />
+            <ToggleField name={`entities.${index}.video.loop`} label='loop' />
+            <ToggleField name={`entities.${index}.video.muted`} label='muted' />
+          </div>
+          <div className='space-y-4'>
+            <InputField
+              name={`entities.${index}.video.ctaLink`}
+              label='CTA link (optional)'
+              placeholder='https://…'
+            />
+            <UnifiedTranslationFields
+              fieldPrefix={`entities.${index}.video.translations`}
+              fields={[
+                { name: 'headline', label: 'headline', type: 'input', required: false },
+                { name: 'ctaText', label: 'CTA text', type: 'input', required: false },
+              ]}
+              editMode
+            />
+          </div>
+        </div>
       );
 
     case 'HERO_TYPE_MARQUEE':

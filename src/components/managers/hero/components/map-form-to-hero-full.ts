@@ -165,6 +165,22 @@ function mapEntity(
         },
       };
 
+    case 'HERO_TYPE_VIDEO':
+      return {
+        ...emptyEntity(e.type),
+        video: {
+          // form keeps only the thumbnail url, so preview shows the poster frame,
+          // not the playing video — full video fidelity is a post-save GetHero pass.
+          media: toMediaFull(e.video?.mediaId, e.video?.mediaUrl),
+          posterMedia: toMediaFull(e.video?.posterId, e.video?.posterUrl),
+          autoplay: e.video?.autoplay ?? true,
+          loop: e.video?.loop ?? true,
+          muted: e.video?.muted ?? true,
+          ctaLink: e.video?.ctaLink ?? undefined,
+          translations: (e.video?.translations || []).map(toCopy),
+        },
+      };
+
     default:
       return emptyEntity(e.type);
   }

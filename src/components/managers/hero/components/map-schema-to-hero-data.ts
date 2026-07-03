@@ -118,6 +118,19 @@ function toInsertEntity(e: any): common_HeroEntityInsert {
           translations: (e.marquee?.translations || []).map(toCopy),
         },
       };
+    case 'HERO_TYPE_VIDEO':
+      return {
+        ...base,
+        video: {
+          mediaId: e.video?.mediaId || 0,
+          posterMediaId: e.video?.posterId || 0,
+          autoplay: e.video?.autoplay ?? true,
+          loop: e.video?.loop ?? true,
+          muted: e.video?.muted ?? true,
+          ctaLink: e.video?.ctaLink || '',
+          translations: (e.video?.translations || []).map(toCopy),
+        },
+      };
     default:
       return base;
   }
@@ -257,6 +270,26 @@ export function mapHeroFullToFormData(
                   e.marquee?.translations?.map((t) => ({
                     languageId: t.languageId || 0,
                     headline: t.headline,
+                  })) || [],
+              },
+            };
+          case 'HERO_TYPE_VIDEO':
+            return {
+              type: e.type,
+              video: {
+                mediaId: e.video?.media?.id || 0,
+                mediaUrl: e.video?.media?.media?.thumbnail?.mediaUrl || '',
+                posterId: e.video?.posterMedia?.id || 0,
+                posterUrl: e.video?.posterMedia?.media?.thumbnail?.mediaUrl || '',
+                autoplay: e.video?.autoplay,
+                loop: e.video?.loop,
+                muted: e.video?.muted,
+                ctaLink: e.video?.ctaLink,
+                translations:
+                  e.video?.translations?.map((t) => ({
+                    languageId: t.languageId || 0,
+                    headline: t.headline,
+                    ctaText: t.ctaText,
                   })) || [],
               },
             };
