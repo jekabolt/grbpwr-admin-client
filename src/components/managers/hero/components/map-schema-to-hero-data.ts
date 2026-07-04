@@ -290,12 +290,23 @@ function readCopy(t: common_HeroCopyTranslation) {
 
 // Read a resolved single/main media pair back into the form's flat id+url fields
 // (thumbnail URL, which is all the form keeps).
+// Read the per-slot presentation modifiers back into the flat form so the
+// toggles show the saved state on edit instead of resetting.
+function readMediaModifiers(m: any) {
+  return {
+    disableOverlay: m?.disableOverlay ?? false,
+    disableTint: m?.disableTint ?? false,
+    stroke: m?.stroke ?? false,
+  };
+}
+
 function readSingle(s?: common_HeroSingleWithTranslations) {
   return {
     mediaLandscapeId: s?.media?.landscape?.id || 0,
     mediaPortraitId: s?.media?.portrait?.id || 0,
     mediaLandscapeUrl: s?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
     mediaPortraitUrl: s?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+    ...readMediaModifiers(s?.media),
     exploreLink: s?.exploreLink,
     translations: (s?.translations || []).map(readCopy),
   };
@@ -325,6 +336,7 @@ export function mapHeroFullToFormData(
                   mediaPortraitId: e.main?.media?.portrait?.id || 0,
                   mediaLandscapeUrl: e.main?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
                   mediaPortraitUrl: e.main?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  ...readMediaModifiers(e.main?.media),
                   exploreLink: e.main?.exploreLink,
                   translations:
                     e.main?.translations?.map((t) => ({
@@ -423,6 +435,7 @@ export function mapHeroFullToFormData(
                   mediaLandscapeUrl:
                     e.statement?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
                   mediaPortraitUrl: e.statement?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  ...readMediaModifiers(e.statement?.media),
                   exploreLink: e.statement?.exploreLink,
                   translations:
                     e.statement?.translations?.map((t) => ({
@@ -441,6 +454,7 @@ export function mapHeroFullToFormData(
                   mediaLandscapeUrl:
                     e.newsletter?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
                   mediaPortraitUrl: e.newsletter?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  ...readMediaModifiers(e.newsletter?.media),
                   translations:
                     e.newsletter?.translations?.map((t) => ({
                       languageId: t.languageId || 0,
@@ -461,6 +475,7 @@ export function mapHeroFullToFormData(
                   mediaPortraitId: e.embed?.fallback?.portrait?.id || 0,
                   mediaLandscapeUrl: e.embed?.fallback?.landscape?.media?.thumbnail?.mediaUrl || '',
                   mediaPortraitUrl: e.embed?.fallback?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  ...readMediaModifiers(e.embed?.fallback),
                   ctaLink: e.embed?.ctaLink,
                   translations:
                     e.embed?.translations?.map((t) => ({
@@ -478,6 +493,7 @@ export function mapHeroFullToFormData(
                   mediaPortraitId: e.drop?.media?.portrait?.id || 0,
                   mediaLandscapeUrl: e.drop?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
                   mediaPortraitUrl: e.drop?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  ...readMediaModifiers(e.drop?.media),
                   releaseAt: e.drop?.releaseAt || '',
                   tag: e.drop?.tag,
                   exploreLink: e.drop?.exploreLink,
@@ -586,6 +602,7 @@ export function mapHeroFullToFormData(
                     e.productSpotlight?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
                   mediaPortraitUrl:
                     e.productSpotlight?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
+                  ...readMediaModifiers(e.productSpotlight?.media),
                   exploreLink: e.productSpotlight?.exploreLink,
                   translations:
                     e.productSpotlight?.translations?.map((t) => ({
