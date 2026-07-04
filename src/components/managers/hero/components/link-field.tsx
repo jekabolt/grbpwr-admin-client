@@ -164,6 +164,7 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
           )}
           <ProductPickerModal
             open={productModalOpen}
+            single
             selectedProductIds={showProduct?.id ? [showProduct.id] : []}
             onOpenRequest={() => setProductModalOpen(true)}
             onClose={() => setProductModalOpen(false)}
@@ -179,43 +180,70 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
 
       {link.type === 'catalog' && <CatalogBody link={link} onChange={update} fieldName={name} />}
 
-      {link.type === 'archive' && <ArchiveBody link={link} onChange={update} fieldName={name} />}
+      {link.type === 'archive' && <ArchiveBody link={link} onChange={update} />}
     </div>
   );
 }
 
-/** Archive picker → serialized into the archive URL by the parent. */
+/** Visual archive picker (thumbnail grid) → serialized into the archive URL. */
 function ArchiveBody({
   link,
   onChange,
-  fieldName,
 }: {
   link: { slug: string };
   onChange: (l: StorefrontLink) => void;
-  fieldName: string;
 }) {
   const { data: archives = [], isLoading } = useArchives();
-  const items = (archives || [])
-    .filter((a) => a.slug)
-    .map((a) => ({
-      value: a.slug as string,
-      label: a.translations?.find((t) => t.heading)?.heading || a.tag || (a.slug as string),
-    }));
-  // Keep the stored slug visible even if it isn't in the fetched page.
-  const hasCurrent = items.some((i) => i.value === link.slug);
-  const allItems =
-    link.slug && !hasCurrent ? [{ value: link.slug, label: link.slug }, ...items] : items;
+  const list = (archives || []).filter((a) => a.slug);
 
   return (
-    <Labeled label='archive'>
-      <Select
-        name={`${fieldName}-archive`}
-        placeholder={isLoading ? 'loading…' : 'select an archive'}
-        value={link.slug || ''}
-        items={allItems}
-        onValueChange={(v: string) => onChange({ type: 'archive', slug: v })}
-      />
-    </Labeled>
+    <div className='space-y-2'>
+      <Text component='label' size='small' variant='label'>
+        archive
+      </Text>
+      {isLoading ? (
+        <Text variant='label' size='small'>
+          loading…
+        </Text>
+      ) : list.length === 0 ? (
+        <Text variant='label' size='small'>
+          no archives found.
+        </Text>
+      ) : (
+        <div className='grid max-h-72 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3'>
+          {list.map((a) => {
+            const slug = a.slug as string;
+            const heading = a.translations?.find((t) => t.heading)?.heading || a.tag || slug;
+            const selected = link.slug === slug;
+            return (
+              <button
+                key={slug}
+                type='button'
+                onClick={() => onChange({ type: 'archive', slug })}
+                aria-pressed={selected}
+                className={cn(
+                  'flex flex-col gap-1 border-2 p-1 text-left cursor-pointer',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                  selected ? 'border-textColor' : 'border-textInactiveColor hover:border-textColor',
+                )}
+              >
+                <div className='aspect-[4/5] w-full overflow-hidden'>
+                  <Media
+                    src={a.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+                    alt={heading}
+                    aspectRatio='4/5'
+                    fit='cover'
+                  />
+                </div>
+                <Text size='small' className='truncate'>
+                  {heading}
+                </Text>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

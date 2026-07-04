@@ -24,6 +24,8 @@ interface ProductsPickerData {
   onClose: () => void;
   onSave: (newSelectedProducts: common_Product[]) => void;
   onOpenRequest?: () => void;
+  /** Single-select mode: radio picker, choosing one replaces any prior pick. */
+  single?: boolean;
 }
 
 export const ProductPickerModal: FC<ProductsPickerData> = ({
@@ -32,6 +34,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   onClose,
   onSave,
   onOpenRequest,
+  single = false,
 }) => {
   const calculateOffset = (page: number, limit: number) => (page - 1) * limit;
 
@@ -92,6 +95,11 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   };
 
   const handleSelectionChange = (product: common_Product) => {
+    if (single) {
+      // One target only — replace any prior pick.
+      setSelectedProducts([product]);
+      return;
+    }
     const isSelected = selectedProducts.some((p) => p.id === product.id);
     if (isSelected) {
       setSelectedProducts((prev) => prev.filter((p) => p.id !== product.id));
@@ -112,7 +120,8 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
           const isSelected = selectedProducts.some((p) => p.id === product.id);
           return (
             <input
-              type='checkbox'
+              type={single ? 'radio' : 'checkbox'}
+              name={single ? 'product-pick' : undefined}
               checked={isSelected}
               onChange={() => handleSelectionChange(product)}
               className='cursor-pointer'
@@ -194,7 +203,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         },
       },
     ],
-    [selectedProducts, categories],
+    [selectedProducts, categories, single],
   );
 
   return (
