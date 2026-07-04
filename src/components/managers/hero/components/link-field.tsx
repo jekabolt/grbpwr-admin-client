@@ -1,17 +1,27 @@
 import { common_Product } from 'api/proto-http/admin';
-import { cn } from 'lib/utility';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import {
   buildStorefrontLink,
+  CatalogLink,
+  GENDER_OPTIONS,
+  ORDER_OPTIONS,
   parseStorefrontLink,
+  SEASON_OPTIONS,
+  SORT_OPTIONS,
   StorefrontLink,
   StorefrontLinkType,
 } from 'lib/storefront-links';
-import { ChangeEvent, useEffect, useState } from 'react';
+import { cn } from 'lib/utility';
+import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import Input from 'ui/components/input';
 import Media from 'ui/components/media';
+import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { ProductPickerModal } from './productPickerModal';
+
+// Radix Select forbids an empty-string item value, so use a sentinel for "any".
+const ANY = '__any';
 
 interface LinkFieldProps {
   /** RHF form path holding the URL string (unchanged contract). */
@@ -165,6 +175,158 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
           />
         </div>
       )}
+
+      {link.type === 'catalog' && <CatalogBody link={link} onChange={update} fieldName={name} />}
+    </div>
+  );
+}
+
+function Labeled({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className='space-y-1'>
+      <Text component='label' size='small' variant='label'>
+        {label}
+      </Text>
+      {children}
+    </div>
+  );
+}
+
+/** Catalog filters + sort → serialized into the catalog URL by the parent. */
+function CatalogBody({
+  link,
+  onChange,
+  fieldName,
+}: {
+  link: CatalogLink;
+  onChange: (l: StorefrontLink) => void;
+  fieldName: string;
+}) {
+  const { dictionary } = useDictionary();
+  const set = (patch: Partial<CatalogLink>) => onChange({ ...link, ...patch });
+
+  const withAny = (items: { value: string; label: string }[], anyLabel = 'any') => [
+    { value: ANY, label: anyLabel },
+    ...items,
+  ];
+
+  const categoryItems = (dictionary?.categories || [])
+    .filter((c) => c.id != null && c.name)
+    .map((c) => ({ value: String(c.id), label: c.name as string }));
+  const collectionItems = (dictionary?.collections || [])
+    .filter((c) => c.name)
+    .map((c) => ({ value: c.name as string, label: c.name as string }));
+
+  return (
+    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+      <Labeled label='gender'>
+        <Select
+          name={`${fieldName}-gender`}
+          placeholder='any'
+          value={link.gender || ANY}
+          items={withAny(GENDER_OPTIONS.map((o) => ({ value: o.value, label: o.label })))}
+          onValueChange={(v: string) =>
+            set({ gender: v === ANY ? undefined : (v as CatalogLink['gender']) })
+          }
+        />
+      </Labeled>
+
+      <Labeled label='category'>
+        <Select
+          name={`${fieldName}-category`}
+          placeholder='any'
+          value={link.categoryId != null ? String(link.categoryId) : ANY}
+          items={withAny(categoryItems)}
+          onValueChange={(v: string) => set({ categoryId: v === ANY ? undefined : Number(v) })}
+        />
+      </Labeled>
+
+      <Labeled label='collection'>
+        <Select
+          name={`${fieldName}-collection`}
+          placeholder='any'
+          value={link.collection || ANY}
+          items={withAny(collectionItems)}
+          onValueChange={(v: string) => set({ collection: v === ANY ? undefined : v })}
+        />
+      </Labeled>
+
+      <Labeled label='tag'>
+        <Input
+          value={link.tag || ''}
+          placeholder='e.g. ss26'
+          className='border px-2 py-1.5'
+          onChange={(e: ChangeEvent<HTMLInputElement>) => set({ tag: e.target.value || undefined })}
+        />
+      </Labeled>
+
+      <Labeled label='season'>
+        <Select
+          name={`${fieldName}-season`}
+          placeholder='any'
+          value={link.season || ANY}
+          items={withAny(SEASON_OPTIONS.map((o) => ({ value: o.value, label: o.label })))}
+          onValueChange={(v: string) =>
+            set({ season: v === ANY ? undefined : (v as CatalogLink['season']) })
+          }
+        />
+      </Labeled>
+
+      <Labeled label='sort by'>
+        <Select
+          name={`${fieldName}-sort`}
+          placeholder='default'
+          value={link.sort || ANY}
+          items={withAny(
+            SORT_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+            'default',
+          )}
+          onValueChange={(v: string) =>
+            set({
+              sort: v === ANY ? undefined : (v as CatalogLink['sort']),
+              order: v === ANY ? undefined : link.order,
+            })
+          }
+        />
+      </Labeled>
+
+      {link.sort && (
+        <Labeled label='order'>
+          <Select
+            name={`${fieldName}-order`}
+            placeholder='descending'
+            value={link.order || ANY}
+            items={withAny(
+              ORDER_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+              'default (desc)',
+            )}
+            onValueChange={(v: string) =>
+              set({ order: v === ANY ? undefined : (v as CatalogLink['order']) })
+            }
+          />
+        </Labeled>
+      )}
+
+      <button
+        type='button'
+        onClick={() => set({ onSale: !link.onSale })}
+        aria-pressed={!!link.onSale}
+        className={cn(
+          'flex items-center gap-2 self-end border px-2 py-1.5 cursor-pointer',
+          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+          link.onSale ? 'border-textColor' : 'border-textInactiveColor',
+        )}
+      >
+        <span
+          className={cn(
+            'inline-block h-3 w-3 border',
+            link.onSale ? 'border-textColor bg-textColor' : 'border-textInactiveColor',
+          )}
+        />
+        <Text size='small' variant='uppercase'>
+          on sale only
+        </Text>
+      </button>
     </div>
   );
 }
