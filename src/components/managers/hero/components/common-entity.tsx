@@ -31,7 +31,13 @@ const TRANSLATION_CONFIGS = {
   ],
   double: [
     { name: 'headline', label: 'headline', type: 'input' as const, required: false, maxLength: 39 },
-    { name: 'exploreText', label: 'explore text', type: 'input' as const, maxLength: 39 },
+    {
+      name: 'exploreText',
+      label: 'explore text',
+      type: 'input' as const,
+      required: false,
+      maxLength: 39,
+    },
   ],
 };
 

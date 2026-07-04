@@ -225,8 +225,8 @@ const heroEntitySchema = z.discriminatedUnion('type', [
               headline: z.string().max(39, 'Headline must be at most 39 characters').optional(),
               exploreText: z
                 .string()
-                .min(1, 'Explore text is required')
-                .max(39, 'Explore text must be at most 39 characters'),
+                .max(39, 'Explore text must be at most 39 characters')
+                .optional(),
             }),
             requiredLanguageIds,
           ),
@@ -252,8 +252,8 @@ const heroEntitySchema = z.discriminatedUnion('type', [
               headline: z.string().max(39, 'Headline must be at most 39 characters').optional(),
               exploreText: z
                 .string()
-                .min(1, 'Explore text is required')
-                .max(39, 'Explore text must be at most 39 characters'),
+                .max(39, 'Explore text must be at most 39 characters')
+                .optional(),
             }),
             requiredLanguageIds,
           ),
