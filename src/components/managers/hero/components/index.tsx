@@ -20,7 +20,7 @@ import { useHero, useSaveHero } from './useHero';
 import { useProductSelection } from './useProductSelection';
 
 export function Hero() {
-  const { data: heroData, isLoading } = useHero();
+  const { data: heroData, isLoading, isError, refetch } = useHero();
   const saveHero = useSaveHero();
   const { showMessage } = useSnackBarStore();
   const entityRefs = useRef<{ [uid: string]: HTMLDivElement | null }>({});
@@ -235,7 +235,7 @@ export function Hero() {
               variant='main'
               type='button'
               onClick={handlePublishClick}
-              disabled={isLoading || form.formState.isSubmitting || saveHero.isPending}
+              disabled={isLoading || isError || form.formState.isSubmitting || saveHero.isPending}
               loading={saveHero.isPending}
               className='uppercase'
             >
@@ -249,6 +249,16 @@ export function Hero() {
             <Text variant='inactive' className='animate-pulse'>
               loading hero…
             </Text>
+          </div>
+        ) : isError ? (
+          <div className='flex flex-col items-center gap-3 py-20'>
+            <Text variant='error'>couldn&apos;t load the hero.</Text>
+            <Text variant='label' size='small'>
+              publishing is disabled until it loads, so the live hero isn&apos;t overwritten.
+            </Text>
+            <Button type='button' variant='secondary' size='lg' onClick={() => refetch()}>
+              retry
+            </Button>
           </div>
         ) : (
           <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
