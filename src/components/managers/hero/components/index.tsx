@@ -5,6 +5,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { BlockEditorModal } from './block-editor-modal';
@@ -31,6 +32,11 @@ export function Hero() {
   const [pendingNewUid, setPendingNewUid] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [publishSummary, setPublishSummary] = useState<{ live: number; incomplete: number }>({
+    live: 0,
+    incomplete: 0,
+  });
   const isResettingRef = useRef(false);
   const heroZodResolver = useMemo(() => zodResolver(heroSchema) as any, []);
 
@@ -130,6 +136,34 @@ export function Hero() {
     }
   }
 
+  // Pre-flight before publishing: validate everything (so every incomplete block
+  // gets flagged in the rail), tally live vs incomplete blocks, then open the
+  // confirm/summary. Publishing overwrites the live storefront hero.
+  const handlePublishClick = async () => {
+    await form.trigger();
+    const values = form.getValues();
+    const liveEntities = (values.entities || []).filter(
+      (e: any) => !deletedIndicesRef.current.has(e._uid),
+    );
+    const result = heroSchema.safeParse({ ...values, entities: liveEntities });
+    const incompleteUids = new Set<string>();
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        if (issue.path[0] === 'entities' && typeof issue.path[1] === 'number') {
+          const uid = (liveEntities[issue.path[1]] as any)?._uid;
+          if (uid) incompleteUids.add(uid);
+        }
+      }
+    }
+    setPublishSummary({ live: liveEntities.length, incomplete: incompleteUids.size });
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmPublish = () => {
+    setConfirmOpen(false);
+    form.handleSubmit(handleSubmit, onError)();
+  };
+
   function onError(errors: any) {
     // log RHF-level errors
     console.log('Validation errors (RHF):', errors);
@@ -199,7 +233,8 @@ export function Hero() {
             <Button
               size='lg'
               variant='main'
-              type='submit'
+              type='button'
+              onClick={handlePublishClick}
               disabled={isLoading || form.formState.isSubmitting || saveHero.isPending}
               loading={saveHero.isPending}
               className='uppercase'
@@ -278,6 +313,33 @@ export function Hero() {
         <HeroSectionModal open={navOpen} onOpenChange={setNavOpen} title='nav featured'>
           <NavFeatured hero={heroData?.hero} />
         </HeroSectionModal>
+
+        <ConfirmationModal
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          onConfirm={handleConfirmPublish}
+          title='publish hero'
+          confirmLabel='publish'
+          cancelLabel='cancel'
+          confirmDisabled={publishSummary.incomplete > 0}
+        >
+          <div className='space-y-2'>
+            <Text>
+              {publishSummary.live === 0
+                ? 'this publishes an empty hero (no blocks) to the live storefront.'
+                : `this replaces the live storefront hero with ${publishSummary.live} block${
+                    publishSummary.live === 1 ? '' : 's'
+                  }.`}
+            </Text>
+            {publishSummary.incomplete > 0 && (
+              <Text variant='error'>
+                {publishSummary.incomplete} block
+                {publishSummary.incomplete === 1 ? ' is' : 's are'} incomplete — fix the flagged (!)
+                block{publishSummary.incomplete === 1 ? '' : 's'} in the rail first.
+              </Text>
+            )}
+          </div>
+        </ConfirmationModal>
       </form>
     </Form>
   );
