@@ -264,7 +264,13 @@ export function Hero() {
             <Text variant='uppercase' size='large'>
               hero
             </Text>
-            {hasUserMadeChanges && <Text variant='inactive'>unsaved changes</Text>}
+            {hasUserMadeChanges && (
+              <span className='border border-warning px-1.5 py-0.5 leading-none'>
+                <Text size='small' variant='uppercase' className='text-warning'>
+                  unsaved changes
+                </Text>
+              </span>
+            )}
           </div>
           <div className='flex items-center gap-2'>
             <Button
