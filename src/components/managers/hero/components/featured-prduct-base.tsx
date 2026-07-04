@@ -2,6 +2,7 @@ import { ProductPickerModal } from 'components/managers/hero/components/productP
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
+import { LinkField } from './link-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { HeroProductEntityInterface } from '../utility/interface';
 import { HeroProductTable } from './heroProductsTable';
@@ -60,11 +61,7 @@ export function FeaturedProductBase({
         fields={FEATURED_PRODUCTS_TRANSLATION_FIELDS}
         editMode={true}
       />
-      <InputField
-        name={`entities.${index}.${prefix}.exploreLink`}
-        label='explore link (optional)'
-        placeholder='https://…'
-      />
+      <LinkField name={`entities.${index}.${prefix}.exploreLink`} label='explore link (optional)' />
 
       {isLoadingProducts && prefix?.includes('featuredProductsTag') ? (
         <div className='py-8 text-center'>
