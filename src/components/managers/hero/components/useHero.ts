@@ -36,8 +36,8 @@ export function useSaveHero() {
       queryClient.invalidateQueries({ queryKey: heroKeys.detail() });
     },
     onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'Failed to save hero';
-      showMessage(msg, 'error');
+      const msg = error instanceof Error ? error.message : 'unknown error';
+      showMessage(`couldn't publish hero — ${msg}`, 'error');
     },
   });
 }

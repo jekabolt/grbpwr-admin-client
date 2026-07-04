@@ -9,11 +9,23 @@ const TRANSLATION_CONFIGS = {
   main: [
     { name: 'headline', label: 'headline', type: 'input' as const },
     { name: 'tag', label: 'tag', type: 'input' as const, required: false },
-    { name: 'description', label: 'description', type: 'textarea' as const, rows: 3, maxLength: 138 },
+    {
+      name: 'description',
+      label: 'description',
+      type: 'textarea' as const,
+      rows: 3,
+      maxLength: 138,
+    },
     { name: 'exploreText', label: 'explore text', type: 'input' as const },
   ],
   single: [
-    { name: 'headline', label: 'headline', type: 'input' as const, required: false, maxLength: 117 },
+    {
+      name: 'headline',
+      label: 'headline',
+      type: 'input' as const,
+      required: false,
+      maxLength: 117,
+    },
     { name: 'exploreText', label: 'explore text', type: 'input' as const, maxLength: 39 },
   ],
   double: [
@@ -62,7 +74,7 @@ export function CommonEntity({
       {!isDoubleAd ? (
         <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
           <div className='w-full space-y-1 sm:w-auto'>
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               landscape
             </Text>
             <MediaPreviewWithSelector
@@ -73,13 +85,13 @@ export function CommonEntity({
               alt='Landscape preview'
               label='select'
               purpose='landscape'
-              heightClass='sm:h-44'
+              heightClass='h-44'
               onSaveMedia={(media) => onSaveMedia(media, 'Landscape')}
               onClear={onClearMedia ? () => onClearMedia('Landscape') : undefined}
             />
           </div>
           <div className='w-full space-y-1 sm:w-auto'>
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               portrait
             </Text>
             <MediaPreviewWithSelector
@@ -90,7 +102,7 @@ export function CommonEntity({
               alt='Portrait preview'
               label='select'
               purpose='portrait'
-              heightClass='sm:h-44'
+              heightClass='h-44'
               onSaveMedia={(media) => onSaveMedia(media, 'Portrait')}
               onClear={onClearMedia ? () => onClearMedia('Portrait') : undefined}
             />
@@ -98,7 +110,7 @@ export function CommonEntity({
         </div>
       ) : (
         <div className='w-full space-y-1 sm:w-auto'>
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             media
           </Text>
           <MediaPreviewWithSelector
@@ -109,7 +121,7 @@ export function CommonEntity({
             alt='Media preview'
             label='select'
             purpose='media'
-            heightClass='sm:h-44'
+            heightClass='h-44'
             onSaveMedia={(media) => {
               onSaveMedia(media, 'Landscape');
               onSaveMedia(media, 'Portrait');
@@ -130,8 +142,8 @@ export function CommonEntity({
       <div className='space-y-4'>
         <InputField
           name={`${prefix}.exploreLink` as any}
-          label='explore link'
-          placeholder='Enter explore link'
+          label='explore link (optional)'
+          placeholder='https://…'
         />
 
         <UnifiedTranslationFields

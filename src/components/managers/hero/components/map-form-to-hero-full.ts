@@ -1,6 +1,8 @@
 import {
+  common_HeroCopyTranslation,
   common_HeroEntityWithTranslations,
   common_HeroFullWithTranslations,
+  common_HeroMediaFull,
   common_HeroSingleWithTranslations,
   common_MediaFull,
   common_NavFeaturedEntityWithTranslations,
@@ -51,17 +53,38 @@ function toMediaFull(id?: number, url?: string | null): common_MediaFull | undef
   };
 }
 
-/** single / double.left / double.right share one shape. */
+// The form's flat portrait/landscape id+url pair → the contract's nested HeroMediaFull.
+function toMediaPair(s: any): common_HeroMediaFull {
+  return {
+    portrait: toMediaFull(s?.mediaPortraitId, s?.mediaPortraitUrl),
+    landscape: toMediaFull(s?.mediaLandscapeId, s?.mediaLandscapeUrl),
+    disableOverlay: s?.disableOverlay ?? false,
+  };
+}
+
+// The form keeps copy flat; the contract uses one shared HeroCopyTranslation.
+// The form's `description` (main) maps to `body` per the proto contract comment.
+function toCopy(t: any): common_HeroCopyTranslation {
+  return {
+    languageId: t.languageId,
+    tag: t.tag ?? undefined,
+    headline: t.headline ?? undefined,
+    subhead: t.subhead ?? undefined,
+    body: t.body ?? t.description ?? undefined,
+    ctaText: t.ctaText ?? undefined,
+    exploreText: t.exploreText ?? undefined,
+    caption: t.caption ?? undefined,
+    placeholder: t.placeholder ?? undefined,
+    successText: t.successText ?? undefined,
+  };
+}
+
+/** single / double.left / double.right / main share one shape. */
 function toSingle(s: any): common_HeroSingleWithTranslations {
   return {
-    mediaLandscape: toMediaFull(s?.mediaLandscapeId, s?.mediaLandscapeUrl),
-    mediaPortrait: toMediaFull(s?.mediaPortraitId, s?.mediaPortraitUrl),
+    media: toMediaPair(s),
     exploreLink: s?.exploreLink ?? undefined,
-    translations: (s?.translations || []).map((t: any) => ({
-      languageId: t.languageId,
-      headline: t.headline ?? undefined,
-      exploreText: t.exploreText ?? undefined,
-    })),
+    translations: (s?.translations || []).map(toCopy),
   };
 }
 
@@ -74,6 +97,21 @@ function emptyEntity(type: any): common_HeroEntityWithTranslations {
     featuredProducts: undefined,
     featuredProductsTag: undefined,
     featuredArchive: undefined,
+    embed: undefined,
+    drop: undefined,
+    lastChance: undefined,
+    marquee: undefined,
+    newArrivals: undefined,
+    slideshow: undefined,
+    mosaic: undefined,
+    split: undefined,
+    video: undefined,
+    productSpotlight: undefined,
+    newsletter: undefined,
+    statement: undefined,
+    lookbook: undefined,
+    audience: undefined,
+    minTierId: undefined,
   };
 }
 
@@ -81,70 +119,192 @@ function mapEntity(
   e: any,
   productsByUid: Record<string, any[]>,
 ): common_HeroEntityWithTranslations {
-  switch (e.type) {
-    case 'HERO_TYPE_MAIN':
-      return {
-        ...emptyEntity(e.type),
-        main: {
-          single: {
-            mediaLandscape: toMediaFull(e.main?.mediaLandscapeId, e.main?.mediaLandscapeUrl),
-            mediaPortrait: toMediaFull(e.main?.mediaPortraitId, e.main?.mediaPortraitUrl),
-            exploreLink: e.main?.exploreLink ?? undefined,
-            translations: [],
+  const mapped: common_HeroEntityWithTranslations = (() => {
+    switch (e.type) {
+      case 'HERO_TYPE_MAIN':
+        return { ...emptyEntity(e.type), main: toSingle(e.main) };
+
+      case 'HERO_TYPE_SINGLE':
+        return { ...emptyEntity(e.type), single: toSingle(e.single) };
+
+      case 'HERO_TYPE_DOUBLE':
+        return {
+          ...emptyEntity(e.type),
+          double: { left: toSingle(e.double?.left), right: toSingle(e.double?.right) },
+        };
+
+      case 'HERO_TYPE_FEATURED_PRODUCTS':
+        return {
+          ...emptyEntity(e.type),
+          featuredProducts: {
+            products: productsByUid[e._uid] || [],
+            exploreLink: e.featuredProducts?.exploreLink ?? undefined,
+            translations: (e.featuredProducts?.translations || []).map(toCopy),
           },
-          translations: (e.main?.translations || []).map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline ?? undefined,
-            tag: t.tag ?? undefined,
-            description: t.description ?? undefined,
-            exploreText: t.exploreText ?? undefined,
-          })),
-        },
-      };
+        };
 
-    case 'HERO_TYPE_SINGLE':
-      return { ...emptyEntity(e.type), single: toSingle(e.single) };
+      case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
+        return {
+          ...emptyEntity(e.type),
+          featuredProductsTag: {
+            tag: e.featuredProductsTag?.tag ?? undefined,
+            // products for a tag block are resolved by the backend from the tag;
+            // the form has no resolved list, so the preview renders it empty until
+            // the tag-products cache is wired in (later pass).
+            products: undefined,
+            translations: (e.featuredProductsTag?.translations || []).map(toCopy),
+          },
+        };
 
-    case 'HERO_TYPE_DOUBLE':
-      return {
-        ...emptyEntity(e.type),
-        double: { left: toSingle(e.double?.left), right: toSingle(e.double?.right) },
-      };
+      case 'HERO_TYPE_MARQUEE':
+        return {
+          ...emptyEntity(e.type),
+          marquee: {
+            link: e.marquee?.link ?? undefined,
+            speed: e.marquee?.speed ?? undefined,
+            translations: (e.marquee?.translations || []).map(toCopy),
+          },
+        };
 
-    case 'HERO_TYPE_FEATURED_PRODUCTS':
-      return {
-        ...emptyEntity(e.type),
-        featuredProducts: {
-          products: productsByUid[e._uid] || [],
-          exploreLink: e.featuredProducts?.exploreLink ?? undefined,
-          translations: (e.featuredProducts?.translations || []).map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline ?? undefined,
-            exploreText: t.exploreText ?? undefined,
-          })),
-        },
-      };
+      case 'HERO_TYPE_VIDEO':
+        return {
+          ...emptyEntity(e.type),
+          video: {
+            // form keeps only the thumbnail url, so preview shows the poster frame,
+            // not the playing video — full video fidelity is a post-save GetHero pass.
+            media: toMediaFull(e.video?.mediaId, e.video?.mediaUrl),
+            posterMedia: toMediaFull(e.video?.posterId, e.video?.posterUrl),
+            autoplay: e.video?.autoplay ?? true,
+            loop: e.video?.loop ?? true,
+            muted: e.video?.muted ?? true,
+            ctaLink: e.video?.ctaLink ?? undefined,
+            translations: (e.video?.translations || []).map(toCopy),
+          },
+        };
 
-    case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
-      return {
-        ...emptyEntity(e.type),
-        featuredProductsTag: {
-          tag: e.featuredProductsTag?.tag ?? undefined,
-          // products for a tag block are resolved by the backend from the tag;
-          // the form has no resolved list, so the preview renders it empty until
-          // the tag-products cache is wired in (later pass).
-          products: undefined,
-          translations: (e.featuredProductsTag?.translations || []).map((t: any) => ({
-            languageId: t.languageId,
-            headline: t.headline ?? undefined,
-            exploreText: t.exploreText ?? undefined,
-          })),
-        },
-      };
+      case 'HERO_TYPE_STATEMENT':
+        return {
+          ...emptyEntity(e.type),
+          statement: {
+            media: toMediaPair(e.statement),
+            exploreLink: e.statement?.exploreLink ?? undefined,
+            translations: (e.statement?.translations || []).map(toCopy),
+          },
+        };
 
-    default:
-      return emptyEntity(e.type);
-  }
+      case 'HERO_TYPE_NEWSLETTER':
+        return {
+          ...emptyEntity(e.type),
+          newsletter: {
+            media: toMediaPair(e.newsletter),
+            translations: (e.newsletter?.translations || []).map(toCopy),
+          },
+        };
+
+      case 'HERO_TYPE_EMBED':
+        return {
+          ...emptyEntity(e.type),
+          embed: {
+            embedUrl: e.embed?.embedUrl ?? undefined,
+            fallback: toMediaPair(e.embed),
+            ctaLink: e.embed?.ctaLink ?? undefined,
+            translations: (e.embed?.translations || []).map(toCopy),
+          },
+        };
+
+      case 'HERO_TYPE_DROP':
+        return {
+          ...emptyEntity(e.type),
+          drop: {
+            media: toMediaPair(e.drop),
+            releaseAt: e.drop?.releaseAt || undefined,
+            exploreLink: e.drop?.exploreLink ?? undefined,
+            tag: e.drop?.tag ?? undefined,
+            translations: (e.drop?.translations || []).map(toCopy),
+          },
+        };
+
+      case 'HERO_TYPE_LAST_CHANCE':
+        return {
+          ...emptyEntity(e.type),
+          lastChance: {
+            // products are backend-resolved from stock; unavailable in the editor,
+            // so the preview renders the copy without product tiles.
+            products: undefined,
+            exploreLink: e.lastChance?.exploreLink ?? undefined,
+            translations: (e.lastChance?.translations || []).map(toCopy),
+          },
+        };
+
+      case 'HERO_TYPE_NEW_ARRIVALS':
+        return {
+          ...emptyEntity(e.type),
+          newArrivals: {
+            // backend-resolved by created_at; not available in the editor preview.
+            products: undefined,
+            exploreLink: e.newArrivals?.exploreLink ?? undefined,
+            translations: (e.newArrivals?.translations || []).map(toCopy),
+          },
+        };
+
+      case 'HERO_TYPE_SLIDESHOW':
+        return {
+          ...emptyEntity(e.type),
+          slideshow: {
+            slides: (e.slideshow?.slides || []).map(toSingle),
+            intervalMs: e.slideshow?.intervalMs ?? undefined,
+          },
+        };
+
+      case 'HERO_TYPE_MOSAIC':
+        return {
+          ...emptyEntity(e.type),
+          mosaic: {
+            tiles: (e.mosaic?.tiles || []).map(toSingle),
+            columns: e.mosaic?.columns ?? undefined,
+          },
+        };
+
+      case 'HERO_TYPE_LOOKBOOK':
+        return {
+          ...emptyEntity(e.type),
+          lookbook: {
+            frames: (e.lookbook?.frames || []).map(toSingle),
+            exploreLink: e.lookbook?.exploreLink ?? undefined,
+            translations: (e.lookbook?.translations || []).map(toCopy),
+          },
+        };
+
+      case 'HERO_TYPE_SPLIT':
+        return {
+          ...emptyEntity(e.type),
+          split: {
+            media: toSingle(e.split?.media),
+            products: productsByUid[e._uid] || [],
+            mediaLeft: e.split?.mediaLeft ?? true,
+          },
+        };
+
+      case 'HERO_TYPE_PRODUCT_SPOTLIGHT':
+        return {
+          ...emptyEntity(e.type),
+          productSpotlight: {
+            product: (productsByUid[e._uid] || [])[0],
+            media: toMediaPair(e.productSpotlight),
+            exploreLink: e.productSpotlight?.exploreLink ?? undefined,
+            translations: (e.productSpotlight?.translations || []).map(toCopy),
+          },
+        };
+
+      default:
+        return emptyEntity(e.type);
+    }
+  })();
+  return {
+    ...mapped,
+    audience: e.audience ?? undefined,
+    minTierId: e.minTierId ?? undefined,
+  };
 }
 
 function mapNav(n: any): common_NavFeaturedEntityWithTranslations {

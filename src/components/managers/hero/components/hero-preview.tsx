@@ -41,7 +41,11 @@ export function HeroPreview({
 }: HeroPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [view, setView] = useState<'desktop' | 'mobile'>('desktop');
+  // Default to the mobile viewport on small screens (a scaled-down desktop frame
+  // is tiny in a phone-width panel); the user can still toggle.
+  const [view, setView] = useState<'desktop' | 'mobile'>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 1024 ? 'mobile' : 'desktop',
+  );
   const [locale, setLocale] = useState('en');
   const [containerWidth, setContainerWidth] = useState(0);
 
@@ -116,7 +120,7 @@ export function HeroPreview({
               key={l.code}
               type='button'
               variant={locale === l.code ? 'main' : 'secondary'}
-              className='cursor-pointer px-2 py-0.5'
+              className='cursor-pointer px-2 py-1'
               aria-pressed={locale === l.code}
               onClick={() => setLocale(l.code)}
             >
@@ -144,6 +148,13 @@ export function HeroPreview({
               border: 0,
             }}
           />
+          {(!hero.entities || hero.entities.length === 0) && (
+            <div className='absolute inset-0 z-10 flex items-center justify-center bg-bgColor/85 p-4 text-center'>
+              <Text variant='label' size='small'>
+                no blocks yet — add one with “+ add block” to preview it here.
+              </Text>
+            </div>
+          )}
         </div>
       </div>
     </div>

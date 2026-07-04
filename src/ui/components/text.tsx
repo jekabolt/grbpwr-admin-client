@@ -12,6 +12,8 @@ const textVariants = cva('', {
       strikethrough: ['line-through', 'text-text'],
       strileTroughInactive: ['line-through', 'text-inactive'],
       inactive: ['text-textInactiveColor'],
+      // Readable secondary text for functional field labels/hints (AA on white).
+      label: ['text-labelColor'],
     },
     size: {
       default: ['text-textBaseSize'],
