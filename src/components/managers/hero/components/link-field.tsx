@@ -18,6 +18,7 @@ import Input from 'ui/components/input';
 import Media from 'ui/components/media';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
+import { useArchives } from '../../archives/components/useArchiveQuery';
 import { ProductPickerModal } from './productPickerModal';
 
 // Radix Select forbids an empty-string item value, so use a sentinel for "any".
@@ -177,7 +178,44 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
       )}
 
       {link.type === 'catalog' && <CatalogBody link={link} onChange={update} fieldName={name} />}
+
+      {link.type === 'archive' && <ArchiveBody link={link} onChange={update} fieldName={name} />}
     </div>
+  );
+}
+
+/** Archive picker → serialized into the archive URL by the parent. */
+function ArchiveBody({
+  link,
+  onChange,
+  fieldName,
+}: {
+  link: { slug: string };
+  onChange: (l: StorefrontLink) => void;
+  fieldName: string;
+}) {
+  const { data: archives = [], isLoading } = useArchives();
+  const items = (archives || [])
+    .filter((a) => a.slug)
+    .map((a) => ({
+      value: a.slug as string,
+      label: a.translations?.find((t) => t.heading)?.heading || a.tag || (a.slug as string),
+    }));
+  // Keep the stored slug visible even if it isn't in the fetched page.
+  const hasCurrent = items.some((i) => i.value === link.slug);
+  const allItems =
+    link.slug && !hasCurrent ? [{ value: link.slug, label: link.slug }, ...items] : items;
+
+  return (
+    <Labeled label='archive'>
+      <Select
+        name={`${fieldName}-archive`}
+        placeholder={isLoading ? 'loading…' : 'select an archive'}
+        value={link.slug || ''}
+        items={allItems}
+        onValueChange={(v: string) => onChange({ type: 'archive', slug: v })}
+      />
+    </Labeled>
   );
 }
 
