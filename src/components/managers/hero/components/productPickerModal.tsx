@@ -63,7 +63,8 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
           sortFactors: ['SORT_FACTOR_CREATED_AT'],
           orderFactor: 'ORDER_FACTOR_DESC',
           filterConditions: undefined,
-          showHidden: true,
+          // Hidden products must not be featurable in the hero.
+          showHidden: false,
         });
         if (Array.isArray(response.products)) {
           setAllProducts((prevProducts) => {
