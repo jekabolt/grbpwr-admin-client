@@ -8,6 +8,30 @@ import { BlockEditor } from './block-editor';
 import { HeroSchema } from './schema';
 import { ProductSelectionApi } from './useProductSelection';
 
+// True if a block has any user-entered content worth guarding against an
+// accidental Esc / click-outside discard: a set media id, a non-empty string, a
+// set number, or any non-empty nested value. The type/_uid/languageId keys,
+// seeded-empty translation strings, and boolean toggles don't count.
+function hasContent(entity: any): boolean {
+  const scan = (v: any): boolean => {
+    if (v == null) return false;
+    if (typeof v === 'string') return v.trim().length > 0;
+    if (typeof v === 'number') return true;
+    if (typeof v === 'boolean') return false;
+    if (Array.isArray(v)) return v.some(scan);
+    if (typeof v === 'object') {
+      return Object.entries(v).some(([k, val]) =>
+        k === 'languageId' || k === '_uid' || k === 'type' ? false : scan(val),
+      );
+    }
+    return false;
+  };
+  if (!entity) return false;
+  return Object.entries(entity).some(([k, val]) =>
+    k === 'type' || k === '_uid' ? false : scan(val),
+  );
+}
+
 interface BlockEditorModalProps {
   /** uid of the block being edited, or null when closed. */
   editingUid: string | null;
@@ -56,7 +80,17 @@ export function BlockEditorModal({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-50 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col border border-textInactiveColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[1040px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'>
+        <DialogPrimitives.Content
+          className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col border border-textInactiveColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[1040px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'
+          onEscapeKeyDown={(e) => {
+            // Don't let Esc silently discard a half-built new block.
+            if (isNew && hasContent(entity)) e.preventDefault();
+          }}
+          onInteractOutside={(e) => {
+            // Same for a click / focus outside the modal.
+            if (isNew && hasContent(entity)) e.preventDefault();
+          }}
+        >
           <DialogPrimitives.Title className='sr-only'>
             edit {typeLabel} block
           </DialogPrimitives.Title>
