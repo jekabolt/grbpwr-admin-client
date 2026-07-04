@@ -45,7 +45,10 @@ export function Hero() {
       return heroZodResolver(filteredValues, context, options);
     },
     defaultValues: defaultData as HeroSchema,
-    mode: 'onSubmit',
+    // Validate on blur (then re-validate on change) so incomplete-block badges in
+    // the rail and inline field errors surface as the user edits, not only after a
+    // failed publish.
+    mode: 'onTouched',
   });
 
   useBlockNavigation(hasUserMadeChanges);
