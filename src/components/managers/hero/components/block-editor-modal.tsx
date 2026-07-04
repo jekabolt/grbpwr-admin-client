@@ -16,6 +16,8 @@ interface BlockEditorModalProps {
   isNew?: boolean;
   /** Confirm/keep the new block (leaves it in the list). */
   onConfirm?: () => void;
+  /** Clone this block (deep copy under a fresh uid); shown for existing blocks. */
+  onDuplicate?: (uid: string) => void;
 }
 
 /**
@@ -31,6 +33,7 @@ export function BlockEditorModal({
   featuredProducts,
   isNew = false,
   onConfirm,
+  onDuplicate,
 }: BlockEditorModalProps) {
   const { control } = useFormContext<HeroSchema>();
   const entities = (useWatch({ control, name: 'entities' }) || []) as any[];
@@ -90,11 +93,24 @@ export function BlockEditorModal({
                   </Button>
                 </>
               ) : (
-                <DialogPrimitives.Close asChild>
-                  <Button type='button' variant='main' size='lg' className='cursor-pointer'>
-                    done
-                  </Button>
-                </DialogPrimitives.Close>
+                <>
+                  {onDuplicate && editingUid && (
+                    <Button
+                      type='button'
+                      variant='secondary'
+                      size='lg'
+                      className='cursor-pointer'
+                      onClick={() => onDuplicate(editingUid)}
+                    >
+                      duplicate
+                    </Button>
+                  )}
+                  <DialogPrimitives.Close asChild>
+                    <Button type='button' variant='main' size='lg' className='cursor-pointer'>
+                      done
+                    </Button>
+                  </DialogPrimitives.Close>
+                </>
               )}
             </div>
           </div>

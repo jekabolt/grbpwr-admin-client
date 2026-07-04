@@ -4,6 +4,7 @@ import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
+import { v4 as uuidv4 } from 'uuid';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
@@ -84,7 +85,7 @@ export function Hero() {
     return () => subscription.unsubscribe();
   }, [form]);
 
-  const { append, remove, move } = useFieldArray({
+  const { append, remove, move, insert } = useFieldArray({
     control: form.control,
     name: 'entities',
   });
@@ -108,6 +109,25 @@ export function Hero() {
       if (uid) setEditingUid(uid);
     },
     [form],
+  );
+
+  // Clone a block: deep-copy its form values under a fresh uid, copy its
+  // resolved-product display cache to that uid, insert it right after the
+  // original, and open the copy for editing (kept on close, not a pendingNew).
+  const handleDuplicate = useCallback(
+    (uid: string) => {
+      const list = form.getValues().entities || [];
+      const idx = list.findIndex((e: any) => e._uid === uid);
+      if (idx < 0) return;
+      const clone = JSON.parse(JSON.stringify(list[idx]));
+      const newUid = uuidv4();
+      clone._uid = newUid;
+      insert(idx + 1, clone);
+      const prods = featuredProducts.products[uid];
+      if (prods?.length) featuredProducts.saveSelection([...prods], newUid);
+      setEditingUid(newUid);
+    },
+    [form, insert, featuredProducts],
   );
 
   async function handleSubmit(data: HeroSchema) {
@@ -305,6 +325,7 @@ export function Hero() {
             setPendingNewUid(null);
             setEditingUid(null);
           }}
+          onDuplicate={handleDuplicate}
           featuredProducts={featuredProducts}
         />
 
