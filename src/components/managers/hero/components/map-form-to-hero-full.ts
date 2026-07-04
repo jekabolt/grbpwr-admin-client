@@ -150,10 +150,14 @@ function mapEntity(
           ...emptyEntity(e.type),
           featuredProductsTag: {
             tag: e.featuredProductsTag?.tag ?? undefined,
-            // products for a tag block are resolved by the backend from the tag;
-            // the form has no resolved list, so the preview renders it empty until
-            // the tag-products cache is wired in (later pass).
-            products: undefined,
+            // Products are resolved by tag (useProductsByTag) and merged into
+            // productsByUid by the preview panel, keyed by this block's uid. The
+            // read model nests them under a HeroFeaturedProducts shape.
+            products: {
+              products: productsByUid[e._uid] || [],
+              exploreLink: e.featuredProductsTag?.exploreLink ?? undefined,
+              translations: (e.featuredProductsTag?.translations || []).map(toCopy),
+            },
             translations: (e.featuredProductsTag?.translations || []).map(toCopy),
           },
         };
