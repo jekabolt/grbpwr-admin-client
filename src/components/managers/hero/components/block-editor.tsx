@@ -9,6 +9,7 @@ import { MediaPreviewWithSelector } from '../../media/components/media-preview-w
 import { CommonEntity } from './common-entity';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroProductPicker } from './hero-product-picker';
+import { LinkField } from './link-field';
 import { MediaPairField } from './media-pair-field';
 import { ReleaseDateField } from './release-date-field';
 import { SlideListField } from './slide-list-field';
@@ -291,11 +292,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               <ToggleField name={`entities.${index}.video.muted`} label='muted' />
             </div>
             <div className='space-y-4'>
-              <InputField
-                name={`entities.${index}.video.ctaLink`}
-                label='CTA link (optional)'
-                placeholder='https://…'
-              />
+              <LinkField name={`entities.${index}.video.ctaLink`} label='CTA link (optional)' />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.video.translations`}
                 fields={[
@@ -315,11 +312,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               marquee
             </Text>
             <div className='space-y-4'>
-              <InputField
-                name={`entities.${index}.marquee.link`}
-                label='link (optional)'
-                placeholder='https://…'
-              />
+              <LinkField name={`entities.${index}.marquee.link`} label='link (optional)' />
               <InputField
                 name={`entities.${index}.marquee.speed`}
                 label='speed (optional)'
@@ -349,10 +342,9 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               optional
             />
             <div className='space-y-4'>
-              <InputField
+              <LinkField
                 name={`entities.${index}.statement.exploreLink`}
                 label='explore link (optional)'
-                placeholder='https://…'
               />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.statement.translations`}
@@ -444,11 +436,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               />
             </div>
             <div className='space-y-4'>
-              <InputField
-                name={`entities.${index}.embed.ctaLink`}
-                label='CTA link (optional)'
-                placeholder='https://…'
-              />
+              <LinkField name={`entities.${index}.embed.ctaLink`} label='CTA link (optional)' />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.embed.translations`}
                 fields={[
@@ -489,10 +477,9 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                 label='collection tag (optional)'
                 placeholder='e.g. ss26-drop'
               />
-              <InputField
+              <LinkField
                 name={`entities.${index}.drop.exploreLink`}
                 label='explore link (optional, shown after release)'
-                placeholder='https://…'
               />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.drop.translations`}
@@ -544,10 +531,9 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                 valueAsNumber
                 placeholder='e.g. 8'
               />
-              <InputField
+              <LinkField
                 name={`entities.${index}.lastChance.exploreLink`}
                 label='explore link (optional)'
-                placeholder='https://…'
               />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.lastChance.translations`}
@@ -592,10 +578,9 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                 valueAsNumber
                 placeholder='e.g. 8'
               />
-              <InputField
+              <LinkField
                 name={`entities.${index}.newArrivals.exploreLink`}
                 label='explore link (optional)'
-                placeholder='https://…'
               />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.newArrivals.translations`}
@@ -695,10 +680,9 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               ]}
             />
             <div className='space-y-4'>
-              <InputField
+              <LinkField
                 name={`entities.${index}.lookbook.exploreLink`}
                 label='explore link (optional)'
-                placeholder='https://…'
               />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.lookbook.translations`}
@@ -729,10 +713,9 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               portraitUrl={entity.split?.media?.mediaPortraitUrl || ''}
             />
             <div className='space-y-4'>
-              <InputField
+              <LinkField
                 name={`entities.${index}.split.media.exploreLink`}
                 label='explore link (optional)'
-                placeholder='https://…'
               />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.split.media.translations`}
@@ -790,10 +773,9 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               optional
             />
             <div className='space-y-4'>
-              <InputField
+              <LinkField
                 name={`entities.${index}.productSpotlight.exploreLink`}
                 label='explore link (optional)'
-                placeholder='https://…'
               />
               <UnifiedTranslationFields
                 fieldPrefix={`entities.${index}.productSpotlight.translations`}
