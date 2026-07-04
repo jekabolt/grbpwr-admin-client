@@ -2,7 +2,7 @@ import { LANGUAGES } from 'constants/constants';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
+import { LinkField } from './link-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { MediaPairField } from './media-pair-field';
 
@@ -109,11 +109,7 @@ export function SlideListField({
               portraitRatio={portraitRatio}
             />
 
-            <InputField
-              name={`${name}.${i}.exploreLink`}
-              label='explore link (optional)'
-              placeholder='https://…'
-            />
+            <LinkField name={`${name}.${i}.exploreLink`} label='explore link (optional)' />
 
             <UnifiedTranslationFields
               fieldPrefix={`${name}.${i}.translations`}

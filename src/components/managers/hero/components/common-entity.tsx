@@ -1,6 +1,6 @@
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
+import { LinkField } from './link-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { Props } from '../utility/interface';
@@ -140,11 +140,7 @@ export function CommonEntity({
 
       {/* Text + translations — full width below the media */}
       <div className='space-y-4'>
-        <InputField
-          name={`${prefix}.exploreLink` as any}
-          label='explore link (optional)'
-          placeholder='https://…'
-        />
+        <LinkField name={`${prefix}.exploreLink`} label='explore link (optional)' />
 
         <UnifiedTranslationFields
           fieldPrefix={`${prefix}.translations`}
