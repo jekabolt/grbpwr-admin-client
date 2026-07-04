@@ -364,19 +364,6 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                     rows: 2,
                     required: false,
                   },
-                  {
-                    name: 'placeholder',
-                    label: 'email placeholder (optional)',
-                    type: 'input',
-                    required: false,
-                  },
-                  { name: 'ctaText', label: 'button text', type: 'input' },
-                  {
-                    name: 'successText',
-                    label: 'success message (optional)',
-                    type: 'input',
-                    required: false,
-                  },
                 ]}
                 editMode
               />

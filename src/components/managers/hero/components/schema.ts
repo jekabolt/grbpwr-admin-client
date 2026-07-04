@@ -411,7 +411,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
           headline: z.string().min(1, 'Headline is required'),
           body: z.string().optional(),
           placeholder: z.string().optional(),
-          ctaText: z.string().min(1, 'Button text is required'),
+          ctaText: z.string().optional(),
           successText: z.string().optional(),
         }),
         requiredLanguageIds,
