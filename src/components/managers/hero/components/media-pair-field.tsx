@@ -11,6 +11,9 @@ interface MediaPairFieldProps {
   portraitUrl: string;
   landscapeRatio?: string[];
   portraitRatio?: string[];
+  /** Slot labels (default "landscape" / "portrait"). */
+  landscapeLabel?: string;
+  portraitLabel?: string;
   /** Append "(optional)" to the slot labels. */
   optional?: boolean;
 }
@@ -27,6 +30,8 @@ export function MediaPairField({
   portraitUrl,
   landscapeRatio = ['2:1'],
   portraitRatio = ['9:16'],
+  landscapeLabel = 'landscape',
+  portraitLabel = 'portrait',
   optional,
 }: MediaPairFieldProps) {
   const { setValue } = useFormContext();
@@ -61,7 +66,8 @@ export function MediaPairField({
       <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
         <div className='w-full space-y-1 sm:w-auto'>
           <Text variant='label' size='small'>
-            landscape{suffix}
+            {landscapeLabel}
+            {suffix}
           </Text>
           <MediaPreviewWithSelector
             mediaUrl={landscapeUrl}
@@ -78,7 +84,8 @@ export function MediaPairField({
         </div>
         <div className='w-full space-y-1 sm:w-auto'>
           <Text variant='label' size='small'>
-            portrait{suffix}
+            {portraitLabel}
+            {suffix}
           </Text>
           <MediaPreviewWithSelector
             mediaUrl={portraitUrl}

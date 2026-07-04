@@ -673,6 +673,8 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               portraitUrl={entity.split?.media?.mediaPortraitUrl || ''}
               landscapeRatio={['1:2']}
               portraitRatio={['1:2']}
+              landscapeLabel='desktop'
+              portraitLabel='mobile'
             />
             <div className='space-y-4'>
               <LinkField
