@@ -7,6 +7,7 @@ import ToggleField from 'ui/form/fields/toggle-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { CommonEntity } from './common-entity';
+import { DoubleEditor } from './double-editor';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroProductPicker } from './hero-product-picker';
 import { LinkField } from './link-field';
@@ -157,39 +158,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
         );
 
       case 'HERO_TYPE_DOUBLE':
-        return (
-          <div className='flex flex-col gap-4'>
-            <div className='p-3 lg:p-4'>
-              <Text className='font-bold leading-none' variant='uppercase' size='large'>
-                double add
-              </Text>
-            </div>
-            <CommonEntity
-              title='left add'
-              prefix={`entities.${index}.double.left`}
-              landscapeLink={entity.double?.left?.mediaLandscapeUrl || ''}
-              portraitLink={entity.double?.left?.mediaPortraitUrl || ''}
-              aspectRatio={['1:1']}
-              isDoubleAd
-              onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
-                handleSaveMedia(media, 'doubleLeft', orientation)
-              }
-              onClearMedia={(orientation) => handleClearMedia('doubleLeft', orientation)}
-            />
-            <CommonEntity
-              title='right add'
-              prefix={`entities.${index}.double.right`}
-              landscapeLink={entity.double?.right?.mediaLandscapeUrl || ''}
-              portraitLink={entity.double?.right?.mediaPortraitUrl || ''}
-              aspectRatio={['1:1']}
-              isDoubleAd
-              onSaveMedia={(media: common_MediaFull[], orientation: 'Portrait' | 'Landscape') =>
-                handleSaveMedia(media, 'doubleRight', orientation)
-              }
-              onClearMedia={(orientation) => handleClearMedia('doubleRight', orientation)}
-            />
-          </div>
-        );
+        return <DoubleEditor index={index} />;
 
       case 'HERO_TYPE_FEATURED_PRODUCTS':
         return (
