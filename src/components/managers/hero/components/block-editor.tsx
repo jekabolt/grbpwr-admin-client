@@ -671,8 +671,8 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               prefix={`entities.${index}.split.media`}
               landscapeUrl={entity.split?.media?.mediaLandscapeUrl || ''}
               portraitUrl={entity.split?.media?.mediaPortraitUrl || ''}
-              landscapeRatio={['2:1']}
-              portraitRatio={['1:1']}
+              landscapeRatio={['1:2']}
+              portraitRatio={['1:2']}
             />
             <div className='space-y-4'>
               <LinkField
