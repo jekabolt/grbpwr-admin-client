@@ -1,7 +1,8 @@
 import { ProductPickerModal } from 'components/managers/hero/components/productPickerModal';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
+import SelectField from 'ui/form/fields/select-field';
 import { LinkField } from './link-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { HeroProductEntityInterface } from '../utility/interface';
@@ -37,6 +38,13 @@ export function FeaturedProductBase({
     ? watch(`entities.${index}.${prefix}.tag` as any)
     : undefined;
 
+  const { dictionary } = useDictionary();
+  const productTags = dictionary?.productTags || [];
+  // Keep the stored tag selectable even if it's no longer in the dictionary.
+  const tagItems = (tag && !productTags.includes(tag) ? [tag, ...productTags] : productTags).map(
+    (t) => ({ value: t, label: t }),
+  );
+
   const { data: productsByTag = [], isLoading: isLoadingProducts } = useProductsByTag(
     tag,
     prefix?.includes('featuredProductsTag'),
@@ -53,7 +61,12 @@ export function FeaturedProductBase({
         {title}
       </Text>
       {prefix?.includes('featuredProductsTag') && (
-        <InputField name={`entities.${index}.${prefix}.tag`} label='tag' />
+        <SelectField
+          name={`entities.${index}.${prefix}.tag`}
+          label='tag'
+          placeholder='select a product tag'
+          items={tagItems}
+        />
       )}
 
       <UnifiedTranslationFields
