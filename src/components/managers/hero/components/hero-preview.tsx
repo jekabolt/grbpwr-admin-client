@@ -148,6 +148,13 @@ export function HeroPreview({
               border: 0,
             }}
           />
+          {(!hero.entities || hero.entities.length === 0) && (
+            <div className='absolute inset-0 z-10 flex items-center justify-center bg-bgColor/85 p-4 text-center'>
+              <Text variant='label' size='small'>
+                no blocks yet — add one with “+ add block” to preview it here.
+              </Text>
+            </div>
+          )}
         </div>
       </div>
     </div>
