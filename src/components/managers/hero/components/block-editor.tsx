@@ -8,6 +8,7 @@ import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fie
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { CommonEntity } from './common-entity';
 import { DoubleEditor } from './double-editor';
+import { TagPicker } from './tag-picker';
 import { FeaturedProductBase } from './featured-prduct-base';
 import { HeroProductPicker } from './hero-product-picker';
 import { LinkField } from './link-field';
@@ -441,8 +442,11 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                 value={entity.drop?.releaseAt}
                 label='release date & time'
               />
-              <InputField
-                name={`entities.${index}.drop.tag`}
+              <TagPicker
+                value={entity.drop?.tag || ''}
+                onChange={(v) =>
+                  setValue(`entities.${index}.drop.tag` as any, v, { shouldDirty: true })
+                }
                 label='collection tag (optional)'
                 placeholder='e.g. ss26-drop'
               />
