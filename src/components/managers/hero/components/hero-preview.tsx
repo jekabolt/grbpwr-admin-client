@@ -41,7 +41,11 @@ export function HeroPreview({
 }: HeroPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [view, setView] = useState<'desktop' | 'mobile'>('desktop');
+  // Default to the mobile viewport on small screens (a scaled-down desktop frame
+  // is tiny in a phone-width panel); the user can still toggle.
+  const [view, setView] = useState<'desktop' | 'mobile'>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 1024 ? 'mobile' : 'desktop',
+  );
   const [locale, setLocale] = useState('en');
   const [containerWidth, setContainerWidth] = useState(0);
 
