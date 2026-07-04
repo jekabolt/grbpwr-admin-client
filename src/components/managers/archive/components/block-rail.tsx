@@ -33,10 +33,16 @@ function defaultCopy(translations: any[] | undefined, key: 'caption' | 'text'): 
 // at a glance instead of only showing the type label.
 function itemPreview(item: any): { thumb?: string; summary?: string } {
   switch (item?.type) {
-    case 'ARCHIVE_ITEM_TYPE_MEDIA':
+    case 'ARCHIVE_ITEM_TYPE_MAIN_MEDIA':
+      return { thumb: item.mediaUrl || undefined, summary: 'main media' };
+    case 'ARCHIVE_ITEM_TYPE_MEDIA_LINE': {
+      const n = item.mediaIds?.length || 0;
+      return { thumb: item.mediaUrls?.[0] || undefined, summary: `${n} media` };
+    }
+    case 'ARCHIVE_ITEM_TYPE_MEDIA_WITH_CAPTION':
       return {
         thumb: item.mediaUrl || undefined,
-        summary: defaultCopy(item.translations, 'caption'),
+        summary: defaultCopy(item.translations, 'caption') || 'media + caption',
       };
     case 'ARCHIVE_ITEM_TYPE_TEXT':
       return { summary: defaultCopy(item.translations, 'text') };
@@ -273,9 +279,11 @@ export const BlockRail: FC<BlockRailProps> = ({
       </DndContext>
 
       {liveCount === 0 && (
-        <Text variant='label' size='small' className='px-1 py-2'>
-          no blocks yet — add your first one below
-        </Text>
+        <div className='border border-dashed border-textInactiveColor px-3 py-6 text-center'>
+          <Text variant='label' size='small' className='leading-snug'>
+            no blocks yet. add media, text, or products below to build the entry.
+          </Text>
+        </div>
       )}
 
       <Button

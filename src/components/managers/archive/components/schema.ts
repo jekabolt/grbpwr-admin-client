@@ -29,8 +29,6 @@ const createStrictTranslationSchema = <T extends z.ZodType>(
 };
 
 // ── per-block translation shapes ────────────────────────────────────────────
-// media / embed / product / products blocks use an optional caption; the text
-// block uses a required text body. (proto: ArchiveItemTranslation { caption, text })
 const captionTranslation = z.object({
   languageId: z.number().min(1, 'Language is required'),
   caption: z.string().max(500, 'Caption must be at most 500 characters').optional(),
@@ -41,16 +39,40 @@ const textTranslation = z.object({
   text: z.string().min(1, 'Text is required').max(10000, 'Text must be at most 10000 characters'),
 });
 
+// Presentation ratio; always seeded on add, so optional here (the mapper defaults it).
+const aspectRatio = z
+  .enum([
+    'ARCHIVE_MEDIA_ASPECT_RATIO_UNKNOWN',
+    'ARCHIVE_MEDIA_ASPECT_RATIO_16X9',
+    'ARCHIVE_MEDIA_ASPECT_RATIO_2X1',
+    'ARCHIVE_MEDIA_ASPECT_RATIO_1X1',
+    'ARCHIVE_MEDIA_ASPECT_RATIO_3X4',
+  ])
+  .optional();
+
 // ── body block (discriminated union on `type`, one member per ArchiveItemType) ─
+// Only the archive thumbnail, title and tag are mandatory; every block is
+// optional to add, but a block that is added must carry its own core content.
 export const archiveItemSchema = z.discriminatedUnion('type', [
   z.object({
-    type: z.literal('ARCHIVE_ITEM_TYPE_MEDIA'),
+    type: z.literal('ARCHIVE_ITEM_TYPE_MAIN_MEDIA'),
     _uid: z.string().optional(),
     mediaId: z.union([z.number(), z.undefined()]).refine((v) => v !== undefined && v >= 1, {
       message: 'Media is required',
     }),
     mediaUrl: z.string().optional(),
-    translations: createStrictTranslationSchema(captionTranslation, requiredLanguageIds),
+    aspectRatio,
+  }),
+
+  z.object({
+    type: z.literal('ARCHIVE_ITEM_TYPE_MEDIA_LINE'),
+    _uid: z.string().optional(),
+    mediaIds: z
+      .array(z.number().min(1))
+      .min(1, 'Add at least one media')
+      .max(4, 'Up to 4 media per line'),
+    mediaUrls: z.array(z.string()).optional().default([]),
+    aspectRatio,
   }),
 
   z.object({
@@ -63,6 +85,18 @@ export const archiveItemSchema = z.discriminatedUnion('type', [
     type: z.literal('ARCHIVE_ITEM_TYPE_EMBED'),
     _uid: z.string().optional(),
     embedUrl: z.string().min(1, 'Embed URL is required'),
+    translations: createStrictTranslationSchema(captionTranslation, requiredLanguageIds),
+  }),
+
+  z.object({
+    type: z.literal('ARCHIVE_ITEM_TYPE_MEDIA_WITH_CAPTION'),
+    _uid: z.string().optional(),
+    mediaId: z.union([z.number(), z.undefined()]).refine((v) => v !== undefined && v >= 1, {
+      message: 'Media is required',
+    }),
+    mediaUrl: z.string().optional(),
+    link: z.string().optional(),
+    aspectRatio,
     translations: createStrictTranslationSchema(captionTranslation, requiredLanguageIds),
   }),
 
@@ -94,25 +128,21 @@ export const archiveItemSchema = z.discriminatedUnion('type', [
 
 export const schema = z.object({
   tag: z.string().min(1, 'Tag is required'),
-  mainMediaIds: z.array(z.number()).min(1, 'Select at least one main media').default([]),
-  // Derived on save from the first MEDIA block when unset; kept so an explicit
-  // choice round-trips.
+  // Explicit thumbnail; derived on save from the first media block when unset.
   thumbnailId: z.number().optional(),
+  // Display-only: the chosen thumbnail's url, for the card-section preview.
+  thumbnailUrl: z.string().optional(),
   translations: createStrictTranslationSchema(
     z.object({
       languageId: z.number().min(1, 'Language is required'),
       heading: z
         .string()
-        .min(20, 'Heading must be at least 20 characters')
+        .min(1, 'Heading is required')
         .max(90, 'Heading cannot exceed 90 characters'),
-      description: z
-        .string()
-        .min(10, 'Description must be at least 10 characters')
-        .max(10000, 'Description cannot exceed 10000 characters'),
     }),
     requiredLanguageIds,
   ),
-  // Ordered, heterogeneous timeline body — hero-style block list.
+  // Ordered, heterogeneous timeline body — blocks may repeat, in any order.
   items: z.array(archiveItemSchema).default([]),
 });
 
@@ -121,8 +151,8 @@ export type ArchiveItemFormData = z.input<typeof archiveItemSchema>;
 
 export const defaultData: ArchiveFormData = {
   tag: '',
-  mainMediaIds: [],
   thumbnailId: undefined,
-  translations: LANGUAGES.map((l) => ({ languageId: l.id, heading: '', description: '' })),
+  thumbnailUrl: undefined,
+  translations: LANGUAGES.map((l) => ({ languageId: l.id, heading: '' })),
   items: [],
 };
