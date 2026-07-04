@@ -9,11 +9,23 @@ const TRANSLATION_CONFIGS = {
   main: [
     { name: 'headline', label: 'headline', type: 'input' as const },
     { name: 'tag', label: 'tag', type: 'input' as const, required: false },
-    { name: 'description', label: 'description', type: 'textarea' as const, rows: 3, maxLength: 138 },
+    {
+      name: 'description',
+      label: 'description',
+      type: 'textarea' as const,
+      rows: 3,
+      maxLength: 138,
+    },
     { name: 'exploreText', label: 'explore text', type: 'input' as const },
   ],
   single: [
-    { name: 'headline', label: 'headline', type: 'input' as const, required: false, maxLength: 117 },
+    {
+      name: 'headline',
+      label: 'headline',
+      type: 'input' as const,
+      required: false,
+      maxLength: 117,
+    },
     { name: 'exploreText', label: 'explore text', type: 'input' as const, maxLength: 39 },
   ],
   double: [
@@ -62,7 +74,7 @@ export function CommonEntity({
       {!isDoubleAd ? (
         <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
           <div className='w-full space-y-1 sm:w-auto'>
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               landscape
             </Text>
             <MediaPreviewWithSelector
@@ -79,7 +91,7 @@ export function CommonEntity({
             />
           </div>
           <div className='w-full space-y-1 sm:w-auto'>
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               portrait
             </Text>
             <MediaPreviewWithSelector
@@ -98,7 +110,7 @@ export function CommonEntity({
         </div>
       ) : (
         <div className='w-full space-y-1 sm:w-auto'>
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             media
           </Text>
           <MediaPreviewWithSelector

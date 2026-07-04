@@ -172,9 +172,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     const fieldsToTranslate = fields.map((f) => ({
       name: f.name,
       value:
-        fieldValues[f.name] ??
-        watch(`${fieldPrefix}.${actualTranslationIndex}.${f.name}`) ??
-        '',
+        fieldValues[f.name] ?? watch(`${fieldPrefix}.${actualTranslationIndex}.${f.name}`) ?? '',
       maxLength: f.maxLength,
     }));
 
@@ -269,7 +267,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
 
           const labelRow = (
             <div className='flex items-center justify-between'>
-              <Text component='label' size='small' variant='inactive'>
+              <Text component='label' size='small' variant='label'>
                 {field.label}
                 {field.required === false ? '' : ' *'}
               </Text>
@@ -306,7 +304,12 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
           return (
             <div key={field.name} className='space-y-1'>
               {labelRow}
-              <div className={cn('border-b', errorMessage || over ? 'border-error' : 'border-textColor')}>
+              <div
+                className={cn(
+                  'border-b',
+                  errorMessage || over ? 'border-error' : 'border-textColor',
+                )}
+              >
                 <Input
                   value={fieldValue}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>

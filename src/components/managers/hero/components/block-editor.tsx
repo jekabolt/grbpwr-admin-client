@@ -229,7 +229,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
             </Text>
             <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
               <div className='w-full space-y-1 sm:w-auto'>
-                <Text variant='inactive' size='small'>
+                <Text variant='label' size='small'>
                   video file
                 </Text>
                 <MediaPreviewWithSelector
@@ -257,7 +257,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                 />
               </div>
               <div className='w-full space-y-1 sm:w-auto'>
-                <Text variant='inactive' size='small'>
+                <Text variant='label' size='small'>
                   poster (optional)
                 </Text>
                 <MediaPreviewWithSelector
@@ -434,7 +434,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               placeholder='https://…'
             />
             <div className='space-y-1'>
-              <Text variant='inactive' size='small'>
+              <Text variant='label' size='small'>
                 fallback media (optional, shown before the embed loads)
               </Text>
               <MediaPairField
@@ -522,7 +522,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
             <Text className='font-bold leading-none' variant='uppercase' size='large'>
               last chance
             </Text>
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               products are filled automatically from stock — no manual selection.
             </Text>
             <div className='space-y-4'>
@@ -573,7 +573,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
             <Text className='font-bold leading-none' variant='uppercase' size='large'>
               new arrivals
             </Text>
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               products are filled automatically from the newest arrivals.
             </Text>
             <div className='space-y-4'>
@@ -746,7 +746,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               />
             </div>
             <div className='space-y-2'>
-              <Text variant='inactive' size='small'>
+              <Text variant='label' size='small'>
                 products (from the shoot)
               </Text>
               <HeroProductPicker
@@ -765,7 +765,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
               product spotlight
             </Text>
             <div className='space-y-2'>
-              <Text variant='inactive' size='small'>
+              <Text variant='label' size='small'>
                 product
               </Text>
               <HeroProductPicker

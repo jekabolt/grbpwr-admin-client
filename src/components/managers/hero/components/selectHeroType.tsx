@@ -142,7 +142,7 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRe
       </div>
 
       {groups.length === 0 ? (
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           no block types match “{query}”.
         </Text>
       ) : (

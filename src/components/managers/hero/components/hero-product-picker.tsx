@@ -43,7 +43,7 @@ export function HeroProductPicker({ uid, api, formPath, single }: HeroProductPic
     <div className='space-y-3'>
       <div className='flex flex-wrap gap-2'>
         {selected.length === 0 && (
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             no product{single ? '' : 's'} selected yet.
           </Text>
         )}

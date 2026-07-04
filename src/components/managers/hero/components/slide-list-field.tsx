@@ -65,7 +65,7 @@ export function SlideListField({
   return (
     <div className='space-y-4'>
       {fields.length === 0 && (
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           no {itemLabel}s yet — add one below.
         </Text>
       )}

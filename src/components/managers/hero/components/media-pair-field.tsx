@@ -58,7 +58,7 @@ export function MediaPairField({
   return (
     <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
       <div className='w-full space-y-1 sm:w-auto'>
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           landscape{suffix}
         </Text>
         <MediaPreviewWithSelector
@@ -75,7 +75,7 @@ export function MediaPairField({
         />
       </div>
       <div className='w-full space-y-1 sm:w-auto'>
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           portrait{suffix}
         </Text>
         <MediaPreviewWithSelector
