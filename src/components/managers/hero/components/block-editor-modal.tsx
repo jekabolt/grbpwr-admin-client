@@ -1,5 +1,6 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { heroTypes } from 'constants/constants';
+import { useEffect, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -44,6 +45,13 @@ export function BlockEditorModal({
     ? heroTypes.find((t) => t.value === entity.type)?.label ?? entity.type
     : '';
 
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Start each opened block at the top — the scroll container persists across
+  // block switches, so a new block would otherwise inherit the last scroll.
+  useEffect(() => {
+    if (editingUid) contentRef.current?.scrollTo({ top: 0 });
+  }, [editingUid]);
+
   return (
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
@@ -58,7 +66,7 @@ export function BlockEditorModal({
           <div className='flex h-full flex-col gap-3'>
             <div className='flex shrink-0 items-center justify-between border-b border-textColor pb-2'>
               <div className='flex items-center gap-2'>
-                {index >= 0 && <Text variant='inactive'>#{index + 1}</Text>}
+                {index >= 0 && <Text variant='label'>#{index + 1}</Text>}
                 <Text variant='uppercase' size='large'>
                   {typeLabel}
                 </Text>
@@ -69,7 +77,7 @@ export function BlockEditorModal({
                 </Button>
               </DialogPrimitives.Close>
             </div>
-            <div className='min-h-0 flex-1 overflow-y-auto'>
+            <div ref={contentRef} className='min-h-0 flex-1 overflow-y-auto'>
               {entity && index >= 0 && (
                 <BlockEditor index={index} entity={entity} featuredProducts={featuredProducts} />
               )}
