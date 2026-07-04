@@ -51,6 +51,19 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
   { value: 'HERO_TYPE_DOUBLE', label: 'double add' },
   { value: 'HERO_TYPE_FEATURED_PRODUCTS', label: 'featured products' },
   { value: 'HERO_TYPE_FEATURED_PRODUCTS_TAG', label: 'featured products tag' },
+  { value: 'HERO_TYPE_MARQUEE', label: 'marquee' },
+  { value: 'HERO_TYPE_VIDEO', label: 'video' },
+  { value: 'HERO_TYPE_STATEMENT', label: 'statement' },
+  { value: 'HERO_TYPE_NEWSLETTER', label: 'newsletter' },
+  { value: 'HERO_TYPE_EMBED', label: 'embed' },
+  { value: 'HERO_TYPE_DROP', label: 'drop' },
+  { value: 'HERO_TYPE_LAST_CHANCE', label: 'last chance' },
+  { value: 'HERO_TYPE_NEW_ARRIVALS', label: 'new arrivals' },
+  { value: 'HERO_TYPE_SLIDESHOW', label: 'slideshow' },
+  { value: 'HERO_TYPE_MOSAIC', label: 'mosaic' },
+  { value: 'HERO_TYPE_LOOKBOOK', label: 'lookbook' },
+  { value: 'HERO_TYPE_SPLIT', label: 'split' },
+  { value: 'HERO_TYPE_PRODUCT_SPOTLIGHT', label: 'product spotlight' },
 ];
 
 export const ASPECT_RATIOS = [

@@ -4,7 +4,9 @@ import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
+import { v4 as uuidv4 } from 'uuid';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { BlockEditorModal } from './block-editor-modal';
@@ -19,7 +21,7 @@ import { useHero, useSaveHero } from './useHero';
 import { useProductSelection } from './useProductSelection';
 
 export function Hero() {
-  const { data: heroData, isLoading } = useHero();
+  const { data: heroData, isLoading, isError, refetch } = useHero();
   const saveHero = useSaveHero();
   const { showMessage } = useSnackBarStore();
   const entityRefs = useRef<{ [uid: string]: HTMLDivElement | null }>({});
@@ -31,6 +33,11 @@ export function Hero() {
   const [pendingNewUid, setPendingNewUid] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [publishSummary, setPublishSummary] = useState<{ live: number; incomplete: number }>({
+    live: 0,
+    incomplete: 0,
+  });
   const isResettingRef = useRef(false);
   const heroZodResolver = useMemo(() => zodResolver(heroSchema) as any, []);
 
@@ -45,7 +52,10 @@ export function Hero() {
       return heroZodResolver(filteredValues, context, options);
     },
     defaultValues: defaultData as HeroSchema,
-    mode: 'onSubmit',
+    // Validate on blur (then re-validate on change) so incomplete-block badges in
+    // the rail and inline field errors surface as the user edits, not only after a
+    // failed publish.
+    mode: 'onTouched',
   });
 
   useBlockNavigation(hasUserMadeChanges);
@@ -101,6 +111,25 @@ export function Hero() {
     [form],
   );
 
+  // Clone a block: deep-copy its form values under a fresh uid, copy its
+  // resolved-product display cache to that uid, insert it right after the
+  // original, and open the copy for editing (kept on close, not a pendingNew).
+  const handleDuplicate = useCallback(
+    (uid: string) => {
+      const list = form.getValues().entities || [];
+      const idx = list.findIndex((e: any) => e._uid === uid);
+      if (idx < 0) return;
+      const clone = JSON.parse(JSON.stringify(list[idx]));
+      const newUid = uuidv4();
+      clone._uid = newUid;
+      insert(idx + 1, clone);
+      const prods = featuredProducts.products[uid];
+      if (prods?.length) featuredProducts.saveSelection([...prods], newUid);
+      setEditingUid(newUid);
+    },
+    [form, insert, featuredProducts],
+  );
+
   async function handleSubmit(data: HeroSchema) {
     const entities = data.entities;
 
@@ -120,12 +149,66 @@ export function Hero() {
       setTimeout(() => {
         isResettingRef.current = false;
       }, 0);
-      showMessage('Hero saved successfully!', 'success');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error saving hero';
-      showMessage(msg, 'error');
+      showMessage('hero published to the live storefront', 'success');
+    } catch {
+      // The error toast is surfaced by useSaveHero's onError; swallow the
+      // rejected mutateAsync here so it doesn't bubble as an unhandled rejection
+      // (and so the form isn't reset — the user's edits are preserved).
     }
   }
+
+  // Pre-flight before publishing: validate everything (so every incomplete block
+  // gets flagged in the rail), tally live vs incomplete blocks, then open the
+  // confirm/summary. Publishing overwrites the live storefront hero.
+  const handlePublishClick = useCallback(async () => {
+    await form.trigger();
+    const values = form.getValues();
+    const liveEntities = (values.entities || []).filter(
+      (e: any) => !deletedIndicesRef.current.has(e._uid),
+    );
+    const result = heroSchema.safeParse({ ...values, entities: liveEntities });
+    const incompleteUids = new Set<string>();
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        if (issue.path[0] === 'entities' && typeof issue.path[1] === 'number') {
+          const uid = (liveEntities[issue.path[1]] as any)?._uid;
+          if (uid) incompleteUids.add(uid);
+        }
+      }
+    }
+    setPublishSummary({ live: liveEntities.length, incomplete: incompleteUids.size });
+    setConfirmOpen(true);
+  }, [form]);
+
+  // Cmd/Ctrl+S opens the pre-publish confirm (and suppresses the browser's save
+  // dialog). Ignored while loading/erroring/publishing or when the confirm is
+  // already open.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 's') return;
+      e.preventDefault();
+      if (isLoading || isError || saveHero.isPending) return;
+      // don't stack the publish confirm on top of an open sub-modal
+      if (editingUid || addMenuOpen || navOpen || confirmOpen) return;
+      handlePublishClick();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    isLoading,
+    isError,
+    saveHero.isPending,
+    editingUid,
+    addMenuOpen,
+    navOpen,
+    confirmOpen,
+    handlePublishClick,
+  ]);
+
+  const handleConfirmPublish = () => {
+    setConfirmOpen(false);
+    form.handleSubmit(handleSubmit, onError)();
+  };
 
   function onError(errors: any) {
     // log RHF-level errors
@@ -176,12 +259,18 @@ export function Hero() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit, onError)} className='flex flex-col'>
-        <div className='-mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <Text variant='uppercase' size='large'>
               hero
             </Text>
-            {hasUserMadeChanges && <Text variant='inactive'>unsaved changes</Text>}
+            {hasUserMadeChanges && (
+              <span className='border border-warning px-1.5 py-0.5 leading-none'>
+                <Text size='small' variant='uppercase' className='text-warning'>
+                  unsaved changes
+                </Text>
+              </span>
+            )}
           </div>
           <div className='flex items-center gap-2'>
             <Button
@@ -196,8 +285,9 @@ export function Hero() {
             <Button
               size='lg'
               variant='main'
-              type='submit'
-              disabled={isLoading || form.formState.isSubmitting || saveHero.isPending}
+              type='button'
+              onClick={handlePublishClick}
+              disabled={isLoading || isError || form.formState.isSubmitting || saveHero.isPending}
               loading={saveHero.isPending}
               className='uppercase'
             >
@@ -212,9 +302,19 @@ export function Hero() {
               loading hero…
             </Text>
           </div>
+        ) : isError ? (
+          <div className='flex flex-col items-center gap-3 py-20'>
+            <Text variant='error'>couldn&apos;t load the hero.</Text>
+            <Text variant='label' size='small'>
+              publishing is disabled until it loads, so the live hero isn&apos;t overwritten.
+            </Text>
+            <Button type='button' variant='secondary' size='lg' onClick={() => refetch()}>
+              retry
+            </Button>
+          </div>
         ) : (
           <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
-            <div className='shrink-0 lg:sticky lg:top-4 lg:w-[240px]'>
+            <div className='max-h-[50vh] shrink-0 overflow-y-auto lg:max-h-none lg:overflow-visible lg:sticky lg:top-20 lg:w-[240px]'>
               <BlockRail
                 entityRefs={entityRefs}
                 arrayHelpers={{ move }}
@@ -256,16 +356,15 @@ export function Hero() {
             setPendingNewUid(null);
             setEditingUid(null);
           }}
+          onDuplicate={handleDuplicate}
           featuredProducts={featuredProducts}
         />
 
         <HeroSectionModal open={addMenuOpen} onOpenChange={setAddMenuOpen} title='add a block'>
           <SelectHeroType
             append={append}
-            insert={insert}
             form={form}
             entityRefs={entityRefs}
-            deletedIndicesRef={deletedIndicesRef}
             onAdded={(uid) => {
               setAddMenuOpen(false);
               setEditingUid(uid);
@@ -277,6 +376,33 @@ export function Hero() {
         <HeroSectionModal open={navOpen} onOpenChange={setNavOpen} title='nav featured'>
           <NavFeatured hero={heroData?.hero} />
         </HeroSectionModal>
+
+        <ConfirmationModal
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          onConfirm={handleConfirmPublish}
+          title='publish hero'
+          confirmLabel='publish'
+          cancelLabel='cancel'
+          confirmDisabled={publishSummary.incomplete > 0}
+        >
+          <div className='space-y-2'>
+            <Text>
+              {publishSummary.live === 0
+                ? 'this publishes an empty hero (no blocks) to the live storefront.'
+                : `this replaces the live storefront hero with ${publishSummary.live} block${
+                    publishSummary.live === 1 ? '' : 's'
+                  }.`}
+            </Text>
+            {publishSummary.incomplete > 0 && (
+              <Text variant='error'>
+                {publishSummary.incomplete} block
+                {publishSummary.incomplete === 1 ? ' is' : 's are'} incomplete — fix the flagged (!)
+                block{publishSummary.incomplete === 1 ? '' : 's'} in the rail first.
+              </Text>
+            )}
+          </div>
+        </ConfirmationModal>
       </form>
     </Form>
   );

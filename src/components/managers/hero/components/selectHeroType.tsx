@@ -1,18 +1,17 @@
 import { common_HeroType } from 'api/proto-http/admin';
 import { heroTypes } from 'constants/constants';
 import { cn } from 'lib/utility';
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useEffect, useRef, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { v4 as uuidv4 } from 'uuid';
+import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { HeroSchema } from './schema';
 
 interface SelectHeroTypeProps {
   append: (value: any) => void;
-  insert: (index: number, value: any) => void;
   form: UseFormReturn<HeroSchema>;
   entityRefs: React.MutableRefObject<{ [uid: string]: HTMLDivElement | null }>;
-  deletedIndicesRef: React.MutableRefObject<Set<string>>;
   /** Called with the new block's uid after it is added (open its editor / close the menu). */
   onAdded?: (uid: string) => void;
 }
@@ -23,33 +22,67 @@ const HERO_TYPE_DESCRIPTIONS: Record<string, string> = {
   HERO_TYPE_DOUBLE: 'Two square media blocks side by side',
   HERO_TYPE_FEATURED_PRODUCTS: 'Hand-picked products with a headline',
   HERO_TYPE_FEATURED_PRODUCTS_TAG: 'Products auto-filled by a tag',
+  HERO_TYPE_MARQUEE: 'Thin scrolling announcement bar — one line of text + optional link',
+  HERO_TYPE_VIDEO: 'Full-screen video — muted autoplay loop + poster + CTA',
+  HERO_TYPE_STATEMENT: 'Manifesto — large statement text, optionally over subtle media',
+  HERO_TYPE_NEWSLETTER: 'Email capture — optional media + headline, button & success copy',
+  HERO_TYPE_EMBED: 'Iframe embed (Spline / 3D / campaign) with fallback media + CTA',
+  HERO_TYPE_DROP: 'Countdown to a drop — media bg + release timer, then explore link',
+  HERO_TYPE_LAST_CHANCE: 'Low-stock products — auto-filled by stock threshold (no manual picks)',
+  HERO_TYPE_NEW_ARRIVALS: 'Newest products — auto-filled by created date (no manual picks)',
+  HERO_TYPE_SLIDESHOW: 'Carousel of media slides with autoplay interval',
+  HERO_TYPE_MOSAIC: 'Grid of media tiles (double / triple as special cases)',
+  HERO_TYPE_LOOKBOOK: 'Story of full-bleed frames, each with a caption',
+  HERO_TYPE_SPLIT: 'Editorial media beside products from the shoot',
+  HERO_TYPE_PRODUCT_SPOTLIGHT: 'One product — large media + name / price + quick-add',
 };
 
-export const SelectHeroType: FC<SelectHeroTypeProps> = ({
-  append,
-  insert,
-  form,
-  entityRefs,
-  deletedIndicesRef,
-  onAdded,
-}) => {
+// Semantic buckets so the palette reads as a handful of groups instead of a flat
+// wall of 18 options. Every hero type appears in exactly one group.
+const HERO_TYPE_GROUPS: { label: string; types: common_HeroType[] }[] = [
+  { label: 'media ads', types: ['HERO_TYPE_MAIN', 'HERO_TYPE_SINGLE', 'HERO_TYPE_DOUBLE'] },
+  {
+    label: 'products',
+    types: [
+      'HERO_TYPE_FEATURED_PRODUCTS',
+      'HERO_TYPE_FEATURED_PRODUCTS_TAG',
+      'HERO_TYPE_PRODUCT_SPOTLIGHT',
+      'HERO_TYPE_SPLIT',
+      'HERO_TYPE_LAST_CHANCE',
+      'HERO_TYPE_NEW_ARRIVALS',
+    ],
+  },
+  {
+    label: 'editorial',
+    types: ['HERO_TYPE_STATEMENT', 'HERO_TYPE_VIDEO', 'HERO_TYPE_LOOKBOOK'],
+  },
+  { label: 'galleries', types: ['HERO_TYPE_SLIDESHOW', 'HERO_TYPE_MOSAIC'] },
+  { label: 'signup & announce', types: ['HERO_TYPE_NEWSLETTER', 'HERO_TYPE_MARQUEE'] },
+  { label: 'interactive', types: ['HERO_TYPE_DROP', 'HERO_TYPE_EMBED'] },
+];
+
+const HERO_TYPE_BY_VALUE = Object.fromEntries(heroTypes.map((t) => [t.value, t])) as Record<
+  string,
+  (typeof heroTypes)[number]
+>;
+
+export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRefs, onAdded }) => {
   const [addedEntityUid, setAddedEntityUid] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Focus the search on open (after Radix's own open-focus settles) so adding a
+  // block is keyboard-first.
+  useEffect(() => {
+    const t = setTimeout(() => searchRef.current?.focus(), 50);
+    return () => clearTimeout(t);
+  }, []);
 
   const entities = form.watch('entities');
-  const isMainAddExists = entities?.some(
-    (entity) =>
-      entity.type === 'HERO_TYPE_MAIN' && !deletedIndicesRef.current.has((entity as any)._uid),
-  );
 
   const addEntity = (type: common_HeroType) => {
-    if (type === 'HERO_TYPE_MAIN' && isMainAddExists) return;
-
     const newEntity = { type, _uid: uuidv4() };
-    if (type === 'HERO_TYPE_MAIN') {
-      insert(0, newEntity);
-    } else {
-      append(newEntity);
-    }
+    append(newEntity);
     setAddedEntityUid(newEntity._uid);
     onAdded?.(newEntity._uid);
   };
@@ -66,37 +99,86 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({
     }
   }, [entities?.length, addedEntityUid, entityRefs]);
 
+  const q = query.trim().toLowerCase();
+  const matches = (value: common_HeroType) => {
+    if (!q) return true;
+    const label = HERO_TYPE_BY_VALUE[value]?.label ?? '';
+    const desc = HERO_TYPE_DESCRIPTIONS[value] ?? '';
+    return label.toLowerCase().includes(q) || desc.toLowerCase().includes(q);
+  };
+
+  const groups = HERO_TYPE_GROUPS.map((g) => ({
+    label: g.label,
+    types: g.types.filter(matches),
+  })).filter((g) => g.types.length > 0);
+  const flatMatches = groups.flatMap((g) => g.types);
+
+  const renderCard = (value: common_HeroType) => {
+    const type = HERO_TYPE_BY_VALUE[value];
+    if (!type) return null;
+    return (
+      <button
+        key={value}
+        type='button'
+        onClick={() => addEntity(value)}
+        className={cn(
+          'group flex h-full flex-col items-start gap-1 border border-textColor p-3 text-left transition-colors',
+          'hover:bg-textColor hover:text-bgColor',
+          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+        )}
+      >
+        <div className='flex w-full items-center justify-between'>
+          <Text variant='uppercase' className='group-hover:text-bgColor'>
+            {type.label}
+          </Text>
+          <span className='text-lg leading-none'>+</span>
+        </div>
+        <span className='text-small leading-tight'>{HERO_TYPE_DESCRIPTIONS[value]}</span>
+      </button>
+    );
+  };
+
   return (
-    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'>
-      {heroTypes.map((type) => {
-        const mainTaken = type.value === 'HERO_TYPE_MAIN' && isMainAddExists;
-        return (
-          <button
-            key={type.value}
-            type='button'
-            disabled={mainTaken}
-            onClick={() => addEntity(type.value)}
-            className={cn(
-              'group flex h-full flex-col items-start gap-1 border border-textColor p-3 text-left transition-colors',
-              'hover:bg-textColor hover:text-bgColor',
-              'disabled:cursor-not-allowed disabled:border-textInactiveColor disabled:bg-bgColor disabled:text-textInactiveColor',
-            )}
-          >
-            <div className='flex w-full items-center justify-between'>
-              <Text
-                variant='uppercase'
-                className='group-hover:text-bgColor group-disabled:text-textInactiveColor'
-              >
-                {type.label}
-              </Text>
-              <span className='text-lg leading-none'>+</span>
+    <div className='space-y-5'>
+      <div className='sticky top-0 z-10 -mt-1 bg-bgColor pb-2 pt-1'>
+        <Input
+          ref={searchRef}
+          value={query}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter' && query.trim() && flatMatches.length > 0) {
+              e.preventDefault();
+              addEntity(flatMatches[0]);
+            }
+          }}
+          placeholder='search block types…'
+          aria-label='search block types'
+          className='border px-2 py-1.5'
+        />
+        {query.trim() && (
+          <Text variant='label' size='small' className='mt-1 block'>
+            {flatMatches.length} match{flatMatches.length === 1 ? '' : 'es'}
+            {flatMatches.length > 0 && ' · enter adds the first'}
+          </Text>
+        )}
+      </div>
+
+      {groups.length === 0 ? (
+        <Text variant='label' size='small'>
+          no block types match “{query}”.
+        </Text>
+      ) : (
+        groups.map((group) => (
+          <div key={group.label} className='space-y-2'>
+            <Text variant='uppercase' size='small'>
+              {group.label}
+            </Text>
+            <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'>
+              {group.types.map(renderCard)}
             </div>
-            <span className='text-small leading-tight'>
-              {mainTaken ? 'already added (only one allowed)' : HERO_TYPE_DESCRIPTIONS[type.value]}
-            </span>
-          </button>
-        );
-      })}
+          </div>
+        ))
+      )}
     </div>
   );
 };

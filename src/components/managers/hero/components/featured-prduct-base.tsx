@@ -47,7 +47,7 @@ export function FeaturedProductBase({
       : product[uid] || [];
 
   return (
-    <div className='lg:px-2.5 lg:pb-8 p-2.5 space-y-6'>
+    <div className='space-y-5 p-3 lg:p-4'>
       <Text className='font-bold leading-none' variant='uppercase' size='large'>
         {title}
       </Text>
@@ -60,7 +60,11 @@ export function FeaturedProductBase({
         fields={FEATURED_PRODUCTS_TRANSLATION_FIELDS}
         editMode={true}
       />
-      <InputField name={`entities.${index}.${prefix}.exploreLink`} label='explore link' />
+      <InputField
+        name={`entities.${index}.${prefix}.exploreLink`}
+        label='explore link (optional)'
+        placeholder='https://…'
+      />
 
       {isLoadingProducts && prefix?.includes('featuredProductsTag') ? (
         <div className='py-8 text-center'>
