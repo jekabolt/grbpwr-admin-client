@@ -1,6 +1,7 @@
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import { LinkField } from './link-field';
+import { MediaModifierToggles } from './media-modifier-toggles';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { Props } from '../utility/interface';
@@ -137,6 +138,8 @@ export function CommonEntity({
           />
         </div>
       )}
+
+      <MediaModifierToggles prefix={prefix} />
 
       {/* Text + translations — full width below the media */}
       <div className='space-y-4'>

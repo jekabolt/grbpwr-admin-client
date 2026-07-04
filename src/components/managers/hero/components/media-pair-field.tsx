@@ -2,6 +2,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
+import { MediaModifierToggles } from './media-modifier-toggles';
 
 interface MediaPairFieldProps {
   /** RHF path prefix for the slot, e.g. `entities.3.statement`. */
@@ -56,41 +57,44 @@ export function MediaPairField({
   const suffix = optional ? ' (optional)' : '';
 
   return (
-    <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
-      <div className='w-full space-y-1 sm:w-auto'>
-        <Text variant='label' size='small'>
-          landscape{suffix}
-        </Text>
-        <MediaPreviewWithSelector
-          mediaUrl={landscapeUrl}
-          aspectRatio={landscapeRatio}
-          allowMultiple={false}
-          showVideos={true}
-          alt='landscape'
-          label='select'
-          purpose='landscape'
-          heightClass='h-44'
-          onSaveMedia={(media) => save('Landscape', media)}
-          onClear={() => clear('Landscape')}
-        />
+    <div className='space-y-3'>
+      <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
+        <div className='w-full space-y-1 sm:w-auto'>
+          <Text variant='label' size='small'>
+            landscape{suffix}
+          </Text>
+          <MediaPreviewWithSelector
+            mediaUrl={landscapeUrl}
+            aspectRatio={landscapeRatio}
+            allowMultiple={false}
+            showVideos={true}
+            alt='landscape'
+            label='select'
+            purpose='landscape'
+            heightClass='h-44'
+            onSaveMedia={(media) => save('Landscape', media)}
+            onClear={() => clear('Landscape')}
+          />
+        </div>
+        <div className='w-full space-y-1 sm:w-auto'>
+          <Text variant='label' size='small'>
+            portrait{suffix}
+          </Text>
+          <MediaPreviewWithSelector
+            mediaUrl={portraitUrl}
+            aspectRatio={portraitRatio}
+            allowMultiple={false}
+            showVideos={true}
+            alt='portrait'
+            label='select'
+            purpose='portrait'
+            heightClass='h-44'
+            onSaveMedia={(media) => save('Portrait', media)}
+            onClear={() => clear('Portrait')}
+          />
+        </div>
       </div>
-      <div className='w-full space-y-1 sm:w-auto'>
-        <Text variant='label' size='small'>
-          portrait{suffix}
-        </Text>
-        <MediaPreviewWithSelector
-          mediaUrl={portraitUrl}
-          aspectRatio={portraitRatio}
-          allowMultiple={false}
-          showVideos={true}
-          alt='portrait'
-          label='select'
-          purpose='portrait'
-          heightClass='h-44'
-          onSaveMedia={(media) => save('Portrait', media)}
-          onClear={() => clear('Portrait')}
-        />
-      </div>
+      <MediaModifierToggles prefix={prefix} />
     </div>
   );
 }
