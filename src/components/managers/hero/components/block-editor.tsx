@@ -525,6 +525,10 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
             <Text variant='label' size='small'>
               products are filled automatically from stock — no manual selection.
             </Text>
+            <Text size='small' className='text-warning'>
+              note: the saved threshold &amp; limit aren&apos;t shown here when you reopen this
+              block — re-enter them before publishing, or a re-save clears them.
+            </Text>
             <div className='space-y-4'>
               <InputField
                 name={`entities.${index}.lastChance.stockThreshold`}
@@ -575,6 +579,10 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
             </Text>
             <Text variant='label' size='small'>
               products are filled automatically from the newest arrivals.
+            </Text>
+            <Text size='small' className='text-warning'>
+              note: the saved limit isn&apos;t shown here when you reopen this block — re-enter it
+              before publishing, or a re-save clears it.
             </Text>
             <div className='space-y-4'>
               <InputField
