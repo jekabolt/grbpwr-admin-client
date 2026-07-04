@@ -69,7 +69,7 @@ export function MediaPairField({
           alt='landscape'
           label='select'
           purpose='landscape'
-          heightClass='sm:h-44'
+          heightClass='h-44'
           onSaveMedia={(media) => save('Landscape', media)}
           onClear={() => clear('Landscape')}
         />
@@ -86,7 +86,7 @@ export function MediaPairField({
           alt='portrait'
           label='select'
           purpose='portrait'
-          heightClass='sm:h-44'
+          heightClass='h-44'
           onSaveMedia={(media) => save('Portrait', media)}
           onClear={() => clear('Portrait')}
         />

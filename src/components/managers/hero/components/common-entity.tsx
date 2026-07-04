@@ -85,7 +85,7 @@ export function CommonEntity({
               alt='Landscape preview'
               label='select'
               purpose='landscape'
-              heightClass='sm:h-44'
+              heightClass='h-44'
               onSaveMedia={(media) => onSaveMedia(media, 'Landscape')}
               onClear={onClearMedia ? () => onClearMedia('Landscape') : undefined}
             />
@@ -102,7 +102,7 @@ export function CommonEntity({
               alt='Portrait preview'
               label='select'
               purpose='portrait'
-              heightClass='sm:h-44'
+              heightClass='h-44'
               onSaveMedia={(media) => onSaveMedia(media, 'Portrait')}
               onClear={onClearMedia ? () => onClearMedia('Portrait') : undefined}
             />
@@ -121,7 +121,7 @@ export function CommonEntity({
             alt='Media preview'
             label='select'
             purpose='media'
-            heightClass='sm:h-44'
+            heightClass='h-44'
             onSaveMedia={(media) => {
               onSaveMedia(media, 'Landscape');
               onSaveMedia(media, 'Portrait');

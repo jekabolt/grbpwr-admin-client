@@ -240,7 +240,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                   alt='video'
                   label='select'
                   purpose='video'
-                  heightClass='sm:h-44'
+                  heightClass='h-44'
                   onSaveMedia={(media) =>
                     saveSingleMedia(
                       `entities.${index}.video.mediaId`,
@@ -268,7 +268,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                   alt='poster'
                   label='select'
                   purpose='poster'
-                  heightClass='sm:h-44'
+                  heightClass='h-44'
                   onSaveMedia={(media) =>
                     saveSingleMedia(
                       `entities.${index}.video.posterId`,
