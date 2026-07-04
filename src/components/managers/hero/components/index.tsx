@@ -160,7 +160,7 @@ export function Hero() {
   // Pre-flight before publishing: validate everything (so every incomplete block
   // gets flagged in the rail), tally live vs incomplete blocks, then open the
   // confirm/summary. Publishing overwrites the live storefront hero.
-  const handlePublishClick = async () => {
+  const handlePublishClick = useCallback(async () => {
     await form.trigger();
     const values = form.getValues();
     const liveEntities = (values.entities || []).filter(
@@ -178,7 +178,32 @@ export function Hero() {
     }
     setPublishSummary({ live: liveEntities.length, incomplete: incompleteUids.size });
     setConfirmOpen(true);
-  };
+  }, [form]);
+
+  // Cmd/Ctrl+S opens the pre-publish confirm (and suppresses the browser's save
+  // dialog). Ignored while loading/erroring/publishing or when the confirm is
+  // already open.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 's') return;
+      e.preventDefault();
+      if (isLoading || isError || saveHero.isPending) return;
+      // don't stack the publish confirm on top of an open sub-modal
+      if (editingUid || addMenuOpen || navOpen || confirmOpen) return;
+      handlePublishClick();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    isLoading,
+    isError,
+    saveHero.isPending,
+    editingUid,
+    addMenuOpen,
+    navOpen,
+    confirmOpen,
+    handlePublishClick,
+  ]);
 
   const handleConfirmPublish = () => {
     setConfirmOpen(false);
