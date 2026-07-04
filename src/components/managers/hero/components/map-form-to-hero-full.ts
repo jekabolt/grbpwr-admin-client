@@ -59,6 +59,8 @@ function toMediaPair(s: any): common_HeroMediaFull {
     portrait: toMediaFull(s?.mediaPortraitId, s?.mediaPortraitUrl),
     landscape: toMediaFull(s?.mediaLandscapeId, s?.mediaLandscapeUrl),
     disableOverlay: s?.disableOverlay ?? false,
+    disableTint: s?.disableTint ?? false,
+    stroke: s?.stroke ?? false,
   };
 }
 

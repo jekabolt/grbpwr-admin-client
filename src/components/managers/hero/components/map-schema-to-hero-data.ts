@@ -39,6 +39,8 @@ function toMedia(s: any): common_HeroMedia {
     portraitId: s?.mediaPortraitId || 0,
     landscapeId: s?.mediaLandscapeId || 0,
     disableOverlay: s?.disableOverlay ?? false,
+    disableTint: s?.disableTint ?? false,
+    stroke: s?.stroke ?? false,
   };
 }
 

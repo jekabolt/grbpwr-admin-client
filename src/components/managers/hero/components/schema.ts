@@ -67,6 +67,7 @@ const heroSingleItemSchema = (translationShape: z.ZodRawShape) =>
     mediaPortraitId: z.number().optional(),
     mediaLandscapeUrl: z.string().optional(),
     mediaPortraitUrl: z.string().optional(),
+    ...mediaModifierShape,
     exploreLink: z.string().nullable().optional(),
     translations: createStrictTranslationSchema(
       z.object({
@@ -90,6 +91,15 @@ const targetingFields = {
     ])
     .optional(),
   minTierId: z.number().optional(),
+};
+
+// Per-slot media presentation modifiers on HeroMedia (disable_overlay / disable_tint
+// / stroke). Optional booleans, declared here and spread into every media slot so
+// Zod keeps them through parse (unknown keys are stripped otherwise).
+const mediaModifierShape = {
+  disableOverlay: z.boolean().optional(),
+  disableTint: z.boolean().optional(),
+  stroke: z.boolean().optional(),
 };
 
 export const navFeatured = z.object({
@@ -137,6 +147,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
         }),
       mediaLandscapeUrl: z.string().optional(),
       mediaPortraitUrl: z.string().optional(),
+      ...mediaModifierShape,
       exploreLink: z.string().nullable().optional(),
       translations: createStrictTranslationSchema(
         z.object({
@@ -171,6 +182,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
         }),
       mediaLandscapeUrl: z.string().optional(),
       mediaPortraitUrl: z.string().optional(),
+      ...mediaModifierShape,
       exploreLink: z.string().nullable().optional(),
       translations: createStrictTranslationSchema(
         z.object({
@@ -205,6 +217,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
             }),
           mediaLandscapeUrl: z.string().optional(),
           mediaPortraitUrl: z.string().optional(),
+          ...mediaModifierShape,
           exploreLink: z.string().nullable().optional(),
           translations: createStrictTranslationSchema(
             z.object({
@@ -231,6 +244,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
             }),
           mediaLandscapeUrl: z.string().optional(),
           mediaPortraitUrl: z.string().optional(),
+          ...mediaModifierShape,
           exploreLink: z.string().nullable().optional(),
           translations: createStrictTranslationSchema(
             z.object({
@@ -364,6 +378,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       mediaPortraitId: z.number().optional(),
       mediaLandscapeUrl: z.string().optional(),
       mediaPortraitUrl: z.string().optional(),
+      ...mediaModifierShape,
       exploreLink: z.string().nullable().optional(),
       translations: createStrictTranslationSchema(
         z.object({
@@ -389,6 +404,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       mediaPortraitId: z.number().optional(),
       mediaLandscapeUrl: z.string().optional(),
       mediaPortraitUrl: z.string().optional(),
+      ...mediaModifierShape,
       translations: createStrictTranslationSchema(
         z.object({
           languageId: z.number().min(1, 'Language is required'),
@@ -414,6 +430,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       mediaPortraitId: z.number().optional(),
       mediaLandscapeUrl: z.string().optional(),
       mediaPortraitUrl: z.string().optional(),
+      ...mediaModifierShape,
       ctaLink: z.string().nullable().optional(),
       translations: createStrictTranslationSchema(
         z.object({
@@ -436,6 +453,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       mediaPortraitId: z.number().optional(),
       mediaLandscapeUrl: z.string().optional(),
       mediaPortraitUrl: z.string().optional(),
+      ...mediaModifierShape,
       // RFC3339 string; the countdown target.
       releaseAt: z.string().min(1, 'Release date is required'),
       // collection/product tag surfaced after the drop goes live.
@@ -505,6 +523,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
             mediaPortraitId: z.number().optional(),
             mediaLandscapeUrl: z.string().optional(),
             mediaPortraitUrl: z.string().optional(),
+            ...mediaModifierShape,
             exploreLink: z.string().nullable().optional(),
             translations: createStrictTranslationSchema(
               z.object({
@@ -587,6 +606,7 @@ const heroEntitySchema = z.discriminatedUnion('type', [
       mediaPortraitId: z.number().optional(),
       mediaLandscapeUrl: z.string().optional(),
       mediaPortraitUrl: z.string().optional(),
+      ...mediaModifierShape,
       exploreLink: z.string().nullable().optional(),
       translations: createStrictTranslationSchema(
         z.object({
