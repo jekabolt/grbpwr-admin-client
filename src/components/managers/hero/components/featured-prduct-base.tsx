@@ -1,8 +1,8 @@
 import { ProductPickerModal } from 'components/managers/hero/components/productPickerModal';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
 import { LinkField } from './link-field';
+import { TagPicker } from './tag-picker';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { HeroProductEntityInterface } from '../utility/interface';
 import { HeroProductTable } from './heroProductsTable';
@@ -31,6 +31,7 @@ export function FeaturedProductBase({
   const {
     formState: { errors },
     watch,
+    setValue,
   } = useFormContext<HeroSchema>();
 
   const tag = prefix?.includes('featuredProductsTag')
@@ -53,7 +54,13 @@ export function FeaturedProductBase({
         {title}
       </Text>
       {prefix?.includes('featuredProductsTag') && (
-        <InputField name={`entities.${index}.${prefix}.tag`} label='tag' />
+        <TagPicker
+          value={tag || ''}
+          onChange={(v) =>
+            setValue(`entities.${index}.${prefix}.tag` as any, v, { shouldDirty: true })
+          }
+          label='tag'
+        />
       )}
 
       <UnifiedTranslationFields

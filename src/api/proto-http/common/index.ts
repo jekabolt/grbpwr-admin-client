@@ -726,6 +726,7 @@ export type Dictionary = {
   isProd: boolean | undefined;
   // Hero section background color for the storefront (CSS). Empty if unset.
   backgroundHeroColor: string | undefined;
+  productTags: string[] | undefined;
 };
 
 export type Collection = {
@@ -839,11 +840,15 @@ export type HeroAudience =
   | "HERO_AUDIENCE_MEMBERS"
   | "HERO_AUDIENCE_TIER";
 // HeroMedia is a portrait/landscape media pair addressed by id (write side).
-// disable_overlay lives here so the scrim can be toggled per media slot.
+// The per-slot presentation modifiers live here: disable_overlay toggles the
+// scrim, disable_tint toggles the frontend's background colour tint, and stroke
+// toggles a border/outline around the media.
 export type HeroMedia = {
   portraitId: number | undefined;
   landscapeId: number | undefined;
   disableOverlay: boolean | undefined;
+  disableTint: boolean | undefined;
+  stroke: boolean | undefined;
 };
 
 // HeroMediaFull is the resolved form of HeroMedia (read side).
@@ -851,6 +856,8 @@ export type HeroMediaFull = {
   portrait: MediaFull | undefined;
   landscape: MediaFull | undefined;
   disableOverlay: boolean | undefined;
+  disableTint: boolean | undefined;
+  stroke: boolean | undefined;
 };
 
 export type HeroFullWithTranslations = {
