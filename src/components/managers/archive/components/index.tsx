@@ -1,44 +1,45 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { adminService } from 'api/api';
-import { common_ArchiveFull, common_ArchiveItemType } from 'api/proto-http/admin';
+import { common_ArchiveFull } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
+import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { Controller, useFieldArray, useForm } from 'react-hook-form';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFieldArray, useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
+import InputField from 'ui/form/fields/input-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { useCreateArchive, useUpdateArchive } from '../../archives/components/useArchiveQuery';
 import { HeroSectionModal } from '../../hero/components/hero-section-modal';
-import { TagPicker } from '../../hero/components/tag-picker';
 import { useProductSelection } from '../../hero/components/useProductSelection';
-import { ArchiveMainMedia } from './archive-main-media';
 import { ArchivePreviewPanel } from './archive-preview-panel';
+import { ArchiveThumbnail } from './archive-thumbnail';
 import { BlockEditorModal } from './block-editor-modal';
 import { BlockRail } from './block-rail';
+import { ArchiveItemValue, DEFAULT_ASPECT } from './item-types';
 import { mapArchiveFullToForm } from './map-full-to-form';
 import { mapFormToArchiveInsert } from './map-form-to-insert';
 import { ArchiveFormData, defaultData, schema } from './schema';
 import { SelectItemType } from './select-item-type';
 
-function Section({
-  title,
-  className,
-  children,
-}: {
-  title: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
+// One header treatment shared by every section on the page: an uppercase title
+// over a full-width rule, with an optional right-aligned hint.
+function SectionHeader({ title, hint }: { title: string; hint?: string }) {
   return (
-    <section className={`space-y-4 border border-textColor p-4 ${className ?? ''}`}>
+    <div className='flex flex-wrap items-baseline justify-between gap-2 border-b border-textColor pb-2'>
       <Text variant='uppercase' size='large'>
         {title}
       </Text>
-      {children}
-    </section>
+      {hint && (
+        <Text variant='label' size='small'>
+          {hint}
+        </Text>
+      )}
+    </div>
   );
 }
 
@@ -55,7 +56,6 @@ export function ArchiveForm({
 }) {
   const { showMessage } = useSnackBarStore();
   const navigate = useNavigate();
-  const editMode = isEditMode || isAddingArchive;
 
   // Resolved read model → form (+ the resolved-product cache, keyed by block uid).
   const initial = useMemo(
@@ -70,6 +70,17 @@ export function ArchiveForm({
   const [editingUid, setEditingUid] = useState<string | null>(null);
   const [pendingNewUid, setPendingNewUid] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [saveSummary, setSaveSummary] = useState<{
+    blocks: number;
+    incomplete: number;
+    detailsIncomplete: boolean;
+  }>({ blocks: 0, incomplete: 0, detailsIncomplete: false });
+  const [leaving, setLeaving] = useState(false);
+
+  const createArchive = useCreateArchive();
+  const updateArchive = useUpdateArchive();
+  const isSaving = createArchive.isPending || updateArchive.isPending;
 
   const archiveZodResolver = useMemo(() => zodResolver(schema) as any, []);
   const form = useForm<ArchiveFormData>({
@@ -82,25 +93,26 @@ export function ArchiveForm({
       return archiveZodResolver(filtered, context, options);
     },
     defaultValues: initialValues as ArchiveFormData,
-    // onTouched so incomplete-block badges + inline errors surface as the user edits.
     mode: 'onTouched',
   });
 
-  // Lifted so the editor and the live preview share one product cache — product
-  // edits are reflected in the preview immediately.
   const productApi = useProductSelection(productsByUid);
 
   const { append, remove, move, insert } = useFieldArray({ control: form.control, name: 'items' });
 
-  // deletedVersion (a state counter bumped on soft-delete change) is read in the
-  // preview props below; referencing it here keeps hasChanges recomputing too.
   const hasChanges =
     form.formState.isDirty || (deletedVersion >= 0 && deletedIndicesRef.current.size > 0);
 
+  // Warn on browser back / refresh / close and on the "← timeline" link while
+  // there are unsaved edits. Suppressed once `leaving` flips (successful create).
+  useBlockNavigation(hasChanges && !leaving);
+
+  useEffect(() => {
+    if (leaving) navigate(ROUTES.archives);
+  }, [leaving, navigate]);
+
   const handleDeletedIndicesChange = useCallback(() => setDeletedVersion((v) => v + 1), []);
 
-  // Preview reports a click as an index into the (soft-delete-filtered) draft;
-  // map it back to the block's uid and open that block's editor modal.
   const handlePreviewBlockClick = useCallback(
     (index: number) => {
       const live = (form.getValues().items || []).filter(
@@ -113,9 +125,15 @@ export function ArchiveForm({
   );
 
   const handleAddItem = useCallback(
-    (type: common_ArchiveItemType) => {
+    (type: ArchiveItemValue) => {
       const _uid = uuidv4();
-      append({ type, _uid } as any);
+      const seed: any = { type, _uid };
+      if (DEFAULT_ASPECT[type]) seed.aspectRatio = DEFAULT_ASPECT[type];
+      if (type === 'ARCHIVE_ITEM_TYPE_MEDIA_LINE') {
+        seed.mediaIds = [];
+        seed.mediaUrls = [];
+      }
+      append(seed);
       setAddMenuOpen(false);
       setEditingUid(_uid);
       setPendingNewUid(_uid);
@@ -149,15 +167,15 @@ export function ArchiveForm({
     const archiveInsert = mapFormToArchiveInsert(filtered);
     try {
       if (isEditMode) {
-        await adminService.UpdateArchive({ id: parseInt(id || '0'), archiveInsert });
-        showMessage('archive updated', 'success');
+        await updateArchive.mutateAsync({ id: parseInt(id || '0'), archiveData: archiveInsert });
+        showMessage('timeline entry updated', 'success');
         form.reset(filtered);
         deletedIndicesRef.current.clear();
         setDeletedVersion((v) => v + 1);
       } else {
-        await adminService.AddArchive({ archiveInsert });
-        showMessage('archive created', 'success');
-        navigate(ROUTES.archives);
+        await createArchive.mutateAsync(archiveInsert);
+        showMessage('timeline entry created', 'success');
+        setLeaving(true);
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to submit archive';
@@ -166,9 +184,59 @@ export function ArchiveForm({
     }
   }
 
+  // Pre-flight before saving: validate everything (so every incomplete block gets
+  // its (!) flag in the rail and the card fields show inline errors), tally live
+  // vs incomplete blocks and whether the card is incomplete, then open the confirm.
+  const handleSaveClick = useCallback(async () => {
+    await form.trigger();
+    const values = form.getValues();
+    const liveItems = (values.items || []).filter(
+      (e: any) => !deletedIndicesRef.current.has(e._uid),
+    );
+    const result = schema.safeParse({ ...values, items: liveItems });
+    const incompleteUids = new Set<string>();
+    let detailsIncomplete = false;
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        if (issue.path[0] === 'items' && typeof issue.path[1] === 'number') {
+          const uid = (liveItems[issue.path[1]] as any)?._uid;
+          if (uid) incompleteUids.add(uid);
+        } else {
+          detailsIncomplete = true;
+        }
+      }
+    }
+    setSaveSummary({
+      blocks: liveItems.length,
+      incomplete: incompleteUids.size,
+      detailsIncomplete,
+    });
+    setConfirmOpen(true);
+  }, [form]);
+
+  const handleConfirmSave = () => {
+    setConfirmOpen(false);
+    form.handleSubmit(handleSubmit, onError)();
+  };
+
+  // Cmd/Ctrl+S opens the pre-save confirm (and suppresses the browser's save
+  // dialog). Ignored while saving, when a sub-modal is open, or when an edit has
+  // nothing to save.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 's') return;
+      e.preventDefault();
+      if (isSaving) return;
+      if (editingUid || addMenuOpen || confirmOpen) return;
+      if (isEditMode && !hasChanges) return;
+      handleSaveClick();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isSaving, editingUid, addMenuOpen, confirmOpen, isEditMode, hasChanges, handleSaveClick]);
+
   function onError(errors: any) {
     showMessage('please fill in all required fields', 'error');
-    // Scroll the first incomplete body block into view in the rail.
     const values = form.getValues();
     if (errors.items) {
       const firstIdx = (errors.items as any[]).findIndex(
@@ -177,24 +245,28 @@ export function ArchiveForm({
       );
       const uid = (values.items?.[firstIdx] as any)?._uid;
       if (firstIdx >= 0 && uid && entityRefs.current[uid]) {
-        entityRefs.current[uid]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        entityRefs.current[uid]?.scrollIntoView({
+          behavior: prefersReduced ? 'auto' : 'smooth',
+          block: 'center',
+        });
       }
     }
   }
 
-  const handleCancel = () => navigate(ROUTES.archives);
-  const submit = () => form.handleSubmit(handleSubmit, onError)();
-
   return (
     <Form {...form}>
       <form
-        className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
+        className='flex flex-col gap-6 px-2 pt-0 pb-12 lg:px-6'
         onSubmit={form.handleSubmit(handleSubmit, onError)}
       >
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
+        <div className='sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2 py-3 lg:-mx-6 lg:px-6'>
           <div className='flex flex-wrap items-center gap-3'>
             <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.archives}>← timeline</Link>
+              <Link to={ROUTES.archives} aria-label='back to timeline'>
+                <span className='sm:hidden'>←</span>
+                <span className='hidden sm:inline'>← timeline</span>
+              </Link>
             </Button>
             <Text variant='uppercase' size='large'>
               {isAddingArchive ? 'new timeline entry' : 'edit timeline entry'}
@@ -207,54 +279,37 @@ export function ArchiveForm({
               </span>
             )}
           </div>
+          <Button
+            type='button'
+            variant='main'
+            size='lg'
+            className='uppercase cursor-pointer'
+            disabled={(isEditMode && !hasChanges) || isSaving}
+            loading={isSaving}
+            onClick={handleSaveClick}
+          >
+            {isEditMode ? 'save' : 'create'}
+          </Button>
         </div>
 
-        <Section title='details'>
+        <section className='space-y-4'>
+          <SectionHeader title='card' hint='how this entry appears in the timeline list' />
           <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
-            <div className='w-full space-y-4 lg:w-1/2'>
+            <div className='w-full space-y-4 lg:w-2/3'>
               <UnifiedTranslationFields
                 fieldPrefix='translations'
-                fields={[
-                  { name: 'heading', label: 'heading', maxLength: 90 },
-                  {
-                    name: 'description',
-                    label: 'description',
-                    type: 'textarea',
-                    rows: 5,
-                    maxLength: 10000,
-                  },
-                ]}
+                fields={[{ name: 'heading', label: 'heading (title)', maxLength: 90 }]}
               />
-              <Controller
-                control={form.control}
-                name='tag'
-                render={({ field, fieldState }) => (
-                  <div className='space-y-1'>
-                    <TagPicker
-                      value={field.value || ''}
-                      onChange={field.onChange}
-                      label='tag'
-                      placeholder='select or type a tag'
-                    />
-                    {fieldState.error && <Text variant='error'>{fieldState.error.message}</Text>}
-                  </div>
-                )}
-              />
+              <InputField name='tag' label='tag' placeholder='free text, e.g. ss24 or editorial' />
             </div>
-            <div className='w-full space-y-2 lg:w-1/2'>
-              <Text variant='label' size='small'>
-                main media (timeline header band)
-              </Text>
-              <ArchiveMainMedia archive={archive} control={form.control} editMode={editMode} />
+            <div className='w-full lg:w-1/3'>
+              <ArchiveThumbnail />
             </div>
           </div>
-        </Section>
+        </section>
 
         <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
-          <div className='max-h-[50vh] shrink-0 overflow-y-auto lg:max-h-none lg:overflow-visible lg:sticky lg:top-4 lg:w-[240px]'>
-            <Text variant='uppercase' size='small' className='mb-2 block'>
-              body
-            </Text>
+          <div className='max-h-[50vh] shrink-0 overflow-y-auto lg:max-h-none lg:overflow-visible lg:sticky lg:top-20 lg:w-[240px]'>
             <BlockRail
               entityRefs={entityRefs}
               arrayHelpers={{ move }}
@@ -277,39 +332,10 @@ export function ArchiveForm({
         </div>
       </form>
 
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
-        <Text variant='inactive' size='small'>
-          {hasChanges ? 'unsaved changes' : ' '}
-        </Text>
-        <div className='flex items-center gap-2'>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase cursor-pointer'
-            onClick={handleCancel}
-          >
-            cancel
-          </Button>
-          <Button
-            type='button'
-            variant='main'
-            size='lg'
-            className='uppercase cursor-pointer'
-            disabled={(isEditMode && !hasChanges) || form.formState.isSubmitting}
-            loading={form.formState.isSubmitting}
-            onClick={submit}
-          >
-            {isEditMode ? 'save' : 'add'}
-          </Button>
-        </div>
-      </div>
-
       <BlockEditorModal
         editingUid={editingUid}
         onOpenChange={(o) => {
           if (o) return;
-          // Closing a freshly-added block without confirming discards it.
           if (editingUid && editingUid === pendingNewUid) {
             const idx = (form.getValues().items || []).findIndex(
               (e: any) => e._uid === pendingNewUid,
@@ -331,6 +357,40 @@ export function ArchiveForm({
       <HeroSectionModal open={addMenuOpen} onOpenChange={setAddMenuOpen} title='add a block'>
         <SelectItemType onAdd={handleAddItem} />
       </HeroSectionModal>
+
+      <ConfirmationModal
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        onConfirm={handleConfirmSave}
+        title={isEditMode ? 'save timeline entry' : 'create timeline entry'}
+        confirmLabel={isEditMode ? 'save' : 'create'}
+        cancelLabel='keep editing'
+        confirmDisabled={saveSummary.incomplete > 0 || saveSummary.detailsIncomplete}
+      >
+        <div className='space-y-2'>
+          <Text>
+            {isEditMode
+              ? `this updates the live timeline entry (${saveSummary.blocks} block${
+                  saveSummary.blocks === 1 ? '' : 's'
+                }).`
+              : saveSummary.blocks === 0
+                ? 'this publishes a timeline entry with no body blocks yet.'
+                : `this publishes a new timeline entry with ${saveSummary.blocks} block${
+                    saveSummary.blocks === 1 ? '' : 's'
+                  }.`}
+          </Text>
+          {saveSummary.detailsIncomplete && (
+            <Text variant='error'>the card is incomplete — check the heading and tag.</Text>
+          )}
+          {saveSummary.incomplete > 0 && (
+            <Text variant='error'>
+              {saveSummary.incomplete} block
+              {saveSummary.incomplete === 1 ? ' is' : 's are'} incomplete — fix the flagged (!)
+              block{saveSummary.incomplete === 1 ? '' : 's'} in the rail first.
+            </Text>
+          )}
+        </div>
+      </ConfirmationModal>
     </Form>
   );
 }
