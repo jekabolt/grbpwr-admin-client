@@ -1,7 +1,7 @@
 import { common_HeroType } from 'api/proto-http/admin';
 import { heroTypes } from 'constants/constants';
 import { cn } from 'lib/utility';
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useEffect, useRef, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { v4 as uuidv4 } from 'uuid';
 import Input from 'ui/components/input';
@@ -69,6 +69,14 @@ const HERO_TYPE_BY_VALUE = Object.fromEntries(heroTypes.map((t) => [t.value, t])
 export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRefs, onAdded }) => {
   const [addedEntityUid, setAddedEntityUid] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Focus the search on open (after Radix's own open-focus settles) so adding a
+  // block is keyboard-first.
+  useEffect(() => {
+    const t = setTimeout(() => searchRef.current?.focus(), 50);
+    return () => clearTimeout(t);
+  }, []);
 
   const entities = form.watch('entities');
 
@@ -103,6 +111,7 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRe
     label: g.label,
     types: g.types.filter(matches),
   })).filter((g) => g.types.length > 0);
+  const flatMatches = groups.flatMap((g) => g.types);
 
   const renderCard = (value: common_HeroType) => {
     const type = HERO_TYPE_BY_VALUE[value];
@@ -133,12 +142,25 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRe
     <div className='space-y-5'>
       <div className='sticky top-0 z-10 -mt-1 bg-bgColor pb-2 pt-1'>
         <Input
+          ref={searchRef}
           value={query}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter' && query.trim() && flatMatches.length > 0) {
+              e.preventDefault();
+              addEntity(flatMatches[0]);
+            }
+          }}
           placeholder='search block types…'
           aria-label='search block types'
           className='border px-2 py-1.5'
         />
+        {query.trim() && (
+          <Text variant='label' size='small' className='mt-1 block'>
+            {flatMatches.length} match{flatMatches.length === 1 ? '' : 'es'}
+            {flatMatches.length > 0 && ' · enter adds the first'}
+          </Text>
+        )}
       </div>
 
       {groups.length === 0 ? (
