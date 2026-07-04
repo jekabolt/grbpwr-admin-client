@@ -92,6 +92,7 @@ export type common_Dictionary = {
   isProd: boolean | undefined;
   // Hero section background color for the storefront (CSS). Empty if unset.
   backgroundHeroColor: string | undefined;
+  productTags: string[] | undefined;
 };
 
 // Category represents a hierarchical category structure
@@ -1774,11 +1775,15 @@ export type common_HeroSingleInsert = {
 };
 
 // HeroMedia is a portrait/landscape media pair addressed by id (write side).
-// disable_overlay lives here so the scrim can be toggled per media slot.
+// The per-slot presentation modifiers live here: disable_overlay toggles the
+// scrim, disable_tint toggles the frontend's background colour tint, and stroke
+// toggles a border/outline around the media.
 export type common_HeroMedia = {
   portraitId: number | undefined;
   landscapeId: number | undefined;
   disableOverlay: boolean | undefined;
+  disableTint: boolean | undefined;
+  stroke: boolean | undefined;
 };
 
 // HeroCopyTranslation is the single, shared translation for every hero block.

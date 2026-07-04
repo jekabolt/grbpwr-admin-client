@@ -85,6 +85,8 @@ export type common_HeroMediaFull = {
   portrait: common_MediaFull | undefined;
   landscape: common_MediaFull | undefined;
   disableOverlay: boolean | undefined;
+  disableTint: boolean | undefined;
+  stroke: boolean | undefined;
 };
 
 export type common_MediaFull = {
@@ -443,6 +445,7 @@ export type common_Dictionary = {
   isProd: boolean | undefined;
   // Hero section background color for the storefront (CSS). Empty if unset.
   backgroundHeroColor: string | undefined;
+  productTags: string[] | undefined;
 };
 
 // Category represents a hierarchical category structure

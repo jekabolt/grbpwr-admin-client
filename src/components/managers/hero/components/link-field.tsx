@@ -20,6 +20,7 @@ import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { useArchives } from '../../archives/components/useArchiveQuery';
 import { ProductPickerModal } from './productPickerModal';
+import { TagPicker } from './tag-picker';
 
 // Radix Select forbids an empty-string item value, so use a sentinel for "any".
 const ANY = '__any';
@@ -317,14 +318,11 @@ function CatalogBody({
         />
       </Labeled>
 
-      <Labeled label='tag'>
-        <Input
-          value={link.tag || ''}
-          placeholder='e.g. ss26'
-          className='border px-2 py-1.5'
-          onChange={(e: ChangeEvent<HTMLInputElement>) => set({ tag: e.target.value || undefined })}
-        />
-      </Labeled>
+      <TagPicker
+        value={link.tag || ''}
+        onChange={(v) => set({ tag: v || undefined })}
+        label='tag'
+      />
 
       <Labeled label='season'>
         <Select
