@@ -3,18 +3,18 @@ import { MediaGallerySelector } from 'components/managers/media/components/media
 import { useState } from 'react';
 import { Control, useController, useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
-import type { CheckoutData } from './schema';
+import type { ArchiveFormData } from './schema';
 
 type Props = {
   archive?: common_ArchiveFull;
-  control: Control<CheckoutData>;
+  control: Control<ArchiveFormData>;
   editMode?: boolean;
 };
 
 export function ArchiveMainMedia({ archive, control, editMode }: Props) {
   const {
     formState: { errors },
-  } = useFormContext<CheckoutData>();
+  } = useFormContext<ArchiveFormData>();
 
   const { field } = useController({
     name: 'mainMediaIds',

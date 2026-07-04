@@ -1955,16 +1955,49 @@ export type AddArchiveRequest = {
 
 export type common_ArchiveInsert = {
   tag: string | undefined;
-  mediaIds: number[] | undefined;
   mainMediaIds: number[] | undefined;
   thumbnailId: number | undefined;
   translations: common_ArchiveInsertTranslation[] | undefined;
+  items: common_ArchiveItemInsert[] | undefined;
 };
 
 export type common_ArchiveInsertTranslation = {
   languageId: number | undefined;
   heading: string | undefined;
   description: string | undefined;
+};
+
+// ArchiveItemInsert is a single timeline body block (write side). Only the
+// fields relevant to `type` are used.
+export type common_ArchiveItemInsert = {
+  type: common_ArchiveItemType | undefined;
+  mediaId: number | undefined;
+  embedUrl: string | undefined;
+  productId: number | undefined;
+  tag: string | undefined;
+  limit: number | undefined;
+  productIds: number[] | undefined;
+  translations: common_ArchiveItemTranslation[] | undefined;
+};
+
+// ArchiveItemType discriminates a timeline body block. The archive body is an
+// ordered, heterogeneous list of these blocks (Insert-form storage, like hero).
+export type common_ArchiveItemType =
+  | "ARCHIVE_ITEM_TYPE_UNKNOWN"
+  | "ARCHIVE_ITEM_TYPE_MEDIA"
+  | "ARCHIVE_ITEM_TYPE_TEXT"
+  | "ARCHIVE_ITEM_TYPE_EMBED"
+  | "ARCHIVE_ITEM_TYPE_PRODUCT"
+  | "ARCHIVE_ITEM_TYPE_PRODUCTS_TAG"
+  | "ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL";
+// ArchiveItemTranslation is the per-block translation for a timeline body item.
+// Each block type uses only the subset it needs:
+// text                         -> text
+// media/embed/product/products -> caption
+export type common_ArchiveItemTranslation = {
+  languageId: number | undefined;
+  caption: string | undefined;
+  text: string | undefined;
 };
 
 export type AddArchiveResponse = {
@@ -1987,7 +2020,7 @@ export type GetArchiveByIDResponse = {
 export type common_ArchiveFull = {
   archiveList: common_ArchiveList | undefined;
   mainMedia: common_MediaFull[] | undefined;
-  media: common_MediaFull[] | undefined;
+  items: common_ArchiveItemFull[] | undefined;
 };
 
 export type common_ArchiveList = {
@@ -1997,6 +2030,17 @@ export type common_ArchiveList = {
   slug: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   thumbnail: common_MediaFull | undefined;
+};
+
+// ArchiveItemFull is the resolved timeline body block (read side).
+export type common_ArchiveItemFull = {
+  type: common_ArchiveItemType | undefined;
+  media: common_MediaFull | undefined;
+  embedUrl: string | undefined;
+  product: common_Product | undefined;
+  tag: string | undefined;
+  products: common_Product[] | undefined;
+  translations: common_ArchiveItemTranslation[] | undefined;
 };
 
 export type UpdateArchiveResponse = {
