@@ -129,10 +129,11 @@ export function Hero() {
       setTimeout(() => {
         isResettingRef.current = false;
       }, 0);
-      showMessage('Hero saved successfully!', 'success');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error saving hero';
-      showMessage(msg, 'error');
+      showMessage('hero published to the live storefront', 'success');
+    } catch {
+      // The error toast is surfaced by useSaveHero's onError; swallow the
+      // rejected mutateAsync here so it doesn't bubble as an unhandled rejection
+      // (and so the form isn't reset — the user's edits are preserved).
     }
   }
 
