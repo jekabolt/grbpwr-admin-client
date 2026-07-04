@@ -22,6 +22,94 @@ import Text from 'ui/components/text';
 import { HeroSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
 
+// Primary headline (default language, id 1) for a block's copy, if any.
+function translationHeadline(translations: any[] | undefined): string | undefined {
+  if (!Array.isArray(translations)) return undefined;
+  const t = translations.find((x) => x?.languageId === 1) || translations[0];
+  return (t?.headline || t?.caption || t?.tag || '').trim() || undefined;
+}
+
+// A tiny thumbnail url + one-line summary per block so rows are distinguishable
+// at a glance instead of showing only the type label. Reads the form's flat
+// media urls (thumbnails) and copy; both are already in the watched entity.
+function blockPreview(entity: any): { thumb?: string; summary?: string } {
+  const e = entity;
+  const firstMedia = (s: any) => s?.mediaLandscapeUrl || s?.mediaPortraitUrl || undefined;
+  switch (e?.type) {
+    case 'HERO_TYPE_MAIN':
+      return { thumb: firstMedia(e.main), summary: translationHeadline(e.main?.translations) };
+    case 'HERO_TYPE_SINGLE':
+      return { thumb: firstMedia(e.single), summary: translationHeadline(e.single?.translations) };
+    case 'HERO_TYPE_DOUBLE':
+      return {
+        thumb: firstMedia(e.double?.left) || firstMedia(e.double?.right),
+        summary: translationHeadline(e.double?.left?.translations),
+      };
+    case 'HERO_TYPE_STATEMENT':
+      return {
+        thumb: firstMedia(e.statement),
+        summary: translationHeadline(e.statement?.translations),
+      };
+    case 'HERO_TYPE_NEWSLETTER':
+      return {
+        thumb: firstMedia(e.newsletter),
+        summary: translationHeadline(e.newsletter?.translations),
+      };
+    case 'HERO_TYPE_EMBED':
+      return { thumb: firstMedia(e.embed), summary: translationHeadline(e.embed?.translations) };
+    case 'HERO_TYPE_DROP':
+      return { thumb: firstMedia(e.drop), summary: translationHeadline(e.drop?.translations) };
+    case 'HERO_TYPE_SPLIT':
+      return {
+        thumb: firstMedia(e.split?.media),
+        summary: translationHeadline(e.split?.media?.translations),
+      };
+    case 'HERO_TYPE_PRODUCT_SPOTLIGHT':
+      return {
+        thumb: firstMedia(e.productSpotlight),
+        summary: translationHeadline(e.productSpotlight?.translations),
+      };
+    case 'HERO_TYPE_VIDEO':
+      return {
+        thumb: e.video?.posterUrl || e.video?.mediaUrl || undefined,
+        summary: translationHeadline(e.video?.translations),
+      };
+    case 'HERO_TYPE_SLIDESHOW':
+      return {
+        thumb: firstMedia(e.slideshow?.slides?.[0]),
+        summary: e.slideshow?.slides?.length ? `${e.slideshow.slides.length} slides` : undefined,
+      };
+    case 'HERO_TYPE_MOSAIC':
+      return {
+        thumb: firstMedia(e.mosaic?.tiles?.[0]),
+        summary: e.mosaic?.tiles?.length ? `${e.mosaic.tiles.length} tiles` : undefined,
+      };
+    case 'HERO_TYPE_LOOKBOOK':
+      return {
+        thumb: firstMedia(e.lookbook?.frames?.[0]),
+        summary: e.lookbook?.frames?.length
+          ? `${e.lookbook.frames.length} frames`
+          : translationHeadline(e.lookbook?.translations),
+      };
+    case 'HERO_TYPE_MARQUEE':
+      return { summary: translationHeadline(e.marquee?.translations) };
+    case 'HERO_TYPE_FEATURED_PRODUCTS':
+      return { summary: translationHeadline(e.featuredProducts?.translations) };
+    case 'HERO_TYPE_FEATURED_PRODUCTS_TAG':
+      return {
+        summary: e.featuredProductsTag?.tag
+          ? `#${e.featuredProductsTag.tag}`
+          : translationHeadline(e.featuredProductsTag?.translations),
+      };
+    case 'HERO_TYPE_LAST_CHANCE':
+      return { summary: translationHeadline(e.lastChance?.translations) };
+    case 'HERO_TYPE_NEW_ARRIVALS':
+      return { summary: translationHeadline(e.newArrivals?.translations) };
+    default:
+      return {};
+  }
+}
+
 interface BlockRailProps {
   entityRefs: React.MutableRefObject<{ [uid: string]: HTMLDivElement | null }>;
   arrayHelpers: { move: (from: number, to: number) => void };
@@ -146,6 +234,7 @@ export const BlockRail: FC<BlockRailProps> = ({
               const isDeleted = deletedIndices.has(uid);
               const isSelected = selectedUid === uid;
               const hasError = !!entityErrors?.[index];
+              const preview = blockPreview(entity);
 
               return (
                 <SortableEntity key={uid} uid={uid} disabled={isDeleted}>
@@ -198,35 +287,53 @@ export const BlockRail: FC<BlockRailProps> = ({
                         <button
                           type='button'
                           onClick={() => onSelectBlock(uid)}
-                          className='flex min-w-0 flex-1 items-center gap-1.5 text-left cursor-pointer'
+                          className='flex min-w-0 flex-1 items-center gap-2 text-left cursor-pointer'
                         >
-                          <Text variant='inactive' size='small'>
-                            #{index + 1}
-                          </Text>
-                          <Text variant='uppercase' size='small' className='truncate'>
-                            {typeLabel(entity.type)}
-                          </Text>
-                          {audienceBadge(entity) && (
-                            <span
-                              className='shrink-0 border border-textInactiveColor px-1 leading-none text-textInactiveColor'
-                              title='audience-restricted'
-                            >
-                              <Text size='small' variant='uppercase'>
-                                {audienceBadge(entity)}
-                              </Text>
-                            </span>
+                          {preview.thumb ? (
+                            <img
+                              src={preview.thumb}
+                              alt=''
+                              className='h-8 w-8 shrink-0 border border-textInactiveColor object-cover'
+                            />
+                          ) : (
+                            <div className='h-8 w-8 shrink-0 border border-dashed border-textInactiveColor' />
                           )}
-                          {hasError && (
-                            <span
-                              className='ml-auto inline-block bg-error px-1 leading-none text-bgColor'
-                              title='incomplete'
-                              aria-label='incomplete'
-                            >
-                              <Text className='!text-bgColor' size='small'>
-                                !
+                          <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                            <span className='flex items-center gap-1.5'>
+                              <Text variant='inactive' size='small'>
+                                #{index + 1}
                               </Text>
+                              <Text variant='uppercase' size='small' className='truncate'>
+                                {typeLabel(entity.type)}
+                              </Text>
+                              {audienceBadge(entity) && (
+                                <span
+                                  className='shrink-0 border border-textInactiveColor px-1 leading-none text-textInactiveColor'
+                                  title='audience-restricted'
+                                >
+                                  <Text size='small' variant='uppercase'>
+                                    {audienceBadge(entity)}
+                                  </Text>
+                                </span>
+                              )}
+                              {hasError && (
+                                <span
+                                  className='ml-auto inline-block bg-error px-1 leading-none text-bgColor'
+                                  title='incomplete'
+                                  aria-label='incomplete'
+                                >
+                                  <Text className='!text-bgColor' size='small'>
+                                    !
+                                  </Text>
+                                </span>
+                              )}
                             </span>
-                          )}
+                            {preview.summary && (
+                              <Text variant='label' size='small' className='truncate'>
+                                {preview.summary}
+                              </Text>
+                            )}
+                          </span>
                         </button>
                         <button
                           type='button'
@@ -247,7 +354,7 @@ export const BlockRail: FC<BlockRailProps> = ({
       </DndContext>
 
       {liveCount === 0 && (
-        <Text variant='inactive' size='small' className='px-1 py-2'>
+        <Text variant='label' size='small' className='px-1 py-2'>
           no blocks yet — add your first one below
         </Text>
       )}
