@@ -308,7 +308,7 @@ export function Hero() {
           </div>
         ) : (
           <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
-            <div className='shrink-0 lg:sticky lg:top-20 lg:w-[240px]'>
+            <div className='max-h-[50vh] shrink-0 overflow-y-auto lg:max-h-none lg:overflow-visible lg:sticky lg:top-20 lg:w-[240px]'>
               <BlockRail
                 entityRefs={entityRefs}
                 arrayHelpers={{ move }}
