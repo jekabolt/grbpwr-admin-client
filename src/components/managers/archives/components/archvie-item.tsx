@@ -50,9 +50,6 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
         <Text variant='uppercase' className='line-clamp-1'>
           {archive.translations?.[0]?.heading}
         </Text>
-        <Text variant='inactive' size='small' className='line-clamp-2'>
-          {archive.translations?.[0]?.description}
-        </Text>
         {archive.tag && (
           <span className='mt-1 inline-block w-fit border border-textColor px-1.5 py-0.5'>
             <Text size='small' variant='uppercase'>
