@@ -1,3 +1,4 @@
+import { common_Product } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import {
   buildStorefrontLink,
@@ -8,7 +9,9 @@ import {
 import { ChangeEvent, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import Input from 'ui/components/input';
+import Media from 'ui/components/media';
 import Text from 'ui/components/text';
+import { ProductPickerModal } from './productPickerModal';
 
 interface LinkFieldProps {
   /** RHF form path holding the URL string (unchanged contract). */
@@ -37,6 +40,9 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
   const { watch, setValue } = useFormContext();
   const raw: string = watch(name) || '';
   const [link, setLink] = useState<StorefrontLink>(() => parseStorefrontLink(raw));
+  const [productModalOpen, setProductModalOpen] = useState(false);
+  // Resolved product for display only (thumbnail); the link stores just the slug.
+  const [pickedProduct, setPickedProduct] = useState<common_Product | null>(null);
 
   // Re-sync when the form value changes from outside (form reset / duplicate),
   // but not on our own writes (then raw already equals build(link)).
@@ -69,6 +75,13 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
         return update(link.type === 'catalog' ? link : { type: 'catalog' });
     }
   };
+
+  // Only trust the resolved product for display when it matches the stored slug
+  // (guards against a stale pick when this field is reused for another block).
+  const showProduct =
+    link.type === 'product' && pickedProduct && pickedProduct.slug === link.slug
+      ? pickedProduct
+      : null;
 
   return (
     <div className='space-y-2'>
@@ -115,6 +128,42 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
         <Text variant='label' size='small'>
           this block has no link.
         </Text>
+      )}
+
+      {link.type === 'product' && (
+        <div className='space-y-2'>
+          {link.slug ? (
+            <div className='flex items-center gap-2'>
+              {showProduct?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl && (
+                <div className='w-12 shrink-0'>
+                  <Media
+                    src={showProduct.productDisplay.thumbnail.media.thumbnail.mediaUrl}
+                    alt='product'
+                    aspectRatio='1/1'
+                    fit='cover'
+                  />
+                </div>
+              )}
+              <Text size='small'>product: {link.slug}</Text>
+            </div>
+          ) : (
+            <Text variant='label' size='small'>
+              no product selected yet.
+            </Text>
+          )}
+          <ProductPickerModal
+            open={productModalOpen}
+            selectedProductIds={showProduct?.id ? [showProduct.id] : []}
+            onOpenRequest={() => setProductModalOpen(true)}
+            onClose={() => setProductModalOpen(false)}
+            onSave={(prods) => {
+              const p = prods[prods.length - 1];
+              update({ type: 'product', slug: p?.slug || '' });
+              setPickedProduct(p || null);
+              setProductModalOpen(false);
+            }}
+          />
+        </div>
       )}
     </div>
   );
