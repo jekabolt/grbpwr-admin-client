@@ -158,8 +158,8 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_DOUBLE':
         return (
           <div className='flex flex-col gap-4'>
-            <div className='lg:px-2.5 p-2.5'>
-              <Text className='text-xl font-bold leading-none' variant='uppercase'>
+            <div className='p-3 lg:p-4'>
+              <Text className='font-bold leading-none' variant='uppercase' size='large'>
                 double add
               </Text>
             </div>

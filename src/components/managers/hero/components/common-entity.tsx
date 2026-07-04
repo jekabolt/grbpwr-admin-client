@@ -142,8 +142,8 @@ export function CommonEntity({
       <div className='space-y-4'>
         <InputField
           name={`${prefix}.exploreLink` as any}
-          label='explore link'
-          placeholder='Enter explore link'
+          label='explore link (optional)'
+          placeholder='https://…'
         />
 
         <UnifiedTranslationFields
