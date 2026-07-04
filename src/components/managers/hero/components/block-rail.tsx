@@ -256,7 +256,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                           </Text>
                           <button
                             type='button'
-                            className='cursor-pointer underline'
+                            className='cursor-pointer px-1 py-0.5 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                             onClick={() => handleRestoreEntity(uid)}
                           >
                             <Text size='small'>restore</Text>
@@ -278,7 +278,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                       >
                         <button
                           type='button'
-                          className='px-0.5 leading-none cursor-grab touch-none select-none text-textInactiveColor hover:text-textColor active:cursor-grabbing'
+                          className='flex items-center px-1.5 py-1 leading-none cursor-grab touch-none select-none text-textInactiveColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                           aria-label='drag to reorder block'
                           {...dragHandleProps}
                         >
@@ -287,7 +287,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                         <button
                           type='button'
                           onClick={() => onSelectBlock(uid)}
-                          className='flex min-w-0 flex-1 items-center gap-2 text-left cursor-pointer'
+                          className='flex min-w-0 flex-1 items-center gap-2 text-left cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                         >
                           {preview.thumb ? (
                             <img
@@ -337,7 +337,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                         </button>
                         <button
                           type='button'
-                          className='px-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor'
+                          className='flex items-center px-1.5 py-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                           aria-label='delete block'
                           onClick={() => handleRemoveEntity(uid)}
                         >

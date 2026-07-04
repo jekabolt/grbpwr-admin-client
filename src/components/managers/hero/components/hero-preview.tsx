@@ -116,7 +116,7 @@ export function HeroPreview({
               key={l.code}
               type='button'
               variant={locale === l.code ? 'main' : 'secondary'}
-              className='cursor-pointer px-2 py-0.5'
+              className='cursor-pointer px-2 py-1'
               aria-pressed={locale === l.code}
               onClick={() => setLocale(l.code)}
             >

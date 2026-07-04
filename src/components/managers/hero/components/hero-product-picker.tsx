@@ -58,7 +58,7 @@ export function HeroProductPicker({ uid, api, formPath, single }: HeroProductPic
             <button
               type='button'
               onClick={() => removeAt(i)}
-              className='absolute right-0 top-0 bg-bgColor px-1 leading-none text-textColor'
+              className='absolute right-0 top-0 bg-bgColor px-1.5 py-0.5 leading-none text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
               aria-label='remove product'
             >
               ×
