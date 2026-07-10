@@ -2,18 +2,13 @@ import type { GetMetricsResponse } from 'api/proto-http/admin';
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
-  AddToCartRateMatrixChart,
-  AddToCartRateTable,
   DeadStockTable,
   InventoryHealthTable,
   NotifyMeIntentTable,
   OOSImpactTable,
   ProductCharts,
-  ProductTrendTable,
   ReorderTable,
-  RevenueParetoChart,
   SizeAnalyticsTable,
-  SizeConfidenceTable,
   SizeRunEfficiencyTable,
   SlowMoversTable,
 } from '../components';
@@ -48,24 +43,20 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
     (metrics?.topProductsByRevenue?.length ?? 0) > 0 ||
     (metrics?.topProductsByQuantity?.length ?? 0) > 0 ||
     (metrics?.revenueByCategory?.length ?? 0) > 0;
-  const hasRevenuePareto = (metricsResponse.revenuePareto?.length ?? 0) > 0;
-  const hasProductTrend = (metricsResponse.productTrend?.length ?? 0) > 0;
-  const hasAddToCartRateAnalysis =
-    (metricsResponse.addToCartRateAnalysis?.products?.length ?? 0) > 0 ||
-    (metricsResponse.addToCartRateAnalysis?.globalTrend?.length ?? 0) > 0;
-  const hasAddToCartRate = (metricsResponse.addToCartRate?.length ?? 0) > 0;
   const hasAnyProductData =
     hasProductCharts ||
-    hasRevenuePareto ||
-    hasProductTrend ||
-    hasAddToCartRateAnalysis ||
-    hasAddToCartRate;
+    (metricsResponse.slowMovers?.length ?? 0) > 0 ||
+    (metricsResponse.deadStock?.length ?? 0) > 0 ||
+    (metricsResponse.sizeAnalytics?.length ?? 0) > 0 ||
+    (metricsResponse.sizeRunEfficiency?.length ?? 0) > 0 ||
+    (metricsResponse.inventoryHealth?.length ?? 0) > 0 ||
+    (metricsResponse.notifyMeIntent?.length ?? 0) > 0 ||
+    (metricsResponse.oosImpact?.length ?? 0) > 0;
 
   return (
     <div className='space-y-6'>
       {!hasAnyProductData ? (
         <div className='border border-textInactiveColor p-8 text-center'>
-          <div id='atc-matrix' className='scroll-mt-24 -mt-8 h-0' aria-hidden />
           <span className='text-textInactiveColor'>
             No product performance data available for this period. Data appears when there are
             orders and product sales.
@@ -79,23 +70,8 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
             </summary>
             <div className='space-y-6 p-4'>
               {hasProductCharts && <ProductCharts metrics={metrics} />}
-              {hasRevenuePareto && (
-                <RevenueParetoChart revenuePareto={metricsResponse.revenuePareto} />
-              )}
-
-              <section id='atc-matrix' className='scroll-mt-24'>
-                {hasAddToCartRateAnalysis ? (
-                  <AddToCartRateMatrixChart
-                    addToCartRateAnalysis={metricsResponse.addToCartRateAnalysis}
-                  />
-                ) : (
-                  <AddToCartRateTable addToCartRate={metricsResponse.addToCartRate} />
-                )}
-              </section>
-
               <SlowMoversTable slowMovers={metricsResponse.slowMovers} />
               <DeadStockTable deadStock={metricsResponse.deadStock} />
-              {hasProductTrend && <ProductTrendTable productTrend={metricsResponse.productTrend} />}
             </div>
           </details>
 
@@ -106,7 +82,6 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
             <div className='space-y-6 p-4'>
               <SizeAnalyticsTable sizeAnalytics={metricsResponse.sizeAnalytics} />
               <SizeRunEfficiencyTable sizeRunEfficiency={metricsResponse.sizeRunEfficiency} />
-              <SizeConfidenceTable sizeConfidence={metricsResponse.sizeConfidence} />
             </div>
           </details>
 

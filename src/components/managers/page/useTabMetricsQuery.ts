@@ -9,7 +9,6 @@ export type MetricsTabId = 'this-week' | 'revenue' | 'products' | 'customers' | 
 export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
   'this-week': [
     'METRICS_SECTION_BUSINESS',
-    'METRICS_SECTION_REVENUE_PARETO',
     'METRICS_SECTION_CAMPAIGN_ATTRIBUTION',
     // Only technical signal that's an ops (money) concern — surfaced as an alert on Overview.
     'METRICS_SECTION_PAYMENT_FAILURES',
@@ -17,9 +16,6 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
   revenue: ['METRICS_SECTION_BUSINESS', 'METRICS_SECTION_FUNNEL'],
   products: [
     'METRICS_SECTION_BUSINESS',
-    'METRICS_SECTION_REVENUE_PARETO',
-    'METRICS_SECTION_PRODUCT_TREND',
-    'METRICS_SECTION_ADD_TO_CART_RATE',
     'METRICS_SECTION_SIZE_ANALYTICS',
     'METRICS_SECTION_SIZE_RUN_EFFICIENCY',
     'METRICS_SECTION_INVENTORY_HEALTH',
@@ -27,9 +23,11 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     'METRICS_SECTION_DEAD_STOCK',
     'METRICS_SECTION_OOS_IMPACT',
     'METRICS_SECTION_NOTIFY_ME_INTENT',
-    'METRICS_SECTION_SIZE_CONFIDENCE',
     // Cut (vanity micro-interaction telemetry, no operator decision): PRODUCT_ENGAGEMENT,
     // TIME_ON_PAGE, PRODUCT_ZOOM, IMAGE_SWIPES, SIZE_GUIDE_CLICKS, DETAILS_EXPANSION.
+    // Cut (thin/misleading at boutique catalog size): REVENUE_PARETO (trivially steep 80/20),
+    // PRODUCT_TREND (extreme swings on tiny prior revenue), ADD_TO_CART_RATE (per-SKU GA4 noise),
+    // SIZE_CONFIDENCE (guide-view/selection ratio explodes on a few events).
   ],
   // Collapsed to repeat-economics only. Cut (too low-n to be reliable at boutique volume):
   // COHORT_RETENTION, ORDER_SEQUENCE, SPENDING_CURVE, ENTRY_PRODUCTS, CATEGORY_LOYALTY.
