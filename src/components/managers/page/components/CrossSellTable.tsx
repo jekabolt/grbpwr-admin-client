@@ -7,14 +7,17 @@ interface CrossSellTableProps {
   metrics: BusinessMetrics | undefined;
 }
 
+// A pair bought together once or twice is chance, not a bundling signal — require real support.
+const MIN_SUPPORT = 3;
+
 export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
-  const pairs = metrics?.crossSellPairs ?? [];
+  const pairs = (metrics?.crossSellPairs ?? []).filter((p) => (p.count ?? 0) >= MIN_SUPPORT);
   if (pairs.length === 0) return null;
 
   return (
     <div className='space-y-4'>
       <Text variant='uppercase' className='font-bold'>
-        Cross-sell pairs
+        Frequently bought together
       </Text>
       <div className='border border-textInactiveColor overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
@@ -40,6 +43,10 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
           </tbody>
         </table>
       </div>
+      <Text className='text-xs text-textInactiveColor'>
+        Only pairs bought together {MIN_SUPPORT}+ times. Raw co-occurrence — a true lift score
+        (vs how often each sells alone) needs marginal frequencies from the backend.
+      </Text>
     </div>
   );
 };

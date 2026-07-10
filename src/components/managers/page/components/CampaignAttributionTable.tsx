@@ -1,59 +1,65 @@
 import type { CampaignAttributionRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
+import Text from 'ui/components/text';
 
 interface CampaignAttributionTableProps {
   campaignAttribution: CampaignAttributionRow[] | undefined;
 }
 
-export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ campaignAttribution }) => {
-  const { pathname } = useLocation();
-  const atcMatrixHref = `${pathname}?tab=products#atc-matrix`;
+// Per-row conversion rate over fewer sessions than this swings wildly — show '—' instead.
+const MIN_SESSIONS_FOR_RATE = 50;
 
+export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ campaignAttribution }) => {
   if (!campaignAttribution || campaignAttribution.length === 0) return null;
 
-  const aggregated = campaignAttribution.reduce((acc, row) => {
-    const key = `${row.utmSource}-${row.utmMedium}-${row.utmCampaign}`;
-    if (!acc[key]) {
-      acc[key] = {
-        utmSource: row.utmSource,
-        utmMedium: row.utmMedium,
-        utmCampaign: row.utmCampaign,
-        sessions: 0,
-        users: 0,
-        conversions: 0,
-        revenue: 0,
-      };
-    }
-    acc[key].sessions += row.sessions || 0;
-    acc[key].users += row.users || 0;
-    acc[key].conversions += row.conversions || 0;
-    acc[key].revenue += parseDecimal(row.revenue);
-    return acc;
-  }, {} as Record<string, {
-    utmSource: string | undefined;
-    utmMedium: string | undefined;
-    utmCampaign: string | undefined;
-    sessions: number;
-    users: number;
-    conversions: number;
-    revenue: number;
-  }>);
+  const aggregated = campaignAttribution.reduce(
+    (acc, row) => {
+      const key = `${row.utmSource}-${row.utmMedium}-${row.utmCampaign}`;
+      if (!acc[key]) {
+        acc[key] = {
+          utmSource: row.utmSource,
+          utmMedium: row.utmMedium,
+          utmCampaign: row.utmCampaign,
+          sessions: 0,
+          conversions: 0,
+          revenue: 0,
+          spend: 0,
+        };
+      }
+      acc[key].sessions += row.sessions || 0;
+      acc[key].conversions += row.conversions || 0;
+      acc[key].revenue += parseDecimal(row.revenue);
+      acc[key].spend += parseDecimal(row.spend);
+      return acc;
+    },
+    {} as Record<
+      string,
+      {
+        utmSource: string | undefined;
+        utmMedium: string | undefined;
+        utmCampaign: string | undefined;
+        sessions: number;
+        conversions: number;
+        revenue: number;
+        spend: number;
+      }
+    >,
+  );
 
   const topCampaigns = Object.values(aggregated)
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 20);
+  const anySpend = topCampaigns.some((r) => r.spend > 0);
 
   return (
     <div className='border border-textInactiveColor p-4'>
-      <Text className='text-textInactiveColor text-xs leading-relaxed mb-3 block'>
-        Each row is UTM source / medium / campaign with session and conversion totals. Product engagement is
-        not split out by row; top product views elsewhere on this tab are site-wide.
-      </Text>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
+      <Text variant='uppercase' className='font-bold mb-1 block'>
         Campaign attribution
+      </Text>
+      <Text className='text-textInactiveColor text-xs leading-relaxed mb-3 block'>
+        UTM source / medium / campaign. Last-click GA4 attribution — directional, and won't tie out
+        to DB revenue exactly. {anySpend ? 'ROAS = revenue ÷ recorded spend.' : 'Enter channel spend to see ROAS.'}
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>
@@ -72,13 +78,13 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
                 <Text variant='uppercase' className='text-[10px]'>Sessions</Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Users</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Conversions</Text>
-              </th>
-              <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>Revenue</Text>
+              </th>
+              <th className='text-right p-2'>
+                <Text variant='uppercase' className='text-[10px]'>Spend</Text>
+              </th>
+              <th className='text-right p-2'>
+                <Text variant='uppercase' className='text-[10px]'>ROAS</Text>
               </th>
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>Conv %</Text>
@@ -88,6 +94,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
           <tbody>
             {topCampaigns.map((row, idx) => {
               const conversionRate = row.sessions > 0 ? (row.conversions / row.sessions) * 100 : 0;
+              const roas = row.spend > 0 ? row.revenue / row.spend : null;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
@@ -105,16 +112,26 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
                     <Text>{formatNumber(row.sessions)}</Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text>{formatNumber(row.users)}</Text>
-                  </td>
-                  <td className='p-2 text-right'>
-                    <Text>{formatNumber(row.conversions)}</Text>
-                  </td>
-                  <td className='p-2 text-right'>
                     <Text className='font-bold'>{formatCurrency(row.revenue)}</Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text>{conversionRate.toFixed(2)}%</Text>
+                    <Text className='text-textInactiveColor'>
+                      {row.spend > 0 ? formatCurrency(row.spend) : '—'}
+                    </Text>
+                  </td>
+                  <td className='p-2 text-right'>
+                    {roas != null ? (
+                      <Text className={roas >= 1 ? 'font-bold text-green-600' : 'font-bold text-error'}>
+                        {roas.toFixed(2)}×
+                      </Text>
+                    ) : (
+                      <Text className='text-textInactiveColor'>—</Text>
+                    )}
+                  </td>
+                  <td className='p-2 text-right'>
+                    <Text className='text-textInactiveColor'>
+                      {row.sessions >= MIN_SESSIONS_FOR_RATE ? `${conversionRate.toFixed(1)}%` : '—'}
+                    </Text>
                   </td>
                 </tr>
               );
@@ -122,13 +139,6 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
           </tbody>
         </table>
       </div>
-      <Text className='text-textInactiveColor text-xs leading-relaxed mt-4 block'>
-        Low conversion on a source?{' '}
-        <Link to={atcMatrixHref} replace className='underline underline-offset-2 hover:text-textColor'>
-          Review add-to-cart performance by product
-        </Link>{' '}
-        on Products &amp; Inventory to spot weak view-to-cart products.
-      </Text>
     </div>
   );
 };

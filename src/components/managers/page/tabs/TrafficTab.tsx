@@ -1,75 +1,30 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import Text from 'ui/components/text';
-import {
-  CampaignAttributionTable,
-  GeographyCharts,
-  KpiCards,
-  TimeSeriesChart,
-  TrafficCharts,
-} from '../components';
+import { CampaignAttributionTable, GeographyCharts, TrafficCharts } from '../components';
 
 interface TrafficTabProps {
   metricsResponse: GetMetricsResponse;
-  compareEnabled: boolean;
+  compareEnabled?: boolean;
 }
 
-export function TrafficTab({ metricsResponse, compareEnabled }: TrafficTabProps) {
+export function TrafficTab({ metricsResponse }: TrafficTabProps) {
   const metrics = metricsResponse.business;
 
   return (
-    <div className='space-y-6'>
-      <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Campaign attribution</h3>
-        <CampaignAttributionTable campaignAttribution={metricsResponse.campaignAttribution} />
-      </div>
-
-      <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Conversion Rate Trend</h3>
-        <div className='max-w-xl'>
-          <TimeSeriesChart
-            title='Conversion rate by day'
-            data={metrics?.conversionRateByDay}
-            compareData={metrics?.conversionRateByDayCompare}
-            valueFormat='number'
-            maxSane={100}
-          />
-        </div>
-      </div>
-
-      <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Traffic &amp; engagement over time</h3>
-        <div className='grid gap-4 md:grid-cols-2'>
-          <TimeSeriesChart
-            title='Sessions by day'
-            data={metrics?.sessionsByDay}
-            compareData={metrics?.sessionsByDayCompare}
-            valueFormat='number'
-          />
-          <TimeSeriesChart
-            title='Users by day'
-            data={metrics?.usersByDay}
-            compareData={metrics?.usersByDayCompare}
-            valueFormat='number'
-          />
-          <TimeSeriesChart
-            title='Page views by day'
-            data={metrics?.pageViewsByDay}
-            compareData={metrics?.pageViewsByDayCompare}
-            valueFormat='number'
-          />
-        </div>
-      </div>
-
-      <TrafficCharts metrics={metrics} />
-      <GeographyCharts metrics={metrics} />
-
+    <div className='space-y-8'>
       <div className='space-y-3'>
-        <h3 className='text-sm font-bold uppercase'>Email Performance</h3>
-        <KpiCards
-          metrics={metrics}
-          compareEnabled={compareEnabled}
-          visibleGroupIds={['email']}
-        />
+        <h3 className='text-sm font-bold uppercase'>Campaigns &amp; channels</h3>
+        <CampaignAttributionTable campaignAttribution={metricsResponse.campaignAttribution} />
+        <Text className='text-textInactiveColor text-[11px] leading-relaxed'>
+          Everything on this tab is GA4-sourced and directional at boutique traffic — sampling,
+          consent gaps, bots and last-click attribution make daily lines and micro-conversion rates
+          unreliable, so only channel mix, spend/ROAS and DB revenue-by-country are shown.
+        </Text>
+      </div>
+
+      <div className='grid gap-8 md:grid-cols-2'>
+        <TrafficCharts metrics={metrics} />
+        <GeographyCharts metrics={metrics} />
       </div>
     </div>
   );

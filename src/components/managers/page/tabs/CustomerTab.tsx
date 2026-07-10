@@ -1,7 +1,7 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import Text from 'ui/components/text';
-import { CrossSellTable, TimeSeriesChart } from '../components';
-import { formatNumber, getMetricComparison } from '../utils';
+import { CrossSellTable } from '../components';
+import { formatAvgDaysBetweenOrders, formatNumber, getMetricComparison } from '../utils';
 
 interface CustomerTabProps {
   metricsResponse: GetMetricsResponse;
@@ -59,7 +59,9 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
               Days between orders
             </Text>
             <Text className='font-bold text-lg'>
-              {daysBetweenOrders.value > 0 ? daysBetweenOrders.value.toFixed(0) : '—'}
+              {daysBetweenOrders.value > 0
+                ? formatAvgDaysBetweenOrders(daysBetweenOrders.value)
+                : '—'}
             </Text>
             <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
               avg gap to next order
@@ -69,25 +71,6 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
       </div>
 
       <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>New vs returning by day</h3>
-        <div className='grid gap-4 md:grid-cols-2'>
-          <TimeSeriesChart
-            title='New customers by day'
-            data={metrics?.newCustomersByDay}
-            compareData={metrics?.newCustomersByDayCompare}
-            valueFormat='number'
-          />
-          <TimeSeriesChart
-            title='Returning customers by day'
-            data={metrics?.returningCustomersByDay}
-            compareData={metrics?.returningCustomersByDayCompare}
-            valueFormat='number'
-          />
-        </div>
-      </div>
-
-      <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Frequently bought together</h3>
         <CrossSellTable metrics={metrics} />
       </div>
     </div>
