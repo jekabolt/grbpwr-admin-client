@@ -5,7 +5,13 @@ import { useFormContext } from 'react-hook-form';
 import { useSnackBarStore } from 'lib/stores/store';
 import TextareaField from 'ui/form/fields/textarea-field';
 
-export function Comment({ orderDetails }: { orderDetails?: common_OrderFull }) {
+export function Comment({
+  orderDetails,
+  canEdit = true,
+}: {
+  orderDetails?: common_OrderFull;
+  canEdit?: boolean;
+}) {
   const { showMessage } = useSnackBarStore();
   const { setValue } = useFormContext();
 
@@ -34,7 +40,8 @@ export function Comment({ orderDetails }: { orderDetails?: common_OrderFull }) {
       placeholder='leave comments here'
       showCharCount
       maxLength={1500}
-      upsertButton={true}
+      readOnly={!canEdit}
+      upsertButton={canEdit}
       onUpsert={onUpsert}
       className='placeholder:uppercase placeholder:text-textInactiveColor'
     />

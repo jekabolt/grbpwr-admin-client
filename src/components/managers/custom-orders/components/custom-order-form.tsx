@@ -2,8 +2,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import type { CreateCustomOrderRequest } from 'api/proto-http/admin';
 import { common_Dictionary, common_Product } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { getFilteredSizes } from 'components/managers/product/utility/sizes';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo } from 'react';
@@ -61,6 +62,7 @@ export function CustomOrderForm({
 }: CustomOrderFormProps) {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
+  const { canWrite } = usePermissions();
   const currency = dictionary?.baseCurrency || '';
   const navigate = useNavigate();
 
@@ -160,7 +162,7 @@ export function CustomOrderForm({
                   triggerClassName='w-full uppercase'
                 />
               )}
-              {selectedProducts.length > 0 && (
+              {selectedProducts.length > 0 && canWrite(SECTION.orders) && (
                 <Button
                   type='submit'
                   variant='main'

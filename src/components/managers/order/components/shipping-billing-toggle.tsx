@@ -10,6 +10,7 @@ interface Props {
   isPrinting: boolean;
   orderStatus: string | undefined;
   isEdit: boolean;
+  canEdit?: boolean;
   trackingNumber: string;
   toggleTrackNumber: () => void;
   handleTrackingNumberChange: (event: any) => void;
@@ -21,6 +22,7 @@ export function ShippingBillingToggle({
   isPrinting,
   orderStatus,
   isEdit,
+  canEdit = true,
   trackingNumber,
   toggleTrackNumber,
   handleTrackingNumberChange,
@@ -72,6 +74,7 @@ export function ShippingBillingToggle({
         <TrackingNumber
           isEdit={isEdit}
           isPrinting={isPrinting}
+          canEdit={canEdit}
           trackingNumber={trackingNumber}
           orderStatus={orderStatus || ''}
           orderDetails={orderDetails}
