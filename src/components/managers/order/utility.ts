@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import type { RefundReason } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
@@ -102,7 +103,11 @@ export const useOrderDetails = (uuid: string) => {
     }
   }
 
-  async function refundOrder(payload: { reason: string; refundShipping?: boolean }) {
+  async function refundOrder(payload: {
+    reason: string;
+    refundShipping?: boolean;
+    reasonCode?: RefundReason;
+  }) {
     try {
       const isPartial = selectedUnitKeys.length > 0;
       // One order_item id per selected unit (duplicates encode quantity — e.g. refund 1 of 2).
@@ -115,6 +120,8 @@ export const useOrderDetails = (uuid: string) => {
         orderUuid: state.orderDetails?.order?.uuid,
         orderItemIds: orderItemIds.length ? orderItemIds : [],
         reason: payload.reason || undefined,
+        // Structured code drives the return-analysis breakdown; free-text reason is the audit note.
+        reasonCode: payload.reasonCode ?? 'REFUND_REASON_UNSPECIFIED',
         refundShipping: isPartial ? payload.refundShipping ?? false : undefined,
         // Structured reason is additive; unset falls back to the free-text reason above.
         reasonCode: undefined,
