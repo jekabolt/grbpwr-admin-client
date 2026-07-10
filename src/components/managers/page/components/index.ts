@@ -24,6 +24,7 @@ export { ProductCharts } from './ProductCharts';
 export { ProductNameLink } from './ProductNameLink';
 export { ProductTrendTable } from './ProductTrendTable';
 export { PromoTable } from './PromoTable';
+export { ReorderTable } from './ReorderTable';
 export { RevenueParetoChart } from './RevenueParetoChart';
 export { SessionDurationChart } from './SessionDurationChart';
 export { SessionsByCountryMapChart } from './SessionsByCountryMapChart';

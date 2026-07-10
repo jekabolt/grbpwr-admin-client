@@ -10,6 +10,7 @@ import {
   OOSImpactTable,
   ProductCharts,
   ProductTrendTable,
+  ReorderTable,
   RevenueParetoChart,
   SizeAnalyticsTable,
   SizeConfidenceTable,
@@ -114,6 +115,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
               Inventory
             </summary>
             <div className='space-y-6 p-4'>
+              <ReorderTable inventoryHealth={metricsResponse.inventoryHealth} />
               <InventoryHealthTable inventoryHealth={metricsResponse.inventoryHealth} />
               <NotifyMeIntentTable notifyMeIntent={metricsResponse.notifyMeIntent} />
               <OOSImpactTable oosImpact={metricsResponse.oosImpact} />

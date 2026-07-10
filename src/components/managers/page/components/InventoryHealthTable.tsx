@@ -33,7 +33,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
       <div className='border border-textInactiveColor p-4'>
         <div className='flex flex-wrap items-center justify-between gap-2 mb-4'>
           <Text variant='uppercase' className='font-bold block'>
-            Inventory health (at risk)
+            Overstock — slow to clear
           </Text>
           {sentinelAtRiskCount > 0 && (
             <button
