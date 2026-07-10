@@ -355,6 +355,11 @@ export type common_ProductInsert = {
   translations: common_ProductInsertTranslation[] | undefined;
   secondaryThumbnailMediaId: number | undefined;
   prices: common_ProductPriceInsert[] | undefined;
+  // cost_price is the confidential per-unit cost of goods (COGS) in base currency (EUR),
+  // used for margin analytics. Omit/empty to leave the stored value unchanged on update.
+  // Deliberately on ProductInsert (write-only) and NOT on ProductBodyInsert, so it is
+  // never serialized on the storefront product read path.
+  costPrice: googletype_Decimal | undefined;
 };
 
 export type common_ProductBodyInsert = {
@@ -1074,6 +1079,19 @@ export type BusinessMetrics = {
   // Distinct from orders_count, which counts only net-revenue statuses. Use this as the
   // denominator when deriving status shares (cancellation rate, refund rate, etc.).
   totalPlacedOrders: MetricWithComparison | undefined;
+  // Margin metrics, derived from product.cost_price (per-unit COGS in base currency).
+  // Computed ONLY over line items whose product has a cost set, so revenue_cost and the
+  // margins are on the "costed" subset of revenue — gross_margin_pct.caveat and
+  // cost_coverage_pct report how much of revenue that subset is. COGS is net of the
+  // refund proration but NOT reduced by promo/sale discounts (a discount lowers revenue,
+  // not the cost of the goods).
+  revenueCost: MetricWithComparison | undefined;
+  grossMargin: MetricWithComparison | undefined;
+  grossMarginPct: MetricWithComparison | undefined;
+  contributionMargin: MetricWithComparison | undefined;
+  // Share (%) of net product revenue (base currency) whose product has a cost set — the
+  // fraction the margin figures above are computed over. 100 = full cost coverage.
+  costCoveragePct: number | undefined;
 };
 
 export type TimeRange = {
@@ -1130,6 +1148,15 @@ export type ProductMetric = {
   brand: string | undefined;
   value: googletype_Decimal | undefined;
   count: number | undefined;
+  // Margin fields, populated only for revenue/quantity product breakdowns (zero for
+  // view-based metrics). unit_cost is the product's current base-currency COGS;
+  // revenue_cost is Σ(cost × net qty); gross_margin = value − revenue_cost. When
+  // has_cost is false the product's cost is unknown — treat margins as N/A, not as 100%.
+  unitCost: googletype_Decimal | undefined;
+  revenueCost: googletype_Decimal | undefined;
+  grossMargin: googletype_Decimal | undefined;
+  grossMarginPct: number | undefined;
+  hasCost: boolean | undefined;
 };
 
 export type CategoryMetric = {

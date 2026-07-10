@@ -167,6 +167,29 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
           {errors.prices.message}
         </Text>
       )}
+
+      {/* Internal COGS — feeds gross-margin analytics, never shown to shoppers. */}
+      <div className='flex flex-col gap-1 border-t border-textInactiveColor pt-3'>
+        <div className='flex items-center justify-between'>
+          <Text>cost {currencySymbols['EUR'] ?? 'EUR'} · internal</Text>
+          <Text variant='inactive' size='small'>
+            margin only · not shown to shoppers
+          </Text>
+        </div>
+        <InputField
+          name='product.costPrice'
+          type='number'
+          step='0.01'
+          min='0'
+          placeholder='per-unit COGS'
+          readOnly={!editMode}
+          className='w-full sm:w-1/3'
+        />
+        <Text variant='inactive' size='small'>
+          Per-unit cost of goods for margin analytics.
+          {editMode ? ' Leave empty to keep the current cost.' : ''}
+        </Text>
+      </div>
     </div>
   );
 }
