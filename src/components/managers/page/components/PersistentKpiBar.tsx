@@ -1,7 +1,7 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { type FC } from 'react';
 import Text from 'ui/components/text';
-import { orderCancellationSharePercent } from '../executiveAlerts';
+import { hasEnoughOrdersForAlert, orderCancellationSharePercent } from '../executiveAlerts';
 import { formatCurrency, formatNumber, formatPercent, getMetricComparison } from '../utils';
 
 export interface PersistentKpiBarProps {
@@ -16,21 +16,23 @@ interface KpiMetric {
   changePct: number | null;
   changeLabel?: string | null;
   isCritical?: boolean;
+  note?: string | null;
 }
 
-function getKpiMetrics(
-  metrics: BusinessMetrics | undefined,
-  compareEnabled: boolean,
-): KpiMetric[] {
+function getKpiMetrics(metrics: BusinessMetrics | undefined, compareEnabled: boolean): KpiMetric[] {
   if (!metrics) return [];
 
   const revenue = getMetricComparison(metrics.revenue as any);
   const orders = getMetricComparison(metrics.ordersCount as any);
   const conversionRate = getMetricComparison(metrics.conversionRate as any);
   const aov = getMetricComparison(metrics.avgOrderValue as any);
-  const sessions = getMetricComparison(metrics.sessions as any);
+  const grossMarginPct = getMetricComparison(metrics.grossMarginPct as any);
+  // Share (%) of revenue whose product has a cost set — margin is computed only over it.
+  const costCoverage = metrics.costCoveragePct ?? 0;
 
   const cancellationPct = orderCancellationSharePercent(metrics);
+  // Only flag cancellation red once there are enough orders for the share to be meaningful.
+  const cancellationCritical = (cancellationPct ?? 0) > 20 && hasEnoughOrdersForAlert(metrics);
 
   const getChangePct = (comp: ReturnType<typeof getMetricComparison>) => {
     if (!compareEnabled || comp.compareValue === undefined) return null;
@@ -67,17 +69,25 @@ function getKpiMetrics(
       changePct: getChangePct(aov),
     },
     {
-      label: 'Sessions',
-      value: sessions.value,
-      format: formatNumber,
-      changePct: getChangePct(sessions),
+      // Replaces the vanity Sessions tile: profit, not activity. Only meaningful over the
+      // costed subset of revenue, so surface coverage and hide the figure when it's zero.
+      label: 'Gross Margin',
+      value: grossMarginPct.value,
+      format: (v) => (costCoverage > 0 ? `${v.toFixed(0)}%` : '—'),
+      changePct: costCoverage > 0 ? getChangePct(grossMarginPct) : null,
+      note:
+        costCoverage <= 0
+          ? 'set product costs'
+          : costCoverage < 99.5
+            ? `${costCoverage.toFixed(0)}% of revenue costed`
+            : null,
     },
     {
       label: 'Cancellation Rate',
       value: cancellationPct ?? 0,
       format: (v) => `${v.toFixed(1)}%`,
       changePct: null,
-      isCritical: (cancellationPct ?? 0) > 20,
+      isCritical: cancellationCritical,
     },
   ];
 }
@@ -100,7 +110,11 @@ function KpiMetricCard({ metric }: { metric: KpiMetric }) {
     <div className={cardClass}>
       <Text
         variant='uppercase'
-        className={metric.isCritical ? 'text-error text-[10px] font-semibold' : 'text-textInactiveColor text-[10px]'}
+        className={
+          metric.isCritical
+            ? 'text-error text-[10px] font-semibold'
+            : 'text-textInactiveColor text-[10px]'
+        }
       >
         {metric.label}
       </Text>
@@ -111,6 +125,11 @@ function KpiMetricCard({ metric }: { metric: KpiMetric }) {
         <Text variant='uppercase' className={`text-[10px] ${changeColor}`}>
           {arrow}
           {formatPercent(metric.changePct!)}
+        </Text>
+      )}
+      {metric.note && (
+        <Text variant='uppercase' className='text-[10px] text-textInactiveColor'>
+          {metric.note}
         </Text>
       )}
     </div>

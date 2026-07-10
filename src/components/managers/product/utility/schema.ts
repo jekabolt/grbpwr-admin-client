@@ -92,6 +92,12 @@ export const baseProductSchema = z
       secondaryThumbnailMediaId: z.number().optional(),
       translations: createStrictTranslationSchema(productTranslationSchema, requiredLanguageIds),
       prices: z.array(priceEntrySchema).min(1, 'At least one price must be specified'),
+      // Confidential per-unit COGS in base currency (EUR), write-only — feeds margin
+      // analytics. Optional; empty leaves the stored value unchanged on update.
+      costPrice: z
+        .string()
+        .regex(/^\d*\.?\d{0,2}$/, 'Cost must be a valid number')
+        .optional(),
     }),
     prices: z.array(priceEntrySchema).min(1, 'At least one price must be specified'),
     mediaIds: z.array(z.number()).min(1, 'At least one media must be added to the product'),
@@ -197,6 +203,7 @@ export const defaultData = {
       currency,
       price: { value: '0' },
     })),
+    costPrice: '',
   },
   prices: Object.keys(currencySymbols).map((currency) => ({
     currency,

@@ -5,26 +5,12 @@ import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { DateRangePicker, PersistentKpiBar } from './components';
-import {
-  CustomerTab,
-  ProductsTab,
-  RevenueTab,
-  TechnicalTab,
-  ThisWeekTab,
-  TrafficTab,
-} from './tabs';
+import { CustomerTab, ProductsTab, RevenueTab, ThisWeekTab, TrafficTab } from './tabs';
 import type { MetricsPeriod } from './useMetricsQuery';
 import type { MetricsTabId } from './useTabMetricsQuery';
 import { useTabMetricsQuery } from './useTabMetricsQuery';
 
-const TAB_IDS: MetricsTabId[] = [
-  'this-week',
-  'revenue',
-  'products',
-  'customers',
-  'traffic',
-  'technical',
-];
+const TAB_IDS: MetricsTabId[] = ['this-week', 'revenue', 'products', 'customers', 'traffic'];
 
 const TAB_LABELS: Record<MetricsTabId, string> = {
   'this-week': 'Overview',
@@ -32,7 +18,6 @@ const TAB_LABELS: Record<MetricsTabId, string> = {
   products: 'Products',
   customers: 'Customers',
   traffic: 'Traffic & Channels',
-  technical: 'Technical',
 };
 
 function getDefaultCustomRange() {
@@ -84,15 +69,16 @@ export function Analitic() {
     setCustomTo(to);
   };
 
-  const { data: metricsResponse, isLoading, isError, refetch } = useTabMetricsQuery(
-    activeTab,
-    period,
-    {
-      compareMode,
-      customFrom: period === 'custom' ? customFrom : undefined,
-      customTo: period === 'custom' ? customTo : undefined,
-    },
-  );
+  const {
+    data: metricsResponse,
+    isLoading,
+    isError,
+    refetch,
+  } = useTabMetricsQuery(activeTab, period, {
+    compareMode,
+    customFrom: period === 'custom' ? customFrom : undefined,
+    customTo: period === 'custom' ? customTo : undefined,
+  });
 
   const compareEnabled = compareMode !== 'COMPARE_MODE_NONE';
 
@@ -183,7 +169,6 @@ export function Analitic() {
           {activeTab === 'traffic' && (
             <TrafficTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
           )}
-          {activeTab === 'technical' && <TechnicalTab metricsResponse={metricsResponse} />}
         </div>
       )}
     </div>

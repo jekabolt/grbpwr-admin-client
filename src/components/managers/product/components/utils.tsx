@@ -77,12 +77,18 @@ export function mapProductDataToForm(data: ProductFormData) {
     },
   }));
 
+  // Write-only COGS: send only when the operator entered a value, so an empty field
+  // leaves the stored cost unchanged on update (per proto contract).
+  const costTrimmed = data.product.costPrice?.trim();
+  const costPrice = costTrimmed && parseFloat(costTrimmed) > 0 ? { value: costTrimmed } : undefined;
+
   const product: common_ProductInsert = {
     productBodyInsert,
     thumbnailMediaId: data.product.thumbnailMediaId,
     secondaryThumbnailMediaId: data.product.secondaryThumbnailMediaId || 0,
     translations,
     prices,
+    costPrice,
   };
 
   const productNew: common_ProductNew = {
@@ -181,6 +187,9 @@ export function mapProductFullToFormData(
         };
       }),
       prices,
+      // COGS is write-only (never on the read path), so it can't be prefilled — empty
+      // means "keep current cost" on save.
+      costPrice: '',
     },
     prices,
     mediaIds,

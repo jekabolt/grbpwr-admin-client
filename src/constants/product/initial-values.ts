@@ -17,8 +17,11 @@ export const productInitialValues = (product?: common_ProductFull): common_Produ
       productBodyInsert: product?.product?.productDisplay?.productBody?.productBodyInsert,
       translations: product?.product?.productDisplay?.productBody?.translations,
       thumbnailMediaId: product?.product?.productDisplay?.thumbnail?.id || undefined,
-      secondaryThumbnailMediaId: product?.product?.productDisplay?.secondaryThumbnail?.id || undefined,
+      secondaryThumbnailMediaId:
+        product?.product?.productDisplay?.secondaryThumbnail?.id || undefined,
       prices,
+      // COGS is write-only and not on the read path — never round-tripped here.
+      costPrice: undefined,
     },
     prices,
     sizeMeasurements:

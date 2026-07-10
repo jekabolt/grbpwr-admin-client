@@ -7,7 +7,7 @@ import {
   PromoTable,
   TimeSeriesChart,
 } from '../components';
-import { orderCancellationSharePercent } from '../executiveAlerts';
+import { hasEnoughOrdersForAlert, orderCancellationSharePercent } from '../executiveAlerts';
 import { formatCurrency, formatNumber, getMetricComparison } from '../utils';
 
 interface RevenueTabProps {
@@ -24,12 +24,21 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
   const aov = getMetricComparison(metrics?.avgOrderValue as any);
   const refundRate = getMetricComparison(metrics?.refundRate as any);
   const cancellationPct = orderCancellationSharePercent(metrics);
+  const cancellationCritical =
+    !!cancellationPct && cancellationPct > 20 && hasEnoughOrdersForAlert(metrics);
+
+  // Margin — computed only over the costed subset of revenue (products with a cost set).
+  const revenueCost = getMetricComparison(metrics?.revenueCost as any);
+  const grossMargin = getMetricComparison(metrics?.grossMargin as any);
+  const grossMarginPct = getMetricComparison(metrics?.grossMarginPct as any);
+  const contributionMargin = getMetricComparison(metrics?.contributionMargin as any);
+  const costCoverage = metrics?.costCoveragePct ?? 0;
 
   return (
     <div className='space-y-6'>
       <div className='space-y-6'>
         <h3 className='text-sm font-bold uppercase'>Revenue & Orders Overview</h3>
-        
+
         <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 border border-textInactiveColor p-4 bg-bgSecondary/20'>
           <div className='space-y-1'>
             <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
@@ -62,13 +71,70 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             <Text className='font-bold'>{refundRate.value.toFixed(1)}%</Text>
           </div>
           <div className='space-y-1'>
-            <Text variant='uppercase' className={cancellationPct && cancellationPct > 20 ? 'text-error text-[10px]' : 'text-textInactiveColor text-[10px]'}>
+            <Text
+              variant='uppercase'
+              className={
+                cancellationCritical
+                  ? 'text-error text-[10px]'
+                  : 'text-textInactiveColor text-[10px]'
+              }
+            >
               Cancellation Rate
             </Text>
-            <Text className={cancellationPct && cancellationPct > 20 ? 'font-bold text-error' : 'font-bold'}>
+            <Text className={cancellationCritical ? 'font-bold text-error' : 'font-bold'}>
               {cancellationPct?.toFixed(1) ?? 0}%
             </Text>
           </div>
+        </div>
+
+        {/* P&L-lite: profit, not just top line. Margin is over the costed revenue subset. */}
+        <div className='space-y-2'>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <h3 className='text-sm font-bold uppercase'>Profit &amp; Margin</h3>
+            <Text variant='inactive' size='small'>
+              {costCoverage > 0
+                ? `over the ${costCoverage.toFixed(0)}% of revenue with a product cost set`
+                : 'set product costs to unlock'}
+            </Text>
+          </div>
+          {costCoverage > 0 ? (
+            <div className='grid grid-cols-2 md:grid-cols-4 gap-3 border border-textInactiveColor p-4 bg-bgSecondary/20'>
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  COGS
+                </Text>
+                <Text className='font-bold'>{formatCurrency(revenueCost.value)}</Text>
+              </div>
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  Gross Profit
+                </Text>
+                <Text className='font-bold'>{formatCurrency(grossMargin.value)}</Text>
+              </div>
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  Gross Margin
+                </Text>
+                <Text className='font-bold'>{grossMarginPct.value.toFixed(0)}%</Text>
+              </div>
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  Contribution
+                </Text>
+                <Text className='font-bold'>{formatCurrency(contributionMargin.value)}</Text>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  after shipping
+                </Text>
+              </div>
+            </div>
+          ) : (
+            <div className='border border-textInactiveColor p-4 bg-bgSecondary/20'>
+              <Text variant='inactive' size='small'>
+                No product costs entered yet — add cost (EUR) on products to see gross profit,
+                margin %, and contribution here.
+              </Text>
+            </div>
+          )}
         </div>
 
         <div className='grid gap-4 md:grid-cols-2'>
@@ -83,7 +149,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             compareData={metrics?.avgOrderValueByDayCompare}
           />
         </div>
-        
+
         <div className='grid gap-6 md:grid-cols-2'>
           <OrdersByStatusChart metrics={metrics} />
           <TimeSeriesChart
