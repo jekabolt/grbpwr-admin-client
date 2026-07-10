@@ -38,15 +38,28 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
   const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
     const items = Array.isArray(raw) ? raw : [raw];
     const label = items[0]?.name ?? '';
-    const rows = items.map((it) => `${it.marker ?? ''}<b>${formatNumber(Number(it.value ?? 0))}</b>`).join('<br/>');
+    const rows = items
+      .map((it) => `${it.marker ?? ''}<b>${formatNumber(Number(it.value ?? 0))}</b>`)
+      .join('<br/>');
     return `<div style="font-size:11px;line-height:1.6">${label}<br/>${rows}</div>`;
   };
 
   const option: EChartsOption = {
     grid: gridBase,
-    tooltip: { ...tooltipBase, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tooltipFormatter },
-    xAxis: valueAxis({ axisLabel: { formatter: (v: number) => formatNumber(v) } }) as EChartsOption['xAxis'],
-    yAxis: categoryAxis({ type: 'category', data: data.map((d) => d.name), inverse: true }) as EChartsOption['yAxis'],
+    tooltip: {
+      ...tooltipBase,
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: tooltipFormatter,
+    },
+    xAxis: valueAxis({
+      axisLabel: { formatter: (v: number) => formatNumber(v) },
+    }) as EChartsOption['xAxis'],
+    yAxis: categoryAxis({
+      type: 'category',
+      data: data.map((d) => d.name),
+      inverse: true,
+    }) as EChartsOption['yAxis'],
     series: [
       {
         type: 'bar',

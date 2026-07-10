@@ -141,7 +141,12 @@ export function computeExecutiveAlerts(
     }
     // Percentage-point rise in refund rate (change_absolute), not a rate-of-rate percentage.
     const refundPp = refund.changeAbsolute;
-    if (enoughOrders && refund.lowerIsBetter && refundPp != null && refundPp > REFUND_RATE_SPIKE_PP) {
+    if (
+      enoughOrders &&
+      refund.lowerIsBetter &&
+      refundPp != null &&
+      refundPp > REFUND_RATE_SPIKE_PP
+    ) {
       alerts.push({
         severity: 'warning',
         title: `Refund rate up ${refundPp.toFixed(1)}pp vs comparison period`,
@@ -163,7 +168,11 @@ export function deriveHealthStatus(
 ): HealthStatus {
   if (alerts.some((a) => a.severity === 'high')) return 'needs_attention';
 
-  if (compareEnabled && metrics && currentMetricValue(metrics.ordersCount) >= MIN_ORDERS_FOR_ALERT) {
+  if (
+    compareEnabled &&
+    metrics &&
+    currentMetricValue(metrics.ordersCount) >= MIN_ORDERS_FOR_ALERT
+  ) {
     const revPct = effectiveChangePct(metrics.revenue);
     const ordPct = effectiveChangePct(metrics.ordersCount);
     if (revPct != null && revPct <= -15 && ordPct != null && ordPct <= -15) {

@@ -209,8 +209,12 @@ export function ThisWeekTab({
                       <Text>{formatNumber(product.units)}</Text>
                     </td>
                     <td className='p-2 text-right'>
-                      <Text className={product.grossMarginPct == null ? 'text-textInactiveColor' : ''}>
-                        {product.grossMarginPct == null ? '—' : `${product.grossMarginPct.toFixed(0)}%`}
+                      <Text
+                        className={product.grossMarginPct == null ? 'text-textInactiveColor' : ''}
+                      >
+                        {product.grossMarginPct == null
+                          ? '—'
+                          : `${product.grossMarginPct.toFixed(0)}%`}
                       </Text>
                     </td>
                   </tr>

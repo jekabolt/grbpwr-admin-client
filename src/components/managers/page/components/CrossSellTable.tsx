@@ -32,11 +32,11 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
             {pairs.map((p, i) => (
               <tr key={i} className='border-b border-textInactiveColor last:border-0'>
                 <td className='p-2'>
-                <ProductNameLink productId={p.productAId} productName={p.productAName} />
-              </td>
-              <td className='p-2'>
-                <ProductNameLink productId={p.productBId} productName={p.productBName} />
-              </td>
+                  <ProductNameLink productId={p.productAId} productName={p.productAName} />
+                </td>
+                <td className='p-2'>
+                  <ProductNameLink productId={p.productBId} productName={p.productBName} />
+                </td>
                 <td className='p-2 text-right'>{p.count ?? 0}</td>
               </tr>
             ))}
@@ -44,8 +44,8 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
         </table>
       </div>
       <Text className='text-xs text-textInactiveColor'>
-        Only pairs bought together {MIN_SUPPORT}+ times. Raw co-occurrence — a true lift score
-        (vs how often each sells alone) needs marginal frequencies from the backend.
+        Only pairs bought together {MIN_SUPPORT}+ times. Raw co-occurrence — a true lift score (vs
+        how often each sells alone) needs marginal frequencies from the backend.
       </Text>
     </div>
   );

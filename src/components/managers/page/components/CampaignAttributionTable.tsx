@@ -10,7 +10,9 @@ interface CampaignAttributionTableProps {
 // Per-row conversion rate over fewer sessions than this swings wildly — show '—' instead.
 const MIN_SESSIONS_FOR_RATE = 50;
 
-export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ campaignAttribution }) => {
+export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
+  campaignAttribution,
+}) => {
   if (!campaignAttribution || campaignAttribution.length === 0) return null;
 
   const aggregated = campaignAttribution.reduce(
@@ -59,35 +61,52 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
       </Text>
       <Text className='text-textInactiveColor text-xs leading-relaxed mb-3 block'>
         UTM source / medium / campaign. Last-click GA4 attribution — directional, and won't tie out
-        to DB revenue exactly. {anySpend ? 'ROAS = revenue ÷ recorded spend.' : 'Enter channel spend to see ROAS.'}
+        to DB revenue exactly.{' '}
+        {anySpend ? 'ROAS = revenue ÷ recorded spend.' : 'Enter channel spend to see ROAS.'}
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Source</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Source
+                </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Medium</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Medium
+                </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Campaign</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Campaign
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Sessions</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Sessions
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Revenue</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Revenue
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Spend</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Spend
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>ROAS</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  ROAS
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Conv %</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Conv %
+                </Text>
               </th>
             </tr>
           </thead>
@@ -121,7 +140,9 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
                   </td>
                   <td className='p-2 text-right'>
                     {roas != null ? (
-                      <Text className={roas >= 1 ? 'font-bold text-green-600' : 'font-bold text-error'}>
+                      <Text
+                        className={roas >= 1 ? 'font-bold text-green-600' : 'font-bold text-error'}
+                      >
                         {roas.toFixed(2)}×
                       </Text>
                     ) : (
@@ -130,7 +151,9 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({ ca
                   </td>
                   <td className='p-2 text-right'>
                     <Text className='text-textInactiveColor'>
-                      {row.sessions >= MIN_SESSIONS_FOR_RATE ? `${conversionRate.toFixed(1)}%` : '—'}
+                      {row.sessions >= MIN_SESSIONS_FOR_RATE
+                        ? `${conversionRate.toFixed(1)}%`
+                        : '—'}
                     </Text>
                   </td>
                 </tr>

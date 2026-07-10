@@ -61,103 +61,107 @@ function pctRowKey(
 }
 
 export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics }) => {
-  const { products, sizeKeys, topSizes, normalizedPctByProductSize, suppressedCount } = useMemo(() => {
-    if (!sizeAnalytics || sizeAnalytics.length === 0) {
-      return {
-        products: [] as { product: string; productId: number; shares: number[] }[],
-        sizeKeys: [] as string[],
-        topSizes: [] as SizeAnalyticsRow[],
-        normalizedPctByProductSize: new Map<string, number>(),
-        suppressedCount: 0,
-      };
-    }
-
-    /** Per product: size label → aggregated raw `pctOfProduct` (proto scale may be 0–1, 0–100, or worse). */
-    const byProduct = new Map<
-      string,
-      {
-        productId: number;
-        productName: string;
-        units: number;
-        sizes: Map<string, { sizeId: number; raw: number }>;
+  const { products, sizeKeys, topSizes, normalizedPctByProductSize, suppressedCount } =
+    useMemo(() => {
+      if (!sizeAnalytics || sizeAnalytics.length === 0) {
+        return {
+          products: [] as { product: string; productId: number; shares: number[] }[],
+          sizeKeys: [] as string[],
+          topSizes: [] as SizeAnalyticsRow[],
+          normalizedPctByProductSize: new Map<string, number>(),
+          suppressedCount: 0,
+        };
       }
-    >();
 
-    for (const row of sizeAnalytics) {
-      const name = (row.productName || `#${row.productId}`).trim();
-      const sizeName = row.sizeName || `Size #${row.sizeId}`;
-      const raw = row.pctOfProduct ?? 0;
+      /** Per product: size label → aggregated raw `pctOfProduct` (proto scale may be 0–1, 0–100, or worse). */
+      const byProduct = new Map<
+        string,
+        {
+          productId: number;
+          productName: string;
+          units: number;
+          sizes: Map<string, { sizeId: number; raw: number }>;
+        }
+      >();
 
-      if (!byProduct.has(name)) {
-        byProduct.set(name, {
-          productId: row.productId ?? 0,
-          productName: name,
-          units: 0,
-          sizes: new Map(),
+      for (const row of sizeAnalytics) {
+        const name = (row.productName || `#${row.productId}`).trim();
+        const sizeName = row.sizeName || `Size #${row.sizeId}`;
+        const raw = row.pctOfProduct ?? 0;
+
+        if (!byProduct.has(name)) {
+          byProduct.set(name, {
+            productId: row.productId ?? 0,
+            productName: name,
+            units: 0,
+            sizes: new Map(),
+          });
+        }
+        const p = byProduct.get(name)!;
+        p.units += row.unitsSold ?? 0;
+        const prev = p.sizes.get(sizeName);
+        if (prev) {
+          prev.raw += raw;
+        } else {
+          p.sizes.set(sizeName, { sizeId: row.sizeId ?? 0, raw });
+        }
+      }
+
+      // Drop products with too few total units for a size mix to mean anything.
+      const suppressedCount = Array.from(byProduct.values()).filter(
+        (p) => p.units < MIN_UNITS_FOR_SIZE_MIX,
+      ).length;
+      const qualifying = new Set(
+        Array.from(byProduct.values())
+          .filter((p) => p.units >= MIN_UNITS_FOR_SIZE_MIX)
+          .map((p) => p.productName),
+      );
+      for (const [name] of byProduct) {
+        if (!qualifying.has(name)) byProduct.delete(name);
+      }
+
+      const allSizeNames = new Set<string>();
+      for (const p of byProduct.values()) {
+        for (const k of p.sizes.keys()) allSizeNames.add(k);
+      }
+      const sizeKeys = Array.from(allSizeNames).sort();
+
+      const normalizedPctByProductSize = new Map<string, number>();
+      for (const p of byProduct.values()) {
+        const rowShares = sizeKeys.map((k) => p.sizes.get(k)?.raw ?? 0);
+        const normalized = normalizeSharesTo100(rowShares);
+        sizeKeys.forEach((k, i) => {
+          const agg = p.sizes.get(k);
+          if (agg) {
+            normalizedPctByProductSize.set(
+              pctRowKey(p.productId, agg.sizeId, k),
+              normalized[i] ?? 0,
+            );
+          }
         });
       }
-      const p = byProduct.get(name)!;
-      p.units += row.unitsSold ?? 0;
-      const prev = p.sizes.get(sizeName);
-      if (prev) {
-        prev.raw += raw;
-      } else {
-        p.sizes.set(sizeName, { sizeId: row.sizeId ?? 0, raw });
-      }
-    }
 
-    // Drop products with too few total units for a size mix to mean anything.
-    const suppressedCount = Array.from(byProduct.values()).filter(
-      (p) => p.units < MIN_UNITS_FOR_SIZE_MIX,
-    ).length;
-    const qualifying = new Set(
-      Array.from(byProduct.values())
-        .filter((p) => p.units >= MIN_UNITS_FOR_SIZE_MIX)
-        .map((p) => p.productName),
-    );
-    for (const [name] of byProduct) {
-      if (!qualifying.has(name)) byProduct.delete(name);
-    }
+      const products = Array.from(byProduct.values())
+        .map((p) => {
+          const rowShares = sizeKeys.map((k) => p.sizes.get(k)?.raw ?? 0);
+          return {
+            product: p.productName,
+            productId: p.productId,
+            shares: normalizeSharesTo100(rowShares),
+          };
+        })
+        .slice(0, 20);
 
-    const allSizeNames = new Set<string>();
-    for (const p of byProduct.values()) {
-      for (const k of p.sizes.keys()) allSizeNames.add(k);
-    }
-    const sizeKeys = Array.from(allSizeNames).sort();
-
-    const normalizedPctByProductSize = new Map<string, number>();
-    for (const p of byProduct.values()) {
-      const rowShares = sizeKeys.map((k) => p.sizes.get(k)?.raw ?? 0);
-      const normalized = normalizeSharesTo100(rowShares);
-      sizeKeys.forEach((k, i) => {
-        const agg = p.sizes.get(k);
-        if (agg) {
-          normalizedPctByProductSize.set(pctRowKey(p.productId, agg.sizeId, k), normalized[i] ?? 0);
-        }
-      });
-    }
-
-    const products = Array.from(byProduct.values())
-      .map((p) => {
-        const rowShares = sizeKeys.map((k) => p.sizes.get(k)?.raw ?? 0);
-        return {
-          product: p.productName,
-          productId: p.productId,
-          shares: normalizeSharesTo100(rowShares),
-        };
-      })
-      .slice(0, 20);
-
-    return {
-      products,
-      sizeKeys,
-      topSizes: sizeAnalytics
-        .filter((r) => qualifying.has((r.productName || `#${r.productId}`).trim()))
-        .slice(0, 50),
-      normalizedPctByProductSize,
-      suppressedCount,
-    };
-  }, [sizeAnalytics]);
+      return {
+        products,
+        sizeKeys,
+        topSizes: sizeAnalytics
+          .filter((r) => qualifying.has((r.productName || `#${r.productId}`).trim()))
+          .slice(0, 50),
+        normalizedPctByProductSize,
+        suppressedCount,
+      };
+    }, [sizeAnalytics]);
 
   if (!sizeAnalytics || sizeAnalytics.length === 0) return null;
 
@@ -311,7 +315,8 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
         <Text>
           Only products with {MIN_UNITS_FOR_SIZE_MIX}+ units sold this period — below that a size
           mix is noise.
-          {suppressedCount > 0 && ` ${suppressedCount} low-volume product${suppressedCount === 1 ? '' : 's'} hidden.`}
+          {suppressedCount > 0 &&
+            ` ${suppressedCount} low-volume product${suppressedCount === 1 ? '' : 's'} hidden.`}
         </Text>
       </div>
     </div>

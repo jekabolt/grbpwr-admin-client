@@ -80,7 +80,9 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
               <li key={`${a.title}-${i}`} className='text-xs leading-snug'>
                 <span className={`font-semibold ${ALERT_TITLE_CLASS[a.severity]}`}>{a.title}</span>
                 {a.detail && (
-                  <Text className='text-textInactiveColor text-[11px] mt-0.5 block'>{a.detail}</Text>
+                  <Text className='text-textInactiveColor text-[11px] mt-0.5 block'>
+                    {a.detail}
+                  </Text>
                 )}
                 {a.href && (
                   <Link

@@ -26,10 +26,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
     return filtered.slice(0, 20);
   }, [slowMovers, showNoSalesProducts]);
 
-  const hiddenGhostCount = useMemo(
-    () => slowMovers.filter(isNeverSoldGhost).length,
-    [slowMovers],
-  );
+  const hiddenGhostCount = useMemo(() => slowMovers.filter(isNeverSoldGhost).length, [slowMovers]);
 
   return (
     <div className='border border-textInactiveColor p-4'>
@@ -43,14 +40,16 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
             onClick={() => setShowNoSalesProducts((v) => !v)}
             className='text-xs underline underline-offset-2 text-textInactiveColor hover:text-textColor'
           >
-            {showNoSalesProducts ? 'Hide products with no sales' : `Show products with no sales (${hiddenGhostCount})`}
+            {showNoSalesProducts
+              ? 'Hide products with no sales'
+              : `Show products with no sales (${hiddenGhostCount})`}
           </button>
         )}
       </div>
       {topSlowMovers.length === 0 ? (
         <p className='text-xs text-textInactiveColor'>
-          No slow movers in this merchandising view (all rows are products with no recorded sales). Turn on
-          &quot;Show products with no sales&quot; to include them.
+          No slow movers in this merchandising view (all rows are products with no recorded sales).
+          Turn on &quot;Show products with no sales&quot; to include them.
         </p>
       ) : (
         <div className='overflow-x-auto'>
@@ -93,7 +92,11 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
                 return (
                   <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                     <td className='p-2'>
-                      <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='150px' />
+                      <ProductNameLink
+                        productId={row.productId}
+                        productName={row.productName}
+                        maxWidth='150px'
+                      />
                     </td>
                     <td className='p-2 text-right'>
                       <Text>{formatCurrency(parseDecimal(row.revenue))}</Text>

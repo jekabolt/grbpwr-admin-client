@@ -17,8 +17,9 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
     }
     const base = inventoryHealth.filter((row) => (row.daysOnHand ?? 0) > 60);
     const anyOver60 = base.length > 0;
-    const sentinelAtRiskCount = base.filter((row) => (row.daysOnHand ?? 0) >= DAYS_ON_HAND_NO_SALES_SENTINEL)
-      .length;
+    const sentinelAtRiskCount = base.filter(
+      (row) => (row.daysOnHand ?? 0) >= DAYS_ON_HAND_NO_SALES_SENTINEL,
+    ).length;
     const filtered = includeNoSalesInPeriod
       ? base
       : base.filter((row) => (row.daysOnHand ?? 0) < DAYS_ON_HAND_NO_SALES_SENTINEL);
@@ -48,8 +49,8 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
           )}
         </div>
         <p className='text-xs text-textInactiveColor'>
-          No rows in this view — all at-risk SKUs have no sales in the period (infinite days on hand). Use
-          &quot;Include no-sales-in-period&quot; to list them.
+          No rows in this view — all at-risk SKUs have no sales in the period (infinite days on
+          hand). Use &quot;Include no-sales-in-period&quot; to list them.
         </p>
       </div>
     );
@@ -111,7 +112,11 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
-                    <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='120px' />
+                    <ProductNameLink
+                      productId={row.productId}
+                      productName={row.productName}
+                      maxWidth='120px'
+                    />
                   </td>
                   <td className='p-2'>
                     <Text>{row.sizeName || `Size #${row.sizeId}`}</Text>
@@ -138,8 +143,9 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>
-          Items with &gt;60 days on hand. &gt;90 days highlighted (consider discount/bundling). Default view
-          hides SKUs with no sales in the period (shown as &quot;No sales&quot; / infinite days on hand).
+          Items with &gt;60 days on hand. &gt;90 days highlighted (consider discount/bundling).
+          Default view hides SKUs with no sales in the period (shown as &quot;No sales&quot; /
+          infinite days on hand).
         </Text>
       </div>
     </div>

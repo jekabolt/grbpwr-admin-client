@@ -58,16 +58,24 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Size</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Size
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>OOS Clicks</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  OOS Clicks
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Price</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Price
+                </Text>
               </th>
             </tr>
           </thead>
@@ -75,7 +83,11 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
             {topOOS.map((row, idx) => (
               <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                 <td className='p-2'>
-                  <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='120px' />
+                  <ProductNameLink
+                    productId={row.productId}
+                    productName={row.productName}
+                    maxWidth='120px'
+                  />
                 </td>
                 <td className='p-2'>
                   <Text>{row.sizeName || `Size #${row.sizeId}`}</Text>

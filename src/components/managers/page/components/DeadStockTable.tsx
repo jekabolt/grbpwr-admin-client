@@ -26,19 +26,29 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Size</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Size
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Qty</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Qty
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Days w/o Sale</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Days w/o Sale
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Stock Value</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Stock Value
+                </Text>
               </th>
             </tr>
           </thead>
@@ -46,7 +56,11 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
             {topDeadStock.map((row, idx) => (
               <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                 <td className='p-2'>
-                  <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='120px' />
+                  <ProductNameLink
+                    productId={row.productId}
+                    productName={row.productName}
+                    maxWidth='120px'
+                  />
                 </td>
                 <td className='p-2'>
                   <Text>{row.sizeName || `Size #${row.sizeId}`}</Text>
@@ -68,7 +82,9 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
         </table>
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
-        <Text>Inventory with no sales &gt;180 days — liquidate or write off. Sorted by € tied up.</Text>
+        <Text>
+          Inventory with no sales &gt;180 days — liquidate or write off. Sorted by € tied up.
+        </Text>
         <Text>Stock value is at listed (retail) price, not cost.</Text>
       </div>
     </div>

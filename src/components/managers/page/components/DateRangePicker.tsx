@@ -97,7 +97,10 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
               >
                 <DayPicker
                   mode='range'
-                  selected={selectingRange ?? (customFrom && customTo ? { from: customFrom, to: customTo } : undefined)}
+                  selected={
+                    selectingRange ??
+                    (customFrom && customTo ? { from: customFrom, to: customTo } : undefined)
+                  }
                   onSelect={handleCustomSelect}
                   numberOfMonths={2}
                   defaultMonth={customFrom ?? new Date()}
@@ -123,7 +126,9 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
           ))}
         </select>
         {compareHint && (
-          <Text className='text-[10px] text-textInactiveColor leading-snug mt-0.5'>{compareHint}</Text>
+          <Text className='text-[10px] text-textInactiveColor leading-snug mt-0.5'>
+            {compareHint}
+          </Text>
         )}
       </div>
     </div>

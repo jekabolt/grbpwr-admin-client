@@ -76,7 +76,14 @@ export const ChannelSpendForm: FC = () => {
             <Input value={form.utmCampaign} onChange={set('utmCampaign')} className='py-1' />
           </Field>
           <Field label='Amount (EUR)'>
-            <Input type='number' value={form.amount} onChange={set('amount')} className='py-1' min='0' step='0.01' />
+            <Input
+              type='number'
+              value={form.amount}
+              onChange={set('amount')}
+              className='py-1'
+              min='0'
+              step='0.01'
+            />
           </Field>
         </div>
       </ConfirmationModal>

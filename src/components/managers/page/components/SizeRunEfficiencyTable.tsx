@@ -32,16 +32,24 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Total sizes</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Total sizes
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Sold through</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Sold through
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Sell-through %</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Sell-through %
+                </Text>
               </th>
             </tr>
           </thead>
@@ -64,7 +72,13 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
                     <Text>{formatNumber(row.soldThroughSizes || 0)}</Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text className={pct < 50 && (row.totalSizes || 0) >= 4 ? 'text-error font-bold' : 'font-bold'}>
+                    <Text
+                      className={
+                        pct < 50 && (row.totalSizes || 0) >= 4
+                          ? 'text-error font-bold'
+                          : 'font-bold'
+                      }
+                    >
                       {pct.toFixed(1)}%
                     </Text>
                   </td>
@@ -79,7 +93,9 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
           Share of distinct sizes that sold at least once (of {MIN_SIZES}+ sizes offered) — a coarse
           proxy for whether the size run was bought right. Low = likely overbought some sizes.
         </Text>
-        <Text>True sell-through (units sold ÷ units bought) needs cost/buy data from the backend.</Text>
+        <Text>
+          True sell-through (units sold ÷ units bought) needs cost/buy data from the backend.
+        </Text>
       </div>
     </div>
   );

@@ -8,7 +8,13 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { tabMetricsKeys } from '../useTabMetricsQuery';
 
-const EMPTY = { productId: '', sizeId: '', reorderPoint: '', targetDaysCover: '', leadTimeDays: '' };
+const EMPTY = {
+  productId: '',
+  sizeId: '',
+  reorderPoint: '',
+  targetDaysCover: '',
+  leadTimeDays: '',
+};
 
 /**
  * Operator entry for a per-SKU reorder target. Without a target the backend can't flag
@@ -66,26 +72,57 @@ export const InventoryTargetForm: FC = () => {
       >
         <div className='flex flex-col gap-3 lg:w-[380px]'>
           <Text size='small' variant='inactive'>
-            Set a reorder point (units) and/or target days of cover for a SKU. The backend then flags
-            it on the Reorder-now list when stock drops to it. For continuity SKUs, not limited drops.
+            Set a reorder point (units) and/or target days of cover for a SKU. The backend then
+            flags it on the Reorder-now list when stock drops to it. For continuity SKUs, not
+            limited drops.
           </Text>
           <div className='grid grid-cols-2 gap-3'>
             <Field label='Product ID'>
-              <Input type='number' value={form.productId} onChange={set('productId')} className='py-1' min='1' />
+              <Input
+                type='number'
+                value={form.productId}
+                onChange={set('productId')}
+                className='py-1'
+                min='1'
+              />
             </Field>
             <Field label='Size ID'>
-              <Input type='number' value={form.sizeId} onChange={set('sizeId')} className='py-1' min='1' />
+              <Input
+                type='number'
+                value={form.sizeId}
+                onChange={set('sizeId')}
+                className='py-1'
+                min='1'
+              />
             </Field>
           </div>
           <Field label='Reorder point (units)'>
-            <Input type='number' value={form.reorderPoint} onChange={set('reorderPoint')} className='py-1' min='0' />
+            <Input
+              type='number'
+              value={form.reorderPoint}
+              onChange={set('reorderPoint')}
+              className='py-1'
+              min='0'
+            />
           </Field>
           <div className='grid grid-cols-2 gap-3'>
             <Field label='Target days cover'>
-              <Input type='number' value={form.targetDaysCover} onChange={set('targetDaysCover')} className='py-1' min='0' />
+              <Input
+                type='number'
+                value={form.targetDaysCover}
+                onChange={set('targetDaysCover')}
+                className='py-1'
+                min='0'
+              />
             </Field>
             <Field label='Lead time (days)'>
-              <Input type='number' value={form.leadTimeDays} onChange={set('leadTimeDays')} className='py-1' min='0' />
+              <Input
+                type='number'
+                value={form.leadTimeDays}
+                onChange={set('leadTimeDays')}
+                className='py-1'
+                min='0'
+              />
             </Field>
           </div>
         </div>

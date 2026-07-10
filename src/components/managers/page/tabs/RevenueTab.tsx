@@ -100,7 +100,12 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 Gross Profit
               </Text>
               <Text className='font-bold text-lg'>{formatCurrency(grossMargin.value)}</Text>
-              <Delta cur={grossMargin.value} prev={grossMargin.compareValue} kind='currency' enabled={compareEnabled} />
+              <Delta
+                cur={grossMargin.value}
+                prev={grossMargin.compareValue}
+                kind='currency'
+                enabled={compareEnabled}
+              />
             </div>
             <div className='space-y-1'>
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
@@ -110,7 +115,12 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 {marginPctTrusted ? `${grossMarginPct.value.toFixed(0)}%` : '—'}
               </Text>
               {marginPctTrusted ? (
-                <Delta cur={grossMarginPct.value} prev={grossMarginPct.compareValue} kind='pp' enabled={compareEnabled} />
+                <Delta
+                  cur={grossMarginPct.value}
+                  prev={grossMarginPct.compareValue}
+                  kind='pp'
+                  enabled={compareEnabled}
+                />
               ) : (
                 <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
                   need ≥{COVERAGE_FLOOR_FOR_PCT}% costed
@@ -122,7 +132,12 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 Contribution
               </Text>
               <Text className='font-bold text-lg'>{formatCurrency(contributionMargin.value)}</Text>
-              <Delta cur={contributionMargin.value} prev={contributionMargin.compareValue} kind='currency' enabled={compareEnabled} />
+              <Delta
+                cur={contributionMargin.value}
+                prev={contributionMargin.compareValue}
+                kind='currency'
+                enabled={compareEnabled}
+              />
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
                 after shipping
               </Text>
@@ -131,8 +146,8 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
         ) : (
           <div className='border border-textInactiveColor p-4 bg-bgSecondary/20'>
             <Text variant='inactive' size='small'>
-              No product costs entered yet — add cost (EUR) on products to see gross profit,
-              margin %, and contribution here.
+              No product costs entered yet — add cost (EUR) on products to see gross profit, margin
+              %, and contribution here.
             </Text>
           </div>
         )}
@@ -147,7 +162,12 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
               Revenue
             </Text>
             <Text className='font-bold'>{formatCurrency(revenue.value)}</Text>
-            <Delta cur={revenue.value} prev={revenue.compareValue} kind='currency' enabled={compareEnabled} />
+            <Delta
+              cur={revenue.value}
+              prev={revenue.compareValue}
+              kind='currency'
+              enabled={compareEnabled}
+            />
           </div>
           <div className='space-y-1'>
             <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
@@ -160,7 +180,12 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
               Orders
             </Text>
             <Text className='font-bold'>{formatNumber(orders.value)}</Text>
-            <Delta cur={orders.value} prev={orders.compareValue} kind='number' enabled={compareEnabled} />
+            <Delta
+              cur={orders.value}
+              prev={orders.compareValue}
+              kind='number'
+              enabled={compareEnabled}
+            />
           </div>
           <div className='space-y-1'>
             <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
@@ -173,7 +198,8 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
               Refunds
             </Text>
             <Text className='font-bold'>
-              {formatNumber(refundedCount)} <span className='text-textInactiveColor text-xs'>of {formatNumber(ordersN)}</span>
+              {formatNumber(refundedCount)}{' '}
+              <span className='text-textInactiveColor text-xs'>of {formatNumber(ordersN)}</span>
             </Text>
             {showRates && (
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
@@ -186,7 +212,8 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
               Cancelled
             </Text>
             <Text className='font-bold'>
-              {formatNumber(cancelledCount)} <span className='text-textInactiveColor text-xs'>of {formatNumber(ordersN)}</span>
+              {formatNumber(cancelledCount)}{' '}
+              <span className='text-textInactiveColor text-xs'>of {formatNumber(ordersN)}</span>
             </Text>
             {showRates && cancellationPct != null && (
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
@@ -198,7 +225,10 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
 
         <div className='grid gap-4 md:grid-cols-2'>
           <TimeSeriesChart title='Revenue' data={coarsenTimeSeries(metrics?.revenueByDay)} />
-          <TimeSeriesChart title='Gross revenue' data={coarsenTimeSeries(metrics?.grossRevenueByDay)} />
+          <TimeSeriesChart
+            title='Gross revenue'
+            data={coarsenTimeSeries(metrics?.grossRevenueByDay)}
+          />
         </div>
       </div>
 

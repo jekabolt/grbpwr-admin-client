@@ -103,7 +103,13 @@ function KpiMetricCard({ metric }: { metric: KpiMetric }) {
       : metric.delta.dir === 'up'
         ? 'text-green-600'
         : 'text-error';
-  const arrow = !metric.delta ? '' : metric.delta.dir === 'up' ? '↑ ' : metric.delta.dir === 'down' ? '↓ ' : '';
+  const arrow = !metric.delta
+    ? ''
+    : metric.delta.dir === 'up'
+      ? '↑ '
+      : metric.delta.dir === 'down'
+        ? '↓ '
+        : '';
 
   return (
     <div className='border border-textInactiveColor bg-bgSecondary/30 p-3 min-w-0 flex flex-col gap-1'>

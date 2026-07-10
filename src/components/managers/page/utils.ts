@@ -1,4 +1,9 @@
-import type { CompareMode, TimeRange, TimeSeriesPoint, googletype_Decimal } from 'api/proto-http/admin';
+import type {
+  CompareMode,
+  TimeRange,
+  TimeSeriesPoint,
+  googletype_Decimal,
+} from 'api/proto-http/admin';
 import { differenceInCalendarDays, format, isValid, parseISO, subDays, subYears } from 'date-fns';
 import type { MetricsPeriod } from './useMetricsQuery';
 
@@ -8,7 +13,10 @@ export function getTimeSeries(
   camelKey: string,
 ): TimeSeriesPoint[] | undefined {
   if (!metrics) return undefined;
-  const snakeKey = camelKey.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+  const snakeKey = camelKey
+    .replace(/([A-Z])/g, '_$1')
+    .toLowerCase()
+    .replace(/^_/, '');
   return (metrics[camelKey] ?? metrics[snakeKey]) as TimeSeriesPoint[] | undefined;
 }
 
@@ -19,7 +27,15 @@ export function parseDecimal(d: googletype_Decimal | undefined): number {
 
 /** MetricWithComparison from API - backend may return snake_case (compare_value, change_pct, lower_is_better, change_absolute) */
 export function getMetricComparison(m: Record<string, unknown> | undefined) {
-  if (!m) return { value: 0, compareValue: undefined, changePct: undefined, lowerIsBetter: false, changeAbsolute: undefined, caveat: undefined };
+  if (!m)
+    return {
+      value: 0,
+      compareValue: undefined,
+      changePct: undefined,
+      lowerIsBetter: false,
+      changeAbsolute: undefined,
+      caveat: undefined,
+    };
   const value = parseDecimal(m.value as googletype_Decimal);
   const compareValueRaw = m.compareValue ?? m.compare_value;
   const compareValue =
@@ -27,7 +43,7 @@ export function getMetricComparison(m: Record<string, unknown> | undefined) {
   const changePct = (m.changePct ?? m.change_pct) as number | undefined;
   const lowerIsBetter = (m.lowerIsBetter ?? m.lower_is_better) === true;
   const changeAbsolute = (m.changeAbsolute ?? m.change_absolute) as number | undefined;
-  const caveat = (m.caveat) as string | undefined;
+  const caveat = m.caveat as string | undefined;
   // n the metric is computed over (e.g. orders behind a refund rate). Lets the UI suppress
   // or widen a figure at low volume instead of guessing from arbitrary hardcoded floors.
   const sampleSize = (m.sampleSize ?? m.sample_size) as number | undefined;
@@ -232,10 +248,10 @@ export function fallbackComparePeriodLabel(
   customTo?: Date,
 ): string | null {
   if (compareMode === 'COMPARE_MODE_NONE') return null;
-  const end = period === 'custom' ? (customTo ?? new Date()) : new Date();
+  const end = period === 'custom' ? customTo ?? new Date() : new Date();
   const start =
     period === 'custom'
-      ? (customFrom ?? subDays(end, 6))
+      ? customFrom ?? subDays(end, 6)
       : subDays(end, presetWindowDays(period) - 1);
   const inclusiveDays = Math.max(1, differenceInCalendarDays(end, start) + 1);
   if (compareMode === 'COMPARE_MODE_SAME_PERIOD_LAST_YEAR') {
@@ -314,7 +330,9 @@ function titleCaseEventToken(token: string): string {
   const t = token.trim();
   if (!t) return t;
   const snake = t.replace(/\s+/g, '_').toLowerCase();
-  return GA4_EVENT_STEP_LABELS[snake] ?? t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return (
+    GA4_EVENT_STEP_LABELS[snake] ?? t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }
 
 /** Turns API journey strings like `view_item -> add_to_cart` into readable steps. */

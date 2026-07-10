@@ -41,22 +41,34 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Size</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Size
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>On Hand</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  On Hand
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Reorder Pt</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Reorder Pt
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Days of Cover</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Days of Cover
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Sold / Day</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Sold / Day
+                </Text>
               </th>
             </tr>
           </thead>
@@ -64,7 +76,11 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
             {rows.map((row, idx) => (
               <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                 <td className='p-2'>
-                  <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='120px' />
+                  <ProductNameLink
+                    productId={row.productId}
+                    productName={row.productName}
+                    maxWidth='120px'
+                  />
                 </td>
                 <td className='p-2'>
                   <Text>{row.sizeName || `Size #${row.sizeId}`}</Text>
@@ -73,7 +89,9 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
                   <Text className='font-bold'>{formatNumber(row.quantity || 0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
-                  <Text className='text-textInactiveColor'>{formatNumber(row.reorderPoint || 0)}</Text>
+                  <Text className='text-textInactiveColor'>
+                    {formatNumber(row.reorderPoint || 0)}
+                  </Text>
                 </td>
                 <td className='p-2 text-right'>
                   <Text>{daysOfCover(row)}</Text>
@@ -87,7 +105,9 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
         </table>
       </div>
       <div className='mt-3 text-xs text-textInactiveColor'>
-        <Text>At or below their reorder point — restock before they sell out. Lowest cover first.</Text>
+        <Text>
+          At or below their reorder point — restock before they sell out. Lowest cover first.
+        </Text>
       </div>
     </div>
   );
