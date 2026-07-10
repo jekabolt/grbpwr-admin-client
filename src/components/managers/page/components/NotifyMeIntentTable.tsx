@@ -39,23 +39,15 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           productName: row.productName,
           action: row.action || '—',
           count: 0,
-          totalRate: 0,
-          entries: 0,
         };
       }
       acc[key].count += row.count || 0;
-      acc[key].totalRate += row.conversionRate || 0;
-      acc[key].entries += 1;
       return acc;
     },
-    {} as Record<string, { productId?: string; productName?: string; action: string; count: number; totalRate: number; entries: number }>,
+    {} as Record<string, { productId?: string; productName?: string; action: string; count: number }>,
   );
 
   const rows = Object.values(aggregated)
-    .map((r) => ({
-      ...r,
-      avgConversionRate: r.entries > 0 ? r.totalRate / r.entries : 0,
-    }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 20);
 
@@ -77,9 +69,6 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>Count</Text>
               </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Conv. rate</Text>
-              </th>
             </tr>
           </thead>
           <tbody>
@@ -97,9 +86,6 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
                 </td>
                 <td className='p-2 text-right'>
                   <Text className='font-bold'>{formatNumber(row.count)}</Text>
-                </td>
-                <td className='p-2 text-right'>
-                  <Text className='font-bold'>{row.avgConversionRate.toFixed(1)}%</Text>
                 </td>
               </tr>
             ))}
