@@ -6,6 +6,7 @@ import { NewTrackCode } from './new-track-code';
 interface Props {
   isEdit: boolean;
   isPrinting: boolean;
+  canEdit?: boolean;
   trackingNumber: string;
   orderStatus: string;
   orderDetails: common_OrderFull | undefined;
@@ -17,6 +18,7 @@ interface Props {
 export function TrackingNumber({
   isEdit,
   isPrinting,
+  canEdit = true,
   trackingNumber,
   orderStatus,
   orderDetails,
@@ -51,7 +53,7 @@ export function TrackingNumber({
                 <Text variant='uppercase'>
                   tracking number: {orderDetails?.shipment?.trackingCode}
                 </Text>
-                {orderStatus === 'SHIPPED' && (
+                {canEdit && orderStatus === 'SHIPPED' && (
                   <Button
                     variant='main'
                     className='px-1 cursor-pointer'

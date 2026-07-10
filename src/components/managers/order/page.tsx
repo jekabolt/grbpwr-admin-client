@@ -2,7 +2,8 @@ import {
   formatDateShort,
   getStatusColor,
 } from 'components/managers/orders-catalog/components/utility';
-import { ROUTES } from 'constants/routes';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { ROUTES, SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -81,6 +82,8 @@ export function OrderDetails() {
   } = useOrderDetails(uuid || '');
 
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
+  const { canWrite } = usePermissions();
+  const canEditOrder = canWrite(SECTION.orders);
 
   const form = useForm<{ refundReason: string; notes: string }>({
     defaultValues: { refundReason: '', notes: '' },
@@ -207,7 +210,7 @@ export function OrderDetails() {
               </Section>
 
               <Section title='comment' className='print:hidden'>
-                <Comment orderDetails={orderDetails} />
+                <Comment orderDetails={orderDetails} canEdit={canEditOrder} />
               </Section>
             </div>
 
@@ -223,6 +226,7 @@ export function OrderDetails() {
                   isPrinting={isPrinting}
                   orderStatus={orderStatus}
                   isEdit={isEdit}
+                  canEdit={canEditOrder}
                   trackingNumber={trackingNumber}
                   toggleTrackNumber={toggleTrackNumber}
                   handleTrackingNumberChange={handleTrackingNumberChange}
@@ -234,7 +238,7 @@ export function OrderDetails() {
                 <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
               </Section>
 
-              {orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
+              {canEditOrder && orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
                 <Section title='tracking' className='print:hidden'>
                   <NewTrackCode
                     isPrinting={isPrinting}
@@ -248,7 +252,7 @@ export function OrderDetails() {
           </div>
         )}
 
-        {(showDeliver || showRefund) && (
+        {canEditOrder && (showDeliver || showRefund) && (
           <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-end gap-2 border-t border-textColor bg-bgColor px-3 py-2 print:hidden'>
             {showDeliver && (
               <Button variant='main' size='lg' className='uppercase' onClick={markAsDelivered}>
