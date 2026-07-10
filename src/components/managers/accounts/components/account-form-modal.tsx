@@ -17,6 +17,17 @@ interface Props {
   sectionsLoading?: boolean;
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className='flex flex-col gap-1'>
+      <Text variant='label' size='small'>
+        {label}
+      </Text>
+      {children}
+    </label>
+  );
+}
+
 export function AccountFormModal({
   open,
   onOpenChange,
@@ -75,60 +86,64 @@ export function AccountFormModal({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor p-3 text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[560px] lg:-translate-x-1/2'>
-          <div className='mb-3 flex items-center justify-between gap-2 border-b border-textColor pb-2'>
-            <DialogPrimitives.Title className='text-lg uppercase'>
-              {isEdit ? `edit — ${username}` : 'new account'}
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[560px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textColor bg-bgColor px-4 py-3'>
+            <DialogPrimitives.Title className='text-lg uppercase break-all'>
+              {isEdit ? username : 'new account'}
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='cursor-pointer'>
+              <Button type='button' className='shrink-0 cursor-pointer'>
                 [x]
               </Button>
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
-            {isEdit ? 'Edit admin account permissions' : 'Create a new admin account'}
+            {isEdit ? 'Edit admin account access' : 'Create a new admin account'}
           </DialogPrimitives.Description>
 
-          <div className='flex flex-col gap-4'>
-            {!isEdit && (
-              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
-                <div className='flex flex-col gap-1'>
-                  <Text variant='inactive' size='small'>
-                    username
-                  </Text>
+          <div className='flex flex-col gap-5 p-4'>
+            {isEdit ? (
+              <Text variant='label' size='small'>
+                Change the password from the account’s “password” action.
+              </Text>
+            ) : (
+              <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+                <Field label='username'>
                   <Input
                     name='newUsername'
                     value={username}
                     autoComplete='off'
+                    className='h-9'
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       setUsername(e.target.value)
                     }
                   />
-                </div>
-                <div className='flex flex-col gap-1'>
-                  <Text variant='inactive' size='small'>
-                    password
-                  </Text>
+                </Field>
+                <Field label='password'>
                   <Input
                     name='newPassword'
                     type='text'
                     value={password}
                     autoComplete='new-password'
+                    className='h-9'
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       setPassword(e.target.value)
                     }
                   />
-                </div>
+                </Field>
               </div>
             )}
 
-            <div className='border border-textColor p-3'>
-              <ToggleSwitch
-                checked={isSuper}
-                label='super admin — full access to every section'
-                onCheckedChange={setIsSuper}
-              />
+            <div className='flex items-start justify-between gap-4 border border-textColor p-3'>
+              <div className='min-w-0'>
+                <Text size='small' className='uppercase'>
+                  super admin
+                </Text>
+                <Text variant='label' size='small'>
+                  Full access to every section. Per-section grants are ignored.
+                </Text>
+              </div>
+              <ToggleSwitch checked={isSuper} onCheckedChange={setIsSuper} />
             </div>
 
             {!isSuper && (
@@ -147,7 +162,7 @@ export function AccountFormModal({
             )}
           </div>
 
-          <div className='mt-4 flex justify-end gap-2'>
+          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-textColor bg-bgColor px-4 py-3'>
             <Button type='button' onClick={() => onOpenChange(false)} variant='secondary' size='lg'>
               cancel
             </Button>
@@ -159,7 +174,7 @@ export function AccountFormModal({
               loading={pending}
               disabled={pending}
             >
-              {isEdit ? 'save' : 'create'}
+              {isEdit ? 'save changes' : 'create account'}
             </Button>
           </div>
         </DialogPrimitives.Content>

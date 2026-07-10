@@ -29,23 +29,28 @@ export function Accounts() {
 
   if (!canView) {
     return (
-      <div className='flex flex-col gap-2 border border-textColor p-6'>
+      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textColor p-10 text-center'>
         <Text variant='uppercase' size='large'>
           admin accounts
         </Text>
-        <Text variant='inactive'>
-          You don’t have access to the accounts section. Ask a super admin to grant it.
+        <Text variant='label' size='small'>
+          You don’t have access to this section. Ask a super admin to grant it.
         </Text>
       </div>
     );
   }
 
   return (
-    <div className='flex flex-col w-full gap-4 pb-16'>
-      <div className='flex items-center justify-between gap-3'>
-        <Text variant='uppercase' size='large'>
-          admin accounts {accounts.length > 0 && `(${accounts.length})`}
-        </Text>
+    <div className='flex w-full flex-col gap-4 pb-16'>
+      <div className='flex flex-wrap items-end justify-between gap-3 border-b border-textColor pb-3'>
+        <div className='flex flex-col gap-1'>
+          <Text variant='uppercase' size='large'>
+            admin accounts{accounts.length > 0 && ` · ${accounts.length}`}
+          </Text>
+          <Text variant='label' size='small'>
+            Super accounts see everything; scoped accounts see only the sections they’re granted.
+          </Text>
+        </div>
         {canManageAccountsWrite && (
           <Button
             variant='main'
@@ -55,7 +60,7 @@ export function Accounts() {
               setFormMode('create');
             }}
           >
-            new account
+            + new account
           </Button>
         )}
       </div>

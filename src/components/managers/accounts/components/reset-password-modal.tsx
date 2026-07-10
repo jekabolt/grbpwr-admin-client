@@ -28,12 +28,12 @@ export function ResetPasswordModal({ open, onOpenChange, username }: Props) {
       open={open}
       onOpenChange={onOpenChange}
       onConfirm={handleConfirm}
-      title={`reset password — ${username}`}
-      confirmLabel='reset'
+      title={`reset password · ${username}`}
+      confirmLabel='reset password'
       confirmDisabled={!password.trim() || reset.isPending}
     >
-      <div className='flex flex-col gap-2'>
-        <Text variant='inactive' size='small'>
+      <label className='flex flex-col gap-1'>
+        <Text variant='label' size='small'>
           new password for {username}
         </Text>
         <Input
@@ -41,9 +41,10 @@ export function ResetPasswordModal({ open, onOpenChange, username }: Props) {
           type='text'
           value={password}
           autoComplete='new-password'
+          className='h-9'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
         />
-      </div>
+      </label>
     </ConfirmationModal>
   );
 }

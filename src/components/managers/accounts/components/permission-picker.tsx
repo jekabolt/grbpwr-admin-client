@@ -10,6 +10,45 @@ const LEVELS: { label: string; value: AccessLevel }[] = [
   { label: 'write', value: ACCESS.WRITE },
 ];
 
+// Connected 3-segment control. Active segment is the inverse fill (brutalist
+// monochrome "selected"); inactive segments use labelColor (AA) not the decorative
+// inactive gray.
+function AccessControl({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: AccessLevel;
+  onChange: (v: AccessLevel) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div role='group' aria-label='access level' className='flex shrink-0 border border-textColor'>
+      {LEVELS.map((lvl, i) => {
+        const active = value === lvl.value;
+        return (
+          <button
+            key={lvl.value}
+            type='button'
+            aria-pressed={active}
+            disabled={disabled}
+            onClick={() => onChange(lvl.value)}
+            className={cn(
+              'px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed',
+              i > 0 && 'border-l border-textColor',
+              active
+                ? 'bg-textColor text-bgColor'
+                : 'bg-bgColor text-labelColor hover:bg-textInactiveColor hover:text-textColor',
+            )}
+          >
+            {lvl.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 interface Props {
   sections: AdminSectionInfo[];
   value: AdminPermission[];
@@ -18,8 +57,8 @@ interface Props {
   loading?: boolean;
 }
 
-// Grid of grantable sections × access level. Emits a clean AdminPermission[] with only
-// the sections that carry read or write access (none = omitted).
+// Grid of grantable sections × access level. Emits a clean AdminPermission[] carrying
+// only the sections with read or write access (none = omitted).
 export function PermissionPicker({ sections, value, onChange, disabled, loading }: Props) {
   const levelFor = (key: string): AccessLevel =>
     value.find((p) => p.section === key)?.access ?? ACCESS.NONE;
@@ -29,45 +68,57 @@ export function PermissionPicker({ sections, value, onChange, disabled, loading 
     onChange(level === ACCESS.NONE ? rest : [...rest, { section: key, access: level }]);
   };
 
-  const setAll = (level: AccessLevel) => {
+  const setAll = (level: AccessLevel) =>
     onChange(
       level === ACCESS.NONE
         ? []
         : sections.filter((s) => s.key).map((s) => ({ section: s.key as string, access: level })),
     );
-  };
+
+  const grantedCount = value.filter((p) => p.access && p.access !== ACCESS.NONE).length;
 
   if (loading) {
     return (
-      <Text variant='inactive' size='small'>
-        loading sections…
-      </Text>
+      <div className='border border-textColor'>
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className={cn(
+              'h-12 animate-pulse bg-textInactiveColor/40',
+              i > 0 && 'border-t border-textColor',
+            )}
+          />
+        ))}
+      </div>
     );
   }
 
   if (sections.length === 0) {
     return (
-      <Text variant='inactive' size='small'>
-        no grantable sections
-      </Text>
+      <div className='border border-textColor p-4'>
+        <Text variant='label' size='small'>
+          no grantable sections
+        </Text>
+      </div>
     );
   }
 
   return (
-    <div className={cn('flex flex-col gap-3', disabled && 'pointer-events-none opacity-40')}>
-      <div className='flex items-center justify-between gap-2'>
-        <Text variant='inactive' size='small'>
-          per-section access
+    <div className={cn('flex flex-col gap-2', disabled && 'pointer-events-none opacity-40')}>
+      <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-1'>
+        <Text variant='uppercase' size='small'>
+          sections{grantedCount > 0 && ` · ${grantedCount} granted`}
         </Text>
         <div className='flex items-center gap-2'>
-          <Text variant='inactive' size='small'>
-            set all:
+          <Text variant='label' size='small'>
+            set all
           </Text>
           {LEVELS.map((lvl) => (
             <Button
               key={lvl.value}
               type='button'
               variant='underline'
+              className='text-small uppercase'
               onClick={() => setAll(lvl.value)}
               disabled={disabled}
             >
@@ -77,65 +128,38 @@ export function PermissionPicker({ sections, value, onChange, disabled, loading 
         </div>
       </div>
 
-      <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border border-textColor min-w-max'>
-          <thead className='bg-textInactiveColor h-9'>
-            <tr>
-              <th className='border border-textColor px-2 text-left'>
-                <Text variant='uppercase' size='small'>
-                  section
+      <div className='border border-textColor'>
+        {sections.map((s, i) => {
+          const key = s.key ?? '';
+          const current = levelFor(key);
+          const granted = current !== ACCESS.NONE;
+          return (
+            <div
+              key={key}
+              className={cn(
+                'flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-3',
+                i > 0 && 'border-t border-textColor',
+                granted && 'bg-textInactiveColor/20',
+              )}
+            >
+              <div className='min-w-0 flex-1'>
+                <Text size='small' className='uppercase'>
+                  {s.title || key}
                 </Text>
-              </th>
-              <th className='border border-textColor px-2'>
-                <Text variant='uppercase' size='small'>
-                  access
-                </Text>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {sections.map((s) => {
-              const key = s.key ?? '';
-              const current = levelFor(key);
-              return (
-                <tr key={key} className='border-b border-textColor last:border-b-0'>
-                  <td className='border border-textColor px-2 py-1.5 align-top'>
-                    <Text size='small'>{s.title || key}</Text>
-                    {s.description && (
-                      <Text variant='inactive' size='small'>
-                        {s.description}
-                      </Text>
-                    )}
-                  </td>
-                  <td className='border border-textColor px-2 py-1.5'>
-                    <div className='flex items-center gap-0.5'>
-                      {LEVELS.map((lvl) => {
-                        const active = current === lvl.value;
-                        return (
-                          <button
-                            key={lvl.value}
-                            type='button'
-                            disabled={disabled}
-                            onClick={() => setLevel(key, lvl.value)}
-                            className={cn(
-                              'border border-textColor px-2 py-0.5 text-small uppercase cursor-pointer',
-                              active
-                                ? 'bg-textColor text-bgColor'
-                                : 'bg-bgColor text-textColor hover:bg-textInactiveColor',
-                              'disabled:cursor-not-allowed',
-                            )}
-                          >
-                            {lvl.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                {s.description && (
+                  <Text variant='label' size='small'>
+                    {s.description}
+                  </Text>
+                )}
+              </div>
+              <AccessControl
+                value={current}
+                onChange={(lvl) => setLevel(key, lvl)}
+                disabled={disabled}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
