@@ -5,7 +5,13 @@ import { Link, useLocation } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { ExecutiveHealthStrip, TimeSeriesChart } from '../components';
 import type { MetricsPeriod } from '../useMetricsQuery';
-import { formatCurrency, formatNumber, getTimeSeries, parseDecimal, resolveAnalyticsPeriodLabels } from '../utils';
+import {
+  formatCurrency,
+  formatNumber,
+  getTimeSeries,
+  parseDecimal,
+  resolveAnalyticsPeriodLabels,
+} from '../utils';
 import { ProductNameLink } from '../components/ProductNameLink';
 
 interface ThisWeekTabProps {
@@ -57,10 +63,8 @@ export function ThisWeekTab({
   const top3Products = useMemo(() => {
     const byRevenue = metrics?.topProductsByRevenue || [];
     const byQuantity = metrics?.topProductsByQuantity || [];
-    
-    const quantityMap = new Map(
-      byQuantity.map((p) => [p.productId, p.count ?? 0])
-    );
+
+    const quantityMap = new Map(byQuantity.map((p) => [p.productId, p.count ?? 0]));
 
     return byRevenue.slice(0, 3).map((p) => ({
       productId: p.productId,
@@ -76,15 +80,24 @@ export function ThisWeekTab({
       const name = [s.source, s.medium].filter(Boolean).join(' / ').toLowerCase();
       return !name.includes('direct') && !name.includes('none');
     });
-    
+
     if (filtered.length === 0) return null;
-    
+
     const top = filtered[0];
     return {
       name: [top.source, top.medium].filter(Boolean).join(' / ') || 'Unknown',
       sessions: top.sessions ?? 0,
     };
   }, [metrics?.trafficBySource]);
+
+  // Payment failures = money that didn't get captured — the one ops-relevant signal kept
+  // from the retired Technical tab.
+  const paymentFailures = useMemo(() => {
+    const rows = metricsResponse.paymentFailures ?? [];
+    const count = rows.reduce((sum, r) => sum + (r.failureCount ?? 0), 0);
+    const value = rows.reduce((sum, r) => sum + parseDecimal(r.totalFailedValue), 0);
+    return { count, value };
+  }, [metricsResponse.paymentFailures]);
 
   return (
     <div className='space-y-6'>
@@ -95,6 +108,18 @@ export function ThisWeekTab({
         currentPeriodLabel={currentPeriodLabel}
         comparePeriodLabel={comparePeriodLabel}
       />
+
+      {paymentFailures.count > 0 && (
+        <div className='flex flex-wrap items-center justify-between gap-2 border-2 border-error bg-error/10 p-3'>
+          <Text variant='uppercase' className='text-error text-[10px] font-semibold'>
+            Payment failures this period
+          </Text>
+          <Text className='font-bold text-error'>
+            {formatNumber(paymentFailures.count)} failed · {formatCurrency(paymentFailures.value)}{' '}
+            not captured
+          </Text>
+        </div>
+      )}
 
       <div className='space-y-6'>
         <h3 className='text-sm font-bold uppercase'>Orders at a glance</h3>
@@ -210,7 +235,9 @@ export function ThisWeekTab({
               </Text>
             </div>
           ) : (
-            <Text className='text-textInactiveColor text-xs'>No attributed traffic this period</Text>
+            <Text className='text-textInactiveColor text-xs'>
+              No attributed traffic this period
+            </Text>
           )}
         </div>
       </div>

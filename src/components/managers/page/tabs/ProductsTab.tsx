@@ -1,28 +1,20 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import Text from 'ui/components/text';
 import {
   AddToCartRateMatrixChart,
   AddToCartRateTable,
   DeadStockTable,
-  DetailsExpansionTable,
-  ImageSwipesTable,
   InventoryHealthTable,
   NotifyMeIntentTable,
   OOSImpactTable,
   ProductCharts,
-  ProductEngagementBubbleMatrixChart,
-  ProductEngagementRadarChart,
-  ProductEngagementTable,
   ProductTrendTable,
-  ProductZoomTable,
   RevenueParetoChart,
   SizeAnalyticsTable,
   SizeConfidenceTable,
-  SizeGuideClicksTable,
+  SizeRunEfficiencyTable,
   SlowMoversTable,
-  TimeOnPageTable,
 } from '../components';
 
 interface ProductsTabProps {
@@ -86,8 +78,10 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
             </summary>
             <div className='space-y-6 p-4'>
               {hasProductCharts && <ProductCharts metrics={metrics} />}
-              {hasRevenuePareto && <RevenueParetoChart revenuePareto={metricsResponse.revenuePareto} />}
-              
+              {hasRevenuePareto && (
+                <RevenueParetoChart revenuePareto={metricsResponse.revenuePareto} />
+              )}
+
               <section id='atc-matrix' className='scroll-mt-24'>
                 {hasAddToCartRateAnalysis ? (
                   <AddToCartRateMatrixChart
@@ -106,15 +100,12 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
 
           <details className='border border-textInactiveColor' open>
             <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
-              Product Engagement
+              Sizes
             </summary>
             <div className='space-y-6 p-4'>
-              <ProductEngagementBubbleMatrixChart
-                productEngagementBubbleMatrix={metricsResponse.productEngagementBubbleMatrix}
-              />
               <SizeAnalyticsTable sizeAnalytics={metricsResponse.sizeAnalytics} />
-              <SizeGuideClicksTable sizeGuideClicks={metricsResponse.sizeGuideClicks} />
-              <DetailsExpansionTable detailsExpansion={metricsResponse.detailsExpansion} />
+              <SizeRunEfficiencyTable sizeRunEfficiency={metricsResponse.sizeRunEfficiency} />
+              <SizeConfidenceTable sizeConfidence={metricsResponse.sizeConfidence} />
             </div>
           </details>
 
@@ -128,25 +119,6 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
               <OOSImpactTable oosImpact={metricsResponse.oosImpact} />
             </div>
           </details>
-
-          <details className='border border-textInactiveColor'>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
-              Deep Dive
-            </summary>
-            <div className='space-y-6 p-4'>
-              <ProductEngagementRadarChart productEngagement={metricsResponse.productEngagement} />
-              <ProductEngagementTable productEngagement={metricsResponse.productEngagement} />
-              <TimeOnPageTable timeOnPage={metricsResponse.timeOnPage} />
-              <div className='grid gap-6 md:grid-cols-2'>
-                <ProductZoomTable productZoom={metricsResponse.productZoom} />
-                <ImageSwipesTable imageSwipes={metricsResponse.imageSwipes} />
-              </div>
-            </div>
-          </details>
-
-          <div className='grid gap-6 md:grid-cols-2'>
-            <SizeConfidenceTable sizeConfidence={metricsResponse.sizeConfidence} />
-          </div>
         </>
       )}
     </div>

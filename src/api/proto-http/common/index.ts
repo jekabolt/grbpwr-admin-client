@@ -194,6 +194,11 @@ export type ProductInsert = {
   translations: ProductInsertTranslation[] | undefined;
   secondaryThumbnailMediaId: number | undefined;
   prices: ProductPriceInsert[] | undefined;
+  // cost_price is the confidential per-unit cost of goods (COGS) in base currency (EUR),
+  // used for margin analytics. Omit/empty to leave the stored value unchanged on update.
+  // Deliberately on ProductInsert (write-only) and NOT on ProductBodyInsert, so it is
+  // never serialized on the storefront product read path.
+  costPrice: googletype_Decimal | undefined;
 };
 
 export type ProductBodyInsert = {
