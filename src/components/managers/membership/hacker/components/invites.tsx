@@ -1,4 +1,6 @@
 import { GenerateHackerInviteResponse } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
@@ -16,6 +18,7 @@ export function HackerInvites() {
   const revoke = useRevokeHackerInvite();
   const [activeOnly, setActiveOnly] = useState(true);
   const { data, isLoading } = useHackerInvites(activeOnly);
+  const { canWrite } = usePermissions();
 
   const [email, setEmail] = useState('');
   const [expiresInDays, setExpiresInDays] = useState('14');
@@ -45,36 +48,40 @@ export function HackerInvites() {
       </Text>
 
       {/* Generate */}
-      <div className='flex flex-wrap gap-3 items-end'>
-        <div className='flex flex-col gap-1'>
-          <Text variant='inactive' size='small'>
-            Pre-bound email (optional)
-          </Text>
-          <Input
-            name='inviteEmail'
-            type='email'
-            placeholder='someone@example.com'
-            value={email}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-            className='w-56'
-          />
+      {canWrite(SECTION.members) && (
+        <div className='flex flex-wrap gap-3 items-end'>
+          <div className='flex flex-col gap-1'>
+            <Text variant='inactive' size='small'>
+              Pre-bound email (optional)
+            </Text>
+            <Input
+              name='inviteEmail'
+              type='email'
+              placeholder='someone@example.com'
+              value={email}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+              className='w-56'
+            />
+          </div>
+          <div className='flex flex-col gap-1'>
+            <Text variant='inactive' size='small'>
+              Expires in (days)
+            </Text>
+            <Input
+              name='expiresInDays'
+              type='number'
+              value={expiresInDays}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setExpiresInDays(e.target.value)
+              }
+              className='w-24'
+            />
+          </div>
+          <Button variant='main' size='lg' onClick={handleGenerate} loading={generate.isPending}>
+            Generate invite
+          </Button>
         </div>
-        <div className='flex flex-col gap-1'>
-          <Text variant='inactive' size='small'>
-            Expires in (days)
-          </Text>
-          <Input
-            name='expiresInDays'
-            type='number'
-            value={expiresInDays}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExpiresInDays(e.target.value)}
-            className='w-24'
-          />
-        </div>
-        <Button variant='main' size='lg' onClick={handleGenerate} loading={generate.isPending}>
-          Generate invite
-        </Button>
-      </div>
+      )}
 
       {lastGenerated && (
         <div className='flex flex-col gap-1 border border-textColor bg-highlightColor/10 p-3'>
@@ -151,7 +158,7 @@ export function HackerInvites() {
                       <Text size='small'>{statusLabel}</Text>
                     </td>
                     <td className='border border-textColor text-center px-2'>
-                      {inv.active && (
+                      {inv.active && canWrite(SECTION.members) && (
                         <Button
                           variant='underline'
                           onClick={() => revoke.mutate({ inviteId: inv.id! })}

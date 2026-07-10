@@ -1,3 +1,5 @@
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -9,6 +11,7 @@ export function HackerAccounts() {
   const { data, isLoading } = useHackerAccounts();
   const revoke = useRevokeHackerStatus();
   const navigate = useNavigate();
+  const { canWrite } = usePermissions();
 
   const members = data?.members ?? [];
 
@@ -60,13 +63,17 @@ export function HackerAccounts() {
                     <Button variant='underline' onClick={() => navigate(`/members/${m.userId}`)}>
                       view
                     </Button>
-                    <span className='px-1'>·</span>
-                    <Button
-                      variant='underline'
-                      onClick={() => revoke.mutate({ userId: m.userId! })}
-                    >
-                      revoke
-                    </Button>
+                    {canWrite(SECTION.members) && (
+                      <>
+                        <span className='px-1'>·</span>
+                        <Button
+                          variant='underline'
+                          onClick={() => revoke.mutate({ userId: m.userId! })}
+                        >
+                          revoke
+                        </Button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

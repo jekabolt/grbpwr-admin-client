@@ -24,21 +24,25 @@ export function MobileNavMenu() {
       </DialogPrimitives.Trigger>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-40 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 border border-textInactiveColor bg-bgColor px-2.5 pb-4 pt-5'>
-          <DialogPrimitives.Title className='sr-only'>managers</DialogPrimitives.Title>
-          <div className='flex h-full flex-col gap-10'>
+        <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col border border-textColor bg-bgColor'>
+          <div className='flex items-center justify-between border-b border-textColor px-2.5 py-3'>
+            <DialogPrimitives.Title asChild>
+              <Text variant='uppercase'>managers</Text>
+            </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <div className='flex items-center justify-between'>
-                <Text variant='uppercase'>managers</Text>
-                <Button>[x]</Button>
-              </div>
+              <Button className='cursor-pointer'>[x]</Button>
             </DialogPrimitives.Close>
-            <div className='flex flex-col gap-5'>
+          </div>
+          <div className='min-h-0 flex-1 overflow-y-auto p-2.5'>
+            <div className='grid grid-cols-2 gap-2'>
               {items.map(({ label, route }, id) => (
                 <DialogPrimitives.Close asChild key={id}>
-                  <Button asChild>
-                    <Link to={route}>{label}</Link>
-                  </Button>
+                  <Link
+                    to={route}
+                    className='flex min-h-12 items-center justify-center border border-textColor px-2 py-3 text-center leading-tight uppercase transition-colors hover:bg-textColor hover:text-bgColor active:opacity-80'
+                  >
+                    {label}
+                  </Link>
                 </DialogPrimitives.Close>
               ))}
             </div>

@@ -1,4 +1,5 @@
-import { ROUTES } from 'constants/routes';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -6,6 +7,7 @@ import Text from 'ui/components/text';
 import { ListArchive } from './components/archive-list';
 
 export function Archives() {
+  const { canWrite } = usePermissions();
   const [count, setCount] = useState({ loaded: 0, hasMore: false });
 
   const handleCount = useCallback((loaded: number, hasMore: boolean) => {
@@ -28,9 +30,11 @@ export function Archives() {
             </Text>
           )}
         </div>
-        <Button size='lg' variant='main' className='uppercase' asChild>
-          <Link to={ROUTES.addArchive}>create new</Link>
-        </Button>
+        {canWrite(SECTION.archive) && (
+          <Button size='lg' variant='main' className='uppercase' asChild>
+            <Link to={ROUTES.addArchive}>create new</Link>
+          </Button>
+        )}
       </div>
 
       <ListArchive onCountChange={handleCount} />

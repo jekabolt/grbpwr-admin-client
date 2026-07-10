@@ -1,7 +1,8 @@
 import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { DEFAULT_PRODUCT_LIMIT } from 'constants/filter';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import debounce from 'lodash/debounce';
 import { useCallback, useEffect, useState } from 'react';
@@ -23,6 +24,7 @@ export default function ProductsCatalog() {
   const [count, setCount] = useState({ loaded: 0, hasMore: false });
   const { dictionary } = useDictionary();
   const baseCurrency = dictionary?.baseCurrency || 'USD';
+  const { canWrite } = usePermissions();
 
   function toggleModal() {
     setIsModalOpen(!isModalOpen);
@@ -95,14 +97,11 @@ export default function ProductsCatalog() {
           >
             filter +
           </Button>
-          <Button
-            variant='main'
-            size='lg'
-            className='uppercase'
-            onClick={handleCreateNewProduct}
-          >
-            create new
-          </Button>
+          {canWrite(SECTION.products) && (
+            <Button variant='main' size='lg' className='uppercase' onClick={handleCreateNewProduct}>
+              create new
+            </Button>
+          )}
         </div>
       </div>
 

@@ -1,3 +1,5 @@
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
@@ -17,6 +19,7 @@ export function FittingCardList() {
   const navigate = useNavigate();
   const { showMessage } = useSnackBarStore();
   const deleteFitting = useDeleteFitting();
+  const canEdit = usePermissions().canWrite(SECTION.fittings);
 
   const [productId, setProductId] = useState(0);
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteFittings(
@@ -111,17 +114,19 @@ export function FittingCardList() {
                     {fitting.media?.length ?? 0} photo(s)
                   </Text>
                 </div>
-                <Button
-                  type='button'
-                  aria-label='delete fitting'
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    setPendingDelete({ id });
-                  }}
-                  className='absolute right-1 top-1 z-20 border border-textColor bg-bgColor px-1.5 leading-none opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100'
-                >
-                  ✕
-                </Button>
+                {canEdit && (
+                  <Button
+                    type='button'
+                    aria-label='delete fitting'
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      setPendingDelete({ id });
+                    }}
+                    className='absolute right-1 top-1 z-20 border border-textColor bg-bgColor px-1.5 leading-none opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100'
+                  >
+                    ✕
+                  </Button>
+                )}
               </div>
             );
           })}

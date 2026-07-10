@@ -1,5 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -23,6 +25,7 @@ import { useProductSelection } from './useProductSelection';
 export function Hero() {
   const { data: heroData, isLoading, isError, refetch } = useHero();
   const saveHero = useSaveHero();
+  const { canWrite } = usePermissions();
   const { showMessage } = useSnackBarStore();
   const entityRefs = useRef<{ [uid: string]: HTMLDivElement | null }>({});
   const productsByEntityUidRef = useRef<Record<string, any[]>>({});
@@ -272,28 +275,30 @@ export function Hero() {
               </span>
             )}
           </div>
-          <div className='flex items-center gap-2'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={() => setNavOpen(true)}
-            >
-              nav featured
-            </Button>
-            <Button
-              size='lg'
-              variant='main'
-              type='button'
-              onClick={handlePublishClick}
-              disabled={isLoading || isError || form.formState.isSubmitting || saveHero.isPending}
-              loading={saveHero.isPending}
-              className='uppercase'
-            >
-              save
-            </Button>
-          </div>
+          {canWrite(SECTION.hero) && (
+            <div className='flex items-center gap-2'>
+              <Button
+                type='button'
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => setNavOpen(true)}
+              >
+                nav featured
+              </Button>
+              <Button
+                size='lg'
+                variant='main'
+                type='button'
+                onClick={handlePublishClick}
+                disabled={isLoading || isError || form.formState.isSubmitting || saveHero.isPending}
+                loading={saveHero.isPending}
+                className='uppercase'
+              >
+                save
+              </Button>
+            </div>
+          )}
         </div>
 
         {isLoading ? (
