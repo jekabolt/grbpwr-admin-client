@@ -1,4 +1,5 @@
 import * as NavigationMenu from '@radix-ui/react-navigation-menu';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { LEFT_SIDE_ITEMS } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
@@ -13,6 +14,8 @@ export function DesktopNavMenu({
   onNavOpenChange: (value: boolean) => void;
 }) {
   const [isNavOpen, setIsNavOpen] = useState(false);
+  const { canRead } = usePermissions();
+  const items = LEFT_SIDE_ITEMS.filter((item) => canRead(item.section));
   return (
     <NavigationMenu.Root
       className={cn('w-full', className)}
@@ -23,7 +26,7 @@ export function DesktopNavMenu({
       }}
     >
       <NavigationMenu.List className='flex items-center'>
-        {LEFT_SIDE_ITEMS.map(({ label, route }, id) => (
+        {items.map(({ label, route }, id) => (
           <NavigationMenu.Item key={route}>
             <Button asChild>
               <Link

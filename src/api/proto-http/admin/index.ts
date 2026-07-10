@@ -56,6 +56,15 @@ export type MetricsSection =
   | "METRICS_SECTION_GEOGRAPHY"
   | "METRICS_SECTION_CUSTOMER_SEGMENTATION"
   | "METRICS_SECTION_RFM";
+// RefundReason is the canonical, structured refund/return reason used by the return-analysis
+// breakdown. Keys mirror the historical free-text buckets.
+export type RefundReason =
+  | "REFUND_REASON_UNSPECIFIED"
+  | "REFUND_REASON_WRONG_SIZE"
+  | "REFUND_REASON_NOT_AS_DESCRIBED"
+  | "REFUND_REASON_DEFECTIVE"
+  | "REFUND_REASON_CHANGED_MIND"
+  | "REFUND_REASON_OTHER";
 // TrendGranularity defines time bucket size for trend analysis
 export type TrendGranularity =
   | "TREND_GRANULARITY_DAILY"
@@ -66,6 +75,11 @@ export type TierCode =
   | "TIER_CODE_PLUS"
   | "TIER_CODE_PLUS_PLUS"
   | "TIER_CODE_HACKER";
+// AccessLevel is the level of access an account has to a section. WRITE implies READ.
+export type AccessLevel =
+  | "ACCESS_LEVEL_UNSPECIFIED"
+  | "ACCESS_LEVEL_READ"
+  | "ACCESS_LEVEL_WRITE";
 export type GetDictionaryRequest = {
 };
 
@@ -1444,6 +1458,13 @@ export type InventoryHealthRow = {
   quantity: number | undefined;
   avgDailySales: number | undefined;
   daysOnHand: number | undefined;
+  // Optional per-SKU targets (0 = unset) and the server-side reorder decision derived
+  // from them. needs_reorder is meaningful only when has_target is true.
+  reorderPoint: number | undefined;
+  targetDaysCover: number | undefined;
+  leadTimeDays: number | undefined;
+  needsReorder: boolean | undefined;
+  hasTarget: boolean | undefined;
 };
 
 export type SizeRunEfficiencyRow = {
@@ -1552,6 +1573,10 @@ export type CampaignAttributionRow = {
   conversions: number | undefined;
   revenue: googletype_Decimal | undefined;
   conversionRate: number | undefined;
+  // Marketing spend (base currency, from channel_spend) and ROAS = revenue / spend. spend is
+  // zero when none is recorded for the channel; roas is 0 unless spend > 0.
+  spend: googletype_Decimal | undefined;
+  roas: number | undefined;
 };
 
 // AddToCartRateAnalysis contains both per-product aggregate data for scatter plot
@@ -1683,12 +1708,15 @@ export type RefundOrderRequest = {
   orderUuid: string | undefined;
   // Only used when status is PendingReturn. Empty = full refund. Non-empty = partial refund for specified order_item IDs.
   orderItemIds: number[] | undefined;
-  // Optional reason for the refund (stored in order for audit).
+  // Optional free-text note for the refund (stored in order for audit).
   reason: string | undefined;
   // Whether to include shipping fee in the refund amount.
   // For full refund of not-yet-shipped orders this is automatically true.
   // For partial refunds, the caller decides whether to refund shipping.
   refundShipping: boolean | undefined;
+  // Optional structured reason. When set, it drives the return-analysis breakdown exactly
+  // (the free-text reason is only bucketed heuristically). Additive to reason (field 3).
+  reasonCode: RefundReason | undefined;
 };
 
 export type RefundOrderResponse = {
@@ -2571,6 +2599,41 @@ export type UpdateSupportTicketRequest = {
 export type UpdateSupportTicketResponse = {
 };
 
+// InventoryTargetInsert is an admin-supplied per-SKU reorder target. Each threshold is
+// optional — 0 means "no trigger on that dimension" (stored as NULL).
+export type InventoryTargetInsert = {
+  productId: number | undefined;
+  sizeId: number | undefined;
+  reorderPoint: number | undefined;
+  targetDaysCover: number | undefined;
+  leadTimeDays: number | undefined;
+};
+
+export type UpsertInventoryTargetsRequest = {
+  targets: InventoryTargetInsert[] | undefined;
+};
+
+export type UpsertInventoryTargetsResponse = {
+};
+
+// ChannelSpendInsert is one operator-entered marketing spend row for a channel on a day.
+// Enter spend in base currency for it to feed ROAS (the shop has no live FX).
+export type ChannelSpendInsert = {
+  date: string | undefined;
+  utmSource: string | undefined;
+  utmMedium: string | undefined;
+  utmCampaign: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+};
+
+export type UpsertChannelSpendRequest = {
+  spend: ChannelSpendInsert[] | undefined;
+};
+
+export type UpsertChannelSpendResponse = {
+};
+
 export type GetOrderReviewsPagedRequest = {
   limit: number | undefined;
   offset: number | undefined;
@@ -3334,6 +3397,97 @@ export type common_TechCardListItem = {
   lockVersion: number | undefined;
 };
 
+// AdminPermission grants an account a level of access to one section.
+export type AdminPermission = {
+  // section is a section key from ListAccountSections (e.g. "orders").
+  section: string | undefined;
+  access: AccessLevel | undefined;
+};
+
+// AdminAccount is an admin account with its permission set. is_super grants full
+// access, in which case permissions is empty.
+export type AdminAccount = {
+  username: string | undefined;
+  isSuper: boolean | undefined;
+  disabled: boolean | undefined;
+  permissions: AdminPermission[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// AdminSectionInfo describes a grantable section for the permission picker.
+export type AdminSectionInfo = {
+  key: string | undefined;
+  title: string | undefined;
+  description: string | undefined;
+};
+
+export type GetCurrentAccountRequest = {
+};
+
+export type GetCurrentAccountResponse = {
+  account: AdminAccount | undefined;
+};
+
+export type ListAccountSectionsRequest = {
+};
+
+export type ListAccountSectionsResponse = {
+  sections: AdminSectionInfo[] | undefined;
+};
+
+export type ListAccountsRequest = {
+};
+
+export type ListAccountsResponse = {
+  accounts: AdminAccount[] | undefined;
+};
+
+export type CreateAccountRequest = {
+  username: string | undefined;
+  password: string | undefined;
+  // is_super grants full access; when true, permissions is ignored.
+  isSuper: boolean | undefined;
+  permissions: AdminPermission[] | undefined;
+};
+
+export type CreateAccountResponse = {
+  account: AdminAccount | undefined;
+};
+
+export type UpdateAccountPermissionsRequest = {
+  username: string | undefined;
+  isSuper: boolean | undefined;
+  permissions: AdminPermission[] | undefined;
+};
+
+export type UpdateAccountPermissionsResponse = {
+  account: AdminAccount | undefined;
+};
+
+export type SetAccountDisabledRequest = {
+  username: string | undefined;
+  disabled: boolean | undefined;
+};
+
+export type SetAccountDisabledResponse = {
+};
+
+export type ResetAccountPasswordRequest = {
+  username: string | undefined;
+  newPassword: string | undefined;
+};
+
+export type ResetAccountPasswordResponse = {
+};
+
+export type DeleteAccountRequest = {
+  username: string | undefined;
+};
+
+export type DeleteAccountResponse = {
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -3388,6 +3542,10 @@ export interface AdminService {
   // order_sequence, entry_products, revenue_pareto, spending_curve, category_loyalty,
   // inventory_health, size_run_efficiency.
   GetMetrics(request: GetMetricsRequest): Promise<GetMetricsResponse>;
+  // Sets per-SKU inventory reorder targets used by the inventory-health metrics.
+  UpsertInventoryTargets(request: UpsertInventoryTargetsRequest): Promise<UpsertInventoryTargetsResponse>;
+  // Records operator-entered marketing spend per channel per day, used for ROAS.
+  UpsertChannelSpend(request: UpsertChannelSpendRequest): Promise<UpsertChannelSpendResponse>;
   // Cancels an order
   CancelOrder(request: CancelOrderRequest): Promise<CancelOrderResponse>;
   // Adds a comment to an order
@@ -3487,6 +3645,31 @@ export interface AdminService {
   GetTierAuditLog(request: GetTierAuditLogRequest): Promise<GetTierAuditLogResponse>;
   // One-time legacy backfill (admin-triggered).
   RunTierBackfill(request: RunTierBackfillRequest): Promise<RunTierBackfillResponse>;
+  // GetCurrentAccount returns the calling account's identity and effective
+  // permissions (what its token authorizes). Any authenticated admin may call it;
+  // the admin panel uses it to decide which sections to show.
+  GetCurrentAccount(request: GetCurrentAccountRequest): Promise<GetCurrentAccountResponse>;
+  // ListAccountSections returns the catalog of grantable admin-panel sections
+  // (for the permission picker). Any authenticated admin may call it.
+  ListAccountSections(request: ListAccountSectionsRequest): Promise<ListAccountSectionsResponse>;
+  // ListAccounts lists every admin account with its permissions. Requires the
+  // accounts section (read).
+  ListAccounts(request: ListAccountsRequest): Promise<ListAccountsResponse>;
+  // CreateAccount creates a scoped (or super) admin account. Requires the accounts
+  // section (write).
+  CreateAccount(request: CreateAccountRequest): Promise<CreateAccountResponse>;
+  // UpdateAccountPermissions replaces an account's super flag and permission set.
+  // Requires the accounts section (write).
+  UpdateAccountPermissions(request: UpdateAccountPermissionsRequest): Promise<UpdateAccountPermissionsResponse>;
+  // SetAccountDisabled enables or disables an account (a disabled account cannot
+  // obtain new tokens at login). Requires the accounts section (write).
+  SetAccountDisabled(request: SetAccountDisabledRequest): Promise<SetAccountDisabledResponse>;
+  // ResetAccountPassword sets a new password for an account. Requires the accounts
+  // section (write).
+  ResetAccountPassword(request: ResetAccountPasswordRequest): Promise<ResetAccountPasswordResponse>;
+  // DeleteAccount removes an admin account (and its permissions). Requires the
+  // accounts section (write).
+  DeleteAccount(request: DeleteAccountRequest): Promise<DeleteAccountResponse>;
 }
 
 type RequestType = {
@@ -4085,6 +4268,40 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetMetrics",
       }) as Promise<GetMetricsResponse>;
+    },
+    UpsertInventoryTargets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/inventory/targets/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertInventoryTargets",
+      }) as Promise<UpsertInventoryTargetsResponse>;
+    },
+    UpsertChannelSpend(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/channel-spend/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertChannelSpend",
+      }) as Promise<UpsertChannelSpendResponse>;
     },
     CancelOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
@@ -5246,6 +5463,154 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "RunTierBackfill",
       }) as Promise<RunTierBackfillResponse>;
+    },
+    GetCurrentAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounts/me`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCurrentAccount",
+      }) as Promise<GetCurrentAccountResponse>;
+    },
+    ListAccountSections(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounts/sections`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAccountSections",
+      }) as Promise<ListAccountSectionsResponse>;
+    },
+    ListAccounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounts`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAccounts",
+      }) as Promise<ListAccountsResponse>;
+    },
+    CreateAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounts`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateAccount",
+      }) as Promise<CreateAccountResponse>;
+    },
+    UpdateAccountPermissions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.username) {
+        throw new Error("missing required field request.username");
+      }
+      const path = `api/admin/accounts/${request.username}/permissions`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateAccountPermissions",
+      }) as Promise<UpdateAccountPermissionsResponse>;
+    },
+    SetAccountDisabled(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.username) {
+        throw new Error("missing required field request.username");
+      }
+      const path = `api/admin/accounts/${request.username}/disabled`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAccountDisabled",
+      }) as Promise<SetAccountDisabledResponse>;
+    },
+    ResetAccountPassword(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.username) {
+        throw new Error("missing required field request.username");
+      }
+      const path = `api/admin/accounts/${request.username}/password`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ResetAccountPassword",
+      }) as Promise<ResetAccountPasswordResponse>;
+    },
+    DeleteAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.username) {
+        throw new Error("missing required field request.username");
+      }
+      const path = `api/admin/accounts/${request.username}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteAccount",
+      }) as Promise<DeleteAccountResponse>;
     },
   };
 }
