@@ -37,7 +37,7 @@ export function ThisWeekTab({
   const { pathname } = useLocation();
   const revenueHref = `${pathname}?tab=revenue`;
   const productsHref = `${pathname}?tab=products`;
-  const trafficHref = `${pathname}?tab=traffic`;
+  const trafficHref = `${pathname}?tab=growth`;
 
   const { current: currentPeriodLabel, compare: comparePeriodLabel } = useMemo(
     () =>

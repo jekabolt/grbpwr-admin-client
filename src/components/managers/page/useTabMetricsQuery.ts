@@ -4,7 +4,7 @@ import type { CompareMode, GetMetricsResponse, MetricsSection } from 'api/proto-
 import type { MetricsPeriod } from './useMetricsQuery';
 import { dateRangeToIso8601Duration } from './useMetricsQuery';
 
-export type MetricsTabId = 'this-week' | 'revenue' | 'products' | 'customers' | 'traffic';
+export type MetricsTabId = 'this-week' | 'revenue' | 'products' | 'growth';
 
 export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
   'this-week': [
@@ -29,13 +29,13 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     // PRODUCT_TREND (extreme swings on tiny prior revenue), ADD_TO_CART_RATE (per-SKU GA4 noise),
     // SIZE_CONFIDENCE (guide-view/selection ratio explodes on a few events).
   ],
-  // Collapsed to repeat-economics only. Cut (too low-n to be reliable at boutique volume):
-  // COHORT_RETENTION, ORDER_SEQUENCE, SPENDING_CURVE, ENTRY_PRODUCTS, CATEGORY_LOYALTY.
-  customers: ['METRICS_SECTION_BUSINESS'],
-  traffic: ['METRICS_SECTION_BUSINESS', 'METRICS_SECTION_CAMPAIGN_ATTRIBUTION'],
+  // Growth folds the old Customers (repeat economics + cross-sell, from BUSINESS) and Traffic
+  // (campaigns + channel mix + DB geo). Cut as too low-n at boutique volume: COHORT_RETENTION,
+  // ORDER_SEQUENCE, SPENDING_CURVE, ENTRY_PRODUCTS, CATEGORY_LOYALTY.
+  growth: ['METRICS_SECTION_BUSINESS', 'METRICS_SECTION_CAMPAIGN_ATTRIBUTION'],
   // 'technical' tab removed from the operator dashboard: Web Vitals / 404s / exceptions /
   // form errors / browser / session duration / user journeys are SRE metrics, wrong persona.
-  // Payment failures (the one money-relevant signal) moved to the Overview alert above.
+  // Payment failures (the one money-relevant signal) moved to the Overview alert.
 };
 
 export const tabMetricsKeys = {

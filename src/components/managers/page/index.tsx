@@ -5,19 +5,25 @@ import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { DateRangePicker, PersistentKpiBar } from './components';
-import { CustomerTab, ProductsTab, RevenueTab, ThisWeekTab, TrafficTab } from './tabs';
+import { GrowthTab, ProductsTab, RevenueTab, ThisWeekTab } from './tabs';
 import type { MetricsPeriod } from './useMetricsQuery';
 import type { MetricsTabId } from './useTabMetricsQuery';
 import { useTabMetricsQuery } from './useTabMetricsQuery';
 
-const TAB_IDS: MetricsTabId[] = ['this-week', 'revenue', 'products', 'customers', 'traffic'];
+// Decision-first order: how are we doing today → are we making money → what to act on → growth.
+const TAB_IDS: MetricsTabId[] = ['this-week', 'revenue', 'products', 'growth'];
 
 const TAB_LABELS: Record<MetricsTabId, string> = {
-  'this-week': 'Overview',
+  'this-week': 'Today',
   revenue: 'Revenue & Orders',
   products: 'Products',
-  customers: 'Customers',
-  traffic: 'Traffic & Channels',
+  growth: 'Growth',
+};
+
+// Legacy deep links from the old 5-tab layout.
+const LEGACY_TAB_ALIASES: Record<string, MetricsTabId> = {
+  customers: 'growth',
+  traffic: 'growth',
 };
 
 function getDefaultCustomRange() {
@@ -29,6 +35,9 @@ function getDefaultCustomRange() {
 function parseTabFromUrl(tabParam: string | null): MetricsTabId {
   if (tabParam && TAB_IDS.includes(tabParam as MetricsTabId)) {
     return tabParam as MetricsTabId;
+  }
+  if (tabParam && LEGACY_TAB_ALIASES[tabParam]) {
+    return LEGACY_TAB_ALIASES[tabParam];
   }
   return 'this-week';
 }
@@ -167,10 +176,7 @@ export function Analitic() {
             <RevenueTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
           )}
           {activeTab === 'products' && <ProductsTab metricsResponse={metricsResponse} />}
-          {activeTab === 'customers' && <CustomerTab metricsResponse={metricsResponse} />}
-          {activeTab === 'traffic' && (
-            <TrafficTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
-          )}
+          {activeTab === 'growth' && <GrowthTab metricsResponse={metricsResponse} />}
         </div>
       )}
     </div>
