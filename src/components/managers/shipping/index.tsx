@@ -1,5 +1,7 @@
 import { common_ShipmentCarrier } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { CURRENCIES } from 'constants/constants';
+import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
@@ -19,6 +21,7 @@ export function Shipping() {
   const [currency, setCurrency] = useState(currencyOptions[0]?.value ?? '');
   const [upsertOpen, setUpsertOpen] = useState(false);
   const [editingCarrierId, setEditingCarrierId] = useState<number | undefined>();
+  const { canWrite } = usePermissions();
 
   const COLUMNS: {
     label: string;
@@ -83,9 +86,11 @@ export function Shipping() {
         <Text variant='uppercase' size='large' className='font-bold'>
           shipment carriers
         </Text>
-        <Button type='button' size='lg' variant='main' onClick={handleCreateCarrier}>
-          add
-        </Button>
+        {canWrite(SECTION.shipping) && (
+          <Button type='button' size='lg' variant='main' onClick={handleCreateCarrier}>
+            add
+          </Button>
+        )}
       </div>
       <div className='overflow-x-auto w-full'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>

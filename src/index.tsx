@@ -6,13 +6,14 @@ import { Archive } from 'components/managers/archive';
 import { Archives } from 'components/managers/archives';
 import { CustomerPage } from 'components/managers/customer-support';
 import { Shipping } from 'components/managers/shipping';
-import { ROUTES } from 'constants/routes';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { ROUTES, SECTION } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
-import { BrowserRouter, Outlet, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { Layout } from 'ui/layout';
 import './global.css';
 
@@ -121,6 +122,20 @@ const LoadingFallback = () => (
   </div>
 );
 
+// The /main landing is analytics. Scoped accounts without analytics access are
+// redirected to the first section they can open, instead of a permission error.
+const AnalyticsHome = () => {
+  const { canRead, homeRoute, isLoading } = usePermissions();
+  if (isLoading) return <LoadingFallback />;
+  if (canRead(SECTION.analytics)) return <Analitic />;
+  if (homeRoute && homeRoute !== ROUTES.main) return <Navigate to={homeRoute} replace />;
+  return (
+    <div style={{ padding: '2rem', textAlign: 'center' }}>
+      No sections are available for your account. Ask a super admin to grant access.
+    </div>
+  );
+};
+
 const ProtectedLayout = () => (
   <ProtectedRoute>
     {/* Mounted inside the auth gate so the dictionary is fetched only once a
@@ -162,7 +177,7 @@ root.render(
               <Routes>
                 <Route path={ROUTES.login} element={<LoginBlock />} />
                 <Route path='/' element={<ProtectedLayout />}>
-                  <Route path={ROUTES.main} element={<Analitic />} />
+                  <Route path={ROUTES.main} element={<AnalyticsHome />} />
                   <Route path={ROUTES.media} element={<MediaManager disabled={true} />} />
                   <Route path={ROUTES.singleProduct} element={<Product />} />
                   <Route path={ROUTES.product} element={<ProductsCatalog />} />

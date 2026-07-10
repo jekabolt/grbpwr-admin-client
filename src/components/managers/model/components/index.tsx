@@ -1,12 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Model } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
 import {
   useCreateModel,
   useUpdateModel,
 } from 'components/managers/models/components/useModelQuery';
 import { genderOptions } from 'constants/filter';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
@@ -59,6 +60,7 @@ export function ModelForm({
   const navigate = useNavigate();
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
+  const { canWrite } = usePermissions();
 
   const form = useForm<ModelFormData>({
     resolver: zodResolver(modelSchema),
@@ -147,17 +149,19 @@ export function ModelForm({
           >
             cancel
           </Button>
-          <Button
-            type='button'
-            variant='main'
-            size='lg'
-            className='uppercase cursor-pointer'
-            disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
-            loading={form.formState.isSubmitting}
-            onClick={() => form.handleSubmit(handleSubmit)()}
-          >
-            {isEditMode ? 'save' : 'add'}
-          </Button>
+          {canWrite(SECTION.models) && (
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              className='uppercase cursor-pointer'
+              disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
+              loading={form.formState.isSubmitting}
+              onClick={() => form.handleSubmit(handleSubmit)()}
+            >
+              {isEditMode ? 'save' : 'add'}
+            </Button>
+          )}
         </div>
       </div>
     </Form>

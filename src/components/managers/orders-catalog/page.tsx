@@ -1,6 +1,7 @@
 import { common_OrderStatusEnum } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { statusOptions } from 'constants/filter';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -21,6 +22,7 @@ export function OrdersCatalog() {
   const [debouncedEmail, setDebouncedEmail] = useState<string>('');
   const [debouncedOrderSearch, setDebouncedOrderSearch] = useState<string>('');
   const [showReport, setShowReport] = useState(false);
+  const { canWrite } = usePermissions();
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedEmail(email), 500);
@@ -43,7 +45,9 @@ export function OrdersCatalog() {
   const busy = isLoading || isFetchingNextPage;
 
   const toggleSort = () =>
-    setOrderFactor((prev) => (prev === 'ORDER_FACTOR_ASC' ? 'ORDER_FACTOR_DESC' : 'ORDER_FACTOR_ASC'));
+    setOrderFactor((prev) =>
+      prev === 'ORDER_FACTOR_ASC' ? 'ORDER_FACTOR_DESC' : 'ORDER_FACTOR_ASC',
+    );
 
   const hasFilters = !!email || !!orderSearch || !!status;
   const resetFilters = () => {
@@ -75,9 +79,11 @@ export function OrdersCatalog() {
           >
             stock report
           </Button>
-          <Button variant='main' size='lg' className='uppercase' asChild>
-            <Link to={ROUTES.customOrders}>create custom order</Link>
-          </Button>
+          {canWrite(SECTION.orders) && (
+            <Button variant='main' size='lg' className='uppercase' asChild>
+              <Link to={ROUTES.customOrders}>create custom order</Link>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -121,9 +127,7 @@ export function OrdersCatalog() {
             label='Status'
             options={[{ value: 'all', label: 'all' }, ...statusOptions]}
             value={status || 'all'}
-            onChange={(v: string) =>
-              setStatus(v === 'all' ? '' : (v as common_OrderStatusEnum))
-            }
+            onChange={(v: string) => setStatus(v === 'all' ? '' : (v as common_OrderStatusEnum))}
             disabled={busy}
             compact
           />

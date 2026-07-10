@@ -1,4 +1,6 @@
 import { Member, TierCode } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useState } from 'react';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Button } from 'ui/components/button';
@@ -22,6 +24,7 @@ export function MemberActions({ member }: { member: Member }) {
   const softDelete = useSoftDeleteMember();
   const hardErase = useHardEraseMember();
   const revokeHacker = useRevokeHackerStatus();
+  const { canWrite } = usePermissions();
 
   const [newTier, setNewTier] = useState<TierCode>(member.currentTier ?? 'TIER_CODE_MEMBER');
   const [reason, setReason] = useState('');
@@ -38,6 +41,8 @@ export function MemberActions({ member }: { member: Member }) {
   const tierChanged = newTier !== member.currentTier;
   const statusChanged = status !== member.status;
   const isHacker = member.currentTier === 'TIER_CODE_HACKER';
+
+  if (!canWrite(SECTION.members)) return null;
 
   const handleOverride = () => {
     if (!tierChanged || !reason.trim()) return;
@@ -137,7 +142,12 @@ export function MemberActions({ member }: { member: Member }) {
 
       {/* Communication + destructive */}
       <div className='flex flex-wrap gap-2'>
-        <Button variant='secondary' size='lg' onClick={() => setEmailOpen(true)} disabled={isErased}>
+        <Button
+          variant='secondary'
+          size='lg'
+          onClick={() => setEmailOpen(true)}
+          disabled={isErased}
+        >
           Send custom email
         </Button>
         <Button

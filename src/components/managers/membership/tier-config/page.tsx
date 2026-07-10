@@ -1,5 +1,6 @@
 import { TierConfigEntry } from 'api/proto-http/admin';
-import { ROUTES } from 'constants/routes';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -12,6 +13,7 @@ export function TierConfig() {
   const { data, isLoading, isError, error } = useTierConfig();
   const update = useUpdateTierConfig();
   const [entries, setEntries] = useState<TierConfigEntry[]>([]);
+  const { canWrite } = usePermissions();
 
   useEffect(() => {
     if (data?.entries) setEntries(data.entries.map((e) => ({ ...e })));
@@ -146,7 +148,7 @@ export function TierConfig() {
         ))}
       </div>
 
-      {entries.length > 0 && (
+      {canWrite(SECTION.members) && entries.length > 0 && (
         <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
           <Text variant='inactive' size='small'>
             {dirty ? 'unsaved changes' : ' '}

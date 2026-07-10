@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Fitting } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   useCreateFitting,
   useUpdateFitting,
@@ -7,7 +8,7 @@ import {
 import { ModelMeasurementsView } from 'components/managers/model/components/measurements-view';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { fittingStatusOptions, fittingVerdictOptions } from 'constants/filter';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
@@ -64,6 +65,7 @@ export function FittingForm({
   const navigate = useNavigate();
   const createFitting = useCreateFitting();
   const updateFitting = useUpdateFitting();
+  const { canWrite } = usePermissions();
   const { data: models } = useAllModels();
   const [searchParams] = useSearchParams();
   // Deep-link from the tech card editor: /add-fitting?techCardId=123 pre-links the style.
@@ -189,17 +191,19 @@ export function FittingForm({
           >
             cancel
           </Button>
-          <Button
-            type='button'
-            variant='main'
-            size='lg'
-            className='uppercase cursor-pointer'
-            disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
-            loading={form.formState.isSubmitting}
-            onClick={() => form.handleSubmit(handleSubmit)()}
-          >
-            {isEditMode ? 'save' : 'add'}
-          </Button>
+          {canWrite(SECTION.fittings) && (
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              className='uppercase cursor-pointer'
+              disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
+              loading={form.formState.isSubmitting}
+              onClick={() => form.handleSubmit(handleSubmit)()}
+            >
+              {isEditMode ? 'save' : 'add'}
+            </Button>
+          )}
         </div>
       </div>
     </Form>

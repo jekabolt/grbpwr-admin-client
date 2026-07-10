@@ -1,4 +1,6 @@
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { genderOptions } from 'constants/filter';
+import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
@@ -25,6 +27,7 @@ export function ModelCardList() {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
   const deleteModel = useDeleteModel();
+  const canEdit = usePermissions().canWrite(SECTION.models);
 
   const [gender, setGender] = useState<string>(ALL);
   const [name, setName] = useState('');
@@ -133,17 +136,19 @@ export function ModelCardList() {
                     {insert?.measurements?.length ?? 0} meas.
                   </Text>
                 </div>
-                <Button
-                  type='button'
-                  aria-label='delete model'
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    setPendingDelete({ id, name: insert?.name || `model ${id}` });
-                  }}
-                  className='absolute right-1 top-1 z-20 border border-textColor bg-bgColor px-1.5 leading-none opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100'
-                >
-                  ✕
-                </Button>
+                {canEdit && (
+                  <Button
+                    type='button'
+                    aria-label='delete model'
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      setPendingDelete({ id, name: insert?.name || `model ${id}` });
+                    }}
+                    className='absolute right-1 top-1 z-20 border border-textColor bg-bgColor px-1.5 leading-none opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100'
+                  >
+                    ✕
+                  </Button>
+                )}
               </div>
             );
           })}
