@@ -35,8 +35,10 @@ function parseTabFromUrl(tabParam: string | null): MetricsTabId {
 
 export function Analitic() {
   const defaultCustom = getDefaultCustomRange();
-  const [period, setPeriod] = useState<MetricsPeriod>('7d');
-  const [compareMode, setCompareMode] = useState<CompareMode>('COMPARE_MODE_PREVIOUS_PERIOD');
+  // Default to 30d with compare OFF: 7d + previous-period puts the noisiest possible number
+  // (a period-over-period % on a handful of orders) at the top of every screen on open.
+  const [period, setPeriod] = useState<MetricsPeriod>('30d');
+  const [compareMode, setCompareMode] = useState<CompareMode>('COMPARE_MODE_NONE');
   const [customFrom, setCustomFrom] = useState(defaultCustom.from);
   const [customTo, setCustomTo] = useState(defaultCustom.to);
 

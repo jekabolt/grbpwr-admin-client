@@ -40,6 +40,28 @@ export function formatCurrency(value: number, currency = 'EUR'): string {
   }).format(value);
 }
 
+/** Whole-euro currency for headline KPIs — cents are false precision at a glance. */
+export function formatCurrencyWhole(value: number, currency = 'EUR'): string {
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+/** Signed whole-euro delta, e.g. "+€1,240" / "−€310". */
+export function formatCurrencyDelta(value: number, currency = 'EUR'): string {
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
+  return `${sign}${formatCurrencyWhole(Math.abs(value), currency)}`;
+}
+
+/** Signed integer delta, e.g. "+12" / "−4". */
+export function formatNumberDelta(value: number): string {
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
+  return `${sign}${formatNumber(Math.abs(value))}`;
+}
+
 export function formatNumber(value: number, decimals = 0): string {
   return new Intl.NumberFormat(undefined, {
     minimumFractionDigits: decimals,
