@@ -6,10 +6,19 @@ import type {
   TrafficSourceMetric,
 } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Text from 'ui/components/text';
+import {
+  categoryAxis,
+  ChartCard,
+  chartColors,
+  EChart,
+  gridBase,
+  tooltipBase,
+  valueAxis,
+} from '../charts';
 import { formatNumber } from '../utils';
 import { SessionsByCountryMapChart } from './SessionsByCountryMapChart';
 
@@ -33,27 +42,58 @@ const TrafficBarChart: FC<BarChartWrapperProps> = ({
 
   const formatValue = valueFormat === 'percent' ? (v: number) => `${v.toFixed(1)}%` : formatNumber;
 
+  const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+    const items = Array.isArray(raw) ? raw : [raw];
+    const label = items[0]?.name ?? '';
+    const rows = items
+      .map((it) => `${it.marker ?? ''}<b>${formatValue(Number(it.value ?? 0))}</b>`)
+      .join('<br/>');
+    return `<div style="font-size:11px;line-height:1.6">${label}<br/>${rows}</div>`;
+  };
+
+  const option: EChartsOption = {
+    grid: gridBase,
+    tooltip: {
+      ...tooltipBase,
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: tooltipFormatter,
+    },
+    // Horizontal bar: swap axes. The `as` casts are required only in this file —
+    // importing SessionsByCountryMapChart pulls in the large world-countries geo
+    // JSON, inflating the type graph past tsc's structural-comparison budget so it
+    // can no longer prove XAXisOption/YAXisOption are interchangeable (other bar
+    // charts using these helpers swapped need no cast).
+    xAxis: valueAxis({
+      axisLabel: { formatter: (v: number) => formatValue(v) },
+    }) as EChartsOption['xAxis'],
+    yAxis: categoryAxis({
+      type: 'category',
+      data: sliced.map((d) => d.name),
+      inverse: true,
+    }) as EChartsOption['yAxis'],
+    series: [
+      {
+        type: 'bar',
+        data: sliced.map((d) => ({ value: d.value, productId: d.productId })),
+        itemStyle: { color: chartColors.ink, borderRadius: [0, 2, 2, 0] },
+      },
+    ],
+  };
+
+  const onEvents = onBarClick
+    ? {
+        click: (params: { data?: unknown }) => {
+          const d = (params.data as { productId?: number }) ?? {};
+          onBarClick(d);
+        },
+      }
+    : undefined;
+
   return (
-    <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        {title}
-      </Text>
-      <ResponsiveContainer width='100%' height={220}>
-        <BarChart data={sliced} layout='vertical' margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-          <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
-          <XAxis type='number' tick={{ fontSize: 10 }} tickFormatter={(v) => formatValue(Number(v))} />
-          <YAxis type='category' dataKey='name' width={80} tick={{ fontSize: 10 }} />
-          <Tooltip formatter={(value: number | undefined) => [value != null ? formatValue(value) : '', '']} />
-          <Bar
-          dataKey='value'
-          fill='#000'
-          radius={[0, 2, 2, 0]}
-          onClick={onBarClick ? (d) => d && onBarClick(d) : undefined}
-          cursor={onBarClick ? 'pointer' : undefined}
-        />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <ChartCard title={title}>
+      <EChart option={option} height={220} onEvents={onEvents} />
+    </ChartCard>
   );
 };
 
@@ -116,11 +156,17 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
         </Text>
       </div>
       <div className='space-y-3'>
-        <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor tracking-wide'>
+        <Text
+          variant='uppercase'
+          className='text-[10px] font-semibold text-textInactiveColor tracking-wide'
+        >
           Geography
         </Text>
         <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
-          <SessionsByCountryMapChart sessionsByCountry={metrics.sessionsByCountry} showTitle={false} />
+          <SessionsByCountryMapChart
+            sessionsByCountry={metrics.sessionsByCountry}
+            showTitle={false}
+          />
           <div className='flex-1 min-w-0'>
             <TrafficBarChart
               title='Sessions by country'
@@ -131,7 +177,10 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
       </div>
       <div className='grid gap-6 md:grid-cols-2'>
         <div className='space-y-3 min-w-0'>
-          <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor tracking-wide'>
+          <Text
+            variant='uppercase'
+            className='text-[10px] font-semibold text-textInactiveColor tracking-wide'
+          >
             Marketing channels
           </Text>
           <TrafficBarChart
@@ -140,7 +189,10 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
           />
         </div>
         <div className='space-y-3 min-w-0'>
-          <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor tracking-wide'>
+          <Text
+            variant='uppercase'
+            className='text-[10px] font-semibold text-textInactiveColor tracking-wide'
+          >
             Devices
           </Text>
           <TrafficBarChart
@@ -150,7 +202,10 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
         </div>
       </div>
       <div className='space-y-3'>
-        <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor tracking-wide'>
+        <Text
+          variant='uppercase'
+          className='text-[10px] font-semibold text-textInactiveColor tracking-wide'
+        >
           Product interest
         </Text>
         <TrafficBarChart
@@ -160,8 +215,9 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
         />
       </div>
       <Text className='text-textInactiveColor text-xs leading-relaxed'>
-        Top products by views are ranked across all traffic sources and sessions — not filtered to a single
-        channel (e.g. Instagram vs organic). Per-source product breakdown requires additional reporting.
+        Top products by views are ranked across all traffic sources and sessions — not filtered to a
+        single channel (e.g. Instagram vs organic). Per-source product breakdown requires additional
+        reporting.
       </Text>
     </div>
   );

@@ -1,12 +1,13 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { ChartCard, EChart, chartColors, tooltipBase } from '../charts';
 
 interface OrdersByStatusChartProps {
   metrics: BusinessMetrics | undefined;
 }
 
+// Grayscale status ramp, ink → light-gray (matches chartColors.ink/inkSecondary/muted family).
 const COLORS = ['#000', '#333', '#666', '#999', '#bbb', '#ddd'];
 
 export const OrdersByStatusChart: FC<OrdersByStatusChartProps> = ({ metrics }) => {
@@ -18,32 +19,37 @@ export const OrdersByStatusChart: FC<OrdersByStatusChartProps> = ({ metrics }) =
 
   if (data.length === 0) return null;
 
+  const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+    const it = Array.isArray(raw) ? raw[0] : raw;
+    const name = it?.name ?? '';
+    const value = Number(it?.value ?? 0);
+    return `<div style="font-size:11px;line-height:1.6">${name}: <b>${value} Orders</b></div>`;
+  };
+
+  const option: EChartsOption = {
+    tooltip: { ...tooltipBase, trigger: 'item', formatter: tooltipFormatter },
+    series: [
+      {
+        type: 'pie',
+        radius: ['45%', '70%'],
+        avoidLabelOverlap: true,
+        label: { formatter: '{b} {d}%', color: chartColors.inkSecondary, fontSize: 10 },
+        data: data.map((d, i) => ({
+          value: d.value,
+          name: d.name,
+          itemStyle: {
+            color: COLORS[i % COLORS.length],
+            borderColor: chartColors.surface,
+            borderWidth: 2,
+          },
+        })),
+      },
+    ],
+  };
+
   return (
-    <div className='space-y-4'>
-      <Text variant='uppercase' className='font-bold'>
-        Orders by status
-      </Text>
-      <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-        <ResponsiveContainer width='100%' height={220}>
-          <PieChart>
-            <Pie
-              data={data}
-              cx='50%'
-              cy='50%'
-              innerRadius={40}
-              outerRadius={80}
-              paddingAngle={2}
-              dataKey='value'
-              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-            >
-              {data.map((_, i) => (
-                <Cell key={i} fill={COLORS[i % COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(value: number) => [value, 'Orders']} />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    <ChartCard title='Orders by status'>
+      <EChart option={option} height={220} />
+    </ChartCard>
   );
 };

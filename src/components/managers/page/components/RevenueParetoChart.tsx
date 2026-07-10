@@ -1,7 +1,16 @@
 import type { RevenueParetoRow } from 'api/proto-http/admin';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Text from 'ui/components/text';
+import {
+  ChartCard,
+  EChart,
+  categoryAxis,
+  chartColors,
+  gridBase,
+  tooltipBase,
+  valueAxis,
+} from '../charts';
 import { formatCurrency, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -27,72 +36,99 @@ export const RevenueParetoChart: FC<RevenueParetoChartProps> = ({ revenuePareto 
     rank: row.rank || 0,
     productId: row.productId,
     productName: row.productName || `#${row.productId}`,
-    productNameShort: (row.productName || `#${row.productId}`).slice(0, 15),
     revenue: parseDecimal(row.revenue),
     cumulativePct: cumulativePctToDisplayPercent(row.cumulativePct),
   }));
 
+  const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+    const items = Array.isArray(raw) ? raw : [raw];
+    const idx = items[0]?.dataIndex ?? 0;
+    const row = data[idx];
+    if (!row) return '';
+    return `<div style="font-size:11px;line-height:1.6">
+      <div style="font-weight:700">#${row.rank} · ${row.productName}</div>
+      <div>Cumulative: <b>${row.cumulativePct.toFixed(1)}%</b></div>
+      <div>Revenue: ${formatCurrency(row.revenue)}</div>
+    </div>`;
+  };
+
+  const option: EChartsOption = {
+    grid: { ...gridBase, left: 12, right: 20, top: 16, bottom: 32 },
+    tooltip: { ...tooltipBase, trigger: 'axis', formatter: tooltipFormatter },
+    xAxis: categoryAxis({
+      data: data.map((d) => String(d.rank)),
+      boundaryGap: false,
+      name: 'Product rank',
+      nameLocation: 'middle',
+      nameGap: 26,
+      nameTextStyle: { color: chartColors.inkSecondary, fontSize: 10 },
+    }),
+    yAxis: valueAxis({
+      max: 100,
+      axisLabel: {
+        formatter: (v: number) => `${v}%`,
+        color: chartColors.inkSecondary,
+        fontSize: 10,
+      },
+      name: 'Cumulative revenue %',
+      nameLocation: 'middle',
+      nameGap: 40,
+      nameTextStyle: { color: chartColors.inkSecondary, fontSize: 10 },
+    }),
+    series: [
+      {
+        type: 'line',
+        data: data.map((d) => d.cumulativePct),
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: chartColors.ink, width: 2 },
+        areaStyle: { color: 'rgba(0,0,0,0.06)' },
+      },
+    ],
+  };
+
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Top products driving revenue
-      </Text>
-      <ResponsiveContainer width='100%' height={300}>
-        <AreaChart data={data}>
-          <CartesianGrid strokeDasharray='3 3' stroke='#333' />
-          <XAxis 
-            dataKey='rank' 
-            stroke='#999' 
-            tick={{ fill: '#999' }}
-            label={{ value: 'Product Rank', position: 'insideBottom', offset: -5, fill: '#999' }}
-          />
-          <YAxis 
-            stroke='#999' 
-            tick={{ fill: '#999' }}
-            label={{ value: 'Cumulative Revenue %', angle: -90, position: 'insideLeft', fill: '#999' }}
-          />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#000', border: '1px solid #333' }}
-            labelStyle={{ color: '#fff' }}
-            formatter={(value: number, name: string) => {
-              if (name === 'cumulativePct') return [`${value.toFixed(1)}%`, 'Cumulative %'];
-              if (name === 'revenue') return [formatCurrency(value), 'Revenue'];
-              return [value, name];
-            }}
-          />
-          <Area 
-            type='monotone' 
-            dataKey='cumulativePct' 
-            stroke='#fff' 
-            fill='rgba(255,255,255,0.2)' 
-            strokeWidth={2}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+    <ChartCard title='Top products driving revenue'>
+      <EChart option={option} height={300} />
       <div className='mt-4 overflow-x-auto'>
         <table className='w-full text-xs'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-1'>
-                <Text variant='uppercase' className='text-[10px]'>Rank</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Rank
+                </Text>
               </th>
               <th className='text-left p-1'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-right p-1'>
-                <Text variant='uppercase' className='text-[10px]'>Revenue</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Revenue
+                </Text>
               </th>
               <th className='text-right p-1'>
-                <Text variant='uppercase' className='text-[10px]'>Cumulative %</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Cumulative %
+                </Text>
               </th>
             </tr>
           </thead>
           <tbody>
             {data.slice(0, 15).map((row) => (
-              <tr key={row.rank} className='border-b border-textInactiveColor/50 hover:bg-bgSecondary'>
+              <tr
+                key={row.rank}
+                className='border-b border-textInactiveColor/50 hover:bg-bgSecondary'
+              >
                 <td className='p-1'>{row.rank}</td>
                 <td className='p-1'>
-                  <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='140px' />
+                  <ProductNameLink
+                    productId={row.productId}
+                    productName={row.productName}
+                    maxWidth='140px'
+                  />
                 </td>
                 <td className='p-1 text-right'>{formatCurrency(row.revenue)}</td>
                 <td className='p-1 text-right'>{row.cumulativePct.toFixed(1)}%</td>
@@ -103,9 +139,10 @@ export const RevenueParetoChart: FC<RevenueParetoChartProps> = ({ revenuePareto 
       </div>
       <div className='mt-3 text-xs text-textInactiveColor'>
         <Text>
-          Cumulative share of revenue by best-selling products — a small set often drives most sales.
+          Cumulative share of revenue by best-selling products — a small set often drives most
+          sales.
         </Text>
       </div>
-    </div>
+    </ChartCard>
   );
 };

@@ -1,16 +1,17 @@
 import type { TimeSeriesPoint } from 'api/proto-http/admin';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
 import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import Text from 'ui/components/text';
+  ChartCard,
+  EChart,
+  categoryAxis,
+  chartColors,
+  compareLineStyle,
+  gridBase,
+  legendBase,
+  tooltipBase,
+  valueAxis,
+} from '../charts';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
 interface TimeSeriesChartProps {
@@ -35,70 +36,72 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
   const getValue = (p: TimeSeriesPoint) =>
     valueFormat === 'number' ? parseDecimal(p.value) || (p.count ?? 0) : parseDecimal(p.value);
 
-  const chartData = (data ?? []).map((p) => ({
-    date: p.date
+  const dates = (data ?? []).map((p) =>
+    p.date
       ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
       : '',
-    value: getValue(p),
-    count: p.count ?? 0,
-  }));
+  );
+  const values = (data ?? []).map(getValue);
+  const compareValues = (compareData ?? []).map(getValue);
+  const hasCompare = compareValues.length > 0;
 
-  const compareValues = (compareData ?? []).map((p) => getValue(p));
+  if (values.length === 0) return null;
 
-  const merged = chartData.map((d, i) => ({
-    ...d,
-    compareValue: compareValues[i],
-  }));
+  const hasInvalid = maxSane != null && values.some((v) => Number.isFinite(v) && v > maxSane);
 
-  if (merged.length === 0) return null;
+  const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+    const items = Array.isArray(raw) ? raw : [raw];
+    const label = items[0]?.name ?? '';
+    const rows = items
+      .map(
+        (it) => `${it.marker ?? ''}${it.seriesName}: <b>${formatValue(Number(it.value ?? 0))}</b>`,
+      )
+      .join('<br/>');
+    return `<div style="font-size:11px;line-height:1.6">${label}<br/>${rows}</div>`;
+  };
 
-  const hasInvalid =
-    maxSane != null && merged.some((d) => Number.isFinite(d.value) && d.value > maxSane);
+  const option: EChartsOption = {
+    grid: { ...gridBase, bottom: hasCompare ? 28 : 8 },
+    tooltip: { ...tooltipBase, trigger: 'axis', formatter: tooltipFormatter },
+    legend: hasCompare ? { ...legendBase } : undefined,
+    xAxis: categoryAxis({ data: dates, boundaryGap: false }),
+    yAxis: valueAxis({ axisLabel: { formatter: (v: number) => formatValue(v) } }),
+    series: [
+      {
+        name: 'Period',
+        type: 'line',
+        data: values,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: chartColors.ink, width: 2 },
+        itemStyle: { color: chartColors.ink },
+      },
+      ...(hasCompare
+        ? [
+            {
+              name: 'Compare',
+              type: 'line' as const,
+              data: compareValues,
+              smooth: true,
+              symbol: 'none',
+              lineStyle: compareLineStyle,
+              itemStyle: { color: chartColors.compare },
+            },
+          ]
+        : []),
+    ],
+  };
 
   return (
-    <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-      <Text variant='uppercase' className='font-bold mb-1 block'>
-        {title}
-      </Text>
-      {hasInvalid && (
-        <Text
-          className='text-warning text-[10px] mb-3 block'
-          title={`Some values exceed ${maxSane} — likely a backend calculation error; treat this chart as unreliable.`}
-        >
-          ⚠ values above {maxSane} look invalid — unreliable
-        </Text>
-      )}
-      <ResponsiveContainer width='100%' height={220}>
-        <LineChart data={merged} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-          <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
-          <XAxis dataKey='date' tick={{ fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatValue(v)} />
-          <Tooltip
-            formatter={(value?: number) => [formatValue(value ?? 0), '']}
-            labelFormatter={(label) => `Date: ${label}`}
-          />
-          <Legend />
-          <Line
-            type='monotone'
-            dataKey='value'
-            stroke='#000'
-            strokeWidth={2}
-            dot={false}
-            name='Period'
-          />
-          {compareData && compareData.length > 0 && (
-            <Line
-              type='monotone'
-              dataKey='compareValue'
-              stroke='#999'
-              strokeWidth={1}
-              strokeDasharray='5 5'
-              dot={false}
-              name='Compare'
-            />
-          )}
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+    <ChartCard
+      title={title}
+      warning={
+        hasInvalid
+          ? `values above ${maxSane} look invalid — treat this chart as unreliable`
+          : undefined
+      }
+    >
+      <EChart option={option} height={220} />
+    </ChartCard>
   );
 };

@@ -1,19 +1,10 @@
 import type { AddToCartRateAnalysis, AddToCartRateProductRow } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-  ReferenceLine,
-} from 'recharts';
 import Text from 'ui/components/text';
+import { EChart, chartColors, gridBase, tooltipBase, valueAxis } from '../charts';
 import { formatNumber, toPercentage } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -33,11 +24,12 @@ function getQuadrant(
   return 'duds';
 }
 
+// Semantic marks, validated on the white surface (dataviz status palette).
 const QUADRANT_COLORS: Record<Quadrant, string> = {
-  stars: '#22c55e', // green - best sellers
-  hidden_gems: '#3b82f6', // blue - low traffic, high conversion
-  underperformers: '#ef4444', // red - high traffic, low conversion (revenue leak)
-  duds: '#94a3b8', // slate - low traffic, low conversion
+  stars: chartColors.status.good, // best sellers
+  hidden_gems: chartColors.status.info, // low traffic, high conversion
+  underperformers: chartColors.status.critical, // high traffic, low conversion (revenue leak)
+  duds: chartColors.status.muted, // low traffic, low conversion
 };
 
 const QUADRANT_LABELS: Record<Quadrant, string> = {
@@ -46,6 +38,17 @@ const QUADRANT_LABELS: Record<Quadrant, string> = {
   underperformers: 'Underperformers',
   duds: 'Duds',
 };
+
+interface ScatterPoint {
+  value: [number, number];
+  name: string;
+  productId?: string;
+  viewCount: number;
+  addToCartCount: number;
+  cartRatePct: number;
+  quadrant: Quadrant;
+  itemStyle: { color: string };
+}
 
 interface AddToCartRateMatrixChartProps {
   addToCartRateAnalysis: AddToCartRateAnalysis | undefined;
@@ -59,31 +62,84 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
 
   const products = addToCartRateAnalysis.products;
   const avgViewCount = addToCartRateAnalysis.avgViewCount ?? 0;
-
-  const handlePointClick = (payload: { productId?: string }) => {
-    const id = payload?.productId;
-    if (id) {
-      const numId = parseInt(id, 10);
-      if (!isNaN(numId)) {
-        navigate(`${BASE_PATH}/products/${numId}`);
-      }
-    }
-  };
   const avgCartRatePct = toPercentage(addToCartRateAnalysis.avgCartRate ?? 0);
 
-  const chartData = products.map((p: AddToCartRateProductRow) => {
+  const goToProduct = (productId?: string) => {
+    if (!productId) return;
+    const numId = parseInt(productId, 10);
+    if (!isNaN(numId)) navigate(`${BASE_PATH}/products/${numId}`);
+  };
+
+  const chartData: ScatterPoint[] = products.map((p: AddToCartRateProductRow) => {
     const viewCount = p.viewCount ?? 0;
     const cartRatePct = toPercentage(p.cartRate ?? 0);
     const quadrant = getQuadrant(viewCount, cartRatePct, avgViewCount, avgCartRatePct);
     return {
-      viewCount,
-      cartRatePct,
-      productName: p.productName || `#${p.productId}`,
+      value: [viewCount, cartRatePct],
+      name: p.productName || `#${p.productId}`,
       productId: p.productId,
+      viewCount,
       addToCartCount: p.addToCartCount ?? 0,
+      cartRatePct,
       quadrant,
+      itemStyle: { color: QUADRANT_COLORS[quadrant] },
     };
   });
+
+  const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+    const p = Array.isArray(raw) ? raw[0] : raw;
+    const d = p?.data as ScatterPoint | undefined;
+    if (!d) return '';
+    return `<div style="font-size:11px;line-height:1.6">
+      <div style="font-weight:700;margin-bottom:4px">${d.name}</div>
+      <div>Views: ${formatNumber(d.viewCount)} · Added to cart: ${formatNumber(d.addToCartCount)}</div>
+      <div>Add to cart rate: ${d.cartRatePct.toFixed(1)}%</div>
+      <div style="font-weight:600;color:${QUADRANT_COLORS[d.quadrant]}">${QUADRANT_LABELS[d.quadrant]}</div>
+    </div>`;
+  };
+
+  const option: EChartsOption = {
+    grid: { ...gridBase, top: 16, right: 24, bottom: 28 },
+    tooltip: { ...tooltipBase, trigger: 'item', formatter: tooltipFormatter },
+    xAxis: valueAxis({
+      name: 'Product views',
+      nameLocation: 'middle',
+      nameGap: 26,
+      nameTextStyle: { color: chartColors.inkSecondary, fontSize: 10 },
+      axisLabel: {
+        formatter: (v: number) => formatNumber(v),
+        color: chartColors.inkSecondary,
+        fontSize: 10,
+      },
+      splitLine: { show: false },
+    }) as EChartsOption['xAxis'],
+    yAxis: valueAxis({
+      name: 'Add to cart rate',
+      nameLocation: 'middle',
+      nameGap: 40,
+      nameTextStyle: { color: chartColors.inkSecondary, fontSize: 10 },
+      axisLabel: {
+        formatter: (v: number) => `${v.toFixed(1)}%`,
+        color: chartColors.inkSecondary,
+        fontSize: 10,
+      },
+    }),
+    series: [
+      {
+        type: 'scatter',
+        data: chartData,
+        symbolSize: 12,
+        emphasis: { scale: 1.3 },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: chartColors.inkSecondary, type: 'dashed', width: 1 },
+          label: { show: false },
+          data: [{ xAxis: avgViewCount }, { yAxis: avgCartRatePct }],
+        },
+      },
+    ],
+  };
 
   return (
     <div className='border border-textInactiveColor p-4'>
@@ -101,119 +157,39 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
           </span>
         ))}
       </div>
-      <ResponsiveContainer width='100%' height={400}>
-        <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
-          <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
-          <XAxis
-            type='number'
-            dataKey='viewCount'
-            name='Product views'
-            tickFormatter={(v) => formatNumber(v)}
-            domain={['auto', 'auto']}
-          />
-          <YAxis
-            type='number'
-            dataKey='cartRatePct'
-            name='Add to cart rate'
-            unit='%'
-            tickFormatter={(v) => `${v.toFixed(1)}%`}
-            domain={['auto', 'auto']}
-          />
-          <Tooltip
-            cursor={{ strokeDasharray: '3 3' }}
-            content={({ active, payload }) => {
-              if (!active || !payload?.length) return null;
-              const d = payload[0].payload as {
-                productName: string;
-                viewCount: number;
-                addToCartCount: number;
-                cartRatePct: number;
-                quadrant: Quadrant;
-              };
-              return (
-                <div className='bg-white border border-textInactiveColor p-3 shadow-lg text-xs'>
-                  <div className='font-bold mb-2'>{d.productName}</div>
-                  <div className='mb-1'>
-                    Views: {formatNumber(d.viewCount)} · Added to cart: {formatNumber(d.addToCartCount)}
-                  </div>
-                  <div className='mb-1'>Add to cart rate: {d.cartRatePct.toFixed(1)}%</div>
-                  <div
-                    className='font-medium'
-                    style={{ color: QUADRANT_COLORS[d.quadrant] }}
-                  >
-                    {QUADRANT_LABELS[d.quadrant]}
-                  </div>
-                </div>
-              );
-            }}
-          />
-          <ReferenceLine
-            x={avgViewCount}
-            stroke='#666'
-            strokeDasharray='5 5'
-            strokeWidth={1.5}
-          />
-          <ReferenceLine
-            y={avgCartRatePct}
-            stroke='#666'
-            strokeDasharray='5 5'
-            strokeWidth={1.5}
-          />
-          <Scatter
-            name='Products'
-            data={chartData}
-            fill='#333'
-            shape={(props: {
-              cx?: number;
-              cy?: number;
-              payload?: { productId?: string; quadrant?: Quadrant };
-              fill?: string;
-            }) => {
-              const { cx, cy, payload, fill = '#333' } = props;
-              if (cx == null || cy == null) return null;
-              const color = payload?.quadrant ? QUADRANT_COLORS[payload.quadrant] : fill;
-              return (
-                <g
-                  onClick={() => payload && handlePointClick(payload)}
-                  style={{ cursor: 'pointer' }}
-                  role='button'
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      payload && handlePointClick(payload);
-                    }
-                  }}
-                >
-                  <circle cx={cx} cy={cy} r={6} fill={color} />
-                </g>
-              );
-            }}
-          >
-            {chartData.map((entry, idx) => (
-              <Cell key={idx} fill={QUADRANT_COLORS[entry.quadrant]} />
-            ))}
-          </Scatter>
-        </ScatterChart>
-      </ResponsiveContainer>
+      <EChart
+        option={option}
+        height={400}
+        onEvents={{ click: (p) => goToProduct((p.data as ScatterPoint | undefined)?.productId) }}
+      />
       <div className='mt-4 overflow-x-auto'>
         <table className='w-full text-xs'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Views</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Views
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Add to Cart</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Add to Cart
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Cart rate %</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Cart rate %
+                </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Quadrant</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Quadrant
+                </Text>
               </th>
             </tr>
           </thead>
@@ -223,7 +199,7 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
                 <td className='p-2'>
                   <ProductNameLink
                     productId={entry.productId}
-                    productName={entry.productName}
+                    productName={entry.name}
                     maxWidth='150px'
                   />
                 </td>
@@ -231,10 +207,7 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
                 <td className='p-2 text-right'>{formatNumber(entry.addToCartCount)}</td>
                 <td className='p-2 text-right'>{entry.cartRatePct.toFixed(1)}%</td>
                 <td className='p-2'>
-                  <span
-                    className='font-medium'
-                    style={{ color: QUADRANT_COLORS[entry.quadrant] }}
-                  >
+                  <span className='font-medium' style={{ color: QUADRANT_COLORS[entry.quadrant] }}>
                     {QUADRANT_LABELS[entry.quadrant]}
                   </span>
                 </td>
@@ -248,8 +221,8 @@ export const AddToCartRateMatrixChart: FC<AddToCartRateMatrixChartProps> = ({
           X-axis: Product views. Y-axis: Add to cart rate (%). Dashed lines: store averages.
         </Text>
         <Text>
-          Underperformers (bottom right): high traffic, low conversion — fix design, price, or photos.
-          Hidden Gems (top left): low traffic, high conversion — boost marketing.
+          Underperformers (bottom right): high traffic, low conversion — fix design, price, or
+          photos. Hidden Gems (top left): low traffic, high conversion — boost marketing.
         </Text>
       </div>
     </div>
