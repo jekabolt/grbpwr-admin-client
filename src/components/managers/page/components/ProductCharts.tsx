@@ -1,9 +1,23 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
+import type {
+  EChartsOption,
+  TooltipComponentFormatterCallbackParams,
+  XAXisComponentOption,
+  YAXisComponentOption,
+} from 'echarts';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Text from 'ui/components/text';
+import {
+  categoryAxis,
+  ChartCard,
+  chartColors,
+  EChart,
+  gridBase,
+  tooltipBase,
+  valueAxis,
+} from '../charts';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -43,8 +57,8 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
     })) ?? [];
   const anyCosted = revenueMarginRows.some((r) => r.hasCost);
 
-  const handleProductBarClick = (data: { productId?: number }) => {
-    const id = data?.productId;
+  const handleProductBarClick = (params: { data?: unknown }) => {
+    const id = (params.data as { productId?: number })?.productId;
     if (id != null && !isNaN(id)) {
       navigate(`${BASE_PATH}/products/${id}`);
     }
@@ -57,6 +71,87 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
       count: c.count ?? 0,
     })) ?? [];
 
+  // Horizontal bar swaps axes: the category helper feeds yAxis, the value helper xAxis.
+  const hValueAxis = (o: YAXisComponentOption): XAXisComponentOption =>
+    valueAxis(o) as unknown as XAXisComponentOption;
+  const hCategoryAxis = (o: XAXisComponentOption): YAXisComponentOption =>
+    categoryAxis(o) as unknown as YAXisComponentOption;
+
+  const makeTooltipFormatter =
+    (format: (v: number) => string) => (raw: TooltipComponentFormatterCallbackParams) => {
+      const items = Array.isArray(raw) ? raw : [raw];
+      const label = items[0]?.name ?? '';
+      const rows = items
+        .map((it) => `${it.marker ?? ''}<b>${format(Number(it.value ?? 0))}</b>`)
+        .join('<br/>');
+      return `<div style="font-size:11px;line-height:1.6">${label}<br/>${rows}</div>`;
+    };
+
+  const revenueOption: EChartsOption = {
+    grid: { ...gridBase },
+    tooltip: {
+      ...tooltipBase,
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: makeTooltipFormatter(formatCurrency),
+    },
+    xAxis: hValueAxis({ axisLabel: { formatter: (v: number) => formatCurrency(v) } }),
+    yAxis: hCategoryAxis({ type: 'category', data: revenueData.map((d) => d.name), inverse: true }),
+    series: [
+      {
+        type: 'bar',
+        data: revenueData.map((d) => ({ value: d.value, productId: d.productId })),
+        itemStyle: { color: chartColors.ink, borderRadius: [0, 2, 2, 0] },
+      },
+    ],
+  };
+
+  const quantityOption: EChartsOption = {
+    grid: { ...gridBase },
+    tooltip: {
+      ...tooltipBase,
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: makeTooltipFormatter((v) => formatNumber(v)),
+    },
+    xAxis: hValueAxis({ axisLabel: { formatter: (v: number) => formatNumber(v) } }),
+    yAxis: hCategoryAxis({
+      type: 'category',
+      data: quantityData.map((d) => d.name),
+      inverse: true,
+    }),
+    series: [
+      {
+        type: 'bar',
+        data: quantityData.map((d) => ({ value: d.value, productId: d.productId })),
+        itemStyle: { color: chartColors.ink, borderRadius: [0, 2, 2, 0] },
+      },
+    ],
+  };
+
+  const categoryOption: EChartsOption = {
+    grid: { ...gridBase },
+    tooltip: {
+      ...tooltipBase,
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: makeTooltipFormatter(formatCurrency),
+    },
+    xAxis: hValueAxis({ axisLabel: { formatter: (v: number) => formatCurrency(v) } }),
+    yAxis: hCategoryAxis({
+      type: 'category',
+      data: categoryData.map((d) => d.name),
+      inverse: true,
+    }),
+    series: [
+      {
+        type: 'bar',
+        data: categoryData.map((d) => d.value),
+        itemStyle: { color: chartColors.ink, borderRadius: [0, 2, 2, 0] },
+      },
+    ],
+  };
+
   return (
     <div className='space-y-6'>
       <Text variant='uppercase' className='font-bold'>
@@ -64,84 +159,27 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
       </Text>
       <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
         {revenueData.length > 0 && (
-          <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-            <Text variant='uppercase' className='font-bold mb-4 block'>
-              Top products by revenue
-            </Text>
-            <ResponsiveContainer width='100%' height={220}>
-              <BarChart
-                data={revenueData}
-                layout='vertical'
-                margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
-                <XAxis
-                  type='number'
-                  tick={{ fontSize: 10 }}
-                  tickFormatter={(v) => formatCurrency(v)}
-                />
-                <YAxis type='category' dataKey='name' width={80} tick={{ fontSize: 10 }} />
-                <Tooltip formatter={(value: number) => [formatCurrency(value), '']} />
-                <Bar
-                  dataKey='value'
-                  fill='#000'
-                  radius={[0, 2, 2, 0]}
-                  onClick={(data) => data && handleProductBarClick(data)}
-                  cursor='pointer'
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <ChartCard title='Top products by revenue'>
+            <EChart
+              option={revenueOption}
+              height={220}
+              onEvents={{ click: handleProductBarClick }}
+            />
+          </ChartCard>
         )}
         {quantityData.length > 0 && (
-          <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-            <Text variant='uppercase' className='font-bold mb-4 block'>
-              Top products by quantity
-            </Text>
-            <ResponsiveContainer width='100%' height={220}>
-              <BarChart
-                data={quantityData}
-                layout='vertical'
-                margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
-                <XAxis type='number' dataKey='value' tick={{ fontSize: 10 }} />
-                <YAxis type='category' dataKey='name' width={80} tick={{ fontSize: 10 }} />
-                <Tooltip />
-                <Bar
-                  dataKey='value'
-                  fill='#000'
-                  radius={[0, 2, 2, 0]}
-                  onClick={(data) => data && handleProductBarClick(data)}
-                  cursor='pointer'
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <ChartCard title='Top products by quantity'>
+            <EChart
+              option={quantityOption}
+              height={220}
+              onEvents={{ click: handleProductBarClick }}
+            />
+          </ChartCard>
         )}
         {categoryData.length > 0 && (
-          <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-            <Text variant='uppercase' className='font-bold mb-4 block'>
-              Revenue by category
-            </Text>
-            <ResponsiveContainer width='100%' height={220}>
-              <BarChart
-                data={categoryData}
-                layout='vertical'
-                margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
-                <XAxis
-                  type='number'
-                  tick={{ fontSize: 10 }}
-                  tickFormatter={(v) => formatCurrency(v)}
-                />
-                <YAxis type='category' dataKey='name' width={80} tick={{ fontSize: 10 }} />
-                <Tooltip formatter={(value: number) => [formatCurrency(value), '']} />
-                <Bar dataKey='value' fill='#000' radius={[0, 2, 2, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <ChartCard title='Revenue by category'>
+            <EChart option={categoryOption} height={220} />
+          </ChartCard>
         )}
       </div>
 

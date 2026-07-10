@@ -1,8 +1,9 @@
 import type { TimeSeriesPoint } from 'api/proto-http/admin';
+import type { EChartsOption } from 'echarts';
 import { FC, useMemo } from 'react';
-import { Line, LineChart, ResponsiveContainer } from 'recharts';
-import type { SparklineValueFormat } from './kpiSparklineConfig';
+import { EChart, chartColors } from '../charts';
 import { parseDecimal } from '../utils';
+import type { SparklineValueFormat } from './kpiSparklineConfig';
 
 function pointValue(p: TimeSeriesPoint, valueFormat: SparklineValueFormat): number {
   if (valueFormat === 'number') {
@@ -24,38 +25,45 @@ export const MetricSparkline: FC<MetricSparklineProps> = ({
   valueFormat,
   showCompare = false,
 }) => {
-  const chartData = useMemo(() => {
-    const compareValues = (compareData ?? []).map((p) => pointValue(p, valueFormat));
-    return data.map((p, i) => ({
-      i,
-      v: pointValue(p, valueFormat),
-      c: compareValues[i],
-    }));
-  }, [data, compareData, valueFormat]);
+  const values = useMemo(() => data.map((p) => pointValue(p, valueFormat)), [data, valueFormat]);
+  const compareValues = useMemo(
+    () => (compareData ?? []).map((p) => pointValue(p, valueFormat)),
+    [compareData, valueFormat],
+  );
 
-  if (chartData.length === 0) return null;
+  if (values.length === 0) return null;
 
   const hasCompare = Boolean(showCompare && compareData && compareData.length > 0);
 
+  const option: EChartsOption = {
+    animation: false,
+    grid: { left: 0, right: 0, top: 2, bottom: 2 },
+    xAxis: { type: 'category', show: false, boundaryGap: false },
+    yAxis: { type: 'value', show: false },
+    series: [
+      {
+        type: 'line',
+        data: values,
+        symbol: 'none',
+        lineStyle: { color: chartColors.ink, width: 1.5 },
+      },
+      ...(hasCompare
+        ? [
+            {
+              type: 'line' as const,
+              data: compareValues,
+              symbol: 'none',
+              connectNulls: true,
+              lineStyle: { color: chartColors.compare, width: 1, type: 'dashed' as const },
+            },
+          ]
+        : []),
+    ],
+  };
+
   return (
     <div className='h-8 w-full mt-1 -mx-0.5' aria-hidden>
-      <ResponsiveContainer width='100%' height='100%'>
-        <LineChart data={chartData} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
-          <Line type='monotone' dataKey='v' stroke='#000' strokeWidth={1.5} dot={false} isAnimationActive={false} />
-          {hasCompare && (
-            <Line
-              type='monotone'
-              dataKey='c'
-              stroke='#999'
-              strokeWidth={1}
-              strokeDasharray='4 3'
-              dot={false}
-              isAnimationActive={false}
-              connectNulls
-            />
-          )}
-        </LineChart>
-      </ResponsiveContainer>
+      <EChart option={option} height={32} />
     </div>
   );
-}
+};

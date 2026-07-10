@@ -1,43 +1,42 @@
 import type { GeographySessionMetric } from 'api/proto-http/admin';
-import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simple-maps';
-import { FC, useMemo, useState } from 'react';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
+import { FC, useMemo } from 'react';
 import CountryList from 'react-select-country-list';
-import Text from 'ui/components/text';
+import { ChartCard, EChart, chartColors, echarts, tooltipBase } from '../charts';
 import { formatNumber } from '../utils';
+import worldGeoJson from '../charts/world-countries.geo.json';
 
-const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
-
-/** API/GA4 country names -> TopoJSON properties.name (Natural Earth) */
+/** API/GA4 country names -> GeoJSON properties.name (Natural Earth) */
 const API_TO_TOPJSON_NAME: Record<string, string> = {
   'United States': 'United States of America',
   'United Kingdom': 'United Kingdom of Great Britain and Northern Ireland',
   UK: 'United Kingdom of Great Britain and Northern Ireland',
-  'Russia': 'Russian Federation',
-  'Iran': 'Iran (Islamic Republic of)',
+  Russia: 'Russian Federation',
+  Iran: 'Iran (Islamic Republic of)',
   'South Korea': 'Republic of Korea',
-  'Korea': 'Republic of Korea',
+  Korea: 'Republic of Korea',
   'North Korea': "Democratic People's Republic of Korea",
-  'Vietnam': 'Viet Nam',
-  'Tanzania': 'Tanzania',
-  'Venezuela': 'Venezuela (Bolivarian Republic of)',
-  'Syria': 'Syrian Arab Republic',
-  'Bolivia': 'Bolivia (Plurinational State of)',
-  'Moldova': 'Republic of Moldova',
-  'Macedonia': 'North Macedonia',
-  'Taiwan': 'Taiwan',
-  'Palestine': 'State of Palestine',
-  'Laos': "Lao People's Democratic Republic",
-  'Brunei': 'Brunei Darussalam',
-  'Turkey': 'Türkiye',
-  'Congo': 'Republic of the Congo',
+  Vietnam: 'Viet Nam',
+  Tanzania: 'Tanzania',
+  Venezuela: 'Venezuela (Bolivarian Republic of)',
+  Syria: 'Syrian Arab Republic',
+  Bolivia: 'Bolivia (Plurinational State of)',
+  Moldova: 'Republic of Moldova',
+  Macedonia: 'North Macedonia',
+  Taiwan: 'Taiwan',
+  Palestine: 'State of Palestine',
+  Laos: "Lao People's Democratic Republic",
+  Brunei: 'Brunei Darussalam',
+  Turkey: 'Türkiye',
+  Congo: 'Republic of the Congo',
   'Democratic Republic of the Congo': 'Democratic Republic of the Congo',
   'Ivory Coast': "Côte d'Ivoire",
   "Côte d'Ivoire": "Côte d'Ivoire",
-  'Libya': 'Libya',
+  Libya: 'Libya',
   'Czech Republic': 'Czechia',
-  'Czechia': 'Czechia',
-  'Gambia': 'Gambia',
-  'Micronesia': 'Micronesia (Federated States of)',
+  Czechia: 'Czechia',
+  Gambia: 'Gambia',
+  Micronesia: 'Micronesia (Federated States of)',
   'Saint Kitts and Nevis': 'Saint Kitts and Nevis',
   'Saint Lucia': 'Saint Lucia',
   'Saint Vincent and the Grenadines': 'Saint Vincent and the Grenadines',
@@ -45,8 +44,8 @@ const API_TO_TOPJSON_NAME: Record<string, string> = {
   'Antigua and Barbuda': 'Antigua and Barbuda',
   'Bosnia and Herzegovina': 'Bosnia and Herzegovina',
   'Sao Tome and Principe': 'Sao Tome and Principe',
-  'Eswatini': 'Eswatini',
-  'Swaziland': 'Eswatini',
+  Eswatini: 'Eswatini',
+  Swaziland: 'Eswatini',
   'Timor-Leste': 'Timor-Leste',
   'East Timor': 'Timor-Leste',
   'Western Sahara': 'W. Sahara',
@@ -58,7 +57,9 @@ function getTopoJsonName(apiName: string): string {
   return API_TO_TOPJSON_NAME[apiName] ?? apiName;
 }
 
-function aggregateSessionsByCountry(items: GeographySessionMetric[] | undefined): Map<string, number> {
+function aggregateSessionsByCountry(
+  items: GeographySessionMetric[] | undefined,
+): Map<string, number> {
   const map = new Map<string, number>();
   if (!items?.length) return map;
   for (const g of items) {
@@ -86,93 +87,92 @@ function buildCountryNameVariants(): Map<string, string> {
 
 const countryNameVariants = buildCountryNameVariants();
 
+// Register the vendored world map once (self-hosted — no runtime CDN fetch).
+let worldMapRegistered = false;
+function ensureWorldMap() {
+  if (!worldMapRegistered) {
+    echarts.registerMap('world', worldGeoJson as Parameters<typeof echarts.registerMap>[1]);
+    worldMapRegistered = true;
+  }
+}
+
 interface SessionsByCountryMapChartProps {
   sessionsByCountry: GeographySessionMetric[] | undefined;
   showTitle?: boolean;
+}
+
+interface MapDatum {
+  name: string;
+  value: number;
+  displayName: string;
 }
 
 export const SessionsByCountryMapChart: FC<SessionsByCountryMapChartProps> = ({
   sessionsByCountry,
   showTitle = true,
 }) => {
-  const { dataByTopoName, maxSessions } = useMemo(() => {
+  const { data, maxSessions } = useMemo(() => {
     const byCountry = aggregateSessionsByCountry(sessionsByCountry);
-    const dataByTopoName = new Map<string, { sessions: number; country: string }>();
+    const byTopoName = new Map<string, MapDatum>();
     let maxSessions = 0;
     for (const [country, sessions] of byCountry) {
       const topoName = countryNameVariants.get(country) ?? country;
-      const existing = dataByTopoName.get(topoName);
-      const total = (existing?.sessions ?? 0) + sessions;
-      dataByTopoName.set(topoName, { sessions: total, country });
+      const existing = byTopoName.get(topoName);
+      const total = (existing?.value ?? 0) + sessions;
+      byTopoName.set(topoName, { name: topoName, value: total, displayName: country });
       if (total > maxSessions) maxSessions = total;
     }
-    return { dataByTopoName, maxSessions };
+    return { data: Array.from(byTopoName.values()), maxSessions };
   }, [sessionsByCountry]);
 
-  if (dataByTopoName.size === 0) return null;
+  if (data.length === 0) return null;
 
-  const [tooltip, setTooltip] = useState<{ name: string; sessions: number } | null>(null);
+  ensureWorldMap();
 
-  const getFillColor = (topoName: string) => {
-    const d = dataByTopoName.get(topoName);
-    if (!d) return '#e5e7eb';
-    if (maxSessions === 0) return '#e5e7eb';
-    const intensity = Math.min(1, d.sessions / maxSessions);
-    const opacity = 0.3 + intensity * 0.7;
-    return `rgba(0, 0, 0, ${opacity})`;
+  const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+    const p = Array.isArray(raw) ? raw[0] : raw;
+    const d = p?.data as MapDatum | undefined;
+    const name = d?.displayName ?? p?.name ?? '';
+    const sessions = d?.value ?? 0;
+    return `<div style="font-size:11px;line-height:1.5"><div style="font-weight:700">${name}</div>${
+      d ? `${formatNumber(sessions)} sessions` : 'No sessions'
+    }</div>`;
+  };
+
+  const option: EChartsOption = {
+    tooltip: { ...tooltipBase, trigger: 'item', formatter: tooltipFormatter },
+    visualMap: {
+      type: 'continuous',
+      min: 0,
+      max: maxSessions || 1,
+      calculable: true,
+      left: 8,
+      bottom: 8,
+      itemWidth: 10,
+      itemHeight: 80,
+      inRange: { color: ['#f2f2f2', '#bfbfbf', '#595959', '#000000'] },
+      text: [formatNumber(maxSessions), '0'],
+      textStyle: { color: chartColors.inkSecondary, fontSize: 9 },
+    },
+    series: [
+      {
+        type: 'map',
+        map: 'world',
+        roam: true,
+        data,
+        itemStyle: { areaColor: '#f5f5f5', borderColor: chartColors.axisLine, borderWidth: 0.5 },
+        emphasis: {
+          itemStyle: { areaColor: chartColors.accent },
+          label: { show: false },
+        },
+        select: { disabled: true },
+      },
+    ],
   };
 
   return (
-    <div className='border border-textInactiveColor p-4 min-h-[280px] flex-1 min-w-0 relative flex flex-col'>
-      {showTitle && (
-        <Text variant='uppercase' className='font-bold mb-4 block'>
-          Sessions by country
-        </Text>
-      )}
-      <div className='flex-1 min-h-[220px]'>
-        <ComposableMap
-          projection='geoMercator'
-          projectionConfig={{ scale: 90 }}
-          width={800}
-          height={400}
-          style={{ width: '100%', height: 220 }}
-        >
-        <ZoomableGroup center={[0, 0]} minZoom={1} maxZoom={8}>
-        <Geographies geography={GEO_URL}>
-          {({ geographies }) =>
-            geographies.map((geo) => {
-              const topoName = (geo.properties?.name as string) ?? geo.id;
-              const d = dataByTopoName.get(topoName);
-              const displayName = d?.country ?? topoName;
-              const sessions = d?.sessions ?? 0;
-              return (
-                <Geography
-                  key={geo.rsmKey}
-                  geography={geo}
-                  fill={getFillColor(topoName)}
-                  stroke='#94a3b8'
-                  strokeWidth={0.5}
-                  style={{
-                    default: { outline: 'none' },
-                    hover: { outline: 'none', cursor: 'pointer' },
-                    pressed: { outline: 'none' },
-                  }}
-                  onMouseEnter={() => setTooltip({ name: displayName, sessions })}
-                  onMouseLeave={() => setTooltip(null)}
-                />
-              );
-            })
-          }
-        </Geographies>
-        </ZoomableGroup>
-      </ComposableMap>
-      </div>
-      {tooltip && (
-        <div className='absolute bottom-2 left-1/2 -translate-x-1/2 bg-black text-white text-xs px-3 py-2 rounded shadow-lg pointer-events-none z-10'>
-          <div className='font-semibold'>{tooltip.name}</div>
-          <div className='text-white/90'>{formatNumber(tooltip.sessions)} sessions</div>
-        </div>
-      )}
-    </div>
+    <ChartCard title={showTitle ? 'Sessions by country' : undefined}>
+      <EChart option={option} height={260} />
+    </ChartCard>
   );
 };

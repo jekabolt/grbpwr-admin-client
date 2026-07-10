@@ -1,16 +1,17 @@
 import type { common_StockChange } from 'api/proto-http/admin';
-import { useMemo } from 'react';
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+  categoryAxis,
+  ChartCard,
+  chartColors,
+  EChart,
+  gridBase,
+  tooltipBase,
+  valueAxis,
+} from 'components/managers/page/charts';
+import { format } from 'date-fns';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
+import { useMemo } from 'react';
 import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
 
 interface StockTrendChartProps {
   changes: common_StockChange[];
@@ -34,13 +35,7 @@ export function StockTrendChart({
       return tA - tB;
     });
     return sorted.map((c) => ({
-      date: c.createdAt
-        ? new Date(c.createdAt).toLocaleDateString(undefined, {
-            month: 'short',
-            day: 'numeric',
-            year: '2-digit',
-          })
-        : '',
+      date: c.createdAt ? format(new Date(c.createdAt), 'MMM d yy') : '',
       quantity: Number(c.quantityAfter?.value ?? 0),
       fullDate: c.createdAt ? new Date(c.createdAt).toLocaleString() : '',
     }));
@@ -48,65 +43,55 @@ export function StockTrendChart({
 
   const hasData = chartData.length > 0;
 
-  return (
-    <div className='shrink-0 rounded border border-textInactiveColor bg-bgColor p-4'>
-      <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-        <Text variant='uppercase' className='font-bold'>
-          Product Stock Trend
-        </Text>
-        <Button
-          type='button'
-          variant='secondary'
-          onClick={onDownloadCsv}
-          disabled={!hasData || isLoading}
-        >
-          Download CSV
-        </Button>
-      </div>
+  const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+    const items = Array.isArray(raw) ? raw : [raw];
+    const first = items[0];
+    const fullDate = chartData[first?.dataIndex ?? 0]?.fullDate ?? '';
+    const qty = Number(first?.value ?? 0);
+    return `<div style="font-size:11px;line-height:1.6">${fullDate}<br/>Quantity: <b>${qty}</b></div>`;
+  };
 
-      <Text variant='uppercase'>
-        Product {productId != null ? productId : '—'}; Size: {sizeLabel}
-      </Text>
-      <div className='min-h-[220px] w-full'>
-        {!hasData ? (
-          <div className='flex h-[220px] items-center justify-center'>
-            <Text variant='uppercase' className='text-textInactiveColor'>
-              {isLoading ? 'Loading…' : 'No data to display'}
-            </Text>
-          </div>
-        ) : (
-          <ResponsiveContainer width='100%' height={220}>
-            <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-              <defs>
-                <linearGradient id='stockTrendFill' x1='0' y1='0' x2='0' y2='1'>
-                  <stop offset='0%' stopColor='#93c5fd' stopOpacity={0.6} />
-                  <stop offset='100%' stopColor='#93c5fd' stopOpacity={0.1} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray='3 3' className='stroke-textInactiveColor/50' />
-              <XAxis dataKey='date' tick={{ fontSize: 10 }} className='text-textInactiveColor' />
-              <YAxis
-                tick={{ fontSize: 10 }}
-                className='text-textInactiveColor'
-                allowDecimals={false}
-              />
-              <Tooltip
-                formatter={(value: number | undefined) => [value ?? 0, 'Quantity']}
-                labelFormatter={(_, payload) =>
-                  (Array.isArray(payload) && payload[0]?.payload?.fullDate) ?? ''
-                }
-              />
-              <Area
-                type='monotone'
-                dataKey='quantity'
-                stroke='#93c5fd'
-                strokeWidth={2}
-                fill='url(#stockTrendFill)'
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-    </div>
+  const option: EChartsOption = {
+    grid: { ...gridBase },
+    tooltip: { ...tooltipBase, trigger: 'axis', formatter: tooltipFormatter },
+    xAxis: categoryAxis({ data: chartData.map((d) => d.date), boundaryGap: false }),
+    yAxis: valueAxis({
+      minInterval: 1,
+      axisLabel: { formatter: (v: number) => `${Math.round(v)}` },
+    }),
+    series: [
+      {
+        name: 'Quantity',
+        type: 'line',
+        data: chartData.map((d) => d.quantity),
+        smooth: false,
+        symbol: 'none',
+        lineStyle: { color: chartColors.accent, width: 2 },
+        areaStyle: { color: 'rgba(49,30,238,0.12)' },
+      },
+    ],
+  };
+
+  const downloadButton = (
+    <Button
+      type='button'
+      variant='secondary'
+      onClick={onDownloadCsv}
+      disabled={!hasData || isLoading}
+    >
+      Download CSV
+    </Button>
+  );
+
+  return (
+    <ChartCard
+      title='Product Stock Trend'
+      subtitle={`Product ${productId != null ? productId : '—'}; Size: ${sizeLabel}`}
+      action={downloadButton}
+      emptyMessage={!hasData ? (isLoading ? 'Loading…' : 'No data to display') : undefined}
+      className='shrink-0 rounded bg-bgColor'
+    >
+      <EChart option={option} height={220} />
+    </ChartCard>
   );
 }
