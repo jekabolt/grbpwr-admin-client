@@ -102,7 +102,9 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
                       <Text>{formatNumber(row.unitsSold || 0)}</Text>
                     </td>
                     <td className='p-2 text-right'>
-                      <Text className='text-error'>{(row.daysInStock || 0).toFixed(0)}</Text>
+                      {/* Age, not a fault — every product accrues days in stock. The signal is
+                          low units/revenue, not the age itself, so don't paint it red. */}
+                      <Text>{(row.daysInStock || 0).toFixed(0)}</Text>
                     </td>
                     <td className='p-2 text-right'>
                       <Text>{lastSaleStr}</Text>

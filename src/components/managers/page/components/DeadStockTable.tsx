@@ -11,7 +11,10 @@ interface DeadStockTableProps {
 export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
   if (!deadStock || deadStock.length === 0) return null;
 
-  const topDeadStock = deadStock.slice(0, 20);
+  // Most capital tied up first — that's what to liquidate to free cash, not the oldest SKU.
+  const topDeadStock = [...deadStock]
+    .sort((a, b) => parseDecimal(b.stockValue) - parseDecimal(a.stockValue))
+    .slice(0, 20);
 
   return (
     <div className='border border-textInactiveColor p-4'>
@@ -52,7 +55,9 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
                   <Text>{formatNumber(row.quantity || 0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
-                  <Text className='text-error font-bold'>{(row.daysWithoutSale || 0).toFixed(0)}</Text>
+                  {/* Every row here is >180 days by definition — bold for scanning, not red
+                      (red on all rows is just noise; the € tied up is the real signal). */}
+                  <Text className='font-bold'>{(row.daysWithoutSale || 0).toFixed(0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
                   <Text>{formatCurrency(parseDecimal(row.stockValue))}</Text>
@@ -62,8 +67,9 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor'>
-        <Text>Inventory with no sales &gt;180 days - liquidate or write off</Text>
+      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+        <Text>Inventory with no sales &gt;180 days — liquidate or write off. Sorted by € tied up.</Text>
+        <Text>Stock value is at listed (retail) price, not cost.</Text>
       </div>
     </div>
   );
