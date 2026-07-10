@@ -2,12 +2,7 @@ import type { BusinessMetrics } from 'api/proto-http/admin';
 import { type FC } from 'react';
 import { Link } from 'react-router-dom';
 import Text from 'ui/components/text';
-import {
-  computeExecutiveAlerts,
-  computeNorthStarBullets,
-  deriveHealthStatus,
-  type HealthStatus,
-} from '../executiveAlerts';
+import { computeExecutiveAlerts, deriveHealthStatus, type HealthStatus } from '../executiveAlerts';
 
 const STATUS_LABEL: Record<HealthStatus, string> = {
   needs_attention: 'Needs attention',
@@ -26,25 +21,6 @@ const ALERT_TITLE_CLASS: Record<'high' | 'warning', string> = {
   warning: 'text-warning',
 };
 
-const MAX_VISIBLE_ALERTS = 5;
-
-function BulletList({ items, emptyLabel }: { items: string[]; emptyLabel: string }) {
-  if (items.length === 0) {
-    return (
-      <Text className='text-textInactiveColor text-xs italic' component='p'>
-        {emptyLabel}
-      </Text>
-    );
-  }
-  return (
-    <ul className='list-disc space-y-1 pl-4 text-xs text-textColor/90 leading-relaxed'>
-      {items.map((line) => (
-        <li key={line}>{line}</li>
-      ))}
-    </ul>
-  );
-}
-
 export interface ExecutiveHealthStripProps {
   metrics: BusinessMetrics | undefined;
   compareEnabled: boolean;
@@ -62,10 +38,6 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
 }) => {
   const alerts = computeExecutiveAlerts(metrics, compareEnabled, { revenue: revenueHref });
   const status = deriveHealthStatus(alerts, metrics, compareEnabled);
-  const { headwinds, tailwinds, operational } = computeNorthStarBullets(metrics, compareEnabled);
-
-  const visibleAlerts = alerts.slice(0, MAX_VISIBLE_ALERTS);
-  const moreCount = alerts.length - visibleAlerts.length;
 
   return (
     <div className='space-y-4 border-2 border-textColor/15 bg-bgSecondary/20 p-4'>
@@ -91,20 +63,20 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
         >
           {STATUS_LABEL[status]}
         </span>
-        {alerts.length > 0 && (
-          <Text className='text-[10px] text-textInactiveColor uppercase'>
-            {alerts.length} highlighted signal{alerts.length === 1 ? '' : 's'}
-          </Text>
-        )}
+        <Text className='text-[10px] text-textInactiveColor uppercase'>
+          {alerts.length === 0
+            ? 'Nothing needs action this period'
+            : `${alerts.length} thing${alerts.length === 1 ? '' : 's'} to act on`}
+        </Text>
       </div>
 
       {alerts.length > 0 && (
         <div className='space-y-2 border-t border-textInactiveColor/40 pt-3'>
           <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor'>
-            Watch list
+            Act now
           </Text>
           <ul className='space-y-2'>
-            {visibleAlerts.map((a, i) => (
+            {alerts.map((a, i) => (
               <li key={`${a.title}-${i}`} className='text-xs leading-snug'>
                 <span className={`font-semibold ${ALERT_TITLE_CLASS[a.severity]}`}>{a.title}</span>
                 {a.detail && (
@@ -122,37 +94,8 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
               </li>
             ))}
           </ul>
-          {moreCount > 0 && (
-            <Text className='text-textInactiveColor text-[10px]'>+{moreCount} more (see Key metrics)</Text>
-          )}
         </div>
       )}
-
-      <div className='space-y-2 border-t border-textInactiveColor/40 pt-3'>
-        <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor'>
-          Story of the period
-        </Text>
-        <div className='grid gap-4 sm:grid-cols-3'>
-          <div className='space-y-1.5 min-w-0'>
-            <Text variant='uppercase' className='text-[9px] font-semibold text-textInactiveColor'>
-              Headwinds
-            </Text>
-            <BulletList items={headwinds} emptyLabel={compareEnabled ? 'No major drags vs comparison.' : '—'} />
-          </div>
-          <div className='space-y-1.5 min-w-0'>
-            <Text variant='uppercase' className='text-[9px] font-semibold text-textInactiveColor'>
-              Tailwinds
-            </Text>
-            <BulletList items={tailwinds} emptyLabel={compareEnabled ? 'No strong lifts vs comparison.' : '—'} />
-          </div>
-          <div className='space-y-1.5 min-w-0'>
-            <Text variant='uppercase' className='text-[9px] font-semibold text-textInactiveColor'>
-              Operational
-            </Text>
-            <BulletList items={operational} emptyLabel='Nothing notable in status mix.' />
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

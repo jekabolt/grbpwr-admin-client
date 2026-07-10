@@ -28,7 +28,30 @@ export function getMetricComparison(m: Record<string, unknown> | undefined) {
   const lowerIsBetter = (m.lowerIsBetter ?? m.lower_is_better) === true;
   const changeAbsolute = (m.changeAbsolute ?? m.change_absolute) as number | undefined;
   const caveat = (m.caveat) as string | undefined;
-  return { value, compareValue, changePct, lowerIsBetter, changeAbsolute, caveat };
+  // n the metric is computed over (e.g. orders behind a refund rate). Lets the UI suppress
+  // or widen a figure at low volume instead of guessing from arbitrary hardcoded floors.
+  const sampleSize = (m.sampleSize ?? m.sample_size) as number | undefined;
+  return { value, compareValue, changePct, lowerIsBetter, changeAbsolute, caveat, sampleSize };
+}
+
+/**
+ * Collapse a daily series into 7-day buckets once it's long enough to be noisy at boutique
+ * volume (a single day is single-digit orders). Below the threshold the daily shape still reads,
+ * so we leave it. Value and count are summed; each bucket is dated to its first day.
+ */
+export function coarsenTimeSeries(
+  points: TimeSeriesPoint[] | undefined,
+  minPointsToBucket = 21,
+): TimeSeriesPoint[] | undefined {
+  if (!points || points.length <= minPointsToBucket) return points;
+  const buckets: TimeSeriesPoint[] = [];
+  for (let i = 0; i < points.length; i += 7) {
+    const chunk = points.slice(i, i + 7);
+    const valueSum = chunk.reduce((s, p) => s + parseDecimal(p.value), 0);
+    const countSum = chunk.reduce((s, p) => s + (p.count ?? 0), 0);
+    buckets.push({ date: chunk[0].date, value: { value: String(valueSum) }, count: countSum });
+  }
+  return buckets;
 }
 
 export function formatCurrency(value: number, currency = 'EUR'): string {

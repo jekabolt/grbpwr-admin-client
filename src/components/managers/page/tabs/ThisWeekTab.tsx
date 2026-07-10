@@ -6,6 +6,7 @@ import Text from 'ui/components/text';
 import { ExecutiveHealthStrip, TimeSeriesChart } from '../components';
 import type { MetricsPeriod } from '../useMetricsQuery';
 import {
+  coarsenTimeSeries,
   formatCurrency,
   formatNumber,
   getTimeSeries,
@@ -64,13 +65,18 @@ export function ThisWeekTab({
     const byRevenue = metrics?.topProductsByRevenue || [];
     const byQuantity = metrics?.topProductsByQuantity || [];
 
-    const quantityMap = new Map(byQuantity.map((p) => [p.productId, p.count ?? 0]));
+    // Units live in `count` on some breakdowns and in `value` on others — take whichever is
+    // populated so the join doesn't silently render 0 units for every product.
+    const unitsOf = (p: { count?: number; value?: unknown }) =>
+      p.count && p.count > 0 ? p.count : Math.round(parseDecimal(p.value as any));
+    const quantityMap = new Map(byQuantity.map((p) => [p.productId, unitsOf(p)]));
 
     return byRevenue.slice(0, 3).map((p) => ({
       productId: p.productId,
       productName: p.productName,
       revenue: parseDecimal(p.value),
-      units: quantityMap.get(p.productId) ?? 0,
+      units: quantityMap.get(p.productId) ?? unitsOf(p),
+      grossMarginPct: p.hasCost ? p.grossMarginPct : null,
     }));
   }, [metrics?.topProductsByRevenue, metrics?.topProductsByQuantity]);
 
@@ -122,12 +128,11 @@ export function ThisWeekTab({
       )}
 
       <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Orders at a glance</h3>
+        <h3 className='text-sm font-bold uppercase'>Orders</h3>
         <div className='max-w-xl'>
           <TimeSeriesChart
-            title='Orders by day'
-            data={getTimeSeries(metricsRecord, 'ordersByDay')}
-            compareData={getTimeSeries(metricsRecord, 'ordersByDayCompare')}
+            title='Orders'
+            data={coarsenTimeSeries(getTimeSeries(metricsRecord, 'ordersByDay'))}
             valueFormat='number'
           />
         </div>
@@ -137,15 +142,13 @@ export function ThisWeekTab({
         <h3 className='text-sm font-bold uppercase'>Acquisition &amp; retention</h3>
         <div className='grid gap-4 md:grid-cols-2'>
           <TimeSeriesChart
-            title='New customers by day'
-            data={metrics?.newCustomersByDay}
-            compareData={metrics?.newCustomersByDayCompare}
+            title='New customers'
+            data={coarsenTimeSeries(metrics?.newCustomersByDay)}
             valueFormat='number'
           />
           <TimeSeriesChart
-            title='Returning customers by day'
-            data={metrics?.returningCustomersByDay}
-            compareData={metrics?.returningCustomersByDayCompare}
+            title='Returning customers'
+            data={coarsenTimeSeries(metrics?.returningCustomersByDay)}
             valueFormat='number'
           />
         </div>
@@ -182,6 +185,11 @@ export function ThisWeekTab({
                       Units
                     </Text>
                   </th>
+                  <th className='text-right p-2'>
+                    <Text variant='uppercase' className='text-[10px]'>
+                      Margin
+                    </Text>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -199,6 +207,11 @@ export function ThisWeekTab({
                     </td>
                     <td className='p-2 text-right'>
                       <Text>{formatNumber(product.units)}</Text>
+                    </td>
+                    <td className='p-2 text-right'>
+                      <Text className={product.grossMarginPct == null ? 'text-textInactiveColor' : ''}>
+                        {product.grossMarginPct == null ? '—' : `${product.grossMarginPct.toFixed(0)}%`}
+                      </Text>
                     </td>
                   </tr>
                 ))}
