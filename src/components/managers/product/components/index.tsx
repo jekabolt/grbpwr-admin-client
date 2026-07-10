@@ -1,8 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { common_ProductFull, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
@@ -42,6 +43,7 @@ export function ProductForm({
   const [mediaClearKey, setMediaClearKey] = useState(0);
   const editMode = isEditMode || isAddingProduct;
   const navigate = useNavigate();
+  const { canWrite } = usePermissions();
 
   const initialValues =
     product && (!isAddingProduct || isCopyMode) ? mapProductFullToFormData(product) : defaultData;
@@ -239,42 +241,44 @@ export function ProductForm({
         <Text variant='inactive' size='small'>
           {editMode && isFormChanged ? 'unsaved changes' : ' '}
         </Text>
-        <div className='flex items-center gap-2'>
-          {!editMode ? (
-            <Button
-              type='button'
-              variant='main'
-              size='lg'
-              className='uppercase cursor-pointer'
-              onClick={() => onEditModeChange(true)}
-            >
-              edit
-            </Button>
-          ) : (
-            <>
-              <Button
-                type='button'
-                variant='secondary'
-                size='lg'
-                className='uppercase cursor-pointer'
-                onClick={handleCancel}
-              >
-                cancel
-              </Button>
+        {canWrite(SECTION.products) && (
+          <div className='flex items-center gap-2'>
+            {!editMode ? (
               <Button
                 type='button'
                 variant='main'
                 size='lg'
                 className='uppercase cursor-pointer'
-                disabled={(isEditMode && !isFormChanged) || form.formState.isSubmitting}
-                loading={form.formState.isSubmitting}
-                onClick={submitForm}
+                onClick={() => onEditModeChange(true)}
               >
-                {isAddingProduct ? (isCopyMode ? 'create copy' : 'create') : 'save'}
+                edit
               </Button>
-            </>
-          )}
-        </div>
+            ) : (
+              <>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='lg'
+                  className='uppercase cursor-pointer'
+                  onClick={handleCancel}
+                >
+                  cancel
+                </Button>
+                <Button
+                  type='button'
+                  variant='main'
+                  size='lg'
+                  className='uppercase cursor-pointer'
+                  disabled={(isEditMode && !isFormChanged) || form.formState.isSubmitting}
+                  loading={form.formState.isSubmitting}
+                  onClick={submitForm}
+                >
+                  {isAddingProduct ? (isCopyMode ? 'create copy' : 'create') : 'save'}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </Form>
   );

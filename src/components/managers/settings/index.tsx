@@ -1,6 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
@@ -49,6 +51,7 @@ export function Settings() {
   const { dictionary, refetch } = useDictionary();
   const showMessage = useSnackBarStore((state) => state.showMessage);
   const [isLoading, setIsLoading] = useState(false);
+  const { canWrite } = usePermissions();
 
   const initialValues = useMemo(
     () => (dictionary ? transformDictionaryToSettings(dictionary) : defaultSettings),
@@ -143,22 +146,24 @@ export function Settings() {
         </Section>
       </form>
 
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
-        <Text variant='inactive' size='small'>
-          {isDirty ? 'unsaved changes' : ' '}
-        </Text>
-        <Button
-          type='button'
-          size='lg'
-          variant='main'
-          className='uppercase cursor-pointer'
-          disabled={isLoading || !isDirty}
-          loading={isLoading}
-          onClick={() => form.handleSubmit(handleSave)()}
-        >
-          save
-        </Button>
-      </div>
+      {canWrite(SECTION.settings) && (
+        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
+          <Text variant='inactive' size='small'>
+            {isDirty ? 'unsaved changes' : ' '}
+          </Text>
+          <Button
+            type='button'
+            size='lg'
+            variant='main'
+            className='uppercase cursor-pointer'
+            disabled={isLoading || !isDirty}
+            loading={isLoading}
+            onClick={() => form.handleSubmit(handleSave)()}
+          >
+            save
+          </Button>
+        </div>
+      )}
     </Form>
   );
 }

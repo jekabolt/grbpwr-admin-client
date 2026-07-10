@@ -1,4 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Button } from 'ui/components/button';
@@ -42,6 +44,7 @@ export function MediaManager({
   const [videoSizes, setVideoSizes] = useState<Record<number, VideoSize>>({});
 
   const pendingFilesHook = usePendingFiles();
+  const { canWrite } = usePermissions();
 
   // Standalone page shows a header + toolbar; the embedded selector (selectionMode) stays minimal.
   const isStandalone = !selectionMode;
@@ -128,7 +131,9 @@ export function MediaManager({
             )}
           </div>
           <div className='flex flex-wrap items-center gap-2'>
-            {showFilters && <Filter type={type} order={order} setType={setType} setOrder={setOrder} />}
+            {showFilters && (
+              <Filter type={type} order={order} setType={setType} setOrder={setOrder} />
+            )}
             {pendingPlate}
             <input
               ref={fileInputRef}
@@ -138,9 +143,11 @@ export function MediaManager({
               className='hidden'
               onChange={handleFileChange}
             />
-            <Button variant='main' size='lg' onClick={handleUploadClick}>
-              upload
-            </Button>
+            {canWrite(SECTION.media) && (
+              <Button variant='main' size='lg' onClick={handleUploadClick}>
+                upload
+              </Button>
+            )}
           </div>
         </div>
       ) : (

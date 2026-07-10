@@ -1,5 +1,5 @@
 import { AccessLevel } from 'api/proto-http/admin';
-import { SECTION } from 'constants/routes';
+import { SECTION, SIDE_BAR_ITEMS } from 'constants/routes';
 import { useMemo } from 'react';
 import { ACCESS, accessSatisfies, useAccountSections, useCurrentAccount } from './hooks';
 
@@ -51,12 +51,20 @@ export function usePermissions() {
     [resolved, isSuper, catalog, grants],
   );
 
+  // First navigable section the account can read, in sidebar order. Used to land
+  // scoped accounts on a page they can actually open instead of the analytics home.
+  const homeRoute = useMemo(() => {
+    const item = SIDE_BAR_ITEMS.find((it) => hasSection(it.section, ACCESS.READ));
+    return item?.route ?? null;
+  }, [hasSection]);
+
   return {
     account,
     isSuper,
     isLoading: accountLoading,
     resolved,
     hasSection,
+    homeRoute,
     canRead: (section?: string) => hasSection(section, ACCESS.READ),
     canWrite: (section?: string) => hasSection(section, ACCESS.WRITE),
     canManageAccounts: hasSection(SECTION.accounts, ACCESS.READ),

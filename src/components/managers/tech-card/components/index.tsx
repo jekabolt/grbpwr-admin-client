@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_TechCard } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   useCreateTechCard,
   useUpdateTechCard,
@@ -14,7 +15,7 @@ import {
   techCardMeasurementUnitOptions,
   techCardStageOptions,
 } from 'constants/filter';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
@@ -122,6 +123,7 @@ export function TechCardForm({
   const navigate = useNavigate();
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
+  const { canWrite } = usePermissions();
 
   const numId = id ? parseInt(id, 10) : undefined;
 
@@ -250,43 +252,44 @@ export function TechCardForm({
                 </Link>
               </Button>
             )}
-            {frozen ? (
-              <Button
-                type='button'
-                variant='main'
-                size='lg'
-                className='uppercase'
-                loading={saving}
-                onClick={() => submitWithApproval(DRAFT)}
-              >
-                re-open to draft
-              </Button>
-            ) : (
-              <>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='lg'
-                  className='uppercase'
-                  title={canRelease ? '' : 'Approve every colourway lab-dip before release'}
-                  disabled={!canRelease || saving}
-                  onClick={() => submitWithApproval(RELEASED)}
-                >
-                  release ▸
-                </Button>
+            {canWrite(SECTION.techCards) &&
+              (frozen ? (
                 <Button
                   type='button'
                   variant='main'
                   size='lg'
                   className='uppercase'
-                  disabled={(isEditMode && !form.formState.isDirty) || saving}
                   loading={saving}
-                  onClick={save}
+                  onClick={() => submitWithApproval(DRAFT)}
                 >
-                  {isEditMode ? 'save' : 'add'}
+                  re-open to draft
                 </Button>
-              </>
-            )}
+              ) : (
+                <>
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='lg'
+                    className='uppercase'
+                    title={canRelease ? '' : 'Approve every colourway lab-dip before release'}
+                    disabled={!canRelease || saving}
+                    onClick={() => submitWithApproval(RELEASED)}
+                  >
+                    release ▸
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='main'
+                    size='lg'
+                    className='uppercase'
+                    disabled={(isEditMode && !form.formState.isDirty) || saving}
+                    loading={saving}
+                    onClick={save}
+                  >
+                    {isEditMode ? 'save' : 'add'}
+                  </Button>
+                </>
+              ))}
           </div>
         </div>
 

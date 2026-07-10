@@ -1,5 +1,7 @@
 import { common_TechCardStage } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardStageOptions } from 'constants/filter';
+import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
@@ -42,6 +44,7 @@ export function TechCardList() {
   const navigate = useNavigate();
   const { showMessage } = useSnackBarStore();
   const deleteTechCard = useDeleteTechCard();
+  const canEdit = usePermissions().canWrite(SECTION.techCards);
 
   const [name, setName] = useState('');
   const [stage, setStage] = useState<common_TechCardStage>(ALL_STAGES);
@@ -162,17 +165,19 @@ export function TechCardList() {
                       </Text>
                     </td>
                     <td className='px-2 py-2'>
-                      <Button
-                        type='button'
-                        aria-label='delete tech card'
-                        onClick={(e: React.MouseEvent) => {
-                          e.stopPropagation();
-                          setPendingDelete({ id });
-                        }}
-                        className='border border-textColor bg-bgColor px-1.5 leading-none'
-                      >
-                        ✕
-                      </Button>
+                      {canEdit && (
+                        <Button
+                          type='button'
+                          aria-label='delete tech card'
+                          onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            setPendingDelete({ id });
+                          }}
+                          className='border border-textColor bg-bgColor px-1.5 leading-none'
+                        >
+                          ✕
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 );

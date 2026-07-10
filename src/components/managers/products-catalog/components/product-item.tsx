@@ -1,7 +1,8 @@
 import { CheckIcon } from '@radix-ui/react-icons';
 import { adminService } from 'api/api';
 import { common_Product } from 'api/proto-http/admin';
-import { ROUTES } from 'constants/routes';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { ROUTES, SECTION } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -25,6 +26,7 @@ export function ProductItem({
   const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const navigate = useNavigate();
+  const canEdit = usePermissions().canWrite(SECTION.products);
 
   async function handleDeleteItem(id: number | undefined, e: React.MouseEvent) {
     e.stopPropagation();
@@ -71,23 +73,27 @@ export function ProductItem({
             </Text>
           </span>
         )}
-        <Button
-          onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
-          className={cn(
-            'absolute top-1 right-1 z-30 border border-textColor bg-bgColor px-1 leading-none block md:hidden md:group-hover:block',
-            { '!block !bg-textColor !text-bgColor': confirmDelete === product.id },
-          )}
-        >
-          {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
-        </Button>
-        <Button
-          size='lg'
-          className='absolute bottom-0 left-0 z-30'
-          variant='main'
-          onClick={(e: React.MouseEvent) => handleCopyProduct(product.id, e)}
-        >
-          copy
-        </Button>
+        {canEdit && (
+          <Button
+            onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
+            className={cn(
+              'absolute top-1 right-1 z-30 border border-textColor bg-bgColor px-1 leading-none block md:hidden md:group-hover:block',
+              { '!block !bg-textColor !text-bgColor': confirmDelete === product.id },
+            )}
+          >
+            {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
+          </Button>
+        )}
+        {canEdit && (
+          <Button
+            size='lg'
+            className='absolute bottom-0 left-0 z-30'
+            variant='main'
+            onClick={(e: React.MouseEvent) => handleCopyProduct(product.id, e)}
+          >
+            copy
+          </Button>
+        )}
         {isHidden && <Overlay cover='container' />}
       </div>
       <Text className='w-full break-words' variant='underLineWithColor'>

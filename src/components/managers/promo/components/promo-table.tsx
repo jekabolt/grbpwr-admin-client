@@ -1,5 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
+import { SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -26,6 +28,9 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
     submitCreate,
   } = usePromo();
 
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite(SECTION.promo);
+
   const form = useForm<PromoDraftSchema>({
     resolver: zodResolver(promoDraftSchema),
     defaultValues: emptyPromoDraft,
@@ -41,6 +46,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
             <CheckboxCommon
               name='allowed'
               checked={isAllowed}
+              disabled={!canEdit}
               onChange={() => handleDisablePromo(p.promoCodeInsert?.code || '')}
             />
           </div>
@@ -78,6 +84,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
       ),
     },
   ];
+  const visibleColumns = COLUMNS.filter((c) => c.label !== 'Delete' || canEdit);
   return (
     <div className='w-full flex flex-col gap-4'>
       <ConfirmationModal
@@ -87,24 +94,26 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
       >
         {confirm.message}
       </ConfirmationModal>
-      <div className='flex justify-end'>
-        <Button
-          variant='main'
-          size='lg'
-          onClick={() => {
-            startCreate();
-            form.reset(emptyPromoDraft);
-          }}
-          disabled={isCreating}
-        >
-          Create
-        </Button>
-      </div>
+      {canEdit && (
+        <div className='flex justify-end'>
+          <Button
+            variant='main'
+            size='lg'
+            onClick={() => {
+              startCreate();
+              form.reset(emptyPromoDraft);
+            }}
+            disabled={isCreating}
+          >
+            Create
+          </Button>
+        </div>
+      )}
       <div className='overflow-x-auto w-full'>
         <table className='w-full border-collapse border-2 border-textColor min-w-max'>
           <thead className='bg-textInactiveColor h-7 overflow-x-scroll'>
             <tr className='border-b border-textColor'>
-              {COLUMNS.map((col) => (
+              {visibleColumns.map((col) => (
                 <th
                   key={col.label}
                   className='text-center min-w-1 border border-r border-textColor'
@@ -123,7 +132,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
                 key={p.promoCodeInsert?.code}
                 className={cn(!p.promoCodeInsert?.allowed && 'bg-textInactiveColor')}
               >
-                {COLUMNS.map((col) => (
+                {visibleColumns.map((col) => (
                   <td
                     key={col.label}
                     className={cn('border border-r border-textColor text-center px-2', {

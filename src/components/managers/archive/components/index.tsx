@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_ArchiveFull } from 'api/proto-http/admin';
-import { ROUTES } from 'constants/routes';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -56,6 +57,7 @@ export function ArchiveForm({
 }) {
   const { showMessage } = useSnackBarStore();
   const navigate = useNavigate();
+  const { canWrite } = usePermissions();
 
   // Resolved read model → form (+ the resolved-product cache, keyed by block uid).
   const initial = useMemo(
@@ -279,17 +281,19 @@ export function ArchiveForm({
               </span>
             )}
           </div>
-          <Button
-            type='button'
-            variant='main'
-            size='lg'
-            className='uppercase cursor-pointer'
-            disabled={(isEditMode && !hasChanges) || isSaving}
-            loading={isSaving}
-            onClick={handleSaveClick}
-          >
-            {isEditMode ? 'save' : 'create'}
-          </Button>
+          {canWrite(SECTION.archive) && (
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              className='uppercase cursor-pointer'
+              disabled={(isEditMode && !hasChanges) || isSaving}
+              loading={isSaving}
+              onClick={handleSaveClick}
+            >
+              {isEditMode ? 'save' : 'create'}
+            </Button>
+          )}
         </div>
 
         <section className='space-y-4'>
