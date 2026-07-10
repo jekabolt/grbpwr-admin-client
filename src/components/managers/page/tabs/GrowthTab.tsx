@@ -1,6 +1,12 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import Text from 'ui/components/text';
-import { CampaignAttributionTable, CrossSellTable, GeographyCharts, TrafficCharts } from '../components';
+import {
+  CampaignAttributionTable,
+  ChannelSpendForm,
+  CrossSellTable,
+  GeographyCharts,
+  TrafficCharts,
+} from '../components';
 import { formatAvgDaysBetweenOrders, formatNumber, getMetricComparison } from '../utils';
 
 interface GrowthTabProps {
@@ -76,7 +82,10 @@ export function GrowthTab({ metricsResponse }: GrowthTabProps) {
       </div>
 
       <div className='space-y-3'>
-        <h3 className='text-sm font-bold uppercase'>Campaigns &amp; channels</h3>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <h3 className='text-sm font-bold uppercase'>Campaigns &amp; channels</h3>
+          <ChannelSpendForm />
+        </div>
         <CampaignAttributionTable campaignAttribution={metricsResponse.campaignAttribution} />
         <Text className='text-textInactiveColor text-[11px] leading-relaxed'>
           Channel data is GA4-sourced and directional at boutique traffic — sampling, consent gaps,

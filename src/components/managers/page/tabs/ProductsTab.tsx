@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom';
 import {
   DeadStockTable,
   InventoryHealthTable,
+  InventoryTargetForm,
   NotifyMeIntentTable,
   OOSImpactTable,
   ProductCharts,
@@ -90,6 +91,9 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
               Inventory
             </summary>
             <div className='space-y-6 p-4'>
+              <div className='flex justify-end'>
+                <InventoryTargetForm />
+              </div>
               <ReorderTable inventoryHealth={metricsResponse.inventoryHealth} />
               <InventoryHealthTable inventoryHealth={metricsResponse.inventoryHealth} />
               <NotifyMeIntentTable notifyMeIntent={metricsResponse.notifyMeIntent} />
