@@ -83,6 +83,9 @@ const TechCard = lazy(() =>
 const TechCardPrint = lazy(() =>
   import('components/managers/tech-card/print-page').then((m) => ({ default: m.TechCardPrint })),
 );
+const Accounts = lazy(() =>
+  import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
+);
 
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
@@ -190,6 +193,7 @@ root.render(
                   <Route path={ROUTES.techCards} element={<TechCards />} />
                   <Route path={ROUTES.addTechCard} element={<TechCard />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
+                  <Route path={ROUTES.accounts} element={<Accounts />} />
                 </Route>
                 {/* Layout-less protected route: a standalone page so the browser print
                     engine (Safari especially) renders the document in normal flow, with

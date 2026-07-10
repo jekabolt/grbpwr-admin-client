@@ -4,6 +4,7 @@ import * as DialogPrimitives from '@radix-ui/react-dialog';
 
 import { useState } from 'react';
 
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SIDE_BAR_ITEMS } from 'constants/routes';
 import { Link } from 'react-router-dom';
 import { Button } from './button';
@@ -11,6 +12,8 @@ import Text from './text';
 
 export function MobileNavMenu() {
   const [open, setOpen] = useState(false);
+  const { canRead } = usePermissions();
+  const items = SIDE_BAR_ITEMS.filter((item) => canRead(item.section));
 
   return (
     <DialogPrimitives.Root open={open} onOpenChange={setOpen}>
@@ -31,7 +34,7 @@ export function MobileNavMenu() {
               </div>
             </DialogPrimitives.Close>
             <div className='flex flex-col gap-5'>
-              {SIDE_BAR_ITEMS.map(({ label, route }, id) => (
+              {items.map(({ label, route }, id) => (
                 <DialogPrimitives.Close asChild key={id}>
                   <Button asChild>
                     <Link to={route}>{label}</Link>
