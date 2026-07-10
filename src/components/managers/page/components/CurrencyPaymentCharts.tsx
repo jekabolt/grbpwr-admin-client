@@ -1,12 +1,44 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Text from 'ui/components/text';
+import {
+  ChartCard,
+  EChart,
+  categoryAxis,
+  chartColors,
+  gridBase,
+  tooltipBase,
+  valueAxis,
+} from '../charts';
 import { formatCurrency, parseDecimal } from '../utils';
 
 interface CurrencyPaymentChartsProps {
   metrics: BusinessMetrics | undefined;
 }
+
+const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+  const items = Array.isArray(raw) ? raw : [raw];
+  const label = items[0]?.name ?? '';
+  const rows = items
+    .map((it) => `${it.marker ?? ''}<b>${formatCurrency(Number(it.value ?? 0))}</b>`)
+    .join('<br/>');
+  return `<div style="font-size:11px;line-height:1.6">${label}<br/>${rows}</div>`;
+};
+
+const barOption = (names: string[], values: number[]): EChartsOption => ({
+  grid: gridBase,
+  tooltip: { ...tooltipBase, trigger: 'axis', formatter: tooltipFormatter },
+  xAxis: categoryAxis({ data: names }),
+  yAxis: valueAxis({ axisLabel: { formatter: (v: number) => formatCurrency(v) } }),
+  series: [
+    {
+      type: 'bar',
+      data: values,
+      itemStyle: { color: chartColors.ink, borderRadius: [2, 2, 0, 0] },
+    },
+  ],
+});
 
 export const CurrencyPaymentCharts: FC<CurrencyPaymentChartsProps> = ({ metrics }) => {
   if (!metrics) return null;
@@ -34,40 +66,26 @@ export const CurrencyPaymentCharts: FC<CurrencyPaymentChartsProps> = ({ metrics 
       </Text>
       <div className='grid gap-4 md:grid-cols-2'>
         {currencyData.length > 0 && (
-          <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-            <Text variant='uppercase' className='font-bold mb-4 block'>
-              Revenue by currency
-            </Text>
-            <ResponsiveContainer width='100%' height={220}>
-              <BarChart data={currencyData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-                <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
-                <XAxis dataKey='name' tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatCurrency(v)} />
-                <Tooltip
-                  formatter={(value?: number) => [value != null ? formatCurrency(value) : '', '']}
-                />
-                <Bar dataKey='value' fill='#000' radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <ChartCard title='Revenue by currency'>
+            <EChart
+              option={barOption(
+                currencyData.map((d) => d.name),
+                currencyData.map((d) => d.value),
+              )}
+              height={220}
+            />
+          </ChartCard>
         )}
         {paymentData.length > 0 && (
-          <div className='border border-textInactiveColor p-4 min-h-[280px]'>
-            <Text variant='uppercase' className='font-bold mb-4 block'>
-              Revenue by payment method
-            </Text>
-            <ResponsiveContainer width='100%' height={220}>
-              <BarChart data={paymentData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-                <CartesianGrid strokeDasharray='3 3' stroke='#ccc' />
-                <XAxis dataKey='name' tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatCurrency(v)} />
-                <Tooltip
-                  formatter={(value?: number) => [value != null ? formatCurrency(value) : '', '']}
-                />
-                <Bar dataKey='value' fill='#000' radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <ChartCard title='Revenue by payment method'>
+            <EChart
+              option={barOption(
+                paymentData.map((d) => d.name),
+                paymentData.map((d) => d.value),
+              )}
+              height={220}
+            />
+          </ChartCard>
         )}
       </div>
     </div>

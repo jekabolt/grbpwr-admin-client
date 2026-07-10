@@ -1,7 +1,17 @@
 import type { SessionDurationMetric } from 'api/proto-http/admin';
+import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import Text from 'ui/components/text';
+import {
+  ChartCard,
+  EChart,
+  categoryAxis,
+  chartColors,
+  compareLineStyle,
+  gridBase,
+  legendBase,
+  tooltipBase,
+  valueAxis,
+} from '../charts';
 
 interface SessionDurationChartProps {
   sessionDuration: SessionDurationMetric[] | undefined;
@@ -10,44 +20,64 @@ interface SessionDurationChartProps {
 export const SessionDurationChart: FC<SessionDurationChartProps> = ({ sessionDuration }) => {
   if (!sessionDuration || sessionDuration.length === 0) return null;
 
-  const data = sessionDuration.map((metric) => {
-    const date = metric.date ? new Date(metric.date) : new Date();
-    return {
-      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      avgSeconds: metric.avgTimeBetweenEventsSeconds || 0,
-      medianSeconds: metric.medianTimeBetweenEvents || 0,
-    };
-  });
+  const dates = sessionDuration.map((m) =>
+    m.date ? new Date(m.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
+  );
+  const avgValues = sessionDuration.map((m) => m.avgTimeBetweenEventsSeconds || 0);
+  const medianValues = sessionDuration.map((m) => m.medianTimeBetweenEvents || 0);
+
+  const formatSeconds = (v: number) => `${v.toFixed(1)}s`;
+
+  const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
+    const items = Array.isArray(raw) ? raw : [raw];
+    const label = items[0]?.name ?? '';
+    const rows = items
+      .map(
+        (it) =>
+          `${it.marker ?? ''}${it.seriesName}: <b>${formatSeconds(Number(it.value ?? 0))}</b>`,
+      )
+      .join('<br/>');
+    return `<div style="font-size:11px;line-height:1.6">${label}<br/>${rows}</div>`;
+  };
+
+  const option: EChartsOption = {
+    grid: { ...gridBase, bottom: 28 },
+    tooltip: { ...tooltipBase, trigger: 'axis', formatter: tooltipFormatter },
+    legend: { ...legendBase },
+    xAxis: categoryAxis({ data: dates, boundaryGap: false }),
+    yAxis: valueAxis({
+      name: 'Seconds',
+      nameTextStyle: { color: chartColors.inkSecondary, fontSize: 10 },
+      axisLabel: { formatter: (v: number) => formatSeconds(v) },
+    }),
+    series: [
+      {
+        name: 'Average',
+        type: 'line',
+        data: avgValues,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: chartColors.ink, width: 2 },
+        itemStyle: { color: chartColors.ink },
+      },
+      {
+        name: 'Median',
+        type: 'line',
+        data: medianValues,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: compareLineStyle,
+        itemStyle: { color: chartColors.compare },
+      },
+    ],
+  };
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Session duration (time between events)
-      </Text>
-      <ResponsiveContainer width='100%' height={300}>
-        <LineChart data={data}>
-          <CartesianGrid strokeDasharray='3 3' stroke='#333' />
-          <XAxis dataKey='date' stroke='#999' tick={{ fill: '#999' }} />
-          <YAxis 
-            stroke='#999' 
-            tick={{ fill: '#999' }}
-            label={{ value: 'Seconds', angle: -90, position: 'insideLeft', fill: '#999' }}
-          />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#000', border: '1px solid #333' }}
-            labelStyle={{ color: '#fff' }}
-            formatter={(value: number, name: string) => {
-              const label = name === 'avgSeconds' ? 'Avg' : 'Median';
-              return [`${value.toFixed(1)}s`, label];
-            }}
-          />
-          <Line type='monotone' dataKey='avgSeconds' stroke='#fff' strokeWidth={2} name='Average' />
-          <Line type='monotone' dataKey='medianSeconds' stroke='#aaa' strokeWidth={2} strokeDasharray='5 5' name='Median' />
-        </LineChart>
-      </ResponsiveContainer>
-      <div className='mt-3 text-xs text-textInactiveColor'>
-        <Text>Time between user interactions - higher = more engaged sessions</Text>
-      </div>
-    </div>
+    <ChartCard
+      title='Session duration (time between events)'
+      subtitle='Time between user interactions - higher = more engaged sessions'
+    >
+      <EChart option={option} height={300} />
+    </ChartCard>
   );
 };
