@@ -1,15 +1,25 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import Text from 'ui/components/text';
-import { CrossSellTable, TimeSeriesChart } from '../components';
-import { formatNumber, getMetricComparison } from '../utils';
+import {
+  CampaignAttributionTable,
+  ChannelSpendForm,
+  CrossSellTable,
+  GeographyCharts,
+  TrafficCharts,
+} from '../components';
+import { formatAvgDaysBetweenOrders, formatNumber, getMetricComparison } from '../utils';
 
-interface CustomerTabProps {
+interface GrowthTabProps {
   metricsResponse: GetMetricsResponse;
 }
 
-export function CustomerTab({ metricsResponse }: CustomerTabProps) {
+/**
+ * Where growth comes from. Repeat economics (DB-true) up top, then GA4/channel signals — all of
+ * which are directional at boutique traffic, so they live here rather than at the money altitude.
+ * Absorbs the former standalone Customers tab (a 3-number card didn't warrant its own tab).
+ */
+export function GrowthTab({ metricsResponse }: GrowthTabProps) {
   const metrics = metricsResponse.business;
-  // Number of customers the repeat stats are computed over — used as the honesty label.
   const sampleSize = metrics?.clvDistribution?.sampleSize ?? 0;
 
   const repeatRate = getMetricComparison(metrics?.repeatCustomersRate as any);
@@ -17,7 +27,7 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
   const daysBetweenOrders = getMetricComparison(metrics?.avgDaysBetweenOrders as any);
 
   return (
-    <div className='space-y-6'>
+    <div className='space-y-10'>
       <div className='space-y-2'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <h3 className='text-sm font-bold uppercase'>Repeat economics</h3>
@@ -29,8 +39,7 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
         {sampleSize > 0 && sampleSize < 30 && (
           <div className='border border-warning bg-warning/10 p-2'>
             <Text className='text-warning text-xs'>
-              Low sample (n={sampleSize}): directional only, not statistically reliable yet. Deeper
-              cohort/CLV breakdowns are hidden until volume supports them.
+              Low sample (n={sampleSize}): directional only, not statistically reliable yet.
             </Text>
           </div>
         )}
@@ -59,36 +68,35 @@ export function CustomerTab({ metricsResponse }: CustomerTabProps) {
               Days between orders
             </Text>
             <Text className='font-bold text-lg'>
-              {daysBetweenOrders.value > 0 ? daysBetweenOrders.value.toFixed(0) : '—'}
+              {daysBetweenOrders.value > 0
+                ? formatAvgDaysBetweenOrders(daysBetweenOrders.value)
+                : '—'}
             </Text>
             <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
               avg gap to next order
             </Text>
           </div>
         </div>
-      </div>
 
-      <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>New vs returning by day</h3>
-        <div className='grid gap-4 md:grid-cols-2'>
-          <TimeSeriesChart
-            title='New customers by day'
-            data={metrics?.newCustomersByDay}
-            compareData={metrics?.newCustomersByDayCompare}
-            valueFormat='number'
-          />
-          <TimeSeriesChart
-            title='Returning customers by day'
-            data={metrics?.returningCustomersByDay}
-            compareData={metrics?.returningCustomersByDayCompare}
-            valueFormat='number'
-          />
-        </div>
-      </div>
-
-      <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Frequently bought together</h3>
         <CrossSellTable metrics={metrics} />
+      </div>
+
+      <div className='space-y-3'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <h3 className='text-sm font-bold uppercase'>Campaigns &amp; channels</h3>
+          <ChannelSpendForm />
+        </div>
+        <CampaignAttributionTable campaignAttribution={metricsResponse.campaignAttribution} />
+        <Text className='text-textInactiveColor text-[11px] leading-relaxed'>
+          Channel data is GA4-sourced and directional at boutique traffic — sampling, consent gaps,
+          bots and last-click attribution make daily lines and micro-conversion rates unreliable, so
+          only channel mix, spend/ROAS and DB revenue-by-country are shown.
+        </Text>
+      </div>
+
+      <div className='grid gap-8 md:grid-cols-2'>
+        <TrafficCharts metrics={metrics} />
+        <GeographyCharts metrics={metrics} />
       </div>
     </div>
   );

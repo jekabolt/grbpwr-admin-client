@@ -12,6 +12,20 @@ This note describes how the **Analytics Dashboard** works in `grbpwr-admin-clien
 
 ---
 
+> ## ⚠️ 2026-07-10 decision-first rework (supersedes much of the detail below)
+>
+> The body of this note (dated 2026-05-03, 6 tabs) is **historical**. Current state on branch `analytics-decision-first`:
+>
+> - **Four decision-oriented tabs**: **Today** (act-now alerts + orders + top products), **Revenue & Orders** (profit hero, funnel, promo), **Products** (reorder / clear / size), **Growth** (repeat economics + campaigns + channel mix + DB geo). Customers & Traffic were folded into Growth; the Technical tab was retired. Legacy `?tab=customers|traffic` alias to Growth.
+> - **Persistent KPI ribbon** is now 4 DB-true tiles: **Revenue / Contribution Margin € / Gross Margin % / Orders**, each led by an *absolute* delta (Conversion, AOV and Sessions removed).
+> - **Defaults**: period **30d**, compare **OFF**; same-period-last-year removed.
+> - **Trust hierarchy**: DB-true money loud/top; GA4/BigQuery quarantined in Growth and labelled "directional". Rates shown as **counts** below n=30; time series **coarsened to weekly**; per-product size mix and per-campaign conversion **suppressed** below volume floors.
+> - **Cut**: OrdersByStatus pie, CurrencyPayment charts, RevenuePareto, AddToCart matrix/table, SizeConfidence, ProductTrend, SessionsByCountry map, daily GA4 series, GA4 engagement vanity, Email KPIs, the "Story of the period" narrative, and ~22 now-orphaned component/tab files.
+> - **New**: `ReorderTable` (needs_reorder), margin-aware product tables, `ChannelSpendForm` + `InventoryTargetForm` operator entry, `RefundReason` enum wiring.
+> - **Backend follow-ups**: see [`analytics-backend-asks.md`](./analytics-backend-asks.md).
+
+---
+
 ## 1. Entry point & navigation
 
 | Item | Detail |

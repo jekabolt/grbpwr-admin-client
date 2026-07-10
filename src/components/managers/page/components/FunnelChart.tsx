@@ -5,7 +5,6 @@ import { formatNumber } from '../utils';
 
 interface FunnelChartProps {
   funnel: FunnelSection | undefined;
-  compareEnabled?: boolean;
 }
 
 // Collapsed to 3 trustworthy steps — at boutique traffic the 10-step GA4 funnel is
@@ -16,12 +15,31 @@ const FUNNEL_STEPS = [
   { key: 'purchaseUsers', label: 'Purchase' },
 ] as const;
 
-export const FunnelChart: FC<FunnelChartProps> = ({ funnel, compareEnabled = false }) => {
+// Below this many purchasers the step ratios are single-digit noise — a funnel drawn on 8
+// buyers invites over-reading. Suppress the shape and say so instead.
+const MIN_PURCHASE_USERS = 30;
+
+export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
   if (!funnel?.aggregate) return null;
 
   const aggregate = funnel.aggregate;
   const maxUsers = aggregate.viewItemUsers || 1;
   const caveat = funnel.caveat?.trim();
+  const purchaseUsers = aggregate.purchaseUsers ?? 0;
+
+  if (purchaseUsers < MIN_PURCHASE_USERS) {
+    return (
+      <div className='border border-textInactiveColor p-4'>
+        <Text variant='uppercase' className='font-bold block mb-1'>
+          Conversion funnel
+        </Text>
+        <Text className='text-xs text-textInactiveColor leading-relaxed'>
+          Only {formatNumber(purchaseUsers)} purchases this period — too few to read step drop-off
+          reliably. Widen the date range to see the funnel.
+        </Text>
+      </div>
+    );
+  }
 
   return (
     <div className='border border-textInactiveColor p-4'>
@@ -29,11 +47,6 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel, compareEnabled = fal
         <Text variant='uppercase' className='font-bold block'>
           Conversion funnel
         </Text>
-        {compareEnabled && (
-          <Text className='text-[10px] text-textInactiveColor mt-1 block'>
-            Prior period comparison is not available for this funnel yet.
-          </Text>
-        )}
       </div>
       {caveat && (
         <div className='mb-4 border-b border-textInactiveColor/40 pb-3'>

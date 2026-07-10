@@ -8,12 +8,19 @@ interface SizeRunEfficiencyTableProps {
   sizeRunEfficiency: SizeRunEfficiencyRow[] | undefined;
 }
 
+// A product needs a real size run before "how many sizes sold" says anything — 1 of 2 sizes is
+// 50% on no information.
+const MIN_SIZES = 3;
+
 export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRunEfficiency }) => {
   if (!sizeRunEfficiency || sizeRunEfficiency.length === 0) return null;
 
   const sorted = [...sizeRunEfficiency]
+    .filter((r) => (r.totalSizes || 0) >= MIN_SIZES)
     .sort((a, b) => (a.efficiencyPct || 0) - (b.efficiencyPct || 0))
     .slice(0, 20);
+
+  if (sorted.length === 0) return null;
 
   return (
     <div className='border border-textInactiveColor p-4'>
@@ -25,16 +32,24 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Total sizes</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Total sizes
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Sold through</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Sold through
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Sell-through %</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Sell-through %
+                </Text>
               </th>
             </tr>
           </thead>
@@ -57,7 +72,13 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
                     <Text>{formatNumber(row.soldThroughSizes || 0)}</Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text className={pct < 50 ? 'text-error font-bold' : 'font-bold'}>
+                    <Text
+                      className={
+                        pct < 50 && (row.totalSizes || 0) >= 4
+                          ? 'text-error font-bold'
+                          : 'font-bold'
+                      }
+                    >
                       {pct.toFixed(1)}%
                     </Text>
                   </td>
@@ -69,10 +90,12 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
         <Text>
-          Share of distinct sizes that sold at least once vs total sizes offered — low sell-through may
-          indicate overbuying on certain sizes
+          Share of distinct sizes that sold at least once (of {MIN_SIZES}+ sizes offered) — a coarse
+          proxy for whether the size run was bought right. Low = likely overbought some sizes.
         </Text>
-        <Text>Snapshot for selected period — no prior-period breakdown in this view.</Text>
+        <Text>
+          True sell-through (units sold ÷ units bought) needs cost/buy data from the backend.
+        </Text>
       </div>
     </div>
   );

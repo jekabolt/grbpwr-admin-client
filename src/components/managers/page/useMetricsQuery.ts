@@ -15,8 +15,9 @@ export const PERIOD_OPTIONS: Array<{ value: MetricsPeriod; label: string }> = [
   { value: 'custom', label: 'Custom' },
 ];
 
+// Same-period-last-year is intentionally omitted: it compares two small samples confounded by
+// different drops, assortment and a smaller past business — noise dressed as a YoY trend.
 export const COMPARE_MODE_OPTIONS: Array<{ value: CompareMode; label: string }> = [
   { value: 'COMPARE_MODE_NONE', label: 'No comparison' },
   { value: 'COMPARE_MODE_PREVIOUS_PERIOD', label: 'Previous period' },
-  { value: 'COMPARE_MODE_SAME_PERIOD_LAST_YEAR', label: 'Same period last year' },
 ];

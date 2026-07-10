@@ -16,9 +16,7 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           Notify me intent
         </Text>
         <div className='py-8 text-center'>
-          <Text className='text-textInactiveColor'>
-            No restock demand signals in this period
-          </Text>
+          <Text className='text-textInactiveColor'>No restock demand signals in this period</Text>
         </div>
         <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
           <Text>
@@ -39,23 +37,18 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           productName: row.productName,
           action: row.action || '—',
           count: 0,
-          totalRate: 0,
-          entries: 0,
         };
       }
       acc[key].count += row.count || 0;
-      acc[key].totalRate += row.conversionRate || 0;
-      acc[key].entries += 1;
       return acc;
     },
-    {} as Record<string, { productId?: string; productName?: string; action: string; count: number; totalRate: number; entries: number }>,
+    {} as Record<
+      string,
+      { productId?: string; productName?: string; action: string; count: number }
+    >,
   );
 
   const rows = Object.values(aggregated)
-    .map((r) => ({
-      ...r,
-      avgConversionRate: r.entries > 0 ? r.totalRate / r.entries : 0,
-    }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 20);
 
@@ -69,16 +62,19 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Action</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Action
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Count</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Conv. rate</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Count
+                </Text>
               </th>
             </tr>
           </thead>
@@ -97,9 +93,6 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
                 </td>
                 <td className='p-2 text-right'>
                   <Text className='font-bold'>{formatNumber(row.count)}</Text>
-                </td>
-                <td className='p-2 text-right'>
-                  <Text className='font-bold'>{row.avgConversionRate.toFixed(1)}%</Text>
                 </td>
               </tr>
             ))}
