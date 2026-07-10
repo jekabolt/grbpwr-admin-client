@@ -1,4 +1,5 @@
 import { AdminAccount } from 'api/proto-http/admin';
+import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -7,16 +8,31 @@ import { formatDateShort } from '../../orders-catalog/components/utility';
 import { ACCESS, useDeleteAccount, useSetAccountDisabled } from '../utils/hooks';
 
 const ACCESS_ABBR: Record<string, string> = {
-  [ACCESS.READ]: 'r',
-  [ACCESS.WRITE]: 'w',
+  [ACCESS.READ]: 'R',
+  [ACCESS.WRITE]: 'W',
 };
 
-function AccessSummary({ account }: { account: AdminAccount }) {
+function StatusBadge({ disabled }: { disabled?: boolean }) {
+  return (
+    <span
+      className={cn(
+        'shrink-0 border px-1.5 py-0.5',
+        disabled ? 'border-error' : 'border-textColor',
+      )}
+    >
+      <Text variant={disabled ? 'error' : 'uppercase'} size='small'>
+        {disabled ? 'disabled' : 'active'}
+      </Text>
+    </span>
+  );
+}
+
+function AccessChips({ account }: { account: AdminAccount }) {
   if (account.isSuper) {
     return (
-      <span className='border border-textColor px-1.5 py-0.5'>
-        <Text variant='uppercase' size='small'>
-          super
+      <span className='inline-flex border border-textColor bg-textColor px-1.5 py-0.5'>
+        <Text size='small' className='uppercase text-bgColor'>
+          super · full access
         </Text>
       </span>
     );
@@ -24,18 +40,18 @@ function AccessSummary({ account }: { account: AdminAccount }) {
   const perms = (account.permissions ?? []).filter((p) => p.section);
   if (perms.length === 0) {
     return (
-      <Text variant='inactive' size='small'>
-        no access
+      <Text variant='label' size='small'>
+        no sections granted
       </Text>
     );
   }
   return (
-    <div className='flex flex-wrap justify-center gap-1'>
+    <div className='flex flex-wrap gap-1'>
       {perms.map((p) => (
-        <span key={p.section} className='border border-textColor px-1 py-0.5 whitespace-nowrap'>
-          <Text size='small'>
+        <span key={p.section} className='whitespace-nowrap border border-textColor px-1.5 py-0.5'>
+          <Text size='small' className='uppercase'>
             {p.section}
-            <span className='text-textInactiveColor'>·{ACCESS_ABBR[p.access ?? ''] ?? '?'}</span>
+            <span className='text-labelColor'> {ACCESS_ABBR[p.access ?? ''] ?? '?'}</span>
           </Text>
         </span>
       ))}
@@ -64,97 +80,89 @@ export function AccountsTable({
   const del = useDeleteAccount();
   const [toDelete, setToDelete] = useState<AdminAccount | null>(null);
 
+  if (isLoading) {
+    return (
+      <div className='border border-textColor'>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className={cn(
+              'h-24 animate-pulse bg-textInactiveColor/30',
+              i > 0 && 'border-t border-textColor',
+            )}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (accounts.length === 0) {
+    return (
+      <div className='flex flex-col items-center gap-1 border border-textColor p-10 text-center'>
+        <Text variant='uppercase'>no accounts yet</Text>
+        <Text variant='label' size='small'>
+          create the first admin account to grant scoped or full access.
+        </Text>
+      </div>
+    );
+  }
+
   return (
     <>
-      <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border border-textColor min-w-max'>
-          <thead className='bg-textInactiveColor h-9'>
-            <tr>
-              {['Username', 'Access', 'Status', 'Created', 'Updated', ''].map((h) => (
-                <th key={h} className='border border-textColor px-2 h-9'>
-                  <Text variant='uppercase' size='small'>
-                    {h}
+      <div className='border border-textColor'>
+        {accounts.map((a, i) => {
+          const isSelf = !!currentUsername && a.username === currentUsername;
+          return (
+            <div
+              key={a.username}
+              className={cn('flex flex-col gap-3 p-3 sm:p-4', i > 0 && 'border-t border-textColor')}
+            >
+              <div className='flex flex-wrap items-center justify-between gap-2'>
+                <div className='flex items-baseline gap-2'>
+                  <Text size='large' className='uppercase break-all'>
+                    {a.username}
                   </Text>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {accounts.length === 0 ? (
-              <tr>
-                <td colSpan={6} className='text-center py-6'>
-                  <Text variant='inactive'>{isLoading ? 'loading…' : 'no accounts'}</Text>
-                </td>
-              </tr>
-            ) : (
-              accounts.map((a) => {
-                const isSelf = !!currentUsername && a.username === currentUsername;
-                return (
-                  <tr key={a.username} className='border-b border-textColor last:border-b-0'>
-                    <td className='border border-textColor px-2 py-1.5 whitespace-nowrap'>
-                      <Text size='small'>
-                        {a.username}
-                        {isSelf && <span className='text-textInactiveColor'> (you)</span>}
-                      </Text>
-                    </td>
-                    <td className='border border-textColor px-2 py-1.5 text-center'>
-                      <AccessSummary account={a} />
-                    </td>
-                    <td className='border border-textColor px-2 py-1.5 text-center'>
-                      <Text size='small' variant={a.disabled ? 'error' : 'default'}>
-                        {a.disabled ? 'disabled' : 'active'}
-                      </Text>
-                    </td>
-                    <td className='border border-textColor px-2 py-1.5 text-center whitespace-nowrap'>
-                      <Text size='small'>{formatDateShort(a.createdAt)}</Text>
-                    </td>
-                    <td className='border border-textColor px-2 py-1.5 text-center whitespace-nowrap'>
-                      <Text size='small'>{formatDateShort(a.updatedAt)}</Text>
-                    </td>
-                    <td className='border border-textColor px-2 py-1.5 text-center whitespace-nowrap'>
-                      {canWrite ? (
-                        <div className='flex items-center justify-center gap-1'>
-                          <Button variant='underline' onClick={() => onEdit(a)}>
-                            edit
-                          </Button>
-                          <span className='text-textInactiveColor'>·</span>
-                          <Button variant='underline' onClick={() => onResetPassword(a)}>
-                            password
-                          </Button>
-                          <span className='text-textInactiveColor'>·</span>
-                          <Button
-                            variant='underline'
-                            disabled={isSelf || setDisabled.isPending}
-                            onClick={() =>
-                              setDisabled.mutate({
-                                username: a.username ?? '',
-                                disabled: !a.disabled,
-                              })
-                            }
-                          >
-                            {a.disabled ? 'enable' : 'disable'}
-                          </Button>
-                          <span className='text-textInactiveColor'>·</span>
-                          <Button
-                            variant='underline'
-                            disabled={isSelf}
-                            onClick={() => setToDelete(a)}
-                          >
-                            delete
-                          </Button>
-                        </div>
-                      ) : (
-                        <Text variant='inactive' size='small'>
-                          read-only
-                        </Text>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                  {isSelf && (
+                    <Text variant='label' size='small'>
+                      you
+                    </Text>
+                  )}
+                </div>
+                <StatusBadge disabled={a.disabled} />
+              </div>
+
+              <AccessChips account={a} />
+
+              <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-textInactiveColor pt-2'>
+                <Text variant='label' size='small'>
+                  created {formatDateShort(a.createdAt)} · updated {formatDateShort(a.updatedAt)}
+                </Text>
+                {canWrite && (
+                  <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
+                    <Button variant='underline' onClick={() => onEdit(a)}>
+                      edit
+                    </Button>
+                    <Button variant='underline' onClick={() => onResetPassword(a)}>
+                      password
+                    </Button>
+                    <Button
+                      variant='underline'
+                      disabled={isSelf || setDisabled.isPending}
+                      onClick={() =>
+                        setDisabled.mutate({ username: a.username ?? '', disabled: !a.disabled })
+                      }
+                    >
+                      {a.disabled ? 'enable' : 'disable'}
+                    </Button>
+                    <Button variant='underline' disabled={isSelf} onClick={() => setToDelete(a)}>
+                      delete
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <ConfirmationModal
@@ -165,7 +173,7 @@ export function AccountsTable({
           setToDelete(null);
         }}
         title='delete account'
-        confirmLabel='delete'
+        confirmLabel='delete account'
       >
         <Text size='small'>
           Permanently delete <span className='uppercase'>{toDelete?.username}</span> and its
