@@ -123,8 +123,6 @@ export const useOrderDetails = (uuid: string) => {
         // Structured code drives the return-analysis breakdown; free-text reason is the audit note.
         reasonCode: payload.reasonCode ?? 'REFUND_REASON_UNSPECIFIED',
         refundShipping: isPartial ? payload.refundShipping ?? false : undefined,
-        // Structured reason is additive; unset falls back to the free-text reason above.
-        reasonCode: undefined,
       });
       fetchOrderDetails();
       setSelectedUnitKeys([]);
