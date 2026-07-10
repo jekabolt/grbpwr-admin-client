@@ -11,36 +11,39 @@ interface OOSImpactTableProps {
 export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
   if (!oosImpact || oosImpact.length === 0) return null;
 
-  const aggregated = oosImpact.reduce((acc, metric) => {
-    const key = `${metric.productId}-${metric.sizeId}`;
-    if (!acc[key]) {
-      acc[key] = {
-        productId: metric.productId,
-        productName: metric.productName,
-        sizeId: metric.sizeId,
-        sizeName: metric.sizeName,
-        productPrice: metric.productPrice,
-        currency: metric.currency,
-        clickCount: 0,
-        estimatedLostRevenue: 0,
-      };
-    }
-    acc[key].clickCount += metric.clickCount || 0;
-    acc[key].estimatedLostRevenue += parseDecimal(metric.estimatedLostRevenue);
-    return acc;
-  }, {} as Record<string, {
-    productId: string | undefined;
-    productName: string | undefined;
-    sizeId: number | undefined;
-    sizeName: string | undefined;
-    productPrice: any;
-    currency: string | undefined;
-    clickCount: number;
-    estimatedLostRevenue: number;
-  }>);
+  const aggregated = oosImpact.reduce(
+    (acc, metric) => {
+      const key = `${metric.productId}-${metric.sizeId}`;
+      if (!acc[key]) {
+        acc[key] = {
+          productId: metric.productId,
+          productName: metric.productName,
+          sizeId: metric.sizeId,
+          sizeName: metric.sizeName,
+          productPrice: metric.productPrice,
+          clickCount: 0,
+        };
+      }
+      acc[key].clickCount += metric.clickCount || 0;
+      return acc;
+    },
+    {} as Record<
+      string,
+      {
+        productId: string | undefined;
+        productName: string | undefined;
+        sizeId: number | undefined;
+        sizeName: string | undefined;
+        productPrice: any;
+        clickCount: number;
+      }
+    >,
+  );
 
+  // Rank by demand (clicks on an out-of-stock size), not a fabricated clicks×price € figure —
+  // an OOS click is intent, not a guaranteed lost sale, so multiplying by price invents precision.
   const topOOS = Object.values(aggregated)
-    .sort((a, b) => b.estimatedLostRevenue - a.estimatedLostRevenue)
+    .sort((a, b) => b.clickCount - a.clickCount)
     .slice(0, 20);
 
   if (topOOS.length === 0) return null;
@@ -48,26 +51,31 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
   return (
     <div className='border border-textInactiveColor p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Out-of-stock impact
+        Out-of-stock demand
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Product</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Product
+                </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Size</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Size
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>OOS Clicks</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  OOS Clicks
+                </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Price</Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>Est. Lost Revenue</Text>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Price
+                </Text>
               </th>
             </tr>
           </thead>
@@ -75,7 +83,11 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
             {topOOS.map((row, idx) => (
               <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                 <td className='p-2'>
-                  <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='120px' />
+                  <ProductNameLink
+                    productId={row.productId}
+                    productName={row.productName}
+                    maxWidth='120px'
+                  />
                 </td>
                 <td className='p-2'>
                   <Text>{row.sizeName || `Size #${row.sizeId}`}</Text>
@@ -86,16 +98,13 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
                 <td className='p-2 text-right'>
                   <Text>{formatCurrency(parseDecimal(row.productPrice))}</Text>
                 </td>
-                <td className='p-2 text-right'>
-                  <Text className='text-error font-bold'>{formatCurrency(row.estimatedLostRevenue)}</Text>
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div className='mt-3 text-xs text-textInactiveColor'>
-        <Text>Estimated lost revenue from out-of-stock clicks - prioritize restocking</Text>
+        <Text>Clicks on out-of-stock sizes — most-wanted first. Restock priority.</Text>
       </div>
     </div>
   );

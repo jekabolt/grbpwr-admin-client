@@ -1,4 +1,4 @@
-import type { BusinessMetrics, GeographyMetric, RegionMetric } from 'api/proto-http/admin';
+import type { BusinessMetrics, GeographyMetric } from 'api/proto-http/admin';
 import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
 import Text from 'ui/components/text';
@@ -74,43 +74,24 @@ function geoToChartData(
   }));
 }
 
-function regionToChartData(
-  items: RegionMetric[] | undefined,
-): Array<{ name: string; value: number; count?: number }> {
-  if (!items?.length) return [];
-  return items.map((r) => ({
-    name: r.region || 'Unknown',
-    value: parseDecimal(r.value),
-    count: r.count ?? 0,
-  }));
-}
-
 interface GeographyChartsProps {
   metrics: BusinessMetrics | undefined;
 }
 
+// Country-level revenue is the useful floor. City/region rows are 1–2 orders and per-country AOV
+// flips on a single large order — cut. This is DB revenue, so it's trustworthy (unlike GA4 geo).
 export const GeographyCharts: FC<GeographyChartsProps> = ({ metrics }) => {
   if (!metrics) return null;
+  const data = geoToChartData(metrics.revenueByCountry);
+  if (data.length === 0) return null;
 
   return (
     <div className='space-y-6'>
       <Text variant='uppercase' className='font-bold'>
-        Geography
+        Revenue by country
       </Text>
-      <div className='grid gap-4 md:grid-cols-2'>
-        <BarChartWrapper
-          title='Revenue by country'
-          data={geoToChartData(metrics.revenueByCountry)}
-        />
-        <BarChartWrapper title='Revenue by city' data={geoToChartData(metrics.revenueByCity)} />
-        <BarChartWrapper
-          title='Revenue by region'
-          data={regionToChartData(metrics.revenueByRegion)}
-        />
-        <BarChartWrapper
-          title='Avg order by country'
-          data={geoToChartData(metrics.avgOrderByCountry)}
-        />
+      <div className='max-w-xl'>
+        <BarChartWrapper title='Revenue by country' data={data} />
       </div>
     </div>
   );

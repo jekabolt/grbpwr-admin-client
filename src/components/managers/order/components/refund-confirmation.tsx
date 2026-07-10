@@ -1,4 +1,4 @@
-import { common_OrderFull } from 'api/proto-http/admin';
+import { common_OrderFull, type RefundReason } from 'api/proto-http/admin';
 import { REASONS } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
@@ -6,6 +6,22 @@ import { Button } from 'ui/components/button';
 import Checkbox from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
+
+// Maps the free-text refund reasons to the structured RefundReason enum, which drives the
+// return-analysis breakdown. Anything unmapped falls back to OTHER.
+const REFUND_REASON_CODE: Record<string, RefundReason> = {
+  'size issues': 'REFUND_REASON_WRONG_SIZE',
+  'damaged or defective': 'REFUND_REASON_DEFECTIVE',
+  'wrong item received': 'REFUND_REASON_NOT_AS_DESCRIBED',
+  'item does not match description': 'REFUND_REASON_NOT_AS_DESCRIBED',
+  'quality not as expected': 'REFUND_REASON_NOT_AS_DESCRIBED',
+  'changed my mind': 'REFUND_REASON_CHANGED_MIND',
+  'ordered by mistake': 'REFUND_REASON_CHANGED_MIND',
+};
+
+function reasonCodeFor(reason: string): RefundReason {
+  return REFUND_REASON_CODE[reason.trim().toLowerCase()] ?? 'REFUND_REASON_OTHER';
+}
 
 export function RefundConfirmation({
   orderDetails,
@@ -18,7 +34,11 @@ export function RefundConfirmation({
   open: boolean;
   selectedUnitKeys: string[];
   onOpenChange: (open: boolean) => void;
-  refundOrder: (payload: { reason: string; refundShipping?: boolean }) => void;
+  refundOrder: (payload: {
+    reason: string;
+    refundShipping?: boolean;
+    reasonCode?: RefundReason;
+  }) => void;
 }) {
   const isFullRefund = !selectedUnitKeys.length;
   const existingReason = orderDetails?.order?.refundReason ?? '';
@@ -49,8 +69,11 @@ export function RefundConfirmation({
   }, [open, existingReason]);
 
   const handleRefundConfirm = () => {
+    const reasonCode = reasonCodeFor(selectedReason);
     refundOrder(
-      isFullRefund ? { reason: selectedReason } : { reason: selectedReason, refundShipping },
+      isFullRefund
+        ? { reason: selectedReason, reasonCode }
+        : { reason: selectedReason, refundShipping, reasonCode },
     );
   };
 

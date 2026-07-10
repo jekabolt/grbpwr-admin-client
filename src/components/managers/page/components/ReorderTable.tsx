@@ -1,25 +1,40 @@
-import type { DeadStockRow } from 'api/proto-http/admin';
-import { FC } from 'react';
+import type { InventoryHealthRow } from 'api/proto-http/admin';
+import { FC, useMemo } from 'react';
 import Text from 'ui/components/text';
-import { formatCurrency, formatNumber, parseDecimal } from '../utils';
+import { DAYS_ON_HAND_NO_SALES_SENTINEL, formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
-interface DeadStockTableProps {
-  deadStock: DeadStockRow[] | undefined;
+interface ReorderTableProps {
+  inventoryHealth: InventoryHealthRow[] | undefined;
 }
 
-export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
-  if (!deadStock || deadStock.length === 0) return null;
+function daysOfCover(row: InventoryHealthRow): string {
+  const d = row.daysOnHand ?? 0;
+  if (d >= DAYS_ON_HAND_NO_SALES_SENTINEL || (row.avgDailySales ?? 0) <= 0) return '—';
+  return d.toFixed(0);
+}
 
-  // Most capital tied up first — that's what to liquidate to free cash, not the oldest SKU.
-  const topDeadStock = [...deadStock]
-    .sort((a, b) => parseDecimal(b.stockValue) - parseDecimal(a.stockValue))
-    .slice(0, 20);
+/**
+ * The buy-more list: SKUs the backend flagged needs_reorder against an operator-set target.
+ * Understock, the mirror of the overstock table. Only meaningful for SKUs with a target set —
+ * a generic days-of-cover flag would be misleading for one-off limited drops.
+ */
+export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
+  const rows = useMemo(
+    () =>
+      (inventoryHealth ?? [])
+        .filter((r) => r.hasTarget && r.needsReorder)
+        .sort((a, b) => (a.daysOnHand ?? 0) - (b.daysOnHand ?? 0))
+        .slice(0, 30),
+    [inventoryHealth],
+  );
+
+  if (rows.length === 0) return null;
 
   return (
-    <div className='border border-textInactiveColor p-4'>
+    <div className='border-2 border-warning/60 p-4'>
       <Text variant='uppercase' className='font-bold mb-4 block'>
-        Dead stock (&gt;180 days)
+        Reorder now ({rows.length})
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>
@@ -37,23 +52,28 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
               </th>
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>
-                  Qty
+                  On Hand
                 </Text>
               </th>
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>
-                  Days w/o Sale
+                  Reorder Pt
                 </Text>
               </th>
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>
-                  Stock Value
+                  Days of Cover
+                </Text>
+              </th>
+              <th className='text-right p-2'>
+                <Text variant='uppercase' className='text-[10px]'>
+                  Sold / Day
                 </Text>
               </th>
             </tr>
           </thead>
           <tbody>
-            {topDeadStock.map((row, idx) => (
+            {rows.map((row, idx) => (
               <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                 <td className='p-2'>
                   <ProductNameLink
@@ -66,26 +86,28 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
                   <Text>{row.sizeName || `Size #${row.sizeId}`}</Text>
                 </td>
                 <td className='p-2 text-right'>
-                  <Text>{formatNumber(row.quantity || 0)}</Text>
+                  <Text className='font-bold'>{formatNumber(row.quantity || 0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
-                  {/* Every row here is >180 days by definition — bold for scanning, not red
-                      (red on all rows is just noise; the € tied up is the real signal). */}
-                  <Text className='font-bold'>{(row.daysWithoutSale || 0).toFixed(0)}</Text>
+                  <Text className='text-textInactiveColor'>
+                    {formatNumber(row.reorderPoint || 0)}
+                  </Text>
                 </td>
                 <td className='p-2 text-right'>
-                  <Text>{formatCurrency(parseDecimal(row.stockValue))}</Text>
+                  <Text>{daysOfCover(row)}</Text>
+                </td>
+                <td className='p-2 text-right'>
+                  <Text>{(row.avgDailySales || 0).toFixed(2)}</Text>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-xs text-textInactiveColor'>
         <Text>
-          Inventory with no sales &gt;180 days — liquidate or write off. Sorted by € tied up.
+          At or below their reorder point — restock before they sell out. Lowest cover first.
         </Text>
-        <Text>Stock value is at listed (retail) price, not cost.</Text>
       </div>
     </div>
   );
