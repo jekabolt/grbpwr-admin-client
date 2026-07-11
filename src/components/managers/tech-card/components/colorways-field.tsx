@@ -278,7 +278,7 @@ function UsagePerSize({ ci, ui, article }: { ci: number; ui: number; article?: F
             )}
           </div>
           {hasAnyConsumption && !hasOrderQty && (
-            <Text size='small' className='block text-amber-600'>
+            <Text size='small' className='block text-warning'>
               заполните тираж по размерам (вкладка patterns → size run), чтобы посчитать расход на
               партию
             </Text>

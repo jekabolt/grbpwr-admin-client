@@ -117,8 +117,8 @@ export function PatternsField() {
       ))}
 
       {orphanSizeIds.map((id) => (
-        <div key={`orphan-${id}`} className='space-y-2 border border-amber-600 p-3'>
-          <Text size='small' className='block text-amber-600'>
+        <div key={`orphan-${id}`} className='space-y-2 border border-warning p-3'>
+          <Text size='small' className='block text-warning'>
             выкройки для размера #{id}, которого больше нет в размерном ряду — удалите или верните
             размер
           </Text>

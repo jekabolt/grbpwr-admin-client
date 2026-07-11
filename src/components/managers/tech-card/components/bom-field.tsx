@@ -83,7 +83,7 @@ function BomItemRow({
           id={`bom-composition-${index}`}
           className={cn(
             'rounded-none lg:col-span-3',
-            highlight && 'animate-pulse p-1 ring-2 ring-amber-500',
+            highlight && 'animate-pulse p-1 ring-2 ring-warning',
           )}
         >
           <CompositionPicker name={`bomItems.${index}.composition`} />

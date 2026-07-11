@@ -267,7 +267,7 @@ function ColorwayMaterialsPanel({
               <button
                 type='button'
                 onClick={() => onAddOperation(u.placement!.trim())}
-                className='text-left text-textBaseSize text-amber-600 underline hover:opacity-70'
+                className='text-left text-textBaseSize text-warning underline hover:opacity-70'
               >
                 нет операций на часть «{u.placement.trim()}» — добавить операцию?
               </button>
