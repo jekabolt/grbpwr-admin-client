@@ -101,12 +101,15 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
 
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
-    for (const rm of techCard.resolvedMedia ?? [])
+    for (const rm of [
+      ...(techCard.resolvedTechnicalMedia ?? []),
+      ...(techCard.resolvedMoodboardMedia ?? []),
+    ])
       if (rm.media?.id != null) m.set(rm.media.id, rm.media);
     return m;
-  }, [techCard.resolvedMedia]);
-  // detail reference images (and swatches) are library media ids not carried in resolvedMedia
-  // (sketch only) — resolve them from the library so they print.
+  }, [techCard.resolvedTechnicalMedia, techCard.resolvedMoodboardMedia]);
+  // detail reference images (and swatches) are library media ids not carried in the resolved
+  // sketch maps — resolve them from the library so they print.
   const libraryMap = useMediaMap();
   const resolveMedia = (id: number) => mediaById.get(id) ?? libraryMap.get(id);
 
@@ -120,7 +123,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
   const sizeIds = tc.sizeIds ?? [];
   const colorways = tc.colorways ?? [];
   const captionById = new Map<number, { caption?: string; kind?: string }>();
-  for (const m of tc.media ?? [])
+  for (const m of [...(tc.technicalMedia ?? []), ...(tc.moodboardMedia ?? [])])
     if (m.mediaId != null) captionById.set(m.mediaId, { caption: m.caption, kind: m.kind });
 
   return (
@@ -205,10 +208,10 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
       )}
 
       {/* SKETCHES + CALLOUTS */}
-      {has(tc.media) && (
+      {has(tc.technicalMedia) && (
         <Sheet title='technical sketch'>
           <div className='flex flex-wrap gap-4'>
-            {(tc.media ?? []).map((m, i) => {
+            {(tc.technicalMedia ?? []).map((m, i) => {
               const full = m.mediaId != null ? mediaById.get(m.mediaId) : undefined;
               const url = full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
               const meta = captionById.get(m.mediaId ?? -1);
@@ -264,6 +267,33 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               </tbody>
             </table>
           )}
+        </Sheet>
+      )}
+
+      {/* MOODBOARD */}
+      {has(tc.moodboardMedia) && (
+        <Sheet title='moodboard'>
+          <div className='flex flex-wrap gap-4'>
+            {(tc.moodboardMedia ?? []).map((m, i) => {
+              const full = m.mediaId != null ? mediaById.get(m.mediaId) : undefined;
+              const url = full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
+              const meta = captionById.get(m.mediaId ?? -1);
+              if (!url) return null;
+              return (
+                <figure key={i} className='break-inside-avoid'>
+                  <img
+                    src={url}
+                    alt=''
+                    className='block max-h-[240px] w-auto border border-black'
+                  />
+                  <figcaption className='mt-1 text-[10px] uppercase text-labelColor'>
+                    {mediaKindL[meta?.kind ?? ''] ?? 'reference'}
+                    {meta?.caption ? ` · ${meta.caption}` : ''}
+                  </figcaption>
+                </figure>
+              );
+            })}
+          </div>
         </Sheet>
       )}
 
@@ -600,11 +630,10 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               <KV k='defect %' v={dec(tc.costing.defectPercent)} />
             </div>
             <div>
-              <KV k='materials (primary cw)' v={dec(tc.costing.materialsCost)} />
+              <KV k='materials / unit (primary cw)' v={dec(tc.costing.materialsPerUnit)} />
+              <KV k='unit cost' v={dec(tc.costing.unitCost)} />
+              <KV k='order qty' v={tc.costing.orderQty ? String(tc.costing.orderQty) : ''} />
               <KV k='total SAM (min)' v={dec(tc.costing.totalSam)} />
-              <KV k='markup ×' v={dec(tc.costing.markupMultiplier)} />
-              <KV k='wholesale' v={dec(tc.costing.wholesalePrice)} />
-              <KV k='retail' v={dec(tc.costing.retailPrice)} />
             </div>
           </div>
 
@@ -614,8 +643,9 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               <thead>
                 <tr>
                   <th className={TH}>colourway</th>
-                  <th className={`${TH} text-right`}>materials / garment</th>
-                  <th className={`${TH} text-right`}>materials / run</th>
+                  <th className={`${TH} text-right`}>materials / unit</th>
+                  <th className={`${TH} text-right`}>unit cost</th>
+                  <th className={`${TH} text-right`}>order cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -628,11 +658,14 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                         {cc.colorwayIndex === 0 ? ' (primary)' : ''}
                       </td>
                       <td className={`${TD} whitespace-nowrap text-right`}>
-                        {dec(cc.materialsCost) || '—'}
+                        {dec(cc.materialsPerUnit) || '—'}
                         {cc.hasUnconvertedCurrencies ? ' ⚠' : ''}
                       </td>
                       <td className={`${TD} whitespace-nowrap text-right`}>
-                        {dec(cc.sizeRunTotal) || '—'}
+                        {dec(cc.unitCost) || '—'}
+                      </td>
+                      <td className={`${TD} whitespace-nowrap text-right`}>
+                        {dec(cc.orderCost) || '—'}
                       </td>
                     </tr>
                   );
@@ -641,10 +674,16 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
             </table>
           )}
 
-          <div className='mt-2 flex items-center justify-between border-t-2 border-black pt-1 text-sm'>
-            <span className='font-bold uppercase'>total cost</span>
+          <div className='mt-2 flex items-center justify-between border-t border-black pt-1 text-sm'>
+            <span className='font-bold uppercase'>unit cost</span>
             <span className='font-bold'>
-              {dec(tc.costing.totalCost) || '—'} {tc.costing.currency ?? ''}
+              {dec(tc.costing.unitCost) || '—'} {tc.costing.currency ?? ''}
+            </span>
+          </div>
+          <div className='mt-1 flex items-center justify-between border-t-2 border-black pt-1 text-sm'>
+            <span className='font-bold uppercase'>order cost</span>
+            <span className='font-bold'>
+              {dec(tc.costing.orderCost) || '—'} {tc.costing.currency ?? ''}
             </span>
           </div>
           {tc.costing.hasUnconvertedCurrencies && (

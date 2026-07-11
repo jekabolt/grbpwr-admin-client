@@ -1,6 +1,6 @@
 import { TaskInsert } from '../api/types';
 
-export type LinkKind = 'techcard' | 'product' | 'order' | 'archive';
+export type LinkKind = 'techcard' | 'product' | 'order' | 'archive' | 'fitting';
 
 export interface TaskLink {
   kind: LinkKind;
@@ -46,6 +46,13 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
       label: `drop #${t.archiveId}`,
       to: `/archives`,
     });
+  if (t.fittingId > 0)
+    links.push({
+      kind: 'fitting',
+      id: t.fittingId,
+      label: `примерка #${t.fittingId}`,
+      to: `/fittings/${t.fittingId}`,
+    });
   return links;
 }
 
@@ -54,6 +61,7 @@ export function taskLinkCount(t: TaskInsert): number {
     (t.techCardId > 0 ? 1 : 0) +
     (t.productId > 0 ? 1 : 0) +
     (t.orderUuid ? 1 : 0) +
-    (t.archiveId > 0 ? 1 : 0)
+    (t.archiveId > 0 ? 1 : 0) +
+    (t.fittingId > 0 ? 1 : 0)
   );
 }

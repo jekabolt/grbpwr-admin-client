@@ -58,6 +58,9 @@ export interface TaskInsert {
   assignee: string; // AdminAccount.username; '' = unassigned
   priority: TaskPriority;
   dueDate: string | undefined; // RFC3339; undefined = no deadline (key always present, mirrors common_TaskInsert)
+  // Planned start (когда работа ДОЛЖНА начаться) — the manual counterpart of
+  // dueDate. Distinct from the server-stamped actual start (Task.startedAt).
+  startDate: string | undefined; // RFC3339; undefined = no planned start
   labels: string[];
   mediaIds: number[];
   // Optional typed links (0 / '' = none) — mirrors common.TaskInsert.
@@ -65,6 +68,7 @@ export interface TaskInsert {
   productId: number;
   orderUuid: string;
   archiveId: number;
+  fittingId: number; // примерка / try-on session (GetFitting)
 }
 
 // Stored card (common.Task): id + content + placement + resolved media + identity.
@@ -79,6 +83,10 @@ export interface Task {
   createdBy: string; // AdminAccount.username
   createdAt: string;
   updatedAt: string;
+  // Actual start: server-stamped the FIRST time the card enters IN_PROGRESS
+  // (never client-supplied). '' = not started yet. Distinct from the planned
+  // TaskInsert.startDate.
+  startedAt: string;
   // Soft-archive stamp. '' = active; set (RFC3339) = archived (hidden from the
   // board's default view, restorable via UnarchiveTask). Orthogonal to placement.
   archivedAt: string;
@@ -115,12 +123,14 @@ export function emptyTaskInsert(): TaskInsert {
     assignee: '',
     priority: 'TASK_PRIORITY_UNKNOWN',
     dueDate: undefined,
+    startDate: undefined,
     labels: [],
     mediaIds: [],
     techCardId: 0,
     productId: 0,
     orderUuid: '',
     archiveId: 0,
+    fittingId: 0,
   };
 }
 
