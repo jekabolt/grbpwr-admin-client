@@ -20,11 +20,12 @@ interface GrowthTabProps {
  */
 export function GrowthTab({ metricsResponse }: GrowthTabProps) {
   const metrics = metricsResponse.business;
-  const sampleSize = metrics?.clvDistribution?.sampleSize ?? 0;
+  const commerce = metrics?.commerce;
+  const sampleSize = commerce?.clvDistribution?.sampleSize ?? 0;
 
-  const repeatRate = getMetricComparison(metrics?.repeatCustomersRate as any);
-  const ordersPerCustomer = getMetricComparison(metrics?.avgOrdersPerCustomer as any);
-  const daysBetweenOrders = getMetricComparison(metrics?.avgDaysBetweenOrders as any);
+  const repeatRate = getMetricComparison(commerce?.repeatCustomersRate as any);
+  const ordersPerCustomer = getMetricComparison(commerce?.avgOrdersPerCustomer as any);
+  const daysBetweenOrders = getMetricComparison(commerce?.avgDaysBetweenOrders as any);
 
   return (
     <div className='space-y-10'>

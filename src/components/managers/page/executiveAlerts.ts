@@ -45,7 +45,7 @@ export function currentMetricValue(m: unknown): number {
 
 /** Whether there are enough current-period orders for order-derived rates to be trusted. */
 export function hasEnoughOrdersForAlert(metrics: BusinessMetrics | undefined): boolean {
-  return currentMetricValue(metrics?.ordersCount) >= MIN_ORDERS_FOR_ALERT;
+  return currentMetricValue(metrics?.commerce?.ordersCount) >= MIN_ORDERS_FOR_ALERT;
 }
 
 function effectiveChangePct(m: unknown): number | null {
@@ -60,7 +60,8 @@ function effectiveChangePct(m: unknown): number | null {
 }
 
 export function orderCancellationSharePercent(metrics: BusinessMetrics | undefined): number | null {
-  const rows = metrics?.ordersByStatus;
+  const commerce = metrics?.commerce;
+  const rows = commerce?.ordersByStatus;
   if (!rows?.length) return null;
   let statusSum = 0;
   let cancelled = 0;
@@ -72,7 +73,7 @@ export function orderCancellationSharePercent(metrics: BusinessMetrics | undefin
   }
   // `ordersByStatus` counts status transitions (its sum exceeds the order count), so the share of
   // cancelled orders must be divided by the real order total, not by the sum of all status rows.
-  const totalOrders = getMetricComparison(asMetricRecord(metrics?.ordersCount)).value;
+  const totalOrders = getMetricComparison(asMetricRecord(commerce?.ordersCount)).value;
   const denom = totalOrders > 0 ? totalOrders : statusSum;
   if (denom <= 0) return null;
   return Math.min(100, (cancelled / denom) * 100);
@@ -86,10 +87,13 @@ export function computeExecutiveAlerts(
   const alerts: ExecutiveAlert[] = [];
   if (!metrics) return alerts;
 
+  const commerce = metrics.commerce;
+  const traffic = metrics.traffic;
+
   // Gate order- and session-derived alerts behind current-period volume floors so single-order
   // or low-traffic weeks don't trigger red/amber on pure noise.
-  const enoughOrders = currentMetricValue(metrics.ordersCount) >= MIN_ORDERS_FOR_ALERT;
-  const enoughSessions = currentMetricValue(metrics.sessions) >= MIN_SESSIONS_FOR_ALERT;
+  const enoughOrders = currentMetricValue(commerce?.ordersCount) >= MIN_ORDERS_FOR_ALERT;
+  const enoughSessions = currentMetricValue(traffic?.sessions) >= MIN_SESSIONS_FOR_ALERT;
 
   const cancelPct = orderCancellationSharePercent(metrics);
   if (enoughOrders && cancelPct != null && cancelPct >= CANCELLATION_SHARE_ALERT) {
@@ -101,7 +105,7 @@ export function computeExecutiveAlerts(
     });
   }
 
-  const refundRec = asMetricRecord(metrics.refundRate);
+  const refundRec = asMetricRecord(commerce?.refundRate);
   const refund = getMetricComparison(refundRec);
   if (enoughOrders && refund.value >= REFUND_RATE_LEVEL_WARNING) {
     alerts.push({
@@ -111,28 +115,28 @@ export function computeExecutiveAlerts(
   }
 
   if (compareEnabled) {
-    const revPct = effectiveChangePct(metrics.revenue);
+    const revPct = effectiveChangePct(commerce?.revenue);
     if (enoughOrders && revPct != null && revPct <= REVENUE_DROP_ALERT_PCT) {
       alerts.push({
         severity: 'warning',
         title: `Revenue ${formatPercent(revPct)} vs comparison period`,
       });
     }
-    const ordPct = effectiveChangePct(metrics.ordersCount);
+    const ordPct = effectiveChangePct(commerce?.ordersCount);
     if (enoughOrders && ordPct != null && ordPct <= ORDERS_DROP_ALERT_PCT) {
       alerts.push({
         severity: 'warning',
         title: `Orders ${formatPercent(ordPct)} vs comparison period`,
       });
     }
-    const sessPct = effectiveChangePct(metrics.sessions);
+    const sessPct = effectiveChangePct(traffic?.sessions);
     if (enoughSessions && sessPct != null && sessPct <= SESSIONS_DROP_ALERT_PCT) {
       alerts.push({
         severity: 'warning',
         title: `Sessions ${formatPercent(sessPct)} vs comparison period`,
       });
     }
-    const convPct = effectiveChangePct(metrics.conversionRate);
+    const convPct = effectiveChangePct(traffic?.conversionRate);
     if (enoughSessions && convPct != null && convPct <= CONVERSION_DROP_ALERT_PCT) {
       alerts.push({
         severity: 'warning',
@@ -171,10 +175,10 @@ export function deriveHealthStatus(
   if (
     compareEnabled &&
     metrics &&
-    currentMetricValue(metrics.ordersCount) >= MIN_ORDERS_FOR_ALERT
+    currentMetricValue(metrics.commerce?.ordersCount) >= MIN_ORDERS_FOR_ALERT
   ) {
-    const revPct = effectiveChangePct(metrics.revenue);
-    const ordPct = effectiveChangePct(metrics.ordersCount);
+    const revPct = effectiveChangePct(metrics.commerce?.revenue);
+    const ordPct = effectiveChangePct(metrics.commerce?.ordersCount);
     if (revPct != null && revPct <= -15 && ordPct != null && ordPct <= -15) {
       return 'needs_attention';
     }

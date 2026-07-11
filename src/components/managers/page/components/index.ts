@@ -3,6 +3,7 @@ export { ChannelSpendForm } from './ChannelSpendForm';
 export { CrossSellTable } from './CrossSellTable';
 export { DateRangePicker } from './DateRangePicker';
 export { DeadStockTable } from './DeadStockTable';
+export { DropVerdictTable } from './DropVerdictTable';
 export { ExecutiveHealthStrip } from './ExecutiveHealthStrip';
 export { FunnelChart } from './FunnelChart';
 export { GeographyCharts } from './GeographyCharts';

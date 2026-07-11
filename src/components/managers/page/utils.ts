@@ -47,7 +47,25 @@ export function getMetricComparison(m: Record<string, unknown> | undefined) {
   // n the metric is computed over (e.g. orders behind a refund rate). Lets the UI suppress
   // or widen a figure at low volume instead of guessing from arbitrary hardcoded floors.
   const sampleSize = (m.sampleSize ?? m.sample_size) as number | undefined;
-  return { value, compareValue, changePct, lowerIsBetter, changeAbsolute, caveat, sampleSize };
+  // 95% CI half-width in the metric's own units; populated only for true count-proportions
+  // (conversion, promo usage). Lets the UI render "12.0% ± 2.4" instead of a bare rate.
+  const marginOfError = (m.marginOfError ?? m.margin_of_error) as number | undefined;
+  return {
+    value,
+    compareValue,
+    changePct,
+    lowerIsBetter,
+    changeAbsolute,
+    caveat,
+    sampleSize,
+    marginOfError,
+  };
+}
+
+/** Render a percentage with its 95% CI band when the backend computed one: "12.0% ± 2.4". */
+export function formatPercentWithBand(value: number, marginOfError: number | undefined): string {
+  const base = `${value.toFixed(1)}%`;
+  return marginOfError && marginOfError > 0 ? `${base} ± ${marginOfError.toFixed(1)}` : base;
 }
 
 /**
