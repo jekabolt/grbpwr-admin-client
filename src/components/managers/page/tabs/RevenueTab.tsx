@@ -9,6 +9,7 @@ import {
   formatCurrencyDelta,
   formatNumber,
   formatNumberDelta,
+  formatPercentWithBand,
   getMetricComparison,
 } from '../utils';
 
@@ -224,7 +225,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             </Text>
             {showRates && (
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
-                {refundRate.value.toFixed(1)}%
+                {formatPercentWithBand(refundRate.value, refundRate.marginOfError)}
               </Text>
             )}
           </div>
