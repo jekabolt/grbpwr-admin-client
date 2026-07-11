@@ -974,6 +974,52 @@ export type Fitting = {
   updatedAt: wellKnownTimestamp | undefined;
 };
 
+// FulfillmentColumn is a lane on the fulfillment board. Unlike TaskStatus (free
+// kanban columns), each column is bound to a concrete order status.
+export type FulfillmentColumn =
+  | "FULFILLMENT_COLUMN_UNKNOWN"
+  | "FULFILLMENT_COLUMN_TO_FULFILL"
+  | "FULFILLMENT_COLUMN_SHIPPED"
+  | "FULFILLMENT_COLUMN_DELIVERED";
+// FulfillmentChecklistItem is one packing-checklist row on a fulfillment card
+// (e.g. "picked", "packed", "label printed"). Managed by dedicated add/toggle/
+// delete RPCs, same as a task checklist item.
+export type FulfillmentChecklistItem = {
+  id: number | undefined;
+  content: string | undefined;
+  isDone: boolean | undefined;
+  position: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// FulfillmentAnnotation is the board-owned overlay on an order: an assignee,
+// internal packing notes and a checklist. It carries NO order status — that lives
+// on the order. Lazily created on first edit; keyed by order_uuid.
+export type FulfillmentAnnotation = {
+  orderUuid: string | undefined;
+  assignee: string | undefined;
+  notes: string | undefined;
+  checklist: FulfillmentChecklistItem[] | undefined;
+};
+
+// FulfillmentCard is one tile on the board: the compact order plus its annotation
+// summary. Full order detail + full annotation come from GetFulfillmentCard.
+export type FulfillmentCard = {
+  order: Order | undefined;
+  column: FulfillmentColumn | undefined;
+  assignee: string | undefined;
+  checklistDone: number | undefined;
+  checklistTotal: number | undefined;
+  hasNotes: boolean | undefined;
+};
+
+// FulfillmentColumnCards groups one column's cards, in fulfillment order
+// (oldest order first, so the longest-waiting order is picked first).
+export type FulfillmentColumnCards = {
+  column: FulfillmentColumn | undefined;
+  cards: FulfillmentCard[] | undefined;
+};
+
 export type HeroType =
   | "HERO_TYPE_UNKNOWN"
   | "HERO_TYPE_SINGLE"
@@ -1500,6 +1546,19 @@ export type TaskInsert = {
   archiveId: number | undefined;
 };
 
+// TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
+// a done flag. Checklist items are managed by dedicated add/toggle/delete RPCs
+// (NOT bundled into TaskInsert's replace-on-update semantics like labels/media),
+// so a content edit never wipes per-item done state.
+export type TaskChecklistItem = {
+  id: number | undefined;
+  taskId: number | undefined;
+  content: string | undefined;
+  isDone: boolean | undefined;
+  position: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
 // Task is a stored kanban card: its content (TaskInsert), its placement on the
 // board (board/status/position — server-managed, set by AddTask and mutated only
 // by MoveTask), resolved media, and server-stamped identity/timestamps.
@@ -1513,6 +1572,11 @@ export type Task = {
   createdBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // Soft-archive: set = the card is archived (hidden from the board and default
+  // list, but preserved and restorable via UnarchiveTask); unset = active.
+  // Orthogonal to placement — archiving does not change board/status/position.
+  archivedAt: wellKnownTimestamp | undefined;
+  checklist: TaskChecklistItem[] | undefined;
 };
 
 // TaskCommentInsert is the writable payload for a comment. author is set
