@@ -1,10 +1,5 @@
-import * as NavigationMenu from '@radix-ui/react-navigation-menu';
-import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { LEFT_SIDE_ITEMS } from 'constants/routes';
-import { cn } from 'lib/utility';
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Button } from './button';
+import { NAV_GROUPS } from 'constants/routes';
+import { NavDropdownMenu } from './nav-dropdown-menu';
 
 export function DesktopNavMenu({
   className,
@@ -13,37 +8,12 @@ export function DesktopNavMenu({
   className?: string;
   onNavOpenChange: (value: boolean) => void;
 }) {
-  const [isNavOpen, setIsNavOpen] = useState(false);
-  const { canRead } = usePermissions();
-  const items = LEFT_SIDE_ITEMS.filter((item) => canRead(item.section));
   return (
-    <NavigationMenu.Root
-      className={cn('w-full', className)}
-      onValueChange={(value) => {
-        const isOpen = !!value;
-        setIsNavOpen(isOpen);
-        onNavOpenChange(isOpen);
-      }}
-    >
-      <NavigationMenu.List className='flex items-center'>
-        {items.map(({ label, route }, id) => (
-          <NavigationMenu.Item key={route}>
-            <Button asChild>
-              <Link
-                to={route}
-                className={cn(
-                  'flex items-center px-2 text-textBaseSize underline-offset-2 hover:underline transition-colors hover:opacity-70 active:opacity-50 whitespace-nowrap',
-                  {
-                    'pl-0': id === 0,
-                  },
-                )}
-              >
-                {label}
-              </Link>
-            </Button>
-          </NavigationMenu.Item>
-        ))}
-      </NavigationMenu.List>
-    </NavigationMenu.Root>
+    <NavDropdownMenu
+      groups={NAV_GROUPS}
+      align='start'
+      onOpenChange={onNavOpenChange}
+      className={className}
+    />
   );
 }
