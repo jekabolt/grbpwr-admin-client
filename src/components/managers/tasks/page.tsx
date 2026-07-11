@@ -1,62 +1,148 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { cn } from 'lib/utility';
+import { Button } from 'ui/components/button';
+import { Loader } from 'ui/components/loader';
 import Text from 'ui/components/text';
+import { emptyTaskInsert, Task, TaskBoard, TaskInsert, TaskStatus } from './api/types';
 import { setLocalActor } from './api/tasksService';
-import { useTasks } from './hooks/useTasks';
-import { BOARD_LABEL, BOARDS, STATUS_LABEL, STATUSES } from './utils/meta';
+import { Board } from './components/board';
+import { TaskFormModal } from './components/task-form-modal';
+import { useCreateTask, useTasks, useUpdateTask } from './hooks/useTasks';
+import { BOARD_LABEL, BOARDS } from './utils/meta';
 
-// F0 placeholder — proves the adapter + query hooks end to end. Replaced by the
-// full drag-and-drop board in F1.
+const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
+
+type ModalState =
+  | { mode: 'create'; status: TaskStatus }
+  | { mode: 'edit'; task: Task }
+  | null;
+
 export function Tasks() {
-  const { account, canRead } = usePermissions();
+  const { account, canRead, canWrite, resolved } = usePermissions();
   useEffect(() => setLocalActor(account?.username), [account?.username]);
 
-  const { data, isLoading } = useTasks({});
+  const canView = !resolved || canRead(SECTION.tasks);
+  const writable = canWrite(SECTION.tasks);
+
+  const [activeBoard, setActiveBoard] = useState<TaskBoard>(
+    () => (localStorage.getItem(ACTIVE_BOARD_KEY) as TaskBoard) || BOARDS[0],
+  );
+  useEffect(() => localStorage.setItem(ACTIVE_BOARD_KEY, activeBoard), [activeBoard]);
+
+  const filter = useMemo(() => ({ board: activeBoard }), [activeBoard]);
+  const { data, isLoading, isError, error, refetch } = useTasks(filter);
   const tasks = data?.tasks ?? [];
 
-  if (!canRead(SECTION.tasks)) {
+  const [modal, setModal] = useState<ModalState>(null);
+  const createTask = useCreateTask();
+  const updateTask = useUpdateTask();
+
+  const initial: TaskInsert = useMemo(() => {
+    if (modal?.mode === 'edit') return modal.task.task;
+    if (modal?.mode === 'create') return emptyTaskInsert(activeBoard, modal.status);
+    return emptyTaskInsert(activeBoard, 'TASK_STATUS_TODO');
+  }, [modal, activeBoard]);
+
+  async function handleSubmit(values: TaskInsert) {
+    try {
+      if (modal?.mode === 'edit') {
+        await updateTask.mutateAsync({ id: modal.task.id, input: values });
+      } else {
+        await createTask.mutateAsync(values);
+      }
+      setModal(null);
+    } catch {
+      /* snackbar shown by the mutation; keep the modal open */
+    }
+  }
+
+  if (!canView) {
     return (
       <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textColor p-10 text-center'>
         <Text variant='uppercase' size='large'>
           tasks
         </Text>
         <Text variant='label' size='small'>
-          You don’t have access to this section.
+          You don’t have access to this section. Ask a super admin to grant it.
         </Text>
       </div>
     );
   }
 
   return (
-    <div className='flex w-full flex-col gap-4 pb-16'>
-      <Text variant='uppercase' size='large'>
-        tasks {isLoading ? '' : `· ${tasks.length}`}
-      </Text>
-      <div className='grid grid-cols-2 gap-3 lg:grid-cols-3'>
+    <div className='flex w-full flex-col gap-4 pb-10'>
+      {/* Header */}
+      <div className='flex flex-wrap items-end justify-between gap-3'>
+        <div className='flex flex-col gap-1'>
+          <Text variant='uppercase' size='large'>
+            tasks
+          </Text>
+          <Text variant='label' size='small'>
+            Track work across departments — drag cards between columns to change status.
+          </Text>
+        </div>
+        {writable && (
+          <Button
+            variant='main'
+            size='lg'
+            onClick={() => setModal({ mode: 'create', status: 'TASK_STATUS_TODO' })}
+          >
+            + new task
+          </Button>
+        )}
+      </div>
+
+      {/* Board tabs */}
+      <div className='flex gap-2 overflow-x-auto border-b border-textColor pb-2'>
         {BOARDS.map((board) => (
-          <div key={board} className='border border-textColor p-3'>
-            <Text variant='uppercase' size='small'>
-              {BOARD_LABEL[board]}
-            </Text>
-            <div className='mt-2 flex flex-col gap-1'>
-              {STATUSES.map((status) => {
-                const count = tasks.filter(
-                  (t) => t.task.board === board && t.task.status === status,
-                ).length;
-                return (
-                  <div key={status} className='flex justify-between text-textBaseSize'>
-                    <Text variant='label' size='small'>
-                      {STATUS_LABEL[status]}
-                    </Text>
-                    <span>{count}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <button
+            key={board}
+            type='button'
+            onClick={() => setActiveBoard(board)}
+            className={cn(
+              'shrink-0 border px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+              board === activeBoard
+                ? 'border-textColor bg-textColor text-bgColor'
+                : 'border-textInactiveColor text-labelColor hover:border-textColor hover:text-textColor',
+            )}
+          >
+            {BOARD_LABEL[board]}
+          </button>
         ))}
       </div>
+
+      {/* Content */}
+      {isLoading ? (
+        <Loader />
+      ) : isError ? (
+        <div className='flex flex-col items-start gap-2 border border-textColor p-4'>
+          <Text variant='error' size='small'>
+            {error instanceof Error ? error.message : 'Failed to load tasks'}
+          </Text>
+          <Button variant='secondary' size='lg' onClick={() => refetch()}>
+            retry
+          </Button>
+        </div>
+      ) : (
+        <Board
+          tasks={tasks}
+          filter={filter}
+          canWrite={writable}
+          onOpen={(task) => setModal({ mode: 'edit', task })}
+          onAdd={(status) => setModal({ mode: 'create', status })}
+        />
+      )}
+
+      <TaskFormModal
+        open={modal !== null}
+        onOpenChange={(o) => !o && setModal(null)}
+        mode={modal?.mode ?? 'create'}
+        initial={initial}
+        saving={createTask.isPending || updateTask.isPending}
+        onSubmit={handleSubmit}
+      />
     </div>
   );
 }
