@@ -49,7 +49,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSubmit }: Props) {
   const {
-    register,
     handleSubmit,
     control,
     reset,
@@ -87,10 +86,21 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
             className='flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3'
           >
             <Field label='title'>
-              <Input
-                placeholder='what needs doing'
-                autoFocus
-                {...register('title', { required: true })}
+              <Controller
+                control={control}
+                name='title'
+                rules={{ required: true }}
+                render={({ field }) => (
+                  <Input
+                    placeholder='what needs doing'
+                    autoFocus
+                    value={field.value}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      field.onChange(e.target.value)
+                    }
+                    onBlur={field.onBlur}
+                  />
+                )}
               />
               {errors.title && (
                 <Text variant='error' size='small'>
@@ -100,11 +110,21 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
             </Field>
 
             <Field label='description'>
-              <Textarea
-                variant='secondary'
-                placeholder='details, links, acceptance criteria…'
-                className='mb-0 min-h-24 border-b border-textInactiveColor'
-                {...register('description')}
+              <Controller
+                control={control}
+                name='description'
+                render={({ field }) => (
+                  <Textarea
+                    variant='secondary'
+                    placeholder='details, links, acceptance criteria…'
+                    className='mb-0 min-h-24 border-b border-textInactiveColor'
+                    value={field.value}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                      field.onChange(e.target.value)
+                    }
+                    onBlur={field.onBlur}
+                  />
+                )}
               />
             </Field>
 

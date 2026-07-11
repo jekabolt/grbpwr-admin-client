@@ -7,6 +7,7 @@ import { applyMove } from '../utils/order';
 export const tasksKeys = {
   all: ['tasks'] as const,
   list: (filter: ListTasksFilter) => [...tasksKeys.all, 'list', filter] as const,
+  detail: (id: number) => [...tasksKeys.all, 'detail', id] as const,
   comments: (taskId: number) => [...tasksKeys.all, 'comments', taskId] as const,
 };
 
@@ -18,6 +19,15 @@ export function useTasks(filter: ListTasksFilter) {
   return useQuery({
     queryKey: tasksKeys.list(filter),
     queryFn: () => tasksService.listTasks(filter),
+    staleTime: 30_000,
+  });
+}
+
+export function useTask(id: number | null) {
+  return useQuery({
+    queryKey: tasksKeys.detail(id ?? -1),
+    queryFn: () => tasksService.getTask(id as number),
+    enabled: id != null && id > 0,
     staleTime: 30_000,
   });
 }
