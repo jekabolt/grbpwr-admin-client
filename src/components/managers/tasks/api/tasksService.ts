@@ -1,9 +1,15 @@
 import { adminService } from 'api/api';
-import type { common_MediaFull, common_Task, common_TaskComment } from 'api/proto-http/admin';
+import type {
+  common_MediaFull,
+  common_Task,
+  common_TaskChecklistItem,
+  common_TaskComment,
+} from 'api/proto-http/admin';
 import {
   ListTasksFilter,
   Task,
   TaskBoard,
+  TaskChecklistItem,
   TaskComment,
   TaskInsert,
   TaskMedia,
@@ -22,8 +28,13 @@ export interface TasksService {
   updateTask(id: number, content: TaskInsert): Promise<void>;
   moveTask(id: number, board: TaskBoard, status: TaskStatus, position: number): Promise<void>;
   deleteTask(id: number): Promise<void>;
+  archiveTask(id: number): Promise<void>;
+  unarchiveTask(id: number): Promise<void>;
   addComment(taskId: number, body: string): Promise<{ id: number }>;
   listComments(taskId: number): Promise<TaskComment[]>;
+  addChecklistItem(taskId: number, content: string): Promise<{ id: number }>;
+  setChecklistItemDone(id: number, isDone: boolean): Promise<void>;
+  deleteChecklistItem(id: number): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +79,15 @@ function mapInsert(i: common_Task['task']): TaskInsert {
   };
 }
 
+function mapChecklistItem(c: common_TaskChecklistItem): TaskChecklistItem {
+  return {
+    id: c.id ?? 0,
+    content: c.content ?? '',
+    isDone: c.isDone ?? false,
+    position: c.position ?? 0,
+  };
+}
+
 function mapTask(t: common_Task): Task {
   const media = (t.media ?? []).map(mapMedia);
   rememberMedia(media);
@@ -78,9 +98,11 @@ function mapTask(t: common_Task): Task {
     status: t.status ?? 'TASK_STATUS_UNKNOWN',
     position: t.position ?? 0,
     media,
+    checklist: (t.checklist ?? []).map(mapChecklistItem).sort((a, b) => a.position - b.position),
     createdBy: t.createdBy ?? '',
     createdAt: t.createdAt ?? '',
     updatedAt: t.updatedAt ?? '',
+    archivedAt: t.archivedAt ?? '',
   };
 }
 
@@ -112,6 +134,7 @@ export const tasksService: TasksService = {
         orderFactor: undefined,
         techCardId: filter.techCardId,
         productId: filter.productId,
+        includeArchived: filter.includeArchived,
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
 
@@ -127,9 +150,21 @@ export const tasksService: TasksService = {
 
   deleteTask: (id) => adminService.DeleteTask({ id }).then(() => undefined),
 
+  archiveTask: (id) => adminService.ArchiveTask({ id }).then(() => undefined),
+
+  unarchiveTask: (id) => adminService.UnarchiveTask({ id }).then(() => undefined),
+
   addComment: (taskId, body) =>
     adminService.AddTaskComment({ comment: { taskId, body } }).then((r) => ({ id: r.id ?? 0 })),
 
   listComments: (taskId) =>
     adminService.ListTaskComments({ taskId }).then((r) => (r.comments ?? []).map(mapComment)),
+
+  addChecklistItem: (taskId, content) =>
+    adminService.AddTaskChecklistItem({ taskId, content }).then((r) => ({ id: r.id ?? 0 })),
+
+  setChecklistItemDone: (id, isDone) =>
+    adminService.SetTaskChecklistItemDone({ id, isDone }).then(() => undefined),
+
+  deleteChecklistItem: (id) => adminService.DeleteTaskChecklistItem({ id }).then(() => undefined),
 };

@@ -8,11 +8,19 @@ import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
-import { Task, TaskBoard, TaskFormValues, TaskStatus } from '../api/types';
+import { TaskBoard, TaskFormValues, TaskStatus } from '../api/types';
 import { LinkChip } from '../components/link-chip';
+import { TaskChecklist } from '../components/task-checklist';
 import { TaskComments } from '../components/task-comments';
 import { TaskFormModal } from '../components/task-form-modal';
-import { useDeleteTask, useMoveTask, useTask, useUpdateTask } from '../hooks/useTasks';
+import {
+  useArchiveTask,
+  useDeleteTask,
+  useMoveTask,
+  useTask,
+  useUnarchiveTask,
+  useUpdateTask,
+} from '../hooks/useTasks';
 import { taskLinks } from '../utils/links';
 import {
   BOARD_LABEL,
@@ -58,6 +66,8 @@ export function TaskDetail() {
 
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const archiveTask = useArchiveTask();
+  const unarchiveTask = useUnarchiveTask();
   const move = useMoveTask(useMemo(() => ({ board: task?.board }), [task?.board]));
 
   const [editing, setEditing] = useState(false);
@@ -122,6 +132,8 @@ export function TaskDetail() {
   const due = dueMeta(t.dueDate);
   const links = taskLinks(t);
   const isMine = !!account?.username && t.assignee === account.username;
+  const isArchived = !!task.archivedAt;
+  const archiveBusy = archiveTask.isPending || unarchiveTask.isPending;
 
   return (
     <div className='mx-auto flex w-full max-w-5xl flex-col gap-5 pb-10'>
@@ -141,10 +153,31 @@ export function TaskDetail() {
             <h1 className='text-xl leading-tight'>{t.title}</h1>
           </div>
           {canWrite && (
-            <div className='flex shrink-0 gap-2'>
+            <div className='flex shrink-0 flex-wrap justify-end gap-2'>
               <Button type='button' variant='secondary' size='lg' onClick={() => setEditing(true)}>
                 edit
               </Button>
+              {isArchived ? (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='lg'
+                  loading={archiveBusy}
+                  onClick={() => unarchiveTask.mutate(task.id)}
+                >
+                  restore
+                </Button>
+              ) : (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='lg'
+                  loading={archiveBusy}
+                  onClick={() => archiveTask.mutate(task.id)}
+                >
+                  archive
+                </Button>
+              )}
               <Button
                 type='button'
                 variant='secondary'
@@ -157,6 +190,17 @@ export function TaskDetail() {
             </div>
           )}
         </div>
+
+        {isArchived && (
+          <div className='flex flex-wrap items-center justify-between gap-2 border border-textColor px-3 py-2'>
+            <Text size='small' className='uppercase'>
+              archived{task.archivedAt ? ` · ${format(new Date(task.archivedAt), 'PP')}` : ''}
+            </Text>
+            <Text variant='label' size='small'>
+              Hidden from the board. Restore to make it active again.
+            </Text>
+          </div>
+        )}
       </div>
 
       {/* Body */}
@@ -177,6 +221,8 @@ export function TaskDetail() {
               </Text>
             )}
           </section>
+
+          <TaskChecklist taskId={task.id} items={task.checklist} canWrite={canWrite} />
 
           {task.media.length > 0 && (
             <section className='flex flex-col gap-2'>

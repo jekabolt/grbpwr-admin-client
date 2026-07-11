@@ -4,6 +4,8 @@ import { ListTasksFilter, Task, TaskBoard, TaskInsert, TaskStatus } from '../api
 import { tasksService } from '../api/tasksService';
 import { applyMove } from '../utils/order';
 
+type MaybeTask = Task | undefined;
+
 export const tasksKeys = {
   all: ['tasks'] as const,
   list: (filter: ListTasksFilter) => [...tasksKeys.all, 'list', filter] as const,
@@ -81,6 +83,101 @@ export function useDeleteTask() {
       showMessage('Task deleted', 'success');
     },
     onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to delete task', 'error'),
+  });
+}
+
+export function useArchiveTask() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (id: number) => tasksService.archiveTask(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: tasksKeys.all });
+      showMessage('Task archived', 'success');
+    },
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to archive task', 'error'),
+  });
+}
+
+export function useUnarchiveTask() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (id: number) => tasksService.unarchiveTask(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: tasksKeys.all });
+      showMessage('Task restored', 'success');
+    },
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to restore task', 'error'),
+  });
+}
+
+// ---- Checklist ----
+// Items live on the task detail (Task.checklist). Mutations invalidate the whole
+// `tasks` tree so the detail refetches and card progress badges refresh. The
+// toggle is optimistic on the detail query for a snappy checkbox.
+
+export function useAddChecklistItem(taskId: number) {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (content: string) => tasksService.addChecklistItem(taskId, content),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to add checklist item', 'error'),
+  });
+}
+
+export function useSetChecklistItemDone(taskId: number) {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  const key = tasksKeys.detail(taskId);
+  return useMutation({
+    mutationFn: (vars: { id: number; isDone: boolean }) =>
+      tasksService.setChecklistItemDone(vars.id, vars.isDone),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<MaybeTask>(key);
+      if (previous) {
+        qc.setQueryData<Task>(key, {
+          ...previous,
+          checklist: previous.checklist.map((c) =>
+            c.id === vars.id ? { ...c, isDone: vars.isDone } : c,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (e, _vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(key, ctx.previous);
+      showMessage(e instanceof Error ? e.message : 'Failed to update checklist', 'error');
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+  });
+}
+
+export function useDeleteChecklistItem(taskId: number) {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  const key = tasksKeys.detail(taskId);
+  return useMutation({
+    mutationFn: (id: number) => tasksService.deleteChecklistItem(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<MaybeTask>(key);
+      if (previous) {
+        qc.setQueryData<Task>(key, {
+          ...previous,
+          checklist: previous.checklist.filter((c) => c.id !== id),
+        });
+      }
+      return { previous };
+    },
+    onError: (e, _id, ctx) => {
+      if (ctx?.previous) qc.setQueryData(key, ctx.previous);
+      showMessage(e instanceof Error ? e.message : 'Failed to remove checklist item', 'error');
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
   });
 }
 

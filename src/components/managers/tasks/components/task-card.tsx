@@ -24,7 +24,11 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
   const due = dueMeta(t.dueDate);
   const linkCount =
     [t.techCardId, t.productId, t.archiveId].filter((v) => v > 0).length + (t.orderUuid ? 1 : 0);
+  const checkTotal = task.checklist.length;
+  const checkDone = task.checklist.filter((c) => c.isDone).length;
+  const isArchived = !!task.archivedAt;
   const meta: string[] = [];
+  if (checkTotal) meta.push(`✓ ${checkDone}/${checkTotal}`);
   if (linkCount) meta.push(`${linkCount} link${linkCount > 1 ? 's' : ''}`);
   if (t.mediaIds.length) meta.push(`${t.mediaIds.length} file${t.mediaIds.length > 1 ? 's' : ''}`);
 
@@ -35,8 +39,15 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
         dragging
           ? 'border-textColor shadow-[4px_4px_0_0_var(--text)]'
           : 'border-textInactiveColor hover:-translate-y-0.5 hover:border-textColor hover:shadow-[2px_2px_0_0_var(--text)] motion-reduce:hover:translate-y-0',
+        isArchived && 'opacity-60',
       )}
     >
+      {isArchived && (
+        <span className='w-fit bg-textColor px-1.5 py-px text-[10px] uppercase leading-4 text-bgColor'>
+          archived
+        </span>
+      )}
+
       {t.labels.length > 0 && (
         <div className='flex flex-wrap gap-1'>
           {t.labels.map((l) => (
