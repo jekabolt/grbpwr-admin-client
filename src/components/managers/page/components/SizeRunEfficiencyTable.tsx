@@ -15,9 +15,18 @@ const MIN_SIZES = 3;
 export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRunEfficiency }) => {
   if (!sizeRunEfficiency || sizeRunEfficiency.length === 0) return null;
 
+  // Backend now ships unit buy/sell quantities → real sell-through (units sold ÷ units bought),
+  // not just the coarse "how many distinct sizes sold at least once" coverage proxy.
+  const hasUnitData = sizeRunEfficiency.some((r) => (r.unitsBought ?? 0) > 0);
+
   const sorted = [...sizeRunEfficiency]
     .filter((r) => (r.totalSizes || 0) >= MIN_SIZES)
-    .sort((a, b) => (a.efficiencyPct || 0) - (b.efficiencyPct || 0))
+    // Worst sell-through first — those are the overbought runs to act on.
+    .sort((a, b) =>
+      hasUnitData
+        ? (a.sellThroughPct || 0) - (b.sellThroughPct || 0)
+        : (a.efficiencyPct || 0) - (b.efficiencyPct || 0),
+    )
     .slice(0, 20);
 
   if (sorted.length === 0) return null;
@@ -38,24 +47,33 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
               </th>
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>
-                  Total sizes
+                  Sizes sold
                 </Text>
               </th>
+              {hasUnitData && (
+                <th className='text-right p-2'>
+                  <Text variant='uppercase' className='text-[10px]'>
+                    Units sold / bought
+                  </Text>
+                </th>
+              )}
               <th className='text-right p-2'>
                 <Text variant='uppercase' className='text-[10px]'>
-                  Sold through
-                </Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
-                  Sell-through %
+                  {hasUnitData ? 'Sell-through %' : 'Size coverage %'}
                 </Text>
               </th>
             </tr>
           </thead>
           <tbody>
             {sorted.map((row, idx) => {
-              const pct = row.efficiencyPct || 0;
+              const totalSizes = row.totalSizes || 0;
+              const bought = row.unitsBought ?? 0;
+              // Prefer true unit sell-through; fall back to the size-coverage proxy when a row
+              // has no buy quantity (e.g. stock predates cost/receiving data).
+              const showTrue = hasUnitData && bought > 0;
+              const pct = showTrue ? row.sellThroughPct || 0 : row.efficiencyPct || 0;
+              // Low sell-through on a wide run = real overbuy; single-digit runs are too small to judge.
+              const isPoor = pct < 50 && totalSizes >= 4;
               return (
                 <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                   <td className='p-2'>
@@ -66,20 +84,24 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
                     />
                   </td>
                   <td className='p-2 text-right'>
-                    <Text>{formatNumber(row.totalSizes || 0)}</Text>
+                    <Text>
+                      {formatNumber(row.soldThroughSizes || 0)}/{formatNumber(totalSizes)}
+                    </Text>
                   </td>
+                  {hasUnitData && (
+                    <td className='p-2 text-right'>
+                      {bought > 0 ? (
+                        <Text>
+                          {formatNumber(row.unitsSold ?? 0)}/{formatNumber(bought)}
+                        </Text>
+                      ) : (
+                        <Text variant='inactive'>—</Text>
+                      )}
+                    </td>
+                  )}
                   <td className='p-2 text-right'>
-                    <Text>{formatNumber(row.soldThroughSizes || 0)}</Text>
-                  </td>
-                  <td className='p-2 text-right'>
-                    <Text
-                      className={
-                        pct < 50 && (row.totalSizes || 0) >= 4
-                          ? 'text-error font-bold'
-                          : 'font-bold'
-                      }
-                    >
-                      {pct.toFixed(1)}%
+                    <Text className={isPoor ? 'text-error font-bold' : 'font-bold'}>
+                      {pct.toFixed(1)}%{!showTrue && hasUnitData ? '*' : ''}
                     </Text>
                   </td>
                 </tr>
@@ -89,13 +111,24 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
         </table>
       </div>
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
-        <Text>
-          Share of distinct sizes that sold at least once (of {MIN_SIZES}+ sizes offered) — a coarse
-          proxy for whether the size run was bought right. Low = likely overbought some sizes.
-        </Text>
-        <Text>
-          True sell-through (units sold ÷ units bought) needs cost/buy data from the backend.
-        </Text>
+        {hasUnitData ? (
+          <>
+            <Text>
+              True sell-through = units sold ÷ units bought. Low on a wide size run = likely
+              overbought — the sizes to cut next buy.
+            </Text>
+            {sorted.some((r) => (r.unitsBought ?? 0) === 0) && (
+              <Text>
+                * Size-coverage proxy shown where unit buy quantities aren&apos;t recorded.
+              </Text>
+            )}
+          </>
+        ) : (
+          <Text>
+            Share of distinct sizes that sold at least once (of {MIN_SIZES}+ sizes offered) — a
+            coarse proxy while unit buy quantities aren&apos;t recorded yet.
+          </Text>
+        )}
       </div>
     </div>
   );

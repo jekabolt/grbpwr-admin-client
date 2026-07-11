@@ -9,6 +9,7 @@ import {
   formatCurrencyDelta,
   formatNumber,
   formatNumberDelta,
+  formatPercentWithBand,
   getMetricComparison,
 } from '../utils';
 
@@ -54,12 +55,14 @@ const Delta: FC<{
 
 export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueTabProps) {
   const metrics = metricsResponse.business;
+  const commerce = metrics?.commerce;
+  const margin = metrics?.margin;
 
-  const revenue = getMetricComparison(metrics?.revenue as any);
-  const grossRevenue = getMetricComparison(metrics?.grossRevenue as any);
-  const orders = getMetricComparison(metrics?.ordersCount as any);
-  const aov = getMetricComparison(metrics?.avgOrderValue as any);
-  const refundRate = getMetricComparison(metrics?.refundRate as any);
+  const revenue = getMetricComparison(commerce?.revenue as any);
+  const grossRevenue = getMetricComparison(commerce?.grossRevenue as any);
+  const orders = getMetricComparison(commerce?.ordersCount as any);
+  const aov = getMetricComparison(commerce?.avgOrderValue as any);
+  const refundRate = getMetricComparison(commerce?.refundRate as any);
   const cancellationPct = orderCancellationSharePercent(metrics);
 
   const ordersN = orders.value;
@@ -68,12 +71,17 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
   const showRates = ordersN >= MIN_ORDERS_FOR_RATE;
 
   // Margin — computed only over the costed subset of revenue (products with a cost set).
-  const revenueCost = getMetricComparison(metrics?.revenueCost as any);
-  const grossMargin = getMetricComparison(metrics?.grossMargin as any);
-  const grossMarginPct = getMetricComparison(metrics?.grossMarginPct as any);
-  const contributionMargin = getMetricComparison(metrics?.contributionMargin as any);
-  const costCoverage = metrics?.costCoveragePct ?? 0;
+  const revenueCost = getMetricComparison(margin?.revenueCost as any);
+  const grossMargin = getMetricComparison(margin?.grossMargin as any);
+  const grossMarginPct = getMetricComparison(margin?.grossMarginPct as any);
+  const paymentFees = getMetricComparison(margin?.paymentFees as any);
+  const contributionMargin = getMetricComparison(margin?.contributionMargin as any);
+  const costCoverage = margin?.costCoveragePct ?? 0;
   const marginPctTrusted = costCoverage >= COVERAGE_FLOOR_FOR_PCT;
+  // Processor fees bridge gross profit → contribution; only show the line once they're captured.
+  const showFees = paymentFees.value > 0;
+  // Products with no cost entered are why margin is partial/dark — name the gap to close it.
+  const uncostedCount = margin?.uncostedProductIds?.length ?? 0;
 
   return (
     <div className='space-y-6'>
@@ -85,10 +93,14 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             {costCoverage > 0
               ? `over the ${costCoverage.toFixed(0)}% of revenue with a product cost set`
               : 'set product costs to unlock'}
+            {uncostedCount > 0 &&
+              ` · ${uncostedCount} product${uncostedCount === 1 ? '' : 's'} missing cost`}
           </Text>
         </div>
         {costCoverage > 0 ? (
-          <div className='grid grid-cols-2 md:grid-cols-4 gap-3 border-2 border-textColor/20 p-4 bg-bgSecondary/30'>
+          <div
+            className={`grid grid-cols-2 ${showFees ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3 border-2 border-textColor/20 p-4 bg-bgSecondary/30`}
+          >
             <div className='space-y-1'>
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
                 COGS
@@ -127,6 +139,17 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 </Text>
               )}
             </div>
+            {showFees && (
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  Payment fees
+                </Text>
+                <Text className='font-bold text-lg'>−{formatCurrency(paymentFees.value)}</Text>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  processor cut
+                </Text>
+              </div>
+            )}
             <div className='space-y-1'>
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
                 Contribution
@@ -139,7 +162,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 enabled={compareEnabled}
               />
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
-                after shipping
+                {showFees ? 'after shipping & fees' : 'after shipping'}
               </Text>
             </div>
           </div>
@@ -203,7 +226,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             </Text>
             {showRates && (
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
-                {refundRate.value.toFixed(1)}%
+                {formatPercentWithBand(refundRate.value, refundRate.marginOfError)}
               </Text>
             )}
           </div>
@@ -224,10 +247,10 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
         </div>
 
         <div className='grid gap-4 md:grid-cols-2'>
-          <TimeSeriesChart title='Revenue' data={coarsenTimeSeries(metrics?.revenueByDay)} />
+          <TimeSeriesChart title='Revenue' data={coarsenTimeSeries(commerce?.revenueByDay)} />
           <TimeSeriesChart
             title='Gross revenue'
-            data={coarsenTimeSeries(metrics?.grossRevenueByDay)}
+            data={coarsenTimeSeries(commerce?.grossRevenueByDay)}
           />
         </div>
       </div>
@@ -252,20 +275,20 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
           <div className='grid gap-4 md:grid-cols-2'>
             <TimeSeriesChart
               title='Units sold'
-              data={coarsenTimeSeries(metrics?.unitsSoldByDay)}
+              data={coarsenTimeSeries(commerce?.unitsSoldByDay)}
               valueFormat='number'
             />
             <TimeSeriesChart
               title='Shipped'
-              data={coarsenTimeSeries(metrics?.shippedByDay)}
+              data={coarsenTimeSeries(commerce?.shippedByDay)}
               valueFormat='number'
             />
             <TimeSeriesChart
               title='Delivered'
-              data={coarsenTimeSeries(metrics?.deliveredByDay)}
+              data={coarsenTimeSeries(commerce?.deliveredByDay)}
               valueFormat='number'
             />
-            <TimeSeriesChart title='Refunds' data={coarsenTimeSeries(metrics?.refundsByDay)} />
+            <TimeSeriesChart title='Refunds' data={coarsenTimeSeries(commerce?.refundsByDay)} />
           </div>
         </div>
       </details>

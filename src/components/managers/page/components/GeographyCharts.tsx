@@ -82,7 +82,7 @@ interface GeographyChartsProps {
 // flips on a single large order — cut. This is DB revenue, so it's trustworthy (unlike GA4 geo).
 export const GeographyCharts: FC<GeographyChartsProps> = ({ metrics }) => {
   if (!metrics) return null;
-  const data = geoToChartData(metrics.revenueByCountry);
+  const data = geoToChartData(metrics.commerce?.revenueByCountry);
   if (data.length === 0) return null;
 
   return (

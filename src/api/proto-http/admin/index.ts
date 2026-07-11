@@ -55,7 +55,13 @@ export type MetricsSection =
   | "METRICS_SECTION_NOTIFY_ME_INTENT"
   | "METRICS_SECTION_GEOGRAPHY"
   | "METRICS_SECTION_CUSTOMER_SEGMENTATION"
-  | "METRICS_SECTION_RFM";
+  | "METRICS_SECTION_RFM"
+  | "METRICS_SECTION_SELL_THROUGH_BY_DROP";
+export type AlertSeverity =
+  | "ALERT_SEVERITY_UNSPECIFIED"
+  | "ALERT_SEVERITY_INFO"
+  | "ALERT_SEVERITY_WARNING"
+  | "ALERT_SEVERITY_CRITICAL";
 // RefundReason is the canonical, structured refund/return reason used by the return-analysis
 // breakdown. Keys mirror the historical free-text buckets.
 export type RefundReason =
@@ -984,30 +990,49 @@ export type GetMetricsResponse = {
   geography: GeographySection | undefined;
   customerSegments: CustomerSegmentRow[] | undefined;
   rfmAnalysis: RFMSegmentRow[] | undefined;
+  sellThroughByDrop: SellThroughByDropRow[] | undefined;
 };
 
+// BusinessMetrics groups the overview metrics by data provenance so consumers can tell
+// DB-trusted figures from GA4-estimated ones at a glance. BREAKING: replaces the former
+// ~90-field flat message — read metrics from commerce / margin / traffic / email instead.
 export type BusinessMetrics = {
   period: TimeRange | undefined;
   comparePeriod: TimeRange | undefined;
+  commerce: CommerceCoreMetrics | undefined;
+  margin: MarginMetrics | undefined;
+  traffic: TrafficMetrics | undefined;
+  email: EmailMetrics | undefined;
+};
+
+export type TimeRange = {
+  from: wellKnownTimestamp | undefined;
+  to: wellKnownTimestamp | undefined;
+};
+
+// CommerceCoreMetrics is the DB-authoritative commerce view: sales, customers, discounts,
+// shipping, plus their breakdowns and daily series.
+export type CommerceCoreMetrics = {
   revenue: MetricWithComparison | undefined;
   ordersCount: MetricWithComparison | undefined;
+  totalPlacedOrders: MetricWithComparison | undefined;
   avgOrderValue: MetricWithComparison | undefined;
   itemsPerOrder: MetricWithComparison | undefined;
   refundRate: MetricWithComparison | undefined;
-  // Share of orders with a promo_code attached (customer_order.promo_id). Unrelated to total_discount
-  // when discounts come only from product sale percentages — see product_sale_discount / promo_code_discount.
   promoUsageRate: MetricWithComparison | undefined;
-  // Gross revenue at list prices (before any discounts or refunds) + shipping.
-  // Includes original order value of fully refunded orders (status=Refunded).
-  // Revenue = GrossRevenue - ProductSaleDiscount - PromoCodeDiscount - TotalRefunded.
   grossRevenue: MetricWithComparison | undefined;
   totalRefunded: MetricWithComparison | undefined;
-  // Sum of product_sale_discount + promo_code_discount (base currency, net-revenue order statuses).
   totalDiscount: MetricWithComparison | undefined;
-  // Line-item sale % off list price (not from promo codes).
   productSaleDiscount: MetricWithComparison | undefined;
-  // Extra % off subtotal from an applied promo_code (orders with promo_id only).
   promoCodeDiscount: MetricWithComparison | undefined;
+  newSubscribers: MetricWithComparison | undefined;
+  newCustomers: MetricWithComparison | undefined;
+  repeatCustomersRate: MetricWithComparison | undefined;
+  avgOrdersPerCustomer: MetricWithComparison | undefined;
+  avgDaysBetweenOrders: MetricWithComparison | undefined;
+  avgShippingCost: MetricWithComparison | undefined;
+  totalShippingCost: MetricWithComparison | undefined;
+  clvDistribution: CLVStats | undefined;
   revenueByCountry: GeographyMetric[] | undefined;
   revenueByCity: GeographyMetric[] | undefined;
   revenueByRegion: RegionMetric[] | undefined;
@@ -1018,17 +1043,9 @@ export type BusinessMetrics = {
   topProductsByQuantity: ProductMetric[] | undefined;
   revenueByCategory: CategoryMetric[] | undefined;
   crossSellPairs: CrossSellPair[] | undefined;
-  newSubscribers: MetricWithComparison | undefined;
-  repeatCustomersRate: MetricWithComparison | undefined;
-  avgOrdersPerCustomer: MetricWithComparison | undefined;
-  avgDaysBetweenOrders: MetricWithComparison | undefined;
-  clvDistribution: CLVStats | undefined;
   revenueByPromo: PromoMetric[] | undefined;
-  // orders_by_status is every order PLACED in the period bucketed by its current status
-  // (one order per bucket), so it sums to total_placed_orders, NOT to orders_count.
-  // orders_count counts only net-revenue statuses (confirmed/shipped/delivered/partially_refunded),
-  // so cancelled/refunded/pending_return orders are excluded from it. Use total_placed_orders
-  // as the denominator for status shares such as cancellation% / refund%.
+  // Every order PLACED in the period bucketed by its current status (one per bucket); sums to
+  // total_placed_orders, not orders_count.
   ordersByStatus: StatusCount[] | undefined;
   revenueByDay: TimeSeriesPoint[] | undefined;
   ordersByDay: TimeSeriesPoint[] | undefined;
@@ -1052,65 +1069,6 @@ export type BusinessMetrics = {
   returningCustomersByDayCompare: TimeSeriesPoint[] | undefined;
   shippedByDayCompare: TimeSeriesPoint[] | undefined;
   deliveredByDayCompare: TimeSeriesPoint[] | undefined;
-  // GA4 Traffic & Engagement
-  sessions: MetricWithComparison | undefined;
-  users: MetricWithComparison | undefined;
-  newUsers: MetricWithComparison | undefined;
-  pageViews: MetricWithComparison | undefined;
-  bounceRate: MetricWithComparison | undefined;
-  // Average engagement time per session (seconds), derived from GA4
-  // userEngagementDuration / sessions at sync — not raw averageSessionDuration
-  // (wall-clock first-to-last event, often inflated by background tabs).
-  avgSessionDuration: MetricWithComparison | undefined;
-  pagesPerSession: MetricWithComparison | undefined;
-  conversionRate: MetricWithComparison | undefined;
-  revenuePerSession: MetricWithComparison | undefined;
-  sessionsByCountry: GeographySessionMetric[] | undefined;
-  topProductsByViews: ProductViewMetric[] | undefined;
-  trafficBySource: TrafficSourceMetric[] | undefined;
-  trafficByDevice: DeviceMetric[] | undefined;
-  sessionsByDay: TimeSeriesPoint[] | undefined;
-  usersByDay: TimeSeriesPoint[] | undefined;
-  pageViewsByDay: TimeSeriesPoint[] | undefined;
-  conversionRateByDay: TimeSeriesPoint[] | undefined;
-  sessionsByDayCompare: TimeSeriesPoint[] | undefined;
-  usersByDayCompare: TimeSeriesPoint[] | undefined;
-  pageViewsByDayCompare: TimeSeriesPoint[] | undefined;
-  conversionRateByDayCompare: TimeSeriesPoint[] | undefined;
-  // Email delivery metrics (from Resend webhooks)
-  emailsSent: MetricWithComparison | undefined;
-  emailsDelivered: MetricWithComparison | undefined;
-  emailDeliveryRate: MetricWithComparison | undefined;
-  emailOpenRate: MetricWithComparison | undefined;
-  emailClickRate: MetricWithComparison | undefined;
-  emailBounceRate: MetricWithComparison | undefined;
-  // Customer acquisition aggregate (sum of new_customers_by_day series)
-  newCustomers: MetricWithComparison | undefined;
-  // Shipping / logistics metrics
-  avgShippingCost: MetricWithComparison | undefined;
-  totalShippingCost: MetricWithComparison | undefined;
-  // Total orders PLACED in the period, regardless of status (sum of orders_by_status).
-  // Distinct from orders_count, which counts only net-revenue statuses. Use this as the
-  // denominator when deriving status shares (cancellation rate, refund rate, etc.).
-  totalPlacedOrders: MetricWithComparison | undefined;
-  // Margin metrics, derived from product.cost_price (per-unit COGS in base currency).
-  // Computed ONLY over line items whose product has a cost set, so revenue_cost and the
-  // margins are on the "costed" subset of revenue — gross_margin_pct.caveat and
-  // cost_coverage_pct report how much of revenue that subset is. COGS is net of the
-  // refund proration but NOT reduced by promo/sale discounts (a discount lowers revenue,
-  // not the cost of the goods).
-  revenueCost: MetricWithComparison | undefined;
-  grossMargin: MetricWithComparison | undefined;
-  grossMarginPct: MetricWithComparison | undefined;
-  contributionMargin: MetricWithComparison | undefined;
-  // Share (%) of net product revenue (base currency) whose product has a cost set — the
-  // fraction the margin figures above are computed over. 100 = full cost coverage.
-  costCoveragePct: number | undefined;
-};
-
-export type TimeRange = {
-  from: wellKnownTimestamp | undefined;
-  to: wellKnownTimestamp | undefined;
 };
 
 export type MetricWithComparison = {
@@ -1124,6 +1082,21 @@ export type MetricWithComparison = {
   changeAbsolute: number | undefined;
   // Optional tooltip/caveat text to clarify metric interpretation (e.g., data limitations, calculation notes).
   caveat: string | undefined;
+  // Number of observations behind the metric (orders, sessions, customers…). 0 = not
+  // populated. Prefer gating a metric on this (e.g. hide/greytext when sample_size < 30)
+  // over an arbitrary display floor.
+  sampleSize: number | undefined;
+  // 95% confidence-interval half-width in the metric's own units (e.g. ±2.4 for a 12.0%
+  // rate). Populated only for true count-proportions (conversion, promo usage); 0 = not
+  // computed. Frontend can render "12.0% ± 2.4" instead of guessing significance from a floor.
+  marginOfError: number | undefined;
+};
+
+export type CLVStats = {
+  mean: googletype_Decimal | undefined;
+  median: googletype_Decimal | undefined;
+  p90: googletype_Decimal | undefined;
+  sampleSize: number | undefined;
 };
 
 export type GeographyMetric = {
@@ -1187,13 +1160,9 @@ export type CrossSellPair = {
   productAName: string | undefined;
   productBName: string | undefined;
   count: number | undefined;
-};
-
-export type CLVStats = {
-  mean: googletype_Decimal | undefined;
-  median: googletype_Decimal | undefined;
-  p90: googletype_Decimal | undefined;
-  sampleSize: number | undefined;
+  support: number | undefined;
+  confidence: number | undefined;
+  lift: number | undefined;
 };
 
 export type PromoMetric = {
@@ -1212,6 +1181,44 @@ export type TimeSeriesPoint = {
   date: wellKnownTimestamp | undefined;
   value: googletype_Decimal | undefined;
   count: number | undefined;
+};
+
+// MarginMetrics is the DB-trusted COGS / margin view (from product.cost_price), computed over
+// the "costed" revenue subset; cost_coverage_pct says how much of revenue that subset is.
+export type MarginMetrics = {
+  revenueCost: MetricWithComparison | undefined;
+  grossMargin: MetricWithComparison | undefined;
+  grossMarginPct: MetricWithComparison | undefined;
+  paymentFees: MetricWithComparison | undefined;
+  contributionMargin: MetricWithComparison | undefined;
+  costCoveragePct: number | undefined;
+  uncostedProductIds: number[] | undefined;
+};
+
+// TrafficMetrics is the GA4-estimated traffic / engagement / conversion view. These figures
+// are sampled/modelled by GA4 — treat as directional, not DB-exact.
+export type TrafficMetrics = {
+  sessions: MetricWithComparison | undefined;
+  users: MetricWithComparison | undefined;
+  newUsers: MetricWithComparison | undefined;
+  pageViews: MetricWithComparison | undefined;
+  bounceRate: MetricWithComparison | undefined;
+  avgSessionDuration: MetricWithComparison | undefined;
+  pagesPerSession: MetricWithComparison | undefined;
+  conversionRate: MetricWithComparison | undefined;
+  revenuePerSession: MetricWithComparison | undefined;
+  sessionsByCountry: GeographySessionMetric[] | undefined;
+  topProductsByViews: ProductViewMetric[] | undefined;
+  trafficBySource: TrafficSourceMetric[] | undefined;
+  trafficByDevice: DeviceMetric[] | undefined;
+  sessionsByDay: TimeSeriesPoint[] | undefined;
+  usersByDay: TimeSeriesPoint[] | undefined;
+  pageViewsByDay: TimeSeriesPoint[] | undefined;
+  conversionRateByDay: TimeSeriesPoint[] | undefined;
+  sessionsByDayCompare: TimeSeriesPoint[] | undefined;
+  usersByDayCompare: TimeSeriesPoint[] | undefined;
+  pageViewsByDayCompare: TimeSeriesPoint[] | undefined;
+  conversionRateByDayCompare: TimeSeriesPoint[] | undefined;
 };
 
 export type GeographySessionMetric = {
@@ -1246,6 +1253,16 @@ export type DeviceMetric = {
   sessions: number | undefined;
   users: number | undefined;
   conversionRate: number | undefined;
+};
+
+// EmailMetrics is the Resend email-delivery view.
+export type EmailMetrics = {
+  emailsSent: MetricWithComparison | undefined;
+  emailsDelivered: MetricWithComparison | undefined;
+  emailDeliveryRate: MetricWithComparison | undefined;
+  emailOpenRate: MetricWithComparison | undefined;
+  emailClickRate: MetricWithComparison | undefined;
+  emailBounceRate: MetricWithComparison | undefined;
 };
 
 export type FunnelSection = {
@@ -1436,6 +1453,16 @@ export type RevenueParetoRow = {
   productName: string | undefined;
   revenue: googletype_Decimal | undefined;
   cumulativePct: number | undefined;
+  // Margin fields (mirror ProductMetric). Populated only when the product has a cost_price;
+  // has_cost=false ⇒ the cost is unknown, so treat margins as N/A, not as 100%. Note the
+  // margin here is computed on this row's own `revenue` basis (gross list revenue, Σ price×qty),
+  // so revenue_cost is Σ(cost × qty) on the same un-adjusted basis — internally consistent
+  // with `revenue`, but not directly comparable to the refund/discount-adjusted BusinessMetrics margin.
+  unitCost: googletype_Decimal | undefined;
+  revenueCost: googletype_Decimal | undefined;
+  grossMargin: googletype_Decimal | undefined;
+  grossMarginPct: number | undefined;
+  hasCost: boolean | undefined;
 };
 
 export type SpendingCurvePoint = {
@@ -1457,14 +1484,22 @@ export type InventoryHealthRow = {
   sizeName: string | undefined;
   quantity: number | undefined;
   avgDailySales: number | undefined;
+  // Days of cover at the current sales rate. When is_selling is false there were no sales in
+  // the window, so this carries a large sentinel (sorts dead stock last) — read is_selling,
+  // not a magic number, and render days of cover as N/A in that case.
   daysOnHand: number | undefined;
-  // Optional per-SKU targets (0 = unset) and the server-side reorder decision derived
-  // from them. needs_reorder is meaningful only when has_target is true.
+  // Optional per-SKU targets (0 = unset) and the server-side reorder decision derived from
+  // them. needs_reorder is meaningful only when has_target is true; setting a target is the
+  // operator's opt-in that this SKU is continuity stock (limited drops get no target, hence
+  // no reorder noise — days of cover is misleading for them).
   reorderPoint: number | undefined;
   targetDaysCover: number | undefined;
   leadTimeDays: number | undefined;
   needsReorder: boolean | undefined;
   hasTarget: boolean | undefined;
+  // True when the SKU sold at least one unit in the window. Replaces the client-side
+  // qty/avgDailySales sentinel check: gate any days-of-cover display on this.
+  isSelling: boolean | undefined;
 };
 
 export type SizeRunEfficiencyRow = {
@@ -1473,6 +1508,9 @@ export type SizeRunEfficiencyRow = {
   totalSizes: number | undefined;
   soldThroughSizes: number | undefined;
   efficiencyPct: number | undefined;
+  unitsBought: number | undefined;
+  unitsSold: number | undefined;
+  sellThroughPct: number | undefined;
 };
 
 export type SlowMoverRow = {
@@ -1484,6 +1522,15 @@ export type SlowMoverRow = {
   lastSaleDate: wellKnownTimestamp | undefined;
   productHidden: boolean | undefined;
   totalViews: number | undefined;
+  // Margin fields (mirror ProductMetric). Populated only when the product has a cost_price;
+  // has_cost=false ⇒ the cost is unknown, so treat margins as N/A, not as 100%. Computed on
+  // this row's `revenue` (the refund/FX/discount-adjusted net revenue), so revenue_cost is the
+  // refund-adjusted COGS — the same basis as the BusinessMetrics and product-breakdown margins.
+  unitCost: googletype_Decimal | undefined;
+  revenueCost: googletype_Decimal | undefined;
+  grossMargin: googletype_Decimal | undefined;
+  grossMarginPct: number | undefined;
+  hasCost: boolean | undefined;
 };
 
 export type ReturnByProductRow = {
@@ -1577,6 +1624,9 @@ export type CampaignAttributionRow = {
   // zero when none is recorded for the channel; roas is 0 unless spend > 0.
   spend: googletype_Decimal | undefined;
   roas: number | undefined;
+  // CAC = spend / conversions (0 unless both > 0). Attribution-based, so directional for an
+  // organic-heavy channel mix rather than an exact acquisition cost.
+  cac: number | undefined;
 };
 
 // AddToCartRateAnalysis contains both per-product aggregate data for scatter plot
@@ -1702,6 +1752,82 @@ export type RFMSegmentRow = {
   lastPurchase: wellKnownTimestamp | undefined;
   orderCount: number | undefined;
   totalSpent: googletype_Decimal | undefined;
+};
+
+// SellThroughByDropRow aggregates a release/drop cohort (product.collection) into
+// decision-grade totals, so tiny per-day/per-SKU samples roll up to a statistically
+// meaningful drop-level view. sell_through_pct = units_sold / (units_sold +
+// units_remaining) × 100 over the whole drop, computed lifetime (current state), not
+// windowed — sell-through is inherently cumulative. Sorted by revenue desc.
+export type SellThroughByDropRow = {
+  collection: string | undefined;
+  productCount: number | undefined;
+  unitsSold: number | undefined;
+  unitsRemaining: number | undefined;
+  sellThroughPct: number | undefined;
+  revenue: googletype_Decimal | undefined;
+  unitsBought: number | undefined;
+  grossMargin: googletype_Decimal | undefined;
+  grossMarginPct: number | undefined;
+  hasCost: boolean | undefined;
+  daysTo50pct?: number;
+};
+
+export type GetDashboardRequest = {
+  // Period spec, same grammar as GetMetrics (7d, 30d, 90d, today, WTD, MTD, QTD, YTD).
+  period: string | undefined;
+  // Optional window end (defaults to now). The period is measured back from here.
+  endAt: wellKnownTimestamp | undefined;
+  // Max rows per action list (top-by-margin, reorder, clear, drops). 0 = server default.
+  limit: number | undefined;
+};
+
+// DashboardAlert is a server-computed, threshold-driven alert. Rate-based alerts are gated on
+// a minimum order count, so they never fire on a statistically meaningless sample.
+export type DashboardAlert = {
+  severity: AlertSeverity | undefined;
+  code: string | undefined;
+  title: string | undefined;
+  detail: string | undefined;
+};
+
+export type GetDashboardResponse = {
+  period: TimeRange | undefined;
+  revenue: googletype_Decimal | undefined;
+  orders: number | undefined;
+  grossMargin: googletype_Decimal | undefined;
+  grossMarginPct: number | undefined;
+  contributionMargin: googletype_Decimal | undefined;
+  costCoveragePct: number | undefined;
+  caveat: string | undefined;
+  uncostedProductIds: number[] | undefined;
+  alerts: DashboardAlert[] | undefined;
+  topByMargin: ProductMetric[] | undefined;
+  reorder: InventoryHealthRow[] | undefined;
+  clear: SlowMoverRow[] | undefined;
+  drops: SellThroughByDropRow[] | undefined;
+};
+
+// AlertSettings are the operator-tunable thresholds behind the dashboard alerts.
+export type AlertSettings = {
+  coverageWarnPct: number | undefined;
+  refundRateWarnPct: number | undefined;
+  rateFloorN: number | undefined;
+  contributionTrustPct: number | undefined;
+};
+
+export type GetAlertSettingsRequest = {
+};
+
+export type GetAlertSettingsResponse = {
+  settings: AlertSettings | undefined;
+};
+
+export type UpsertAlertSettingsRequest = {
+  settings: AlertSettings | undefined;
+};
+
+export type UpsertAlertSettingsResponse = {
 };
 
 export type RefundOrderRequest = {
@@ -2427,6 +2553,160 @@ export type DeleteFittingRequest = {
 };
 
 export type DeleteFittingResponse = {
+};
+
+export type AddTaskRequest = {
+  task: common_TaskInsert | undefined;
+  board: common_TaskBoard | undefined;
+  status: common_TaskStatus | undefined;
+};
+
+// TaskInsert is the writable CONTENT of a task (create/update). Placement on the
+// board — board, status, position — is deliberately NOT here: it is set at
+// AddTask and changed only via MoveTask, so a content edit can never silently
+// re-file a card into another lane/column or reorder it. Other server-managed
+// fields (id, created_by, timestamps, resolved media) also live on Task.
+export type common_TaskInsert = {
+  title: string | undefined;
+  description: string | undefined;
+  assignee: string | undefined;
+  priority: common_TaskPriority | undefined;
+  dueDate: wellKnownTimestamp | undefined;
+  labels: string[] | undefined;
+  mediaIds: number[] | undefined;
+  // Optional typed links to existing admin entities (0 / "" = none). Follows the
+  // fitting precedent (several nullable typed FKs, NOT a polymorphic entity_type
+  // ref) so a card can deep-link to the artifact it is about while that artifact
+  // keeps its own state machine (techcard stage/approval, fitting verdict, …).
+  // Each target has a single-get RPC so the card can resolve a title/thumbnail.
+  techCardId: number | undefined;
+  productId: number | undefined;
+  orderUuid: string | undefined;
+  archiveId: number | undefined;
+};
+
+export type common_TaskPriority =
+  | "TASK_PRIORITY_UNKNOWN"
+  | "TASK_PRIORITY_LOW"
+  | "TASK_PRIORITY_MEDIUM"
+  | "TASK_PRIORITY_HIGH"
+  | "TASK_PRIORITY_URGENT";
+// TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
+// task belongs to exactly one board. Extend by appending members (never reuse
+// numbers) — 0 stays UNKNOWN per proto3 convention.
+export type common_TaskBoard =
+  | "TASK_BOARD_UNKNOWN"
+  | "TASK_BOARD_DEVELOPMENT"
+  | "TASK_BOARD_DESIGN"
+  | "TASK_BOARD_MARKETING"
+  | "TASK_BOARD_PRODUCTION"
+  | "TASK_BOARD_SOURCING"
+  | "TASK_BOARD_CONTENT";
+// TaskStatus is the kanban column. A drag between columns is a status change.
+export type common_TaskStatus =
+  | "TASK_STATUS_UNKNOWN"
+  | "TASK_STATUS_BACKLOG"
+  | "TASK_STATUS_TODO"
+  | "TASK_STATUS_IN_PROGRESS"
+  | "TASK_STATUS_REVIEW"
+  | "TASK_STATUS_DONE";
+export type AddTaskResponse = {
+  id: number | undefined;
+};
+
+export type GetTaskRequest = {
+  id: number | undefined;
+};
+
+export type GetTaskResponse = {
+  task: common_Task | undefined;
+};
+
+// Task is a stored kanban card: its content (TaskInsert), its placement on the
+// board (board/status/position — server-managed, set by AddTask and mutated only
+// by MoveTask), resolved media, and server-stamped identity/timestamps.
+export type common_Task = {
+  id: number | undefined;
+  task: common_TaskInsert | undefined;
+  board: common_TaskBoard | undefined;
+  status: common_TaskStatus | undefined;
+  position: number | undefined;
+  media: common_MediaFull[] | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+export type UpdateTaskRequest = {
+  id: number | undefined;
+  task: common_TaskInsert | undefined;
+};
+
+export type UpdateTaskResponse = {
+};
+
+export type MoveTaskRequest = {
+  id: number | undefined;
+  board: common_TaskBoard | undefined;
+  status: common_TaskStatus | undefined;
+  position: number | undefined;
+};
+
+export type MoveTaskResponse = {
+};
+
+export type DeleteTaskRequest = {
+  id: number | undefined;
+};
+
+export type DeleteTaskResponse = {
+};
+
+export type ListTasksRequest = {
+  board: common_TaskBoard | undefined;
+  status: common_TaskStatus | undefined;
+  assignee: string | undefined;
+  limit: number | undefined;
+  offset: number | undefined;
+  orderFactor: common_OrderFactor | undefined;
+  techCardId: number | undefined;
+  productId: number | undefined;
+};
+
+export type ListTasksResponse = {
+  tasks: common_Task[] | undefined;
+  total: number | undefined;
+};
+
+export type AddTaskCommentRequest = {
+  comment: common_TaskCommentInsert | undefined;
+};
+
+// TaskCommentInsert is the writable payload for a comment. author is set
+// server-side from the caller's JWT (not client-supplied).
+export type common_TaskCommentInsert = {
+  taskId: number | undefined;
+  body: string | undefined;
+};
+
+export type AddTaskCommentResponse = {
+  id: number | undefined;
+};
+
+export type ListTaskCommentsRequest = {
+  taskId: number | undefined;
+};
+
+export type ListTaskCommentsResponse = {
+  comments: common_TaskComment[] | undefined;
+};
+
+export type common_TaskComment = {
+  id: number | undefined;
+  taskId: number | undefined;
+  author: string | undefined;
+  body: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 export type UpdateSettingsRequest = {
@@ -3542,6 +3822,14 @@ export interface AdminService {
   // order_sequence, entry_products, revenue_pareto, spending_curve, category_loyalty,
   // inventory_health, size_run_efficiency.
   GetMetrics(request: GetMetricsRequest): Promise<GetMetricsResponse>;
+  // GetDashboard returns a small, DB-trusted decision payload: headline revenue/orders/margin
+  // (+ caveat), server-computed alerts, and short action lists (top by margin €, reorder,
+  // clear, drop sell-through). Use GetMetrics for deep, sectioned drill-down.
+  GetDashboard(request: GetDashboardRequest): Promise<GetDashboardResponse>;
+  // Reads the operator-tunable thresholds behind the dashboard alerts.
+  GetAlertSettings(request: GetAlertSettingsRequest): Promise<GetAlertSettingsResponse>;
+  // Updates the operator-tunable dashboard alert thresholds.
+  UpsertAlertSettings(request: UpsertAlertSettingsRequest): Promise<UpsertAlertSettingsResponse>;
   // Sets per-SKU inventory reorder targets used by the inventory-health metrics.
   UpsertInventoryTargets(request: UpsertInventoryTargetsRequest): Promise<UpsertInventoryTargetsResponse>;
   // Records operator-entered marketing spend per channel per day, used for ROAS.
@@ -3583,6 +3871,31 @@ export interface AdminService {
   // Declared last on purpose (see ListModels ordering note) so GET /fitting/list
   // is not shadowed by GET /fitting/{id}.
   ListFittings(request: ListFittingsRequest): Promise<ListFittingsResponse>;
+  // AddTask creates a new kanban task from its content plus placement (target
+  // board + optional initial column). Server sets created_by (from JWT) and
+  // appends the card to the end of its (board,status) column (position).
+  AddTask(request: AddTaskRequest): Promise<AddTaskResponse>;
+  // GetTask returns a task by id.
+  GetTask(request: GetTaskRequest): Promise<GetTaskResponse>;
+  // UpdateTask replaces a task's content (title, description, assignee, priority,
+  // due_date, labels, media, entity links). Placement — board, column (status),
+  // ordering — is NOT touched here; it changes only through MoveTask.
+  UpdateTask(request: UpdateTaskRequest): Promise<UpdateTaskResponse>;
+  // MoveTask changes a task's placement: its board, its column (status), and/or
+  // its order within a column (position) — a card can be dragged across columns
+  // and across boards. This is the drag-and-drop endpoint; the server
+  // re-sequences sibling positions as needed.
+  MoveTask(request: MoveTaskRequest): Promise<MoveTaskResponse>;
+  // DeleteTask deletes a task by id (cascades its comments).
+  DeleteTask(request: DeleteTaskRequest): Promise<DeleteTaskResponse>;
+  // AddTaskComment appends a comment to a task. Server sets author from JWT.
+  AddTaskComment(request: AddTaskCommentRequest): Promise<AddTaskCommentResponse>;
+  // ListTaskComments returns a task's comments, oldest first.
+  ListTaskComments(request: ListTaskCommentsRequest): Promise<ListTaskCommentsResponse>;
+  // ListTasks lists tasks with optional board/status/assignee filters. Declared
+  // last (see route-ordering note above) so GET /task/list is not shadowed by
+  // GET /task/{id}.
+  ListTasks(request: ListTasksRequest): Promise<ListTasksResponse>;
   // CreateTechCard creates a new tech card (техкарта) with its nested sections.
   CreateTechCard(request: CreateTechCardRequest): Promise<CreateTechCardResponse>;
   // GetTechCard returns a tech card by id with its nested sections resolved.
@@ -4269,6 +4582,66 @@ export function createAdminServiceClient(
         method: "GetMetrics",
       }) as Promise<GetMetricsResponse>;
     },
+    GetDashboard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dashboard`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.period) {
+        queryParams.push(`period=${encodeURIComponent(request.period.toString())}`)
+      }
+      if (request.endAt) {
+        queryParams.push(`endAt=${encodeURIComponent(request.endAt.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDashboard",
+      }) as Promise<GetDashboardResponse>;
+    },
+    GetAlertSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dashboard/alert-settings`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAlertSettings",
+      }) as Promise<GetAlertSettingsResponse>;
+    },
+    UpsertAlertSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dashboard/alert-settings/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertAlertSettings",
+      }) as Promise<UpsertAlertSettingsResponse>;
+    },
     UpsertInventoryTargets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/inventory/targets/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -4665,6 +5038,175 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListFittings",
       }) as Promise<ListFittingsResponse>;
+    },
+    AddTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTask",
+      }) as Promise<AddTaskResponse>;
+    },
+    GetTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/task/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTask",
+      }) as Promise<GetTaskResponse>;
+    },
+    UpdateTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTask",
+      }) as Promise<UpdateTaskResponse>;
+    },
+    MoveTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/move`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MoveTask",
+      }) as Promise<MoveTaskResponse>;
+    },
+    DeleteTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/task/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTask",
+      }) as Promise<DeleteTaskResponse>;
+    },
+    AddTaskComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/comment/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTaskComment",
+      }) as Promise<AddTaskCommentResponse>;
+    },
+    ListTaskComments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.taskId) {
+        throw new Error("missing required field request.task_id");
+      }
+      const path = `api/admin/task/${request.taskId}/comments`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTaskComments",
+      }) as Promise<ListTaskCommentsResponse>;
+    },
+    ListTasks(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.board) {
+        queryParams.push(`board=${encodeURIComponent(request.board.toString())}`)
+      }
+      if (request.status) {
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
+      }
+      if (request.assignee) {
+        queryParams.push(`assignee=${encodeURIComponent(request.assignee.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      if (request.techCardId) {
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
+      }
+      if (request.productId) {
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTasks",
+      }) as Promise<ListTasksResponse>;
     },
     CreateTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/add`; // eslint-disable-line quotes

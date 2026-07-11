@@ -1,6 +1,6 @@
 ---
 title: Analytics — Backend Follow-ups (grbpwr-proto)
-date: 2026-07-10
+date: 2026-07-11
 tags: [analytics, backend, grbpwr-proto, roadmap]
 ---
 
@@ -9,29 +9,42 @@ tags: [analytics, backend, grbpwr-proto, roadmap]
 Hand-off list from the decision-first dashboard rework (branch `analytics-decision-first`).
 Each item is a concrete `grbpwr-proto` / gateway change. Ordered by value × effort.
 
-## Already delivered in this proto bump (consumed by the frontend)
+## Delivered & consumed by the frontend
+
+Earlier proto bump:
 
 - `RefundReason` enum + `RefundOrderRequest.reasonCode` — wired in the refund modal.
 - `InventoryHealthRow.{reorderPoint,targetDaysCover,leadTimeDays,needsReorder,hasTarget}`
   + `UpsertInventoryTargets` RPC — powers the **Reorder-now** list + target entry form.
 - `CampaignAttributionRow.{spend,roas}` + `UpsertChannelSpend` RPC — powers ROAS + spend entry.
-- `BusinessMetrics.contributionMargin` — shown in the Revenue P&L block.
 
-## Still needed (prioritized)
+`@26a19e8` proto bump (this follow-up round — asks #1/#2/#3/#4/#6/#7/#8/#10 below):
+
+- #1 **Margin on `SlowMoverRow` + `RevenueParetoRow`** (`unitCost/revenueCost/grossMargin/grossMarginPct/hasCost`)
+  — Margin column on the Slow movers table (markdown headroom).
+- #2 **`MarginMetrics.paymentFees`** + redefined `contributionMargin` — Payment-fees line in the Revenue P&L.
+- #3 **`MarginMetrics.uncostedProductIds`** — "N products missing cost" hint on the margin block.
+- #4 **`GetMetricsResponse.sellThroughByDrop`** (`SellThroughByDropRow`: collection, units bought/sold/remaining,
+  sellThroughPct, revenue, grossMargin(Pct), hasCost, daysTo50pct) — new **Drop verdict** section in Products.
+- #6 **`SizeRunEfficiencyRow.{unitsBought,unitsSold,sellThroughPct}`** — true unit sell-through in the size-run table.
+- #7 **`CrossSellPair.{support,confidence,lift}`** — cross-sell table now ranks by lift, shows attach rate.
+- #8 **`MetricWithComparison.{sampleSize,marginOfError}`** — alert gating prefers `sampleSize`; `formatPercentWithBand`
+  renders "12.0% ± 2.4" (applied to refund rate; lights up as backend extends MoE coverage).
+- #10 **`BusinessMetrics` god-object split** into `CommerceCoreMetrics / MarginMetrics / TrafficMetrics / EmailMetrics`
+  — all frontend reads migrated to the sub-messages.
+
+## Available in the contract but not yet consumed (deliberate)
+
+| # | Ask | Status | Note |
+|---|-----|--------|------|
+| 5 | **`GetDashboard` decision RPC** (+ `DashboardAlert`) | Shipped in proto, not wired | Building a single decision-first page would duplicate the current tabbed dashboard. Deferred as an architecture decision, not an oversight — revisit if we want to retire the tabs. |
+| 11 | **`GetAlertSettings` / `UpsertAlertSettings` + `AlertSettings`** | Shipped in proto, not wired | Alert thresholds still live as constants in `executiveAlerts.ts`. A small settings form would move them server-side; low priority until ops actually want to tune them. |
+
+## Still needed
 
 | # | Ask | Value | Effort | Why |
 |---|-----|-------|--------|-----|
-| 1 | **Margin on `SlowMoverRow` + `RevenueParetoRow`** — add `unitCost/revenueCost/grossMargin/grossMarginPct/hasCost` (mirror `ProductMetric`). | High | S | The markdown/liquidate decision on Slow movers & Dead stock is margin-blind. Rows already carry `productId`; margin is already computed for `ProductMetric`. **This was thought delivered but is not** — only `ProductMetric` carries margin today. |
-| 2 | **`paymentFees` on `BusinessMetrics`** (capture Stripe `balance_transaction.fee`), and redefine `contributionMargin = grossMargin − totalShippingCost − paymentFees`; make COGS net of promo/sale discount. | High | M | Processor fees + discount erosion are a silent 2–3pp leak. Contribution margin € should become the dashboard's headline number. |
-| 3 | **Cost coverage activation** — `uncostedProductIds` (or a small "products missing cost" endpoint) on the margin block. | High | S | The whole margin suite is dark until costs are entered; show operators exactly which products to cost. |
-| 4 | **Drop/release cohort** — tag orders+products with a release id; add `SellThroughByDropRow {dropId, dropName, releasedAt, unitsBought, unitsSold, sellThroughPct, daysTo50pct, revenue, grossMargin}` behind a new `METRICS_SECTION_DROP_SELL_THROUGH`. | High | M | The core KPI of a drop brand, currently absent. Turns tiny daily samples into decision-grade per-drop totals and makes compare honest (this drop vs last drop, not WoW across a drop boundary). Unlocks a real "Drop verdict" zone. |
-| 5 | **`GetDashboard` decision RPC** — one opinionated DB-trusted payload (money + server-computed alerts + top movers by margin + reorder/clear lists + current-drop sell-through). Keep sectioned `GetMetrics` for drill-down. | Med | L | Enables collapsing the 4 tabs into one decision-first page without fetching the ~90-field `BusinessMetrics` god-object per tab. |
-| 6 | **True size-run sell-through** — `SizeRunEfficiencyRow` currently uses "sold at least once". Add `unitsBought`/`unitsSold` so efficiency = sold ÷ bought. | Med | M | Frontend only has a coarse proxy; real overbuy detection needs buy quantities. |
-| 7 | **Cross-sell lift** — add marginal frequencies (or a precomputed `lift`) to `crossSellPairs`. | Med | S | Raw co-occurrence is chance-dominated at low N; frontend floors at count≥3 but can't compute observed/expected. |
-| 8 | **`sampleSize` on `MetricWithComparison`** — the n a rate/comparison is computed over. | Med | M | Lets the UI suppress or show ± bands instead of hardcoded floors. (`sampleSize` exists on `ClvDistribution` only today; `currentMetricValue()` already reads it defensively.) |
-| 9 | **Fix `ordersByStatus`** — count each order's current/terminal status once, not transitions (its sum currently exceeds the order count). | Med | S | Removes the cancellation-denominator workaround; makes any status breakdown honest. |
-| 10 | **Split `BusinessMetrics` god-object** into CommerceCore / Margin / Traffic(GA4) / Email sub-messages. | Med | L | Type-separates DB-trusted from GA4-estimated so a consumer can't accidentally headline a sampled number; stops every tab paying the full computation. |
-| 11 | **Move alert thresholds server-side / into settings** (`executiveAlerts.ts`: `REVENUE_DROP_ALERT_PCT`, `CANCELLATION_SHARE_ALERT`, `MIN_ORDERS_FOR_ALERT`, `MIN_SESSIONS_FOR_ALERT`, …). | Low | M | Lets ops tune floors to their volume without a frontend deploy. |
+| 9 | **Fix `ordersByStatus`** — count each order's current/terminal status once, not transitions (its sum currently exceeds the order count). | Med | S | Removes the cancellation-denominator workaround (`orderCancellationSharePercent` still divides by `ordersCount`, not the status-row sum); makes any status breakdown honest. |
 
 ## Explicitly NOT worth building
 

@@ -32,7 +32,7 @@ function trafficBySourceToData(items: TrafficSourceMetric[] | undefined) {
  */
 export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
   if (!metrics) return null;
-  const data = trafficBySourceToData(metrics.trafficBySource).slice(0, 10);
+  const data = trafficBySourceToData(metrics.traffic?.trafficBySource).slice(0, 10);
   if (data.length === 0) return null;
 
   const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {

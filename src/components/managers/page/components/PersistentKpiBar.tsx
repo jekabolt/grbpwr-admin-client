@@ -46,12 +46,14 @@ function coverageNote(costCoverage: number): string | null {
 function getKpiMetrics(metrics: BusinessMetrics | undefined, compareEnabled: boolean): KpiMetric[] {
   if (!metrics) return [];
 
-  const revenue = getMetricComparison(metrics.revenue as any);
-  const orders = getMetricComparison(metrics.ordersCount as any);
-  const grossMarginPct = getMetricComparison(metrics.grossMarginPct as any);
-  const contributionMargin = getMetricComparison(metrics.contributionMargin as any);
+  const commerce = metrics.commerce;
+  const margin = metrics.margin;
+  const revenue = getMetricComparison(commerce?.revenue as any);
+  const orders = getMetricComparison(commerce?.ordersCount as any);
+  const grossMarginPct = getMetricComparison(margin?.grossMarginPct as any);
+  const contributionMargin = getMetricComparison(margin?.contributionMargin as any);
   // Share (%) of revenue whose product has a cost set — margin is computed only over it.
-  const costCoverage = metrics.costCoveragePct ?? 0;
+  const costCoverage = margin?.costCoveragePct ?? 0;
   const costed = costCoverage > 0;
 
   return [

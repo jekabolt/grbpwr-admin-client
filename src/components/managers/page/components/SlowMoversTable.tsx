@@ -27,6 +27,8 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
   }, [slowMovers, showNoSalesProducts]);
 
   const hiddenGhostCount = useMemo(() => slowMovers.filter(isNeverSoldGhost).length, [slowMovers]);
+  // Margin tells you how much room there is to mark a slow mover down before it stops paying.
+  const anyCosted = useMemo(() => topSlowMovers.some((r) => r.hasCost), [topSlowMovers]);
 
   return (
     <div className='border border-textInactiveColor p-4'>
@@ -68,6 +70,11 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
                 </th>
                 <th className='text-right p-2'>
                   <Text variant='uppercase' className='text-[10px]'>
+                    Margin
+                  </Text>
+                </th>
+                <th className='text-right p-2'>
+                  <Text variant='uppercase' className='text-[10px]'>
                     Units Sold
                   </Text>
                 </th>
@@ -101,6 +108,20 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
                     <td className='p-2 text-right'>
                       <Text>{formatCurrency(parseDecimal(row.revenue))}</Text>
                     </td>
+                    <td
+                      className='p-2 text-right'
+                      title={
+                        row.hasCost
+                          ? `Gross margin ${formatCurrency(parseDecimal(row.grossMargin))}`
+                          : 'No product cost set'
+                      }
+                    >
+                      {row.hasCost && row.grossMarginPct != null ? (
+                        <Text>{row.grossMarginPct.toFixed(0)}%</Text>
+                      ) : (
+                        <Text variant='inactive'>N/A</Text>
+                      )}
+                    </td>
                     <td className='p-2 text-right'>
                       <Text>{formatNumber(row.unitsSold || 0)}</Text>
                     </td>
@@ -120,7 +141,11 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
         </div>
       )}
       <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
-        <Text>Products with low sales velocity — consider promotions or markdown.</Text>
+        <Text>
+          Products with low sales velocity — consider promotions or markdown. Margin is the room to
+          discount before a unit stops paying for itself.
+        </Text>
+        {!anyCosted && <Text>Set product costs to see margin (markdown headroom) here.</Text>}
         {!showNoSalesProducts && hiddenGhostCount > 0 && (
           <Text>Default view excludes products with no sales (e.g. test or seed SKUs).</Text>
         )}

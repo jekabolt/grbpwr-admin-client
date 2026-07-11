@@ -33,7 +33,10 @@ export function ThisWeekTab({
   customTo,
 }: ThisWeekTabProps) {
   const metrics = metricsResponse.business;
-  const metricsRecord = metrics as Record<string, unknown> | undefined;
+  const commerce = metrics?.commerce;
+  const traffic = metrics?.traffic;
+  // ordersByDay moved into the commerce sub-message; feed getTimeSeries that record.
+  const metricsRecord = commerce as Record<string, unknown> | undefined;
   const { pathname } = useLocation();
   const revenueHref = `${pathname}?tab=revenue`;
   const productsHref = `${pathname}?tab=products`;
@@ -62,8 +65,8 @@ export function ThisWeekTab({
   );
 
   const top3Products = useMemo(() => {
-    const byRevenue = metrics?.topProductsByRevenue || [];
-    const byQuantity = metrics?.topProductsByQuantity || [];
+    const byRevenue = commerce?.topProductsByRevenue || [];
+    const byQuantity = commerce?.topProductsByQuantity || [];
 
     // Units live in `count` on some breakdowns and in `value` on others — take whichever is
     // populated so the join doesn't silently render 0 units for every product.
@@ -78,10 +81,10 @@ export function ThisWeekTab({
       units: quantityMap.get(p.productId) ?? unitsOf(p),
       grossMarginPct: p.hasCost ? p.grossMarginPct : null,
     }));
-  }, [metrics?.topProductsByRevenue, metrics?.topProductsByQuantity]);
+  }, [commerce?.topProductsByRevenue, commerce?.topProductsByQuantity]);
 
   const topTrafficSource = useMemo(() => {
-    const sources = metrics?.trafficBySource || [];
+    const sources = traffic?.trafficBySource || [];
     const filtered = sources.filter((s) => {
       const name = [s.source, s.medium].filter(Boolean).join(' / ').toLowerCase();
       return !name.includes('direct') && !name.includes('none');
@@ -94,7 +97,7 @@ export function ThisWeekTab({
       name: [top.source, top.medium].filter(Boolean).join(' / ') || 'Unknown',
       sessions: top.sessions ?? 0,
     };
-  }, [metrics?.trafficBySource]);
+  }, [traffic?.trafficBySource]);
 
   // Payment failures = money that didn't get captured — the one ops-relevant signal kept
   // from the retired Technical tab.
@@ -143,12 +146,12 @@ export function ThisWeekTab({
         <div className='grid gap-4 md:grid-cols-2'>
           <TimeSeriesChart
             title='New customers'
-            data={coarsenTimeSeries(metrics?.newCustomersByDay)}
+            data={coarsenTimeSeries(commerce?.newCustomersByDay)}
             valueFormat='number'
           />
           <TimeSeriesChart
             title='Returning customers'
-            data={coarsenTimeSeries(metrics?.returningCustomersByDay)}
+            data={coarsenTimeSeries(commerce?.returningCustomersByDay)}
             valueFormat='number'
           />
         </div>

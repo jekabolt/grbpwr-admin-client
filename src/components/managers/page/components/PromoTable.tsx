@@ -8,7 +8,7 @@ interface PromoTableProps {
 }
 
 export const PromoTable: FC<PromoTableProps> = ({ metrics }) => {
-  const promos = metrics?.revenueByPromo ?? [];
+  const promos = metrics?.commerce?.revenueByPromo ?? [];
   if (promos.length === 0) return null;
 
   return (

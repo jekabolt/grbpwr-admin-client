@@ -29,8 +29,9 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
   const navigate = useNavigate();
   if (!metrics) return null;
 
+  const commerce = metrics.commerce;
   const revenueData =
-    metrics.topProductsByRevenue?.slice(0, 10).map((p) => ({
+    commerce?.topProductsByRevenue?.slice(0, 10).map((p) => ({
       name: (p.productName || `#${p.productId}`).slice(0, 20),
       value: parseDecimal(p.value),
       count: p.count ?? 0,
@@ -38,7 +39,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
     })) ?? [];
 
   const quantityData =
-    metrics.topProductsByQuantity?.slice(0, 10).map((p) => ({
+    commerce?.topProductsByQuantity?.slice(0, 10).map((p) => ({
       name: (p.productName || `#${p.productId}`).slice(0, 20),
       value: p.count ?? 0,
       revenue: parseDecimal(p.value),
@@ -47,7 +48,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
 
   // Revenue rank with margin, so a top seller that's actually low-margin is visible.
   const revenueMarginRows =
-    metrics.topProductsByRevenue?.slice(0, 10).map((p) => ({
+    commerce?.topProductsByRevenue?.slice(0, 10).map((p) => ({
       productId: p.productId,
       productName: p.productName,
       revenue: parseDecimal(p.value),
@@ -65,7 +66,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
   };
 
   const categoryData =
-    metrics.revenueByCategory?.map((c) => ({
+    commerce?.revenueByCategory?.map((c) => ({
       name: (c.categoryName || `#${c.categoryId}`).slice(0, 20),
       value: parseDecimal(c.value),
       count: c.count ?? 0,
