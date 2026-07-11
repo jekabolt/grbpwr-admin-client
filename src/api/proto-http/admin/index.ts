@@ -2635,6 +2635,24 @@ export type common_Task = {
   createdBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // Soft-archive: set = the card is archived (hidden from the board and default
+  // list, but preserved and restorable via UnarchiveTask); unset = active.
+  // Orthogonal to placement — archiving does not change board/status/position.
+  archivedAt: wellKnownTimestamp | undefined;
+  checklist: common_TaskChecklistItem[] | undefined;
+};
+
+// TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
+// a done flag. Checklist items are managed by dedicated add/toggle/delete RPCs
+// (NOT bundled into TaskInsert's replace-on-update semantics like labels/media),
+// so a content edit never wipes per-item done state.
+export type common_TaskChecklistItem = {
+  id: number | undefined;
+  taskId: number | undefined;
+  content: string | undefined;
+  isDone: boolean | undefined;
+  position: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 export type UpdateTaskRequest = {
@@ -2671,6 +2689,7 @@ export type ListTasksRequest = {
   orderFactor: common_OrderFactor | undefined;
   techCardId: number | undefined;
   productId: number | undefined;
+  includeArchived: boolean | undefined;
 };
 
 export type ListTasksResponse = {
@@ -2707,6 +2726,162 @@ export type common_TaskComment = {
   author: string | undefined;
   body: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
+};
+
+export type ArchiveTaskRequest = {
+  id: number | undefined;
+};
+
+export type ArchiveTaskResponse = {
+};
+
+export type UnarchiveTaskRequest = {
+  id: number | undefined;
+};
+
+export type UnarchiveTaskResponse = {
+};
+
+export type AddTaskChecklistItemRequest = {
+  taskId: number | undefined;
+  content: string | undefined;
+};
+
+export type AddTaskChecklistItemResponse = {
+  id: number | undefined;
+};
+
+export type SetTaskChecklistItemDoneRequest = {
+  id: number | undefined;
+  isDone: boolean | undefined;
+};
+
+export type SetTaskChecklistItemDoneResponse = {
+};
+
+export type DeleteTaskChecklistItemRequest = {
+  id: number | undefined;
+};
+
+export type DeleteTaskChecklistItemResponse = {
+};
+
+export type GetFulfillmentBoardRequest = {
+  deliveredLimit: number | undefined;
+};
+
+export type GetFulfillmentBoardResponse = {
+  columns: common_FulfillmentColumnCards[] | undefined;
+};
+
+// FulfillmentColumnCards groups one column's cards, in fulfillment order
+// (oldest order first, so the longest-waiting order is picked first).
+export type common_FulfillmentColumnCards = {
+  column: common_FulfillmentColumn | undefined;
+  cards: common_FulfillmentCard[] | undefined;
+};
+
+// FulfillmentColumn is a lane on the fulfillment board. Unlike TaskStatus (free
+// kanban columns), each column is bound to a concrete order status.
+export type common_FulfillmentColumn =
+  | "FULFILLMENT_COLUMN_UNKNOWN"
+  | "FULFILLMENT_COLUMN_TO_FULFILL"
+  | "FULFILLMENT_COLUMN_SHIPPED"
+  | "FULFILLMENT_COLUMN_DELIVERED";
+// FulfillmentCard is one tile on the board: the compact order plus its annotation
+// summary. Full order detail + full annotation come from GetFulfillmentCard.
+export type common_FulfillmentCard = {
+  order: common_Order | undefined;
+  column: common_FulfillmentColumn | undefined;
+  assignee: string | undefined;
+  checklistDone: number | undefined;
+  checklistTotal: number | undefined;
+  hasNotes: boolean | undefined;
+};
+
+export type GetFulfillmentCardRequest = {
+  orderUuid: string | undefined;
+};
+
+export type GetFulfillmentCardResponse = {
+  order: common_OrderFull | undefined;
+  annotation: common_FulfillmentAnnotation | undefined;
+};
+
+// FulfillmentAnnotation is the board-owned overlay on an order: an assignee,
+// internal packing notes and a checklist. It carries NO order status — that lives
+// on the order. Lazily created on first edit; keyed by order_uuid.
+export type common_FulfillmentAnnotation = {
+  orderUuid: string | undefined;
+  assignee: string | undefined;
+  notes: string | undefined;
+  checklist: common_FulfillmentChecklistItem[] | undefined;
+};
+
+// FulfillmentChecklistItem is one packing-checklist row on a fulfillment card
+// (e.g. "picked", "packed", "label printed"). Managed by dedicated add/toggle/
+// delete RPCs, same as a task checklist item.
+export type common_FulfillmentChecklistItem = {
+  id: number | undefined;
+  content: string | undefined;
+  isDone: boolean | undefined;
+  position: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+export type SetFulfillmentAssigneeRequest = {
+  orderUuid: string | undefined;
+  assignee: string | undefined;
+};
+
+export type SetFulfillmentAssigneeResponse = {
+};
+
+export type SetFulfillmentNotesRequest = {
+  orderUuid: string | undefined;
+  notes: string | undefined;
+};
+
+export type SetFulfillmentNotesResponse = {
+};
+
+export type AddFulfillmentChecklistItemRequest = {
+  orderUuid: string | undefined;
+  content: string | undefined;
+};
+
+export type AddFulfillmentChecklistItemResponse = {
+  id: number | undefined;
+};
+
+export type SetFulfillmentChecklistItemDoneRequest = {
+  id: number | undefined;
+  isDone: boolean | undefined;
+};
+
+export type SetFulfillmentChecklistItemDoneResponse = {
+};
+
+export type DeleteFulfillmentChecklistItemRequest = {
+  id: number | undefined;
+};
+
+export type DeleteFulfillmentChecklistItemResponse = {
+};
+
+export type ShipFulfillmentOrderRequest = {
+  orderUuid: string | undefined;
+  trackingCode: string | undefined;
+};
+
+export type ShipFulfillmentOrderResponse = {
+};
+
+export type MarkFulfillmentDeliveredRequest = {
+  orderUuid: string | undefined;
+};
+
+export type MarkFulfillmentDeliveredResponse = {
 };
 
 export type UpdateSettingsRequest = {
@@ -3896,6 +4071,43 @@ export interface AdminService {
   // last (see route-ordering note above) so GET /task/list is not shadowed by
   // GET /task/{id}.
   ListTasks(request: ListTasksRequest): Promise<ListTasksResponse>;
+  // ArchiveTask soft-archives a task: it is hidden from the board and the default
+  // list (restorable), and its former (board,status) column is re-sequenced so
+  // positions stay gap-free. Placement is otherwise preserved.
+  ArchiveTask(request: ArchiveTaskRequest): Promise<ArchiveTaskResponse>;
+  // UnarchiveTask restores an archived task, appending it to the end of its
+  // (board,status) column.
+  UnarchiveTask(request: UnarchiveTaskRequest): Promise<UnarchiveTaskResponse>;
+  // AddTaskChecklistItem appends a checklist item (subtask) to a task.
+  AddTaskChecklistItem(request: AddTaskChecklistItemRequest): Promise<AddTaskChecklistItemResponse>;
+  // SetTaskChecklistItemDone sets a checklist item's done flag.
+  SetTaskChecklistItemDone(request: SetTaskChecklistItemDoneRequest): Promise<SetTaskChecklistItemDoneResponse>;
+  // DeleteTaskChecklistItem removes a checklist item.
+  DeleteTaskChecklistItem(request: DeleteTaskChecklistItemRequest): Promise<DeleteTaskChecklistItemResponse>;
+  // GetFulfillmentBoard returns the three columns of cards (compact order +
+  // annotation summary), oldest order first within each column.
+  GetFulfillmentBoard(request: GetFulfillmentBoardRequest): Promise<GetFulfillmentBoardResponse>;
+  // GetFulfillmentCard returns full order detail plus the full annotation
+  // (assignee, notes, checklist) for one order.
+  GetFulfillmentCard(request: GetFulfillmentCardRequest): Promise<GetFulfillmentCardResponse>;
+  // SetFulfillmentAssignee sets (or clears, with "") the order's fulfillment
+  // assignee, lazily creating the annotation.
+  SetFulfillmentAssignee(request: SetFulfillmentAssigneeRequest): Promise<SetFulfillmentAssigneeResponse>;
+  // SetFulfillmentNotes sets the order's internal packing notes.
+  SetFulfillmentNotes(request: SetFulfillmentNotesRequest): Promise<SetFulfillmentNotesResponse>;
+  // AddFulfillmentChecklistItem appends a packing-checklist item to an order.
+  AddFulfillmentChecklistItem(request: AddFulfillmentChecklistItemRequest): Promise<AddFulfillmentChecklistItemResponse>;
+  // SetFulfillmentChecklistItemDone sets a packing-checklist item's done flag.
+  SetFulfillmentChecklistItemDone(request: SetFulfillmentChecklistItemDoneRequest): Promise<SetFulfillmentChecklistItemDoneResponse>;
+  // DeleteFulfillmentChecklistItem removes a packing-checklist item.
+  DeleteFulfillmentChecklistItem(request: DeleteFulfillmentChecklistItemRequest): Promise<DeleteFulfillmentChecklistItemResponse>;
+  // ShipFulfillmentOrder records a To-Fulfill order's tracking code, performing
+  // the real shipped transition (and the shipped email) — gated by fulfillment
+  // perms. Requires a non-empty tracking code.
+  ShipFulfillmentOrder(request: ShipFulfillmentOrderRequest): Promise<ShipFulfillmentOrderResponse>;
+  // MarkFulfillmentDelivered performs the real delivered transition for a shipped
+  // order.
+  MarkFulfillmentDelivered(request: MarkFulfillmentDeliveredRequest): Promise<MarkFulfillmentDeliveredResponse>;
   // CreateTechCard creates a new tech card (техкарта) with its nested sections.
   CreateTechCard(request: CreateTechCardRequest): Promise<CreateTechCardResponse>;
   // GetTechCard returns a tech card by id with its nested sections resolved.
@@ -5195,6 +5407,9 @@ export function createAdminServiceClient(
       if (request.productId) {
         queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
       }
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -5207,6 +5422,256 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListTasks",
       }) as Promise<ListTasksResponse>;
+    },
+    ArchiveTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveTask",
+      }) as Promise<ArchiveTaskResponse>;
+    },
+    UnarchiveTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/unarchive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UnarchiveTask",
+      }) as Promise<UnarchiveTaskResponse>;
+    },
+    AddTaskChecklistItem(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/checklist/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTaskChecklistItem",
+      }) as Promise<AddTaskChecklistItemResponse>;
+    },
+    SetTaskChecklistItemDone(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/checklist/done`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTaskChecklistItemDone",
+      }) as Promise<SetTaskChecklistItemDoneResponse>;
+    },
+    DeleteTaskChecklistItem(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/task/checklist/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTaskChecklistItem",
+      }) as Promise<DeleteTaskChecklistItemResponse>;
+    },
+    GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.deliveredLimit) {
+        queryParams.push(`deliveredLimit=${encodeURIComponent(request.deliveredLimit.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFulfillmentBoard",
+      }) as Promise<GetFulfillmentBoardResponse>;
+    },
+    GetFulfillmentCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.orderUuid) {
+        throw new Error("missing required field request.order_uuid");
+      }
+      const path = `api/admin/fulfillment/card/${request.orderUuid}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFulfillmentCard",
+      }) as Promise<GetFulfillmentCardResponse>;
+    },
+    SetFulfillmentAssignee(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/assignee`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetFulfillmentAssignee",
+      }) as Promise<SetFulfillmentAssigneeResponse>;
+    },
+    SetFulfillmentNotes(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/notes`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetFulfillmentNotes",
+      }) as Promise<SetFulfillmentNotesResponse>;
+    },
+    AddFulfillmentChecklistItem(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/checklist/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddFulfillmentChecklistItem",
+      }) as Promise<AddFulfillmentChecklistItemResponse>;
+    },
+    SetFulfillmentChecklistItemDone(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/checklist/done`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetFulfillmentChecklistItemDone",
+      }) as Promise<SetFulfillmentChecklistItemDoneResponse>;
+    },
+    DeleteFulfillmentChecklistItem(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/fulfillment/checklist/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFulfillmentChecklistItem",
+      }) as Promise<DeleteFulfillmentChecklistItemResponse>;
+    },
+    ShipFulfillmentOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/ship`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ShipFulfillmentOrder",
+      }) as Promise<ShipFulfillmentOrderResponse>;
+    },
+    MarkFulfillmentDelivered(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/deliver`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MarkFulfillmentDelivered",
+      }) as Promise<MarkFulfillmentDeliveredResponse>;
     },
     CreateTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/add`; // eslint-disable-line quotes
