@@ -1451,6 +1451,85 @@ export type SupportTicket = {
   internalNotes: string | undefined;
 };
 
+// TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
+// task belongs to exactly one board. Extend by appending members (never reuse
+// numbers) — 0 stays UNKNOWN per proto3 convention.
+export type TaskBoard =
+  | "TASK_BOARD_UNKNOWN"
+  | "TASK_BOARD_DEVELOPMENT"
+  | "TASK_BOARD_DESIGN"
+  | "TASK_BOARD_MARKETING"
+  | "TASK_BOARD_PRODUCTION"
+  | "TASK_BOARD_SOURCING"
+  | "TASK_BOARD_CONTENT";
+// TaskStatus is the kanban column. A drag between columns is a status change.
+export type TaskStatus =
+  | "TASK_STATUS_UNKNOWN"
+  | "TASK_STATUS_BACKLOG"
+  | "TASK_STATUS_TODO"
+  | "TASK_STATUS_IN_PROGRESS"
+  | "TASK_STATUS_REVIEW"
+  | "TASK_STATUS_DONE";
+export type TaskPriority =
+  | "TASK_PRIORITY_UNKNOWN"
+  | "TASK_PRIORITY_LOW"
+  | "TASK_PRIORITY_MEDIUM"
+  | "TASK_PRIORITY_HIGH"
+  | "TASK_PRIORITY_URGENT";
+// TaskInsert is the writable CONTENT of a task (create/update). Placement on the
+// board — board, status, position — is deliberately NOT here: it is set at
+// AddTask and changed only via MoveTask, so a content edit can never silently
+// re-file a card into another lane/column or reorder it. Other server-managed
+// fields (id, created_by, timestamps, resolved media) also live on Task.
+export type TaskInsert = {
+  title: string | undefined;
+  description: string | undefined;
+  assignee: string | undefined;
+  priority: TaskPriority | undefined;
+  dueDate: wellKnownTimestamp | undefined;
+  labels: string[] | undefined;
+  mediaIds: number[] | undefined;
+  // Optional typed links to existing admin entities (0 / "" = none). Follows the
+  // fitting precedent (several nullable typed FKs, NOT a polymorphic entity_type
+  // ref) so a card can deep-link to the artifact it is about while that artifact
+  // keeps its own state machine (techcard stage/approval, fitting verdict, …).
+  // Each target has a single-get RPC so the card can resolve a title/thumbnail.
+  techCardId: number | undefined;
+  productId: number | undefined;
+  orderUuid: string | undefined;
+  archiveId: number | undefined;
+};
+
+// Task is a stored kanban card: its content (TaskInsert), its placement on the
+// board (board/status/position — server-managed, set by AddTask and mutated only
+// by MoveTask), resolved media, and server-stamped identity/timestamps.
+export type Task = {
+  id: number | undefined;
+  task: TaskInsert | undefined;
+  board: TaskBoard | undefined;
+  status: TaskStatus | undefined;
+  position: number | undefined;
+  media: MediaFull[] | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// TaskCommentInsert is the writable payload for a comment. author is set
+// server-side from the caller's JWT (not client-supplied).
+export type TaskCommentInsert = {
+  taskId: number | undefined;
+  body: string | undefined;
+};
+
+export type TaskComment = {
+  id: number | undefined;
+  taskId: number | undefined;
+  author: string | undefined;
+  body: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
 // TechCardStage is the development stage of a tech pack: prototype, fit sample,
 // salesman sample, pre-production, production.
 export type TechCardStage =
