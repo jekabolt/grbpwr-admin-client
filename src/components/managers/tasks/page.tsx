@@ -3,21 +3,21 @@ import { SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Loader } from 'ui/components/loader';
 import Text from 'ui/components/text';
 import { emptyTaskInsert, Task, TaskBoard, TaskInsert, TaskStatus } from './api/types';
 import { setLocalActor } from './api/tasksService';
 import { Board } from './components/board';
+import { applyFilters, emptyFilters, FiltersBar, TaskFilters } from './components/filters-bar';
+import { TaskDetailDrawer } from './components/task-detail-drawer';
 import { TaskFormModal } from './components/task-form-modal';
-import { useCreateTask, useTasks, useUpdateTask } from './hooks/useTasks';
+import { useCreateTask, useDeleteTask, useTasks, useUpdateTask } from './hooks/useTasks';
 import { BOARD_LABEL, BOARDS } from './utils/meta';
 
 const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
 
-type ModalState =
-  | { mode: 'create'; status: TaskStatus }
-  | { mode: 'edit'; task: Task }
-  | null;
+type ModalState = { mode: 'create'; status: TaskStatus } | { mode: 'edit'; task: Task } | null;
 
 export function Tasks() {
   const { account, canRead, canWrite, resolved } = usePermissions();
@@ -35,9 +35,19 @@ export function Tasks() {
   const { data, isLoading, isError, error, refetch } = useTasks(filter);
   const tasks = data?.tasks ?? [];
 
+  const [filters, setFilters] = useState<TaskFilters>(emptyFilters);
+  const visible = useMemo(
+    () => applyFilters(tasks, filters, account?.username),
+    [tasks, filters, account?.username],
+  );
+
   const [modal, setModal] = useState<ModalState>(null);
+  const [selected, setSelected] = useState<Task | null>(null);
+  const [deleting, setDeleting] = useState<Task | null>(null);
+
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
+  const deleteTask = useDeleteTask();
 
   const initial: TaskInsert = useMemo(() => {
     if (modal?.mode === 'edit') return modal.task.task;
@@ -56,6 +66,13 @@ export function Tasks() {
     } catch {
       /* snackbar shown by the mutation; keep the modal open */
     }
+  }
+
+  function confirmDelete() {
+    if (!deleting) return;
+    deleteTask.mutate(deleting.id);
+    if (selected?.id === deleting.id) setSelected(null);
+    setDeleting(null);
   }
 
   if (!canView) {
@@ -113,6 +130,9 @@ export function Tasks() {
         ))}
       </div>
 
+      {/* Filters */}
+      <FiltersBar filters={filters} onChange={setFilters} showMine={!!account?.username} />
+
       {/* Content */}
       {isLoading ? (
         <Loader />
@@ -127,13 +147,25 @@ export function Tasks() {
         </div>
       ) : (
         <Board
-          tasks={tasks}
+          tasks={visible}
           filter={filter}
           canWrite={writable}
-          onOpen={(task) => setModal({ mode: 'edit', task })}
+          onOpen={(task) => setSelected(task)}
           onAdd={(status) => setModal({ mode: 'create', status })}
         />
       )}
+
+      <TaskDetailDrawer
+        task={selected}
+        open={selected !== null}
+        onOpenChange={(o) => !o && setSelected(null)}
+        canWrite={writable}
+        onEdit={(task) => {
+          setSelected(null);
+          setModal({ mode: 'edit', task });
+        }}
+        onDelete={(task) => setDeleting(task)}
+      />
 
       <TaskFormModal
         open={modal !== null}
@@ -143,6 +175,18 @@ export function Tasks() {
         saving={createTask.isPending || updateTask.isPending}
         onSubmit={handleSubmit}
       />
+
+      <ConfirmationModal
+        open={deleting !== null}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        onConfirm={confirmDelete}
+        title='delete task'
+        confirmLabel='delete'
+      >
+        <Text size='small'>
+          Delete “{deleting?.task.title}”? This can’t be undone.
+        </Text>
+      </ConfirmationModal>
     </div>
   );
 }

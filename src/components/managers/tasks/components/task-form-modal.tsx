@@ -198,6 +198,77 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 )}
               />
             </Field>
+
+            <details className='border-t border-textInactiveColor pt-2'>
+              <summary className='cursor-pointer text-textBaseSize uppercase text-labelColor'>
+                links (optional)
+              </summary>
+              <div className='mt-2 grid grid-cols-2 gap-3'>
+                <Field label='техкарта id'>
+                  <Controller
+                    control={control}
+                    name='techCardId'
+                    render={({ field }) => (
+                      <Input
+                        type='number'
+                        name='techCardId'
+                        value={field.value || ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(Number(e.target.value) || 0)
+                        }
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='product id'>
+                  <Controller
+                    control={control}
+                    name='productId'
+                    render={({ field }) => (
+                      <Input
+                        type='number'
+                        name='productId'
+                        value={field.value || ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(Number(e.target.value) || 0)
+                        }
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='order uuid'>
+                  <Controller
+                    control={control}
+                    name='orderUuid'
+                    render={({ field }) => (
+                      <Input
+                        name='orderUuid'
+                        value={field.value}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(e.target.value)
+                        }
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='archive id'>
+                  <Controller
+                    control={control}
+                    name='archiveId'
+                    render={({ field }) => (
+                      <Input
+                        type='number'
+                        name='archiveId'
+                        value={field.value || ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(Number(e.target.value) || 0)
+                        }
+                      />
+                    )}
+                  />
+                </Field>
+              </div>
+            </details>
           </form>
 
           <div className='flex justify-end gap-2 border-t border-textColor p-3'>
