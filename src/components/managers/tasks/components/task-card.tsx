@@ -30,10 +30,10 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
   return (
     <div
       className={cn(
-        'flex flex-col gap-2 border bg-bgColor p-3 transition-colors',
+        'flex flex-col gap-2 border bg-bgColor p-3 transition-[border-color,transform,box-shadow] duration-150',
         dragging
           ? 'border-textColor shadow-[4px_4px_0_0_var(--text)]'
-          : 'border-textInactiveColor hover:border-textColor',
+          : 'border-textInactiveColor hover:-translate-y-0.5 hover:border-textColor hover:shadow-[2px_2px_0_0_var(--text)] motion-reduce:hover:translate-y-0',
       )}
     >
       {t.labels.length > 0 && (

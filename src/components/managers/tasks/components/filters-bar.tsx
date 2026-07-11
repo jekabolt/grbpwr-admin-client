@@ -51,7 +51,7 @@ export function FiltersBar({
       <Input
         name='task-search'
         placeholder='search…'
-        className='w-40'
+        className='w-full sm:w-40'
         value={filters.search}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ search: e.target.value })}
       />
@@ -82,6 +82,7 @@ export function FiltersBar({
         <button
           type='button'
           onClick={() => set({ mine: !filters.mine })}
+          aria-pressed={filters.mine}
           className={cn(
             'border px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
             filters.mine

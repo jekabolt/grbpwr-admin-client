@@ -125,6 +125,7 @@ export function Tasks() {
             key={board}
             type='button'
             onClick={() => setActiveBoard(board)}
+            aria-pressed={board === activeBoard}
             className={cn(
               'shrink-0 border px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
               board === activeBoard

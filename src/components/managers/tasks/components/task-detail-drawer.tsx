@@ -53,7 +53,7 @@ export function TaskDetailDrawer({
               <div className='flex items-start justify-between gap-2 border-b border-textColor p-3'>
                 <Dialog.Title className='text-lg leading-tight'>{t.title}</Dialog.Title>
                 <Dialog.Close asChild>
-                  <Button type='button' className='shrink-0'>
+                  <Button type='button' aria-label='close' className='shrink-0'>
                     [x]
                   </Button>
                 </Dialog.Close>

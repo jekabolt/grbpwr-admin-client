@@ -66,6 +66,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
       <Dialog.Portal>
         <Dialog.Overlay className='fixed inset-0 z-40 bg-overlay' />
         <Dialog.Content
+          aria-describedby={undefined}
           className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-hidden border border-textColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[32rem] lg:-translate-x-1/2'
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
@@ -74,7 +75,9 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
               {mode === 'create' ? 'new task' : 'edit task'}
             </Dialog.Title>
             <Dialog.Close asChild>
-              <Button type='button'>[x]</Button>
+              <Button type='button' aria-label='close'>
+                [x]
+              </Button>
             </Dialog.Close>
           </div>
 

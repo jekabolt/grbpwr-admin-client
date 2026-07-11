@@ -106,7 +106,10 @@ export function Board({
       onDragEnd={handleDragEnd}
       onDragCancel={() => setActiveId(null)}
     >
-      <div className='flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 sm:snap-none'>
+      <div
+        aria-label='task board columns'
+        className='flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 sm:snap-none'
+      >
         {STATUSES.map((status) => (
           <BoardColumn
             key={status}

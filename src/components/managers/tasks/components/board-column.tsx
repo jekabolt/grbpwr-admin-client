@@ -48,7 +48,7 @@ export function BoardColumn({
         ref={setNodeRef}
         className={cn(
           'mt-2 flex min-h-24 flex-1 flex-col gap-2 rounded-none p-1 transition-colors',
-          isOver ? 'bg-black/[0.05]' : 'bg-black/[0.02]',
+          isOver ? 'bg-black/[0.06] ring-2 ring-inset ring-textColor' : 'bg-black/[0.02]',
         )}
       >
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
