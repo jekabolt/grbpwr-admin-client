@@ -39,6 +39,16 @@ export interface TaskMedia {
   blurhash?: string;
 }
 
+// One checklist row (mapped from common_TaskChecklistItem). Managed by dedicated
+// add/toggle/delete RPCs — never part of the content replace-on-update, so a
+// content edit never wipes per-item done state.
+export interface TaskChecklistItem {
+  id: number;
+  content: string;
+  isDone: boolean;
+  position: number;
+}
+
 // Writable CONTENT (matches common_TaskInsert field-for-field, so a TaskInsert
 // passes straight through to the generated request type). due_date is an RFC3339
 // string to match the generated client's wellKnownTimestamp representation.
@@ -65,9 +75,13 @@ export interface Task {
   status: TaskStatus;
   position: number;
   media: TaskMedia[];
+  checklist: TaskChecklistItem[];
   createdBy: string; // AdminAccount.username
   createdAt: string;
   updatedAt: string;
+  // Soft-archive stamp. '' = active; set (RFC3339) = archived (hidden from the
+  // board's default view, restorable via UnarchiveTask). Orthogonal to placement.
+  archivedAt: string;
 }
 
 export interface TaskComment {
@@ -85,6 +99,7 @@ export interface ListTasksFilter {
   assignee?: string;
   techCardId?: number;
   productId?: number;
+  includeArchived?: boolean; // false/undefined = active only; true = include archived
 }
 
 // Form values = content + its (initial or edited) placement. The modal edits
