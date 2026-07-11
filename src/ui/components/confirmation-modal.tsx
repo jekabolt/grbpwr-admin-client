@@ -43,7 +43,7 @@ export function ConfirmationModal({
             Confirmation
           </DialogPrimitives.Description>
           {title ? (
-            <div className='mb-3 flex items-center justify-between gap-2 border-b border-textColor pb-2'>
+            <div className='mb-3 flex items-center justify-between gap-2 border-b border-textInactiveColor pb-2'>
               <DialogPrimitives.Title className='text-lg uppercase'>{title}</DialogPrimitives.Title>
               <DialogPrimitives.Close asChild>
                 <Button type='button' className='cursor-pointer'>

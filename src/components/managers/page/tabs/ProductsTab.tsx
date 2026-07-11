@@ -70,7 +70,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
         <>
           {(metricsResponse.sellThroughByDrop?.length ?? 0) > 0 && (
             <details className='border border-textInactiveColor' open>
-              <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+              <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
                 Drops
               </summary>
               <div className='space-y-6 p-4'>
@@ -80,7 +80,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
           )}
 
           <details className='border border-textInactiveColor' open>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
               What's Selling
             </summary>
             <div className='space-y-6 p-4'>
@@ -91,7 +91,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
           </details>
 
           <details className='border border-textInactiveColor' open>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
               Sizes
             </summary>
             <div className='space-y-6 p-4'>
@@ -101,7 +101,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
           </details>
 
           <details className='border border-textInactiveColor' open>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
               Inventory
             </summary>
             <div className='space-y-6 p-4'>

@@ -40,7 +40,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
           <button
             type='button'
             onClick={() => setShowNoSalesProducts((v) => !v)}
-            className='text-xs underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+            className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
           >
             {showNoSalesProducts
               ? 'Hide products with no sales'
@@ -49,42 +49,42 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
         )}
       </div>
       {topSlowMovers.length === 0 ? (
-        <p className='text-xs text-textInactiveColor'>
+        <p className='text-textBaseSize text-textInactiveColor'>
           No slow movers in this merchandising view (all rows are products with no recorded sales).
           Turn on &quot;Show products with no sales&quot; to include them.
         </p>
       ) : (
         <div className='overflow-x-auto'>
-          <table className='w-full text-xs'>
+          <table className='w-full text-textBaseSize'>
             <thead>
               <tr className='border-b border-textInactiveColor'>
                 <th className='text-left p-2'>
-                  <Text variant='uppercase' className='text-[10px]'>
+                  <Text variant='uppercase' className='text-textBaseSize'>
                     Product
                   </Text>
                 </th>
                 <th className='text-right p-2'>
-                  <Text variant='uppercase' className='text-[10px]'>
+                  <Text variant='uppercase' className='text-textBaseSize'>
                     Revenue
                   </Text>
                 </th>
                 <th className='text-right p-2'>
-                  <Text variant='uppercase' className='text-[10px]'>
+                  <Text variant='uppercase' className='text-textBaseSize'>
                     Margin
                   </Text>
                 </th>
                 <th className='text-right p-2'>
-                  <Text variant='uppercase' className='text-[10px]'>
+                  <Text variant='uppercase' className='text-textBaseSize'>
                     Units Sold
                   </Text>
                 </th>
                 <th className='text-right p-2'>
-                  <Text variant='uppercase' className='text-[10px]'>
+                  <Text variant='uppercase' className='text-textBaseSize'>
                     Days in Stock
                   </Text>
                 </th>
                 <th className='text-right p-2'>
-                  <Text variant='uppercase' className='text-[10px]'>
+                  <Text variant='uppercase' className='text-textBaseSize'>
                     Last Sale
                   </Text>
                 </th>
@@ -140,7 +140,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
           </table>
         </div>
       )}
-      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
         <Text>
           Products with low sales velocity — consider promotions or markdown. Margin is the room to
           discount before a unit stops paying for itself.

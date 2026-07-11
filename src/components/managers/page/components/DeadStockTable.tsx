@@ -22,31 +22,31 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
         Dead stock (&gt;180 days)
       </Text>
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Product
                 </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Size
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Qty
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Days w/o Sale
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Stock Value
                 </Text>
               </th>
@@ -81,7 +81,7 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
         <Text>
           Inventory with no sales &gt;180 days — liquidate or write off. Sorted by € tied up.
         </Text>

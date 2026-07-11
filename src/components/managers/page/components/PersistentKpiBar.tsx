@@ -103,7 +103,7 @@ function KpiMetricCard({ metric }: { metric: KpiMetric }) {
     !metric.delta || metric.delta.dir === 'flat'
       ? 'text-textColor'
       : metric.delta.dir === 'up'
-        ? 'text-green-600'
+        ? 'text-success'
         : 'text-error';
   const arrow = !metric.delta
     ? ''

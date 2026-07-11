@@ -35,7 +35,7 @@ function PatternList({
             href={row.url || '#'}
             target='_blank'
             rel='noopener noreferrer'
-            className='min-w-0 flex-1 truncate text-sm underline hover:opacity-70'
+            className='min-w-0 flex-1 truncate text-textBaseSize underline hover:opacity-70'
             title={row.filename}
           >
             {row.filename || '(без имени)'}
@@ -117,8 +117,8 @@ export function PatternsField() {
       ))}
 
       {orphanSizeIds.map((id) => (
-        <div key={`orphan-${id}`} className='space-y-2 border border-amber-600 p-3'>
-          <Text size='small' className='block text-amber-600'>
+        <div key={`orphan-${id}`} className='space-y-2 border border-warning p-3'>
+          <Text size='small' className='block text-warning'>
             выкройки для размера #{id}, которого больше нет в размерном ряду — удалите или верните
             размер
           </Text>

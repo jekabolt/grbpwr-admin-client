@@ -66,13 +66,13 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 z-40 bg-overlay' />
+        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
         <Dialog.Content
           aria-describedby={undefined}
-          className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-hidden border border-textColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[34rem] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-hidden border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[34rem] lg:-translate-x-1/2'
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
-          <div className='flex items-center justify-between gap-2 border-b border-textColor px-4 py-3'>
+          <div className='flex items-center justify-between gap-2 border-b border-textInactiveColor px-4 py-3'>
             <Dialog.Title className='text-lg uppercase'>
               {mode === 'create' ? 'new task' : 'edit task'}
             </Dialog.Title>
@@ -97,7 +97,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                     placeholder='Task title'
                     aria-label='task title'
                     autoFocus
-                    className='border-textColor pb-1 text-lg'
+                    className='border-textInactiveColor pb-1 text-lg'
                     value={field.value}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       field.onChange(e.target.value)
@@ -298,7 +298,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
             </details>
           </form>
 
-          <div className='flex justify-end gap-2 border-t border-textColor px-4 py-3'>
+          <div className='flex justify-end gap-2 border-t border-textInactiveColor px-4 py-3'>
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>

@@ -7,7 +7,7 @@ import { PRIORITY_LABEL, dueMeta } from '../utils/meta';
 
 const PRIORITY_STYLE: Record<TaskPriority, string> = {
   TASK_PRIORITY_URGENT: 'bg-textColor text-bgColor',
-  TASK_PRIORITY_HIGH: 'border border-textColor text-textColor',
+  TASK_PRIORITY_HIGH: 'border border-textInactiveColor text-textColor',
   TASK_PRIORITY_MEDIUM: 'border border-textInactiveColor text-labelColor',
   TASK_PRIORITY_LOW: 'text-labelColor',
   TASK_PRIORITY_UNKNOWN: 'hidden',
@@ -37,8 +37,8 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
       className={cn(
         'flex flex-col gap-2 border bg-bgColor p-3 transition-[border-color,transform,box-shadow] duration-150',
         dragging
-          ? 'border-textColor shadow-[4px_4px_0_0_var(--text)]'
-          : 'border-textInactiveColor hover:-translate-y-0.5 hover:border-textColor hover:shadow-[2px_2px_0_0_var(--text)] motion-reduce:hover:translate-y-0',
+          ? 'border-textInactiveColor shadow-[4px_4px_0_0_var(--text)]'
+          : 'border-textInactiveColor hover:-translate-y-0.5 hover:border-textInactiveColor hover:shadow-[2px_2px_0_0_var(--text)] motion-reduce:hover:translate-y-0',
         isArchived && 'opacity-60',
       )}
     >

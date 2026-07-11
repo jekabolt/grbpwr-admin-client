@@ -70,7 +70,7 @@ export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalPro
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={5}
-              className='w-full resize-none border border-textColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
+              className='w-full resize-none border border-textInactiveColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
             />
           </div>
 

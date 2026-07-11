@@ -51,7 +51,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
 
   return (
     <div className='w-full flex flex-col gap-4'>
-      <Text className='text-xl font-bold leading-none' variant='uppercase'>
+      <Text className='text-lg font-bold leading-none' variant='uppercase'>
         {gender}
       </Text>
       <div className='flex flex-col lg:flex-row gap-4'>
@@ -68,7 +68,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
         </div>
         <div className='w-full flex flex-col gap-4'>
           <InputField name={`navFeatured.${gender}.featuredTag`} label='tag' />
-          <div className='flex items-center w-full border border-textColor justify-between px-2 py-1'>
+          <div className='flex items-center w-full border border-textInactiveColor justify-between px-2 py-1'>
             <Text variant='uppercase'>
               {selectedArchiveId ? `archive id: ${selectedArchiveId}` : 'no archive selected'}
             </Text>
@@ -108,9 +108,9 @@ export function NavFeatured({ hero }: { hero?: common_HeroFullWithTranslations }
   };
 
   return (
-    <div className='border-2 border-textColor p-4 space-y-6'>
+    <div className='border-2 border-textInactiveColor p-4 space-y-6'>
       <div className='flex items-center justify-between'>
-        <Text variant='uppercase' className='text-xl font-bold leading-none'>
+        <Text variant='uppercase' className='text-lg font-bold leading-none'>
           navigation featured
         </Text>
         <Button

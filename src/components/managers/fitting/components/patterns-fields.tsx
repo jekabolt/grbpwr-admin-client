@@ -83,7 +83,7 @@ export function PatternsFields() {
                   href={row.url || '#'}
                   target='_blank'
                   rel='noopener noreferrer'
-                  className='min-w-0 flex-1 truncate text-sm underline hover:opacity-70'
+                  className='min-w-0 flex-1 truncate text-textBaseSize underline hover:opacity-70'
                   title={row.filename}
                 >
                   {row.filename || '(без имени)'}

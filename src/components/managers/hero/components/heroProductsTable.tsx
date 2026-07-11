@@ -128,7 +128,7 @@ export const HeroProductTable: FC<
               <td className='border border-text p-2'>
                 <button
                   onClick={() => navigate(`/products/${product.id}`)}
-                  className='text-blue-500 underline hover:text-blue-700 cursor-pointer'
+                  className='text-blue underline hover:text-blue cursor-pointer'
                 >
                   {product.id}
                 </button>

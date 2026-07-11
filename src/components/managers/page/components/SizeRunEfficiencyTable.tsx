@@ -37,28 +37,28 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
         Which sizes are selling
       </Text>
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Product
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Sizes sold
                 </Text>
               </th>
               {hasUnitData && (
                 <th className='text-right p-2'>
-                  <Text variant='uppercase' className='text-[10px]'>
+                  <Text variant='uppercase' className='text-textBaseSize'>
                     Units sold / bought
                   </Text>
                 </th>
               )}
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   {hasUnitData ? 'Sell-through %' : 'Size coverage %'}
                 </Text>
               </th>
@@ -110,7 +110,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
         {hasUnitData ? (
           <>
             <Text>

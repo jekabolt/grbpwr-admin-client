@@ -53,7 +53,7 @@ export function LinkChip({ link, onNavigate }: { link: TaskLink; onNavigate?: ()
       to={link.to}
       onClick={onNavigate}
       title={text}
-      className='max-w-full truncate border border-textColor px-2 py-0.5 text-textBaseSize lowercase hover:bg-textColor hover:text-bgColor'
+      className='max-w-full truncate border border-textInactiveColor px-2 py-0.5 text-textBaseSize lowercase hover:bg-textColor hover:text-bgColor'
     >
       {text}
     </Link>

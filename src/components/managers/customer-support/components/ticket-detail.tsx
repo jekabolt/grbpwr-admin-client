@@ -64,7 +64,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
   };
 
   return (
-    <div className='flex flex-col gap-6 p-4 border border-textColor bg-bgColor'>
+    <div className='flex flex-col gap-6 p-4 border border-textInactiveColor bg-bgColor'>
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='large'>
           ticket #{ticket.id} &mdash; {ticket.caseNumber}
@@ -76,11 +76,14 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
 
       <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
         {/* Customer info */}
-        <div className='flex flex-col gap-3 border border-textColor p-4'>
+        <div className='flex flex-col gap-3 border border-textInactiveColor p-4'>
           <Text variant='uppercase' size='default'>
             Customer Information
           </Text>
-          <InfoRow label='Name' value={`${insert?.civility ?? ''} ${insert?.firstName ?? ''} ${insert?.lastName ?? ''}`.trim()} />
+          <InfoRow
+            label='Name'
+            value={`${insert?.civility ?? ''} ${insert?.firstName ?? ''} ${insert?.lastName ?? ''}`.trim()}
+          />
           <InfoRow label='Email' value={insert?.email} />
           <InfoRow label='Order Ref' value={insert?.orderReference} />
           <InfoRow label='Topic' value={insert?.topic} />
@@ -92,7 +95,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
               <Text variant='inactive' size='small'>
                 Customer Notes
               </Text>
-              <div className='p-2 border border-textColor bg-white whitespace-pre-wrap'>
+              <div className='p-2 border border-textInactiveColor bg-white whitespace-pre-wrap'>
                 <Text>{insert.notes}</Text>
               </div>
             </div>
@@ -100,7 +103,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
         </div>
 
         {/* Ticket management */}
-        <div className='flex flex-col gap-3 border border-textColor p-4'>
+        <div className='flex flex-col gap-3 border border-textInactiveColor p-4'>
           <Text variant='uppercase' size='default'>
             Ticket Management
           </Text>
@@ -164,7 +167,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               placeholder='e.g. shipping, billing, product'
-              className='w-full border-b border-textColor bg-bgColor text-textBaseSize focus:outline-none'
+              className='w-full border-b border-textInactiveColor bg-bgColor text-textBaseSize focus:outline-none'
             />
           </div>
 
@@ -176,7 +179,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
               value={internalNotes}
               onChange={(e) => setInternalNotes(e.target.value)}
               rows={4}
-              className='w-full resize-none border border-textColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
+              className='w-full resize-none border border-textInactiveColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
             />
           </div>
 

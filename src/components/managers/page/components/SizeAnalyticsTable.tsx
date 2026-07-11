@@ -41,7 +41,7 @@ function PercentBar({ value }: { value: number }) {
         {Array.from({ length: 10 }).map((_, i) => (
           <div
             key={i}
-            className='h-2 flex-1 min-w-[3px] rounded-sm'
+            className='h-2 flex-1 min-w-[3px] rounded-none'
             style={{ backgroundColor: i < filled ? chartColors.ink : '#e5e5e5' }}
           />
         ))}
@@ -173,7 +173,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
         <Text variant='uppercase' className='font-bold mb-2 block'>
           Size distribution
         </Text>
-        <Text className='text-xs text-textInactiveColor'>
+        <Text className='text-textBaseSize text-textInactiveColor'>
           No product sold {MIN_UNITS_FOR_SIZE_MIX}+ units this period — too few to read a size mix.
           Widen the date range.
         </Text>
@@ -248,31 +248,31 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
 
       {/* Enhanced data table with inline % bar */}
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Product
                 </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Size
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Units Sold
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Revenue
                 </Text>
               </th>
               <th className='text-left p-2 min-w-[120px]'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   % of Product
                 </Text>
               </th>
@@ -311,7 +311,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
           </tbody>
         </table>
       </div>
-      <div className='text-xs text-textInactiveColor space-y-1'>
+      <div className='text-textBaseSize text-textInactiveColor space-y-1'>
         <Text>
           Only products with {MIN_UNITS_FOR_SIZE_MIX}+ units sold this period — below that a size
           mix is noise.

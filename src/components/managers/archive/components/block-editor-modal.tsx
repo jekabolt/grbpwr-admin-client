@@ -86,7 +86,7 @@ export function BlockEditorModal({
             edit block fields; changes apply to the live preview
           </DialogPrimitives.Description>
           <div className='flex h-full flex-col gap-3'>
-            <div className='flex shrink-0 items-center justify-between border-b border-textColor pb-2'>
+            <div className='flex shrink-0 items-center justify-between border-b border-textInactiveColor pb-2'>
               <div className='flex items-center gap-2'>
                 {index >= 0 && <Text variant='label'>#{index + 1}</Text>}
                 <Text variant='uppercase' size='large'>

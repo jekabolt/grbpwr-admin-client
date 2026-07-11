@@ -197,26 +197,26 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
             )}
           </div>
           <div className='overflow-x-auto'>
-            <table className='w-full text-xs'>
+            <table className='w-full text-textBaseSize'>
               <thead>
                 <tr className='border-b border-textInactiveColor'>
                   <th className='text-left p-2'>
-                    <Text variant='uppercase' className='text-[10px]'>
+                    <Text variant='uppercase' className='text-textBaseSize'>
                       Product
                     </Text>
                   </th>
                   <th className='text-right p-2'>
-                    <Text variant='uppercase' className='text-[10px]'>
+                    <Text variant='uppercase' className='text-textBaseSize'>
                       Revenue
                     </Text>
                   </th>
                   <th className='text-right p-2'>
-                    <Text variant='uppercase' className='text-[10px]'>
+                    <Text variant='uppercase' className='text-textBaseSize'>
                       Units
                     </Text>
                   </th>
                   <th className='text-right p-2'>
-                    <Text variant='uppercase' className='text-[10px]'>
+                    <Text variant='uppercase' className='text-textBaseSize'>
                       Margin
                     </Text>
                   </th>

@@ -8,7 +8,7 @@ export function BoardSkeleton() {
     <div className='flex gap-4 overflow-hidden pb-4' aria-hidden>
       {STATUSES.map((status, i) => (
         <div key={status} className='flex w-[85vw] shrink-0 flex-col sm:w-72'>
-          <div className='mb-2 flex items-center justify-between border-b border-textColor pb-2'>
+          <div className='mb-2 flex items-center justify-between border-b border-textInactiveColor pb-2'>
             <div className='h-3 w-20 bg-black/[0.12]' />
             <div className='h-3 w-4 bg-black/[0.08]' />
           </div>

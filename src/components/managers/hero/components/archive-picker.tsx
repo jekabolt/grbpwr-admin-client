@@ -40,7 +40,7 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
   const columnLabels = ['select', 'id', 'thumbnail', 'tag', 'heading'];
 
   const content = error ? (
-    <div className='text-red-500 p-4'>
+    <div className='text-error p-4'>
       Error loading archives: {error instanceof Error ? error.message : 'Unknown error'}
     </div>
   ) : isLoading ? (
@@ -50,13 +50,13 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
   ) : (
     <div className='w-full'>
       <div className='overflow-auto w-full max-h-[min(70vh,500px)]'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor h-10'>
-            <tr className='border-b border-textColor'>
+            <tr className='border-b border-textInactiveColor'>
               {columnLabels.map((label) => (
                 <th
                   key={label}
-                  className='sticky top-0 z-10 bg-textInactiveColor border border-r border-textColor p-2 text-center'
+                  className='sticky top-0 z-10 bg-textInactiveColor border border-r border-textInactiveColor p-2 text-center'
                 >
                   <Text variant='uppercase'>{label}</Text>
                 </th>
@@ -70,9 +70,9 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                 return (
                   <tr
                     key={archive.id}
-                    className='border-b border-textColor hover:bg-bgColor/50 text-center'
+                    className='border-b border-textInactiveColor hover:bg-bgColor/50 text-center'
                   >
-                    <td className='border border-textColor p-2'>
+                    <td className='border border-textInactiveColor p-2'>
                       <input
                         type='checkbox'
                         checked={isSelected}
@@ -80,10 +80,10 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                         className='cursor-pointer'
                       />
                     </td>
-                    <td className='border border-textColor p-2'>
+                    <td className='border border-textInactiveColor p-2'>
                       <Text>{archive.id}</Text>
                     </td>
-                    <td className='border border-textColor lg:w-16'>
+                    <td className='border border-textInactiveColor lg:w-16'>
                       {archive.thumbnail?.media?.thumbnail?.mediaUrl && (
                         <MediaComponent
                           src={archive.thumbnail.media.thumbnail.mediaUrl}
@@ -93,10 +93,10 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                         />
                       )}
                     </td>
-                    <td className='border border-textColor p-2'>
+                    <td className='border border-textInactiveColor p-2'>
                       <Text>{archive.tag || '-'}</Text>
                     </td>
-                    <td className='border border-textColor p-2'>
+                    <td className='border border-textInactiveColor p-2'>
                       <Text>{archive.translations?.[0]?.heading || '-'}</Text>
                     </td>
                   </tr>
@@ -106,7 +106,7 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
               <tr>
                 <td
                   colSpan={columnLabels.length}
-                  className='border border-textColor p-8 text-center'
+                  className='border border-textInactiveColor p-8 text-center'
                 >
                   <Text>No archives found</Text>
                 </td>

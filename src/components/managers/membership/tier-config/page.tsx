@@ -29,7 +29,7 @@ export function TierConfig() {
 
   return (
     <div className='flex flex-col w-full gap-6 pb-24'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
         <Text variant='uppercase' size='large'>
           tier configuration
         </Text>
@@ -56,7 +56,7 @@ export function TierConfig() {
         {entries.map((entry, index) => (
           <div
             key={entry.tierCode ?? index}
-            className='flex flex-col gap-3 border border-textColor p-4'
+            className='flex flex-col gap-3 border border-textInactiveColor p-4'
           >
             <div className='flex items-center gap-2'>
               <Text variant='uppercase' size='default'>
@@ -149,7 +149,7 @@ export function TierConfig() {
       </div>
 
       {canWrite(SECTION.members) && entries.length > 0 && (
-        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
+        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>
           <Text variant='inactive' size='small'>
             {dirty ? 'unsaved changes' : ' '}
           </Text>

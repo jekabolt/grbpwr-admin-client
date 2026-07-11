@@ -37,7 +37,7 @@ const Delta: FC<{
   const dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
   const good = dir === 'flat' ? 'flat' : (dir === 'up') === higherIsBetter ? 'good' : 'bad';
   const color =
-    good === 'flat' ? 'text-textInactiveColor' : good === 'good' ? 'text-green-600' : 'text-error';
+    good === 'flat' ? 'text-textInactiveColor' : good === 'good' ? 'text-success' : 'text-error';
   const arrow = dir === 'up' ? '↑ ' : dir === 'down' ? '↓ ' : '';
   const text =
     kind === 'currency'
@@ -46,7 +46,7 @@ const Delta: FC<{
         ? `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${Math.abs(diff).toFixed(1)}pp`
         : formatNumberDelta(diff);
   return (
-    <Text variant='uppercase' className={`text-[10px] ${color}`}>
+    <Text variant='uppercase' className={`text-textBaseSize ${color}`}>
       {arrow}
       {text}
     </Text>
@@ -88,7 +88,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
       {/* Profit is the point — lead with it. Margin is over the costed revenue subset. */}
       <div className='space-y-2'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
-          <h3 className='text-sm font-bold uppercase'>Profit &amp; Margin</h3>
+          <h3 className='text-textBaseSize font-bold uppercase'>Profit &amp; Margin</h3>
           <Text variant='inactive' size='small'>
             {costCoverage > 0
               ? `over the ${costCoverage.toFixed(0)}% of revenue with a product cost set`
@@ -99,16 +99,16 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
         </div>
         {costCoverage > 0 ? (
           <div
-            className={`grid grid-cols-2 ${showFees ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3 border-2 border-textColor/20 p-4 bg-bgSecondary/30`}
+            className={`grid grid-cols-2 ${showFees ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3 border-2 border-textInactiveColor/20 p-4 bg-bgSecondary/30`}
           >
             <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                 COGS
               </Text>
               <Text className='font-bold text-lg'>{formatCurrency(revenueCost.value)}</Text>
             </div>
             <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                 Gross Profit
               </Text>
               <Text className='font-bold text-lg'>{formatCurrency(grossMargin.value)}</Text>
@@ -120,7 +120,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
               />
             </div>
             <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                 Gross Margin
               </Text>
               <Text className='font-bold text-lg'>
@@ -134,24 +134,24 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                   enabled={compareEnabled}
                 />
               ) : (
-                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                   need ≥{COVERAGE_FLOOR_FOR_PCT}% costed
                 </Text>
               )}
             </div>
             {showFees && (
               <div className='space-y-1'>
-                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                   Payment fees
                 </Text>
                 <Text className='font-bold text-lg'>−{formatCurrency(paymentFees.value)}</Text>
-                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                   processor cut
                 </Text>
               </div>
             )}
             <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                 Contribution
               </Text>
               <Text className='font-bold text-lg'>{formatCurrency(contributionMargin.value)}</Text>
@@ -161,7 +161,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 kind='currency'
                 enabled={compareEnabled}
               />
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                 {showFees ? 'after shipping & fees' : 'after shipping'}
               </Text>
             </div>
@@ -177,11 +177,11 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
       </div>
 
       <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Revenue &amp; Orders</h3>
+        <h3 className='text-textBaseSize font-bold uppercase'>Revenue &amp; Orders</h3>
 
         <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 border border-textInactiveColor p-4 bg-bgSecondary/20'>
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
               Revenue
             </Text>
             <Text className='font-bold'>{formatCurrency(revenue.value)}</Text>
@@ -193,13 +193,13 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             />
           </div>
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
               Gross Revenue
             </Text>
             <Text className='font-bold'>{formatCurrency(grossRevenue.value)}</Text>
           </div>
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
               Orders
             </Text>
             <Text className='font-bold'>{formatNumber(orders.value)}</Text>
@@ -211,35 +211,39 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             />
           </div>
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
               AOV
             </Text>
             <Text className='font-bold'>{formatCurrency(aov.value)}</Text>
           </div>
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
               Refunds
             </Text>
             <Text className='font-bold'>
               {formatNumber(refundedCount)}{' '}
-              <span className='text-textInactiveColor text-xs'>of {formatNumber(ordersN)}</span>
+              <span className='text-textInactiveColor text-textBaseSize'>
+                of {formatNumber(ordersN)}
+              </span>
             </Text>
             {showRates && (
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                 {formatPercentWithBand(refundRate.value, refundRate.marginOfError)}
               </Text>
             )}
           </div>
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
               Cancelled
             </Text>
             <Text className='font-bold'>
               {formatNumber(cancelledCount)}{' '}
-              <span className='text-textInactiveColor text-xs'>of {formatNumber(ordersN)}</span>
+              <span className='text-textInactiveColor text-textBaseSize'>
+                of {formatNumber(ordersN)}
+              </span>
             </Text>
             {showRates && cancellationPct != null && (
-              <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                 {cancellationPct.toFixed(1)}%
               </Text>
             )}
@@ -256,11 +260,11 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
       </div>
 
       <details className='border border-textInactiveColor' open>
-        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
           Purchase Funnel
         </summary>
         <div className='space-y-3 p-4'>
-          <Text className='text-xs text-textInactiveColor leading-relaxed'>
+          <Text className='text-textBaseSize text-textInactiveColor leading-relaxed'>
             Where browsers drop off on the way to purchase (browse → cart → buy).
           </Text>
           <FunnelChart funnel={metricsResponse.funnel} />
@@ -268,7 +272,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
       </details>
 
       <details className='border border-textInactiveColor'>
-        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
           Shipping & Delivery
         </summary>
         <div className='space-y-6 p-4'>

@@ -25,7 +25,7 @@ export function BoardColumn({
 
   return (
     <section className='flex w-[85vw] shrink-0 snap-start flex-col sm:w-72'>
-      <header className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textColor bg-bgColor pb-2'>
+      <header className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor pb-2'>
         <div className='flex items-baseline gap-2'>
           <Text variant='uppercase' size='small' component='span'>
             {STATUS_LABEL[status]}
@@ -66,7 +66,7 @@ export function BoardColumn({
             <button
               type='button'
               onClick={() => onAdd(status)}
-              className='flex flex-1 items-center justify-center border border-dashed border-textInactiveColor py-6 text-[11px] uppercase text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+              className='flex flex-1 items-center justify-center border border-dashed border-textInactiveColor py-6 text-[11px] uppercase text-labelColor transition-colors hover:border-textInactiveColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
             >
               + add task
             </button>

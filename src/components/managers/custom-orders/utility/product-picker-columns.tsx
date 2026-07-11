@@ -28,7 +28,7 @@ export function getProductPickerColumns(params: {
         to={`${BASE_PATH}/products/${product.id}`}
         target='_blank'
         onClick={(e) => e.stopPropagation()}
-        className='cursor-pointer text-blue-500 underline hover:text-blue-700'
+        className='cursor-pointer text-blue underline hover:text-blue'
       >
         {product.id}
       </Link>

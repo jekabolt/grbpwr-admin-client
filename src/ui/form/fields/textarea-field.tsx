@@ -63,7 +63,7 @@ export default function TextareaField({
                 </Button>
               )}
               {showCharCount && (
-                <div className='absolute bottom-2 right-2 text-xs text-textInactiveColor'>
+                <div className='absolute bottom-2 right-2 text-textBaseSize text-textInactiveColor'>
                   {value.length}
                   {maxLength && `/${maxLength}`}
                 </div>

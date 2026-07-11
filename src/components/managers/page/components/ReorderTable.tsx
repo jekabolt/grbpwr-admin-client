@@ -37,36 +37,36 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
         Reorder now ({rows.length})
       </Text>
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Product
                 </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Size
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   On Hand
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Reorder Pt
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Days of Cover
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Sold / Day
                 </Text>
               </th>
@@ -104,7 +104,7 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor'>
+      <div className='mt-3 text-textBaseSize text-textInactiveColor'>
         <Text>
           At or below their reorder point — restock before they sell out. Lowest cover first.
         </Text>

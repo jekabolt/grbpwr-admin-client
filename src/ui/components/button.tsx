@@ -14,7 +14,7 @@ export const buttonVariants = cva(
           'text-textColor',
           'bg-bgColor',
           'border',
-          'border-textColor',
+          'border-textInactiveColor',
           'leading-4',
         ],
         main: [
@@ -33,11 +33,12 @@ export const buttonVariants = cva(
         ],
         secondary: [
           'border',
-          'border-textColor',
+          'border-textInactiveColor',
           'text-textBaseSize',
           'text-textColor',
           'hover:bg-textColor',
           'hover:text-bgColor',
+          'hover:border-textInactiveColor',
           'disabled:bg-textInactiveColor',
           'disabled:bg-textInactiveColor',
           'disabled:text-bgColor',

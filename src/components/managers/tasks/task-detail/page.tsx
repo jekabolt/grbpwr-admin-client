@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { MediaGallery } from 'ui/components/media-gallery';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { TaskBoard, TaskFormValues, TaskStatus } from '../api/types';
@@ -138,7 +139,7 @@ export function TaskDetail() {
   return (
     <div className='mx-auto flex w-full max-w-5xl flex-col gap-5 pb-10'>
       {/* Header */}
-      <div className='flex flex-col gap-3 border-b border-textColor pb-3'>
+      <div className='flex flex-col gap-3 border-b border-textInactiveColor pb-3'>
         <Link
           to={ROUTES.tasks}
           className='w-fit text-textBaseSize lowercase text-labelColor underline hover:text-textColor'
@@ -150,7 +151,7 @@ export function TaskDetail() {
             <Text variant='uppercase' size='small' className='text-labelColor'>
               {BOARD_LABEL[task.board]} · {STATUS_LABEL[task.status]}
             </Text>
-            <h1 className='text-xl leading-tight'>{t.title}</h1>
+            <h1 className='text-lg leading-tight'>{t.title}</h1>
           </div>
           {canWrite && (
             <div className='flex shrink-0 flex-wrap justify-end gap-2'>
@@ -192,7 +193,7 @@ export function TaskDetail() {
         </div>
 
         {isArchived && (
-          <div className='flex flex-wrap items-center justify-between gap-2 border border-textColor px-3 py-2'>
+          <div className='flex flex-wrap items-center justify-between gap-2 border border-textInactiveColor px-3 py-2'>
             <Text size='small' className='uppercase'>
               archived{task.archivedAt ? ` · ${format(new Date(task.archivedAt), 'PP')}` : ''}
             </Text>
@@ -229,25 +230,18 @@ export function TaskDetail() {
               <Text variant='uppercase' size='small' className='text-labelColor'>
                 attachments · {task.media.length}
               </Text>
-              <div className='flex flex-wrap gap-2'>
-                {task.media.map((m) => (
-                  <a
-                    key={m.id}
-                    href={m.fullSize || m.thumbnail}
-                    target='_blank'
-                    rel='noreferrer'
-                    className='block h-20 w-20 border border-textInactiveColor hover:border-textColor'
-                  >
-                    <img src={m.thumbnail} alt='' className='h-full w-full object-cover' />
-                  </a>
-                ))}
-              </div>
+              <MediaGallery
+                items={task.media.map((m) => ({
+                  src: m.fullSize || m.thumbnail || '',
+                  thumbnail: m.thumbnail,
+                }))}
+              />
             </section>
           )}
         </div>
 
         {/* Aside */}
-        <aside className='flex flex-col gap-4 border border-textColor p-4 md:order-2 md:h-fit'>
+        <aside className='flex flex-col gap-4 border border-textInactiveColor p-4 md:order-2 md:h-fit'>
           {/* Placement — inline move without opening the editor */}
           <div className='flex flex-col gap-3'>
             <label className='flex flex-col gap-1'>
@@ -323,7 +317,7 @@ export function TaskDetail() {
               {t.labels.map((l) => (
                 <span
                   key={l}
-                  className='border border-textInactiveColor px-1.5 py-px text-[10px] uppercase text-labelColor'
+                  className='border border-textInactiveColor px-1.5 py-px text-textBaseSize uppercase text-labelColor'
                 >
                   {l}
                 </span>

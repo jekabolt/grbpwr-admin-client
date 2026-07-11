@@ -26,16 +26,16 @@ export function OrdersTable({ orders, orderFactor, isLoading, onToggleSort }: Or
 
   return (
     <div className='overflow-x-auto w-full'>
-      <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+      <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
         <thead className='bg-textInactiveColor h-10'>
-          <tr className='border-b border-textColor'>
-            <th className='sticky left-0 z-10 min-w-26 border border-textColor bg-textInactiveColor px-2 text-center'>
+          <tr className='border-b border-textInactiveColor'>
+            <th className='sticky left-0 z-10 min-w-26 border border-textInactiveColor bg-textInactiveColor px-2 text-center'>
               <Text variant='uppercase'>order</Text>
             </th>
-            <th className='min-w-26 border border-textColor px-2 text-center'>
+            <th className='min-w-26 border border-textInactiveColor px-2 text-center'>
               <Text variant='uppercase'>status</Text>
             </th>
-            <th className='hidden min-w-26 border border-textColor px-2 text-center md:table-cell'>
+            <th className='hidden min-w-26 border border-textInactiveColor px-2 text-center md:table-cell'>
               <Button
                 onClick={onToggleSort}
                 disabled={isLoading}
@@ -47,7 +47,7 @@ export function OrdersTable({ orders, orderFactor, isLoading, onToggleSort }: Or
                 </Text>
               </Button>
             </th>
-            <th className='hidden min-w-26 border border-textColor px-2 text-center md:table-cell'>
+            <th className='hidden min-w-26 border border-textInactiveColor px-2 text-center md:table-cell'>
               <Text variant='uppercase'>total</Text>
             </th>
           </tr>
@@ -65,21 +65,21 @@ export function OrdersTable({ orders, orderFactor, isLoading, onToggleSort }: Or
               return (
                 <tr
                   key={o.id}
-                  className='group h-10 cursor-pointer border-b border-textColor last:border-b-0 transition-colors hover:bg-highlightColor/20'
+                  className='group h-10 cursor-pointer border-b border-textInactiveColor last:border-b-0 transition-colors hover:bg-highlightColor/20'
                   onClick={() => handleRowClick(o)}
                 >
-                  <td className='sticky left-0 z-10 border border-textColor bg-bgColor px-2 text-center group-hover:bg-highlightColor/20'>
+                  <td className='sticky left-0 z-10 border border-textInactiveColor bg-bgColor px-2 text-center group-hover:bg-highlightColor/20'>
                     <Text>{o.uuid}</Text>
                   </td>
-                  <td className='border border-textColor px-2 text-center'>
+                  <td className='border border-textInactiveColor px-2 text-center'>
                     <span className={cn('inline-block px-1.5 py-0.5', getStatusColor(statusName))}>
                       <Text variant='uppercase'>{statusName}</Text>
                     </span>
                   </td>
-                  <td className='hidden border border-textColor px-2 text-center md:table-cell'>
+                  <td className='hidden border border-textInactiveColor px-2 text-center md:table-cell'>
                     <Text>{formatDateShort(o.placed)}</Text>
                   </td>
-                  <td className='hidden border border-textColor px-2 text-center md:table-cell'>
+                  <td className='hidden border border-textInactiveColor px-2 text-center md:table-cell'>
                     <Text>
                       {o.totalPrice?.value} {o.currency}
                     </Text>

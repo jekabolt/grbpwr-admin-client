@@ -104,7 +104,7 @@ export function SelectTrigger({
   return (
     <Select.Trigger
       className={cn(
-        'flex w-full items-center justify-between gap-2 border-b border-b-textColor bg-bgColor text-textBaseSize focus:outline-none focus:ring-0',
+        'flex w-full items-center justify-between gap-2 border-b border-b-textInactiveColor bg-bgColor text-textBaseSize transition-colors focus:border-b-textInactiveColor focus:outline-none focus:ring-0',
         readOnly && 'cursor-default pointer-events-none opacity-90',
         className,
       )}
@@ -139,7 +139,7 @@ export function SelectContent({
   return (
     <Select.Portal>
       <Select.Content
-        className='w-full overflow-auto bg-bgColor shadow-md z-[1500]'
+        className='z-[var(--z-popover)] w-full overflow-auto border border-textInactiveColor bg-bgColor'
         position='popper'
         style={{
           width: getWidth(),
