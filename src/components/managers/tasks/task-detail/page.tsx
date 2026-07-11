@@ -64,9 +64,13 @@ export function TaskDetail() {
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
-  const initial: TaskFormValues | null = task
-    ? { ...task.task, board: task.board, status: task.status }
-    : null;
+  // Memoized so a background refetch of useTask doesn't hand the open edit modal
+  // a fresh object and reset the form mid-edit (react-query structural sharing
+  // keeps `task` stable while its data is unchanged).
+  const initial: TaskFormValues | null = useMemo(
+    () => (task ? { ...task.task, board: task.board, status: task.status } : null),
+    [task],
+  );
 
   async function handleSubmit(values: TaskFormValues) {
     if (!task) return;

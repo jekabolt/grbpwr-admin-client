@@ -14,8 +14,8 @@ interface DatePickerProps {
 
 // Monochrome, portalled date field. The calendar internals are themed globally
 // via `.rdp-*` overrides in global.css; here we theme the trigger + popover
-// surface. Rendered through a Portal at z-50 so it escapes the create/edit
-// modal's stacking/overflow context.
+// surface. Rendered through a Portal at z-[60] so it clears the create/edit
+// modal (z-50) and escapes its overflow/stacking context.
 export function DatePicker({
   value,
   onChange,

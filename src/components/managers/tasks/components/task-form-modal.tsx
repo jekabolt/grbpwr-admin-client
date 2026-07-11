@@ -95,6 +95,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 render={({ field }) => (
                   <Input
                     placeholder='Task title'
+                    aria-label='task title'
                     autoFocus
                     className='border-textColor pb-1 text-lg'
                     value={field.value}
