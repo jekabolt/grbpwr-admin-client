@@ -31,7 +31,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className='space-y-4 border border-textColor p-4'>
+    <section className='space-y-4 border border-textInactiveColor p-4'>
       <div className='space-y-1'>
         <Text variant='uppercase' size='large'>
           {title}
@@ -87,7 +87,7 @@ export function Settings() {
         onSubmit={form.handleSubmit(handleSave)}
         className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
       >
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <Text variant='uppercase' size='large'>
             settings
           </Text>
@@ -95,7 +95,7 @@ export function Settings() {
             <Text variant='inactive' size='small'>
               base currency
             </Text>
-            <span className='border border-textColor px-1.5 py-0.5'>
+            <span className='border border-textInactiveColor px-1.5 py-0.5'>
               <Text variant='uppercase'>{baseCurrency}</Text>
             </span>
           </div>
@@ -147,7 +147,7 @@ export function Settings() {
       </form>
 
       {canWrite(SECTION.settings) && (
-        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2'>
+        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>
           <Text variant='inactive' size='small'>
             {isDirty ? 'unsaved changes' : ' '}
           </Text>

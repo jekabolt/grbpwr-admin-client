@@ -5,6 +5,7 @@ import { isVideo } from 'lib/features/filterContentType';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
+import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
@@ -23,6 +24,11 @@ export function MediaField({
   const { control } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'media' });
   const selectedIds = fields.map((f) => f.mediaId);
+  const viewer = useMediaViewer();
+  const viewerItems = fields.map((f) => {
+    const full = mediaById.get(f.mediaId);
+    return full ? mediaFullToViewerItem(full) : { src: '' };
+  });
 
   function handleAdd(items: common_MediaFull[]) {
     const fresh = items.filter((it) => it.id != null && !selectedIds.includes(it.id));
@@ -48,7 +54,7 @@ export function MediaField({
             return (
               <div key={f.id} className='space-y-2 border border-textInactiveColor p-2'>
                 <div
-                  className='relative overflow-hidden border border-textColor'
+                  className='relative overflow-hidden border border-textInactiveColor'
                   style={{ aspectRatio: '3/4' }}
                 >
                   <Media
@@ -56,10 +62,15 @@ export function MediaField({
                     src={url}
                     alt={full?.media?.blurhash || ''}
                     fit='cover'
-                    controls={video}
                     aspectRatio='auto'
                   />
-                  <span className='absolute left-1 top-1 z-20 bg-textColor px-1.5 py-0.5'>
+                  <button
+                    type='button'
+                    aria-label={`View sketch ${index + 1}`}
+                    onClick={() => viewer.openAt(index)}
+                    className='absolute inset-0 z-10 cursor-zoom-in focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                  />
+                  <span className='pointer-events-none absolute left-1 top-1 z-20 bg-textColor px-1.5 py-0.5'>
                     <Text className='!text-bgColor' size='small' variant='uppercase'>
                       {index + 1}
                     </Text>
@@ -67,8 +78,11 @@ export function MediaField({
                   <Button
                     type='button'
                     aria-label='remove sketch'
-                    onClick={() => remove(index)}
-                    className='absolute right-1 top-1 z-20 border border-textColor bg-bgColor px-1 leading-none'
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      remove(index);
+                    }}
+                    className='absolute right-1 top-1 z-20 border border-textInactiveColor bg-bgColor px-1 leading-none'
                   >
                     [x]
                   </Button>
@@ -94,6 +108,8 @@ export function MediaField({
         saveSelectedMedia={handleAdd}
         triggerClassName='uppercase px-3 py-1.5'
       />
+
+      <MediaViewer items={viewerItems} {...viewer} />
     </div>
   );
 }

@@ -156,7 +156,7 @@ export function EntityPicker({
               // Keep results open while interacting with our own input/rows.
               if (rootRef.current?.contains(e.target as Node)) e.preventDefault();
             }}
-            className='z-[60] max-h-60 w-[var(--radix-popover-trigger-width)] overflow-auto border border-textColor bg-bgColor'
+            className='z-[var(--z-popover)] max-h-60 w-[var(--radix-popover-trigger-width)] overflow-auto border border-textInactiveColor bg-bgColor'
           >
             {isFetching && results.length === 0 ? (
               <Text variant='inactive' size='small' className='block p-2'>

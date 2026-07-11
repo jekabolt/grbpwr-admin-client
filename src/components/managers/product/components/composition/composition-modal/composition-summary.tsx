@@ -24,16 +24,16 @@ export function CompositionSummary({
       <div className='flex items-center gap-4'>
         <Text
           className={cn('uppercase', {
-            'text-red-500': isInvalid,
-            'text-green-500': isComplete,
-            'text-yellow-500': isPartial,
+            'text-error': isInvalid,
+            'text-success': isComplete,
+            'text-warning': isPartial,
           })}
         >
           {selectedPart}: {totalPercentage}%
         </Text>
         {currentPartItemsCount > 0 && totalPercentage !== 100 && (
           <>
-            <Text variant='uppercase' className='text-red-500'>
+            <Text variant='uppercase' className='text-error'>
               must equal 100%
             </Text>
             <Button className='uppercase' onClick={onAutoAdjust}>

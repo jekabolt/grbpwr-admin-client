@@ -89,7 +89,7 @@ export function ChecklistEditor({
                 disabled={!canWrite}
                 onClick={() => onToggle(item.id, !item.isDone)}
                 className={cn(
-                  'flex h-4 w-4 shrink-0 items-center justify-center border border-textColor text-[10px] leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                  'flex h-4 w-4 shrink-0 items-center justify-center border border-textInactiveColor text-[10px] leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                   item.isDone ? 'bg-textColor text-bgColor' : 'bg-bgColor text-transparent',
                   !canWrite && 'cursor-default opacity-70',
                 )}

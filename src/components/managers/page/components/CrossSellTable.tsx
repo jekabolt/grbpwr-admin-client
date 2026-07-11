@@ -52,7 +52,7 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
               const lift = p.lift ?? 0;
               // >1.5× is a strong bundle worth a cross-sell slot; 1–1.5× is mild.
               const liftClass =
-                lift >= 1.5 ? 'text-green-600 font-bold' : lift > 1 ? 'font-bold' : '';
+                lift >= 1.5 ? 'text-success font-bold' : lift > 1 ? 'font-bold' : '';
               return (
                 <tr key={i} className='border-b border-textInactiveColor last:border-0'>
                   <td className='p-2'>
@@ -73,7 +73,7 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
           </tbody>
         </table>
       </div>
-      <Text className='text-xs text-textInactiveColor'>
+      <Text className='text-textBaseSize text-textInactiveColor'>
         {hasLift
           ? `Pairs bought together ${MIN_SUPPORT}+ times, ranked by lift. Lift = how much more often the pair sells together than their solo rates predict (>1× = a real bundle, not chance). Attach rate is the share of A's orders that also bought B.`
           : `Only pairs bought together ${MIN_SUPPORT}+ times.`}

@@ -192,7 +192,7 @@ export function MediaSelector({
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-overlay' />
-        <DialogPrimitive.Content className='fixed left-[50%] top-[50%] z-50 flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-textColor bg-bgColor p-2.5'>
+        <DialogPrimitive.Content className='fixed left-[50%] top-[50%] z-50 flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-textInactiveColor bg-bgColor p-2.5'>
           <div className='flex flex-shrink-0 items-center justify-between'>
             <DialogPrimitive.Title className='text-lg uppercase'>
               {cropMedia ? 'crop' : 'select'} {purpose ? purpose : 'media'}
@@ -242,7 +242,7 @@ export function MediaSelector({
               </div>
 
               {oneAtATime && allowMultiple && (
-                <div className='flex flex-shrink-0 items-center justify-between gap-4 border-t border-textColor pt-4'>
+                <div className='flex flex-shrink-0 items-center justify-between gap-4 border-t border-textInactiveColor pt-4'>
                   <Text variant='inactive' size='small'>
                     added items appear in the gallery — close when done
                   </Text>
@@ -255,7 +255,7 @@ export function MediaSelector({
               )}
 
               {!oneAtATime && allowMultiple && (
-                <div className='flex flex-shrink-0 items-center justify-end gap-4 border-t border-textColor bg-bgColor pt-4'>
+                <div className='flex flex-shrink-0 items-center justify-end gap-4 border-t border-textInactiveColor bg-bgColor pt-4'>
                   <DialogPrimitive.Close asChild>
                     <Button size='lg' className='uppercase' variant='simpleReverse'>
                       cancel

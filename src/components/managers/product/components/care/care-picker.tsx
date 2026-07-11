@@ -105,7 +105,7 @@ export function CarePicker({
   return (
     <div className='space-y-1'>
       <FormLabel>{label}</FormLabel>
-      <div className='flex min-h-9 items-center gap-2 border-b border-textColor'>
+      <div className='flex min-h-9 items-center gap-2 border-b border-textInactiveColor'>
         <div className='flex flex-1 flex-wrap items-center gap-1 py-1'>
           {codes.length === 0 ? (
             <Text variant='inactive' size='small'>
@@ -117,7 +117,7 @@ export function CarePicker({
               return m?.img ? (
                 <img key={code} src={m.img} title={m.name} alt={m.name} className='size-7' />
               ) : (
-                <span key={code} className='text-xs'>
+                <span key={code} className='text-textBaseSize'>
                   {code}
                 </span>
               );
@@ -131,7 +131,7 @@ export function CarePicker({
                 type='button'
                 variant='simple'
                 onClick={clear}
-                className='px-2 py-1 text-xs uppercase'
+                className='px-2 py-1 text-textBaseSize uppercase'
               >
                 clear
               </Button>
@@ -140,7 +140,7 @@ export function CarePicker({
               type='button'
               variant='secondary'
               onClick={openModal}
-              className='px-2 py-1 text-xs uppercase'
+              className='px-2 py-1 text-textBaseSize uppercase'
             >
               выбрать
             </Button>

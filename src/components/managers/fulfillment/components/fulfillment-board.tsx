@@ -38,7 +38,7 @@ export function FulfillmentBoard({
         const cards = byColumn.get(col) ?? [];
         return (
           <section key={col} className='flex w-[85vw] shrink-0 snap-start flex-col sm:w-72'>
-            <header className='sticky top-0 z-10 flex flex-col gap-0.5 border-b border-textColor bg-bgColor pb-2'>
+            <header className='sticky top-0 z-10 flex flex-col gap-0.5 border-b border-textInactiveColor bg-bgColor pb-2'>
               <div className='flex items-baseline gap-2'>
                 <Text variant='uppercase' size='small' component='span'>
                   {COLUMN_LABEL[col]}

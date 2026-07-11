@@ -40,12 +40,15 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
   const status = deriveHealthStatus(alerts, metrics, compareEnabled);
 
   return (
-    <div className='space-y-4 border-2 border-textColor/15 bg-bgSecondary/20 p-4'>
+    <div className='space-y-4 border-2 border-textInactiveColor/15 bg-bgSecondary/20 p-4'>
       <div className='space-y-1'>
-        <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor'>
+        <Text
+          variant='uppercase'
+          className='text-textBaseSize font-semibold text-textInactiveColor'
+        >
           Business health
         </Text>
-        <Text className='text-xs text-textColor/90 leading-relaxed'>
+        <Text className='text-textBaseSize text-textColor/90 leading-relaxed'>
           <span className='text-textInactiveColor'>Current: </span>
           {currentPeriodLabel}
           {comparePeriodLabel && (
@@ -59,11 +62,11 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
 
       <div className='flex flex-wrap items-center gap-3'>
         <span
-          className={`inline-flex items-center border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${STATUS_SHELL[status]}`}
+          className={`inline-flex items-center border px-2.5 py-1 text-textBaseSize font-bold uppercase tracking-wide ${STATUS_SHELL[status]}`}
         >
           {STATUS_LABEL[status]}
         </span>
-        <Text className='text-[10px] text-textInactiveColor uppercase'>
+        <Text className='text-textBaseSize text-textInactiveColor uppercase'>
           {alerts.length === 0
             ? 'Nothing needs action this period'
             : `${alerts.length} thing${alerts.length === 1 ? '' : 's'} to act on`}
@@ -72,15 +75,18 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
 
       {alerts.length > 0 && (
         <div className='space-y-2 border-t border-textInactiveColor/40 pt-3'>
-          <Text variant='uppercase' className='text-[10px] font-semibold text-textInactiveColor'>
+          <Text
+            variant='uppercase'
+            className='text-textBaseSize font-semibold text-textInactiveColor'
+          >
             Act now
           </Text>
           <ul className='space-y-2'>
             {alerts.map((a, i) => (
-              <li key={`${a.title}-${i}`} className='text-xs leading-snug'>
+              <li key={`${a.title}-${i}`} className='text-textBaseSize leading-snug'>
                 <span className={`font-semibold ${ALERT_TITLE_CLASS[a.severity]}`}>{a.title}</span>
                 {a.detail && (
-                  <Text className='text-textInactiveColor text-[11px] mt-0.5 block'>
+                  <Text className='text-textInactiveColor text-textBaseSize mt-0.5 block'>
                     {a.detail}
                   </Text>
                 )}
@@ -88,7 +94,7 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
                   <Link
                     to={a.href}
                     replace
-                    className='text-[11px] underline underline-offset-2 mt-0.5 inline-block hover:text-textColor'
+                    className='text-textBaseSize underline underline-offset-2 mt-0.5 inline-block hover:text-textColor'
                   >
                     Open
                   </Link>

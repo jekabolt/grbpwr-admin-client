@@ -34,9 +34,9 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
   return (
     <div
       onClick={() => handleArchiveClick(archive.slug || '')}
-      className='group relative flex cursor-pointer flex-col overflow-hidden border border-textColor transition-colors hover:bg-highlightColor/5'
+      className='group relative flex cursor-pointer flex-col overflow-hidden border border-textInactiveColor transition-colors hover:bg-highlightColor/5'
     >
-      <div className='aspect-[4/5] w-full overflow-hidden border-b border-textColor bg-bgColor'>
+      <div className='aspect-[4/5] w-full overflow-hidden border-b border-textInactiveColor bg-bgColor'>
         {archive.thumbnail?.media?.fullSize?.mediaUrl && (
           <Media
             src={archive.thumbnail.media.fullSize.mediaUrl}
@@ -51,7 +51,7 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
           {archive.translations?.[0]?.heading}
         </Text>
         {archive.tag && (
-          <span className='mt-1 inline-block w-fit border border-textColor px-1.5 py-0.5'>
+          <span className='mt-1 inline-block w-fit border border-textInactiveColor px-1.5 py-0.5'>
             <Text size='small' variant='uppercase'>
               {archive.tag}
             </Text>
@@ -62,7 +62,7 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
         onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
           handleDeleteArchive(e, archive.id || 0)
         }
-        className='absolute right-1 top-1 z-20 cursor-pointer border border-textColor bg-bgColor px-1 leading-none opacity-0 transition-opacity group-hover:opacity-100'
+        className='absolute right-1 top-1 z-20 cursor-pointer border border-textInactiveColor bg-bgColor px-1 leading-none opacity-0 transition-opacity group-hover:opacity-100'
         disabled={deleteArchiveMutation.isPending}
       >
         [x]

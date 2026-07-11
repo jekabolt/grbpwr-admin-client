@@ -25,7 +25,7 @@ export function MaterialRow({
       tabIndex={0}
       className={cn(
         'border border-text w-full h-16 flex gap-4 p-4 items-center flex-nowrap justify-between hover:cursor-pointer',
-        { 'border-2 border-green-500': isSelected },
+        { 'border-2 border-success': isSelected },
       )}
       onClick={onToggle}
       onKeyDown={(e) => e.key === 'Enter' && onToggle()}

@@ -77,7 +77,7 @@ export function CompositionPicker({
   return (
     <div className='space-y-1'>
       <FormLabel>{label}</FormLabel>
-      <div className='flex items-center gap-2 border-b border-textColor'>
+      <div className='flex items-center gap-2 border-b border-textInactiveColor'>
         <Input value={display} readOnly placeholder='—' className='flex-1 border-none' />
         {editMode && (
           <div className='flex gap-1'>
@@ -86,7 +86,7 @@ export function CompositionPicker({
                 type='button'
                 variant='simple'
                 onClick={() => selectComposition({})}
-                className='px-2 py-1 text-xs uppercase'
+                className='px-2 py-1 text-textBaseSize uppercase'
               >
                 clear
               </Button>
@@ -95,7 +95,7 @@ export function CompositionPicker({
               type='button'
               variant='secondary'
               onClick={() => setOpen(true)}
-              className='px-2 py-1 text-xs uppercase'
+              className='px-2 py-1 text-textBaseSize uppercase'
             >
               select
             </Button>

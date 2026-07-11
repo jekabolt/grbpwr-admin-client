@@ -60,7 +60,11 @@ export function ActiveFilters() {
   const sizes = get('sizes') || get('size');
   if (sizes) {
     const n = sizes.split(',').filter(Boolean).length;
-    chips.push({ key: 'sizes', label: `sizes (${n})`, remove: () => removeKeys(['sizes', 'size']) });
+    chips.push({
+      key: 'sizes',
+      label: `sizes (${n})`,
+      remove: () => removeKeys(['sizes', 'size']),
+    });
   }
 
   if (get('sale') === 'true') {
@@ -83,7 +87,11 @@ export function ActiveFilters() {
   if (from || to) {
     const currency = get('currency');
     const range = `${from || '0'}–${to || '∞'}${currency ? ` ${currency}` : ''}`;
-    chips.push({ key: 'price', label: `price: ${range}`, remove: () => removeKeys(['from', 'to']) });
+    chips.push({
+      key: 'price',
+      label: `price: ${range}`,
+      remove: () => removeKeys(['from', 'to']),
+    });
   }
 
   const limit = get('limit');
@@ -103,7 +111,7 @@ export function ActiveFilters() {
           key={chip.key}
           type='button'
           onClick={chip.remove}
-          className='flex items-center gap-1 border border-textColor px-2 py-0.5 text-textBaseSize uppercase transition-colors hover:bg-textColor hover:text-bgColor cursor-pointer'
+          className='flex items-center gap-1 border border-textInactiveColor px-2 py-0.5 text-textBaseSize uppercase transition-colors hover:bg-textColor hover:text-bgColor cursor-pointer'
         >
           {chip.label}
           <span aria-hidden>×</span>

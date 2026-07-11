@@ -33,7 +33,7 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
         <Text variant='uppercase' className='font-bold block mb-1'>
           Conversion funnel
         </Text>
-        <Text className='text-xs text-textInactiveColor leading-relaxed'>
+        <Text className='text-textBaseSize text-textInactiveColor leading-relaxed'>
           Only {formatNumber(purchaseUsers)} purchases this period — too few to read step drop-off
           reliably. Widen the date range to see the funnel.
         </Text>
@@ -50,7 +50,10 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
       </div>
       {caveat && (
         <div className='mb-4 border-b border-textInactiveColor/40 pb-3'>
-          <Text className='text-[9px] italic text-textInactiveColor leading-snug' title={caveat}>
+          <Text
+            className='text-textBaseSize italic text-textInactiveColor leading-snug'
+            title={caveat}
+          >
             {caveat}
           </Text>
         </div>
@@ -66,7 +69,7 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
 
           return (
             <div key={key} className='space-y-1'>
-              <div className='flex justify-between items-center text-xs'>
+              <div className='flex justify-between items-center text-textBaseSize'>
                 <Text className='uppercase'>{label}</Text>
                 <div className='flex gap-3'>
                   <Text className='font-bold'>{formatNumber(users)}</Text>

@@ -128,7 +128,7 @@ function FormDescription({ className, ref, ...props }: any) {
     <p
       ref={ref}
       id={formDescriptionId}
-      className={cn('text-muted-foreground text-xs', className)}
+      className={cn('text-muted-foreground text-textBaseSize', className)}
       {...props}
     />
   );

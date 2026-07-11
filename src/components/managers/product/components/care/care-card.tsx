@@ -30,7 +30,7 @@ export const CareCard: FC<CareCardProps> = ({
   <div
     onClick={() => onSelectCareInstruction(selectedCare, method, code, subCategory)}
     className={cn(
-      'border border-2 border-textColor cursor-pointer flex flex-col items-center w-full',
+      'border border-2 border-textInactiveColor cursor-pointer flex flex-col items-center w-full',
       { 'bg-textInactiveColor': isSelected },
     )}
   >

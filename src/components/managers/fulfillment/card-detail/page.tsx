@@ -133,7 +133,7 @@ export function FulfillmentCardDetail() {
   return (
     <div className='mx-auto flex w-full max-w-5xl flex-col gap-5 pb-10'>
       {/* Header */}
-      <div className='flex flex-col gap-3 border-b border-textColor pb-3'>
+      <div className='flex flex-col gap-3 border-b border-textInactiveColor pb-3'>
         <Link
           to={ROUTES.fulfillment}
           className='w-fit text-textBaseSize lowercase text-labelColor underline hover:text-textColor'
@@ -143,8 +143,8 @@ export function FulfillmentCardDetail() {
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-col gap-1'>
             <div className='flex flex-wrap items-center gap-2'>
-              <h1 className='text-xl leading-tight'>order #{o?.id ?? ''}</h1>
-              <span className='bg-textColor px-1.5 py-0.5 text-[10px] uppercase leading-4 text-bgColor'>
+              <h1 className='text-lg leading-tight'>order #{o?.id ?? ''}</h1>
+              <span className='bg-textColor px-1.5 py-0.5 text-textBaseSize uppercase leading-4 text-bgColor'>
                 {COLUMN_LABEL[column]}
               </span>
             </div>
@@ -213,7 +213,7 @@ export function FulfillmentCardDetail() {
               </Text>
               <Text size='small'>{formatMoney(order.shipment?.cost?.value, currency)}</Text>
             </div>
-            <div className='mt-1 flex items-center justify-between gap-4 border-t border-textColor pt-2'>
+            <div className='mt-1 flex items-center justify-between gap-4 border-t border-textInactiveColor pt-2'>
               <Text className='font-bold uppercase'>total</Text>
               <Text className='font-bold'>{formatMoney(o?.totalPrice?.value, currency)}</Text>
             </div>
@@ -221,7 +221,7 @@ export function FulfillmentCardDetail() {
         </div>
 
         {/* Aside — annotation + customer + shipping */}
-        <aside className='flex flex-col gap-5 border border-textColor p-4 md:order-2 md:h-fit'>
+        <aside className='flex flex-col gap-5 border border-textInactiveColor p-4 md:order-2 md:h-fit'>
           <FulfillmentAnnotation annotation={annotation} canWrite={canWrite} />
 
           <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-4'>

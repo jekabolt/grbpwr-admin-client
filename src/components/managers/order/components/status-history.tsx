@@ -14,7 +14,9 @@ export function StatusHistory({ orderDetails }: { orderDetails?: common_OrderFul
       }}
       className='p-5 bg-bgColor text-textColor'
       openElement={() => (
-        <Button className='border border-textInactiveColor rounded px-1 cursor-pointer'>i</Button>
+        <Button className='border border-textInactiveColor rounded-none px-1 cursor-pointer'>
+          i
+        </Button>
       )}
     >
       <div className='flex flex-col gap-y-2'>

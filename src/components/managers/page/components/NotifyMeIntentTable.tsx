@@ -18,7 +18,7 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
         <div className='py-8 text-center'>
           <Text className='text-textInactiveColor'>No restock demand signals in this period</Text>
         </div>
-        <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+        <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
           <Text>
             "Notify me" / back-in-stock intent signals — high demand items currently unavailable
           </Text>
@@ -58,21 +58,21 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
         Notify me intent
       </Text>
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Product
                 </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Action
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Count
                 </Text>
               </th>
@@ -99,7 +99,7 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
         <Text>
           "Notify me" / back-in-stock intent signals — high demand items currently unavailable
         </Text>

@@ -101,7 +101,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`space-y-4 border border-textColor p-4 ${className ?? ''}`}>
+    <section className={`space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}>
       <Text variant='uppercase' size='large'>
         {title}
       </Text>
@@ -210,7 +210,7 @@ export function TechCardForm({
       {/* sticky lifecycle bar + tabs as one block (top-16 clears the fixed Layout nav;
           -mx-2.5 cancels the Layout content px-2.5 so the bar spans full width) */}
       <div className='sticky top-16 z-30 -mx-2.5 bg-bgColor'>
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor px-2.5 py-2'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor px-2.5 py-2'>
           <div className='flex min-w-0 items-center gap-3'>
             <Button asChild variant='secondary' size='lg'>
               <Link to={ROUTES.techCards}>←</Link>
@@ -305,19 +305,19 @@ export function TechCardForm({
                 key={tab.id}
                 type='button'
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm uppercase transition-colors ${
+                className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-textBaseSize uppercase transition-colors ${
                   active
-                    ? 'border-textColor text-textColor'
+                    ? 'border-textInactiveColor text-textColor'
                     : 'border-transparent text-textInactiveColor hover:text-textColor'
                 }`}
               >
                 {tab.label}
                 {tab.id === 'issues' && openIssues > 0 && (
-                  <span className='border border-textColor px-1 text-xs leading-none'>
+                  <span className='border border-textInactiveColor px-1 text-textBaseSize leading-none'>
                     {openIssues}
                   </span>
                 )}
-                {hasError && <span className='size-1.5 rounded-full bg-red-600' aria-hidden />}
+                {hasError && <span className='size-1.5 rounded-full bg-error' aria-hidden />}
               </button>
             );
           })}
@@ -325,7 +325,7 @@ export function TechCardForm({
       </div>
 
       {conflict && (
-        <div className='mt-3 flex flex-wrap items-center justify-between gap-3 border border-textColor bg-highlightColor/10 p-3'>
+        <div className='mt-3 flex flex-wrap items-center justify-between gap-3 border border-textInactiveColor bg-highlightColor/10 p-3'>
           <Text size='small'>
             This card was saved by someone else. Reload to get the latest version, then re-apply
             your changes.
@@ -343,7 +343,7 @@ export function TechCardForm({
       )}
 
       {frozen && (
-        <div className='mt-3 border border-textColor bg-highlightColor/10 p-3'>
+        <div className='mt-3 border border-textInactiveColor bg-highlightColor/10 p-3'>
           <Text size='small'>
             Released and frozen — the factory spec is locked. Use “Re-open to draft” to edit.
           </Text>

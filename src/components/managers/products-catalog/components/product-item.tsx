@@ -77,7 +77,7 @@ export function ProductItem({
           <Button
             onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
             className={cn(
-              'absolute top-1 right-1 z-30 border border-textColor bg-bgColor px-1 leading-none block md:hidden md:group-hover:block',
+              'absolute top-1 right-1 z-30 border border-textInactiveColor bg-bgColor px-1 leading-none block md:hidden md:group-hover:block',
               { '!block !bg-textColor !text-bgColor': confirmDelete === product.id },
             )}
           >

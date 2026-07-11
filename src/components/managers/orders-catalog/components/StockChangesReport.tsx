@@ -1,7 +1,10 @@
 import { subDays } from 'date-fns';
 import { useState } from 'react';
 import { adminService } from 'api/api';
-import { downloadCsv, stockChangeRowsToCsv } from 'components/managers/product/components/stock/stock-csv';
+import {
+  downloadCsv,
+  stockChangeRowsToCsv,
+} from 'components/managers/product/components/stock/stock-csv';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
@@ -58,13 +61,13 @@ export function StockChangesReport() {
   };
 
   return (
-    <div className='flex flex-wrap items-end gap-3 border border-textColor bg-bgColor p-4'>
+    <div className='flex flex-wrap items-end gap-3 border border-textInactiveColor bg-bgColor p-4'>
       <Text variant='uppercase' className='shrink-0 font-medium'>
         Stock changes report
       </Text>
       <div className='flex flex-wrap items-center gap-2'>
         <label className='flex flex-col gap-1'>
-          <Text variant='uppercase' className='text-sm text-textInactiveColor'>
+          <Text variant='uppercase' className='text-textBaseSize text-textInactiveColor'>
             From
           </Text>
           <Input
@@ -76,7 +79,7 @@ export function StockChangesReport() {
           />
         </label>
         <label className='flex flex-col gap-1'>
-          <Text variant='uppercase' className='text-sm text-textInactiveColor'>
+          <Text variant='uppercase' className='text-textBaseSize text-textInactiveColor'>
             To
           </Text>
           <Input

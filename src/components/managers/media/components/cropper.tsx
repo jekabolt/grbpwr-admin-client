@@ -105,7 +105,7 @@ export const MediaCropper: FC<CropperInterface> = ({
 
   return (
     <div className='flex w-full flex-col gap-4'>
-      <div className='flex items-center justify-between border-b border-textColor pb-2'>
+      <div className='flex items-center justify-between border-b border-textInactiveColor pb-2'>
         <Text variant='uppercase' size='large'>
           crop image
         </Text>
@@ -145,7 +145,7 @@ export const MediaCropper: FC<CropperInterface> = ({
                   type='button'
                   onClick={() => handleAspectRatioChange(ratio.value)}
                   className={cn(
-                    'border border-textColor px-2 py-1 text-center uppercase transition-colors cursor-pointer',
+                    'border border-textInactiveColor px-2 py-1 text-center uppercase transition-colors cursor-pointer',
                     selected
                       ? 'bg-textColor text-bgColor'
                       : 'bg-bgColor text-textColor hover:bg-textColor/10',
@@ -159,7 +159,7 @@ export const MediaCropper: FC<CropperInterface> = ({
         </div>
       </div>
 
-      <div className='flex flex-wrap items-center justify-between gap-2 border-t border-textColor pt-3'>
+      <div className='flex flex-wrap items-center justify-between gap-2 border-t border-textInactiveColor pt-3'>
         {onUseOriginal ? (
           <Button
             type='button'

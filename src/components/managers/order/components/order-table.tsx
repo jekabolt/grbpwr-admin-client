@@ -145,17 +145,16 @@ export function OrderTable({
 
   // Partial refund is per unit, so offer selection whenever there's more than one unit
   // (e.g. a single line with quantity 2 — refund 1 of 2).
-  const showPartialRefundCheckboxes =
-    showRefundSelection && !isPrinting && expandedRows.length > 1;
+  const showPartialRefundCheckboxes = showRefundSelection && !isPrinting && expandedRows.length > 1;
 
   return (
     <div className='w-full'>
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max print:border-separate print:border-spacing-0 print:[border:1px_solid_currentColor]'>
+        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max print:border-separate print:border-spacing-0 print:[border:1px_solid_currentColor]'>
           <thead className='bg-textInactiveColor h-10'>
-            <tr className='border-b border-textColor'>
+            <tr className='border-b border-textInactiveColor'>
               {showPartialRefundCheckboxes && (
-                <th className='text-center w-10 border border-r border-textColor px-2'>
+                <th className='text-center w-10 border border-r border-textInactiveColor px-2'>
                   <Text variant='uppercase' className='leading-none'>
                     refund
                   </Text>
@@ -165,7 +164,7 @@ export function OrderTable({
                 <th
                   key={col.label}
                   className={cn(
-                    'text-center w-auto lg:min-w-26 border border-r border-textColor px-2',
+                    'text-center w-auto lg:min-w-26 border border-r border-textInactiveColor px-2',
                     'print:[border:1px_solid_currentColor]',
                     col.className,
                   )}
@@ -207,12 +206,12 @@ export function OrderTable({
                 return (
                   <tr
                     key={unitKey ?? idx}
-                    className={cn('border-b border-textColor last:border-b-0', {
+                    className={cn('border-b border-textInactiveColor last:border-b-0', {
                       'bg-highlightColor/10': isSelected,
                     })}
                   >
                     {showPartialRefundCheckboxes && (
-                      <td className='border border-textColor text-center px-2 w-10'>
+                      <td className='border border-textInactiveColor text-center px-2 w-10'>
                         <input
                           type='checkbox'
                           checked={isSelected}
@@ -228,7 +227,7 @@ export function OrderTable({
                         <td
                           key={col.label}
                           className={cn(
-                            'border border-textColor text-center px-2 w-16 lg:w-auto',
+                            'border border-textInactiveColor text-center px-2 w-16 lg:w-auto',
                             'print:[border:1px_solid_currentColor]',
                             col.className,
                             isRefunded &&

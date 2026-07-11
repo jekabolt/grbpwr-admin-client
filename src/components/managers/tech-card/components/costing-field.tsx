@@ -47,8 +47,8 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   return (
     <div className='space-y-3'>
       {mixedScale && (
-        <div className='border border-amber-600 p-3'>
-          <Text size='small' className='block text-amber-600'>
+        <div className='border border-warning p-3'>
+          <Text size='small' className='block text-warning'>
             Внимание: часть материалов задана поразмерно (стоимость партии), часть — на изделие.
             Итог смешивает масштабы. По возможности задавайте расход всех измеряемых материалов
             одним способом.

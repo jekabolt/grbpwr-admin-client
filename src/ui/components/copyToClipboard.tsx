@@ -60,7 +60,7 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, cutText }) => 
             <Tooltip.Content
               side='top'
               sideOffset={4}
-              className='rounded border border-textInactiveColor bg-bgColor px-2 py-1 text-sm text-textColor shadow'
+              className='rounded-none border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize text-textColor shadow'
             >
               {copied ? 'Copied!' : 'Copy to clipboard'}
             </Tooltip.Content>
