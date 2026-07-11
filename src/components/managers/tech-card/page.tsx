@@ -1,3 +1,4 @@
+import { RelatedTasks } from 'components/managers/tasks/components/related-tasks';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
@@ -34,5 +35,10 @@ export function TechCard() {
     );
   }
 
-  return <TechCardForm isEditMode={isEditMode} id={id} techCard={data} />;
+  return (
+    <div className='flex flex-col gap-6'>
+      <TechCardForm isEditMode={isEditMode} id={id} techCard={data} />
+      {numId ? <RelatedTasks techCardId={numId} /> : null}
+    </div>
+  );
 }

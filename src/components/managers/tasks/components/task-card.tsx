@@ -123,8 +123,7 @@ export function SortableTaskCard({
       {...listeners}
       onClick={() => onOpen(task)}
       className={cn(
-        'touch-none',
-        disabled ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
+        disabled ? 'cursor-pointer' : 'touch-none cursor-grab active:cursor-grabbing',
         isDragging && 'opacity-40',
       )}
     >
