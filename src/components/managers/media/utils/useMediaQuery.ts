@@ -48,7 +48,7 @@ export function useInfiniteMedia(limit: number = ITEMS_PER_PAGE) {
 
 // id → MediaFull map over the most-recent `limit` library items. Used to resolve media
 // referenced only by id (colourway swatches, construction-description reference images) that
-// the tech card's resolvedMedia (sketch media only) doesn't carry. Best-effort: media older
+// the tech card's resolved sketch media (moodboard/technical only) doesn't carry. Best-effort: media older
 // than `limit` items back won't resolve — the proper fix is the backend resolving all
 // referenced media. One cached request (5 min).
 export function useMediaMap(limit = 500) {

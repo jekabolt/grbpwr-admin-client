@@ -17,7 +17,13 @@ import {
   STATUSES,
   toOptions,
 } from '../utils/meta';
-import { archiveConfig, orderConfig, productConfig, techCardConfig } from '../utils/entity-configs';
+import {
+  archiveConfig,
+  fittingConfig,
+  orderConfig,
+  productConfig,
+  techCardConfig,
+} from '../utils/entity-configs';
 import { AssigneeSelect } from './assignee-select';
 import { EntityPicker } from './entity-picker';
 import { MediaAttachments } from './media-attachments';
@@ -181,6 +187,18 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                   )}
                 />
               </Field>
+              <Field label='start date'>
+                <Controller
+                  control={control}
+                  name='startDate'
+                  render={({ field }) => (
+                    <DatePicker
+                      value={field.value ? new Date(field.value) : undefined}
+                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
+                    />
+                  )}
+                />
+              </Field>
               <Field label='due date'>
                 <Controller
                   control={control}
@@ -264,6 +282,19 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                         value={field.value}
                         onChange={field.onChange}
                         config={productConfig}
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='примерка'>
+                  <Controller
+                    control={control}
+                    name='fittingId'
+                    render={({ field }) => (
+                      <EntityPicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        config={fittingConfig}
                       />
                     )}
                   />

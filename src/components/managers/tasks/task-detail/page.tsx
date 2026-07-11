@@ -299,9 +299,19 @@ export function TaskDetail() {
                 <span className='text-labelColor'>unassigned</span>
               )}
             </Row>
+            <Row label='planned start'>
+              <span className={cn(!t.startDate && 'text-labelColor')}>
+                {t.startDate ? format(new Date(t.startDate), 'PPP') : '—'}
+              </span>
+            </Row>
             <Row label='due'>
               <span className={cn(due.state === 'overdue' && 'text-error')}>
                 {t.dueDate ? format(new Date(t.dueDate), 'PPP') : '—'}
+              </span>
+            </Row>
+            <Row label='started'>
+              <span className='text-labelColor'>
+                {task.startedAt ? format(new Date(task.startedAt), 'PP') : 'not started'}
               </span>
             </Row>
             <Row label='created'>
