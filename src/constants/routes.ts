@@ -26,6 +26,7 @@ export const SECTION = {
   models: 'models',
   fittings: 'fittings',
   techCards: 'tech_cards',
+  tasks: 'tasks',
   accounts: 'accounts',
 } as const;
 
@@ -68,6 +69,7 @@ export enum ROUTES {
   addTechCard = '/add-tech-card',
   singleTechCard = '/tech-cards/:id',
   techCardPrint = '/tech-cards/:id/print',
+  tasks = '/tasks',
   accounts = '/accounts',
 }
 
@@ -143,6 +145,11 @@ export const SIDE_BAR_ITEMS: Manager[] = [
     section: SECTION.techCards,
   },
   {
+    label: 'TASKS',
+    route: ROUTES.tasks,
+    section: SECTION.tasks,
+  },
+  {
     label: 'TIER CONFIG',
     route: ROUTES.tierConfig,
     section: SECTION.members,
@@ -189,6 +196,11 @@ export const LEFT_SIDE_ITEMS: Manager[] = [
     label: 'orders',
     route: ROUTES.orders,
     section: SECTION.orders,
+  },
+  {
+    label: 'tasks',
+    route: ROUTES.tasks,
+    section: SECTION.tasks,
   },
   {
     label: 'hero',
