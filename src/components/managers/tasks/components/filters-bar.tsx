@@ -20,7 +20,7 @@ export function filtersActive(f: TaskFilters): boolean {
 export function applyFilters(tasks: Task[], f: TaskFilters, currentUser?: string): Task[] {
   const q = f.search.trim().toLowerCase();
   return tasks.filter((t) => {
-    if (f.status && t.task.status !== f.status) return false;
+    if (f.status && t.status !== f.status) return false;
     if (f.priority && t.task.priority !== f.priority) return false;
     if (f.mine && t.task.assignee !== currentUser) return false;
     if (q) {
@@ -33,7 +33,10 @@ export function applyFilters(tasks: Task[], f: TaskFilters, currentUser?: string
 
 const ALL = '__all__';
 const statusItems = [{ value: ALL, label: 'all columns' }, ...toOptions(STATUSES, STATUS_LABEL)];
-const priorityItems = [{ value: ALL, label: 'all priorities' }, ...toOptions(PRIORITIES, PRIORITY_LABEL)];
+const priorityItems = [
+  { value: ALL, label: 'all priorities' },
+  ...toOptions(PRIORITIES, PRIORITY_LABEL),
+];
 
 export function FiltersBar({
   filters,

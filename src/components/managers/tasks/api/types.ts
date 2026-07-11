@@ -1,13 +1,11 @@
-// Temporary hand-written mirror of proto/common/common/task.proto (grbpwr-proto
-// @94ab49c). The generated client uses string-literal-union enums (see
-// AccessLevel in api/proto-http/admin), so these match that style 1:1.
+// UI-facing view model for the kanban. Mirrors the generated client
+// (api/proto-http/admin: common_Task / common_TaskInsert @ proto 26a19e8) but
+// with required, defaulted fields (the generated types are all-optional) so
+// components stay clean. The adapter in tasksService.ts maps between the two.
 //
-// SWAP ON CODEGEN: after the backend ships the TASK MANAGER endpoints and
-// `make proto` regenerates the client, delete this file and import
-// `common_Task`, `common_TaskInsert`, `common_TaskBoard`, … from
-// `api/proto-http/common` and the request/response types from
-// `api/proto-http/admin`. The field names below already match the generated
-// camelCase convention so the swap is mechanical.
+// Contract shape "split placement from content": TaskInsert is CONTENT only;
+// placement (board / status / position) lives on Task and is set at AddTask /
+// changed only via MoveTask.
 
 export type TaskBoard =
   | 'TASK_BOARD_UNKNOWN'
@@ -33,7 +31,7 @@ export type TaskPriority =
   | 'TASK_PRIORITY_HIGH'
   | 'TASK_PRIORITY_URGENT';
 
-// Loose mirror of common.MediaFull for card display (swap to common_MediaFull).
+// Resolved attachment (mapped from common_MediaFull) for card/drawer display.
 export interface TaskMedia {
   id: number;
   thumbnail?: string;
@@ -41,16 +39,15 @@ export interface TaskMedia {
   blurhash?: string;
 }
 
-// Writable payload (common.TaskInsert). due_date is an ISO string here to match
-// the generated client's Timestamp representation.
+// Writable CONTENT (matches common_TaskInsert field-for-field, so a TaskInsert
+// passes straight through to the generated request type). due_date is an RFC3339
+// string to match the generated client's wellKnownTimestamp representation.
 export interface TaskInsert {
   title: string;
   description: string;
-  board: TaskBoard;
-  status: TaskStatus;
   assignee: string; // AdminAccount.username; '' = unassigned
   priority: TaskPriority;
-  dueDate?: string; // ISO 8601; undefined = no deadline
+  dueDate: string | undefined; // RFC3339; undefined = no deadline (key always present, mirrors common_TaskInsert)
   labels: string[];
   mediaIds: number[];
   // Optional typed links (0 / '' = none) — mirrors common.TaskInsert.
@@ -60,10 +57,12 @@ export interface TaskInsert {
   archiveId: number;
 }
 
-// Stored card (common.Task): id + Insert + server-managed fields + resolved media.
+// Stored card (common.Task): id + content + placement + resolved media + identity.
 export interface Task {
   id: number;
   task: TaskInsert;
+  board: TaskBoard;
+  status: TaskStatus;
   position: number;
   media: TaskMedia[];
   createdBy: string; // AdminAccount.username
@@ -88,13 +87,16 @@ export interface ListTasksFilter {
   productId?: number;
 }
 
-// A blank writable payload for the create form.
-export function emptyTaskInsert(board: TaskBoard, status: TaskStatus): TaskInsert {
+// Form values = content + its (initial or edited) placement. The modal edits
+// board/column inline; on submit the page splits this back into content +
+// placement (AddTask sets both; edits go through UpdateTask + MoveTask).
+export type TaskFormValues = TaskInsert & { board: TaskBoard; status: TaskStatus };
+
+// A blank writable payload (content only).
+export function emptyTaskInsert(): TaskInsert {
   return {
     title: '',
     description: '',
-    board,
-    status,
     assignee: '',
     priority: 'TASK_PRIORITY_UNKNOWN',
     dueDate: undefined,
@@ -105,4 +107,9 @@ export function emptyTaskInsert(board: TaskBoard, status: TaskStatus): TaskInser
     orderUuid: '',
     archiveId: 0,
   };
+}
+
+// A blank form seeded with the create target's placement.
+export function emptyFormValues(board: TaskBoard, status: TaskStatus): TaskFormValues {
+  return { ...emptyTaskInsert(), board, status };
 }

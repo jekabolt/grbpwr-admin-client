@@ -62,8 +62,8 @@ export function TaskDetailDrawer({
               {/* Body */}
               <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3'>
                 <div className='flex flex-col divide-y divide-textInactiveColor'>
-                  <MetaRow label='board'>{BOARD_LABEL[t.board]}</MetaRow>
-                  <MetaRow label='column'>{STATUS_LABEL[t.status]}</MetaRow>
+                  <MetaRow label='board'>{BOARD_LABEL[task.board]}</MetaRow>
+                  <MetaRow label='column'>{STATUS_LABEL[task.status]}</MetaRow>
                   <MetaRow label='priority'>{PRIORITY_LABEL[t.priority]}</MetaRow>
                   <MetaRow label='assignee'>{t.assignee || '—'}</MetaRow>
                   <MetaRow label='due'>

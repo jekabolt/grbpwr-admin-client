@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
-import { ListTasksFilter, Task, TaskInsert, TaskStatus } from '../api/types';
+import { ListTasksFilter, Task, TaskBoard, TaskInsert, TaskStatus } from '../api/types';
 import { tasksService } from '../api/tasksService';
 import { applyMove } from '../utils/order';
 
@@ -37,7 +37,8 @@ export function useCreateTask() {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   return useMutation({
-    mutationFn: (input: TaskInsert) => tasksService.addTask(input),
+    mutationFn: (vars: { content: TaskInsert; board: TaskBoard; status: TaskStatus }) =>
+      tasksService.addTask(vars.content, vars.board, vars.status),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: tasksKeys.all });
       showMessage('Task created', 'success');
@@ -50,8 +51,8 @@ export function useUpdateTask() {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   return useMutation({
-    mutationFn: (vars: { id: number; input: TaskInsert }) =>
-      tasksService.updateTask(vars.id, vars.input),
+    mutationFn: (vars: { id: number; content: TaskInsert }) =>
+      tasksService.updateTask(vars.id, vars.content),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: tasksKeys.all });
       showMessage('Task saved', 'success');
@@ -81,8 +82,8 @@ export function useMoveTask(filter: ListTasksFilter) {
   const { showMessage } = useSnackBarStore();
   const key = tasksKeys.list(filter);
   return useMutation({
-    mutationFn: (vars: { id: number; status: TaskStatus; position: number }) =>
-      tasksService.moveTask(vars.id, vars.status, vars.position),
+    mutationFn: (vars: { id: number; board: TaskBoard; status: TaskStatus; position: number }) =>
+      tasksService.moveTask(vars.id, vars.board, vars.status, vars.position),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<ListResult>(key);

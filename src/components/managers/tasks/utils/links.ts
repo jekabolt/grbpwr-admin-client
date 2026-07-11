@@ -16,14 +16,36 @@ export interface TaskLink {
 export function taskLinks(t: TaskInsert): TaskLink[] {
   const links: TaskLink[] = [];
   if (t.techCardId > 0)
-    links.push({ kind: 'techcard', id: t.techCardId, label: `техкарта #${t.techCardId}`, to: `/tech-cards/${t.techCardId}` });
+    links.push({
+      kind: 'techcard',
+      id: t.techCardId,
+      label: `техкарта #${t.techCardId}`,
+      to: `/tech-cards/${t.techCardId}`,
+    });
   if (t.productId > 0)
-    links.push({ kind: 'product', id: t.productId, label: `product #${t.productId}`, to: `/products/${t.productId}` });
+    links.push({
+      kind: 'product',
+      id: t.productId,
+      label: `product #${t.productId}`,
+      to: `/products/${t.productId}`,
+    });
   if (t.orderUuid)
-    links.push({ kind: 'order', id: 0, orderUuid: t.orderUuid, label: `order ${t.orderUuid.slice(0, 8)}`, to: `/orders/${t.orderUuid}` });
+    links.push({
+      kind: 'order',
+      id: 0,
+      orderUuid: t.orderUuid,
+      label: `order ${t.orderUuid.slice(0, 8)}`,
+      to: `/orders/${t.orderUuid}`,
+    });
   // The timeline detail route needs heading+tag+id; without resolving them we
   // deep-link to the archive list.
-  if (t.archiveId > 0) links.push({ kind: 'archive', id: t.archiveId, label: `drop #${t.archiveId}`, to: `/archives` });
+  if (t.archiveId > 0)
+    links.push({
+      kind: 'archive',
+      id: t.archiveId,
+      label: `drop #${t.archiveId}`,
+      to: `/archives`,
+    });
   return links;
 }
 

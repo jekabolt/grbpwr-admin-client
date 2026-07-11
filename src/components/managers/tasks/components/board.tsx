@@ -53,7 +53,7 @@ export function Board({
       TASK_STATUS_REVIEW: [],
       TASK_STATUS_DONE: [],
     };
-    for (const t of tasks) (map[t.task.status] ??= []).push(t);
+    for (const t of tasks) (map[t.status] ??= []).push(t);
     for (const s of STATUSES) map[s].sort((a, b) => a.position - b.position);
     return map;
   }, [tasks]);
@@ -82,7 +82,7 @@ export function Board({
     } else {
       const overTask = tasks.find((t) => t.id === Number(over.id));
       if (!overTask) return;
-      targetStatus = overTask.task.status;
+      targetStatus = overTask.status;
       targetIndex = byStatus[targetStatus]
         .filter((t) => t.id !== activeIdNum)
         .findIndex((t) => t.id === overTask.id);
@@ -90,12 +90,17 @@ export function Board({
     }
 
     // Skip a genuine no-op (same column, same slot).
-    if (dragged.task.status === targetStatus) {
+    if (dragged.status === targetStatus) {
       const currentIndex = byStatus[targetStatus].findIndex((t) => t.id === activeIdNum);
       if (currentIndex === targetIndex) return;
     }
 
-    move.mutate({ id: activeIdNum, status: targetStatus, position: targetIndex });
+    move.mutate({
+      id: activeIdNum,
+      board: dragged.board,
+      status: targetStatus,
+      position: targetIndex,
+    });
   }
 
   return (

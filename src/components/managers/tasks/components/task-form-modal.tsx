@@ -7,7 +7,7 @@ import Input from 'ui/components/input';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
-import { TaskInsert } from '../api/types';
+import { TaskFormValues } from '../api/types';
 import {
   BOARD_LABEL,
   BOARDS,
@@ -24,9 +24,9 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   mode: 'create' | 'edit';
-  initial: TaskInsert;
+  initial: TaskFormValues;
   saving?: boolean;
-  onSubmit: (values: TaskInsert) => void;
+  onSubmit: (values: TaskFormValues) => void;
 }
 
 const boardOptions = toOptions(BOARDS, BOARD_LABEL);
@@ -54,7 +54,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     control,
     reset,
     formState: { errors },
-  } = useForm<TaskInsert>({ defaultValues: initial });
+  } = useForm<TaskFormValues>({ defaultValues: initial });
 
   // Reseed when the modal opens for a different task / column.
   useEffect(() => {
