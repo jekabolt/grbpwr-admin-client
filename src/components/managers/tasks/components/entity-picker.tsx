@@ -136,6 +136,7 @@ export function EntityPicker({
           <div>
             <Input
               name={`${config.kind}-search`}
+              aria-label={config.searchPlaceholder}
               value={query}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 setQuery(e.target.value);
