@@ -82,7 +82,7 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
         {t.assignee ? (
           <span
             title={t.assignee}
-            className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-textColor text-[9px] text-bgColor'
+            className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-textColor text-[10px] leading-none text-bgColor'
           >
             {initials(t.assignee)}
           </span>
@@ -122,7 +122,9 @@ export function SortableTaskCard({
       {...attributes}
       {...listeners}
       onClick={() => onOpen(task)}
+      aria-label={`Open task: ${task.task.title}`}
       className={cn(
+        'rounded-none outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
         disabled ? 'cursor-pointer' : 'touch-none cursor-grab active:cursor-grabbing',
         isDragging && 'opacity-40',
       )}

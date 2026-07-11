@@ -12,12 +12,14 @@ export function BoardColumn({
   onOpen,
   onAdd,
   canWrite,
+  filtered,
 }: {
   status: TaskStatus;
   tasks: Task[];
   onOpen: (task: Task) => void;
   onAdd: (status: TaskStatus) => void;
   canWrite: boolean;
+  filtered?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -55,16 +57,24 @@ export function BoardColumn({
           ))}
         </SortableContext>
 
-        {tasks.length === 0 && (
-          <button
-            type='button'
-            disabled={!canWrite}
-            onClick={() => onAdd(status)}
-            className='flex flex-1 items-center justify-center border border-dashed border-textInactiveColor py-6 text-[11px] uppercase text-labelColor enabled:hover:border-textColor enabled:hover:text-textColor disabled:cursor-default'
-          >
-            {canWrite ? '+ add task' : 'empty'}
-          </button>
-        )}
+        {tasks.length === 0 &&
+          (filtered ? (
+            <div className='flex flex-1 items-center justify-center py-6 text-[11px] uppercase text-labelColor'>
+              no matches
+            </div>
+          ) : canWrite ? (
+            <button
+              type='button'
+              onClick={() => onAdd(status)}
+              className='flex flex-1 items-center justify-center border border-dashed border-textInactiveColor py-6 text-[11px] uppercase text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            >
+              + add task
+            </button>
+          ) : (
+            <div className='flex flex-1 items-center justify-center py-6 text-[11px] uppercase text-labelColor'>
+              empty
+            </div>
+          ))}
       </div>
     </section>
   );

@@ -4,12 +4,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Loader } from 'ui/components/loader';
 import Text from 'ui/components/text';
 import { emptyTaskInsert, Task, TaskBoard, TaskInsert, TaskStatus } from './api/types';
 import { setLocalActor } from './api/tasksService';
 import { Board } from './components/board';
-import { applyFilters, emptyFilters, FiltersBar, TaskFilters } from './components/filters-bar';
+import { BoardSkeleton } from './components/board-skeleton';
+import {
+  applyFilters,
+  emptyFilters,
+  filtersActive,
+  FiltersBar,
+  TaskFilters,
+} from './components/filters-bar';
 import { TaskDetailDrawer } from './components/task-detail-drawer';
 import { TaskFormModal } from './components/task-form-modal';
 import { useCreateTask, useDeleteTask, useTasks, useUpdateTask } from './hooks/useTasks';
@@ -36,6 +42,7 @@ export function Tasks() {
   const tasks = data?.tasks ?? [];
 
   const [filters, setFilters] = useState<TaskFilters>(emptyFilters);
+  const active = filtersActive(filters);
   const visible = useMemo(
     () => applyFilters(tasks, filters, account?.username),
     [tasks, filters, account?.username],
@@ -97,7 +104,7 @@ export function Tasks() {
             tasks
           </Text>
           <Text variant='label' size='small'>
-            Track work across departments — drag cards between columns to change status.
+            Track work across departments. Drag a card between columns to change its status.
           </Text>
         </div>
         {writable && (
@@ -135,7 +142,7 @@ export function Tasks() {
 
       {/* Content */}
       {isLoading ? (
-        <Loader />
+        <BoardSkeleton />
       ) : isError ? (
         <div className='flex flex-col items-start gap-2 border border-textColor p-4'>
           <Text variant='error' size='small'>
@@ -146,13 +153,30 @@ export function Tasks() {
           </Button>
         </div>
       ) : (
-        <Board
-          tasks={visible}
-          filter={filter}
-          canWrite={writable}
-          onOpen={(task) => setSelected(task)}
-          onAdd={(status) => setModal({ mode: 'create', status })}
-        />
+        <>
+          {active && visible.length === 0 && (
+            <div className='flex flex-wrap items-center gap-3 border border-textInactiveColor p-3'>
+              <Text variant='label' size='small'>
+                No tasks match your filters.
+              </Text>
+              <button
+                type='button'
+                onClick={() => setFilters(emptyFilters)}
+                className='text-textBaseSize uppercase underline hover:text-textColor'
+              >
+                clear filters
+              </button>
+            </div>
+          )}
+          <Board
+            tasks={visible}
+            filter={filter}
+            filtered={active}
+            canWrite={writable}
+            onOpen={(task) => setSelected(task)}
+            onAdd={(status) => setModal({ mode: 'create', status })}
+          />
+        </>
       )}
 
       <TaskDetailDrawer

@@ -26,12 +26,14 @@ export function Board({
   onOpen,
   onAdd,
   canWrite,
+  filtered,
 }: {
   tasks: Task[];
   filter: ListTasksFilter;
   onOpen: (task: Task) => void;
   onAdd: (status: TaskStatus) => void;
   canWrite: boolean;
+  filtered?: boolean;
 }) {
   const move = useMoveTask(filter);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -113,6 +115,7 @@ export function Board({
             onOpen={onOpen}
             onAdd={onAdd}
             canWrite={canWrite}
+            filtered={filtered}
           />
         ))}
       </div>
