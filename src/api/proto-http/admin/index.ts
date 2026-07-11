@@ -2475,6 +2475,10 @@ export type common_FittingInsert = {
   // uploaded via Admin.UploadPattern; the url is stored as a snapshot (immune to later
   // tech-card edits).
   patterns: common_FittingPattern[] | undefined;
+  // Callouts pinned onto the fitting's photos — a marker + note flagging what is
+  // wrong with the fit at a point on a specific photo (media_ids). Full-replace on
+  // update, like sizes/media/patterns.
+  callouts: common_FittingCallout[] | undefined;
 };
 
 // FittingStatus is the lifecycle state of a fitting session.
@@ -2503,6 +2507,18 @@ export type common_FittingPattern = {
   url: string | undefined;
   filename: string | undefined;
   sizeBytes: number | undefined;
+};
+
+// FittingCallout is a numbered marker pinned to a fitting photo, noting a fit
+// problem at a point on the image ("here the shoulder is too tight"). It is the
+// fitting analogue of TechCardCallout but deliberately simpler: a pin + a note,
+// with no part/dimensions (a fitting flags posadka, not spec geometry).
+export type common_FittingCallout = {
+  number: number | undefined;
+  note: string | undefined;
+  mediaId: number | undefined;
+  posX: googletype_Decimal | undefined;
+  posY: googletype_Decimal | undefined;
 };
 
 export type AddFittingResponse = {
@@ -2583,6 +2599,11 @@ export type common_TaskInsert = {
   productId: number | undefined;
   orderUuid: string | undefined;
   archiveId: number | undefined;
+  fittingId: number | undefined;
+  // Planned start (when work SHOULD begin), the manual counterpart of due_date.
+  // The ACTUAL start (when the card first entered IN_PROGRESS) is the
+  // server-stamped Task.started_at, not this field. Unset = no planned start.
+  startDate: wellKnownTimestamp | undefined;
 };
 
 export type common_TaskPriority =
@@ -2640,6 +2661,10 @@ export type common_Task = {
   // Orthogonal to placement — archiving does not change board/status/position.
   archivedAt: wellKnownTimestamp | undefined;
   checklist: common_TaskChecklistItem[] | undefined;
+  // Actual start: server-stamped the FIRST time the card enters IN_PROGRESS
+  // (never client-supplied, never cleared on later moves). Unset = the card has
+  // not been started yet. This is distinct from the planned TaskInsert.start_date.
+  startedAt: wellKnownTimestamp | undefined;
 };
 
 // TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
@@ -2774,8 +2799,9 @@ export type GetFulfillmentBoardResponse = {
   columns: common_FulfillmentColumnCards[] | undefined;
 };
 
-// FulfillmentColumnCards groups one column's cards, in fulfillment order
-// (oldest order first, so the longest-waiting order is picked first).
+// FulfillmentColumnCards groups one column's cards. The active columns
+// (TO_FULFILL, SHIPPED) are oldest order first (longest-waiting picked first);
+// the historical DELIVERED column is newest first and bounded.
 export type common_FulfillmentColumnCards = {
   column: common_FulfillmentColumn | undefined;
   cards: common_FulfillmentCard[] | undefined;
@@ -3365,7 +3391,13 @@ export type common_TechCardInsert = {
   // children (full-replace on update)
   sizeIds: number[] | undefined;
   productIds: number[] | undefined;
-  media: common_TechCardMediaItem[] | undefined;
+  // Sketch media split into two INDEPENDENT lists (replaces the single `media = 32`):
+  // moodboard_media — mood / inspiration / reference / fabric-swatch photos (design intent)
+  // technical_media — flat sketches used in construction (front / back / detail / lining / preview)
+  // Construction consumes ONLY technical_media. Each item's `kind` sub-classifies within its
+  // list. Both are full-replace on update; callouts pin onto technical_media by media_id.
+  moodboardMedia: common_TechCardMediaItem[] | undefined;
+  technicalMedia: common_TechCardMediaItem[] | undefined;
   callouts: common_TechCardCallout[] | undefined;
   revisions: common_TechCardRevision[] | undefined;
   // materials (Phase 2): bill of materials (article catalog) and colourways (recipes).
@@ -3651,31 +3683,32 @@ export type common_TechCardPackaging = {
   notes: string | undefined;
 };
 
-// TechCardCosting holds the manually-entered cost articles (Sheet «Калькуляция»).
-// The materials rollup and total are COMPUTED on read from the BOM; they are
-// output-only (ignored on write) and never converted across currencies.
+// TechCardCosting holds the manually-entered per-unit cost articles (Sheet «Калькуляция»).
+// Everything is in a SINGLE currency. The materials line and the unit/order totals are
+// COMPUTED on read (output-only, ignored on write). Model: cost is built per GARMENT, then
+// scaled to the whole order by order_qty. There is NO pricing here — markup/wholesale/retail
+// were removed; pricing lives on the published product.
 export type common_TechCardCosting = {
+  // manual per-unit cost articles (per ONE garment), all in `currency`.
   cmtCost: googletype_Decimal | undefined;
   hardwareCost: googletype_Decimal | undefined;
   packagingCost: googletype_Decimal | undefined;
   logisticsCost: googletype_Decimal | undefined;
   overheadCost: googletype_Decimal | undefined;
   defectPercent: googletype_Decimal | undefined;
-  // Pricing is single (brand policy): markup_multiplier, wholesale_price, retail_price
-  // and currency are the SAME across colourways. Per-SKU pricing, if ever needed, lives
-  // on the published product, not here.
-  markupMultiplier: googletype_Decimal | undefined;
-  wholesalePrice: googletype_Decimal | undefined;
-  retailPrice: googletype_Decimal | undefined;
   currency: string | undefined;
   notes: string | undefined;
-  // OUTPUT-ONLY computed rollup (ignored on write; no currency conversion). The root
-  // rollup is the PRIMARY colourway (colorways index 0); per-colourway figures are in
-  // colorway_costs. A usage with per-size consumption contributes its whole-run
-  // size_run_total (order-scale); a usage without contributes its per-garment line_total.
+  // OUTPUT-ONLY computed rollup (ignored on write). Root figures are the PRIMARY colourway
+  // (colorways index 0); per-colourway figures are in colorway_costs. Materials come from the
+  // BOM via each colourway's usages, normalised to a PER-GARMENT figure (a usage graded only
+  // per size is divided by order_qty), then taken in the single `currency` — a BOM line in
+  // another currency is flagged in has_unconverted_currencies and left out of materials_per_unit
+  // (it still appears in materials_total under its own currency, never silently dropped).
   materialsTotal: common_TechCardCostLine[] | undefined;
-  materialsCost: googletype_Decimal | undefined;
-  totalCost: googletype_Decimal | undefined;
+  materialsPerUnit: googletype_Decimal | undefined;
+  unitCost: googletype_Decimal | undefined;
+  orderQty: number | undefined;
+  orderCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
   colorwayCosts: common_TechCardColorwayCost[] | undefined;
@@ -3687,13 +3720,17 @@ export type common_TechCardCostLine = {
   amount: googletype_Decimal | undefined;
 };
 
-// TechCardColorwayCost is the computed material cost of ONE colourway (Sheet «Калькуляция»).
-// OUTPUT-ONLY (ignored on write). Per-currency buckets; no FX conversion.
+// TechCardColorwayCost is the computed cost of ONE colourway (Sheet «Калькуляция»),
+// OUTPUT-ONLY (ignored on write). Materials come from that colourway's usages; the manual
+// articles (CMT/hardware/…) are shared across colourways, so unit_cost folds them in. All
+// figures are per GARMENT except order_cost (whole run). No FX conversion.
 export type common_TechCardColorwayCost = {
   colorwayIndex: number | undefined;
   materialsTotal: common_TechCardCostLine[] | undefined;
-  materialsCost: googletype_Decimal | undefined;
-  sizeRunTotal: googletype_Decimal | undefined;
+  materialsPerUnit: googletype_Decimal | undefined;
+  unitCost: googletype_Decimal | undefined;
+  orderQty: number | undefined;
+  orderCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
 };
 
@@ -3793,14 +3830,17 @@ export type common_TechCard = {
   techCard: common_TechCardInsert | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
-  resolvedMedia: common_TechCardMediaFull[] | undefined;
   lockVersion: number | undefined;
+  // Resolved sketch media (MediaFull), split to mirror the writable lists.
+  resolvedMoodboardMedia: common_TechCardMediaFull[] | undefined;
+  resolvedTechnicalMedia: common_TechCardMediaFull[] | undefined;
 };
 
 // TechCardMediaFull is a resolved sketch-media reference for display.
 export type common_TechCardMediaFull = {
   media: common_MediaFull | undefined;
   kind: common_TechCardMediaKind | undefined;
+  caption: string | undefined;
 };
 
 export type UpdateTechCardRequest = {

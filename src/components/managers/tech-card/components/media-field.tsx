@@ -1,4 +1,4 @@
-import { common_MediaFull } from 'api/proto-http/admin';
+import { common_MediaFull, common_TechCardMediaKind } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { techCardMediaKindOptions } from 'constants/filter';
 import { isVideo } from 'lib/features/filterContentType';
@@ -11,18 +11,44 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { TechCardFormData } from './schema';
 
-// Technical sketch media. Each item carries a `kind` + `caption`; the form only stores
-// { mediaId, kind, caption }. The resolved MediaFull map (for thumbnails) is owned by
-// the parent SketchTab and shared with the callout canvas.
+// Kinds that make sense for each list (both draw from the same enum; the split just
+// filters which options are offered).
+const TECHNICAL_KINDS: common_TechCardMediaKind[] = [
+  'TECH_CARD_MEDIA_KIND_FRONT',
+  'TECH_CARD_MEDIA_KIND_BACK',
+  'TECH_CARD_MEDIA_KIND_DETAIL',
+  'TECH_CARD_MEDIA_KIND_LINING',
+  'TECH_CARD_MEDIA_KIND_PREVIEW',
+];
+const MOODBOARD_KINDS: common_TechCardMediaKind[] = [
+  'TECH_CARD_MEDIA_KIND_MOODBOARD',
+  'TECH_CARD_MEDIA_KIND_REFERENCE',
+  'TECH_CARD_MEDIA_KIND_SWATCH',
+];
+
+type MediaListName = 'moodboardMedia' | 'technicalMedia';
+
+// One sketch-media list (moodboard or technical). Each item carries a `kind` + `caption`;
+// the form only stores { mediaId, kind, caption }. The resolved MediaFull map (for
+// thumbnails) is owned by the parent SketchTab and shared with the callout canvas.
 export function MediaField({
+  name,
   mediaById,
   onPickedMedia,
 }: {
+  name: MediaListName;
   mediaById: Map<number, common_MediaFull>;
   onPickedMedia: (items: common_MediaFull[]) => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
-  const { fields, append, remove } = useFieldArray({ control, name: 'media' });
+  const { fields, append, remove } = useFieldArray({ control, name });
+  const isMoodboard = name === 'moodboardMedia';
+  const kinds = isMoodboard ? MOODBOARD_KINDS : TECHNICAL_KINDS;
+  const kindOptions = techCardMediaKindOptions.filter((o) => kinds.includes(o.value));
+  const defaultKind: common_TechCardMediaKind = kinds[0];
+  const emptyLabel = isMoodboard ? 'no moodboard images' : 'no sketches';
+  const addLabel = isMoodboard ? 'add moodboard image' : 'add sketch';
+  const purpose = isMoodboard ? 'moodboard reference' : 'tech sketch';
   const selectedIds = fields.map((f) => f.mediaId);
   const viewer = useMediaViewer();
   const viewerItems = fields.map((f) => {
@@ -35,7 +61,7 @@ export function MediaField({
     if (!fresh.length) return;
     onPickedMedia(fresh);
     for (const it of fresh) {
-      append({ mediaId: it.id as number, kind: 'TECH_CARD_MEDIA_KIND_FRONT' });
+      append({ mediaId: it.id as number, kind: defaultKind });
     }
   }
 
@@ -43,7 +69,7 @@ export function MediaField({
     <div className='space-y-3'>
       {fields.length === 0 ? (
         <Text variant='inactive' size='small'>
-          no sketches
+          {emptyLabel}
         </Text>
       ) : (
         <div className='grid grid-cols-2 gap-3 md:grid-cols-3'>
@@ -87,12 +113,8 @@ export function MediaField({
                     [x]
                   </Button>
                 </div>
-                <SelectField
-                  name={`media.${index}.kind`}
-                  label='kind'
-                  items={techCardMediaKindOptions}
-                />
-                <InputField name={`media.${index}.caption`} label='caption' />
+                <SelectField name={`${name}.${index}.kind`} label='kind' items={kindOptions} />
+                <InputField name={`${name}.${index}.caption`} label='caption' />
               </div>
             );
           })}
@@ -100,8 +122,8 @@ export function MediaField({
       )}
 
       <MediaSelector
-        label='add sketch'
-        purpose='tech sketch'
+        label={addLabel}
+        purpose={purpose}
         aspectRatio={['Custom']}
         allowMultiple
         showVideos

@@ -435,8 +435,8 @@ function ColorwayCard({
 
   const hexValid = /^#?[0-9a-fA-F]{3,8}$/.test(hex.trim());
   const hexCss = hex.trim().startsWith('#') ? hex.trim() : `#${hex.trim()}`;
-  // resolve the saved swatch from the media library so it survives a reload (resolvedMedia
-  // carries only sketch media)
+  // resolve the saved swatch from the media library so it survives a reload (the resolved
+  // sketch media carries only moodboard/technical sketches)
   const libraryMap = useMediaMap();
   const swatchFromLib = swatchMediaId ? libraryMap.get(swatchMediaId) : undefined;
   const swatchUrl =

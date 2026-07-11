@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
 import { Link } from 'react-router-dom';
 import { TaskLink } from '../utils/links';
 
@@ -30,6 +31,14 @@ function useLinkName(link: TaskLink) {
           const r: any = await adminService.GetArchiveByID({ id: link.id });
           return r?.archive?.archiveList?.slug || null;
         }
+        if (link.kind === 'fitting') {
+          // No name field — compose date · status like the fitting card list.
+          const r = await adminService.GetFitting({ id: link.id });
+          const f = r?.fitting?.fitting;
+          if (!f) return null;
+          const date = formatFittingDate(f.fittingDate);
+          return [date, statusLabel(f.status)].filter(Boolean).join(' · ') || null;
+        }
         return null;
       } catch {
         return null;
@@ -43,6 +52,7 @@ const KIND_PREFIX: Record<TaskLink['kind'], string> = {
   product: 'product',
   order: 'order',
   archive: 'drop',
+  fitting: 'примерка',
 };
 
 export function LinkChip({ link, onNavigate }: { link: TaskLink; onNavigate?: () => void }) {

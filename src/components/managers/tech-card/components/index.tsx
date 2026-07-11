@@ -69,7 +69,8 @@ type TabId = (typeof TABS)[number]['id'];
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
 const ERROR_TAB: Record<string, TabId> = {
-  media: 'sketch',
+  moodboardMedia: 'sketch',
+  technicalMedia: 'sketch',
   callouts: 'sketch',
   patterns: 'patterns',
   sizeIds: 'patterns',
