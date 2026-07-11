@@ -89,7 +89,7 @@ export function Fulfillment() {
 
   if (!canView) {
     return (
-      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textColor p-10 text-center'>
+      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textInactiveColor p-10 text-center'>
         <Text variant='uppercase' size='large'>
           fulfillment
         </Text>
@@ -102,7 +102,7 @@ export function Fulfillment() {
 
   return (
     <div className='flex w-full flex-col gap-4 pb-10'>
-      <div className='flex flex-col gap-1 border-b border-textColor pb-3'>
+      <div className='flex flex-col gap-1 border-b border-textInactiveColor pb-3'>
         <Text variant='uppercase' size='large'>
           fulfillment
         </Text>
@@ -115,7 +115,7 @@ export function Fulfillment() {
       {isLoading ? (
         <BoardSkeleton />
       ) : isError ? (
-        <div className='flex flex-col items-start gap-2 border border-textColor p-4'>
+        <div className='flex flex-col items-start gap-2 border border-textInactiveColor p-4'>
           <Text variant='error' size='small'>
             {error instanceof Error ? error.message : 'Failed to load the fulfillment board'}
           </Text>
@@ -142,7 +142,7 @@ export function Fulfillment() {
                   'border px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                   mine
                     ? 'border-textColor bg-textColor text-bgColor'
-                    : 'border-textInactiveColor text-labelColor hover:border-textColor hover:text-textColor',
+                    : 'border-textInactiveColor text-labelColor hover:border-textInactiveColor hover:text-textColor',
                 )}
               >
                 assigned to me

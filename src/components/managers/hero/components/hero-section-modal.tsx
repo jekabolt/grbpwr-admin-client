@@ -23,7 +23,7 @@ export function HeroSectionModal({ open, onOpenChange, title, children }: HeroSe
         <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col border border-textInactiveColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[1040px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'>
           <DialogPrimitives.Description className='sr-only'>{title}</DialogPrimitives.Description>
           <div className='flex h-full flex-col gap-3'>
-            <div className='flex shrink-0 items-center justify-between border-b border-textColor pb-2'>
+            <div className='flex shrink-0 items-center justify-between border-b border-textInactiveColor pb-2'>
               <DialogPrimitives.Title asChild>
                 <Text variant='uppercase' size='large'>
                   {title}

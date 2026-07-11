@@ -27,7 +27,7 @@ export function FulfillmentCard({
   const check = card.checklistTotal > 0 ? `✓ ${card.checklistDone}/${card.checklistTotal}` : '';
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor bg-bgColor p-3 transition-[border-color,transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:border-textColor hover:shadow-[2px_2px_0_0_var(--text)] motion-reduce:hover:translate-y-0'>
+    <div className='flex flex-col gap-2 border border-textInactiveColor bg-bgColor p-3 transition-[border-color,transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:border-textInactiveColor hover:shadow-[2px_2px_0_0_var(--text)] motion-reduce:hover:translate-y-0'>
       <button
         type='button'
         onClick={() => onOpen(card.orderUuid)}

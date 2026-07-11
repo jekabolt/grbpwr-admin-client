@@ -62,7 +62,7 @@ export function NavDropdownMenu({
 
               <NavigationMenu.Content
                 className={cn(
-                  'nav-dropdown absolute top-full z-40',
+                  'nav-dropdown absolute top-full z-[var(--z-nav)]',
                   align === 'end' ? 'right-0' : 'left-0',
                 )}
               >
@@ -70,7 +70,7 @@ export function NavDropdownMenu({
                     pointer travels down from the trigger, and drops it clear of the
                     bar's bottom edge. */}
                 <div className='pt-2'>
-                  <ul className='flex min-w-40 flex-col border border-textColor bg-bgColor py-1'>
+                  <ul className='flex min-w-40 flex-col border border-textInactiveColor bg-bgColor py-1'>
                     {group.items.map((item) => {
                       const itemActive = isActiveRoute(pathname, item.route);
                       return (

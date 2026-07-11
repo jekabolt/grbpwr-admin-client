@@ -110,14 +110,14 @@ export function ProductPicker({
           </div>
           <div className='min-h-0 flex-1 overflow-y-auto mt-2'>
             <div className='hidden lg:block w-full overflow-x-auto'>
-              <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+              <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
                 <thead className='bg-textInactiveColor h-10'>
-                  <tr className='border-b border-textColor'>
+                  <tr className='border-b border-textInactiveColor'>
                     {columns.map((col) => (
                       <th
                         key={col.label}
                         className={cn(
-                          'sticky top-0 z-10 bg-textInactiveColor text-center w-auto lg:min-w-26 border border-r border-textColor px-2',
+                          'sticky top-0 z-10 bg-textInactiveColor text-center w-auto lg:min-w-26 border border-r border-textInactiveColor px-2',
                           col.className,
                         )}
                       >
@@ -157,7 +157,7 @@ export function ProductPicker({
                               <td
                                 key={col.label}
                                 className={cn(
-                                  'border border-textColor text-center px-2 w-16 lg:w-auto',
+                                  'border border-textInactiveColor text-center px-2 w-16 lg:w-auto',
                                   col.className,
                                 )}
                               >

@@ -82,7 +82,7 @@ function BomItemRow({
         <div
           id={`bom-composition-${index}`}
           className={cn(
-            'rounded-sm lg:col-span-3',
+            'rounded-none lg:col-span-3',
             highlight && 'animate-pulse p-1 ring-2 ring-amber-500',
           )}
         >

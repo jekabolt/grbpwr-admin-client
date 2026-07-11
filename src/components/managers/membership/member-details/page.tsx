@@ -61,7 +61,7 @@ export function MemberDetails() {
         <>
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-4'>
             {/* Profile */}
-            <div className='flex flex-col gap-2 border border-textColor p-4'>
+            <div className='flex flex-col gap-2 border border-textInactiveColor p-4'>
               <Text variant='uppercase' size='default'>
                 Profile
               </Text>
@@ -78,7 +78,7 @@ export function MemberDetails() {
             </div>
 
             {/* Membership */}
-            <div className='flex flex-col gap-2 border border-textColor p-4'>
+            <div className='flex flex-col gap-2 border border-textInactiveColor p-4'>
               <Text variant='uppercase' size='default'>
                 Membership
               </Text>

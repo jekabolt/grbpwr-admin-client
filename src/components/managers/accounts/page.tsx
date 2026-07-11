@@ -29,7 +29,7 @@ export function Accounts() {
 
   if (!canView) {
     return (
-      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textColor p-10 text-center'>
+      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textInactiveColor p-10 text-center'>
         <Text variant='uppercase' size='large'>
           admin accounts
         </Text>
@@ -42,7 +42,7 @@ export function Accounts() {
 
   return (
     <div className='flex w-full flex-col gap-4 pb-16'>
-      <div className='flex flex-wrap items-end justify-between gap-3 border-b border-textColor pb-3'>
+      <div className='flex flex-wrap items-end justify-between gap-3 border-b border-textInactiveColor pb-3'>
         <div className='flex flex-col gap-1'>
           <Text variant='uppercase' size='large'>
             admin accounts{accounts.length > 0 && ` · ${accounts.length}`}

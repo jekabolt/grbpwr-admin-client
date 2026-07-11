@@ -15,7 +15,7 @@ export default function CheckboxCommon({
   return (
     <Checkbox.Root
       className={cn(
-        'flex h-3 w-3 flex-none appearance-none items-center justify-center border border-textColor cursor-pointer',
+        'flex h-3 w-3 flex-none appearance-none items-center justify-center border border-textInactiveColor cursor-pointer',
         className,
       )}
       id={name}

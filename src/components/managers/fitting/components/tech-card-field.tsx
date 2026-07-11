@@ -124,7 +124,7 @@ export function TechCardField() {
           placeholder={selected ? 'change tech card…' : 'search name / style number'}
         />
         {open && (
-          <div className='absolute inset-x-0 top-full z-30 mt-1 max-h-64 overflow-auto border border-textColor bg-bgColor'>
+          <div className='absolute inset-x-0 top-full z-30 mt-1 max-h-64 overflow-auto border border-textInactiveColor bg-bgColor'>
             {isLoading ? (
               <Text variant='inactive' size='small' className='block p-2'>
                 searching…

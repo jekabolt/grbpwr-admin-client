@@ -89,8 +89,8 @@ export function HeroPreview({
   const scale = containerWidth ? Math.min(1, containerWidth / logicalWidth) : 1;
 
   return (
-    <div className='flex flex-col gap-3 border-2 border-textColor'>
-      <div className='flex flex-col gap-2 border-b border-textColor px-3 py-2'>
+    <div className='flex flex-col gap-3 border-2 border-textInactiveColor'>
+      <div className='flex flex-col gap-2 border-b border-textInactiveColor px-3 py-2'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <Text variant='uppercase' size='large'>
             live preview

@@ -51,7 +51,7 @@ export function SizePickerModal({
             'lg:inset-x-auto lg:left-1/2 lg:top-1/2 lg:bottom-auto lg:h-[min(85vh,640px)] lg:w-[min(92vw,720px)] lg:-translate-x-1/2 lg:-translate-y-1/2',
           )}
         >
-          <div className='flex shrink-0 items-center justify-between border-b border-textColor pb-2'>
+          <div className='flex shrink-0 items-center justify-between border-b border-textInactiveColor pb-2'>
             <DialogPrimitives.Title className='text-lg uppercase'>{title}</DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
               <Button type='button'>[x]</Button>
@@ -90,7 +90,7 @@ export function SizePickerModal({
                             'border px-2 py-1 text-textBaseSize uppercase transition-colors',
                             on
                               ? 'border-textColor bg-textColor text-bgColor'
-                              : 'border-textInactiveColor text-textColor hover:border-textColor',
+                              : 'border-textInactiveColor text-textColor hover:border-textInactiveColor',
                           )}
                         >
                           {formatSizeName(s.name)}

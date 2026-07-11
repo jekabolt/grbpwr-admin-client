@@ -9,7 +9,7 @@ export function PieceLegend() {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className='border border-textColor p-4'>
+    <div className='border border-textInactiveColor p-4'>
       <button
         type='button'
         onClick={() => setOpen((o) => !o)}
@@ -26,7 +26,7 @@ export function PieceLegend() {
         <div className='mt-4 space-y-3'>
           <div className='grid grid-cols-2 gap-x-4 gap-y-1'>
             {pieceBaseCodes.map((p) => (
-              <div key={p.code} className='flex items-baseline gap-2 text-sm'>
+              <div key={p.code} className='flex items-baseline gap-2 text-textBaseSize'>
                 <span className='font-mono'>{p.code}</span>
                 <span className='truncate text-textInactiveColor'>{p.name}</span>
               </div>
@@ -35,7 +35,7 @@ export function PieceLegend() {
 
           <div className='space-y-1 border-t border-textInactiveColor pt-2'>
             {pieceModifiers.map((m) => (
-              <div key={m.mod} className='flex items-baseline gap-2 text-sm'>
+              <div key={m.mod} className='flex items-baseline gap-2 text-textBaseSize'>
                 <span className='font-mono'>{m.mod}</span>
                 <span className='text-textInactiveColor'>{m.name}</span>
               </div>

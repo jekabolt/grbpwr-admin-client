@@ -113,10 +113,10 @@ export function TechCardList() {
           </Text>
         </div>
       ) : (
-        <div className='overflow-x-auto border border-textColor'>
+        <div className='overflow-x-auto border border-textInactiveColor'>
           <table className='w-full min-w-max border-collapse text-textBaseSize'>
             <thead>
-              <tr className='border-b border-textColor bg-textInactiveColor/20'>
+              <tr className='border-b border-textInactiveColor bg-textInactiveColor/20'>
                 {COLUMNS.map((h, i) => (
                   <th key={i} className='px-2 py-2 text-left'>
                     <Text variant='uppercase' size='small'>
@@ -173,7 +173,7 @@ export function TechCardList() {
                             e.stopPropagation();
                             setPendingDelete({ id });
                           }}
-                          className='border border-textColor bg-bgColor px-1.5 leading-none'
+                          className='border border-textInactiveColor bg-bgColor px-1.5 leading-none'
                         >
                           ✕
                         </Button>

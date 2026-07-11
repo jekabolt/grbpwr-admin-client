@@ -138,7 +138,7 @@ function OperationRow({
       }}
       className={cn(
         'space-y-4 border p-4 transition-colors',
-        linked ? 'border-textColor ring-1 ring-textColor' : 'border-textInactiveColor',
+        linked ? 'border-textInactiveColor ring-1 ring-textColor' : 'border-textInactiveColor',
       )}
     >
       <div className='flex items-center justify-between gap-2'>

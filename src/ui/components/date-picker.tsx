@@ -14,7 +14,7 @@ interface DatePickerProps {
 
 // Monochrome, portalled date field. The calendar internals are themed globally
 // via `.rdp-*` overrides in global.css; here we theme the trigger + popover
-// surface. Rendered through a Portal at z-[60] so it clears the create/edit
+// surface. Rendered through a Portal at z-[var(--z-popover)] so it clears the create/edit
 // modal (z-50) and escapes its overflow/stacking context.
 export function DatePicker({
   value,
@@ -31,7 +31,7 @@ export function DatePicker({
           type='button'
           disabled={disabled}
           className={cn(
-            'flex w-full items-center justify-between gap-2 border-b border-textColor bg-bgColor py-1 text-left text-textBaseSize focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:opacity-50',
+            'flex w-full items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor py-1 text-left text-textBaseSize focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:opacity-50',
           )}
         >
           <span className={cn(!value && 'text-labelColor')}>
@@ -61,7 +61,7 @@ export function DatePicker({
         <Popover.Content
           align='start'
           sideOffset={4}
-          className='z-[60] border border-textColor bg-bgColor p-2 text-textColor shadow-[4px_4px_0_0_var(--color-textColor)]'
+          className='z-[var(--z-popover)] border border-textInactiveColor bg-bgColor p-2 text-textColor shadow-[4px_4px_0_0_var(--color-textColor)]'
         >
           <DayPicker
             mode='single'

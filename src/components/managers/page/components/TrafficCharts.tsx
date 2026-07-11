@@ -75,7 +75,7 @@ export const TrafficCharts: FC<TrafficChartsProps> = ({ metrics }) => {
         <Text variant='uppercase' className='font-bold'>
           Traffic by source
         </Text>
-        <Text className='text-textInactiveColor text-xs'>
+        <Text className='text-textInactiveColor text-textBaseSize'>
           Sessions by channel — GA4 estimate, directional only.
         </Text>
       </div>

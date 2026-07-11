@@ -96,7 +96,7 @@ export function Analitic() {
   return (
     <div className='flex flex-col gap-8 pb-16'>
       <div className='flex flex-col gap-4'>
-        <Text variant='uppercase' className='text-2xl font-bold'>
+        <Text variant='uppercase' className='text-lg font-bold'>
           Analytics Dashboard
         </Text>
         <DateRangePicker
@@ -118,9 +118,9 @@ export function Analitic() {
               key={tabId}
               type='button'
               onClick={() => setActiveTab(tabId)}
-              className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+              className={`whitespace-nowrap border-b-2 px-4 py-3 text-textBaseSize font-medium transition-colors ${
                 activeTab === tabId
-                  ? 'border-textColor text-textColor'
+                  ? 'border-textInactiveColor text-textColor'
                   : 'border-transparent text-textInactiveColor hover:text-textColor'
               }`}
             >

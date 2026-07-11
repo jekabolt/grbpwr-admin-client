@@ -59,52 +59,52 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
       <Text variant='uppercase' className='font-bold mb-1 block'>
         Campaign attribution
       </Text>
-      <Text className='text-textInactiveColor text-xs leading-relaxed mb-3 block'>
+      <Text className='text-textInactiveColor text-textBaseSize leading-relaxed mb-3 block'>
         UTM source / medium / campaign. Last-click GA4 attribution — directional, and won't tie out
         to DB revenue exactly.{' '}
         {anySpend ? 'ROAS = revenue ÷ recorded spend.' : 'Enter channel spend to see ROAS.'}
       </Text>
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Source
                 </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Medium
                 </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Campaign
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Sessions
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Revenue
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Spend
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   ROAS
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Conv %
                 </Text>
               </th>
@@ -141,7 +141,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
                   <td className='p-2 text-right'>
                     {roas != null ? (
                       <Text
-                        className={roas >= 1 ? 'font-bold text-green-600' : 'font-bold text-error'}
+                        className={roas >= 1 ? 'font-bold text-success' : 'font-bold text-error'}
                       >
                         {roas.toFixed(2)}×
                       </Text>

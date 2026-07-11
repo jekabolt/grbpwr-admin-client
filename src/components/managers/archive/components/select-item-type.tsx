@@ -38,9 +38,10 @@ const ITEM_BY_VALUE = Object.fromEntries(ARCHIVE_ITEM_TYPES.map((t) => [t.value,
 
 // Frame + parts for the per-type schematic. Drawn from divs (not font glyphs) so
 // they render identically everywhere, and they invert with the card on hover.
-const FRAME = 'flex h-10 w-14 shrink-0 border border-textColor p-1.5 group-hover:border-bgColor';
+const FRAME =
+  'flex h-10 w-14 shrink-0 border border-textInactiveColor p-1.5 group-hover:border-bgColor';
 const FILL = 'bg-textColor group-hover:bg-bgColor';
-const OUTLINE = 'border border-textColor group-hover:border-bgColor';
+const OUTLINE = 'border border-textInactiveColor group-hover:border-bgColor';
 
 /** A tiny monochrome schematic of what each block renders on the storefront. */
 function TypeGlyph({ value }: { value: ArchiveItemValue }) {
@@ -78,7 +79,7 @@ function TypeGlyph({ value }: { value: ArchiveItemValue }) {
       return (
         <div className={cn(FRAME, 'items-center justify-center')} aria-hidden>
           <div className={cn('flex h-full w-full items-center justify-center', OUTLINE)}>
-            <span className='h-0 w-0 border-y-[4px] border-l-[6px] border-y-transparent border-l-textColor group-hover:border-l-bgColor' />
+            <span className='h-0 w-0 border-y-[4px] border-l-[6px] border-y-transparent border-l-textInactiveColor group-hover:border-l-bgColor' />
           </div>
         </div>
       );
@@ -144,7 +145,7 @@ export const SelectItemType: FC<SelectItemTypeProps> = ({ onAdd }) => {
         onClick={() => onAdd(value)}
         aria-label={`add ${t.label} block`}
         className={cn(
-          'group flex h-full min-h-[84px] items-start gap-3 border border-textColor p-3 text-left transition-colors',
+          'group flex h-full min-h-[84px] items-start gap-3 border border-textInactiveColor p-3 text-left transition-colors',
           'hover:bg-textColor hover:text-bgColor',
           'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
         )}

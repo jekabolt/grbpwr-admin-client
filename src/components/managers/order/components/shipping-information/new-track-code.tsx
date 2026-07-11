@@ -17,7 +17,7 @@ export function NewTrackCode({
 }: Props) {
   return (
     <div
-      className={cn('w-full border border-textColor', {
+      className={cn('w-full border border-textInactiveColor', {
         hidden: isPrinting,
       })}
     >

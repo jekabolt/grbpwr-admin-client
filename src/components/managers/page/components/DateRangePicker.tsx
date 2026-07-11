@@ -80,13 +80,13 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
               <Popover.Trigger asChild>
                 <button
                   type='button'
-                  className='h-9 px-3 flex items-center gap-2 border border-textInactiveColor bg-bgColor text-textBaseSize text-left min-w-[200px] hover:border-textColor transition-colors'
+                  className='h-9 px-3 flex items-center gap-2 border border-textInactiveColor bg-bgColor text-textBaseSize text-left min-w-[200px] hover:border-textInactiveColor transition-colors'
                 >
                   {formatDateRange(customFrom, customTo)}
                 </button>
               </Popover.Trigger>
               <Popover.Content
-                className='z-50 bg-bgColor p-4 rounded border border-textInactiveColor shadow-lg'
+                className='z-50 bg-bgColor p-4 rounded-none border border-textInactiveColor shadow-lg'
                 align='start'
                 onOpenAutoFocus={(e) => e.preventDefault()}
                 onInteractOutside={(e) => {

@@ -24,7 +24,7 @@ export function MaterialCategorySelector({
             size='lg'
             onClick={() => onCategoryChange(category)}
             className={cn(
-              'uppercase border border-textColor bg-bgColor hover:bg-textColor hover:text-bgColor',
+              'uppercase border border-textInactiveColor bg-bgColor hover:bg-textColor hover:text-bgColor',
               selectedCategory === category && 'bg-textColor text-bgColor',
             )}
           >

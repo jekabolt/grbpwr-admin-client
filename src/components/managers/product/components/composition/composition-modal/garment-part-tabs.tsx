@@ -27,7 +27,7 @@ export function GarmentPartTabs({
             <Tabs.Trigger
               key={part}
               value={part}
-              className='px-3 py-1 border border-textColor bg-bgColor data-[state=active]:text-bgColor data-[state=active]:bg-textColor'
+              className='px-3 py-1 border border-textInactiveColor bg-bgColor data-[state=active]:text-bgColor data-[state=active]:bg-textColor'
             >
               <div className='flex items-center gap-2'>
                 <Text variant='uppercase'>

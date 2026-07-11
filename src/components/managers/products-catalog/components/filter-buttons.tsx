@@ -91,9 +91,12 @@ export default function FilterOptionButtons({
         loadingReverse={isSelected}
         loadingType='overlay'
         disabled={isLoading || !isAvailable}
-        className={cn('block border border-transparent uppercase md:hover:border-textColor', {
-          'border-textColor': isSelected,
-        })}
+        className={cn(
+          'block border border-transparent uppercase md:hover:border-textInactiveColor',
+          {
+            'border-textInactiveColor': isSelected,
+          },
+        )}
         key={factorId}
       >
         {displayName}

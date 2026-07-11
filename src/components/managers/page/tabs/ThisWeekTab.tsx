@@ -120,7 +120,7 @@ export function ThisWeekTab({
 
       {paymentFailures.count > 0 && (
         <div className='flex flex-wrap items-center justify-between gap-2 border-2 border-error bg-error/10 p-3'>
-          <Text variant='uppercase' className='text-error text-[10px] font-semibold'>
+          <Text variant='uppercase' className='text-error text-textBaseSize font-semibold'>
             Payment failures this period
           </Text>
           <Text className='font-bold text-error'>
@@ -131,7 +131,7 @@ export function ThisWeekTab({
       )}
 
       <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Orders</h3>
+        <h3 className='text-textBaseSize font-bold uppercase'>Orders</h3>
         <div className='max-w-xl'>
           <TimeSeriesChart
             title='Orders'
@@ -142,7 +142,7 @@ export function ThisWeekTab({
       </div>
 
       <div className='space-y-6'>
-        <h3 className='text-sm font-bold uppercase'>Acquisition &amp; retention</h3>
+        <h3 className='text-textBaseSize font-bold uppercase'>Acquisition &amp; retention</h3>
         <div className='grid gap-4 md:grid-cols-2'>
           <TimeSeriesChart
             title='New customers'
@@ -159,37 +159,37 @@ export function ThisWeekTab({
 
       <div className='space-y-6'>
         <div className='flex items-center justify-between'>
-          <h3 className='text-sm font-bold uppercase'>Top 3 Products This Period</h3>
+          <h3 className='text-textBaseSize font-bold uppercase'>Top 3 Products This Period</h3>
           <Link
             to={productsHref}
             replace
-            className='text-xs underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+            className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
           >
             View all →
           </Link>
         </div>
         {top3Products.length > 0 ? (
           <div className='border border-textInactiveColor p-4'>
-            <table className='w-full text-xs'>
+            <table className='w-full text-textBaseSize'>
               <thead>
                 <tr className='border-b border-textInactiveColor'>
                   <th className='text-left p-2'>
-                    <Text variant='uppercase' className='text-[10px]'>
+                    <Text variant='uppercase' className='text-textBaseSize'>
                       Product
                     </Text>
                   </th>
                   <th className='text-right p-2'>
-                    <Text variant='uppercase' className='text-[10px]'>
+                    <Text variant='uppercase' className='text-textBaseSize'>
                       Revenue
                     </Text>
                   </th>
                   <th className='text-right p-2'>
-                    <Text variant='uppercase' className='text-[10px]'>
+                    <Text variant='uppercase' className='text-textBaseSize'>
                       Units
                     </Text>
                   </th>
                   <th className='text-right p-2'>
-                    <Text variant='uppercase' className='text-[10px]'>
+                    <Text variant='uppercase' className='text-textBaseSize'>
                       Margin
                     </Text>
                   </th>
@@ -227,18 +227,20 @@ export function ThisWeekTab({
           </div>
         ) : (
           <div className='border border-textInactiveColor p-4 text-center'>
-            <Text className='text-textInactiveColor text-xs'>No product data for this period.</Text>
+            <Text className='text-textInactiveColor text-textBaseSize'>
+              No product data for this period.
+            </Text>
           </div>
         )}
       </div>
 
       <div className='space-y-6'>
         <div className='flex items-center justify-between'>
-          <h3 className='text-sm font-bold uppercase'>Top Traffic Source This Period</h3>
+          <h3 className='text-textBaseSize font-bold uppercase'>Top Traffic Source This Period</h3>
           <Link
             to={trafficHref}
             replace
-            className='text-xs underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+            className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
           >
             View breakdown →
           </Link>
@@ -246,16 +248,16 @@ export function ThisWeekTab({
         <div className='border border-textInactiveColor p-4'>
           {topTrafficSource ? (
             <div className='space-y-2'>
-              <Text className='text-2xl font-bold'>{topTrafficSource.name}</Text>
-              <Text className='text-textInactiveColor text-xs'>
+              <Text className='text-lg font-bold'>{topTrafficSource.name}</Text>
+              <Text className='text-textInactiveColor text-textBaseSize'>
                 {formatNumber(topTrafficSource.sessions)} sessions
               </Text>
-              <Text className='text-textInactiveColor text-[10px] italic mt-2'>
+              <Text className='text-textInactiveColor text-textBaseSize italic mt-2'>
                 Excluding direct traffic
               </Text>
             </div>
           ) : (
-            <Text className='text-textInactiveColor text-xs'>
+            <Text className='text-textInactiveColor text-textBaseSize'>
               No attributed traffic this period
             </Text>
           )}

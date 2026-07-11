@@ -37,7 +37,11 @@ export function Tags({
 
   useEffect(() => {
     if (isAddingProduct && !isCopyMode) {
-      setValue('tags', selectedTags.map((tag) => ({ tag })), { shouldDirty: true });
+      setValue(
+        'tags',
+        selectedTags.map((tag) => ({ tag })),
+        { shouldDirty: true },
+      );
     }
   }, [isAddingProduct, selectedTags, setValue]);
 
@@ -123,7 +127,11 @@ export function Tags({
 
   useEffect(() => {
     if (isEditMode || isCopyMode) {
-      setValue('tags', selectedTags.map((tag) => ({ tag })), { shouldDirty: true });
+      setValue(
+        'tags',
+        selectedTags.map((tag) => ({ tag })),
+        { shouldDirty: true },
+      );
     }
   }, [isAddingProduct, isCopyMode, isEditMode, selectedTags, setValue]);
 
@@ -146,7 +154,7 @@ export function Tags({
         </Button>
       )}
       {(isEditMode || (showAddTagField && (isAddingProduct || isCopyMode))) && (
-        <div className='flex items-center border-b border-textColor w-full'>
+        <div className='flex items-center border-b border-textInactiveColor w-full'>
           <div className='flex-1'>
             <Input
               name='product.tags'

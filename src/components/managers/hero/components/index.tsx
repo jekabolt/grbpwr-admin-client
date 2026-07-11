@@ -262,7 +262,7 @@ export function Hero() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit, onError)} className='flex flex-col'>
-        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <Text variant='uppercase' size='large'>
               hero

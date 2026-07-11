@@ -25,27 +25,52 @@
 }
 
 @theme {
-  /* COLORS */
-  --color-textColor: #000;
-  --color-bgColor: #fff;
-  --color-textInactiveColor: #cccccc;
-  /* Readable secondary text for functional field labels/hints. #666 on #fff is
-     ~5.7:1 (WCAG AA), unlike textInactiveColor (#ccc ≈ 1.6:1, decorative only). */
-  --color-labelColor: #666666;
-  --color-error: #ff0000;
-  --color-warning: #c65d00;
+  /* COLORS
+     One committed palette. Neutrals: black ink, white ground, one gray for every
+     border (#ccc) and one readable gray for secondary text (#666). Accents:
+     red / blue / purple only. Green + "warning" (blue) are reserved for status
+     semantics, never decoration. */
+  --color-textColor: #000; /* black — ink */
+  --color-bgColor: #fff; /* white — ground */
+  /* The single border gray. Every outline in the app is this color. */
+  --color-borderColor: #cccccc;
+  --color-textInactiveColor: #cccccc; /* == borderColor; also disabled/placeholder ink */
+  /* Readable secondary text for labels/hints. #666 on #fff is ~5.7:1 (WCAG AA),
+     unlike textInactiveColor (#ccc ≈ 1.6:1, decorative only). */
+  --color-labelColor: #666666; /* gray — secondary ink */
+
+  /* Accents */
+  --color-red: #ff0000;
+  --color-error: #ff0000; /* == red */
+  --color-blue: #2323ff;
+  --color-purple: #311eee;
+  --color-highlightColor: #311eee; /* == purple (legacy alias) */
+
+  /* Status-only (semantic, not accents) */
+  --color-success: #0f7a34; /* green, ~4.6:1 on white */
+  --color-warning: #2323ff; /* blue — warnings read blue, not orange */
+
   --color-overlay: rgba(0, 0, 0, 0.4);
-  --color-highlightColor: #311eee;
+
+  /* Z-INDEX SCALE (semantic — reference via z-[var(--z-*)])
+     sticky page chrome < nav < modal < popover-in-modal < toast */
+  --z-sticky: 20;
+  --z-nav: 45; /* top nav bar + its dropdowns: above page chrome, below modals */
+  --z-modal: 50;
+  --z-popover: 60; /* selects / date / entity pickers opened inside a modal */
+  --z-toast: 70;
 
   /* FONTS */
   --font-family-sans: 'FeatureMono', 'Inter', 'Helvetica Neue', Arial, sans-serif;
   --font-family-mono: 'FeatureMono', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
-  /* TEXT */
-  --text-giant: 200px;
-  --text-giantSmall: 110px;
-  --text-lg: 18px;
-  --text-textBaseSize: 12px;
+  /* TEXT — two working sizes (body 12 / heading 18) + bold for emphasis.
+     giant/giantSmall are display-only, reserved for the login + hero splash. */
+  --text-textBaseSize: 12px; /* body */
+  --text-small: 12px; /* alias of body — keeps size='small' on the 2-size system */
+  --text-lg: 18px; /* heading */
+  --text-giantSmall: 110px; /* display (login/hero only) */
+  --text-giant: 200px; /* display (login/hero only) */
 }
 
 * {
@@ -162,6 +187,55 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .nav-dropdown[data-state='open'],
   .nav-dropdown[data-state='closed'] {
+    animation: none;
+  }
+}
+
+/* Media viewer (lightbox). Overlay + chrome crossfade; the stage remounts on each
+   navigation (keyed by index) so its zoom-in replays as you step through images. */
+@keyframes mediaViewerFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mediaViewerFadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes mediaViewerStageIn {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.media-viewer-overlay[data-state='open'],
+.media-viewer-content[data-state='open'] {
+  animation: mediaViewerFadeIn 160ms ease-out;
+}
+.media-viewer-overlay[data-state='closed'],
+.media-viewer-content[data-state='closed'] {
+  animation: mediaViewerFadeOut 130ms ease-in;
+}
+.media-viewer-stage {
+  animation: mediaViewerStageIn 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .media-viewer-overlay[data-state='open'],
+  .media-viewer-overlay[data-state='closed'],
+  .media-viewer-content[data-state='open'],
+  .media-viewer-content[data-state='closed'],
+  .media-viewer-stage {
     animation: none;
   }
 }

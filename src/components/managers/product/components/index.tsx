@@ -163,7 +163,7 @@ export function ProductForm({
         onSubmit={form.handleSubmit(handleSubmit, handleFormError)}
       >
         {/* Header — identity + status */}
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
             <Button asChild variant='secondary' size='lg'>
               <Link to={ROUTES.product}>← products</Link>
@@ -237,7 +237,7 @@ export function ProductForm({
       </form>
 
       {/* Sticky action bar */}
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textColor bg-bgColor px-3 py-2 print:hidden'>
+      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>
         <Text variant='inactive' size='small'>
           {editMode && isFormChanged ? 'unsaved changes' : ' '}
         </Text>
@@ -294,7 +294,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`space-y-4 border border-textColor p-4 ${className ?? ''}`}>
+    <section className={`space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}>
       <Text variant='uppercase' size='large'>
         {title}
       </Text>

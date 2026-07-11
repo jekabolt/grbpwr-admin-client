@@ -109,7 +109,9 @@ export function TierAudit() {
             name='to'
             type='date'
             value={filters.to ? filters.to.slice(0, 10) : ''}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => patch({ to: toIso(e.target.value) })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              patch({ to: toIso(e.target.value) })
+            }
             className='w-36'
           />
         </div>
@@ -124,12 +126,12 @@ export function TierAudit() {
 
       {/* Table */}
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border border-textColor min-w-max'>
+        <table className='w-full border-collapse border border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor h-9'>
             <tr>
               {['ID', 'Date', 'From', 'To', 'Trigger', 'Actor', 'Spend @ change', 'Reason'].map(
                 (h) => (
-                  <th key={h} className='border border-textColor px-2 h-9'>
+                  <th key={h} className='border border-textInactiveColor px-2 h-9'>
                     <Text variant='uppercase' size='small'>
                       {h}
                     </Text>
@@ -149,29 +151,29 @@ export function TierAudit() {
               </tr>
             ) : (
               entries.map((e) => (
-                <tr key={e.id} className='border-b border-textColor last:border-b-0 h-9'>
-                  <td className='border border-textColor text-center px-2'>
+                <tr key={e.id} className='border-b border-textInactiveColor last:border-b-0 h-9'>
+                  <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{e.id}</Text>
                   </td>
-                  <td className='border border-textColor text-center px-2'>
+                  <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{formatDateShort(e.createdAt, true)}</Text>
                   </td>
-                  <td className='border border-textColor text-center px-2'>
+                  <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{e.oldTier || '-'}</Text>
                   </td>
-                  <td className='border border-textColor text-center px-2'>
+                  <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{e.newTier || '-'}</Text>
                   </td>
-                  <td className='border border-textColor text-center px-2'>
+                  <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{e.triggerType || '-'}</Text>
                   </td>
-                  <td className='border border-textColor text-center px-2'>
+                  <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{e.actor || '-'}</Text>
                   </td>
-                  <td className='border border-textColor text-center px-2'>
+                  <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{formatEur(e.spendEurAtChange)}</Text>
                   </td>
-                  <td className='border border-textColor text-center px-2'>
+                  <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{e.reason || '-'}</Text>
                   </td>
                 </tr>

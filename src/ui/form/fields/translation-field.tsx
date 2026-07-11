@@ -149,7 +149,9 @@ export function TranslationField({ label, fieldPrefix, fieldName, maxLength }: P
         onLanguageChange={handleLanguageChange}
       />
 
-      <div className={`border-b ${errorMessage || over ? 'border-error' : 'border-textColor'}`}>
+      <div
+        className={`border-b ${errorMessage || over ? 'border-error' : 'border-textInactiveColor'}`}
+      >
         <Input
           name={fieldNameWithIndex}
           value={currentInputValue}

@@ -66,14 +66,14 @@ export function StockTable({ changes = [], isLoading, sizes = [] }: StockTablePr
 
   return (
     <div className='min-h-0 w-full flex-1 overflow-auto'>
-      <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+      <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
         <thead className='sticky top-0 z-20 h-10'>
-          <tr className='border-b border-textColor bg-textInactiveColor'>
+          <tr className='border-b border-textInactiveColor bg-textInactiveColor'>
             {COLUMNS.map((col, i) => (
               <th
                 key={col.label}
                 className={cn(
-                  'text-center h-10 min-w-26 border border-r border-textColor bg-textInactiveColor px-2',
+                  'text-center h-10 min-w-26 border border-r border-textInactiveColor bg-textInactiveColor px-2',
                 )}
               >
                 <Text variant='uppercase'>{col.label}</Text>
@@ -103,7 +103,7 @@ export function StockTable({ changes = [], isLoading, sizes = [] }: StockTablePr
                 {COLUMNS.map((col) => (
                   <td
                     key={col.label}
-                    className={cn('border border-r border-textColor text-center px-2')}
+                    className={cn('border border-r border-textInactiveColor text-center px-2')}
                   >
                     <Text>{col.accessor(c)}</Text>
                   </td>

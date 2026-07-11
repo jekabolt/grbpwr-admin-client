@@ -89,7 +89,7 @@ export function StockTrendChart({
       subtitle={`Product ${productId != null ? productId : '—'}; Size: ${sizeLabel}`}
       action={downloadButton}
       emptyMessage={!hasData ? (isLoading ? 'Loading…' : 'No data to display') : undefined}
-      className='shrink-0 rounded bg-bgColor'
+      className='shrink-0 rounded-none bg-bgColor'
     >
       <EChart option={option} height={220} />
     </ChartCard>

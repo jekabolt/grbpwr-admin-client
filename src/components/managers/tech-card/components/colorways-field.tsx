@@ -223,10 +223,10 @@ function UsagePerSize({ ci, ui, article }: { ci: number; ui: number; article?: F
               type='button'
               onClick={disablePerSize}
               className={cn(
-                'border px-2 py-1 text-xs uppercase transition-colors',
+                'border px-2 py-1 text-textBaseSize uppercase transition-colors',
                 !perSize
                   ? 'border-textColor bg-textColor text-bgColor'
-                  : 'border-textInactiveColor text-textColor hover:border-textColor',
+                  : 'border-textInactiveColor text-textColor hover:border-textInactiveColor',
               )}
             >
               один на изделие
@@ -235,10 +235,10 @@ function UsagePerSize({ ci, ui, article }: { ci: number; ui: number; article?: F
               type='button'
               onClick={enablePerSize}
               className={cn(
-                'border px-2 py-1 text-xs uppercase transition-colors',
+                'border px-2 py-1 text-textBaseSize uppercase transition-colors',
                 perSize
                   ? 'border-textColor bg-textColor text-bgColor'
-                  : 'border-textInactiveColor text-textColor hover:border-textColor',
+                  : 'border-textInactiveColor text-textColor hover:border-textInactiveColor',
               )}
             >
               по размерам
@@ -324,7 +324,7 @@ function UsageRow({
       {/* scannable header: part · material */}
       <div className='flex items-center gap-2 border-b border-textInactiveColor pb-2'>
         <span
-          className='size-3 shrink-0 border border-textColor'
+          className='size-3 shrink-0 border border-textInactiveColor'
           style={colorIsHex ? { backgroundColor: color } : undefined}
           aria-hidden
         />
@@ -375,7 +375,7 @@ function UsageRow({
             onChange={(e) =>
               setValue(`${base}.color`, e.target.value, { shouldDirty: true, shouldTouch: true })
             }
-            className='h-9 w-9 shrink-0 cursor-pointer border border-textColor bg-bgColor p-0'
+            className='h-9 w-9 shrink-0 cursor-pointer border border-textInactiveColor bg-bgColor p-0'
             aria-label='выбрать цвет'
             title='выбрать цвет (запишет HEX)'
           />
@@ -453,12 +453,12 @@ function ColorwayCard({
   }
 
   return (
-    <div className='space-y-4 border border-textColor p-4'>
+    <div className='space-y-4 border border-textInactiveColor p-4'>
       {/* title bar — colour identity + actions */}
       <div className='flex items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
         <div className='flex min-w-0 items-center gap-3'>
           <div
-            className='flex size-12 shrink-0 items-center justify-center overflow-hidden border border-textColor text-xs text-textInactiveColor'
+            className='flex size-12 shrink-0 items-center justify-center overflow-hidden border border-textInactiveColor text-textBaseSize text-textInactiveColor'
             style={!swatchUrl && hexValid ? { backgroundColor: hexCss } : undefined}
             aria-label='colour swatch'
           >
@@ -548,7 +548,7 @@ function ColorwayCard({
               onChange={(e) =>
                 setValue(`colorways.${index}.hex`, e.target.value, { shouldDirty: true })
               }
-              className='h-9 w-9 shrink-0 cursor-pointer border border-textColor bg-bgColor p-0'
+              className='h-9 w-9 shrink-0 cursor-pointer border border-textInactiveColor bg-bgColor p-0'
               aria-label='выбрать цвет'
               title='выбрать цвет (HEX)'
             />
@@ -559,7 +559,7 @@ function ColorwayCard({
             </Text>
             <div className='flex items-center gap-2'>
               {swatchUrl && (
-                <div className='size-10 shrink-0 border border-textColor'>
+                <div className='size-10 shrink-0 border border-textInactiveColor'>
                   <Media src={swatchUrl} alt='swatch' aspectRatio='1/1' fit='cover' />
                 </div>
               )}

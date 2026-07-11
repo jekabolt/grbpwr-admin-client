@@ -76,7 +76,7 @@ export default function ProductsCatalog() {
 
   return (
     <div className='flex flex-col gap-6 pb-20'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
         <div className='flex items-baseline gap-2'>
           <Text variant='uppercase' size='large'>
             products
