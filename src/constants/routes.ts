@@ -1,11 +1,19 @@
 export const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
 
-type Manager = {
+// A single navigation destination. `section` (from AdminService.ListAccountSections)
+// gates the item against an account's RBAC permissions; when omitted the item is
+// always shown. See usePermissions() for the gating rules.
+export type NavItem = {
   label: string;
   route: string;
-  // Section key (from AdminService.ListAccountSections) that gates this item. When
-  // omitted the item is always shown. See usePermissions() for the gating rules.
   section?: string;
+};
+
+// A labeled group of destinations. On desktop each group is a dropdown in the top
+// bar; on mobile it renders as a titled section in the drawer.
+export type NavGroup = {
+  label: string;
+  items: NavItem[];
 };
 
 // Canonical section keys used to gate admin-panel navigation against an account's
@@ -77,189 +85,69 @@ export enum ROUTES {
   accounts = '/accounts',
 }
 
-export const SIDE_BAR_ITEMS: Manager[] = [
+// Primary navigation, grouped by domain. Desktop renders each group as a top-bar
+// dropdown; mobile renders each as a titled drawer section. This is the single
+// source of truth — desktop and mobile can no longer drift apart.
+export const NAV_GROUPS: NavGroup[] = [
   {
-    label: 'ANALYTICS',
-    route: ROUTES.main,
-    section: SECTION.analytics,
+    label: 'operations',
+    items: [
+      { label: 'analytics', route: ROUTES.main, section: SECTION.analytics },
+      { label: 'orders', route: ROUTES.orders, section: SECTION.orders },
+      { label: 'fulfillment', route: ROUTES.fulfillment, section: SECTION.fulfillment },
+      { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks },
+    ],
   },
   {
-    label: 'MEDIA',
-    route: ROUTES.media,
-    section: SECTION.media,
+    label: 'catalog',
+    items: [
+      { label: 'products', route: ROUTES.product, section: SECTION.products },
+      { label: 'media', route: ROUTES.media, section: SECTION.media },
+      { label: 'hero', route: ROUTES.hero, section: SECTION.hero },
+      { label: 'promo', route: ROUTES.promo, section: SECTION.promo },
+      { label: 'timeline', route: ROUTES.archives, section: SECTION.archive },
+    ],
   },
   {
-    label: 'PRODUCTS',
-    route: ROUTES.product,
-    section: SECTION.products,
-  },
-  {
-    label: 'ORDERS',
-    route: ROUTES.orders,
-    section: SECTION.orders,
-  },
-  {
-    label: 'FULFILLMENT',
-    route: ROUTES.fulfillment,
-    section: SECTION.fulfillment,
-  },
-  {
-    label: 'HERO',
-    route: ROUTES.hero,
-    section: SECTION.hero,
-  },
-  {
-    label: 'PROMO',
-    route: ROUTES.promo,
-    section: SECTION.promo,
-  },
-  {
-    label: 'TIMELINE',
-    route: ROUTES.archives,
-    section: SECTION.archive,
-  },
-  {
-    label: 'SETTINGS',
-    route: ROUTES.settings,
-    section: SECTION.settings,
-  },
-  {
-    label: 'SHIPPING',
-    route: ROUTES.shipping,
-    section: SECTION.shipping,
-  },
-  {
-    label: 'CUSTOMER SUPPORT',
-    route: ROUTES.customerSupport,
-    section: SECTION.support,
-  },
-  {
-    label: 'MEMBERS',
-    route: ROUTES.members,
-    section: SECTION.members,
-  },
-  {
-    label: 'MODELS',
-    route: ROUTES.models,
-    section: SECTION.models,
-  },
-  {
-    label: 'FITTINGS',
-    route: ROUTES.fittings,
-    section: SECTION.fittings,
-  },
-  {
-    label: 'TECH CARDS',
-    route: ROUTES.techCards,
-    section: SECTION.techCards,
-  },
-  {
-    label: 'TASKS',
-    route: ROUTES.tasks,
-    section: SECTION.tasks,
-  },
-  {
-    label: 'TIER CONFIG',
-    route: ROUTES.tierConfig,
-    section: SECTION.members,
-  },
-  {
-    label: 'HACKER',
-    route: ROUTES.hacker,
-    section: SECTION.members,
-  },
-  {
-    label: 'TIER AUDIT',
-    route: ROUTES.tierAudit,
-    section: SECTION.members,
-  },
-  {
-    label: 'ACCOUNTS',
-    route: ROUTES.accounts,
-    section: SECTION.accounts,
-  },
-];
-
-export const LEFT_SIDE_ITEMS: Manager[] = [
-  {
-    label: 'analytics',
-    route: ROUTES.main,
-    section: SECTION.analytics,
-  },
-  {
-    label: 'media',
-    route: ROUTES.media,
-    section: SECTION.media,
-  },
-  {
-    label: 'products',
-    route: ROUTES.product,
-    section: SECTION.products,
-  },
-  {
-    label: 'timiline',
-    route: ROUTES.archives,
-    section: SECTION.archive,
-  },
-  {
-    label: 'orders',
-    route: ROUTES.orders,
-    section: SECTION.orders,
-  },
-  {
-    label: 'fulfillment',
-    route: ROUTES.fulfillment,
-    section: SECTION.fulfillment,
-  },
-  {
-    label: 'tasks',
-    route: ROUTES.tasks,
-    section: SECTION.tasks,
-  },
-  {
-    label: 'hero',
-    route: ROUTES.hero,
-    section: SECTION.hero,
+    label: 'production',
+    items: [
+      { label: 'models', route: ROUTES.models, section: SECTION.models },
+      { label: 'fittings', route: ROUTES.fittings, section: SECTION.fittings },
+      { label: 'tech cards', route: ROUTES.techCards, section: SECTION.techCards },
+    ],
   },
   {
     label: 'members',
-    route: ROUTES.members,
-    section: SECTION.members,
+    items: [
+      { label: 'members', route: ROUTES.members, section: SECTION.members },
+      { label: 'tier config', route: ROUTES.tierConfig, section: SECTION.members },
+      { label: 'tier audit', route: ROUTES.tierAudit, section: SECTION.members },
+      { label: 'hacker', route: ROUTES.hacker, section: SECTION.members },
+      { label: 'support', route: ROUTES.customerSupport, section: SECTION.support },
+    ],
   },
-  {
-    label: 'models',
-    route: ROUTES.models,
-    section: SECTION.models,
-  },
-  {
-    label: 'fittings',
-    route: ROUTES.fittings,
-    section: SECTION.fittings,
-  },
-  {
-    label: 'tech cards',
-    route: ROUTES.techCards,
-    section: SECTION.techCards,
-  },
-  {
-    label: 'accounts',
-    route: ROUTES.accounts,
-    section: SECTION.accounts,
-  },
-  // {
-  //   label: 'promo',
-  //   route: ROUTES.promo,
-  // },
-  // {
-  //   label: 'support',
-  //   route: ROUTES.customerSupport,
-  // },
 ];
 
-export const RIGHT_SIDE_MANAGERS: Manager[] = [
-  {
-    label: 'settings',
-    route: ROUTES.settings,
-    section: SECTION.settings,
-  },
-];
+// Admin cluster, surfaced to the right of the logo on desktop and as the final
+// drawer section on mobile.
+export const ADMIN_GROUP: NavGroup = {
+  label: 'admin',
+  items: [
+    { label: 'settings', route: ROUTES.settings, section: SECTION.settings },
+    { label: 'shipping', route: ROUTES.shipping, section: SECTION.shipping },
+    { label: 'accounts', route: ROUTES.accounts, section: SECTION.accounts },
+  ],
+};
+
+// Flattened list of every destination, in nav order. Retained for RBAC landing-route
+// resolution (usePermissions().homeRoute picks the first item an account can read).
+export const SIDE_BAR_ITEMS: NavItem[] = [...NAV_GROUPS, ADMIN_GROUP].flatMap(
+  (group) => group.items,
+);
+
+// True when `pathname` is at `route` or nested beneath it (e.g. /products/42 is under
+// /products). Used to highlight the active nav item and its parent group.
+export function isActiveRoute(pathname: string, route: string): boolean {
+  if (route === ROUTES.login) return pathname === ROUTES.login;
+  return pathname === route || pathname.startsWith(`${route}/`);
+}
