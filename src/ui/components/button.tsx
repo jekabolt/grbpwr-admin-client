@@ -19,7 +19,7 @@ export const buttonVariants = cva(
         ],
         main: [
           'border',
-          'border-textInactiveColor',
+          'border-textColor',
           'text-textBaseSize',
           'text-bgColor',
           'bg-textColor',
