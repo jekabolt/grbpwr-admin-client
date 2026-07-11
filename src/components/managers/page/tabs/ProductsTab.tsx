@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   DeadStockTable,
+  DropVerdictTable,
   InventoryHealthTable,
   InventoryTargetForm,
   NotifyMeIntentTable,
@@ -47,6 +48,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
     (commerce?.revenueByCategory?.length ?? 0) > 0;
   const hasAnyProductData =
     hasProductCharts ||
+    (metricsResponse.sellThroughByDrop?.length ?? 0) > 0 ||
     (metricsResponse.slowMovers?.length ?? 0) > 0 ||
     (metricsResponse.deadStock?.length ?? 0) > 0 ||
     (metricsResponse.sizeAnalytics?.length ?? 0) > 0 ||
@@ -66,6 +68,17 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
         </div>
       ) : (
         <>
+          {(metricsResponse.sellThroughByDrop?.length ?? 0) > 0 && (
+            <details className='border border-textInactiveColor' open>
+              <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
+                Drops
+              </summary>
+              <div className='space-y-6 p-4'>
+                <DropVerdictTable sellThroughByDrop={metricsResponse.sellThroughByDrop} />
+              </div>
+            </details>
+          )}
+
           <details className='border border-textInactiveColor' open>
             <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-sm font-bold uppercase hover:bg-bgSecondary/50'>
               What's Selling
