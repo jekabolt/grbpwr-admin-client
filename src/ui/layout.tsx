@@ -1,10 +1,10 @@
-import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { ROUTES, SECTION } from 'constants/routes';
+import { ADMIN_GROUP, ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { FC, ReactNode, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from './components/button';
 import { LeftSideNavMenu } from './components/left-side-nav-menu';
+import { NavDropdownMenu } from './components/nav-dropdown-menu';
 import { SnackBar } from './components/snackbar';
 
 interface LayoutProps {
@@ -14,7 +14,6 @@ interface LayoutProps {
 export const Layout: FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const [isNavOpen, setIsNavOpen] = useState(false);
-  const { canRead } = usePermissions();
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
@@ -48,57 +47,16 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           </Button>
         </div>
 
-        <div className='flex grow basis-0 items-center justify-end'>
-          <div className='relative w-full lg:w-auto flex justify-end lg:justify-start'>
-            {canRead(SECTION.promo) && (
-              <Button
-                asChild
-                className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden whitespace-nowrap'
-              >
-                <Link to={ROUTES.promo}>promo</Link>
-              </Button>
-            )}
-            <div className='flex justify-end lg:justify-start'>
-              {canRead(SECTION.support) && (
-                <Button
-                  asChild
-                  className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden whitespace-nowrap'
-                >
-                  <Link to={ROUTES.customerSupport}>support</Link>
-                </Button>
-              )}
-              {canRead(SECTION.shipping) && (
-                <Button
-                  asChild
-                  className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden'
-                >
-                  <Link to={ROUTES.shipping}>shipping</Link>
-                </Button>
-              )}
-              {canRead(SECTION.settings) && (
-                <Button
-                  asChild
-                  className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden'
-                >
-                  <Link to={ROUTES.settings}>settings</Link>
-                </Button>
-              )}
-              {canRead(SECTION.accounts) && (
-                <Button
-                  asChild
-                  className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 lg:block hidden'
-                >
-                  <Link to={ROUTES.accounts}>accounts</Link>
-                </Button>
-              )}
-              <Button
-                className='px-2  underline-offset-2 hover:underline transition-colors hover:opacity-70 cursor-pointer'
-                onClick={handleLogout}
-              >
-                logout
-              </Button>
-            </div>
+        <div className='flex grow basis-0 items-center justify-end gap-1'>
+          <div className='hidden lg:block'>
+            <NavDropdownMenu groups={[ADMIN_GROUP]} align='end' />
           </div>
+          <Button
+            className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 cursor-pointer'
+            onClick={handleLogout}
+          >
+            logout
+          </Button>
         </div>
       </div>
       <div className='h-full print:h-full print:pt-0 pt-26 px-2.5'>{children}</div>
