@@ -1,11 +1,11 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { SECTION } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { emptyFormValues, Task, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
+import { emptyFormValues, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
 import { BoardSkeleton } from './components/board-skeleton';
 import {
@@ -15,23 +15,16 @@ import {
   FiltersBar,
   TaskFilters,
 } from './components/filters-bar';
-import { TaskDetailDrawer } from './components/task-detail-drawer';
 import { TaskFormModal } from './components/task-form-modal';
-import {
-  useCreateTask,
-  useDeleteTask,
-  useMoveTask,
-  useTasks,
-  useUpdateTask,
-} from './hooks/useTasks';
+import { useCreateTask, useTasks } from './hooks/useTasks';
 import { BOARD_LABEL, BOARDS } from './utils/meta';
 
 const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
-
-type ModalState = { mode: 'create'; status: TaskStatus } | { mode: 'edit'; task: Task } | null;
+const FILTERS_KEY = 'grbpwr.kanban.filters';
 
 export function Tasks() {
   const { account, canRead, canWrite, resolved } = usePermissions();
+  const navigate = useNavigate();
 
   const canView = !resolved || canRead(SECTION.tasks);
   const writable = canWrite(SECTION.tasks);
@@ -45,56 +38,40 @@ export function Tasks() {
   const { data, isLoading, isError, error, refetch } = useTasks(filter);
   const tasks = data?.tasks ?? [];
 
-  const [filters, setFilters] = useState<TaskFilters>(emptyFilters);
+  // Persist filters across navigation (opening a task detail unmounts the board).
+  const [filters, setFilters] = useState<TaskFilters>(() => {
+    try {
+      const raw = sessionStorage.getItem(FILTERS_KEY);
+      return raw ? { ...emptyFilters, ...(JSON.parse(raw) as Partial<TaskFilters>) } : emptyFilters;
+    } catch {
+      return emptyFilters;
+    }
+  });
+  useEffect(() => sessionStorage.setItem(FILTERS_KEY, JSON.stringify(filters)), [filters]);
+
   const active = filtersActive(filters);
   const visible = useMemo(
     () => applyFilters(tasks, filters, account?.username),
     [tasks, filters, account?.username],
   );
 
-  const [modal, setModal] = useState<ModalState>(null);
-  const [selected, setSelected] = useState<Task | null>(null);
-  const [deleting, setDeleting] = useState<Task | null>(null);
-
+  // The create modal; `null` = closed. Column seeds the new card's status.
+  const [creating, setCreating] = useState<TaskStatus | null>(null);
   const createTask = useCreateTask();
-  const updateTask = useUpdateTask();
-  const deleteTask = useDeleteTask();
-  const moveTask = useMoveTask(filter);
 
-  const initial: TaskFormValues = useMemo(() => {
-    if (modal?.mode === 'edit') {
-      const t = modal.task;
-      return { ...t.task, board: t.board, status: t.status };
-    }
-    if (modal?.mode === 'create') return emptyFormValues(activeBoard, modal.status);
-    return emptyFormValues(activeBoard, 'TASK_STATUS_TODO');
-  }, [modal, activeBoard]);
+  const initial: TaskFormValues = useMemo(
+    () => emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'),
+    [activeBoard, creating],
+  );
 
-  async function handleSubmit(values: TaskFormValues) {
+  async function handleCreate(values: TaskFormValues) {
     const { board, status, ...content } = values;
     try {
-      if (modal?.mode === 'edit') {
-        const t = modal.task;
-        await updateTask.mutateAsync({ id: t.id, content });
-        // Placement (board/column) is a MoveTask, not a content edit. Only fire
-        // when it actually changed; the card lands at the top of its new column.
-        if (board !== t.board || status !== t.status) {
-          await moveTask.mutateAsync({ id: t.id, board, status, position: 0 });
-        }
-      } else {
-        await createTask.mutateAsync({ content, board, status });
-      }
-      setModal(null);
+      await createTask.mutateAsync({ content, board, status });
+      setCreating(null);
     } catch {
       /* snackbar shown by the mutation; keep the modal open */
     }
-  }
-
-  function confirmDelete() {
-    if (!deleting) return;
-    deleteTask.mutate(deleting.id);
-    if (selected?.id === deleting.id) setSelected(null);
-    setDeleting(null);
   }
 
   if (!canView) {
@@ -123,11 +100,7 @@ export function Tasks() {
           </Text>
         </div>
         {writable && (
-          <Button
-            variant='main'
-            size='lg'
-            onClick={() => setModal({ mode: 'create', status: 'TASK_STATUS_TODO' })}
-          >
+          <Button variant='main' size='lg' onClick={() => setCreating('TASK_STATUS_TODO')}>
             + new task
           </Button>
         )}
@@ -189,42 +162,20 @@ export function Tasks() {
             filter={filter}
             filtered={active}
             canWrite={writable}
-            onOpen={(task) => setSelected(task)}
-            onAdd={(status) => setModal({ mode: 'create', status })}
+            onOpen={(task) => navigate(`${ROUTES.tasks}/${task.id}`)}
+            onAdd={(status) => setCreating(status)}
           />
         </>
       )}
 
-      <TaskDetailDrawer
-        task={selected}
-        open={selected !== null}
-        onOpenChange={(o) => !o && setSelected(null)}
-        canWrite={writable}
-        onEdit={(task) => {
-          setSelected(null);
-          setModal({ mode: 'edit', task });
-        }}
-        onDelete={(task) => setDeleting(task)}
-      />
-
       <TaskFormModal
-        open={modal !== null}
-        onOpenChange={(o) => !o && setModal(null)}
-        mode={modal?.mode ?? 'create'}
+        open={creating !== null}
+        onOpenChange={(o) => !o && setCreating(null)}
+        mode='create'
         initial={initial}
-        saving={createTask.isPending || updateTask.isPending || moveTask.isPending}
-        onSubmit={handleSubmit}
+        saving={createTask.isPending}
+        onSubmit={handleCreate}
       />
-
-      <ConfirmationModal
-        open={deleting !== null}
-        onOpenChange={(o) => !o && setDeleting(null)}
-        onConfirm={confirmDelete}
-        title='delete task'
-        confirmLabel='delete'
-      >
-        <Text size='small'>Delete “{deleting?.task.title}”? This can’t be undone.</Text>
-      </ConfirmationModal>
     </div>
   );
 }

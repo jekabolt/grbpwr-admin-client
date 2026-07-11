@@ -70,6 +70,7 @@ export enum ROUTES {
   singleTechCard = '/tech-cards/:id',
   techCardPrint = '/tech-cards/:id/print',
   tasks = '/tasks',
+  taskDetails = '/tasks/:id',
   accounts = '/accounts',
 }
 
