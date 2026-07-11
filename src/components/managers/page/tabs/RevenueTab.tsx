@@ -93,7 +93,8 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             {costCoverage > 0
               ? `over the ${costCoverage.toFixed(0)}% of revenue with a product cost set`
               : 'set product costs to unlock'}
-            {uncostedCount > 0 && ` · ${uncostedCount} product${uncostedCount === 1 ? '' : 's'} missing cost`}
+            {uncostedCount > 0 &&
+              ` · ${uncostedCount} product${uncostedCount === 1 ? '' : 's'} missing cost`}
           </Text>
         </div>
         {costCoverage > 0 ? (

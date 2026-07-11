@@ -26,9 +26,7 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
   const pairs = all
     .filter((p) => (p.count ?? 0) >= MIN_SUPPORT)
     .filter((p) => (hasLift ? (p.lift ?? 0) >= MIN_LIFT : true))
-    .sort((a, b) =>
-      hasLift ? (b.lift ?? 0) - (a.lift ?? 0) : (b.count ?? 0) - (a.count ?? 0),
-    )
+    .sort((a, b) => (hasLift ? (b.lift ?? 0) - (a.lift ?? 0) : (b.count ?? 0) - (a.count ?? 0)))
     .slice(0, 20);
 
   if (pairs.length === 0) return null;
@@ -68,9 +66,7 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
                   </td>
                   {/* Confidence = P(B|A): of orders with A, the share that also bought B. */}
                   <td className='p-2 text-right'>{pct(p.confidence)}</td>
-                  {hasLift && (
-                    <td className={`p-2 text-right ${liftClass}`}>{lift.toFixed(1)}×</td>
-                  )}
+                  {hasLift && <td className={`p-2 text-right ${liftClass}`}>{lift.toFixed(1)}×</td>}
                 </tr>
               );
             })}

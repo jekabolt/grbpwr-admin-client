@@ -118,7 +118,9 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
               overbought — the sizes to cut next buy.
             </Text>
             {sorted.some((r) => (r.unitsBought ?? 0) === 0) && (
-              <Text>* Size-coverage proxy shown where unit buy quantities aren&apos;t recorded.</Text>
+              <Text>
+                * Size-coverage proxy shown where unit buy quantities aren&apos;t recorded.
+              </Text>
             )}
           </>
         ) : (

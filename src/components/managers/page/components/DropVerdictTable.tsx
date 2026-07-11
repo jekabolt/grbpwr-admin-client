@@ -30,8 +30,8 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
         Drop verdict
       </Text>
       <Text className='text-xs text-textInactiveColor mb-4 block'>
-        Per-release sell-through — the drop-brand KPI. Whole-drop totals, so the read is decision-grade
-        even when a single day is only a handful of orders.
+        Per-release sell-through — the drop-brand KPI. Whole-drop totals, so the read is
+        decision-grade even when a single day is only a handful of orders.
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-xs'>
