@@ -1,0 +1,295 @@
+import * as Dialog from '@radix-ui/react-dialog';
+import { useEffect } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { Button } from 'ui/components/button';
+import { DatePicker } from 'ui/components/date-picker';
+import Input from 'ui/components/input';
+import SelectComponent from 'ui/components/select';
+import Text from 'ui/components/text';
+import Textarea from 'ui/components/text-area';
+import { TaskInsert } from '../api/types';
+import {
+  BOARD_LABEL,
+  BOARDS,
+  PRIORITIES,
+  PRIORITY_LABEL,
+  STATUS_LABEL,
+  STATUSES,
+  toOptions,
+} from '../utils/meta';
+import { AssigneeSelect } from './assignee-select';
+
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  mode: 'create' | 'edit';
+  initial: TaskInsert;
+  saving?: boolean;
+  onSubmit: (values: TaskInsert) => void;
+}
+
+const boardOptions = toOptions(BOARDS, BOARD_LABEL);
+const statusOptions = toOptions(STATUSES, STATUS_LABEL);
+const priorityOptions = [
+  { value: 'TASK_PRIORITY_UNKNOWN', label: 'no priority' },
+  ...toOptions(PRIORITIES, PRIORITY_LABEL),
+];
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className='flex flex-col gap-1'>
+      <Text variant='label' size='small' component='span'>
+        {label}
+      </Text>
+      {children}
+    </label>
+  );
+}
+
+export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSubmit }: Props) {
+  const {
+    register,
+    handleSubmit,
+    control,
+    reset,
+    formState: { errors },
+  } = useForm<TaskInsert>({ defaultValues: initial });
+
+  // Reseed when the modal opens for a different task / column.
+  useEffect(() => {
+    if (open) reset(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initial]);
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className='fixed inset-0 z-40 bg-overlay' />
+        <Dialog.Content
+          aria-describedby={undefined}
+          className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-hidden border border-textColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[32rem] lg:-translate-x-1/2'
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <div className='flex items-center justify-between gap-2 border-b border-textColor p-3'>
+            <Dialog.Title className='text-lg uppercase'>
+              {mode === 'create' ? 'new task' : 'edit task'}
+            </Dialog.Title>
+            <Dialog.Close asChild>
+              <Button type='button' aria-label='close'>
+                [x]
+              </Button>
+            </Dialog.Close>
+          </div>
+
+          <form
+            onSubmit={handleSubmit(onSubmit)}
+            className='flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3'
+          >
+            <Field label='title'>
+              <Input
+                placeholder='what needs doing'
+                autoFocus
+                {...register('title', { required: true })}
+              />
+              {errors.title && (
+                <Text variant='error' size='small'>
+                  title is required
+                </Text>
+              )}
+            </Field>
+
+            <Field label='description'>
+              <Textarea
+                variant='secondary'
+                placeholder='details, links, acceptance criteria…'
+                className='mb-0 min-h-24 border-b border-textInactiveColor'
+                {...register('description')}
+              />
+            </Field>
+
+            <div className='grid grid-cols-2 gap-3'>
+              <Field label='board'>
+                <Controller
+                  control={control}
+                  name='board'
+                  render={({ field }) => (
+                    <SelectComponent
+                      name='board'
+                      items={boardOptions}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder='board'
+                      fullWidth
+                    />
+                  )}
+                />
+              </Field>
+              <Field label='column'>
+                <Controller
+                  control={control}
+                  name='status'
+                  render={({ field }) => (
+                    <SelectComponent
+                      name='status'
+                      items={statusOptions}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder='column'
+                      fullWidth
+                    />
+                  )}
+                />
+              </Field>
+              <Field label='priority'>
+                <Controller
+                  control={control}
+                  name='priority'
+                  render={({ field }) => (
+                    <SelectComponent
+                      name='priority'
+                      items={priorityOptions}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder='priority'
+                      fullWidth
+                    />
+                  )}
+                />
+              </Field>
+              <Field label='due date'>
+                <Controller
+                  control={control}
+                  name='dueDate'
+                  render={({ field }) => (
+                    <DatePicker
+                      value={field.value ? new Date(field.value) : undefined}
+                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
+                    />
+                  )}
+                />
+              </Field>
+            </div>
+
+            <Field label='assignee'>
+              <Controller
+                control={control}
+                name='assignee'
+                render={({ field }) => (
+                  <AssigneeSelect value={field.value} onChange={field.onChange} />
+                )}
+              />
+            </Field>
+
+            <Field label='labels (comma separated)'>
+              <Controller
+                control={control}
+                name='labels'
+                render={({ field }) => (
+                  <Input
+                    name='labels'
+                    placeholder='fw26, urgent, drop-3'
+                    value={field.value.join(', ')}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      field.onChange(
+                        e.target.value
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      )
+                    }
+                  />
+                )}
+              />
+            </Field>
+
+            <details className='border-t border-textInactiveColor pt-2'>
+              <summary className='cursor-pointer text-textBaseSize uppercase text-labelColor'>
+                links (optional)
+              </summary>
+              <div className='mt-2 grid grid-cols-2 gap-3'>
+                <Field label='техкарта id'>
+                  <Controller
+                    control={control}
+                    name='techCardId'
+                    render={({ field }) => (
+                      <Input
+                        type='number'
+                        name='techCardId'
+                        value={field.value || ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(Number(e.target.value) || 0)
+                        }
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='product id'>
+                  <Controller
+                    control={control}
+                    name='productId'
+                    render={({ field }) => (
+                      <Input
+                        type='number'
+                        name='productId'
+                        value={field.value || ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(Number(e.target.value) || 0)
+                        }
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='order uuid'>
+                  <Controller
+                    control={control}
+                    name='orderUuid'
+                    render={({ field }) => (
+                      <Input
+                        name='orderUuid'
+                        value={field.value}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(e.target.value)
+                        }
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='archive id'>
+                  <Controller
+                    control={control}
+                    name='archiveId'
+                    render={({ field }) => (
+                      <Input
+                        type='number'
+                        name='archiveId'
+                        value={field.value || ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          field.onChange(Number(e.target.value) || 0)
+                        }
+                      />
+                    )}
+                  />
+                </Field>
+              </div>
+            </details>
+          </form>
+
+          <div className='flex justify-end gap-2 border-t border-textColor p-3'>
+            <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
+              cancel
+            </Button>
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              loading={saving}
+              onClick={handleSubmit(onSubmit)}
+            >
+              {mode === 'create' ? 'create' : 'save'}
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}

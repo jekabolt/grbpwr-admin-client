@@ -87,6 +87,9 @@ const TechCardPrint = lazy(() =>
 const Accounts = lazy(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
+const Tasks = lazy(() =>
+  import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
+);
 
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
@@ -208,6 +211,7 @@ root.render(
                   <Route path={ROUTES.techCards} element={<TechCards />} />
                   <Route path={ROUTES.addTechCard} element={<TechCard />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
+                  <Route path={ROUTES.tasks} element={<Tasks />} />
                   <Route path={ROUTES.accounts} element={<Accounts />} />
                 </Route>
                 {/* Layout-less protected route: a standalone page so the browser print
