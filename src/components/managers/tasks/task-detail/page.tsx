@@ -194,19 +194,16 @@ export function TaskDetail() {
               </div>
             </section>
           )}
-
-          <section className='border-t border-textInactiveColor pt-4'>
-            <TaskComments taskId={task.id} />
-          </section>
         </div>
 
         {/* Aside */}
-        <aside className='flex flex-col divide-y divide-textInactiveColor border border-textColor p-4 md:order-2 md:h-fit'>
-          <div className='pb-1'>
-            <Text variant='label' size='small' component='span'>
-              board
-            </Text>
-            <div className='mt-1'>
+        <aside className='flex flex-col gap-4 border border-textColor p-4 md:order-2 md:h-fit'>
+          {/* Placement — inline move without opening the editor */}
+          <div className='flex flex-col gap-3'>
+            <label className='flex flex-col gap-1'>
+              <Text variant='label' size='small' component='span'>
+                board
+              </Text>
               <SelectComponent
                 name='detail-board'
                 items={boardOptions}
@@ -214,18 +211,21 @@ export function TaskDetail() {
                 onValueChange={(v: string) =>
                   canWrite &&
                   v !== task.board &&
-                  move.mutate({ id: task.id, board: v as TaskBoard, status: task.status, position: 0 })
+                  move.mutate({
+                    id: task.id,
+                    board: v as TaskBoard,
+                    status: task.status,
+                    position: 0,
+                  })
                 }
                 readOnly={!canWrite}
                 fullWidth
               />
-            </div>
-          </div>
-          <div className='py-2'>
-            <Text variant='label' size='small' component='span'>
-              column
-            </Text>
-            <div className='mt-1'>
+            </label>
+            <label className='flex flex-col gap-1'>
+              <Text variant='label' size='small' component='span'>
+                column
+              </Text>
               <SelectComponent
                 name='detail-status'
                 items={statusOptions}
@@ -233,36 +233,43 @@ export function TaskDetail() {
                 onValueChange={(v: string) =>
                   canWrite &&
                   v !== task.status &&
-                  move.mutate({ id: task.id, board: task.board, status: v as TaskStatus, position: 0 })
+                  move.mutate({
+                    id: task.id,
+                    board: task.board,
+                    status: v as TaskStatus,
+                    position: 0,
+                  })
                 }
                 readOnly={!canWrite}
                 fullWidth
               />
-            </div>
+            </label>
           </div>
 
-          <Row label='priority'>{PRIORITY_LABEL[t.priority]}</Row>
-          <Row label='assignee'>
-            {t.assignee ? (
-              <span className={cn(isMine && 'font-bold')}>{t.assignee}</span>
-            ) : (
-              <span className='text-labelColor'>unassigned</span>
-            )}
-          </Row>
-          <Row label='due'>
-            <span className={cn(due.state === 'overdue' && 'text-error')}>
-              {t.dueDate ? format(new Date(t.dueDate), 'PPP') : '—'}
-            </span>
-          </Row>
-          <Row label='created'>
-            <span className='text-labelColor'>
-              {task.createdBy ? `${task.createdBy} · ` : ''}
-              {task.createdAt ? format(new Date(task.createdAt), 'PP') : '—'}
-            </span>
-          </Row>
+          <div className='flex flex-col divide-y divide-textInactiveColor border-t border-textInactiveColor'>
+            <Row label='priority'>{PRIORITY_LABEL[t.priority]}</Row>
+            <Row label='assignee'>
+              {t.assignee ? (
+                <span className={cn(isMine && 'font-bold')}>{t.assignee}</span>
+              ) : (
+                <span className='text-labelColor'>unassigned</span>
+              )}
+            </Row>
+            <Row label='due'>
+              <span className={cn(due.state === 'overdue' && 'text-error')}>
+                {t.dueDate ? format(new Date(t.dueDate), 'PPP') : '—'}
+              </span>
+            </Row>
+            <Row label='created'>
+              <span className='text-labelColor'>
+                {task.createdBy ? `${task.createdBy} · ` : ''}
+                {task.createdAt ? format(new Date(task.createdAt), 'PP') : '—'}
+              </span>
+            </Row>
+          </div>
 
           {t.labels.length > 0 && (
-            <div className='flex flex-wrap gap-1 py-2'>
+            <div className='flex flex-wrap gap-1'>
               {t.labels.map((l) => (
                 <span
                   key={l}
@@ -275,7 +282,7 @@ export function TaskDetail() {
           )}
 
           {links.length > 0 && (
-            <div className='flex flex-col gap-2 pt-3'>
+            <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
               <Text variant='uppercase' size='small' className='text-labelColor'>
                 links
               </Text>
@@ -288,6 +295,11 @@ export function TaskDetail() {
           )}
         </aside>
       </div>
+
+      {/* Comments — full width, below the fold on mobile */}
+      <section className='max-w-3xl border-t border-textInactiveColor pt-4'>
+        <TaskComments taskId={task.id} />
+      </section>
 
       {initial && (
         <TaskFormModal

@@ -128,7 +128,9 @@ export const orderConfig: EntityConfig = {
       orderFactor: 'ORDER_FACTOR_DESC',
     });
     const o = (r.orders ?? [])[0];
-    return o ? orderOption(o) : { value, label: `order ${String(value).slice(0, 8)}`, sublabel: '' };
+    return o
+      ? orderOption(o)
+      : { value, label: `order ${String(value).slice(0, 8)}`, sublabel: '' };
   },
 };
 

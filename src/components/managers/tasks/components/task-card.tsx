@@ -14,12 +14,8 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
 };
 
 function initials(username: string) {
-  return (
-    username
-      .replace(/[^a-zA-Z0-9]/g, '')
-      .slice(0, 2)
-      .toUpperCase() || '?'
-  );
+  // Keep letters/digits across scripts (Cyrillic usernames included).
+  return username.replace(/\s+/g, '').slice(0, 2).toUpperCase() || '?';
 }
 
 // Presentational card body — reused by the sortable card and the drag overlay.

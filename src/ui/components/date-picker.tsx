@@ -16,7 +16,12 @@ interface DatePickerProps {
 // via `.rdp-*` overrides in global.css; here we theme the trigger + popover
 // surface. Rendered through a Portal at z-50 so it escapes the create/edit
 // modal's stacking/overflow context.
-export function DatePicker({ value, onChange, disabled, placeholder = 'pick a date' }: DatePickerProps) {
+export function DatePicker({
+  value,
+  onChange,
+  disabled,
+  placeholder = 'pick a date',
+}: DatePickerProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -56,7 +61,7 @@ export function DatePicker({ value, onChange, disabled, placeholder = 'pick a da
         <Popover.Content
           align='start'
           sideOffset={4}
-          className='z-50 border border-textColor bg-bgColor p-2 text-textColor shadow-[4px_4px_0_0_var(--color-textColor)]'
+          className='z-[60] border border-textColor bg-bgColor p-2 text-textColor shadow-[4px_4px_0_0_var(--color-textColor)]'
         >
           <DayPicker
             mode='single'
