@@ -90,6 +90,9 @@ const Accounts = lazy(() =>
 const Tasks = lazy(() =>
   import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
 );
+const TaskDetail = lazy(() =>
+  import('components/managers/tasks/task-detail/page').then((m) => ({ default: m.TaskDetail })),
+);
 
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
@@ -212,6 +215,7 @@ root.render(
                   <Route path={ROUTES.addTechCard} element={<TechCard />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
+                  <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
                   <Route path={ROUTES.accounts} element={<Accounts />} />
                 </Route>
                 {/* Layout-less protected route: a standalone page so the browser print
