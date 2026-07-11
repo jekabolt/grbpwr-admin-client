@@ -28,9 +28,9 @@ export function MobileNavMenu() {
         </Button>
       </DialogPrimitives.Trigger>
       <DialogPrimitives.Portal>
-        <DialogPrimitives.Overlay className='fixed inset-0 z-40 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col border border-textColor bg-bgColor'>
-          <div className='flex items-center justify-between border-b border-textColor px-2.5 py-3'>
+        <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-nav)] h-screen bg-overlay' />
+        <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-[var(--z-nav)] flex flex-col border border-textInactiveColor bg-bgColor'>
+          <div className='flex items-center justify-between border-b border-textInactiveColor px-2.5 py-3'>
             <DialogPrimitives.Title asChild>
               <Text variant='uppercase'>menu</Text>
             </DialogPrimitives.Title>
@@ -54,7 +54,7 @@ export function MobileNavMenu() {
                             to={item.route}
                             aria-current={active ? 'page' : undefined}
                             className={cn(
-                              'flex min-h-12 items-center justify-center border border-textColor px-2 py-3 text-center leading-tight uppercase transition-colors active:opacity-80',
+                              'flex min-h-12 items-center justify-center border border-textInactiveColor px-2 py-3 text-center leading-tight uppercase transition-colors active:opacity-80',
                               active
                                 ? 'bg-textColor text-bgColor'
                                 : 'hover:bg-textColor hover:text-bgColor',

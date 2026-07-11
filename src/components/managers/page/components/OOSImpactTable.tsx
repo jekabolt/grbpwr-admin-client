@@ -54,26 +54,26 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
         Out-of-stock demand
       </Text>
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Product
                 </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Size
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   OOS Clicks
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Price
                 </Text>
               </th>
@@ -103,7 +103,7 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor'>
+      <div className='mt-3 text-textBaseSize text-textInactiveColor'>
         <Text>Clicks on out-of-stock sizes — most-wanted first. Restock priority.</Text>
       </div>
     </div>

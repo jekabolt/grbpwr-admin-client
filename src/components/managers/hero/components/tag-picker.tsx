@@ -59,7 +59,7 @@ export function TagPicker({
         <button
           type='button'
           onClick={() => setOpen(true)}
-          className='flex flex-1 items-center justify-between border border-textColor px-2 py-1.5 text-left cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          className='flex flex-1 items-center justify-between border border-textInactiveColor px-2 py-1.5 text-left cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
         >
           <Text size='small' variant={value ? 'default' : 'label'} className='truncate'>
             {value || placeholder}
@@ -106,7 +106,7 @@ export function TagPicker({
             <button
               type='button'
               onClick={() => pick(query.trim())}
-              className='w-full border border-textColor px-2 py-2 text-left cursor-pointer hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+              className='w-full border border-textInactiveColor px-2 py-2 text-left cursor-pointer hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
             >
               <Text size='small'>use “{query.trim()}” as a custom tag</Text>
             </button>
@@ -135,7 +135,7 @@ export function TagPicker({
                       'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                       selected
                         ? 'border-textColor bg-textColor text-bgColor'
-                        : 'border-textInactiveColor hover:border-textColor',
+                        : 'border-textInactiveColor hover:border-textInactiveColor',
                     )}
                   >
                     <Text size='small' className={selected ? '!text-bgColor' : ''}>

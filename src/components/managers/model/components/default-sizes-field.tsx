@@ -49,7 +49,7 @@ export function DefaultSizesField() {
           {selectedIds.map((id) => (
             <span
               key={id}
-              className='flex items-center gap-1 border border-textColor px-2 py-0.5 uppercase'
+              className='flex items-center gap-1 border border-textInactiveColor px-2 py-0.5 uppercase'
             >
               <Text size='small'>{formatSizeName(sizeById.get(id) ?? `#${id}`)}</Text>
               <button

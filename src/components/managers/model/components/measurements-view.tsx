@@ -23,7 +23,7 @@ export function ModelMeasurementsView({
   }
 
   return (
-    <div className='space-y-6 border border-textColor bg-bgColor p-3'>
+    <div className='space-y-6 border border-textInactiveColor bg-bgColor p-3'>
       <Text variant='uppercase' size='small'>
         model measurements · mm
       </Text>
@@ -32,7 +32,11 @@ export function ModelMeasurementsView({
         if (present.length === 0) return null;
         return (
           <div key={group.title} className='space-y-2'>
-            <Text variant='uppercase' size='small' className='border-b border-textColor pb-1'>
+            <Text
+              variant='uppercase'
+              size='small'
+              className='border-b border-textInactiveColor pb-1'
+            >
               {group.title}
             </Text>
             <div className='grid grid-cols-2 gap-x-10 gap-y-2 sm:grid-cols-3'>

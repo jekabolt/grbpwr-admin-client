@@ -30,7 +30,7 @@ export function TechCardPrint() {
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
       <style>{PRINT_CSS}</style>
 
-      <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
+      <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
         <div className='flex items-center gap-3'>
           <Button asChild variant='secondary' size='lg'>
             <Link to={id ? `/tech-cards/${id}` : ROUTES.techCards}>← back</Link>

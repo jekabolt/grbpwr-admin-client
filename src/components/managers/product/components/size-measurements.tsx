@@ -15,9 +15,9 @@ import { StockHistory } from './stock/stock-history';
 import { UpdateStock } from './stock/update-stock';
 import { ToggleSizeNames } from './toggle-sizenames';
 
-const cellClass = 'text-center border-r border-textColor';
-const qtyCellClass = 'text-center border-r-2 border-textColor';
-const measurementCellClass = 'text-center border-r border-textColor w-20 lg:w-auto';
+const cellClass = 'text-center border-r border-textInactiveColor';
+const qtyCellClass = 'text-center border-r-2 border-textInactiveColor';
+const measurementCellClass = 'text-center border-r border-textInactiveColor w-20 lg:w-auto';
 const lastCellClass = 'text-center w-20 lg:w-auto';
 
 export function SizeMeasurements({
@@ -215,7 +215,7 @@ export function SizeMeasurements({
         )}
       </div>
       <div className='overflow-x-auto'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor'>
             <tr className='border-b border-text'>
               <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>

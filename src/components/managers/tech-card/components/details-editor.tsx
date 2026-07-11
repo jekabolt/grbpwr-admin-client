@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
+import { MediaViewer, MediaViewerItem } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 import { TechCardFormData } from './schema';
 import { detailAspects, detailKeyLabel } from './tech-card-options';
@@ -24,8 +25,9 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
   const [newAspect, setNewAspect] = useState('');
   // session cache of just-picked media so thumbnails show before a reload
   const [cache, setCache] = useState<Map<number, string>>(new Map());
-  // url of the image opened in the enlarged preview (null = closed)
-  const [preview, setPreview] = useState<string | null>(null);
+  // the reference strip opened in the shared viewer (null = closed). Each aspect
+  // browses its own images, so we stash the built item list alongside the index.
+  const [viewer, setViewer] = useState<{ items: MediaViewerItem[]; index: number } | null>(null);
 
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
@@ -95,6 +97,17 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
     return cache.get(id) || m?.media?.thumbnail?.mediaUrl || m?.media?.fullSize?.mediaUrl || '';
   };
 
+  // Build the viewer strip for an aspect (full-size on the stage, thumb for nav).
+  const viewerItemsFor = (ids: number[]): MediaViewerItem[] =>
+    ids.map((id) => {
+      const m = mediaById.get(id) ?? libraryMap.get(id);
+      const thumb = urlOf(id);
+      return {
+        src: m?.media?.fullSize?.mediaUrl || m?.media?.compressed?.mediaUrl || thumb,
+        thumbnail: thumb,
+      };
+    });
+
   // standard aspects (always shown) + any custom keys present in data or added this session
   const presentCustom = details
     .map((d) => d.key)
@@ -134,7 +147,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                     type='button'
                     aria-label='remove aspect'
                     onClick={() => removeCustom(key)}
-                    className='shrink-0 text-xs uppercase text-textInactiveColor hover:text-textColor'
+                    className='shrink-0 text-textBaseSize uppercase text-textInactiveColor hover:text-textColor'
                   >
                     удалить аспект ✕
                   </button>
@@ -145,24 +158,26 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                 maxLength={2000}
                 value={d?.text ?? ''}
                 onChange={(e) => upsert(key, { text: e.target.value })}
-                className='w-full appearance-none rounded-none border-b border-textColor bg-bgColor text-textBaseSize focus:outline-none'
+                className='w-full appearance-none rounded-none border-b border-textInactiveColor bg-bgColor text-textBaseSize focus:outline-none'
               />
               <div className='flex flex-wrap items-center gap-2'>
-                {ids.map((id) => {
+                {ids.map((id, imgIndex) => {
                   const url = urlOf(id);
                   return (
-                    <div key={id} className='relative size-12 border border-textColor'>
+                    <div key={id} className='relative size-12 border border-textInactiveColor'>
                       <button
                         type='button'
-                        onClick={() => url && setPreview(url)}
+                        onClick={() =>
+                          url && setViewer({ items: viewerItemsFor(ids), index: imgIndex })
+                        }
                         disabled={!url}
                         aria-label='посмотреть картинку'
-                        className='block size-full'
+                        className='block size-full cursor-zoom-in'
                       >
                         {url ? (
                           <Media src={url} alt='ref' aspectRatio='1/1' fit='cover' />
                         ) : (
-                          <span className='flex size-full items-center justify-center text-xs'>
+                          <span className='flex size-full items-center justify-center text-textBaseSize'>
                             #{id}
                           </span>
                         )}
@@ -171,7 +186,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                         type='button'
                         aria-label='remove image'
                         onClick={() => removeImage(key, id)}
-                        className='absolute -right-1 -top-1 flex size-4 items-center justify-center border border-textColor bg-bgColor text-xs leading-none'
+                        className='absolute -right-1 -top-1 flex size-4 items-center justify-center border border-textInactiveColor bg-bgColor text-textBaseSize leading-none'
                       >
                         ✕
                       </button>
@@ -198,24 +213,21 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
           value={newAspect}
           onChange={(e) => setNewAspect(e.target.value)}
           placeholder='свой аспект (напр. подкладка)'
-          className='w-64 appearance-none rounded-none border-b border-textColor bg-bgColor text-textBaseSize focus:outline-none'
+          className='w-64 appearance-none rounded-none border-b border-textInactiveColor bg-bgColor text-textBaseSize focus:outline-none'
         />
         <Button type='button' className='uppercase' onClick={addCustom}>
           + аспект
         </Button>
       </div>
 
-      {/* click-to-enlarge preview of a reference image */}
-      {preview && (
-        <div
-          className='fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 p-6'
-          onClick={() => setPreview(null)}
-          role='dialog'
-          aria-label='предпросмотр картинки'
-        >
-          <img src={preview} alt='preview' className='max-h-full max-w-full object-contain' />
-        </div>
-      )}
+      {/* click-to-enlarge preview of the aspect's reference images */}
+      <MediaViewer
+        items={viewer?.items ?? []}
+        index={viewer?.index ?? 0}
+        open={!!viewer}
+        onOpenChange={(open) => !open && setViewer(null)}
+        onIndexChange={(index) => setViewer((v) => (v ? { ...v, index } : v))}
+      />
     </div>
   );
 }

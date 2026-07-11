@@ -84,8 +84,8 @@ export default function Selector({
       >
         <Select.Trigger
           className={`inline-flex items-center justify-between w-full px-2 ${
-            compact ? 'py-0.5 text-xs' : 'py-2'
-          } bg-white border border-gray-300 shadow-sm focus:outline-none disabled:bg-gray-50 disabled:text-gray-500`}
+            compact ? 'py-0.5 text-textBaseSize' : 'py-2'
+          } bg-bgColor border border-textInactiveColor shadow-sm focus:outline-none disabled:bg-textInactiveColor/20 disabled:text-labelColor`}
         >
           <Select.Value placeholder={placeholder}>
             <Text>{getDisplayValue()}</Text>
@@ -96,14 +96,14 @@ export default function Selector({
         </Select.Trigger>
 
         <Select.Portal>
-          <Select.Content className='overflow-hidden bg-white border border-gray-200 z-50'>
-            <Select.ScrollUpButton className='flex items-center justify-center h-6 bg-white cursor-default'>
+          <Select.Content className='overflow-hidden bg-bgColor border border-textInactiveColor z-50'>
+            <Select.ScrollUpButton className='flex items-center justify-center h-6 bg-bgColor cursor-default'>
               <ChevronUpIcon />
             </Select.ScrollUpButton>
 
             <Select.Viewport className='p-1'>
               <Select.Group>
-                <Select.Label className='px-6 py-2 font-medium text-gray-500 uppercase'>
+                <Select.Label className='px-6 py-2 font-medium text-labelColor uppercase'>
                   <Text>{label}</Text>
                 </Select.Label>
                 {allOptions.map((option) => {
@@ -111,7 +111,7 @@ export default function Selector({
                     <Select.Item
                       key={option.value}
                       value={option.value.toString()}
-                      className='relative flex items-center px-8 py-2 cursor-pointer select-none hover:bg-gray-500/50 focus:outline-none'
+                      className='relative flex items-center px-8 py-2 cursor-pointer select-none hover:bg-textInactiveColor/40 focus:outline-none'
                     >
                       <Select.ItemText>
                         <Text>{option.label}</Text>
@@ -125,7 +125,7 @@ export default function Selector({
               </Select.Group>
             </Select.Viewport>
 
-            <Select.ScrollDownButton className='flex items-center justify-center h-6 bg-white cursor-default'>
+            <Select.ScrollDownButton className='flex items-center justify-center h-6 bg-bgColor cursor-default'>
               <Text>↓</Text>
               <ChevronDownIcon />
             </Select.ScrollDownButton>

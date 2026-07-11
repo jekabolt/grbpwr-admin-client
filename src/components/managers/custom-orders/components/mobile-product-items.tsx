@@ -43,11 +43,13 @@ export function MobileProductItems({
               tabIndex={0}
               onClick={() => togglePending(product)}
               className={cn(
-                'flex gap-3 items-center p-3 rounded cursor-pointer active:opacity-80',
-                isSelected ? 'border-2 border-textColor' : 'border border-textInactiveColor',
+                'flex gap-3 items-center p-3 rounded-none cursor-pointer active:opacity-80',
+                isSelected
+                  ? 'border-2 border-textInactiveColor'
+                  : 'border border-textInactiveColor',
               )}
             >
-              <div className='w-16 h-16 shrink-0 overflow-hidden rounded'>
+              <div className='w-16 h-16 shrink-0 overflow-hidden rounded-none'>
                 <Media
                   src={product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
                   alt='thumbnail'
@@ -60,12 +62,12 @@ export function MobileProductItems({
                   to={`${BASE_PATH}/products/${product.id}`}
                   target='_blank'
                   onClick={(e) => e.stopPropagation()}
-                  className='text-blue-500 underline hover:text-blue-700 text-sm'
+                  className='text-blue underline hover:text-blue text-textBaseSize'
                 >
                   #{product.id}
                 </Link>
                 <Text className='block truncate'>{name}</Text>
-                <Text variant='uppercase' className='text-textInactiveColor text-xs'>
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                   {categoryName}
                 </Text>
               </div>

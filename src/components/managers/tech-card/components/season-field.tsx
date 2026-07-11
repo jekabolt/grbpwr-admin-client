@@ -48,7 +48,7 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
   return (
     <div className='space-y-1'>
       <FormLabel>season</FormLabel>
-      <div className='flex items-center gap-2 border-b border-textColor'>
+      <div className='flex items-center gap-2 border-b border-textInactiveColor'>
         <Input value={value} readOnly placeholder='— сезон —' className='flex-1 border-none' />
         <Button
           type='button'
@@ -57,7 +57,7 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
             setManual(value);
             setOpen(true);
           }}
-          className='px-2 py-1 text-xs uppercase'
+          className='px-2 py-1 text-textBaseSize uppercase'
         >
           выбрать
         </Button>
@@ -65,13 +65,13 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
 
       {open && (
         <div
-          className='fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 p-6'
+          className='fixed inset-0 z-[var(--z-popover)] flex items-center justify-center bg-black/60 p-6'
           onClick={close}
           role='dialog'
           aria-label='выбор сезона'
         >
           <div
-            className='w-full max-w-sm space-y-4 border border-textColor bg-bgColor p-4'
+            className='w-full max-w-sm space-y-4 border border-textInactiveColor bg-bgColor p-4'
             onClick={(e) => e.stopPropagation()}
           >
             <Text variant='uppercase'>выбор сезона</Text>
@@ -88,10 +88,10 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
                     onClick={() => setType(t)}
                     title={t.label}
                     className={cn(
-                      'border px-2 py-1 text-sm uppercase transition-colors',
+                      'border px-2 py-1 text-textBaseSize uppercase transition-colors',
                       type?.code === t.code
                         ? 'border-textColor bg-textColor text-bgColor'
-                        : 'border-textInactiveColor hover:border-textColor',
+                        : 'border-textInactiveColor hover:border-textInactiveColor',
                     )}
                   >
                     {t.code}
@@ -112,9 +112,9 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
                     disabled={!type}
                     onClick={() => type && commit(buildSeason(type, y))}
                     className={cn(
-                      'border px-3 py-1 text-sm transition-colors',
+                      'border px-3 py-1 text-textBaseSize transition-colors',
                       type
-                        ? 'border-textInactiveColor hover:border-textColor'
+                        ? 'border-textInactiveColor hover:border-textInactiveColor'
                         : 'border-textInactiveColor opacity-40',
                     )}
                   >

@@ -8,7 +8,7 @@ export function VisibilityField({ editMode }: { editMode: boolean }) {
   const hidden = !!watch('product.productBodyInsert.hidden');
 
   return (
-    <div className='flex items-center justify-between gap-3 border border-textColor px-3 py-2'>
+    <div className='flex items-center justify-between gap-3 border border-textInactiveColor px-3 py-2'>
       <div className='flex flex-col'>
         <Text variant='uppercase'>visibility</Text>
         <Text variant='inactive' size='small'>

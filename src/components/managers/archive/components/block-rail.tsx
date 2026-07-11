@@ -207,7 +207,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                         className={cn(
                           'flex items-center gap-1.5 bg-bgColor px-1.5 py-1.5 scroll-mt-4',
                           isSelected
-                            ? 'border-2 border-textColor'
+                            ? 'border-2 border-textInactiveColor'
                             : 'border border-textInactiveColor',
                         )}
                       >

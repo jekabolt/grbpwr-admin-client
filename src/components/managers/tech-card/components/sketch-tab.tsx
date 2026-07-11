@@ -27,7 +27,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className={cn('space-y-4 border border-textColor p-4', className)}>
+    <section className={cn('space-y-4 border border-textInactiveColor p-4', className)}>
       <Text variant='uppercase' size='large'>
         {title}
       </Text>
@@ -144,10 +144,10 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
                 type='button'
                 onClick={() => setViewId(v.mediaId)}
                 className={cn(
-                  'border px-2 py-1 text-sm uppercase transition-colors',
+                  'border px-2 py-1 text-textBaseSize uppercase transition-colors',
                   v.mediaId === activeViewId
                     ? 'border-textColor bg-textColor text-bgColor'
-                    : 'border-textInactiveColor text-textColor hover:border-textColor',
+                    : 'border-textInactiveColor text-textColor hover:border-textInactiveColor',
                 )}
               >
                 {kindLabels[v.kind ?? ''] ?? 'view'}
@@ -160,7 +160,7 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
               src={url}
               alt='sketch'
               onClick={addAt}
-              className='block max-h-[460px] w-auto cursor-crosshair select-none border border-textColor'
+              className='block max-h-[460px] w-auto cursor-crosshair select-none border border-textInactiveColor'
               draggable={false}
             />
             {callouts.map((c, idx) => {
@@ -181,7 +181,7 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
                     setDragPos({ idx, ...p });
                   }}
                   onClick={(e) => e.stopPropagation()}
-                  className='absolute flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-move items-center justify-center rounded-full border-2 border-bgColor bg-textColor text-xs text-bgColor'
+                  className='absolute flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-move items-center justify-center rounded-full border-2 border-bgColor bg-textColor text-textBaseSize text-bgColor'
                   style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
                   aria-label={`callout ${c.number || idx + 1}`}
                 >

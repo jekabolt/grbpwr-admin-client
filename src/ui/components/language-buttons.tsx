@@ -29,12 +29,12 @@ export function LanguageButtons({
             className={cn(
               'flex items-center gap-1 border px-2 py-1 text-textBaseSize uppercase transition-colors cursor-pointer',
               // base (unfilled, not selected)
-              'border-textInactiveColor text-textInactiveColor hover:border-textColor hover:text-textColor',
+              'border-textInactiveColor text-textInactiveColor hover:border-textInactiveColor hover:text-textColor',
               {
                 // selected
                 'border-textColor bg-textColor text-bgColor hover:text-bgColor': isSelected,
                 // filled, not selected
-                'border-textColor text-textColor': isFilled && !isSelected,
+                'border-textInactiveColor text-textColor': isFilled && !isSelected,
                 // required-but-empty emphasis
                 'border-error text-error hover:border-error':
                   showRedBorderForUnfilled && !isFilled && !isSelected,

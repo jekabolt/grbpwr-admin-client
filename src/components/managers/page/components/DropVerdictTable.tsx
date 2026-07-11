@@ -10,7 +10,7 @@ interface DropVerdictTableProps {
 // Sell-through verdict bands. A drop brand lives or dies on how much of a release clears —
 // these are the coarse "reprint / hold / cut" buckets, not precise targets.
 function verdict(pct: number): { label: string; cls: string } {
-  if (pct >= 75) return { label: 'Strong', cls: 'text-green-600' };
+  if (pct >= 75) return { label: 'Strong', cls: 'text-success' };
   if (pct >= 40) return { label: 'OK', cls: 'text-textColor' };
   return { label: 'Weak', cls: 'text-warning' };
 }
@@ -29,51 +29,51 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
       <Text variant='uppercase' className='font-bold mb-1 block'>
         Drop verdict
       </Text>
-      <Text className='text-xs text-textInactiveColor mb-4 block'>
+      <Text className='text-textBaseSize text-textInactiveColor mb-4 block'>
         Per-release sell-through — the drop-brand KPI. Whole-drop totals, so the read is
         decision-grade even when a single day is only a handful of orders.
       </Text>
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Drop
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Products
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Units sold / bought
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Sell-through %
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Days to 50%
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Revenue
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Margin
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Verdict
                 </Text>
               </th>
@@ -126,7 +126,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
                     )}
                   </td>
                   <td className='p-2 text-right'>
-                    <Text variant='uppercase' className={`text-[10px] font-bold ${v.cls}`}>
+                    <Text variant='uppercase' className={`text-textBaseSize font-bold ${v.cls}`}>
                       {v.label}
                     </Text>
                   </td>
@@ -136,7 +136,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
         <Text>
           Sell-through = units sold ÷ units bought. Days-to-50% is how fast the release cleared its
           first half; blank = not there yet. Strong ≥75% · OK ≥40% · Weak below.

@@ -53,7 +53,7 @@ export function MemberActions({ member }: { member: Member }) {
   };
 
   return (
-    <div className='flex flex-col gap-5 border border-textColor p-4'>
+    <div className='flex flex-col gap-5 border border-textInactiveColor p-4'>
       <Text variant='uppercase' size='default'>
         Actions
       </Text>
@@ -66,7 +66,7 @@ export function MemberActions({ member }: { member: Member }) {
           Manual tier change
         </Text>
         <div className='flex flex-wrap gap-2 items-center'>
-          <span className='inline-block px-2 py-0.5 bg-gray-100'>
+          <span className='inline-block px-2 py-0.5 bg-textInactiveColor/30'>
             <Text>{formatTierLabel(member.currentTier, member.currentTierDisplay)}</Text>
           </span>
           <Text variant='inactive'>&rarr;</Text>

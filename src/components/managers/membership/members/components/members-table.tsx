@@ -71,15 +71,18 @@ export function MembersTable({ members, isLoading }: MembersTableProps) {
 
   return (
     <div className='overflow-x-auto w-full'>
-      <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+      <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
         <thead className='bg-textInactiveColor h-10'>
-          <tr className='border-b border-textColor'>
+          <tr className='border-b border-textInactiveColor'>
             {COLUMNS.map((col) => (
               <th
                 key={col.key}
-                className={cn('text-center h-10 min-w-20 border border-r border-textColor px-2', {
-                  'sticky left-0 bg-textInactiveColor z-10': col.key === 'userId',
-                })}
+                className={cn(
+                  'text-center h-10 min-w-20 border border-r border-textInactiveColor px-2',
+                  {
+                    'sticky left-0 bg-textInactiveColor z-10': col.key === 'userId',
+                  },
+                )}
               >
                 <Text variant='uppercase'>{col.label}</Text>
               </th>
@@ -103,7 +106,7 @@ export function MembersTable({ members, isLoading }: MembersTableProps) {
                 {COLUMNS.map((col) => (
                   <td
                     key={col.key}
-                    className={cn('border border-r border-textColor text-center px-2', {
+                    className={cn('border border-r border-textInactiveColor text-center px-2', {
                       'sticky left-0 bg-bgColor group-hover:bg-highlightColor/20 z-10':
                         col.key === 'userId',
                     })}

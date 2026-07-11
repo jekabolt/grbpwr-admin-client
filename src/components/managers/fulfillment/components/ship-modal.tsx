@@ -34,12 +34,12 @@ export function ShipModal({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 z-40 bg-overlay' />
+        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
         <Dialog.Content
           aria-describedby={undefined}
-          className='fixed inset-x-2.5 top-1/2 z-50 flex w-auto -translate-y-1/2 flex-col gap-4 border border-textColor bg-bgColor p-4 text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[26rem] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-50 flex w-auto -translate-y-1/2 flex-col gap-4 border border-textInactiveColor bg-bgColor p-4 text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[26rem] lg:-translate-x-1/2'
         >
-          <div className='flex items-center justify-between gap-2 border-b border-textColor pb-2'>
+          <div className='flex items-center justify-between gap-2 border-b border-textInactiveColor pb-2'>
             <Dialog.Title className='text-lg uppercase'>ship order {orderLabel}</Dialog.Title>
             <Dialog.Close asChild>
               <Button type='button' aria-label='close'>

@@ -72,7 +72,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
     {
       label: 'Delete',
       accessor: (p) => (
-        <div className='w-full h-full flex items-center justify-center bg-red-500'>
+        <div className='w-full h-full flex items-center justify-center bg-error'>
           <Button
             size='lg'
             className='text-bgColor hover:cursor-pointer'
@@ -110,13 +110,13 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
         </div>
       )}
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor h-7 overflow-x-scroll'>
-            <tr className='border-b border-textColor'>
+            <tr className='border-b border-textInactiveColor'>
               {visibleColumns.map((col) => (
                 <th
                   key={col.label}
-                  className='text-center min-w-1 border border-r border-textColor'
+                  className='text-center min-w-1 border border-r border-textInactiveColor'
                 >
                   <Text variant='uppercase'>{col.label}</Text>
                 </th>
@@ -135,7 +135,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
                 {visibleColumns.map((col) => (
                   <td
                     key={col.label}
-                    className={cn('border border-r border-textColor text-center px-2', {
+                    className={cn('border border-r border-textInactiveColor text-center px-2', {
                       'px-0': col.label === 'Delete',
                     })}
                   >

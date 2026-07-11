@@ -17,7 +17,7 @@ function StatusBadge({ disabled }: { disabled?: boolean }) {
     <span
       className={cn(
         'shrink-0 border px-1.5 py-0.5',
-        disabled ? 'border-error' : 'border-textColor',
+        disabled ? 'border-error' : 'border-textInactiveColor',
       )}
     >
       <Text variant={disabled ? 'error' : 'uppercase'} size='small'>
@@ -48,7 +48,10 @@ function AccessChips({ account }: { account: AdminAccount }) {
   return (
     <div className='flex flex-wrap gap-1'>
       {perms.map((p) => (
-        <span key={p.section} className='whitespace-nowrap border border-textColor px-1.5 py-0.5'>
+        <span
+          key={p.section}
+          className='whitespace-nowrap border border-textInactiveColor px-1.5 py-0.5'
+        >
           <Text size='small' className='uppercase'>
             {p.section}
             <span className='text-labelColor'> {ACCESS_ABBR[p.access ?? ''] ?? '?'}</span>
@@ -82,13 +85,13 @@ export function AccountsTable({
 
   if (isLoading) {
     return (
-      <div className='border border-textColor'>
+      <div className='border border-textInactiveColor'>
         {[0, 1, 2].map((i) => (
           <div
             key={i}
             className={cn(
               'h-24 animate-pulse bg-textInactiveColor/30',
-              i > 0 && 'border-t border-textColor',
+              i > 0 && 'border-t border-textInactiveColor',
             )}
           />
         ))}
@@ -98,7 +101,7 @@ export function AccountsTable({
 
   if (accounts.length === 0) {
     return (
-      <div className='flex flex-col items-center gap-1 border border-textColor p-10 text-center'>
+      <div className='flex flex-col items-center gap-1 border border-textInactiveColor p-10 text-center'>
         <Text variant='uppercase'>no accounts yet</Text>
         <Text variant='label' size='small'>
           create the first admin account to grant scoped or full access.
@@ -109,13 +112,16 @@ export function AccountsTable({
 
   return (
     <>
-      <div className='border border-textColor'>
+      <div className='border border-textInactiveColor'>
         {accounts.map((a, i) => {
           const isSelf = !!currentUsername && a.username === currentUsername;
           return (
             <div
               key={a.username}
-              className={cn('flex flex-col gap-3 p-3 sm:p-4', i > 0 && 'border-t border-textColor')}
+              className={cn(
+                'flex flex-col gap-3 p-3 sm:p-4',
+                i > 0 && 'border-t border-textInactiveColor',
+              )}
             >
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <div className='flex items-baseline gap-2'>

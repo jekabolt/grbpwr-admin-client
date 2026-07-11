@@ -42,7 +42,7 @@ export function HackerInvites() {
   };
 
   return (
-    <div className='flex flex-col gap-4 border border-textColor p-4'>
+    <div className='flex flex-col gap-4 border border-textInactiveColor p-4'>
       <Text variant='uppercase' size='default'>
         Invites
       </Text>
@@ -84,7 +84,7 @@ export function HackerInvites() {
       )}
 
       {lastGenerated && (
-        <div className='flex flex-col gap-1 border border-textColor bg-highlightColor/10 p-3'>
+        <div className='flex flex-col gap-1 border border-textInactiveColor bg-highlightColor/10 p-3'>
           <Text variant='inactive' size='small'>
             One-time invite link (copy now — token is shown only once):
           </Text>
@@ -109,11 +109,11 @@ export function HackerInvites() {
       </label>
 
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border border-textColor min-w-max'>
+        <table className='w-full border-collapse border border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor h-9'>
             <tr>
               {['ID', 'Email', 'Created by', 'Created', 'Expires', 'Status', ''].map((h) => (
-                <th key={h} className='border border-textColor px-2 h-9'>
+                <th key={h} className='border border-textInactiveColor px-2 h-9'>
                   <Text variant='uppercase' size='small'>
                     {h}
                   </Text>
@@ -138,26 +138,29 @@ export function HackerInvites() {
                       ? 'active'
                       : 'expired';
                 return (
-                  <tr key={inv.id} className='border-b border-textColor last:border-b-0 h-9'>
-                    <td className='border border-textColor text-center px-2'>
+                  <tr
+                    key={inv.id}
+                    className='border-b border-textInactiveColor last:border-b-0 h-9'
+                  >
+                    <td className='border border-textInactiveColor text-center px-2'>
                       <Text size='small'>{inv.id}</Text>
                     </td>
-                    <td className='border border-textColor text-center px-2'>
+                    <td className='border border-textInactiveColor text-center px-2'>
                       <Text size='small'>{inv.email || '-'}</Text>
                     </td>
-                    <td className='border border-textColor text-center px-2'>
+                    <td className='border border-textInactiveColor text-center px-2'>
                       <Text size='small'>{inv.createdBy || '-'}</Text>
                     </td>
-                    <td className='border border-textColor text-center px-2'>
+                    <td className='border border-textInactiveColor text-center px-2'>
                       <Text size='small'>{formatDateShort(inv.createdAt)}</Text>
                     </td>
-                    <td className='border border-textColor text-center px-2'>
+                    <td className='border border-textInactiveColor text-center px-2'>
                       <Text size='small'>{formatDateShort(inv.expiresAt)}</Text>
                     </td>
-                    <td className='border border-textColor text-center px-2'>
+                    <td className='border border-textInactiveColor text-center px-2'>
                       <Text size='small'>{statusLabel}</Text>
                     </td>
-                    <td className='border border-textColor text-center px-2'>
+                    <td className='border border-textInactiveColor text-center px-2'>
                       {inv.active && canWrite(SECTION.members) && (
                         <Button
                           variant='underline'

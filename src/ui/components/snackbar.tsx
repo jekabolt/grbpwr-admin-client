@@ -9,15 +9,11 @@ export function SnackBar() {
 
   return (
     <div
-      className='fixed bottom-5 left-5 z-[100] flex max-h-screen w-80 flex-col-reverse gap-2'
+      className='fixed bottom-5 left-5 z-[var(--z-toast)] flex max-h-screen w-80 flex-col-reverse gap-2'
       aria-label='Notifications'
     >
       {alerts.map((alert) => (
-        <ToastItem
-          key={alert.id}
-          alert={alert}
-          onClose={() => closeMessage(alert.id)}
-        />
+        <ToastItem key={alert.id} alert={alert} onClose={() => closeMessage(alert.id)} />
       ))}
     </div>
   );
@@ -38,18 +34,21 @@ function ToastItem({
   return (
     <div
       role='status'
-      className={cn(
-        'flex items-center gap-3 rounded border px-4 py-3 shadow-lg',
-        alert.severity === 'error'
-          ? 'border-red-500/50 bg-red-950/90 text-red-100'
-          : 'border-green-500/50 bg-green-950/90 text-green-100',
-      )}
+      className='flex items-center gap-3 rounded-none border border-textColor bg-textColor px-4 py-3 text-bgColor'
     >
-      <span className='uppercase flex-1'>{alert.message ?? ''}</span>
+      <span
+        className={cn(
+          'shrink-0 font-bold uppercase',
+          alert.severity === 'error' ? 'text-error' : 'text-success',
+        )}
+      >
+        {alert.severity === 'error' ? 'error' : 'ok'}
+      </span>
+      <span className='flex-1 uppercase'>{alert.message ?? ''}</span>
       <button
         type='button'
         onClick={onClose}
-        className='rounded p-1 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/30'
+        className='rounded-none p-1 transition-opacity hover:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
         aria-label='Dismiss'
       >
         ×

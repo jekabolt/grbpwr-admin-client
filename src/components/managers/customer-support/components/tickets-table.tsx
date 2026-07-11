@@ -100,15 +100,18 @@ export function TicketsTable({
     <div className='w-full flex flex-col gap-4'>
       <Filter filters={filters} onFiltersChange={onFiltersChange} isLoading={isLoading} />
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textColor min-w-max'>
+        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor h-10'>
-            <tr className='border-b border-textColor'>
+            <tr className='border-b border-textInactiveColor'>
               {COLUMNS.map((col) => (
                 <th
                   key={col.key}
-                  className={cn('text-center h-10 min-w-20 border border-r border-textColor px-2', {
-                    'sticky left-0 bg-textInactiveColor z-10': col.key === 'id',
-                  })}
+                  className={cn(
+                    'text-center h-10 min-w-20 border border-r border-textInactiveColor px-2',
+                    {
+                      'sticky left-0 bg-textInactiveColor z-10': col.key === 'id',
+                    },
+                  )}
                 >
                   <Text variant='uppercase'>{col.label}</Text>
                 </th>
@@ -132,7 +135,7 @@ export function TicketsTable({
                   {COLUMNS.map((col) => (
                     <td
                       key={col.key}
-                      className={cn('border border-r border-textColor text-center px-2', {
+                      className={cn('border border-r border-textInactiveColor text-center px-2', {
                         'sticky left-0 bg-bgColor group-hover:bg-highlightColor/20 z-10':
                           col.key === 'id',
                       })}

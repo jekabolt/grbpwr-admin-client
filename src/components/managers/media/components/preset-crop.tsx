@@ -48,7 +48,7 @@ export const PresetCrop: FC<PresetCropProps> = ({ selectedFile, aspect, onCropCo
           <Slider.Track className='relative h-1.5 grow rounded-full bg-textInactiveColor'>
             <Slider.Range className='absolute h-full rounded-full bg-textColor' />
           </Slider.Track>
-          <Slider.Thumb className='block h-4 w-4 rounded-full border border-textColor bg-bgColor shadow focus:outline-none focus:ring-2 focus:ring-textColor/50' />
+          <Slider.Thumb className='block h-4 w-4 rounded-full border border-textInactiveColor bg-bgColor shadow focus:outline-none focus:ring-2 focus:ring-textColor/50' />
         </Slider.Root>
       </div>
     </div>

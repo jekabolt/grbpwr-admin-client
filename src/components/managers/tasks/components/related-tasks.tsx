@@ -25,7 +25,7 @@ export function RelatedTasks({
   if (!enabled) return null;
 
   return (
-    <section className={cn('flex flex-col gap-2 border border-textColor p-3', className)}>
+    <section className={cn('flex flex-col gap-2 border border-textInactiveColor p-3', className)}>
       <div className='flex items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
           related tasks{tasks.length ? ` · ${tasks.length}` : ''}

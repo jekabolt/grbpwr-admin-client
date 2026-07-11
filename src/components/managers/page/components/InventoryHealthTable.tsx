@@ -40,7 +40,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
             <button
               type='button'
               onClick={() => setIncludeNoSalesInPeriod((v) => !v)}
-              className='text-xs underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+              className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
             >
               {includeNoSalesInPeriod
                 ? 'Hide no-sales-in-period SKUs'
@@ -48,7 +48,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
             </button>
           )}
         </div>
-        <p className='text-xs text-textInactiveColor'>
+        <p className='text-textBaseSize text-textInactiveColor'>
           No rows in this view — all at-risk SKUs have no sales in the period (infinite days on
           hand). Use &quot;Include no-sales-in-period&quot; to list them.
         </p>
@@ -66,7 +66,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
           <button
             type='button'
             onClick={() => setIncludeNoSalesInPeriod((v) => !v)}
-            className='text-xs underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+            className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
           >
             {includeNoSalesInPeriod
               ? 'Hide no-sales-in-period SKUs'
@@ -75,31 +75,31 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
         )}
       </div>
       <div className='overflow-x-auto'>
-        <table className='w-full text-xs'>
+        <table className='w-full text-textBaseSize'>
           <thead>
             <tr className='border-b border-textInactiveColor'>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Product
                 </Text>
               </th>
               <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Size
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Qty
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Avg Daily Sales
                 </Text>
               </th>
               <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-[10px]'>
+                <Text variant='uppercase' className='text-textBaseSize'>
                   Days on Hand
                 </Text>
               </th>
@@ -141,7 +141,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-xs text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
         <Text>
           Items with &gt;60 days on hand. &gt;90 days highlighted (consider discount/bundling).
           Default view hides SKUs with no sales in the period (shown as &quot;No sales&quot; /

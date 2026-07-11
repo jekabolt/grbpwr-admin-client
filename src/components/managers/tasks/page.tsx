@@ -89,7 +89,7 @@ export function Tasks() {
 
   if (!canView) {
     return (
-      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textColor p-10 text-center'>
+      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textInactiveColor p-10 text-center'>
         <Text variant='uppercase' size='large'>
           tasks
         </Text>
@@ -123,7 +123,7 @@ export function Tasks() {
               'border px-3 py-2 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
               showArchived
                 ? 'border-textColor bg-textColor text-bgColor'
-                : 'border-textColor text-textColor hover:bg-textColor hover:text-bgColor',
+                : 'border-textInactiveColor text-textColor hover:bg-textColor hover:text-bgColor',
             )}
           >
             {showArchived ? 'exit archive' : 'archived'}
@@ -137,7 +137,7 @@ export function Tasks() {
       </div>
 
       {/* Board tabs */}
-      <div className='flex gap-2 overflow-x-auto border-b border-textColor pb-2'>
+      <div className='flex gap-2 overflow-x-auto border-b border-textInactiveColor pb-2'>
         {BOARDS.map((board) => (
           <button
             key={board}
@@ -148,7 +148,7 @@ export function Tasks() {
               'shrink-0 border px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
               board === activeBoard
                 ? 'border-textColor bg-textColor text-bgColor'
-                : 'border-textInactiveColor text-labelColor hover:border-textColor hover:text-textColor',
+                : 'border-textInactiveColor text-labelColor hover:border-textInactiveColor hover:text-textColor',
             )}
           >
             {BOARD_LABEL[board]}
@@ -163,7 +163,7 @@ export function Tasks() {
       {isLoading ? (
         <BoardSkeleton />
       ) : isError ? (
-        <div className='flex flex-col items-start gap-2 border border-textColor p-4'>
+        <div className='flex flex-col items-start gap-2 border border-textInactiveColor p-4'>
           <Text variant='error' size='small'>
             {error instanceof Error ? error.message : 'Failed to load tasks'}
           </Text>

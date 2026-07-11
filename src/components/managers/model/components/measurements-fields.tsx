@@ -20,7 +20,7 @@ function MeasurementInput({ name, label }: { name: string; label: string }) {
             field.onChange(digits === '' ? undefined : parseInt(digits, 10));
           }}
           placeholder='—'
-          className='w-20 border border-textInactiveColor bg-bgColor px-2 py-1 text-right text-textBaseSize focus:border-textColor focus:outline-none'
+          className='w-20 border border-textInactiveColor bg-bgColor px-2 py-1 text-right text-textBaseSize focus:border-textInactiveColor focus:outline-none'
         />
         <Text variant='inactive' size='small'>
           mm
@@ -46,7 +46,7 @@ export function MeasurementsFields() {
       </Text>
       {BODY_MEASUREMENT_GROUPS.map((group) => (
         <div key={group.title} className='space-y-2'>
-          <Text variant='uppercase' className='border-b border-textColor pb-1'>
+          <Text variant='uppercase' className='border-b border-textInactiveColor pb-1'>
             {group.title}
           </Text>
           <div className='grid grid-cols-1 gap-x-10 gap-y-1 sm:grid-cols-2'>

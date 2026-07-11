@@ -97,7 +97,7 @@ export function Care({ editMode }: CareInterface) {
 
   return (
     <>
-      <div className='border-b border-textColor flex items-center w-full'>
+      <div className='border-b border-textInactiveColor flex items-center w-full'>
         <div className='flex-1'>
           <InputField
             name='product.productBodyInsert.careInstructions'

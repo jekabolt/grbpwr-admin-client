@@ -66,8 +66,8 @@ function Sheet({ title, children }: { title: string; children: ReactNode }) {
 function KV({ k, v }: { k: string; v?: ReactNode }) {
   const empty = v == null || v === '' || v === '—';
   return (
-    <div className='flex gap-2 break-inside-avoid border-b border-neutral-200 py-0.5 text-[11px] leading-tight'>
-      <span className='w-36 shrink-0 uppercase tracking-wide text-neutral-500'>{k}</span>
+    <div className='flex gap-2 break-inside-avoid border-b border-textInactiveColor py-0.5 text-[11px] leading-tight'>
+      <span className='w-36 shrink-0 uppercase tracking-wide text-labelColor'>{k}</span>
       <span className='font-medium'>{empty ? '—' : v}</span>
     </div>
   );
@@ -129,7 +129,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
           <div>
-            <div className='text-[10px] uppercase tracking-[0.2em] text-neutral-500'>
+            <div className='text-[10px] uppercase tracking-[0.2em] text-labelColor'>
               {tc.brand || 'GRBPWR'} · tech pack
             </div>
             <div className='text-2xl font-bold uppercase leading-tight'>
@@ -144,7 +144,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
           <div className='text-right text-[11px] leading-tight'>
             <div className='font-semibold uppercase'>{stageLabel(tc.stage)}</div>
             <div>{approvalStateLabel(tc.approvalState)}</div>
-            <div className='text-neutral-500'>
+            <div className='text-labelColor'>
               v{tc.version || '—'} · {formatTechCardDate(techCard.updatedAt)}
             </div>
           </div>
@@ -233,7 +233,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                       );
                     })}
                   </div>
-                  <figcaption className='mt-1 text-[10px] uppercase text-neutral-500'>
+                  <figcaption className='mt-1 text-[10px] uppercase text-labelColor'>
                     {mediaKindL[meta?.kind ?? ''] ?? 'view'}
                     {meta?.caption ? ` · ${meta.caption}` : ''}
                   </figcaption>
@@ -309,13 +309,13 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                   <figcaption className='mt-1 text-[10px] uppercase'>
                     <div className='font-semibold'>{sizeName(p.sizeId)}</div>
                     {p.filename && (
-                      <div className='max-w-[120px] truncate text-neutral-500'>{p.filename}</div>
+                      <div className='max-w-[120px] truncate text-labelColor'>{p.filename}</div>
                     )}
                   </figcaption>
                 </figure>
               ))}
           </div>
-          <p className='mt-2 text-[9px] text-neutral-500'>
+          <p className='mt-2 text-[9px] text-labelColor'>
             наведите камеру на QR, чтобы открыть PDF-выкройку этого размера
           </p>
         </Sheet>
@@ -355,7 +355,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                     <td className={TD}>{bomSectionL[b.section ?? ''] ?? '—'}</td>
                     <td className={TD}>
                       <div className='font-medium'>{b.name || '—'}</div>
-                      {b.composition && <div className='text-neutral-500'>{b.composition}</div>}
+                      {b.composition && <div className='text-labelColor'>{b.composition}</div>}
                     </td>
                     <td className={TD}>
                       {b.supplier || '—'}
@@ -391,20 +391,20 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                       />
                     )}
                     <span className='font-bold uppercase'>{c.name || c.code || `#${i + 1}`}</span>
-                    {c.code && <span className='text-neutral-500'>{c.code}</span>}
+                    {c.code && <span className='text-labelColor'>{c.code}</span>}
                     {c.pantone && (
-                      <span className='text-neutral-500'>
+                      <span className='text-labelColor'>
                         · {c.pantone}
                         {c.pantoneSystem ? ` ${c.pantoneSystem}` : ''}
                       </span>
                     )}
-                    <span className='ml-auto text-neutral-500'>
+                    <span className='ml-auto text-labelColor'>
                       {labDipL[c.labDipStatus ?? ''] ?? ''}
                       {c.labDipRound ? ` · round ${c.labDipRound}` : ''}
                     </span>
                   </div>
                   {usages.length === 0 ? (
-                    <p className='text-[10px] text-neutral-500'>нет материалов</p>
+                    <p className='text-[10px] text-labelColor'>нет материалов</p>
                   ) : (
                     <table className='w-full border-collapse text-[10px]'>
                       <thead>
@@ -489,7 +489,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                     <td className={TD}>{o.placement || '—'}</td>
                     <td className={TD}>
                       <div>{o.description || '—'}</div>
-                      {o.seamType && <div className='text-neutral-500'>{o.seamType}</div>}
+                      {o.seamType && <div className='text-labelColor'>{o.seamType}</div>}
                     </td>
                     <td className={TD}>{o.machine || '—'}</td>
                     <td className={TD}>
@@ -551,7 +551,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                         ) : (
                           l.content || '—'
                         )}
-                        {l.note?.trim() && <div className='text-neutral-500'>{l.note}</div>}
+                        {l.note?.trim() && <div className='text-labelColor'>{l.note}</div>}
                       </td>
                       <td className={TD}>{l.placement || '—'}</td>
                       <td className={TD}>{l.attachment || '—'}</td>
@@ -648,7 +648,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
             </span>
           </div>
           {tc.costing.hasUnconvertedCurrencies && (
-            <p className='mt-1 text-[10px] text-neutral-500'>
+            <p className='mt-1 text-[10px] text-labelColor'>
               ⚠ contains unconverted currencies — totals are per-currency, not summed
             </p>
           )}
@@ -746,7 +746,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
         </Sheet>
       )}
 
-      <footer className='mt-6 border-t border-neutral-300 pt-2 text-[9px] uppercase tracking-wide text-neutral-400'>
+      <footer className='mt-6 border-t border-textInactiveColor pt-2 text-[9px] uppercase tracking-wide text-labelColor'>
         {tc.brand || 'GRBPWR'} · {tc.styleNumber || ''} · {tc.name || ''} · generated{' '}
         {formatTechCardDate(techCard.updatedAt)}
       </footer>

@@ -43,7 +43,10 @@ function Section({
 }) {
   return (
     <section
-      className={cn('space-y-3 border border-textColor p-4 print:border-0 print:p-0', className)}
+      className={cn(
+        'space-y-3 border border-textInactiveColor p-4 print:border-0 print:p-0',
+        className,
+      )}
     >
       <Text variant='uppercase' size='large' className='print:hidden'>
         {title}
@@ -112,7 +115,7 @@ export function OrderDetails() {
         </div>
 
         {/* Screen header */}
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3 print:hidden'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3 print:hidden'>
           <div className='flex flex-wrap items-center gap-3'>
             <Button asChild variant='secondary' size='lg'>
               <Link to={ROUTES.orders}>← orders</Link>
@@ -198,7 +201,7 @@ export function OrderDetails() {
                   {order?.refundReason && (
                     <SummaryRow label='refund reason' value={order.refundReason} />
                   )}
-                  <div className='mt-2 flex items-center justify-between gap-4 border-t border-textColor pt-2'>
+                  <div className='mt-2 flex items-center justify-between gap-4 border-t border-textInactiveColor pt-2'>
                     <Text variant='uppercase' className='font-bold'>
                       total
                     </Text>
@@ -238,22 +241,24 @@ export function OrderDetails() {
                 <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
               </Section>
 
-              {canEditOrder && orderStatus === 'CONFIRMED' && !orderDetails?.shipment?.trackingCode && (
-                <Section title='tracking' className='print:hidden'>
-                  <NewTrackCode
-                    isPrinting={isPrinting}
-                    trackingNumber={trackingNumber}
-                    handleTrackingNumberChange={handleTrackingNumberChange}
-                    saveTrackingNumber={saveTrackingNumber}
-                  />
-                </Section>
-              )}
+              {canEditOrder &&
+                orderStatus === 'CONFIRMED' &&
+                !orderDetails?.shipment?.trackingCode && (
+                  <Section title='tracking' className='print:hidden'>
+                    <NewTrackCode
+                      isPrinting={isPrinting}
+                      trackingNumber={trackingNumber}
+                      handleTrackingNumberChange={handleTrackingNumberChange}
+                      saveTrackingNumber={saveTrackingNumber}
+                    />
+                  </Section>
+                )}
             </div>
           </div>
         )}
 
         {canEditOrder && (showDeliver || showRefund) && (
-          <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-end gap-2 border-t border-textColor bg-bgColor px-3 py-2 print:hidden'>
+          <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>
             {showDeliver && (
               <Button variant='main' size='lg' className='uppercase' onClick={markAsDelivered}>
                 mark as delivered

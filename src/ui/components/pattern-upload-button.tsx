@@ -96,7 +96,7 @@ export function PatternUploadButton({ onUploaded, label, disabled, className }: 
         {label ?? '+ загрузить PDF'}
       </Button>
       {error && (
-        <Text size='small' className='mt-1 block text-red-600'>
+        <Text size='small' className='mt-1 block text-error'>
           {error}
         </Text>
       )}

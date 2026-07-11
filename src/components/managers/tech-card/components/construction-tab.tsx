@@ -32,7 +32,7 @@ const CONSTRUCTION_VIEW_KINDS = new Set([
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className='space-y-4 border border-textColor p-4'>
+    <section className='space-y-4 border border-textInactiveColor p-4'>
       <Text variant='uppercase' size='large'>
         {title}
       </Text>
@@ -105,10 +105,10 @@ function ConstructionSketch({
               type='button'
               onClick={() => setViewId(v.mediaId)}
               className={cn(
-                'border px-2 py-1 text-sm uppercase transition-colors',
+                'border px-2 py-1 text-textBaseSize uppercase transition-colors',
                 v.mediaId === activeViewId
                   ? 'border-textColor bg-textColor text-bgColor'
-                  : 'border-textInactiveColor text-textColor hover:border-textColor',
+                  : 'border-textInactiveColor text-textColor hover:border-textInactiveColor',
               )}
             >
               {mediaKindLabels[v.kind ?? ''] ?? 'view'}
@@ -122,7 +122,7 @@ function ConstructionSketch({
           src={url}
           alt='sketch'
           draggable={false}
-          className='block max-h-[520px] w-auto select-none border border-textColor'
+          className='block max-h-[520px] w-auto select-none border border-textInactiveColor'
         />
         {callouts.map((c, idx) => {
           if (c.mediaId !== activeViewId) return null;
@@ -139,10 +139,10 @@ function ConstructionSketch({
               onMouseEnter={() => num > 0 && onActivePinChange(num)}
               onMouseLeave={() => onActivePinChange(null)}
               className={cn(
-                'absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 text-xs transition-transform',
+                'absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 text-textBaseSize transition-transform',
                 used
                   ? 'border-bgColor bg-textColor text-bgColor'
-                  : 'border-textColor bg-bgColor text-textColor',
+                  : 'border-textInactiveColor bg-bgColor text-textColor',
                 active && 'z-10 scale-150 ring-2 ring-textColor',
               )}
               style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
@@ -237,7 +237,7 @@ function ColorwayMaterialsPanel({
             onMouseEnter={() => onActiveBomChange(bi)}
             onMouseLeave={() => onActiveBomChange(null)}
             className={cn(
-              'flex flex-col gap-0.5 border px-2 py-1 text-sm transition-colors',
+              'flex flex-col gap-0.5 border px-2 py-1 text-textBaseSize transition-colors',
               active ? 'border-textColor bg-textColor text-bgColor' : 'border-textInactiveColor',
             )}
           >
@@ -249,15 +249,15 @@ function ColorwayMaterialsPanel({
                 {' · '}
                 {article?.name?.trim() || `артикул #${bi + 1}`}
               </span>
-              <span className='shrink-0 text-xs uppercase opacity-70'>
+              <span className='shrink-0 text-textBaseSize uppercase opacity-70'>
                 {bomSectionLabels[article?.section ?? ''] ?? ''}
               </span>
             </span>
-            <span className='text-xs opacity-80'>
+            <span className='text-textBaseSize opacity-80'>
               цвет: {colour || '—'} · расход: {consumptionLabel(u)}
             </span>
             {matchedOps.length > 0 ? (
-              <span className='text-xs opacity-70'>
+              <span className='text-textBaseSize opacity-70'>
                 операции:{' '}
                 {matchedOps
                   .map(({ o, oi }) => `оп.${o.operationNumber || (oi + 1) * 10}`)
@@ -267,7 +267,7 @@ function ColorwayMaterialsPanel({
               <button
                 type='button'
                 onClick={() => onAddOperation(u.placement!.trim())}
-                className='text-left text-xs text-amber-600 underline hover:opacity-70'
+                className='text-left text-textBaseSize text-amber-600 underline hover:opacity-70'
               >
                 нет операций на часть «{u.placement.trim()}» — добавить операцию?
               </button>
@@ -364,14 +364,14 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
                       type='button'
                       onClick={() => setColorwayIdx(i)}
                       className={cn(
-                        'flex items-center gap-2 border px-2 py-1 text-sm transition-colors',
+                        'flex items-center gap-2 border px-2 py-1 text-textBaseSize transition-colors',
                         i === cwIdx
-                          ? 'border-textColor ring-1 ring-textColor'
-                          : 'border-textInactiveColor hover:border-textColor',
+                          ? 'border-textInactiveColor ring-1 ring-textColor'
+                          : 'border-textInactiveColor hover:border-textInactiveColor',
                       )}
                     >
                       <span
-                        className='size-4 shrink-0 border border-textColor'
+                        className='size-4 shrink-0 border border-textInactiveColor'
                         style={valid ? { backgroundColor: hexCss } : undefined}
                       />
                       <span className='uppercase'>

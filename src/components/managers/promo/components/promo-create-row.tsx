@@ -15,12 +15,12 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
   return (
     <Form {...form}>
       <tr className='bg-bgColor'>
-        <td className='border border-r border-textColor px-0'>
+        <td className='border border-r border-textInactiveColor px-0'>
           <div className='flex justify-center'>
             <CheckboxField name='allowed' readOnly />
           </div>
         </td>
-        <td className='border border-r border-textColor text-center px-2'>
+        <td className='border border-r border-textInactiveColor text-center px-2'>
           <InputField
             name='code'
             label='Code'
@@ -29,7 +29,7 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             className='w-full text-center border-none'
           />
         </td>
-        <td className='border border-r border-textColor px-2'>
+        <td className='border border-r border-textInactiveColor px-2'>
           <InputField
             name='start'
             type='date'
@@ -38,7 +38,7 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             className='w-full text-center border-none'
           />
         </td>
-        <td className='border border-r border-textColor px-2'>
+        <td className='border border-r border-textInactiveColor px-2'>
           <InputField
             name='expiration'
             type='date'
@@ -47,7 +47,7 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             className='w-full text-center border-none'
           />
         </td>
-        <td className='border border-r border-textColor px-2'>
+        <td className='border border-r border-textInactiveColor px-2'>
           <div className='flex items-center justify-center gap-1'>
             <InputField
               name='discount'
@@ -61,17 +61,17 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             <span>%</span>
           </div>
         </td>
-        <td className='border border-r border-textColor px-0'>
+        <td className='border border-r border-textInactiveColor px-0'>
           <div className='flex justify-center'>
             <CheckboxField name='freeShipping' />
           </div>
         </td>
-        <td className='border border-r border-textColor px-0'>
+        <td className='border border-r border-textInactiveColor px-0'>
           <div className='flex justify-center'>
             <CheckboxField name='voucher' />
           </div>
         </td>
-        <td className='border border-r border-textColor'>
+        <td className='border border-r border-textInactiveColor'>
           <div className='flex justify-center gap-1'>
             <Button
               size='lg'

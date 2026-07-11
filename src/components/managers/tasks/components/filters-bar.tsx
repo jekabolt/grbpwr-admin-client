@@ -90,7 +90,7 @@ export function FiltersBar({
             'border px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
             filters.mine
               ? 'border-textColor bg-textColor text-bgColor'
-              : 'border-textInactiveColor text-labelColor hover:border-textColor hover:text-textColor',
+              : 'border-textInactiveColor text-labelColor hover:border-textInactiveColor hover:text-textColor',
           )}
         >
           my tasks

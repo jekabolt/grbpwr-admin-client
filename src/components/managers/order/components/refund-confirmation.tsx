@@ -111,7 +111,7 @@ export function RefundConfirmation({
             </Text>
           </div>
         ) : (
-          <div className='space-y-2 border border-textColor p-3'>
+          <div className='space-y-2 border border-textInactiveColor p-3'>
             <Text variant='uppercase' className='font-bold'>
               partial refund — {unitCount} unit{unitCount === 1 ? '' : 's'}
             </Text>
@@ -152,7 +152,7 @@ export function RefundConfirmation({
                 key={i}
                 type='button'
                 size='lg'
-                className={cn('border border-textColor uppercase', {
+                className={cn('border border-textInactiveColor uppercase', {
                   'bg-textColor text-bgColor': selectedReason === l,
                 })}
                 onClick={() => setSelectedReason(l)}

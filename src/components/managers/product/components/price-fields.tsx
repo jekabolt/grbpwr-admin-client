@@ -110,7 +110,7 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
         </Text>
       </div>
 
-      <div className='grid grid-cols-2 gap-x-4 gap-y-3 border border-textColor p-3 sm:grid-cols-3'>
+      <div className='grid grid-cols-2 gap-x-4 gap-y-3 border border-textInactiveColor p-3 sm:grid-cols-3'>
         {CURRENCIES.map((currency) => {
           const priceIndex = prices.findIndex((price: any) => price?.currency === currency.value);
           const isIntegerCurrency = currency.value === 'JPY' || currency.value === 'KRW';
