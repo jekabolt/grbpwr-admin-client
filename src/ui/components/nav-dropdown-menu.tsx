@@ -45,7 +45,9 @@ export function NavDropdownMenu({
               <NavigationMenu.Trigger
                 className={cn(
                   'group flex items-center gap-1 px-2 py-1 text-textBaseSize whitespace-nowrap cursor-pointer',
-                  'underline-offset-4 transition-colors hover:underline',
+                  // Hover matches the bar's logo/logout language (opacity), so the
+                  // underline is reserved to mean "this section is open or active".
+                  'underline-offset-4 transition-opacity hover:opacity-70',
                   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                   'data-[state=open]:underline',
                   groupActive && 'underline',
@@ -54,7 +56,7 @@ export function NavDropdownMenu({
                 {group.label}
                 <ChevronDownIcon
                   aria-hidden
-                  className='size-3 opacity-50 transition-transform duration-150 group-data-[state=open]:rotate-180'
+                  className='size-3 opacity-50 transition-transform duration-150 motion-reduce:transition-none group-data-[state=open]:rotate-180'
                 />
               </NavigationMenu.Trigger>
 
@@ -76,10 +78,14 @@ export function NavDropdownMenu({
                           <NavigationMenu.Link asChild active={itemActive}>
                             <Link
                               to={item.route}
+                              aria-current={itemActive ? 'page' : undefined}
                               className={cn(
                                 'block whitespace-nowrap px-3 py-2 text-textBaseSize transition-colors',
                                 'hover:bg-textColor hover:text-bgColor',
-                                'focus-visible:bg-textColor focus-visible:text-bgColor focus-visible:outline-none',
+                                // Keyboard focus inverts like hover, plus an inset ring so it
+                                // stays visible on the already-inverted active row.
+                                'focus-visible:bg-textColor focus-visible:text-bgColor',
+                                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-bgColor focus-visible:[outline-offset:-2px]',
                                 itemActive && 'bg-textColor text-bgColor',
                               )}
                             >
