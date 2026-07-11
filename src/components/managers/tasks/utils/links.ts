@@ -4,24 +4,26 @@ export type LinkKind = 'techcard' | 'product' | 'order' | 'archive';
 
 export interface TaskLink {
   kind: LinkKind;
-  label: string;
+  id: number; // entity id (0 for order, which is keyed by uuid)
+  orderUuid?: string;
+  label: string; // fallback label ("#id") when the name isn't resolved
   to: string; // in-app route to the linked entity
 }
 
 // Derives the set of typed links attached to a task and the admin route each
-// deep-links to. Names aren't resolved here (kept robust/decoupled) — the id is
-// shown and clicking navigates to the entity's screen.
+// deep-links to. The `label` is the id fallback; LinkChip resolves the real name
+// via the entity's single-get RPC when available.
 export function taskLinks(t: TaskInsert): TaskLink[] {
   const links: TaskLink[] = [];
   if (t.techCardId > 0)
-    links.push({ kind: 'techcard', label: `техкарта #${t.techCardId}`, to: `/tech-cards/${t.techCardId}` });
+    links.push({ kind: 'techcard', id: t.techCardId, label: `техкарта #${t.techCardId}`, to: `/tech-cards/${t.techCardId}` });
   if (t.productId > 0)
-    links.push({ kind: 'product', label: `product #${t.productId}`, to: `/products/${t.productId}` });
+    links.push({ kind: 'product', id: t.productId, label: `product #${t.productId}`, to: `/products/${t.productId}` });
   if (t.orderUuid)
-    links.push({ kind: 'order', label: `order ${t.orderUuid.slice(0, 8)}`, to: `/orders/${t.orderUuid}` });
+    links.push({ kind: 'order', id: 0, orderUuid: t.orderUuid, label: `order ${t.orderUuid.slice(0, 8)}`, to: `/orders/${t.orderUuid}` });
   // The timeline detail route needs heading+tag+id; without resolving them we
   // deep-link to the archive list.
-  if (t.archiveId > 0) links.push({ kind: 'archive', label: `drop #${t.archiveId}`, to: `/archives` });
+  if (t.archiveId > 0) links.push({ kind: 'archive', id: t.archiveId, label: `drop #${t.archiveId}`, to: `/archives` });
   return links;
 }
 
