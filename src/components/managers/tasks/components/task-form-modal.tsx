@@ -17,12 +17,7 @@ import {
   STATUSES,
   toOptions,
 } from '../utils/meta';
-import {
-  archiveConfig,
-  orderConfig,
-  productConfig,
-  techCardConfig,
-} from '../utils/entity-configs';
+import { archiveConfig, orderConfig, productConfig, techCardConfig } from '../utils/entity-configs';
 import { AssigneeSelect } from './assignee-select';
 import { EntityPicker } from './entity-picker';
 import { MediaAttachments } from './media-attachments';
@@ -74,10 +69,10 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
         <Dialog.Overlay className='fixed inset-0 z-40 bg-overlay' />
         <Dialog.Content
           aria-describedby={undefined}
-          className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-hidden border border-textColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[32rem] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-hidden border border-textColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[34rem] lg:-translate-x-1/2'
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
-          <div className='flex items-center justify-between gap-2 border-b border-textColor p-3'>
+          <div className='flex items-center justify-between gap-2 border-b border-textColor px-4 py-3'>
             <Dialog.Title className='text-lg uppercase'>
               {mode === 'create' ? 'new task' : 'edit task'}
             </Dialog.Title>
@@ -90,17 +85,18 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
 
           <form
             onSubmit={handleSubmit(onSubmit)}
-            className='flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3'
+            className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4'
           >
-            <Field label='title'>
+            <div className='flex flex-col gap-1'>
               <Controller
                 control={control}
                 name='title'
                 rules={{ required: true }}
                 render={({ field }) => (
                   <Input
-                    placeholder='what needs doing'
+                    placeholder='Task title'
                     autoFocus
+                    className='border-textColor pb-1 text-lg'
                     value={field.value}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       field.onChange(e.target.value)
@@ -114,7 +110,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                   title is required
                 </Text>
               )}
-            </Field>
+            </div>
 
             <Field label='description'>
               <Controller
@@ -123,7 +119,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 render={({ field }) => (
                   <Textarea
                     variant='secondary'
-                    placeholder='details, links, acceptance criteria…'
+                    placeholder='Add details or acceptance criteria…'
                     className='mb-0 min-h-24 border-b border-textInactiveColor'
                     value={field.value}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
@@ -301,7 +297,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
             </details>
           </form>
 
-          <div className='flex justify-end gap-2 border-t border-textColor p-3'>
+          <div className='flex justify-end gap-2 border-t border-textColor px-4 py-3'>
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>

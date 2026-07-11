@@ -68,7 +68,7 @@ export function EntityPicker({
   const selected: EntityOption | null = has
     ? picked && picked.value === value
       ? picked
-      : (resolved ?? null)
+      : resolved ?? null
     : null;
 
   const { data: loaded = [], isFetching } = useQuery({
