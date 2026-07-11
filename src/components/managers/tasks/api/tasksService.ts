@@ -57,6 +57,23 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+// Local-only media cache so picked attachments render as thumbnails before a
+// backend resolves media_ids → MediaFull. No-op relevance in remote mode (the
+// server returns Task.media).
+const MEDIA_KEY = 'grbpwr.kanban.media.v1';
+export function rememberMedia(items: Task['media']) {
+  const cache = read<Record<number, Task['media'][number]>>(MEDIA_KEY, {});
+  for (const m of items) if (m.id) cache[m.id] = m;
+  write(MEDIA_KEY, cache);
+}
+export function resolveMedia(ids: number[]): Task['media'] {
+  const cache = read<Record<number, Task['media'][number]>>(MEDIA_KEY, {});
+  return ids.map((id) => cache[id]).filter(Boolean);
+}
+function withMedia(t: Task): Task {
+  return { ...t, media: resolveMedia(t.task.mediaIds) };
+}
+
 function loadTasks(): Task[] {
   const tasks = read<Task[] | null>(TASKS_KEY, null);
   if (tasks === null) {
@@ -78,12 +95,13 @@ const localTasksService: TasksService = {
     if (filter.assignee) tasks = tasks.filter((t) => t.task.assignee === filter.assignee);
     if (filter.techCardId) tasks = tasks.filter((t) => t.task.techCardId === filter.techCardId);
     if (filter.productId) tasks = tasks.filter((t) => t.task.productId === filter.productId);
-    const sorted = [...tasks].sort((a, b) => a.position - b.position);
+    const sorted = [...tasks].sort((a, b) => a.position - b.position).map(withMedia);
     return { tasks: sorted, total: sorted.length };
   },
 
   async getTask(id) {
-    return loadTasks().find((t) => t.id === id);
+    const found = loadTasks().find((t) => t.id === id);
+    return found ? withMedia(found) : undefined;
   },
 
   async addTask(input) {

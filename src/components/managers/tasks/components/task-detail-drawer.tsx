@@ -1,12 +1,12 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { format } from 'date-fns';
 import { cn } from 'lib/utility';
-import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Task } from '../api/types';
 import { BOARD_LABEL, dueMeta, PRIORITY_LABEL, STATUS_LABEL } from '../utils/meta';
 import { taskLinks } from '../utils/links';
+import { LinkChip } from './link-chip';
 import { TaskComments } from './task-comments';
 
 function MetaRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -108,14 +108,11 @@ export function TaskDetailDrawer({
                     </Text>
                     <div className='flex flex-wrap gap-2'>
                       {links.map((l) => (
-                        <Link
+                        <LinkChip
                           key={`${l.kind}-${l.to}`}
-                          to={l.to}
-                          onClick={() => onOpenChange(false)}
-                          className='border border-textColor px-2 py-0.5 text-textBaseSize lowercase hover:bg-textColor hover:text-bgColor'
-                        >
-                          {l.label}
-                        </Link>
+                          link={l}
+                          onNavigate={() => onOpenChange(false)}
+                        />
                       ))}
                     </div>
                   </div>
