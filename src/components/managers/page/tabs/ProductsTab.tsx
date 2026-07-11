@@ -40,10 +40,11 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
   }, [hash, metricsResponse]);
 
   const metrics = metricsResponse.business;
+  const commerce = metrics?.commerce;
   const hasProductCharts =
-    (metrics?.topProductsByRevenue?.length ?? 0) > 0 ||
-    (metrics?.topProductsByQuantity?.length ?? 0) > 0 ||
-    (metrics?.revenueByCategory?.length ?? 0) > 0;
+    (commerce?.topProductsByRevenue?.length ?? 0) > 0 ||
+    (commerce?.topProductsByQuantity?.length ?? 0) > 0 ||
+    (commerce?.revenueByCategory?.length ?? 0) > 0;
   const hasAnyProductData =
     hasProductCharts ||
     (metricsResponse.slowMovers?.length ?? 0) > 0 ||
