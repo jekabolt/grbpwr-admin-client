@@ -18,6 +18,7 @@ import {
   toOptions,
 } from '../utils/meta';
 import { AssigneeSelect } from './assignee-select';
+import { MediaAttachments } from './media-attachments';
 
 interface Props {
   open: boolean;
@@ -198,6 +199,16 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                       )
                     }
                   />
+                )}
+              />
+            </Field>
+
+            <Field label='attachments'>
+              <Controller
+                control={control}
+                name='mediaIds'
+                render={({ field }) => (
+                  <MediaAttachments value={field.value} onChange={field.onChange} />
                 )}
               />
             </Field>
