@@ -21,7 +21,7 @@ function useLinkName(link: TaskLink) {
         if (link.kind === 'product') {
           const r: any = await adminService.GetProductByID({ id: link.id });
           return (
-            r?.product?.product?.productDisplay?.productBody?.productBodyInsert?.name ||
+            r?.product?.product?.productDisplay?.productBody?.translations?.[0]?.name ||
             r?.product?.product?.slug ||
             null
           );

@@ -17,7 +17,14 @@ import {
   STATUSES,
   toOptions,
 } from '../utils/meta';
+import {
+  archiveConfig,
+  orderConfig,
+  productConfig,
+  techCardConfig,
+} from '../utils/entity-configs';
 import { AssigneeSelect } from './assignee-select';
+import { EntityPicker } from './entity-picker';
 import { MediaAttachments } from './media-attachments';
 
 interface Props {
@@ -237,66 +244,55 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
               <summary className='cursor-pointer text-textBaseSize uppercase text-labelColor'>
                 links (optional)
               </summary>
-              <div className='mt-2 grid grid-cols-2 gap-3'>
-                <Field label='техкарта id'>
+              <div className='mt-3 flex flex-col gap-3'>
+                <Field label='техкарта'>
                   <Controller
                     control={control}
                     name='techCardId'
                     render={({ field }) => (
-                      <Input
-                        type='number'
-                        name='techCardId'
-                        value={field.value || ''}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          field.onChange(Number(e.target.value) || 0)
-                        }
+                      <EntityPicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        config={techCardConfig}
                       />
                     )}
                   />
                 </Field>
-                <Field label='product id'>
+                <Field label='product'>
                   <Controller
                     control={control}
                     name='productId'
                     render={({ field }) => (
-                      <Input
-                        type='number'
-                        name='productId'
-                        value={field.value || ''}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          field.onChange(Number(e.target.value) || 0)
-                        }
+                      <EntityPicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        config={productConfig}
                       />
                     )}
                   />
                 </Field>
-                <Field label='order uuid'>
+                <Field label='order'>
                   <Controller
                     control={control}
                     name='orderUuid'
                     render={({ field }) => (
-                      <Input
-                        name='orderUuid'
+                      <EntityPicker
                         value={field.value}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          field.onChange(e.target.value)
-                        }
+                        onChange={field.onChange}
+                        config={orderConfig}
                       />
                     )}
                   />
                 </Field>
-                <Field label='archive id'>
+                <Field label='timeline drop'>
                   <Controller
                     control={control}
                     name='archiveId'
                     render={({ field }) => (
-                      <Input
-                        type='number'
-                        name='archiveId'
-                        value={field.value || ''}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          field.onChange(Number(e.target.value) || 0)
-                        }
+                      <EntityPicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        config={archiveConfig}
                       />
                     )}
                   />
