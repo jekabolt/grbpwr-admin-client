@@ -87,11 +87,17 @@ const TechCardPrint = lazy(() =>
 const Accounts = lazy(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
-const Tasks = lazy(() =>
-  import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
-);
+const Tasks = lazy(() => import('components/managers/tasks').then((m) => ({ default: m.Tasks })));
 const TaskDetail = lazy(() =>
   import('components/managers/tasks/task-detail/page').then((m) => ({ default: m.TaskDetail })),
+);
+const Fulfillment = lazy(() =>
+  import('components/managers/fulfillment').then((m) => ({ default: m.Fulfillment })),
+);
+const FulfillmentCardDetail = lazy(() =>
+  import('components/managers/fulfillment/card-detail/page').then((m) => ({
+    default: m.FulfillmentCardDetail,
+  })),
 );
 
 // Configure QueryClient with best practices
@@ -196,6 +202,8 @@ root.render(
                   <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
                   <Route path={ROUTES.customOrders} element={<CustomOrders />} />
                   <Route path={ROUTES.orders} element={<OrdersCatalog />} />
+                  <Route path={ROUTES.fulfillmentCard} element={<FulfillmentCardDetail />} />
+                  <Route path={ROUTES.fulfillment} element={<Fulfillment />} />
                   <Route path={ROUTES.singleArchive} element={<Archive />} />
                   <Route path={ROUTES.archives} element={<Archives />} />
                   <Route path={ROUTES.addArchive} element={<Archive />} />
