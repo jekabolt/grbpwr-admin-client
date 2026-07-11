@@ -39,8 +39,9 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const materialsTotal = rollup?.materialsTotal ?? [];
   const hasRollup =
     materialsTotal.length > 0 ||
-    !!rollup?.materialsCost?.value ||
-    !!rollup?.totalCost?.value ||
+    !!rollup?.materialsPerUnit?.value ||
+    !!rollup?.unitCost?.value ||
+    !!rollup?.orderCost?.value ||
     !!rollup?.totalSam?.value ||
     colorwayCosts.length > 0;
 
@@ -56,19 +57,18 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         </div>
       )}
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-3'>
-        <DecimalField name='costing.cmtCost' label='CMT cost' />
-        <DecimalField name='costing.hardwareCost' label='hardware cost' />
-        <DecimalField name='costing.packagingCost' label='packaging cost' />
-        <DecimalField name='costing.logisticsCost' label='logistics cost' />
-        <DecimalField name='costing.overheadCost' label='overhead cost' />
+        <DecimalField name='costing.cmtCost' label='CMT cost / изделие' />
+        <DecimalField name='costing.hardwareCost' label='hardware / изделие' />
+        <DecimalField name='costing.packagingCost' label='packaging / изделие' />
+        <DecimalField name='costing.logisticsCost' label='logistics / изделие' />
+        <DecimalField name='costing.overheadCost' label='overhead / изделие' />
         <DecimalField name='costing.defectPercent' label='defect %' />
-        <DecimalField name='costing.markupMultiplier' label='markup ×' />
-        <DecimalField name='costing.wholesalePrice' label='wholesale price' />
-        <DecimalField name='costing.retailPrice' label='retail price' />
         <CurrencySelect name='costing.currency' label='currency' />
       </div>
       <Text variant='inactive' size='small'>
-        Цены оптовая/розничная и валюта едины для всех колорвеев (политика бренда).
+        Все статьи — на 1 изделие, в одной валюте. Себестоимость считается на изделие, затем
+        масштабируется на тираж (order qty). Ценообразование (наценка/опт/розница) живёт на
+        опубликованном продукте, не здесь.
       </Text>
       <TextareaField name='costing.notes' label='notes' rows={2} maxLength={2000} />
 
@@ -94,8 +94,11 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                       </Text>
                     ))}
                     <Text variant='inactive' size='small'>
-                      на изделие: {decimalToInput(cc.materialsCost) || '—'} · на тираж:{' '}
-                      {decimalToInput(cc.sizeRunTotal) || '—'}
+                      материалы/изделие: {decimalToInput(cc.materialsPerUnit) || '—'} ·
+                      себестоимость/изделие: {decimalToInput(cc.unitCost) || '—'}
+                    </Text>
+                    <Text variant='inactive' size='small'>
+                      тираж {cc.orderQty || 0} · на тираж: {decimalToInput(cc.orderCost) || '—'}
                     </Text>
                     {cc.hasUnconvertedCurrencies && (
                       <Text variant='inactive' size='small'>
@@ -116,13 +119,17 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                 </Text>
               ))}
               <Text variant='inactive' size='small'>
-                materials cost: {decimalToInput(rollup?.materialsCost) || '—'}
+                материалы / изделие: {decimalToInput(rollup?.materialsPerUnit) || '—'}
+              </Text>
+              <Text variant='inactive' size='small'>
+                себестоимость / изделие: {decimalToInput(rollup?.unitCost) || '—'}
+              </Text>
+              <Text variant='inactive' size='small'>
+                тираж {rollup?.orderQty || 0} · себестоимость тиража:{' '}
+                {decimalToInput(rollup?.orderCost) || '—'}
               </Text>
               <Text variant='inactive' size='small'>
                 Σ SAM (информативно): {decimalToInput(rollup?.totalSam) || '—'} min
-              </Text>
-              <Text variant='inactive' size='small'>
-                total cost: {decimalToInput(rollup?.totalCost) || '—'}
               </Text>
               {rollup?.hasUnconvertedCurrencies && (
                 <Text variant='inactive' size='small'>

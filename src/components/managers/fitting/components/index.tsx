@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { common_Fitting } from 'api/proto-http/admin';
+import { common_Fitting, common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   useCreateFitting,
@@ -10,7 +10,7 @@ import { useAllModels } from 'components/managers/models/components/useModelQuer
 import { fittingStatusOptions, fittingVerdictOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -19,6 +19,7 @@ import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { FittingCallouts } from './fitting-callouts';
 import { FittingMedia } from './fitting-media';
 import { PatternsFields } from './patterns-fields';
 import { ProductField } from './product-field';
@@ -92,6 +93,17 @@ export function FittingForm({
 
   const selectedModelId = form.watch('modelId');
   const selectedModel = (models ?? []).find((m) => m.id === selectedModelId);
+
+  // Resolved-media map shared by the photo picker and the callouts editor, so a
+  // freshly-picked photo can be annotated before the fitting is saved (saved
+  // fitting.media + media picked this session).
+  const [picked, setPicked] = useState<common_MediaFull[]>([]);
+  const mediaById = useMemo(() => {
+    const m = new Map<number, common_MediaFull>();
+    for (const item of fitting?.media ?? []) if (item.id != null) m.set(item.id, item);
+    for (const p of picked) if (p.id != null) m.set(p.id, p);
+    return m;
+  }, [fitting?.media, picked]);
 
   async function handleSubmit(data: FittingFormData) {
     const fittingInsert = mapFormToFittingInsert(data);
@@ -171,7 +183,13 @@ export function FittingForm({
               <PatternsFields />
             </Section>
             <Section title='photos'>
-              <FittingMedia fitting={fitting} />
+              <FittingMedia
+                mediaById={mediaById}
+                onPicked={(items) => setPicked((prev) => [...prev, ...items])}
+              />
+            </Section>
+            <Section title='callouts (замечания по посадке)'>
+              <FittingCallouts mediaById={mediaById} />
             </Section>
           </div>
         </div>

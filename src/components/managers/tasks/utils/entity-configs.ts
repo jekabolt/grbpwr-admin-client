@@ -1,6 +1,12 @@
 import { adminService, frontendService } from 'api/api';
-import type { common_Order, common_Product, common_TechCardListItem } from 'api/proto-http/admin';
+import type {
+  common_Fitting,
+  common_Order,
+  common_Product,
+  common_TechCardListItem,
+} from 'api/proto-http/admin';
 import type { common_ArchiveList } from 'api/proto-http/frontend';
+import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
 import { EntityConfig, EntityOption } from '../components/entity-picker';
 
 // Maps the four typed task links to their real admin/frontend list + single-get
@@ -143,6 +149,41 @@ function archiveOption(a: common_ArchiveList): EntityOption {
     thumbnail: a.thumbnail?.media?.thumbnail?.mediaUrl,
   };
 }
+
+// ---- fitting / примерка (ListFittings has no text search → client filter) ---
+// A fitting has no name field, so compose a label from its date + status; the
+// client-side filter matches on that text (and the id sublabel).
+function fittingOption(f: common_Fitting): EntityOption {
+  const date = formatFittingDate(f.fitting?.fittingDate);
+  return {
+    value: f.id ?? 0,
+    label: date ? `примерка · ${date}` : `примерка #${f.id}`,
+    sublabel: `#${f.id} · ${statusLabel(f.fitting?.status)}`,
+  };
+}
+
+export const fittingConfig: EntityConfig = {
+  kind: 'fitting',
+  empty: 0,
+  mode: 'client',
+  searchPlaceholder: 'search примерки by date / status…',
+  emptyResult: 'no fittings',
+  load: async () => {
+    const r = await adminService.ListFittings({
+      limit: 100,
+      offset: undefined,
+      orderFactor: 'ORDER_FACTOR_DESC',
+      productId: undefined,
+      modelId: undefined,
+      techCardId: undefined,
+    });
+    return (r.fittings ?? []).map(fittingOption);
+  },
+  resolve: async (value) => {
+    const r = await adminService.GetFitting({ id: value as number });
+    return r?.fitting ? fittingOption(r.fitting) : null;
+  },
+};
 
 export const archiveConfig: EntityConfig = {
   kind: 'archive',

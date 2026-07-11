@@ -70,12 +70,14 @@ function mapInsert(i: common_Task['task']): TaskInsert {
     assignee: i?.assignee ?? '',
     priority: i?.priority ?? 'TASK_PRIORITY_UNKNOWN',
     dueDate: i?.dueDate || undefined,
+    startDate: i?.startDate || undefined,
     labels: i?.labels ?? [],
     mediaIds: i?.mediaIds ?? [],
     techCardId: i?.techCardId ?? 0,
     productId: i?.productId ?? 0,
     orderUuid: i?.orderUuid ?? '',
     archiveId: i?.archiveId ?? 0,
+    fittingId: i?.fittingId ?? 0,
   };
 }
 
@@ -102,6 +104,7 @@ function mapTask(t: common_Task): Task {
     createdBy: t.createdBy ?? '',
     createdAt: t.createdAt ?? '',
     updatedAt: t.updatedAt ?? '',
+    startedAt: t.startedAt ?? '',
     archivedAt: t.archivedAt ?? '',
   };
 }

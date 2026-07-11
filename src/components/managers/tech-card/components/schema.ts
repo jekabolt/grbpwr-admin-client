@@ -13,6 +13,7 @@ import {
   common_TechCardLabDipStatus,
   common_TechCardLabelType,
   common_TechCardMeasurementUnit,
+  common_TechCardMediaItem,
   common_TechCardMediaKind,
   common_TechCardOperationType,
   common_TechCardPackaging,
@@ -24,13 +25,13 @@ import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils'
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 
-// Tech-card form. Covers the full TechCardInsert: header ("Титул"), sketch media +
-// callouts, size range + patterns, linked products, colourways (recipe = usages), BOM
-// (article catalog), construction, operations, labels, packaging, costing, details,
-// and the revision log. The backend does a full replace on update, so
+// Tech-card form. Covers the full TechCardInsert: header ("Титул"), sketch media
+// (moodboard + technical) + callouts, size range + patterns, linked products, colourways
+// (recipe = usages), BOM (article catalog), construction, operations, labels, packaging,
+// costing, details, and the revision log. The backend does a full replace on update, so
 // mapFormToTechCardInsert sends every section. Computed fields — costing rollups
-// (materials_total/materials_cost/total_cost/colorway_costs) and usage line/run totals —
-// are output-only: shown read-only, never sent.
+// (materials_total/materials_per_unit/unit_cost/order_cost/colorway_costs) and usage
+// line/run totals — are output-only: shown read-only, never sent.
 
 const DEFAULT_STAGE: common_TechCardStage = 'TECH_CARD_STAGE_PROTO';
 const DEFAULT_APPROVAL_STATE: common_TechCardApprovalState = 'TECH_CARD_APPROVAL_STATE_DRAFT';
@@ -256,6 +257,8 @@ const packagingSchema = z.object({
   notes: z.string().optional().default(''),
 });
 
+// Manual per-unit cost articles (per ONE garment), all in a single `currency`. Pricing
+// (markup/wholesale/retail) was removed from the tech card — it lives on the published product.
 const costingSchema = z.object({
   cmtCost: z.string().optional().default(''),
   hardwareCost: z.string().optional().default(''),
@@ -263,9 +266,6 @@ const costingSchema = z.object({
   logisticsCost: z.string().optional().default(''),
   overheadCost: z.string().optional().default(''),
   defectPercent: z.string().optional().default(''),
-  markupMultiplier: z.string().optional().default(''),
-  wholesalePrice: z.string().optional().default(''),
-  retailPrice: z.string().optional().default(''),
   currency: z.string().optional().default(''),
   notes: z.string().optional().default(''),
 });
@@ -301,9 +301,6 @@ export const emptyCosting: z.input<typeof costingSchema> = {
   logisticsCost: '',
   overheadCost: '',
   defectPercent: '',
-  markupMultiplier: '',
-  wholesalePrice: '',
-  retailPrice: '',
   currency: '',
   notes: '',
 };
@@ -339,7 +336,10 @@ export const techCardSchema = z.object({
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
   patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
   productIds: z.array(z.number()).default([]),
-  media: z.array(mediaItemSchema).default([]),
+  // Sketch media split into two independent lists (construction consumes ONLY technicalMedia;
+  // callouts pin onto technicalMedia). Each item's `kind` sub-classifies within its list.
+  moodboardMedia: z.array(mediaItemSchema).default([]),
+  technicalMedia: z.array(mediaItemSchema).default([]),
   callouts: z.array(calloutSchema).default([]),
   colorways: z.array(colorwaySchema).default([]),
   bomItems: z.array(bomItemSchema).default([]),
@@ -380,7 +380,8 @@ export const techCardDefaultData: TechCardFormData = {
   sizeQuantities: [],
   patterns: [],
   productIds: [],
-  media: [],
+  moodboardMedia: [],
+  technicalMedia: [],
   callouts: [],
   colorways: [],
   bomItems: [],
@@ -403,6 +404,51 @@ function approvalStateOrDefault(state?: string): string {
 }
 function measurementUnitOrDefault(unit?: string): string {
   return unit && unit !== 'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN' ? unit : DEFAULT_MEASUREMENT_UNIT;
+}
+
+// Both sketch-media lists (moodboard / technical) share the { mediaId, kind, caption } shape.
+type FormMediaItem = z.input<typeof mediaItemSchema>;
+function mapMediaItemToForm(m: common_TechCardMediaItem): FormMediaItem {
+  return {
+    mediaId: m.mediaId || 0,
+    kind: m.kind && m.kind !== 'TECH_CARD_MEDIA_KIND_UNKNOWN' ? m.kind : DEFAULT_MEDIA_KIND,
+    caption: m.caption || '',
+  };
+}
+function mapMediaItemOut(m: FormMediaItem): common_TechCardMediaItem {
+  return {
+    mediaId: m.mediaId,
+    kind: (m.kind || 'TECH_CARD_MEDIA_KIND_UNKNOWN') as common_TechCardMediaKind,
+    caption: m.caption?.trim() || '',
+  };
+}
+
+const MOODBOARD_KIND_SET = new Set([
+  'TECH_CARD_MEDIA_KIND_MOODBOARD',
+  'TECH_CARD_MEDIA_KIND_REFERENCE',
+  'TECH_CARD_MEDIA_KIND_SWATCH',
+]);
+
+// Sketch media read into the two split lists. Backward-compat: a tech card saved before the
+// proto media-split still holds its sketches under the removed single `media` field. If BOTH
+// new lists are empty but a legacy `media` list is present, route legacy items into
+// moodboard/technical by kind — so an un-migrated card doesn't open with empty grids and get
+// its sketches wiped on the next full-replace save.
+function splitSketchMedia(insert?: common_TechCardInsert): {
+  moodboardMedia: FormMediaItem[];
+  technicalMedia: FormMediaItem[];
+} {
+  const moodboardMedia = (insert?.moodboardMedia ?? []).map(mapMediaItemToForm);
+  const technicalMedia = (insert?.technicalMedia ?? []).map(mapMediaItemToForm);
+  if (moodboardMedia.length || technicalMedia.length) return { moodboardMedia, technicalMedia };
+  const legacy = (insert as { media?: common_TechCardMediaItem[] } | undefined)?.media ?? [];
+  const mood: FormMediaItem[] = [];
+  const tech: FormMediaItem[] = [];
+  for (const m of legacy) {
+    const item = mapMediaItemToForm(m);
+    (MOODBOARD_KIND_SET.has(item.kind ?? '') ? mood : tech).push(item);
+  }
+  return { moodboardMedia: mood, technicalMedia: tech };
 }
 
 export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
@@ -441,11 +487,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       sizeBytes: Number(p.sizeBytes) || 0,
     })),
     productIds: insert?.productIds ?? [],
-    media: (insert?.media ?? []).map((m) => ({
-      mediaId: m.mediaId || 0,
-      kind: m.kind && m.kind !== 'TECH_CARD_MEDIA_KIND_UNKNOWN' ? m.kind : DEFAULT_MEDIA_KIND,
-      caption: m.caption || '',
-    })),
+    ...splitSketchMedia(insert),
     callouts: (insert?.callouts ?? []).map((c) => ({
       number: c.number || 0,
       part: c.part || '',
@@ -581,9 +623,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           logisticsCost: decimalToInput(insert.costing.logisticsCost),
           overheadCost: decimalToInput(insert.costing.overheadCost),
           defectPercent: decimalToInput(insert.costing.defectPercent),
-          markupMultiplier: decimalToInput(insert.costing.markupMultiplier),
-          wholesalePrice: decimalToInput(insert.costing.wholesalePrice),
-          retailPrice: decimalToInput(insert.costing.retailPrice),
           currency: insert.costing.currency || '',
           notes: insert.costing.notes || '',
         }
@@ -680,8 +719,9 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
   };
 }
 
-// costing rollup fields (materials_total/materials_cost/total_cost/colorway_costs/total_sam)
-// are output-only — never sent on write.
+// The materials line and the unit/order totals (materials_total / materials_per_unit /
+// unit_cost / order_qty / order_cost / colorway_costs / total_sam) are computed server-side
+// from the BOM + colourway usages — output-only, never sent on write.
 function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting | undefined {
   if (
     !hasContent([
@@ -691,9 +731,6 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
       c?.logisticsCost,
       c?.overheadCost,
       c?.defectPercent,
-      c?.markupMultiplier,
-      c?.wholesalePrice,
-      c?.retailPrice,
       c?.currency,
       c?.notes,
     ])
@@ -707,14 +744,13 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     logisticsCost: inputToDecimal(c?.logisticsCost),
     overheadCost: inputToDecimal(c?.overheadCost),
     defectPercent: inputToDecimal(c?.defectPercent),
-    markupMultiplier: inputToDecimal(c?.markupMultiplier),
-    wholesalePrice: inputToDecimal(c?.wholesalePrice),
-    retailPrice: inputToDecimal(c?.retailPrice),
     currency: c?.currency?.trim() || '',
     notes: c?.notes?.trim() || '',
     materialsTotal: undefined,
-    materialsCost: undefined,
-    totalCost: undefined,
+    materialsPerUnit: undefined,
+    unitCost: undefined,
+    orderQty: undefined,
+    orderCost: undefined,
     hasUnconvertedCurrencies: undefined,
     totalSam: undefined,
     colorwayCosts: undefined,
@@ -765,11 +801,8 @@ export function mapFormToTechCardInsert(
         sizeBytes: p.sizeBytes || 0,
       })),
     productIds: data.productIds ?? [],
-    media: (data.media ?? []).map((m) => ({
-      mediaId: m.mediaId,
-      kind: (m.kind || 'TECH_CARD_MEDIA_KIND_UNKNOWN') as common_TechCardMediaKind,
-      caption: m.caption?.trim() || '',
-    })),
+    moodboardMedia: (data.moodboardMedia ?? []).map(mapMediaItemOut),
+    technicalMedia: (data.technicalMedia ?? []).map(mapMediaItemOut),
     callouts: (data.callouts ?? []).map((c) => ({
       number: c.number || 0,
       part: c.part?.trim() || '',

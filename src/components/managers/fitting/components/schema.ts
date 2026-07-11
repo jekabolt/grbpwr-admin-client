@@ -5,6 +5,7 @@ import {
   common_FittingVerdict,
 } from 'api/proto-http/admin';
 import { ZERO_TIMESTAMP } from 'components/managers/fittings/components/utils';
+import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 
 const fittingSizeSchema = z.object({
@@ -19,6 +20,17 @@ const fittingPatternSchema = z.object({
   url: z.string().optional().default(''),
   filename: z.string().optional().default(''),
   sizeBytes: z.number().optional().default(0),
+});
+
+// A numbered marker pinned onto a fitting photo, flagging what is wrong with the
+// fit at a point on the image. posX/posY are normalised (0..1) strings while in
+// the form (like the tech-card callouts) — converted to Decimal at the boundary.
+const fittingCalloutSchema = z.object({
+  number: z.number().int().optional().default(0),
+  note: z.string().optional().default(''),
+  mediaId: z.number().int().optional().default(0), // FK media(id); 0 = unanchored
+  posX: z.string().optional().default(''),
+  posY: z.string().optional().default(''),
 });
 
 export const fittingSchema = z
@@ -37,6 +49,7 @@ export const fittingSchema = z
     sizes: z.array(fittingSizeSchema).default([]),
     patterns: z.array(fittingPatternSchema).default([]),
     mediaIds: z.array(z.number()).default([]),
+    callouts: z.array(fittingCalloutSchema).default([]),
   })
   .refine((data) => !!data.productId || !!data.techCardId, {
     message: 'Укажите продукт или тех карту',
@@ -57,6 +70,7 @@ export const fittingDefaultData: FittingFormData = {
   sizes: [],
   patterns: [],
   mediaIds: [],
+  callouts: [],
 };
 
 export function todayDateInput(): string {
@@ -109,6 +123,13 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       fitting.media?.map((m) => m.id).filter((id): id is number => id != null) ??
       insert?.mediaIds ??
       [],
+    callouts: (insert?.callouts ?? []).map((c) => ({
+      number: c.number || 0,
+      note: c.note || '',
+      mediaId: c.mediaId || 0,
+      posX: decimalToInput(c.posX),
+      posY: decimalToInput(c.posY),
+    })),
   };
 }
 
@@ -135,5 +156,15 @@ export function mapFormToFittingInsert(data: FittingFormData): common_FittingIns
         sizeBytes: p.sizeBytes || 0,
       })),
     mediaIds: data.mediaIds ?? [],
+    // note is required by the contract — drop markers left un-annotated on save.
+    callouts: (data.callouts ?? [])
+      .filter((c) => c.note?.trim())
+      .map((c, i) => ({
+        number: c.number || i + 1,
+        note: c.note?.trim() || '',
+        mediaId: c.mediaId || 0,
+        posX: inputToDecimal(c.posX),
+        posY: inputToDecimal(c.posY),
+      })),
   };
 }

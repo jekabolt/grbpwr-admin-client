@@ -63,7 +63,8 @@ function ConstructionSketch({
   onActivePinChange: (n: number | null) => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
-  const media = (useWatch({ control, name: 'media' }) ?? []) as Array<{
+  // Assembly map draws on the technical sketches (front/back/detail), not the moodboard.
+  const media = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
     mediaId: number;
     kind?: string;
   }>;
@@ -317,13 +318,14 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
     [operations],
   );
 
+  // The assembly map pins onto the technical sketches (callouts live there).
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
-    for (const rm of techCard?.resolvedMedia ?? []) {
+    for (const rm of techCard?.resolvedTechnicalMedia ?? []) {
       if (rm.media?.id != null) m.set(rm.media.id, rm.media);
     }
     return m;
-  }, [techCard?.resolvedMedia]);
+  }, [techCard?.resolvedTechnicalMedia]);
 
   const cwIdx = colorwayIdx < colorways.length ? colorwayIdx : 0;
   const selectedUsages = colorways[cwIdx]?.usages ?? [];

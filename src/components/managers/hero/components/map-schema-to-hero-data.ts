@@ -455,14 +455,15 @@ export function mapHeroFullToFormData(
                     e.newsletter?.media?.landscape?.media?.thumbnail?.mediaUrl || '',
                   mediaPortraitUrl: e.newsletter?.media?.portrait?.media?.thumbnail?.mediaUrl || '',
                   ...readMediaModifiers(e.newsletter?.media),
+                  // placeholder / ctaText / successText are NOT carried by the newsletter
+                  // contract (HeroNewsletterTranslation is headline+body only — the email
+                  // placeholder, button and success text are handled client-side on the
+                  // storefront). The form fields stay optional and simply load empty.
                   translations:
                     e.newsletter?.translations?.map((t) => ({
                       languageId: t.languageId || 0,
                       headline: t.headline,
                       body: t.body,
-                      placeholder: t.placeholder,
-                      ctaText: t.ctaText,
-                      successText: t.successText,
                     })) || [],
                 },
               };

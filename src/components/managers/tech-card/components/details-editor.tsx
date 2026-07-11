@@ -31,13 +31,16 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
 
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
-    for (const rm of techCard?.resolvedMedia ?? [])
+    for (const rm of [
+      ...(techCard?.resolvedTechnicalMedia ?? []),
+      ...(techCard?.resolvedMoodboardMedia ?? []),
+    ])
       if (rm.media?.id != null) m.set(rm.media.id, rm.media);
     return m;
-  }, [techCard?.resolvedMedia]);
-  // resolvedMedia carries only the sketch media; detail reference images are plain library
-  // media ids, so resolve them from the media library too (otherwise they show as "#id" after
-  // a reload).
+  }, [techCard?.resolvedTechnicalMedia, techCard?.resolvedMoodboardMedia]);
+  // The resolved sketch maps carry only the sketch media; detail reference images are plain
+  // library media ids, so resolve them from the media library too (otherwise they show as
+  // "#id" after a reload).
   const libraryMap = useMediaMap();
 
   const detailByKey = (key: string) => details.find((d) => d.key === key);

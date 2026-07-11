@@ -53,7 +53,8 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'callouts' });
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
-  const media = (useWatch({ control, name: 'media' }) ?? []) as Array<{
+  // Callouts pin onto the TECHNICAL sketches (construction media), not the moodboard.
+  const media = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
     mediaId: number;
     kind?: string;
   }>;
@@ -269,30 +270,38 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
   );
 }
 
-// Sketch sheet — owns the resolved-media map shared by the sketch grid and the callout
-// canvas (so a freshly-picked sketch can be annotated without a save/reload).
+// Sketch sheet — owns the resolved-media map shared by both sketch grids (moodboard +
+// technical) and the callout canvas (so a freshly-picked sketch can be annotated without a
+// save/reload). Media ids are unique across the two lists, so one shared map serves both.
 export function SketchTab({ techCard }: { techCard?: common_TechCard }) {
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
 
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
-    for (const rm of techCard?.resolvedMedia ?? []) {
+    for (const rm of [
+      ...(techCard?.resolvedTechnicalMedia ?? []),
+      ...(techCard?.resolvedMoodboardMedia ?? []),
+    ]) {
       if (rm.media?.id != null) m.set(rm.media.id, rm.media);
     }
     for (const p of picked) if (p.id != null) m.set(p.id, p);
     return m;
-  }, [techCard?.resolvedMedia, picked]);
+  }, [techCard?.resolvedTechnicalMedia, techCard?.resolvedMoodboardMedia, picked]);
+
+  const onPicked = (items: common_MediaFull[]) => setPicked((prev) => [...prev, ...items]);
 
   return (
-    <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
-      <Section title='technical sketch' className='w-full lg:w-1/2'>
-        <MediaField
-          mediaById={mediaById}
-          onPickedMedia={(items) => setPicked((prev) => [...prev, ...items])}
-        />
-      </Section>
-      <Section title='callouts' className='w-full lg:w-1/2'>
-        <CalloutsEditor mediaById={mediaById} />
+    <div className='flex flex-col gap-6'>
+      <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+        <Section title='technical sketch' className='w-full lg:w-1/2'>
+          <MediaField name='technicalMedia' mediaById={mediaById} onPickedMedia={onPicked} />
+        </Section>
+        <Section title='callouts' className='w-full lg:w-1/2'>
+          <CalloutsEditor mediaById={mediaById} />
+        </Section>
+      </div>
+      <Section title='moodboard (mood / reference / swatches)'>
+        <MediaField name='moodboardMedia' mediaById={mediaById} onPickedMedia={onPicked} />
       </Section>
     </div>
   );
