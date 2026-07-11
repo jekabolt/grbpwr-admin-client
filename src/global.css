@@ -73,3 +73,60 @@ body {
     }
   }
 }
+
+/* react-day-picker v9 — monochrome theme mapped to the design tokens. Squared
+   corners, black selection, hairline "today", muted weekday/outside days. */
+.rdp-root {
+  --rdp-accent-color: var(--color-textColor);
+  --rdp-accent-background-color: rgba(0, 0, 0, 0.06);
+  --rdp-today-color: var(--color-textColor);
+  --rdp-day-width: 2.1rem;
+  --rdp-day-height: 2.1rem;
+  --rdp-day_button-width: 2.1rem;
+  --rdp-day_button-height: 2.1rem;
+  --rdp-day_button-border-radius: 0;
+  --rdp-selected-border: none;
+  --rdp-outside-opacity: 1;
+  --rdp-nav_button-height: 1.75rem;
+  --rdp-nav_button-width: 1.75rem;
+  margin: 0;
+  color: var(--color-textColor);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-textBaseSize);
+}
+.rdp-month_caption,
+.rdp-caption_label {
+  text-transform: uppercase;
+  font-weight: 400;
+}
+.rdp-weekday {
+  color: var(--color-labelColor);
+  text-transform: uppercase;
+  font-weight: 400;
+  font-size: 10px;
+}
+.rdp-chevron {
+  fill: var(--color-textColor);
+}
+.rdp-day_button {
+  border-radius: 0;
+  border: none;
+}
+.rdp-day_button:hover:not([disabled]) {
+  background: rgba(0, 0, 0, 0.08);
+}
+.rdp-selected .rdp-day_button {
+  background: var(--color-textColor);
+  color: var(--color-bgColor);
+  border: none;
+}
+.rdp-today:not(.rdp-selected) .rdp-day_button {
+  box-shadow: inset 0 0 0 1px var(--color-textColor);
+  font-weight: 700;
+}
+.rdp-outside .rdp-day_button {
+  color: var(--color-textInactiveColor);
+}
+.rdp-disabled {
+  opacity: 0.3;
+}
