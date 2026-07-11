@@ -17,14 +17,10 @@ export function RelatedTasks({
   productId?: number;
   className?: string;
 }) {
-  const filter: ListTasksFilter = techCardId
-    ? { techCardId }
-    : productId
-      ? { productId }
-      : {};
+  const filter: ListTasksFilter = techCardId ? { techCardId } : productId ? { productId } : {};
   const enabled = !!(techCardId || productId);
   const { data, isLoading } = useTasks(filter);
-  const tasks = enabled ? (data?.tasks ?? []) : [];
+  const tasks = enabled ? data?.tasks ?? [] : [];
 
   if (!enabled) return null;
 
@@ -56,7 +52,7 @@ export function RelatedTasks({
             <li key={t.id} className='flex items-center justify-between gap-2 py-1.5'>
               <span className='truncate text-textBaseSize'>{t.task.title}</span>
               <span className='shrink-0 text-[10px] uppercase text-labelColor'>
-                {STATUS_LABEL[t.task.status]}
+                {STATUS_LABEL[t.status]}
               </span>
             </li>
           ))}

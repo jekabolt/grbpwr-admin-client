@@ -38,7 +38,10 @@ export function TaskComments({ taskId }: { taskId: number }) {
           </Text>
         ) : (
           comments.map((c) => (
-            <div key={c.id} className='flex flex-col gap-0.5 border-b border-textInactiveColor pb-2'>
+            <div
+              key={c.id}
+              className='flex flex-col gap-0.5 border-b border-textInactiveColor pb-2'
+            >
               <div className='flex items-baseline justify-between gap-2'>
                 <Text size='small' className='uppercase'>
                   {c.author}

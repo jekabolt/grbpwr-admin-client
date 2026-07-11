@@ -5,8 +5,7 @@ import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { emptyTaskInsert, Task, TaskBoard, TaskInsert, TaskStatus } from './api/types';
-import { setLocalActor } from './api/tasksService';
+import { emptyFormValues, Task, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
 import { BoardSkeleton } from './components/board-skeleton';
 import {
@@ -18,7 +17,13 @@ import {
 } from './components/filters-bar';
 import { TaskDetailDrawer } from './components/task-detail-drawer';
 import { TaskFormModal } from './components/task-form-modal';
-import { useCreateTask, useDeleteTask, useTasks, useUpdateTask } from './hooks/useTasks';
+import {
+  useCreateTask,
+  useDeleteTask,
+  useMoveTask,
+  useTasks,
+  useUpdateTask,
+} from './hooks/useTasks';
 import { BOARD_LABEL, BOARDS } from './utils/meta';
 
 const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
@@ -27,7 +32,6 @@ type ModalState = { mode: 'create'; status: TaskStatus } | { mode: 'edit'; task:
 
 export function Tasks() {
   const { account, canRead, canWrite, resolved } = usePermissions();
-  useEffect(() => setLocalActor(account?.username), [account?.username]);
 
   const canView = !resolved || canRead(SECTION.tasks);
   const writable = canWrite(SECTION.tasks);
@@ -55,19 +59,30 @@ export function Tasks() {
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const moveTask = useMoveTask(filter);
 
-  const initial: TaskInsert = useMemo(() => {
-    if (modal?.mode === 'edit') return modal.task.task;
-    if (modal?.mode === 'create') return emptyTaskInsert(activeBoard, modal.status);
-    return emptyTaskInsert(activeBoard, 'TASK_STATUS_TODO');
+  const initial: TaskFormValues = useMemo(() => {
+    if (modal?.mode === 'edit') {
+      const t = modal.task;
+      return { ...t.task, board: t.board, status: t.status };
+    }
+    if (modal?.mode === 'create') return emptyFormValues(activeBoard, modal.status);
+    return emptyFormValues(activeBoard, 'TASK_STATUS_TODO');
   }, [modal, activeBoard]);
 
-  async function handleSubmit(values: TaskInsert) {
+  async function handleSubmit(values: TaskFormValues) {
+    const { board, status, ...content } = values;
     try {
       if (modal?.mode === 'edit') {
-        await updateTask.mutateAsync({ id: modal.task.id, input: values });
+        const t = modal.task;
+        await updateTask.mutateAsync({ id: t.id, content });
+        // Placement (board/column) is a MoveTask, not a content edit. Only fire
+        // when it actually changed; the card lands at the top of its new column.
+        if (board !== t.board || status !== t.status) {
+          await moveTask.mutateAsync({ id: t.id, board, status, position: 0 });
+        }
       } else {
-        await createTask.mutateAsync(values);
+        await createTask.mutateAsync({ content, board, status });
       }
       setModal(null);
     } catch {
@@ -197,7 +212,7 @@ export function Tasks() {
         onOpenChange={(o) => !o && setModal(null)}
         mode={modal?.mode ?? 'create'}
         initial={initial}
-        saving={createTask.isPending || updateTask.isPending}
+        saving={createTask.isPending || updateTask.isPending || moveTask.isPending}
         onSubmit={handleSubmit}
       />
 
@@ -208,9 +223,7 @@ export function Tasks() {
         title='delete task'
         confirmLabel='delete'
       >
-        <Text size='small'>
-          Delete “{deleting?.task.title}”? This can’t be undone.
-        </Text>
+        <Text size='small'>Delete “{deleting?.task.title}”? This can’t be undone.</Text>
       </ConfirmationModal>
     </div>
   );
