@@ -49,7 +49,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
 
         <div className='flex grow basis-0 items-center justify-end gap-1'>
           <div className='hidden lg:block'>
-            <NavDropdownMenu groups={[ADMIN_GROUP]} align='end' />
+            <NavDropdownMenu groups={[ADMIN_GROUP]} align='end' onOpenChange={setIsNavOpen} />
           </div>
           <Button
             className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 cursor-pointer'
