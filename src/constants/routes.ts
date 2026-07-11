@@ -16,6 +16,7 @@ export const SECTION = {
   media: 'media',
   products: 'products',
   orders: 'orders',
+  fulfillment: 'fulfillment',
   hero: 'hero',
   promo: 'promo',
   archive: 'archive',
@@ -51,6 +52,8 @@ export enum ROUTES {
   settings = '/settings',
   orders = '/orders',
   orderDetails = '/orders/:uuid',
+  fulfillment = '/fulfillment',
+  fulfillmentCard = '/fulfillment/:uuid',
   customOrders = '/custom-orders',
   customerSupport = '/customer-support',
   shipping = '/shipping',
@@ -94,6 +97,11 @@ export const SIDE_BAR_ITEMS: Manager[] = [
     label: 'ORDERS',
     route: ROUTES.orders,
     section: SECTION.orders,
+  },
+  {
+    label: 'FULFILLMENT',
+    route: ROUTES.fulfillment,
+    section: SECTION.fulfillment,
   },
   {
     label: 'HERO',
@@ -197,6 +205,11 @@ export const LEFT_SIDE_ITEMS: Manager[] = [
     label: 'orders',
     route: ROUTES.orders,
     section: SECTION.orders,
+  },
+  {
+    label: 'fulfillment',
+    route: ROUTES.fulfillment,
+    section: SECTION.fulfillment,
   },
   {
     label: 'tasks',
