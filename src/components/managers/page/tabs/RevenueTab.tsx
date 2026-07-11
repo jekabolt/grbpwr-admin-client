@@ -73,9 +73,14 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
   const revenueCost = getMetricComparison(margin?.revenueCost as any);
   const grossMargin = getMetricComparison(margin?.grossMargin as any);
   const grossMarginPct = getMetricComparison(margin?.grossMarginPct as any);
+  const paymentFees = getMetricComparison(margin?.paymentFees as any);
   const contributionMargin = getMetricComparison(margin?.contributionMargin as any);
   const costCoverage = margin?.costCoveragePct ?? 0;
   const marginPctTrusted = costCoverage >= COVERAGE_FLOOR_FOR_PCT;
+  // Processor fees bridge gross profit → contribution; only show the line once they're captured.
+  const showFees = paymentFees.value > 0;
+  // Products with no cost entered are why margin is partial/dark — name the gap to close it.
+  const uncostedCount = margin?.uncostedProductIds?.length ?? 0;
 
   return (
     <div className='space-y-6'>
@@ -87,10 +92,13 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             {costCoverage > 0
               ? `over the ${costCoverage.toFixed(0)}% of revenue with a product cost set`
               : 'set product costs to unlock'}
+            {uncostedCount > 0 && ` · ${uncostedCount} product${uncostedCount === 1 ? '' : 's'} missing cost`}
           </Text>
         </div>
         {costCoverage > 0 ? (
-          <div className='grid grid-cols-2 md:grid-cols-4 gap-3 border-2 border-textColor/20 p-4 bg-bgSecondary/30'>
+          <div
+            className={`grid grid-cols-2 ${showFees ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3 border-2 border-textColor/20 p-4 bg-bgSecondary/30`}
+          >
             <div className='space-y-1'>
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
                 COGS
@@ -129,6 +137,17 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 </Text>
               )}
             </div>
+            {showFees && (
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  Payment fees
+                </Text>
+                <Text className='font-bold text-lg'>−{formatCurrency(paymentFees.value)}</Text>
+                <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+                  processor cut
+                </Text>
+              </div>
+            )}
             <div className='space-y-1'>
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
                 Contribution
@@ -141,7 +160,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 enabled={compareEnabled}
               />
               <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
-                after shipping
+                {showFees ? 'after shipping & fees' : 'after shipping'}
               </Text>
             </div>
           </div>
