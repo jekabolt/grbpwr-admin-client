@@ -124,7 +124,10 @@ export function TechCardForm({
   const navigate = useNavigate();
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
-  const { canWrite } = usePermissions();
+  const { canWrite, canReadCosting } = usePermissions();
+  // Costing tab is field-shaped: hidden entirely without costing:read (server nulls
+  // the cost block anyway; showing an empty tab would read as "zero cost").
+  const visibleTabs = TABS.filter((t) => t.id !== 'costing' || canReadCosting);
 
   const numId = id ? parseInt(id, 10) : undefined;
 
@@ -298,7 +301,7 @@ export function TechCardForm({
           className='flex gap-1 overflow-x-auto border-b border-textInactiveColor px-2.5'
           aria-label='Tech card sections'
         >
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const active = activeTab === tab.id;
             const hasError = errorTabs.has(tab.id);
             return (
@@ -451,12 +454,14 @@ export function TechCardForm({
             </Section>
           </div>
 
-          {/* COSTING */}
-          <div hidden={activeTab !== 'costing'}>
-            <Section title='costing'>
-              <CostingField techCard={techCard} />
-            </Section>
-          </div>
+          {/* COSTING — mounted only with costing:read (field-shaped) */}
+          {canReadCosting && (
+            <div hidden={activeTab !== 'costing'}>
+              <Section title='costing'>
+                <CostingField techCard={techCard} />
+              </Section>
+            </div>
+          )}
 
           {/* ISSUES */}
           <div hidden={activeTab !== 'issues'}>

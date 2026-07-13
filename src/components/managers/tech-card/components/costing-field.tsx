@@ -1,4 +1,5 @@
 import { common_TechCard } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useFormContext, useWatch } from 'react-hook-form';
 import Text from 'ui/components/text';
 import CurrencySelect from 'ui/form/fields/currency-select';
@@ -12,6 +13,9 @@ import { TechCardFormData } from './schema';
 // usages (output-only): shown read-only here from the last GetTechCard, never sent on write.
 export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const { control } = useFormContext<TechCardFormData>();
+  // Cost inputs are writable only with costing:write (the tab itself is hidden without
+  // costing:read — see the editor's TABS). Backend enforces; this disables the UI.
+  const { canWriteCosting } = usePermissions();
   const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
     usages?: Array<{ consumption?: string; sizeConsumptions?: Array<{ consumption?: string }> }>;
   }>;
@@ -56,7 +60,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
           </Text>
         </div>
       )}
-      <div className='grid grid-cols-2 gap-3 lg:grid-cols-3'>
+      <fieldset disabled={!canWriteCosting} className='grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'>
         <DecimalField name='costing.cmtCost' label='CMT cost / изделие' />
         <DecimalField name='costing.hardwareCost' label='hardware / изделие' />
         <DecimalField name='costing.packagingCost' label='packaging / изделие' />
@@ -64,7 +68,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         <DecimalField name='costing.overheadCost' label='overhead / изделие' />
         <DecimalField name='costing.defectPercent' label='defect %' />
         <CurrencySelect name='costing.currency' label='currency' />
-      </div>
+      </fieldset>
       <Text variant='inactive' size='small'>
         Все статьи — на 1 изделие, в одной валюте. Себестоимость считается на изделие, затем
         масштабируется на тираж (order qty). Ценообразование (наценка/опт/розница) живёт на
@@ -131,10 +135,30 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
               <Text variant='inactive' size='small'>
                 Σ SAM (информативно): {decimalToInput(rollup?.totalSam) || '—'} min
               </Text>
-              {rollup?.hasUnconvertedCurrencies && (
-                <Text variant='inactive' size='small'>
-                  ⚠ some BOM lines are in another currency — excluded from total (no FX)
+              {/* Base-currency rollup (folded via costing FX rates) — this is the figure that
+                  seeds the product's cost_price. Absent when a currency has no FX rate. */}
+              {rollup?.baseCurrency && (rollup?.unitCostBase?.value || rollup?.orderCostBase?.value) ? (
+                <Text size='small' className='block'>
+                  base ({rollup.baseCurrency}): / изделие {decimalToInput(rollup?.unitCostBase) || '—'}{' '}
+                  · тираж {decimalToInput(rollup?.orderCostBase) || '—'}{' '}
+                  <Text variant='inactive' size='small'>
+                    (seeds product cost)
+                  </Text>
                 </Text>
+              ) : rollup?.hasUnconvertedCurrencies ? null : (
+                <Text variant='inactive' size='small'>
+                  base-currency cost unavailable — add a costing FX rate for every currency used
+                </Text>
+              )}
+              {rollup?.hasUnconvertedCurrencies && (
+                <div className='border border-warning p-2'>
+                  <Text size='small' className='block text-warning'>
+                    ⚠ some BOM lines are in another currency without an FX rate — they are excluded
+                    from the total and no base-currency cost can be computed. Add a costing FX rate
+                    (Tech cards → FX rates) so they fold into the base cost instead of silently
+                    lowering it.
+                  </Text>
+                </div>
               )}
             </div>
           </>
