@@ -14,6 +14,7 @@ import InputField from 'ui/form/fields/input-field';
 import ToggleField from 'ui/form/fields/toggle-field';
 import { TranslationField } from 'ui/form/fields/translation-field';
 import { CarrierPrices } from './components/carrier-prices';
+import { PaymentFeesEditor } from './components/payment-fees-editor';
 import {
   defaultSettings,
   SettingsSchema,
@@ -131,6 +132,16 @@ export function Settings() {
               />
             ))}
           </div>
+        </Section>
+
+        <Section
+          title='processing fees'
+          description='estimated fee per payment method — feeds contribution margin for non-Stripe methods'
+        >
+          <PaymentFeesEditor
+            methods={(paymentMethods ?? []).map((m) => m.paymentMethod ?? '')}
+            baseCurrency={baseCurrency}
+          />
         </Section>
 
         <Section title='announce'>
