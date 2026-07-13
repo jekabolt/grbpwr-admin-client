@@ -388,6 +388,7 @@ const adjustReasonOptions = [
   { value: 'found', label: 'found' },
   { value: 'correction', label: 'correction' },
   { value: 'packaging', label: 'packaging' },
+  { value: 'scrap', label: 'scrap' },
   { value: 'other', label: 'other' },
 ];
 

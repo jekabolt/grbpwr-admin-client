@@ -14,6 +14,12 @@ import { productionRunKeys, useMaterialPlan } from './useProductionRuns';
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 const num = (d?: googletype_Decimal) => decimalToInput(d) || '0';
 const isShort = (r: MaterialPlanRow) => Number(r.shortage?.value) > 0;
+// issued_variance (gap-04): signed issued − required. Blank until anything is issued.
+const variance = (d?: googletype_Decimal) => {
+  const n = Number(d?.value);
+  if (!d?.value || !Number.isFinite(n) || n === 0) return '—';
+  return `${n > 0 ? '+' : ''}${Number(n.toFixed(3))}`;
+};
 
 // Estimated material requirement of the run against warehouse stock (NF-06). Shortage is the ready
 // purchase order (copy it — R-9); [issue…] opens the shared warehouse Issue modal locked to this
@@ -93,6 +99,7 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
                 <th className={`${cell} text-right uppercase`}>required</th>
                 <th className={`${cell} text-right uppercase`}>on hand</th>
                 <th className={`${cell} text-right uppercase`}>issued</th>
+                <th className={`${cell} text-right uppercase`}>Δ vs plan</th>
                 <th className={`${cell} text-right uppercase`}>shortage</th>
                 {canEdit ? <th className={cell} /> : null}
               </tr>
@@ -113,6 +120,12 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
                   </td>
                   <td className={`${cell} text-right`}>{num(r.onHand)}</td>
                   <td className={`${cell} text-right`}>{num(r.issued)}</td>
+                  <td
+                    className={`${cell} text-right`}
+                    title='issued − required: >0 over-issued (scrap/overuse), <0 leftover'
+                  >
+                    {variance(r.issuedVariance)}
+                  </td>
                   <td className={`${cell} text-right ${isShort(r) ? 'font-bold' : ''}`}>
                     {isShort(r) ? '! ' : ''}
                     {num(r.shortage)}
