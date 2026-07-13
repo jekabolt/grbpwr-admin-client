@@ -1,10 +1,15 @@
 import type { CompareMode } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { subDays } from 'date-fns';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { DateRangePicker, PersistentKpiBar } from './components';
+import { OpexModal } from './components/opex-modal';
+import { VatRatesModal } from './components/vat-rates-modal';
 import { GrowthTab, ProductsTab, RevenueTab, ThisWeekTab } from './tabs';
 import type { MetricsPeriod } from './useMetricsQuery';
 import type { MetricsTabId } from './useTabMetricsQuery';
@@ -55,6 +60,12 @@ export function Analitic() {
   const tabParam = searchParams.get('tab');
   const activeTab = parseTabFromUrl(tabParam);
 
+  const { canWrite } = usePermissions();
+  const { dictionary } = useDictionary();
+  const canConfig = canWrite(SECTION.analytics);
+  const [vatOpen, setVatOpen] = useState(false);
+  const [opexOpen, setOpexOpen] = useState(false);
+
   const setActiveTab = (tabId: MetricsTabId) => {
     setSearchParams(
       (prev) => {
@@ -96,9 +107,27 @@ export function Analitic() {
   return (
     <div className='flex flex-col gap-8 pb-16'>
       <div className='flex flex-col gap-4'>
-        <Text variant='uppercase' className='text-lg font-bold'>
-          Analytics Dashboard
-        </Text>
+        <div className='flex flex-wrap items-center justify-between gap-3'>
+          <Text variant='uppercase' className='text-lg font-bold'>
+            Analytics Dashboard
+          </Text>
+          {canConfig && (
+            <div className='flex items-center gap-2'>
+              <Button variant='secondary' size='lg' className='uppercase' onClick={() => setVatOpen(true)}>
+                VAT rates
+              </Button>
+              <Button variant='secondary' size='lg' className='uppercase' onClick={() => setOpexOpen(true)}>
+                OPEX
+              </Button>
+            </div>
+          )}
+        </div>
+        <VatRatesModal open={vatOpen} onOpenChange={setVatOpen} />
+        <OpexModal
+          open={opexOpen}
+          onOpenChange={setOpexOpen}
+          baseCurrency={dictionary?.baseCurrency || 'EUR'}
+        />
         <DateRangePicker
           period={period}
           compareMode={compareMode}
