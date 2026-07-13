@@ -87,6 +87,29 @@ export const useOrderDetails = (uuid: string) => {
     }
   };
 
+  // Record the real carrier invoice (and optional return leg) so contribution margin
+  // uses actual logistics instead of the quoted rate. Write-only — the contract does
+  // not surface the stored value back on the order.
+  async function setShipmentActualCost(actualCost: string, returnShippingCost?: string) {
+    const orderUuid = state.orderDetails?.order?.uuid;
+    if (!orderUuid) return false;
+    try {
+      await adminService.SetShipmentActualCost({
+        orderUuid,
+        actualCost: { value: actualCost.trim() },
+        returnShippingCost: returnShippingCost?.trim()
+          ? { value: returnShippingCost.trim() }
+          : undefined,
+      });
+      showMessage('Actual shipping cost recorded', 'success');
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to record shipping cost';
+      showMessage(msg, 'error');
+      return false;
+    }
+  }
+
   async function markAsDelivered() {
     const confirmed = window.confirm('Are you sure you want to mark this order as delivered?');
     if (!confirmed) return;
@@ -165,6 +188,7 @@ export const useOrderDetails = (uuid: string) => {
     handleTrackingNumberChange,
     markAsDelivered,
     refundOrder,
+    setShipmentActualCost,
     toggleOrderItemsSelection,
   };
 };
