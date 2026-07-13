@@ -5,6 +5,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Fragment, useEffect, useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
+import { DevExpensesField } from './dev-expenses-field';
 import { SampleFittings, SampleMovements } from './sample-panels';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -32,7 +33,8 @@ const th =
 const td = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 // Samples (сэмплы) of a style (NF-04). List + inline editor, addressed by ?sample= so a sample is
-// deep-linkable (R-1). The material movements / dev-expenses / fitting sub-panels are added in W3.3.
+// deep-linkable (R-1). Each open sample carries material-movement, dev-expense and fitting
+// sub-panels (W3.3 / W3.5).
 export function SamplesTab({
   techCardId,
   techCard,
@@ -433,10 +435,18 @@ function SampleEditor({
         </div>
       ) : null}
 
-      {/* Movement / fitting sub-panels need a saved sample id (W3.3). */}
+      {/* Movement / fitting / dev-expense sub-panels need a saved sample id (W3.3 / W3.5). */}
       {isEdit && sample?.id ? (
         <>
           <SampleMovements sampleId={sample.id} />
+          {canReadCosting ? (
+            <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-2'>
+              <Text variant='uppercase' size='small'>
+                dev expenses
+              </Text>
+              <DevExpensesField techCardId={techCardId} scopedSampleId={sample.id} />
+            </div>
+          ) : null}
           <SampleFittings sampleId={sample.id} techCardId={techCardId} returnTo={returnTo} />
         </>
       ) : null}
