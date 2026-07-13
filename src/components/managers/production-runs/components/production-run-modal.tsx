@@ -39,10 +39,13 @@ export function ProductionRunModal({
   open,
   onOpenChange,
   run,
+  initialTechCardId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   run?: common_ProductionRun;
+  // Seed the tech card on a fresh run (the spine's [plan run] deep link, W3.6). Ignored on edit.
+  initialTechCardId?: number;
 }) {
   const { showMessage } = useSnackBarStore();
   const navigate = useNavigate();
@@ -64,9 +67,9 @@ export function ProductionRunModal({
             startedAt: isoToDate(ins.startedAt),
             notes: ins.notes ?? '',
           }
-        : emptyDraft,
+        : { ...emptyDraft, techCardId: initialTechCardId ?? 0 },
     );
-  }, [run, open]);
+  }, [run, open, initialTechCardId]);
 
   const { data: tcData } = useQuery({
     queryKey: ['techCardsForRun'],

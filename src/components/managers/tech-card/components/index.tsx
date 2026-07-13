@@ -35,6 +35,7 @@ import { DetailsEditor } from './details-editor';
 import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
 import { LabelsField } from './labels-field';
+import { LifecycleStrip } from './lifecycle-strip';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
 import { ProductIdsField } from './product-ids-field';
@@ -159,19 +160,23 @@ export function TechCardForm({
   });
 
   // Active tab lives in the URL (?tab=) so a section — and, on the samples tab, a specific sample
-  // (?sample=) — is deep-linkable (R-1). Switching tabs drops a stale ?sample=.
+  // (?sample=) — is deep-linkable (R-1). Switching tabs drops a stale ?sample= / ?fits=; extra params
+  // (a sample to open, a fittings filter) can be set in the same navigation (spine deep links).
   const [params, setParams] = useSearchParams();
   const activeTab: TabId = (params.get('tab') as TabId) || 'header';
-  const setActiveTab = (id: TabId) =>
+  const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
       (prev) => {
         const p = new URLSearchParams(prev);
         p.set('tab', id);
         if (id !== 'samples') p.delete('sample');
+        p.delete('fits');
+        for (const [k, v] of Object.entries(extra ?? {})) p.set(k, v);
         return p;
       },
       { replace: true },
     );
+  const setActiveTab = (id: TabId) => navTo(id);
   const [conflict, setConflict] = useState(false);
   // bump to jump to the BOM tab and pulse the empty composition fields (from labels care-gen)
   const [bomHighlight, setBomHighlight] = useState(0);
@@ -194,6 +199,13 @@ export function TechCardForm({
     status?: string;
   }>;
   const openIssues = issues.filter((i) => i.status === 'TECH_CARD_ISSUE_STATUS_OPEN').length;
+
+  // Lifecycle spine inputs: current stage/approval drive the stepper + next-hint; linked-product
+  // count feeds the counter row.
+  const stage = (useWatch({ control: form.control, name: 'stage' }) ?? '') as string;
+  const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
+    '') as string;
+  const productCount = (useWatch({ control: form.control, name: 'productIds' }) ?? []).length;
 
   const errorTabs = new Set(
     Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header'),
@@ -377,6 +389,23 @@ export function TechCardForm({
           })}
         </nav>
       </div>
+
+      {isEditMode && numId ? (
+        <LifecycleStrip
+          techCardId={numId}
+          stage={stage}
+          approvalState={approvalState}
+          productCount={productCount}
+          frozen={frozen}
+          canEdit={canWrite(SECTION.techCards)}
+          onStageChange={(next) => form.setValue('stage', next, { shouldDirty: true })}
+          onGoSamples={() => navTo('samples')}
+          onAddSample={() => navTo('samples', { sample: 'new' })}
+          onGoFittings={(unresolvedOnly) =>
+            navTo('history', unresolvedOnly ? { fits: 'unresolved' } : undefined)
+          }
+        />
+      ) : null}
 
       {conflict && (
         <div className='mt-3 flex flex-wrap items-center justify-between gap-3 border border-textInactiveColor bg-highlightColor/10 p-3'>

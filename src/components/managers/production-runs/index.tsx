@@ -4,8 +4,8 @@ import { SECTION } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
@@ -33,12 +33,24 @@ const statusFilterOptions = [
 export function ProductionRuns() {
   const { canWrite, canReadCosting } = usePermissions();
   const canEdit = canWrite(SECTION.production);
+  // Deep link from the tech card spine ([plan run]): ?techCardId=118 filters the list and seeds the
+  // create modal; ?new=1 auto-opens it (W3.6).
+  const [searchParams] = useSearchParams();
   const [status, setStatus] = useState('');
-  const [techCardId, setTechCardId] = useState('');
+  const [techCardId, setTechCardId] = useState(searchParams.get('techCardId') ?? '');
   const [editing, setEditing] = useState<common_ProductionRun | undefined>();
   const [editOpen, setEditOpen] = useState(false);
   const [receiving, setReceiving] = useState<common_ProductionRun | undefined>();
   const [deleting, setDeleting] = useState<common_ProductionRun | undefined>();
+
+  // Auto-open the create modal once when arriving via ?new=1 (guarded by write permission).
+  useEffect(() => {
+    if (searchParams.get('new') === '1' && canEdit) {
+      setEditing(undefined);
+      setEditOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { data, isLoading } = useProductionRuns(Number(techCardId) || 0, status);
   const del = useDeleteProductionRun();
@@ -115,7 +127,12 @@ export function ProductionRuns() {
         </div>
       )}
 
-      <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={editing} />
+      <ProductionRunModal
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        run={editing}
+        initialTechCardId={Number(techCardId) || 0}
+      />
       <ReceiveModal
         open={receiving != null}
         onOpenChange={(v) => !v && setReceiving(undefined)}
