@@ -33,26 +33,47 @@ const statusFilterOptions = [
 export function ProductionRuns() {
   const { canWrite, canReadCosting } = usePermissions();
   const canEdit = canWrite(SECTION.production);
+  // Filters live in the URL (R-1) so a filtered run list is shareable and survives reload.
   // Deep link from the tech card spine ([plan run]): ?techCardId=118 filters the list and seeds the
   // create modal; ?new=1 auto-opens it (W3.6).
-  const [searchParams] = useSearchParams();
-  const [status, setStatus] = useState('');
-  const [techCardId, setTechCardId] = useState(searchParams.get('techCardId') ?? '');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const status = searchParams.get('status') ?? '';
+  const techCardId = searchParams.get('techCardId') ?? '';
+  const patchFilters = (next: Record<string, string>) =>
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        Object.entries(next).forEach(([k, v]) => (v ? p.set(k, v) : p.delete(k)));
+        return p;
+      },
+      { replace: true },
+    );
   const [editing, setEditing] = useState<common_ProductionRun | undefined>();
   const [editOpen, setEditOpen] = useState(false);
   const [receiving, setReceiving] = useState<common_ProductionRun | undefined>();
   const [deleting, setDeleting] = useState<common_ProductionRun | undefined>();
 
-  // Auto-open the create modal once when arriving via ?new=1 (guarded by write permission).
+  // Auto-open the create modal once when arriving via ?new=1 (guarded by write permission),
+  // then strip the param — otherwise refresh/back re-opens the modal uninvited.
   useEffect(() => {
-    if (searchParams.get('new') === '1' && canEdit) {
-      setEditing(undefined);
-      setEditOpen(true);
+    if (searchParams.get('new') === '1') {
+      if (canEdit) {
+        setEditing(undefined);
+        setEditOpen(true);
+      }
+      setSearchParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.delete('new');
+          return p;
+        },
+        { replace: true },
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { data, isLoading } = useProductionRuns(Number(techCardId) || 0, status);
+  const { data, isLoading, isError } = useProductionRuns(Number(techCardId) || 0, status);
   const del = useDeleteProductionRun();
   const { showMessage } = useSnackBarStore();
   const runs = data?.runs ?? [];
@@ -88,7 +109,11 @@ export function ProductionRuns() {
       </div>
 
       <div className='flex flex-wrap items-center gap-3'>
-        <select className={cell} value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select
+          className={cell}
+          value={status}
+          onChange={(e) => patchFilters({ status: e.target.value })}
+        >
           {statusFilterOptions.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -101,12 +126,14 @@ export function ProductionRuns() {
           min='0'
           placeholder='tech card id'
           value={techCardId}
-          onChange={(e) => setTechCardId(e.target.value)}
+          onChange={(e) => patchFilters({ techCardId: e.target.value })}
         />
       </div>
 
       {isLoading ? (
         <Text size='small'>loading…</Text>
+      ) : isError ? (
+        <Text size='small'>Failed to load production runs — refresh to retry.</Text>
       ) : runs.length === 0 ? (
         <Text variant='inactive' size='small'>
           no production runs

@@ -5,7 +5,7 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { useUpdateRunSection } from './useProductionRuns';
@@ -31,7 +31,6 @@ export function LinesGrid({
 }) {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
-  const { pathname, search } = useLocation();
   const update = useUpdateRunSection();
   const editable = canEdit && !locked;
 
@@ -59,9 +58,14 @@ export function LinesGrid({
 
   const [rows, setRows] = useState<Row[]>([]);
   const [qty, setQty] = useState<Record<string, string>>({});
+  // Sibling saves (marker, costs, an issue from the plan) refetch the run — without a dirty
+  // guard that refetch rebuilt the grid from server state and silently discarded typed cells.
+  const [dirty, setDirty] = useState(false);
 
-  // Load the grid from the run's lines (distinct products, in first-seen order).
+  // Load the grid from the run's lines (distinct products, in first-seen order) — but never
+  // over unsaved edits.
   useEffect(() => {
+    if (dirty) return;
     const seen: number[] = [];
     const q: Record<string, string> = {};
     for (const l of lines) {
@@ -71,7 +75,7 @@ export function LinesGrid({
     }
     setRows(seen.map((pid) => ({ productId: pid, label: labelFor(pid) })));
     setQty(q);
-  }, [lines, labelFor]);
+  }, [lines, labelFor, dirty]);
 
   const addable = colorways.filter((c) => {
     const pid = c.productId ?? 0;
@@ -83,6 +87,7 @@ export function LinesGrid({
     if (!c) return;
     const pid = c.productId ?? 0;
     if (rows.some((r) => r.productId === pid)) return;
+    setDirty(true);
     setRows((prev) => [
       ...prev,
       { productId: pid, label: `${c.code ? `${c.code} · ` : ''}${c.name ?? '(unassigned)'}` },
@@ -90,6 +95,17 @@ export function LinesGrid({
   };
 
   const removeRow = (productId: number) => {
+    // A row whose lines carry counted quantities can't be casually dropped — saving without
+    // it would erase the received/defect record.
+    const counted = lines.some(
+      (l) =>
+        (l.productId ?? 0) === productId && ((l.receivedQty ?? 0) > 0 || (l.defectQty ?? 0) > 0),
+    );
+    if (counted) {
+      showMessage('This colour-model has received/defect counts — it cannot be removed', 'error');
+      return;
+    }
+    setDirty(true);
     setRows((prev) => prev.filter((r) => r.productId !== productId));
     setQty((prev) => {
       const next = { ...prev };
@@ -98,18 +114,20 @@ export function LinesGrid({
     });
   };
 
-  // Stamp the card's per-size order quantities onto every current row (R-3). Each colourway gets
-  // the whole size run; the planner splits it by hand afterwards.
+  // Stamp the card's per-size order quantities onto every current row (R-3) — but only into
+  // EMPTY cells, so "top up" never overwrites a hand-split plan.
   const prefillFromSizeRun = () => {
     if (rows.length === 0) {
       showMessage('Add a colour-model first, then prefill', 'error');
       return;
     }
-    setQty(() => {
-      const q: Record<string, string> = {};
+    setDirty(true);
+    setQty((prev) => {
+      const q = { ...prev };
       rows.forEach((r) =>
         sizeQuantities.forEach((sq) => {
-          if (sq.sizeId && sq.orderQty) q[key(r.productId, sq.sizeId)] = String(sq.orderQty);
+          const k = key(r.productId, sq.sizeId ?? 0);
+          if (sq.sizeId && sq.orderQty && !q[k]?.trim()) q[k] = String(sq.orderQty);
         }),
       );
       return q;
@@ -128,8 +146,14 @@ export function LinesGrid({
       for (const s of columns) {
         const raw = qty[key(r.productId, s)];
         const planned = Number(raw);
-        if (!raw?.trim() || !Number.isFinite(planned) || planned <= 0) continue;
         const prev = lines.find((l) => (l.productId ?? 0) === r.productId && l.sizeId === s);
+        const hasCounts = (prev?.receivedQty ?? 0) > 0 || (prev?.defectQty ?? 0) > 0;
+        if (!raw?.trim() || !Number.isFinite(planned) || planned <= 0) {
+          // A blanked cell normally drops the line — but never one that already carries
+          // counted received/defect quantities; keep it with plan 0 instead.
+          if (hasCounts && prev) next.push({ ...prev, plannedQty: 0 });
+          continue;
+        }
         next.push({
           productId: r.productId,
           sizeId: s,
@@ -141,22 +165,24 @@ export function LinesGrid({
     }
     try {
       await update.mutateAsync({ id: run.id!, patch: { lines: next } });
+      setDirty(false);
       showMessage('Lines saved', 'success');
     } catch (e) {
       showMessage(e instanceof Error ? e.message : 'Failed to save lines', 'error');
     }
   };
 
-  const setCell = (productId: number, sizeId: number, v: string) =>
+  const setCell = (productId: number, sizeId: number, v: string) => {
+    setDirty(true);
     setQty((prev) => ({ ...prev, [key(productId, sizeId)]: v.replace(/[^0-9]/g, '') }));
-
-  const returnTo = encodeURIComponent(pathname + search);
+  };
 
   return (
     <div className='flex flex-col gap-2'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
           lines (colour-model × size)
+          {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
         </Text>
         {editable && (
           <div className='flex items-center gap-2'>
@@ -213,11 +239,15 @@ export function LinesGrid({
                         {' '}
                         <Text variant='inactive' size='small'>
                           ! no product yet ·{' '}
+                          {/* New tab: navigating away would silently discard the grid draft,
+                              and nothing in the product flow leads back here. */}
                           <Link
-                            to={`${ROUTES.addProduct}?returnTo=${returnTo}`}
+                            to={ROUTES.addProduct}
+                            target='_blank'
+                            rel='noreferrer'
                             className='underline'
                           >
-                            create product
+                            create product ↗
                           </Link>
                         </Text>
                       </>

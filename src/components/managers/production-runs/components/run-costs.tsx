@@ -22,6 +22,9 @@ type CostDraft = {
   amount: string;
   currency: string;
   incurredAt: string;
+  // The stored article this draft came from, if any — used to carry its server-folded
+  // amountBase through an untouched save (see save()).
+  orig?: common_ProductionRunCost;
 };
 
 // Actual cost articles of a run (phase 2). Moved off the create/edit modal onto the detail page
@@ -39,8 +42,11 @@ export function RunCosts({
   const { showMessage } = useSnackBarStore();
   const update = useUpdateRunSection();
   const [costs, setCosts] = useState<CostDraft[]>([]);
+  // Sibling saves refetch the run — don't let that resync wipe an in-progress draft.
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
+    if (dirty) return;
     setCosts(
       (run.run?.costs ?? []).map((c) => ({
         kind: c.kind ?? 'PRODUCTION_RUN_COST_KIND_OTHER',
@@ -48,16 +54,20 @@ export function RunCosts({
         amount: decimalToInput(c.amount),
         currency: c.currency ?? 'EUR',
         incurredAt: isoToDate(c.incurredAt),
+        orig: c,
       })),
     );
-  }, [run]);
+  }, [run, dirty]);
 
   // Cost articles are confidential — hidden entirely without costing:read (never a fake €0.00).
   if (!canReadCosting) return null;
 
-  const patchCost = (i: number, patch: Partial<CostDraft>) =>
+  const patchCost = (i: number, patch: Partial<CostDraft>) => {
+    setDirty(true);
     setCosts((prev) => prev.map((c, j) => (j === i ? { ...c, ...patch } : c)));
-  const addCost = () =>
+  };
+  const addCost = () => {
+    setDirty(true);
     setCosts((prev) => [
       ...prev,
       {
@@ -68,20 +78,39 @@ export function RunCosts({
         incurredAt: '',
       },
     ]);
+  };
 
   const save = async () => {
+    // A drafted article without an amount would silently vanish under the filter below —
+    // refuse instead of reporting a lying "Costs saved".
+    const incomplete = costs.some(
+      (c) => !c.amount.trim() && (c.description.trim() || c.incurredAt),
+    );
+    if (incomplete) {
+      showMessage('A cost article is missing its amount — fill or remove it', 'error');
+      return;
+    }
     const next: common_ProductionRunCost[] = costs
       .filter((c) => c.amount.trim())
-      .map((c) => ({
-        kind: c.kind as common_ProductionRunCostKind,
-        description: c.description.trim(),
-        amount: inputToDecimal(c.amount),
-        currency: c.currency,
-        amountBase: undefined, // server folds to base via FX
-        incurredAt: dateToIso(c.incurredAt),
-      }));
+      .map((c) => {
+        // Untouched amount+currency keep the stored server-folded base amount — resending
+        // undefined would re-fold EVERY article at today's FX rate on any unrelated edit.
+        const untouched =
+          c.orig &&
+          decimalToInput(c.orig.amount) === c.amount &&
+          (c.orig.currency ?? 'EUR') === c.currency;
+        return {
+          kind: c.kind as common_ProductionRunCostKind,
+          description: c.description.trim(),
+          amount: inputToDecimal(c.amount),
+          currency: c.currency,
+          amountBase: untouched ? c.orig?.amountBase : undefined, // unset → server folds via FX
+          incurredAt: dateToIso(c.incurredAt),
+        };
+      });
     try {
       await update.mutateAsync({ id: run.id!, patch: { costs: next } });
+      setDirty(false);
       showMessage('Costs saved', 'success');
     } catch (e) {
       showMessage(e instanceof Error ? e.message : 'Failed to save costs', 'error');
@@ -93,6 +122,7 @@ export function RunCosts({
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='small'>
           actual costs
+          {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
         </Text>
         {canEdit && (
           <div className='flex items-center gap-2'>
@@ -178,7 +208,10 @@ export function RunCosts({
                   type='button'
                   variant='secondary'
                   aria-label='remove cost'
-                  onClick={() => setCosts((prev) => prev.filter((_, j) => j !== i))}
+                  onClick={() => {
+                    setDirty(true);
+                    setCosts((prev) => prev.filter((_, j) => j !== i));
+                  }}
                 >
                   ✕
                 </Button>

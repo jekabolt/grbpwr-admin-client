@@ -1,9 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { MaterialPlanRow, common_ProductionRun, googletype_Decimal } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   IssueStockModal,
   MovementTarget,
 } from 'components/managers/materials/components/movement-modals';
+import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -14,10 +16,12 @@ import { productionRunKeys, useMaterialPlan } from './useProductionRuns';
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 const num = (d?: googletype_Decimal) => decimalToInput(d) || '0';
 const isShort = (r: MaterialPlanRow) => Number(r.shortage?.value) > 0;
-// issued_variance (gap-04): signed issued − required. Blank until anything is issued.
-const variance = (d?: googletype_Decimal) => {
+// issued_variance (gap-04): signed issued − required. Blank until anything is issued; a material
+// issued exactly per plan shows an explicit "0" — '—' would read as "untouched".
+const variance = (d?: googletype_Decimal, issued?: googletype_Decimal) => {
   const n = Number(d?.value);
-  if (!d?.value || !Number.isFinite(n) || n === 0) return '—';
+  if (!d?.value || !Number.isFinite(n)) return '—';
+  if (n === 0) return Number(issued?.value) > 0 ? '0' : '—';
   return `${n > 0 ? '+' : ''}${Number(n.toFixed(3))}`;
 };
 
@@ -27,6 +31,10 @@ const variance = (d?: googletype_Decimal) => {
 export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canEdit: boolean }) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
+  // Issuing stock is a warehouse write — gate on the same section the warehouse module uses,
+  // or a production-only account gets a button that 403s at submit.
+  const { canWrite } = usePermissions();
+  const canIssue = canEdit && canWrite(SECTION.techCards);
   const runId = run.id ?? 0;
   const { data, isLoading, isError, refetch, isFetching } = useMaterialPlan(runId, runId > 0);
   const rows = data?.rows ?? [];
@@ -101,7 +109,7 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
                 <th className={`${cell} text-right uppercase`}>issued</th>
                 <th className={`${cell} text-right uppercase`}>Δ vs plan</th>
                 <th className={`${cell} text-right uppercase`}>shortage</th>
-                {canEdit ? <th className={cell} /> : null}
+                {canIssue ? <th className={cell} /> : null}
               </tr>
             </thead>
             <tbody>
@@ -124,13 +132,13 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
                     className={`${cell} text-right`}
                     title='issued − required: >0 over-issued (scrap/overuse), <0 leftover'
                   >
-                    {variance(r.issuedVariance)}
+                    {variance(r.issuedVariance, r.issued)}
                   </td>
                   <td className={`${cell} text-right ${isShort(r) ? 'font-bold' : ''}`}>
                     {isShort(r) ? '! ' : ''}
                     {num(r.shortage)}
                   </td>
-                  {canEdit ? (
+                  {canIssue ? (
                     <td className={cell}>
                       <Button
                         type='button'
@@ -142,7 +150,7 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
                               materialId: r.materialId ?? 0,
                               materialLabel: r.materialName ?? `#${r.materialId}`,
                               unit: r.unit ?? '',
-                              onHand: decimalToInput(r.onHand),
+                              onHand: decimalToInput(r.onHand) || '0',
                             },
                             qty: isShort(r) ? num(r.shortage) : '',
                           })

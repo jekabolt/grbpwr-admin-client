@@ -55,11 +55,14 @@ export function MarkerBlock({
 
   const [efficiency, setEfficiency] = useState('');
   const [notes, setNotes] = useState('');
+  // Sibling saves refetch the run — don't let that resync wipe an in-progress draft.
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
+    if (dirty) return;
     setEfficiency(decimalToInput(run.run?.markerEfficiencyPct));
     setNotes(run.run?.markerNotes ?? '');
-  }, [run]);
+  }, [run, dirty]);
 
   const save = async () => {
     try {
@@ -70,6 +73,7 @@ export function MarkerBlock({
           markerNotes: notes.trim(),
         },
       });
+      setDirty(false);
       showMessage('Marker saved', 'success');
     } catch (e) {
       showMessage(e instanceof Error ? e.message : 'Failed to save marker', 'error');
@@ -81,6 +85,7 @@ export function MarkerBlock({
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='small'>
           marker / раскладка
+          {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
         </Text>
         {editable && (
           <Button
@@ -105,7 +110,10 @@ export function MarkerBlock({
             disabled={!editable}
             placeholder='fabric utilisation'
             value={efficiency}
-            onChange={(e) => setEfficiency(sanitizeDecimal(e.target.value))}
+            onChange={(e) => {
+              setDirty(true);
+              setEfficiency(sanitizeDecimal(e.target.value));
+            }}
           />
         </label>
         <label className='flex flex-col gap-1'>
@@ -114,7 +122,10 @@ export function MarkerBlock({
             className={cell}
             disabled={!editable}
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            onChange={(e) => {
+              setDirty(true);
+              setNotes(e.target.value);
+            }}
           />
         </label>
       </div>

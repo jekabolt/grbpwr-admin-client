@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_ProductionRunInsert } from 'api/proto-http/admin';
+import { common_ProductionRunInsert, common_ProductionRunLine } from 'api/proto-http/admin';
+import { stockChangeHistoryKeys } from 'components/managers/product/components/stock/useStockChangeHistory';
 import { runStatusToDbFilter } from './options';
 
 // Read-modify-write a single section of a run's insert (R-17). UpdateProductionRun is a
@@ -8,19 +9,25 @@ import { runStatusToDbFilter } from './options';
 // re-fetches the latest run immediately before saving and overrides ONLY its own keys — a
 // marker edit can't clobber concurrently-saved lines, and vice versa. The race window shrinks
 // to the fetch→save gap; a true lock_version on runs is a backend follow-up.
+// `mergeLines` derives the new lines FROM the fresh ones (receive uses it to stamp counted
+// quantities per (product, size) without replacing concurrently-edited lines wholesale).
 export function useUpdateRunSection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
       id,
       patch,
+      mergeLines,
     }: {
       id: number;
       patch: Partial<common_ProductionRunInsert>;
+      mergeLines?: (fresh: common_ProductionRunLine[]) => common_ProductionRunLine[];
     }) => {
       const fresh = await adminService.GetProductionRun({ id });
       const base = (fresh.run?.run ?? {}) as common_ProductionRunInsert;
-      return adminService.UpdateProductionRun({ id, run: { ...base, ...patch } });
+      const run = { ...base, ...patch };
+      if (mergeLines) run.lines = mergeLines(base.lines ?? []);
+      return adminService.UpdateProductionRun({ id, run });
     },
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });
@@ -98,7 +105,12 @@ export function useReceiveProductionRun() {
   return useMutation({
     mutationFn: (input: { runId: number; updateCostPrice: boolean }) =>
       adminService.ReceiveProductionRun(input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: productionRunKeys.all }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: productionRunKeys.all });
+      // Receive posts stock (and possibly cost_price) into each line's PRODUCT — the
+      // product stock-history views must not keep pre-receive data for 5 minutes.
+      qc.invalidateQueries({ queryKey: stockChangeHistoryKeys.all });
+    },
   });
 }
 

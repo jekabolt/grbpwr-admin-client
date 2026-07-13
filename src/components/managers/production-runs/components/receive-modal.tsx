@@ -1,14 +1,14 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { common_ProductionRun, common_ProductionRunInsert } from 'api/proto-http/admin';
+import { common_ProductionRun } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
-import { useReceiveProductionRun, useSaveProductionRun } from './useProductionRuns';
+import { useReceiveProductionRun, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
@@ -35,13 +35,13 @@ export function ReceiveModal({
   const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
   const { canWriteCosting } = usePermissions();
-  const save = useSaveProductionRun();
+  const update = useUpdateRunSection();
   const receive = useReceiveProductionRun();
 
   const [rows, setRows] = useState<Row[]>([]);
   // Setting cost_price is a costing write — off (and disabled) without costing:write.
   const [updateCostPrice, setUpdateCostPrice] = useState(false);
-  const busy = save.isPending || receive.isPending;
+  const busy = update.isPending || receive.isPending;
 
   // Group rows by product (colour-model) for display, keeping each row's flat index for handlers.
   const groups = useMemo(() => {
@@ -54,11 +54,19 @@ export function ReceiveModal({
     return out;
   }, [rows]);
 
-  // Reset per-run state whenever the modal opens for a (different) run. Sort by product then size
-  // so lines group contiguously by colour-model; received defaults to planned ("everything came in"
-  // is one click).
+  // Reset per-run state on the CLOSED → OPEN transition only. The naive [run, open] deps
+  // re-ran mid-flow — step 1's own invalidation refetches `run` on the detail page and the
+  // reset silently re-checked updateCostPrice against the user's explicit choice.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      wasOpen.current = false;
+      return;
+    }
+    if (wasOpen.current) return;
+    wasOpen.current = true;
+    // Sort by product then size so lines group contiguously by colour-model; received defaults
+    // to planned ("everything came in" is one click).
     setRows(
       (run?.run?.lines ?? [])
         .map((l) => ({
@@ -98,19 +106,35 @@ export function ReceiveModal({
         return;
       }
     }
-    const insert: common_ProductionRunInsert = {
-      ...run.run,
-      lines: rows.map((r) => ({
-        productId: r.productId,
-        sizeId: r.sizeId,
-        plannedQty: r.plannedQty,
-        receivedQty: Number(r.received) || 0,
-        defectQty: Number(r.defect) || 0,
-      })),
-    };
+    // The receive RPC requires at least one counted unit — catch it before step 1
+    // stamps quantities on a run that then can't be received.
+    if (!rows.some((r) => (Number(r.received) || 0) > 0)) {
+      showMessage('Nothing to receive — every received quantity is 0', 'error');
+      return;
+    }
+    // Step 1 persists counts via read-modify-write like every other section: merge this
+    // modal's received/defect into the FRESHLY fetched lines by (product, size) — the `run`
+    // prop can be a stale list-cache snapshot and a full-replace from it would silently
+    // undo lines/costs/marker edits saved after that snapshot.
+    const counted = new Map(rows.map((r) => [`${r.productId}:${r.sizeId}`, r]));
     try {
-      // 1) persist the counted quantities, 2) post stock into each line's product + opt. cost_price.
-      await save.mutateAsync({ id: run.id, run: insert });
+      await update.mutateAsync({
+        id: run.id,
+        patch: {},
+        mergeLines: (freshLines) =>
+          freshLines.map((l) => {
+            const r = counted.get(`${l.productId ?? 0}:${l.sizeId ?? 0}`);
+            return r
+              ? { ...l, receivedQty: Number(r.received) || 0, defectQty: Number(r.defect) || 0 }
+              : l;
+          }),
+      });
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : 'Failed to save received counts', 'error');
+      return;
+    }
+    try {
+      // Step 2 posts stock into each line's product + optionally sets cost_price.
       const res = await receive.mutateAsync({ runId: run.id, updateCostPrice });
       showMessage(
         res.costPriceUpdated
@@ -120,7 +144,13 @@ export function ReceiveModal({
       );
       onOpenChange(false);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to receive run', 'error');
+      // The counts from step 1 ARE saved — say so, or the user can't tell what state the run is in.
+      showMessage(
+        `Counts saved, but stock was NOT posted: ${
+          e instanceof Error ? e.message : 'receive failed'
+        } — fix and press receive again`,
+        'error',
+      );
     }
   };
 
@@ -144,6 +174,11 @@ export function ReceiveModal({
           </DialogPrimitives.Description>
 
           <div className='flex flex-col gap-4 p-4'>
+            {rows.length === 0 ? (
+              <Text variant='inactive' size='small'>
+                no lines planned — plan quantities on the run page first
+              </Text>
+            ) : null}
             {groups.map((g) => (
               <div key={g.productId} className='flex flex-col gap-1'>
                 <Text size='small'>
@@ -214,7 +249,13 @@ export function ReceiveModal({
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>
-            <Button type='button' variant='main' size='lg' disabled={busy} onClick={submit}>
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              disabled={busy || rows.length === 0}
+              onClick={submit}
+            >
               {busy ? 'receiving…' : 'receive'}
             </Button>
           </div>
@@ -244,19 +285,19 @@ function RowInputs({
       <Text size='small'>
         {label} <span className='text-textInactiveColor'>· plan {planned}</span>
       </Text>
+      {/* Whole units only — sanitize to digits like the lines grid; a typed "1.5" would
+          otherwise pass the >= 0 guard and 400 on the integer proto field mid-flow. */}
       <input
         className={`${cell} w-20`}
-        type='number'
-        min='0'
+        inputMode='numeric'
         value={received}
-        onChange={(e) => onReceived(e.target.value)}
+        onChange={(e) => onReceived(e.target.value.replace(/[^0-9]/g, ''))}
       />
       <input
         className={`${cell} w-20`}
-        type='number'
-        min='0'
+        inputMode='numeric'
         value={defect}
-        onChange={(e) => onDefect(e.target.value)}
+        onChange={(e) => onDefect(e.target.value.replace(/[^0-9]/g, ''))}
       />
     </>
   );
