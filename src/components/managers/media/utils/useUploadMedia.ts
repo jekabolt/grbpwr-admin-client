@@ -36,6 +36,25 @@ function getContentTypeFromDataUrl(dataUrl: string): string {
   return match ? match[1] : 'image/jpeg';
 }
 
+// Maps an upload failure to a clear, media-specific message. The grpc-gateway surfaces the
+// gRPC code as an HTTP status on the thrown error: INVALID_ARGUMENT → 400 (bad file — the
+// backend rejects images over 40 megapixels / 28 MB and videos that aren't a real MP4/WebM),
+// UNAUTHENTICATED/PERMISSION_DENIED → 401/403, INTERNAL → 5xx (retry). Auth error texts are
+// intentionally generic on the backend, so we branch on the status code, not the message.
+function mediaUploadErrorMessage(error: unknown, isVideo: boolean): string {
+  const status = (error as { status?: number })?.status;
+  const raw = error instanceof Error ? error.message : '';
+  if (status === 400) {
+    return isVideo
+      ? 'Video rejected — it must be a valid MP4 or WebM file no larger than 50 MB.'
+      : 'Image rejected — it must be a valid image no larger than 40 megapixels (≈28 MB).';
+  }
+  if (status === 401) return 'Session expired — please sign in again.';
+  if (status === 403) return 'You do not have permission to upload media.';
+  if (status && status >= 500) return 'Upload failed on the server — please try again.';
+  return raw || 'Failed to upload media.';
+}
+
 export type UploadMediaInput = File | string;
 
 export function useUploadMedia() {
@@ -78,9 +97,14 @@ export function useUploadMedia() {
       }
 
       if (!isVideo) {
-        const response = await adminService.UploadContentImage({
-          rawB64Image: base64,
-        });
+        let response;
+        try {
+          response = await adminService.UploadContentImage({
+            rawB64Image: base64,
+          });
+        } catch (e) {
+          throw new Error(mediaUploadErrorMessage(e, false));
+        }
 
         if (!response.media) {
           throw new Error('Upload image failed: empty response');
@@ -90,10 +114,15 @@ export function useUploadMedia() {
       }
 
       const raw = trimBeforeBase64(base64);
-      const response = await adminService.UploadContentVideo({
-        raw,
-        contentType,
-      });
+      let response;
+      try {
+        response = await adminService.UploadContentVideo({
+          raw,
+          contentType,
+        });
+      } catch (e) {
+        throw new Error(mediaUploadErrorMessage(e, true));
+      }
 
       if (!response.media) {
         throw new Error('Upload video failed: empty response');

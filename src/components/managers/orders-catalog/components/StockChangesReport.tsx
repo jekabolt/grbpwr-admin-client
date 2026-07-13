@@ -1,6 +1,7 @@
 import { subDays } from 'date-fns';
 import { useState } from 'react';
 import { adminService } from 'api/api';
+import { StockChangeRow } from 'api/proto-http/admin';
 import {
   downloadCsv,
   stockChangeRowsToCsv,
@@ -40,14 +41,27 @@ export function StockChangesReport() {
     }
     setIsExporting(true);
     try {
-      const response = await adminService.ListStockChanges({
-        from: toRfc3339DateOnly(dateFrom, false),
-        to: toRfc3339DateOnly(dateTo, true),
-        source: undefined,
-        limit: -1,
-        offset: undefined,
-      });
-      const rows = response.changes ?? [];
+      // The backend clamps list limits (>1000 → 1000, ≤0 → default 50), so a single
+      // "give me everything" request can silently truncate. Page through explicitly using
+      // the response `total` so the export always covers the full date range.
+      const PAGE = 1000;
+      const MAX_PAGES = 100; // safety cap: 100k rows
+      const rows: StockChangeRow[] = [];
+      let offset = 0;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const response = await adminService.ListStockChanges({
+          from: toRfc3339DateOnly(dateFrom, false),
+          to: toRfc3339DateOnly(dateTo, true),
+          source: undefined,
+          limit: PAGE,
+          offset,
+        });
+        const batch = response.changes ?? [];
+        rows.push(...batch);
+        const total = response.total ?? 0;
+        if (batch.length < PAGE || rows.length >= total) break;
+        offset += batch.length;
+      }
       const csv = stockChangeRowsToCsv(rows);
       const filename = `stock-changes-${dateFrom}-to-${dateTo}.csv`;
       downloadCsv(csv, filename);
