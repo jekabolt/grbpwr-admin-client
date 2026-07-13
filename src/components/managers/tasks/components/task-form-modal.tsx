@@ -22,6 +22,7 @@ import {
   fittingConfig,
   orderConfig,
   productConfig,
+  runConfig,
   sampleConfig,
   techCardConfig,
 } from '../utils/entity-configs';
@@ -309,6 +310,19 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                         value={field.value}
                         onChange={field.onChange}
                         config={sampleConfig}
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='партия'>
+                  <Controller
+                    control={control}
+                    name='productionRunId'
+                    render={({ field }) => (
+                      <EntityPicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        config={runConfig}
                       />
                     )}
                   />

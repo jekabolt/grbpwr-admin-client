@@ -3,11 +3,13 @@ import type {
   common_Fitting,
   common_Order,
   common_Product,
+  common_ProductionRun,
   common_Sample,
   common_TechCardListItem,
 } from 'api/proto-http/admin';
 import type { common_ArchiveList } from 'api/proto-http/frontend';
 import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
+import { runStatusLabel } from 'components/managers/production-runs/components/options';
 import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
 import { EntityConfig, EntityOption } from '../components/entity-picker';
 
@@ -218,6 +220,38 @@ export const sampleConfig: EntityConfig = {
   resolve: async (value) => {
     const r = await adminService.GetSample({ id: value as number });
     return r?.sample ? sampleOption(r.sample) : null;
+  },
+};
+
+// ---- production run / партия (ListProductionRuns has no text search → client filter) ---
+// A run has no name; label from its id + status, sublabel carrying the owning style.
+function runOption(r: common_ProductionRun): EntityOption {
+  const tc = r.run?.techCardId;
+  return {
+    value: r.id ?? 0,
+    label: `партия #${r.id} · ${runStatusLabel(r.run?.status)}`,
+    sublabel: tc ? `техкарта #${tc}` : `#${r.id}`,
+  };
+}
+
+export const runConfig: EntityConfig = {
+  kind: 'run',
+  empty: 0,
+  mode: 'client',
+  searchPlaceholder: 'search партии by #/status…',
+  emptyResult: 'no production runs',
+  load: async () => {
+    const r = await adminService.ListProductionRuns({
+      techCardId: undefined,
+      status: undefined,
+      limit: 100,
+      offset: undefined,
+    });
+    return (r.runs ?? []).map(runOption);
+  },
+  resolve: async (value) => {
+    const r = await adminService.GetProductionRun({ id: value as number });
+    return r?.run ? runOption(r.run) : null;
   },
 };
 

@@ -1,6 +1,6 @@
 import { TaskInsert } from '../api/types';
 
-export type LinkKind = 'techcard' | 'product' | 'order' | 'archive' | 'fitting' | 'sample';
+export type LinkKind = 'techcard' | 'product' | 'order' | 'archive' | 'fitting' | 'sample' | 'run';
 
 export interface TaskLink {
   kind: LinkKind;
@@ -53,8 +53,9 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
       label: `примерка #${t.fittingId}`,
       to: `/fittings/${t.fittingId}`,
     });
-  // A sample lives inside its tech card's samples tab; deep-link there when the owning style is
-  // also linked, else fall back to the tech-cards list (no standalone sample route).
+  // A sample lives inside its tech card's samples tab. The task's techCardId is only a guess at
+  // the owning style (the two pickers are independent) — LinkChip re-derives the true deep link
+  // from the sample's own techCardId once GetSample resolves; this is the pre-resolution fallback.
   if (t.sampleId > 0)
     links.push({
       kind: 'sample',
@@ -64,6 +65,13 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
         t.techCardId > 0
           ? `/tech-cards/${t.techCardId}?tab=samples&sample=${t.sampleId}`
           : `/tech-cards`,
+    });
+  if (t.productionRunId > 0)
+    links.push({
+      kind: 'run',
+      id: t.productionRunId,
+      label: `партия #${t.productionRunId}`,
+      to: `/production-runs/${t.productionRunId}`,
     });
   return links;
 }
@@ -75,6 +83,7 @@ export function taskLinkCount(t: TaskInsert): number {
     (t.orderUuid ? 1 : 0) +
     (t.archiveId > 0 ? 1 : 0) +
     (t.fittingId > 0 ? 1 : 0) +
-    (t.sampleId > 0 ? 1 : 0)
+    (t.sampleId > 0 ? 1 : 0) +
+    (t.productionRunId > 0 ? 1 : 0)
   );
 }

@@ -5,9 +5,9 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { decimalToInput } from 'utils/decimal';
+import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
-import { opexCategoryOptions } from '../utils/options';
+import { isRecurringLine, opexCategoryOptions } from '../utils/options';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
@@ -15,17 +15,20 @@ type Draft = { category: string; label: string; amount: string; currency: string
 
 // Add / edit one manual OPEX line for a month. OpexLineInsert carries no id, so the server upserts
 // by natural key (month, category, label): an amount-only edit is a plain upsert, but changing the
-// category/label first deletes the old row so it isn't orphaned.
+// category/label also deletes the old row (after the new one is safely written) so it isn't
+// orphaned. `lines` = the month's current lines, used to refuse silent natural-key clobbers.
 export function LineFormModal({
   open,
   onOpenChange,
   month,
   existing,
+  lines = [],
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   month: string;
   existing?: OpexLine;
+  lines?: OpexLine[];
 }) {
   const { showMessage } = useSnackBarStore();
   const upsert = useUpsertOpexLines();
@@ -62,24 +65,58 @@ export function LineFormModal({
       showMessage('Enter a label and amount', 'error');
       return;
     }
+    const amountNum = parseDecimalNumber(d.amount);
+    if (!Number.isFinite(amountNum) || amountNum < 0) {
+      showMessage('Amount must be a non-negative number', 'error');
+      return;
+    }
     const monthApi = monthToApi(month);
     const line = {
       month: monthApi,
       category: d.category.trim() || 'other',
       label: d.label.trim(),
-      amount: { value: d.amount.trim() },
+      amount: { value: normalizeDecimalInput(d.amount) },
       currency: d.currency,
       note: d.note.trim(),
     };
+    // The server upserts by (month, category, label): refuse to silently clobber a
+    // different existing line — a worker-owned ⟳ line especially — under the same key.
+    const collision = lines.find(
+      (l) =>
+        l.id !== existing?.id &&
+        (l.category || 'other') === line.category &&
+        (l.label || '') === line.label,
+    );
+    if (collision) {
+      showMessage(
+        isRecurringLine(collision)
+          ? 'A recurring (⟳) line already uses this category + label this month'
+          : 'A line with this category + label already exists this month — edit that line instead',
+        'error',
+      );
+      return;
+    }
     try {
-      // The natural key changed → drop the old row before writing the new one.
+      // Write the new row first, THEN drop the old one when the natural key changed:
+      // the reverse order loses the line entirely if the upsert fails after the delete.
+      await upsert.mutateAsync([line]);
       const keyChanged =
         existing &&
         (existing.category !== line.category ||
           existing.label !== line.label ||
           existing.month !== monthApi);
-      if (existing?.id && keyChanged) await del.mutateAsync(existing.id);
-      await upsert.mutateAsync([line]);
+      if (existing?.id && keyChanged) {
+        try {
+          await del.mutateAsync(existing.id);
+        } catch {
+          showMessage(
+            'Line saved under the new name, but the old line could not be removed — delete it manually',
+            'error',
+          );
+          onOpenChange(false);
+          return;
+        }
+      }
       showMessage(existing ? 'Line saved' : 'Line added', 'success');
       onOpenChange(false);
     } catch (e) {

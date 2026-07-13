@@ -1,3 +1,4 @@
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useSearchParams } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { MonthlyTab } from './components/monthly-tab';
@@ -6,6 +7,7 @@ import { RecurringTab } from './components/recurring-tab';
 // OPEX v2 (NF-08): monthly fixed-cost lines + recurring templates. Replaces the analytics blind-write
 // modal. View lives in the URL (R-1) so a tab is shareable.
 export function OpexPage() {
+  const { canReadCosting } = usePermissions();
   const [params, setParams] = useSearchParams();
   const view = params.get('view') === 'recurring' ? 'recurring' : 'monthly';
   const setView = (v: 'monthly' | 'recurring') =>
@@ -52,7 +54,17 @@ export function OpexPage() {
         </div>
       </div>
 
-      {view === 'recurring' ? <RecurringTab /> : <MonthlyTab />}
+      {/* OPEX is money-only: without costing:read the backend nulls every amount and the page
+          would render rows that read as zero cost — say so instead of faking numbers. */}
+      {!canReadCosting ? (
+        <Text variant='inactive' size='small'>
+          OPEX amounts require costing access — ask an admin for the costing section.
+        </Text>
+      ) : view === 'recurring' ? (
+        <RecurringTab />
+      ) : (
+        <MonthlyTab />
+      )}
     </div>
   );
 }

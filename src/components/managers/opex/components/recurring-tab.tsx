@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { decimalToInput } from 'utils/decimal';
+import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   monthToApi,
   useArchiveOpexRecurring,
@@ -29,7 +29,7 @@ export function RecurringTab() {
   const { canWriteCosting } = usePermissions();
   const { showMessage } = useSnackBarStore();
   const [showArchived, setShowArchived] = useState(false);
-  const { data, isLoading } = useOpexRecurring(showArchived);
+  const { data, isLoading, isError, refetch } = useOpexRecurring(showArchived);
   const archive = useArchiveOpexRecurring();
   const rows = data?.recurring ?? [];
 
@@ -72,6 +72,19 @@ export function RecurringTab() {
         <Text variant='inactive' size='small'>
           loading…
         </Text>
+      ) : isError ? (
+        <div className='flex items-center gap-3'>
+          <Text variant='error' size='small'>
+            failed to load templates
+          </Text>
+          <button
+            type='button'
+            className='text-textBaseSize uppercase underline'
+            onClick={() => refetch()}
+          >
+            retry
+          </button>
+        </div>
       ) : rows.length === 0 ? (
         <Text variant='inactive' size='small'>
           no recurring templates
@@ -217,13 +230,23 @@ function RecurringFormModal({
       showMessage('Enter a label, amount and active-from month', 'error');
       return;
     }
+    const amountNum = parseDecimalNumber(d.amount);
+    if (!Number.isFinite(amountNum) || amountNum < 0) {
+      showMessage('Amount must be a non-negative number', 'error');
+      return;
+    }
+    // YYYY-MM strings compare lexicographically, so this is a real month comparison.
+    if (d.activeTo && d.activeTo < d.activeFrom) {
+      showMessage('Active-to month is before active-from', 'error');
+      return;
+    }
     try {
       await upsert.mutateAsync({
         id: existing?.id ?? 0,
         recurring: {
           label: d.label.trim(),
           category: d.category.trim() || 'other',
-          amount: { value: d.amount.trim() },
+          amount: { value: normalizeDecimalInput(d.amount) },
           currency: d.currency,
           activeFrom: monthToApi(d.activeFrom),
           activeTo: d.activeTo ? monthToApi(d.activeTo) : '',
