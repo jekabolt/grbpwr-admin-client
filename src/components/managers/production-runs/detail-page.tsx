@@ -45,6 +45,10 @@ export function ProductionRunDetail() {
 
   const locked = isRunLocked(ins?.status);
   const receivable = isRunReceivable(ins?.status);
+  // Lines planned but not yet tied to a product can't be booked on receive (NF-06) — hint it.
+  const unassignedPlanned = (ins?.lines ?? []).filter(
+    (l) => (l.plannedQty ?? 0) > 0 && !l.productId,
+  ).length;
 
   const confirmDelete = () =>
     del.mutate(runId, {
@@ -93,6 +97,11 @@ export function ProductionRunDetail() {
                 variant='main'
                 size='lg'
                 className='uppercase'
+                title={
+                  unassignedPlanned
+                    ? `${unassignedPlanned} line(s) have no product — publish them or zero their received qty`
+                    : undefined
+                }
                 onClick={() => setReceiveOpen(true)}
               >
                 receive

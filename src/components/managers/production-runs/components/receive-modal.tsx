@@ -4,7 +4,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
@@ -43,23 +43,48 @@ export function ReceiveModal({
   const [updateCostPrice, setUpdateCostPrice] = useState(false);
   const busy = save.isPending || receive.isPending;
 
-  // Reset per-run state whenever the modal opens for a (different) run.
+  // Group rows by product (colour-model) for display, keeping each row's flat index for handlers.
+  const groups = useMemo(() => {
+    const out: { productId: number; items: { r: Row; i: number }[] }[] = [];
+    rows.forEach((r, i) => {
+      const g = out.find((x) => x.productId === r.productId);
+      if (g) g.items.push({ r, i });
+      else out.push({ productId: r.productId, items: [{ r, i }] });
+    });
+    return out;
+  }, [rows]);
+
+  // Reset per-run state whenever the modal opens for a (different) run. Sort by product then size
+  // so lines group contiguously by colour-model; received defaults to planned ("everything came in"
+  // is one click).
   useEffect(() => {
     if (!open) return;
     setRows(
-      (run?.run?.lines ?? []).map((l) => ({
-        productId: l.productId ?? 0,
-        sizeId: l.sizeId ?? 0,
-        plannedQty: l.plannedQty ?? 0,
-        received: l.receivedQty != null ? String(l.receivedQty) : String(l.plannedQty ?? 0),
-        defect: l.defectQty != null ? String(l.defectQty) : '0',
-      })),
+      (run?.run?.lines ?? [])
+        .map((l) => ({
+          productId: l.productId ?? 0,
+          sizeId: l.sizeId ?? 0,
+          plannedQty: l.plannedQty ?? 0,
+          received: l.receivedQty != null ? String(l.receivedQty) : String(l.plannedQty ?? 0),
+          defect: l.defectQty != null ? String(l.defectQty) : '0',
+        }))
+        .sort((a, b) => a.productId - b.productId || a.sizeId - b.sizeId),
     );
     setUpdateCostPrice(canWriteCosting);
   }, [run, open, canWriteCosting]);
 
   const submit = async () => {
     if (!run?.id || !run.run) return;
+    // NF-06: a line with received > 0 is booked into its own product — it must have one. Publish
+    // the colour-model as a product (or zero its received qty) before receiving.
+    const orphans = rows.filter((r) => (Number(r.received) || 0) > 0 && !r.productId);
+    if (orphans.length > 0) {
+      showMessage(
+        `${orphans.length} line(s) have no product — publish the product or set received to 0`,
+        'error',
+      );
+      return;
+    }
     // Guard the counts: no negatives, and defects can't exceed what was received.
     for (const r of rows) {
       const rec = Number(r.received);
@@ -119,40 +144,49 @@ export function ReceiveModal({
           </DialogPrimitives.Description>
 
           <div className='flex flex-col gap-4 p-4'>
-            <div className='grid grid-cols-[1fr_auto_auto] items-center gap-2'>
-              <Text variant='uppercase' size='small'>
-                product · size
-              </Text>
-              <Text variant='uppercase' size='small'>
-                received
-              </Text>
-              <Text variant='uppercase' size='small'>
-                defect
-              </Text>
-              {rows.map((r, i) => (
-                <RowInputs
-                  key={`${r.productId}-${r.sizeId}`}
-                  label={`#${r.productId} · ${findInDictionary(dictionary, r.sizeId, 'size') || r.sizeId}`}
-                  planned={r.plannedQty}
-                  received={r.received}
-                  defect={r.defect}
-                  onReceived={(v) =>
-                    setRows((prev) => {
-                      const next = [...prev];
-                      next[i] = { ...next[i], received: v };
-                      return next;
-                    })
-                  }
-                  onDefect={(v) =>
-                    setRows((prev) => {
-                      const next = [...prev];
-                      next[i] = { ...next[i], defect: v };
-                      return next;
-                    })
-                  }
-                />
-              ))}
-            </div>
+            {groups.map((g) => (
+              <div key={g.productId} className='flex flex-col gap-1'>
+                <Text size='small'>
+                  {g.productId
+                    ? `#${g.productId}`
+                    : '(unassigned — publish a product to book stock)'}
+                </Text>
+                <div className='grid grid-cols-[1fr_auto_auto] items-center gap-2'>
+                  <Text variant='uppercase' size='small'>
+                    size
+                  </Text>
+                  <Text variant='uppercase' size='small'>
+                    received
+                  </Text>
+                  <Text variant='uppercase' size='small'>
+                    defect
+                  </Text>
+                  {g.items.map(({ r, i }) => (
+                    <RowInputs
+                      key={`${r.productId}-${r.sizeId}`}
+                      label={String(findInDictionary(dictionary, r.sizeId, 'size') || r.sizeId)}
+                      planned={r.plannedQty}
+                      received={r.received}
+                      defect={r.defect}
+                      onReceived={(v) =>
+                        setRows((prev) => {
+                          const next = [...prev];
+                          next[i] = { ...next[i], received: v };
+                          return next;
+                        })
+                      }
+                      onDefect={(v) =>
+                        setRows((prev) => {
+                          const next = [...prev];
+                          next[i] = { ...next[i], defect: v };
+                          return next;
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
 
             {canWriteCosting && (
               <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
