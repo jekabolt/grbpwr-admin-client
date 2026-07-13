@@ -1,3 +1,4 @@
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
@@ -32,7 +33,68 @@ const emptyBomItem = {
   fabricWeightGsm: '',
   fabricDirection: 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
   wastagePercent: '',
+  materialId: 0,
 };
+
+// Optionally link this BOM line to a catalog Material. Picking one snapshots the catalog's
+// meta (name/section/supplier/composition/spec/unit/fabric + latest price) onto the line, so
+// the line stays self-contained even after the catalog changes. `materialId` records the link.
+function MaterialLinkField({ index }: { index: number }) {
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const materialId = useWatch({ control, name: `bomItems.${index}.materialId` }) as
+    | number
+    | undefined;
+  const { data } = useMaterials('', false);
+  const materials = data?.materials ?? [];
+
+  const pick = (idStr: string) => {
+    const id = Number(idStr) || 0;
+    setValue(`bomItems.${index}.materialId`, id, { shouldDirty: true });
+    const m = materials.find((x) => x.id === id);
+    if (!m) return;
+    const put = (field: string, val?: string) => {
+      if (val) setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
+    };
+    put('name', m.name);
+    put('section', m.section);
+    put('supplier', m.supplier);
+    put('supplierRef', m.supplierRef);
+    put('composition', m.composition);
+    put('spec', m.spec);
+    put('unit', m.unit);
+    put('fabricWidth', m.fabricWidth?.value);
+    put('fabricWeightGsm', m.fabricWeightGsm?.value);
+    // latest_price is costing-gated (absent without access) — seed price only when present.
+    put('unitPrice', m.latestPrice?.price?.value);
+    put('currency', m.latestPrice?.currency);
+  };
+
+  return (
+    <div className='space-y-1 lg:col-span-3'>
+      <Text size='small' variant='label'>
+        catalog material (optional)
+      </Text>
+      <select
+        className='w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize'
+        value={materialId || 0}
+        onChange={(e) => pick(e.target.value)}
+      >
+        <option value={0}>— not linked (free text) —</option>
+        {materials.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+            {m.supplier ? ` · ${m.supplier}` : ''}
+          </option>
+        ))}
+      </select>
+      {materialId ? (
+        <Text size='small' variant='inactive'>
+          Поля ниже — снимок из справочника; их можно править для этого стиля.
+        </Text>
+      ) : null}
+    </div>
+  );
+}
 
 // One catalog article (Sheet «Спецификация»). The BOM is a pure material-article catalog:
 // identity + supplier + price + fabric data. Which article goes on which part, in what
@@ -63,6 +125,7 @@ function BomItemRow({
       </div>
 
       <div className='grid grid-cols-1 gap-3 lg:grid-cols-3'>
+        <MaterialLinkField index={index} />
         <SelectField
           name={`bomItems.${index}.section`}
           label='section *'

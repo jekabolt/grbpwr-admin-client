@@ -187,6 +187,9 @@ const bomItemSchema = z.object({
   fabricWeightGsm: z.string().optional().default(''),
   fabricDirection: z.string().optional().default('TECH_CARD_FABRIC_DIRECTION_UNKNOWN'),
   wastagePercent: z.string().optional().default(''),
+  // optional link to a catalog Material (0 = unlinked free-text line). The line keeps its own
+  // snapshot fields regardless of the link.
+  materialId: z.number().optional().default(0),
 });
 
 // One construction-description aspect (Sheet «Титул», lower block): freeform text + optional
@@ -552,6 +555,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           ? b.fabricDirection
           : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
       wastagePercent: decimalToInput(b.wastagePercent),
+      materialId: b.materialId ?? 0,
     })),
     details: (insert?.details ?? []).map((d) => ({
       key: d.key || '',
@@ -871,6 +875,7 @@ export function mapFormToTechCardInsert(
       fabricDirection: (b.fabricDirection ||
         'TECH_CARD_FABRIC_DIRECTION_UNKNOWN') as common_TechCardFabricDirection,
       wastagePercent: inputToDecimal(b.wastagePercent),
+      materialId: b.materialId || 0,
     })),
     details: (data.details ?? [])
       .map((d) => ({

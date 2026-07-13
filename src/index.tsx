@@ -84,6 +84,9 @@ const TechCard = lazy(() =>
 const TechCardPrint = lazy(() =>
   import('components/managers/tech-card/print-page').then((m) => ({ default: m.TechCardPrint })),
 );
+const Materials = lazy(() =>
+  import('components/managers/materials').then((m) => ({ default: m.Materials })),
+);
 const Accounts = lazy(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
@@ -222,6 +225,7 @@ root.render(
                   <Route path={ROUTES.techCards} element={<TechCards />} />
                   <Route path={ROUTES.addTechCard} element={<TechCard />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
+                  <Route path={ROUTES.materials} element={<Materials />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
                   <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
                   <Route path={ROUTES.accounts} element={<Accounts />} />

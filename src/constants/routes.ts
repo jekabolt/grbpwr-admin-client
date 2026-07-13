@@ -85,6 +85,7 @@ export enum ROUTES {
   addTechCard = '/add-tech-card',
   singleTechCard = '/tech-cards/:id',
   techCardPrint = '/tech-cards/:id/print',
+  materials = '/materials',
   tasks = '/tasks',
   taskDetails = '/tasks/:id',
   accounts = '/accounts',
@@ -119,6 +120,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'models', route: ROUTES.models, section: SECTION.models },
       { label: 'fittings', route: ROUTES.fittings, section: SECTION.fittings },
       { label: 'tech cards', route: ROUTES.techCards, section: SECTION.techCards },
+      { label: 'materials', route: ROUTES.materials, section: SECTION.techCards },
     ],
   },
   {
