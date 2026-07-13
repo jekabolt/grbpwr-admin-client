@@ -1,41 +1,35 @@
-import { common_Material } from 'api/proto-http/admin';
-import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { techCardBomSectionOptions } from 'constants/filter';
-import { SECTION } from 'constants/routes';
-import { useState } from 'react';
-import { Button } from 'ui/components/button';
+import { useSearchParams } from 'react-router-dom';
 import Text from 'ui/components/text';
-import { decimalToInput } from 'utils/decimal';
-import { MaterialModal } from './components/material-modal';
-import { MaterialPricesModal } from './components/material-prices-modal';
-import { useArchiveMaterial, useMaterials } from './components/useMaterials';
+import { cn } from 'lib/utility';
+import { CatalogTab } from './components/catalog-tab';
+import { StockTab } from './components/stock-tab';
+import { MovementsTab } from './components/movements-tab';
 
-const sectionLabel = (v?: string) =>
-  techCardBomSectionOptions.find((o) => o.value === v)?.label ?? '—';
+type Tab = 'catalog' | 'stock' | 'movements';
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'catalog', label: 'catalog' },
+  { id: 'stock', label: 'stock' },
+  { id: 'movements', label: 'movements' },
+];
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
-
+// /materials is three views of one nomenclature: the catalog (articles + prices), the warehouse
+// stock (balances + valuation), and the append-only movement ledger. The active tab lives in the
+// URL (?tab=) so a filtered stock/movements view is a shareable link (R-1).
 export function Materials() {
-  const { canWrite, canReadCosting } = usePermissions();
-  const canEdit = canWrite(SECTION.techCards);
-  const [section, setSection] = useState('');
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const [editing, setEditing] = useState<common_Material | undefined>();
-  const [editOpen, setEditOpen] = useState(false);
-  const [pricesOf, setPricesOf] = useState<common_Material | undefined>();
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get('tab') as Tab) || 'catalog';
 
-  const { data, isLoading } = useMaterials(section, includeArchived);
-  const archive = useArchiveMaterial();
-  const materials = data?.materials ?? [];
-
-  const openCreate = () => {
-    setEditing(undefined);
-    setEditOpen(true);
-  };
-  const openEdit = (m: common_Material) => {
-    setEditing(m);
-    setEditOpen(true);
-  };
+  const select = (id: Tab) =>
+    setParams(
+      (prev) => {
+        // Switching tab drops the other tab's filters so a stale ?section=/?type= can't leak across.
+        const p = new URLSearchParams();
+        if (prev.get('material')) p.set('material', prev.get('material')!);
+        p.set('tab', id);
+        return p;
+      },
+      { replace: true },
+    );
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
@@ -43,105 +37,26 @@ export function Materials() {
         <Text variant='uppercase' size='large'>
           materials
         </Text>
-        {canEdit && (
-          <Button size='lg' variant='main' className='uppercase' onClick={openCreate}>
-            new material
-          </Button>
-        )}
       </div>
 
-      <div className='flex flex-wrap items-center gap-3'>
-        <select className={cell} value={section} onChange={(e) => setSection(e.target.value)}>
-          <option value=''>all sections</option>
-          {techCardBomSectionOptions.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <label className='flex items-center gap-2'>
-          <input
-            type='checkbox'
-            checked={includeArchived}
-            onChange={(e) => setIncludeArchived(e.target.checked)}
-          />
-          <Text size='small'>include archived</Text>
-        </label>
+      <div className='flex items-center gap-4 border-b border-textInactiveColor'>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type='button'
+            onClick={() => select(t.id)}
+            className={cn(
+              'border-b-2 px-1 pb-2 text-textBaseSize uppercase transition-colors',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+              tab === t.id ? 'border-textColor' : 'border-transparent hover:opacity-70',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {isLoading ? (
-        <Text size='small'>loading…</Text>
-      ) : materials.length === 0 ? (
-        <Text variant='inactive' size='small'>
-          no materials
-        </Text>
-      ) : (
-        <div className='flex flex-col gap-1'>
-          {materials.map((m) => (
-            <div
-              key={m.id}
-              className='flex flex-wrap items-center justify-between gap-2 border border-textInactiveColor p-2'
-            >
-              <div className='flex flex-col'>
-                <Text size='small'>
-                  {m.name}
-                  {m.archived ? ' · archived' : ''}
-                </Text>
-                <Text variant='inactive' size='small'>
-                  {sectionLabel(m.section)}
-                  {m.supplier ? ` · ${m.supplier}` : ''}
-                  {m.unit ? ` · ${m.unit}` : ''}
-                  {canReadCosting && m.latestPrice?.price?.value
-                    ? ` · ${decimalToInput(m.latestPrice.price)} ${m.latestPrice.currency || ''}`
-                    : ''}
-                </Text>
-              </div>
-              <div className='flex items-center gap-2'>
-                {canReadCosting && (
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='lg'
-                    className='uppercase'
-                    onClick={() => setPricesOf(m)}
-                  >
-                    prices
-                  </Button>
-                )}
-                {canEdit && (
-                  <>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='lg'
-                      className='uppercase'
-                      onClick={() => openEdit(m)}
-                    >
-                      edit
-                    </Button>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='lg'
-                      className='uppercase'
-                      onClick={() => m.id && archive.mutate({ id: m.id, archived: !m.archived })}
-                    >
-                      {m.archived ? 'restore' : 'archive'}
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <MaterialModal open={editOpen} onOpenChange={setEditOpen} material={editing} />
-      <MaterialPricesModal
-        open={pricesOf != null}
-        onOpenChange={(v) => !v && setPricesOf(undefined)}
-        material={pricesOf}
-      />
+      {tab === 'stock' ? <StockTab /> : tab === 'movements' ? <MovementsTab /> : <CatalogTab />}
     </div>
   );
 }
