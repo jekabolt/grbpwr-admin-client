@@ -2009,6 +2009,14 @@ export type TechCardInsert = {
   callouts: TechCardCallout[] | undefined;
   revisions: TechCardRevision[] | undefined;
   // materials (Phase 2): bill of materials (article catalog) and colourways (recipes).
+  // CONTRACT (nf05-01): downstream references into bom_items and colorways are POSITIONAL, by index,
+  // and every write is a full replace (there are no stable ids to reference across a save). So when a
+  // BOM line or colourway is removed or reordered, the client MUST renumber all downstream indices in
+  // the SAME payload — colorway usages' bom_item_index, operations' bom_item_index, and pieces'
+  // colorway_index / bom_item_index / fusing_bom_item_index. An index left pointing at a shifted row
+  // silently maps a detail to the wrong material/colourway (data that goes to the factory); an
+  // out-of-range index is rejected, but an in-range-but-wrong one is not. The server range-checks but
+  // cannot detect a wrong-but-valid index.
   bomItems: TechCardBomItem[] | undefined;
   colorways: TechCardColorway[] | undefined;
   // production (Phase 3): construction, operations, labels, packaging, costing.
@@ -2061,6 +2069,10 @@ export type TechCardListItem = {
   updatedAt: wellKnownTimestamp | undefined;
   approvalState: TechCardApprovalState | undefined;
   lockVersion: number | undefined;
+  // Thumbnail URL for a grid/gallery view (idea gallery). For an IDEA card it is the first
+  // moodboard image; otherwise the PREVIEW-kind sketch (falling back to the first technical, then any
+  // media). Empty when the card has no media. Resolved server-side to avoid an N+1 GetTechCard.
+  previewUrl: string | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
@@ -2291,6 +2303,9 @@ export type SampleInsert = {
   notes: string | undefined;
   startedAt: string | undefined;
   finishedAt: string | undefined;
+  mediaIds: number[] | undefined;
+  patternUrl: string | undefined;
+  patternNote: string | undefined;
 };
 
 // SampleCost is the composed cost of a sample in the base currency (confidential; stripped without
@@ -2311,6 +2326,7 @@ export type Sample = {
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   cost: SampleCost | undefined;
+  media: MediaFull[] | undefined;
 };
 
 // Subscriber represents the subscriber table

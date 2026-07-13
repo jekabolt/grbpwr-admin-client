@@ -2745,6 +2745,9 @@ export type common_SampleInsert = {
   notes: string | undefined;
   startedAt: string | undefined;
   finishedAt: string | undefined;
+  mediaIds: number[] | undefined;
+  patternUrl: string | undefined;
+  patternNote: string | undefined;
 };
 
 export type AddSampleResponse = {
@@ -2783,6 +2786,7 @@ export type common_Sample = {
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   cost: common_SampleCost | undefined;
+  media: common_MediaFull[] | undefined;
 };
 
 // SampleCost is the composed cost of a sample in the base currency (confidential; stripped without
@@ -3859,6 +3863,14 @@ export type common_TechCardInsert = {
   callouts: common_TechCardCallout[] | undefined;
   revisions: common_TechCardRevision[] | undefined;
   // materials (Phase 2): bill of materials (article catalog) and colourways (recipes).
+  // CONTRACT (nf05-01): downstream references into bom_items and colorways are POSITIONAL, by index,
+  // and every write is a full replace (there are no stable ids to reference across a save). So when a
+  // BOM line or colourway is removed or reordered, the client MUST renumber all downstream indices in
+  // the SAME payload — colorway usages' bom_item_index, operations' bom_item_index, and pieces'
+  // colorway_index / bom_item_index / fusing_bom_item_index. An index left pointing at a shifted row
+  // silently maps a detail to the wrong material/colourway (data that goes to the factory); an
+  // out-of-range index is rejected, but an in-range-but-wrong one is not. The server range-checks but
+  // cannot detect a wrong-but-valid index.
   bomItems: common_TechCardBomItem[] | undefined;
   colorways: common_TechCardColorway[] | undefined;
   // production (Phase 3): construction, operations, labels, packaging, costing.
@@ -4394,6 +4406,27 @@ export type common_TechCardListItem = {
   updatedAt: wellKnownTimestamp | undefined;
   approvalState: common_TechCardApprovalState | undefined;
   lockVersion: number | undefined;
+  // Thumbnail URL for a grid/gallery view (idea gallery). For an IDEA card it is the first
+  // moodboard image; otherwise the PREVIEW-kind sketch (falling back to the first technical, then any
+  // media). Empty when the card has no media. Resolved server-side to avoid an N+1 GetTechCard.
+  previewUrl: string | undefined;
+};
+
+// GetStylePipeline is the development board: one column per lifecycle stage
+// (idea→proto→fit→sms→pp→prod) with the total count and a few light preview cards, so the whole
+// board loads in one call instead of six ListTechCards (gap-01).
+export type GetStylePipelineRequest = {
+  cardsPerStage: number | undefined;
+};
+
+export type StylePipelineColumn = {
+  stage: common_TechCardStage | undefined;
+  count: number | undefined;
+  cards: common_TechCardListItem[] | undefined;
+};
+
+export type GetStylePipelineResponse = {
+  columns: StylePipelineColumn[] | undefined;
 };
 
 // CostingFxRate is a manual FX rate: how many base-currency units one unit of `currency` is
@@ -4795,6 +4828,7 @@ export type MaterialPlanRow = {
   issued: googletype_Decimal | undefined;
   shortage: googletype_Decimal | undefined;
   hasSizeNorms: boolean | undefined;
+  issuedVariance: googletype_Decimal | undefined;
 };
 
 export type GetProductionRunMaterialPlanResponse = {
@@ -5246,6 +5280,9 @@ export interface AdminService {
   // /tech-card/list before /tech-card/{id}. Guarded by
   // TestTechCardListRouteNotShadowed.
   ListTechCards(request: ListTechCardsRequest): Promise<ListTechCardsResponse>;
+  // GetStylePipeline returns the development board: per-stage counts + a few light cards per column
+  // (gap-01), so the idea→prod pipeline loads in one call.
+  GetStylePipeline(request: GetStylePipelineRequest): Promise<GetStylePipelineResponse>;
   // Material catalog (task 10): shared nomenclature for BOM lines + append-only price history.
   CreateMaterial(request: CreateMaterialRequest): Promise<CreateMaterialResponse>;
   UpdateMaterial(request: UpdateMaterialRequest): Promise<UpdateMaterialResponse>;
@@ -7258,6 +7295,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListTechCards",
       }) as Promise<ListTechCardsResponse>;
+    },
+    GetStylePipeline(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/pipeline`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.cardsPerStage) {
+        queryParams.push(`cardsPerStage=${encodeURIComponent(request.cardsPerStage.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStylePipeline",
+      }) as Promise<GetStylePipelineResponse>;
     },
     CreateMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes
