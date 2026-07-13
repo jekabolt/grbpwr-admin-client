@@ -1,4 +1,5 @@
 export { CampaignAttributionTable } from './CampaignAttributionTable';
+export { ChannelRoasTable } from './ChannelRoasTable';
 export { ChannelSpendForm } from './ChannelSpendForm';
 export { CogsStructureTable } from './CogsStructureTable';
 export { CrossSellTable } from './CrossSellTable';

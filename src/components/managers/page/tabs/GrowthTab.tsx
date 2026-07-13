@@ -1,7 +1,8 @@
-import type { GetMetricsResponse } from 'api/proto-http/admin';
+import type { GetChannelRoasSettledResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import Text from 'ui/components/text';
 import {
   CampaignAttributionTable,
+  ChannelRoasTable,
   ChannelSpendForm,
   CrossSellTable,
   GeographyCharts,
@@ -11,6 +12,7 @@ import { formatAvgDaysBetweenOrders, formatNumber, getMetricComparison } from '.
 
 interface GrowthTabProps {
   metricsResponse: GetMetricsResponse;
+  channelRoas?: GetChannelRoasSettledResponse;
 }
 
 /**
@@ -18,7 +20,7 @@ interface GrowthTabProps {
  * which are directional at boutique traffic, so they live here rather than at the money altitude.
  * Absorbs the former standalone Customers tab (a 3-number card didn't warrant its own tab).
  */
-export function GrowthTab({ metricsResponse }: GrowthTabProps) {
+export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
   const metrics = metricsResponse.business;
   const commerce = metrics?.commerce;
   const sampleSize = commerce?.clvDistribution?.sampleSize ?? 0;
@@ -87,6 +89,7 @@ export function GrowthTab({ metricsResponse }: GrowthTabProps) {
           <h3 className='text-textBaseSize font-bold uppercase'>Campaigns &amp; channels</h3>
           <ChannelSpendForm />
         </div>
+        <ChannelRoasTable data={channelRoas} />
         <CampaignAttributionTable campaignAttribution={metricsResponse.campaignAttribution} />
         <Text className='text-textInactiveColor text-textBaseSize leading-relaxed'>
           Channel data is GA4-sourced and directional at boutique traffic — sampling, consent gaps,

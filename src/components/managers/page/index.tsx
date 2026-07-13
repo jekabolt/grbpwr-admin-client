@@ -12,6 +12,7 @@ import { AlertSettingsModal } from './components/alert-settings-modal';
 import { OpexModal } from './components/opex-modal';
 import { VatRatesModal } from './components/vat-rates-modal';
 import { GrowthTab, ProductsTab, RevenueTab, ThisWeekTab } from './tabs';
+import { useChannelRoasQuery } from './useChannelRoasQuery';
 import { useDashboardQuery } from './useDashboardQuery';
 import type { MetricsPeriod } from './useMetricsQuery';
 import type { MetricsTabId } from './useTabMetricsQuery';
@@ -110,6 +111,13 @@ export function Analitic() {
   // Operating result + GA4 coverage come from GetDashboard, only needed on the Revenue tab.
   const { data: dashboard } = useDashboardQuery(period, {
     enabled: activeTab === 'revenue',
+    customFrom: period === 'custom' ? customFrom : undefined,
+    customTo: period === 'custom' ? customTo : undefined,
+  });
+
+  // Settled-revenue channel ROAS lives on the Growth tab next to GA4 attribution.
+  const { data: channelRoas } = useChannelRoasQuery(period, {
+    enabled: activeTab === 'growth',
     customFrom: period === 'custom' ? customFrom : undefined,
     customTo: period === 'custom' ? customTo : undefined,
   });
@@ -238,7 +246,9 @@ export function Analitic() {
             />
           )}
           {activeTab === 'products' && <ProductsTab metricsResponse={metricsResponse} />}
-          {activeTab === 'growth' && <GrowthTab metricsResponse={metricsResponse} />}
+          {activeTab === 'growth' && (
+            <GrowthTab metricsResponse={metricsResponse} channelRoas={channelRoas} />
+          )}
         </div>
       )}
     </div>
