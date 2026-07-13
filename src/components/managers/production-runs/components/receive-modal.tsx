@@ -1,5 +1,6 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { common_ProductionRun, common_ProductionRunInsert } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -27,6 +28,7 @@ export function ReceiveModal({
 }) {
   const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
+  const { canWriteCosting } = usePermissions();
   const save = useSaveProductionRun();
   const receive = useReceiveProductionRun();
   const { data: techCard } = useTechCard(open ? run?.run?.techCardId : undefined);
@@ -34,9 +36,12 @@ export function ReceiveModal({
 
   const [rows, setRows] = useState<Row[]>([]);
   const [productId, setProductId] = useState('');
-  const [updateCostPrice, setUpdateCostPrice] = useState(true);
+  // Setting cost_price is a costing write — off (and disabled) without costing:write.
+  const [updateCostPrice, setUpdateCostPrice] = useState(false);
   const busy = save.isPending || receive.isPending;
 
+  // Reset ALL per-run state when the modal opens for a (different) run — otherwise the target
+  // productId / checkbox leak across runs and stock could post to the wrong product.
   useEffect(() => {
     if (!open) return;
     setRows(
@@ -47,7 +52,9 @@ export function ReceiveModal({
         defect: s.defectQty != null ? String(s.defectQty) : '0',
       })),
     );
-  }, [run, open]);
+    setProductId('');
+    setUpdateCostPrice(canWriteCosting);
+  }, [run, open, canWriteCosting]);
 
   useEffect(() => {
     if (open && linkedProducts.length > 0) setProductId((p) => p || String(linkedProducts[0]));
@@ -60,6 +67,19 @@ export function ReceiveModal({
       return;
     }
     if (!run?.id || !run.run) return;
+    // Guard the counts: no negatives, and defects can't exceed what was received.
+    for (const r of rows) {
+      const rec = Number(r.received);
+      const def = Number(r.defect);
+      if (!Number.isFinite(rec) || rec < 0 || !Number.isFinite(def) || def < 0) {
+        showMessage('Received / defect quantities must be zero or more', 'error');
+        return;
+      }
+      if (def > rec) {
+        showMessage('Defect quantity cannot exceed received quantity', 'error');
+        return;
+      }
+    }
     const insert: common_ProductionRunInsert = {
       ...run.run,
       sizes: rows.map((r) => ({
@@ -160,19 +180,21 @@ export function ReceiveModal({
               ) : null}
             </label>
 
-            <label className='flex items-center gap-2'>
-              <input
-                type='checkbox'
-                checked={updateCostPrice}
-                onChange={(e) => setUpdateCostPrice(e.target.checked)}
-              />
-              <Text size='small'>
-                set product cost_price from this run’s actual unit cost
-                {run?.plannedUnitCost?.value
-                  ? ` (planned ${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''})`
-                  : ''}
-              </Text>
-            </label>
+            {canWriteCosting && (
+              <label className='flex items-center gap-2'>
+                <input
+                  type='checkbox'
+                  checked={updateCostPrice}
+                  onChange={(e) => setUpdateCostPrice(e.target.checked)}
+                />
+                <Text size='small'>
+                  set product cost_price from this run’s actual unit cost
+                  {run?.plannedUnitCost?.value
+                    ? ` (planned ${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''})`
+                    : ''}
+                </Text>
+              </label>
+            )}
 
             <Text variant='inactive' size='small'>
               Приёмка приходует сток и переводит партию в received — после этого её нельзя удалить.
