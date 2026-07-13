@@ -46,3 +46,10 @@ export const runCostKindOptions: { value: common_ProductionRunCostKind; label: s
 
 export const runCostKindLabel = (k?: common_ProductionRunCostKind | string): string =>
   runCostKindOptions.find((o) => o.value === k)?.label ?? 'other';
+
+// The ListProductionRuns `status` filter is a plain string, and the backend stores the status
+// as its lowercase short name (see production.proto: "Stored as its lowercase name in the DB").
+// So the filter must be sent as e.g. `planned` / `in_progress`, NOT the enum constant — otherwise
+// it matches nothing. The UI keeps the enum constant for display; convert only at the boundary.
+export const runStatusToDbFilter = (status?: string): string | undefined =>
+  status ? status.replace('PRODUCTION_RUN_STATUS_', '').toLowerCase() : undefined;

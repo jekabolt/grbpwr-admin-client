@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_ProductionRunInsert } from 'api/proto-http/admin';
+import { runStatusToDbFilter } from './options';
 
 export const productionRunKeys = {
   all: ['productionRuns'] as const,
@@ -15,7 +16,8 @@ export function useProductionRuns(techCardId: number, status: string) {
     queryFn: () =>
       adminService.ListProductionRuns({
         techCardId: techCardId || undefined,
-        status: status || undefined,
+        // Backend stores status as its lowercase name; send that, not the enum constant.
+        status: runStatusToDbFilter(status),
         limit: 200,
         offset: 0,
       }),

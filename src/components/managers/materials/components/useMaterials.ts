@@ -9,10 +9,18 @@ const materialKeys = {
   prices: (materialId: number) => [...materialKeys.all, 'prices', materialId] as const,
 };
 
+// ListMaterials.section is a plain string, not the TechCardBomSection enum — mirroring the
+// production-run status filter, the backend expects the DB short name (`fabric`, `lining`, …),
+// not the enum constant. Inferred (no explicit proto note as there is for run status); if the
+// backend actually matches the enum constant, drop this transform.
+const bomSectionToDbFilter = (section: string): string | undefined =>
+  section ? section.replace('TECH_CARD_BOM_SECTION_', '').toLowerCase() : undefined;
+
 export function useMaterials(section: string, includeArchived: boolean) {
   return useQuery({
     queryKey: materialKeys.list(section, includeArchived),
-    queryFn: () => adminService.ListMaterials({ section, includeArchived }),
+    queryFn: () =>
+      adminService.ListMaterials({ section: bomSectionToDbFilter(section), includeArchived }),
   });
 }
 
