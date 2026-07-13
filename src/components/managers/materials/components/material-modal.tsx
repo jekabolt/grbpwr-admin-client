@@ -134,6 +134,9 @@ export function MaterialModal({
       open={open}
       onOpenChange={onOpenChange}
       onConfirm={submit}
+      // Close only in onSuccess — auto-close would wipe the 14-field draft on a
+      // validation error or a duplicate-code rejection.
+      closeOnConfirm={false}
       title={material ? 'edit material' : 'new material'}
       confirmLabel={save.isPending ? 'saving…' : 'save'}
       confirmDisabled={save.isPending}

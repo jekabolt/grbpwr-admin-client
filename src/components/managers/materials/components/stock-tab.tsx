@@ -2,7 +2,7 @@ import { common_MaterialStockRow } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { techCardBomSectionOptions } from 'constants/filter';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import GenericPopover from 'ui/components/popover';
@@ -51,9 +51,17 @@ export function StockTab() {
   const [, setParams] = useSearchParams();
   const f = useStockFilters();
 
+  // Debounce only the value feeding the query — the URL/input stay immediate. Without this,
+  // every keystroke is a distinct ListMaterialStock request and a 5-min cache entry.
+  const [debouncedQ, setDebouncedQ] = useState(f.q);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQ(f.q), 300);
+    return () => clearTimeout(id);
+  }, [f.q]);
+
   const { data, isLoading, isError } = useMaterialStock({
     section: f.section,
-    q: f.q,
+    q: debouncedQ,
     withStockOnly: f.withStock,
     belowMinOnly: f.belowMin,
   });
@@ -68,7 +76,9 @@ export function StockTab() {
       materialId: m?.id ? Number(m.id) : 0,
       materialLabel: `${m?.code ? `${m.code} · ` : ''}${m?.name ?? `#${m?.id}`}`,
       unit: m?.unit ?? '',
-      onHand: decimalToInput(row.onHand),
+      // An absent balance means 0 — '' would silently disable the over-issue guard
+      // (parseDecimalNumber('') is NaN) while the modal still displays "on hand: 0".
+      onHand: decimalToInput(row.onHand) || '0',
     });
     setModal(which);
   };
@@ -216,7 +226,10 @@ export function StockTab() {
                           >
                             issue
                           </Button>
-                          <GenericPopover openElement={<span className='px-1'>⋯</span>}>
+                          <GenericPopover
+                            openElement={<span className='px-1'>⋯</span>}
+                            triggerProps={{ 'aria-label': 'more actions', title: 'more actions' }}
+                          >
                             <div className='flex flex-col gap-1'>
                               <Button
                                 type='button'

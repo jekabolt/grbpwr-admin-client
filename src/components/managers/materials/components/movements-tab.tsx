@@ -49,7 +49,19 @@ export function MovementsList({ filter }: { filter: MovementFilter }) {
 
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useMaterialMovements(filter, 50);
-  const movements = useMemo(() => (data?.pages ?? []).flatMap((p) => p.movements), [data]);
+  // De-dupe across offset pages: a movement posted between two fetches shifts the newest-first
+  // boundary, repeating the last row of page N as the first row of page N+1.
+  const movements = useMemo(() => {
+    const seen = new Set<number>();
+    return (data?.pages ?? [])
+      .flatMap((p) => p.movements)
+      .filter((m) => {
+        const id = Number(m.id) || 0;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+  }, [data]);
 
   if (isLoading) return <Text size='small'>loading…</Text>;
   if (isError)
@@ -168,8 +180,31 @@ export function MovementsTab() {
             value={materialId}
             onChange={(id) => patch({ material: id })}
             placeholder='filter by material'
+            includeArchived
           />
         </div>
+        {/* run/sample filters arrive via deep links ("movements →" on the run page etc.) and have
+            no picker of their own — surface them as clearable chips so the filter is never invisible. */}
+        {runId > 0 ? (
+          <button
+            type='button'
+            className={`${cell} uppercase`}
+            title='clear run filter'
+            onClick={() => patch({ run: 0 })}
+          >
+            PR-{runId} ✕
+          </button>
+        ) : null}
+        {sampleId > 0 ? (
+          <button
+            type='button'
+            className={`${cell} uppercase`}
+            title='clear sample filter'
+            onClick={() => patch({ sample: 0 })}
+          >
+            sample #{sampleId} ✕
+          </button>
+        ) : null}
         <label className='flex flex-col gap-1'>
           <Text size='small'>from</Text>
           <input

@@ -15,14 +15,18 @@ export function MaterialPicker({
   section = '',
   disabled,
   placeholder = 'search name / code',
+  includeArchived = false,
 }: {
   value: number;
   onChange: (materialId: number, material?: common_Material) => void;
   section?: string; // UI enum constant to pre-narrow the catalog (e.g. packaging for aux output)
   disabled?: boolean;
   placeholder?: string;
+  // Filter contexts (e.g. the movements ledger) set this so a URL pointing at an archived
+  // material still shows as the active selection instead of a blank placeholder.
+  includeArchived?: boolean;
 }) {
-  const { data, isLoading } = useMaterials(section, false);
+  const { data, isLoading } = useMaterials(section, includeArchived);
   const materials = useMemo(() => data?.materials ?? [], [data]);
   const [q, setQ] = useState('');
 

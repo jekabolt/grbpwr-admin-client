@@ -6,6 +6,8 @@ import {
   ReceiveMaterialStockRequest,
   common_MaterialMovementType,
 } from 'api/proto-http/admin';
+import { productionRunKeys } from 'components/managers/production-runs/components/useProductionRuns';
+import { sampleKeys } from 'components/managers/tech-card/components/useSamples';
 import { bomSectionToDbFilter } from './useMaterials';
 
 // Material warehouse (new-flow NF-01). The stock list and movement ledger sit alongside the
@@ -80,11 +82,19 @@ export function useMaterialMovements(filter: MovementFilter = {}, limit = 50) {
 // A stock movement changes balances (and possibly the moving average) — invalidate the whole
 // warehouse tree. The catalog (useMaterials) is untouched. Each mutation returns the posted
 // MaterialMovement so callers can report `on hand before → after`.
+// A movement targeting a run/sample also changes THAT entity's derived data (material plan
+// shortages, sample composed cost) — invalidate those trees too, or e.g. issuing to PR-5 from
+// the stock tab leaves /production-runs/5's plan stale for the whole 5-min staleTime.
 function useMovementMutation<TReq, TRes>(fn: (req: TReq) => Promise<TRes>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: () => qc.invalidateQueries({ queryKey: warehouseKeys.all }),
+    onSuccess: (_res, req) => {
+      qc.invalidateQueries({ queryKey: warehouseKeys.all });
+      const target = req as { productionRunId?: number; sampleId?: number };
+      if (target.productionRunId) qc.invalidateQueries({ queryKey: productionRunKeys.all });
+      if (target.sampleId) qc.invalidateQueries({ queryKey: sampleKeys.all });
+    },
   });
 }
 

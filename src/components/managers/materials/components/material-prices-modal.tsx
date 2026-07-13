@@ -63,6 +63,9 @@ export function MaterialPricesModal({
       open={open}
       onOpenChange={onOpenChange}
       onConfirm={submit}
+      // Stay open: "add price" is a multi-add flow (onSuccess resets the row for the next
+      // entry), and a validation error must not dismiss the dialog.
+      closeOnConfirm={false}
       title={`prices · ${material?.name ?? ''}`}
       confirmLabel={add.isPending ? 'adding…' : 'add price'}
       confirmDisabled={!canWriteCosting || add.isPending}

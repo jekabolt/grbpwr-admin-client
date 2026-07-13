@@ -25,7 +25,12 @@ export type MovementTarget = {
 };
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Local date parts, not toISOString(): the warehouse user's "today" is their wall-clock
+  // date, and UTC is a day off around midnight in non-UTC timezones.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate(),
+  ).padStart(2, '0')}`;
 }
 
 // Snackbar copy that reports the balance change straight from the posted ledger row.
@@ -432,6 +437,17 @@ export function AdjustStockModal({
     }
   };
 
+  // Mirror the issue modal's exceeds-stock hint for the modes that subtract stock
+  // (write-off, negative adjust) — same situation, same warning.
+  const qtyNum = parseDecimalNumber(quantity);
+  const onHandNum = parseDecimalNumber(target.onHand);
+  const removed = mode === 'writeoff' ? qtyNum : mode === 'adjust' && qtyNum < 0 ? -qtyNum : NaN;
+  const overStock =
+    target.onHand != null &&
+    Number.isFinite(removed) &&
+    Number.isFinite(onHandNum) &&
+    removed > onHandNum;
+
   const submit = async () => {
     const n = parseDecimalNumber(quantity);
     if (!Number.isFinite(n) || (mode !== 'adjust' && n < 0)) {
@@ -503,6 +519,9 @@ export function AdjustStockModal({
           onChange={(e) => onQtyChange(e.target.value)}
         />
       </Field>
+      {overStock ? (
+        <Text size='small'>! exceeds stock by {(removed - onHandNum).toFixed(2)}</Text>
+      ) : null}
       <Field label='reason'>
         <select className={cell} value={reason} onChange={(e) => setReason(e.target.value)}>
           {adjustReasonOptions.map((o) => (

@@ -19,7 +19,10 @@ export function Materials() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'catalog';
 
-  const select = (id: Tab) =>
+  const select = (id: Tab) => {
+    // Clicking the already-active tab is a no-op — running the reset would wipe
+    // that tab's own filters (?section=/&q=/&belowMin=…).
+    if (id === tab) return;
     setParams(
       (prev) => {
         // Switching tab drops the other tab's filters so a stale ?section=/?type= can't leak across.
@@ -30,6 +33,7 @@ export function Materials() {
       },
       { replace: true },
     );
+  };
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
