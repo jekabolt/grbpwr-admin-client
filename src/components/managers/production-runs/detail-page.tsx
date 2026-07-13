@@ -10,6 +10,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { LinesGrid } from './components/lines-grid';
+import { MarkerBlock } from './components/marker-block';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import { isRunLocked, isRunReceivable, runStatusLabel } from './components/options';
@@ -124,6 +125,8 @@ export function ProductionRunDetail() {
       {canReadCosting ? <PlanFactBlock run={run} actuals={actuals} /> : null}
 
       <LinesGrid run={run} canEdit={canEdit} locked={locked} />
+
+      <MarkerBlock run={run} canEdit={canEdit} locked={locked} />
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal open={receiveOpen} onOpenChange={setReceiveOpen} run={run} />
