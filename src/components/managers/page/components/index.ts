@@ -1,9 +1,12 @@
 export { CampaignAttributionTable } from './CampaignAttributionTable';
 export { ChannelSpendForm } from './ChannelSpendForm';
+export { CogsStructureTable } from './CogsStructureTable';
 export { CrossSellTable } from './CrossSellTable';
 export { DateRangePicker } from './DateRangePicker';
 export { DeadStockTable } from './DeadStockTable';
 export { DropVerdictTable } from './DropVerdictTable';
+export { InventoryValuationTable } from './InventoryValuationTable';
+export { MarginByStyleTable } from './MarginByStyleTable';
 export { ExecutiveHealthStrip } from './ExecutiveHealthStrip';
 export { FunnelChart } from './FunnelChart';
 export { GeographyCharts } from './GeographyCharts';
