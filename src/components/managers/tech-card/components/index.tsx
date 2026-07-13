@@ -18,7 +18,7 @@ import {
 } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -141,28 +141,27 @@ export function TechCardForm({
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
-  // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read
-  // (server nulls the cost block / returns an empty journal; an empty tab would read
-  // as "zero cost"). Samples need a saved card (id).
-  const isTabVisible = (t: TabId) => {
-    if ((t === 'costing' || t === 'dev') && !canReadCosting) return false;
-    if (t === 'samples' && !isEditMode) return false;
-    return true;
-  };
   const [econOpen, setEconOpen] = useState(false);
 
   const numId = id ? parseInt(id, 10) : undefined;
 
+  // URL-driven state. ?stage=… seeds a freshly-created card's stage ([new idea] → IDEA); ?tab=…
+  // and ?sample=/?fits= make the open section / sample / fittings-filter deep-linkable (R-1).
+  const [params, setParams] = useSearchParams();
+  const initialStage = (params.get('stage') as TechCardFormData['stage']) || undefined;
+
   const form = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema),
-    defaultValues: techCard ? mapTechCardToForm(techCard) : techCardDefaultData,
+    defaultValues: techCard
+      ? mapTechCardToForm(techCard)
+      : initialStage
+        ? { ...techCardDefaultData, stage: initialStage }
+        : techCardDefaultData,
     mode: 'onSubmit',
   });
 
-  // Active tab lives in the URL (?tab=) so a section — and, on the samples tab, a specific sample
-  // (?sample=) — is deep-linkable (R-1). Switching tabs drops a stale ?sample= / ?fits=; extra params
-  // (a sample to open, a fittings filter) can be set in the same navigation (spine deep links).
-  const [params, setParams] = useSearchParams();
+  // Switching tabs drops a stale ?sample= / ?fits=; extra params (a sample to open, a fittings
+  // filter) can be set in the same navigation (spine deep links).
   const activeTab: TabId = (params.get('tab') as TabId) || 'header';
   const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
@@ -206,6 +205,26 @@ export function TechCardForm({
   const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
     '') as string;
   const productCount = (useWatch({ control: form.control, name: 'productIds' }) ?? []).length;
+
+  // IDEA is a "light" card (screen E): only the concept-relevant tabs show; the rest reappear when
+  // the stage advances, their echoed fields untouched. Not disabled — hidden.
+  const isIdea = stage === 'TECH_CARD_STAGE_IDEA';
+  const IDEA_TABS: TabId[] = ['header', 'sketch', 'samples', 'history'];
+  // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read (server nulls
+  // the cost block / returns an empty journal; an empty tab would read as "zero cost"). Samples
+  // need a saved card (id).
+  const isTabVisible = (t: TabId) => {
+    if (isIdea && !IDEA_TABS.includes(t)) return false;
+    if ((t === 'costing' || t === 'dev') && !canReadCosting) return false;
+    if (t === 'samples' && !isEditMode) return false;
+    return true;
+  };
+  // If the open tab becomes hidden (e.g. switching a card to IDEA while on the BOM tab), fall back
+  // to header so the body isn't blank.
+  useEffect(() => {
+    if (!isTabVisible(activeTab)) navTo('header');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isIdea]);
 
   const errorTabs = new Set(
     Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header'),
@@ -439,7 +458,17 @@ export function TechCardForm({
           <div hidden={activeTab !== 'header'} className='flex flex-col gap-6'>
             <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
               <Section title='identification' className='w-full lg:w-1/2'>
-                <InputField name='styleNumber' label='style number *' placeholder='артикул' />
+                <InputField
+                  name='styleNumber'
+                  label={isIdea ? 'style number' : 'style number *'}
+                  placeholder={isIdea ? 'auto IDEA-… draft' : 'артикул'}
+                />
+                {isIdea && (
+                  <Text variant='inactive' size='small'>
+                    optional at idea — a draft number is assigned on save; set the real one before
+                    PROTO
+                  </Text>
+                )}
                 <InputField name='name' label='name *' placeholder='название изделия' />
                 <InputField name='brand' label='brand' />
                 <SeasonField />

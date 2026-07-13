@@ -70,9 +70,14 @@ export function TechCards() {
             </Button>
           )}
           {canWrite(SECTION.techCards) && (
-            <Button size='lg' variant='main' className='uppercase' asChild>
-              <Link to={ROUTES.addTechCard}>create new</Link>
-            </Button>
+            <>
+              <Button size='lg' variant='secondary' className='uppercase' asChild>
+                <Link to={`${ROUTES.addTechCard}?stage=TECH_CARD_STAGE_IDEA`}>new idea</Link>
+              </Button>
+              <Button size='lg' variant='main' className='uppercase' asChild>
+                <Link to={ROUTES.addTechCard}>create new</Link>
+              </Button>
+            </>
           )}
         </div>
       </div>

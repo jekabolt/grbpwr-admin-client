@@ -308,9 +308,11 @@ export const emptyCosting: z.input<typeof costingSchema> = {
   notes: '',
 };
 
-export const techCardSchema = z.object({
-  // identification
-  styleNumber: z.string().min(1, 'Style number is required'),
+const techCardObject = z.object({
+  // identification. style_number is optional in the form so an IDEA concept can be created without
+  // an article number; a conditional refine below still requires it past IDEA, and an empty IDEA
+  // number is auto-filled with a draft on save (B-2, backend still requires the field).
+  styleNumber: z.string().optional().default(''),
   name: z.string().min(1, 'Name is required'),
   brand: z.string().optional().default(''),
   season: z.string().optional().default(''),
@@ -357,7 +359,18 @@ export const techCardSchema = z.object({
   revisions: z.array(revisionSchema).default([]),
 });
 
-export type TechCardFormData = z.input<typeof techCardSchema>;
+// style_number is required past the IDEA stage; at IDEA it may be blank (auto-filled on save).
+export const techCardSchema = techCardObject.superRefine((data, ctx) => {
+  if (data.stage !== 'TECH_CARD_STAGE_IDEA' && !data.styleNumber?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Style number is required',
+      path: ['styleNumber'],
+    });
+  }
+});
+
+export type TechCardFormData = z.input<typeof techCardObject>;
 
 export const techCardDefaultData: TechCardFormData = {
   styleNumber: '',
@@ -776,9 +789,16 @@ export function mapFormToTechCardInsert(
   // costing. Preserve the original block instead so a non-costing editor can never destroy it.
   canWriteCosting: boolean = true,
 ): common_TechCardInsert {
+  // B-2: the backend requires style_number even for an IDEA card, so fill an empty one with a draft
+  // `IDEA-<base36 time>` the user renames before PROTO. Edits preserve the existing number (the form
+  // seeds it from the loaded card), so this only ever fires on a fresh blank IDEA concept.
+  const trimmedStyleNumber = data.styleNumber?.trim() || '';
+  const styleNumber =
+    trimmedStyleNumber ||
+    (data.stage === 'TECH_CARD_STAGE_IDEA' ? `IDEA-${Date.now().toString(36).toUpperCase()}` : '');
   return {
     ...original,
-    styleNumber: data.styleNumber.trim(),
+    styleNumber,
     name: data.name.trim(),
     brand: data.brand?.trim() || '',
     season: data.season?.trim() || '',

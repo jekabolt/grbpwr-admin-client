@@ -92,6 +92,7 @@ export const fittingVerdictOptions: Array<{ value: common_FittingVerdict; label:
 
 // Tech-card development stage (excludes the UNKNOWN sentinel; server defaults UNKNOWN→PROTO).
 export const techCardStageOptions: Array<{ value: common_TechCardStage; label: string }> = [
+  { value: 'TECH_CARD_STAGE_IDEA', label: 'idea' },
   { value: 'TECH_CARD_STAGE_PROTO', label: 'proto' },
   { value: 'TECH_CARD_STAGE_FIT', label: 'fit sample' },
   { value: 'TECH_CARD_STAGE_SMS', label: 'salesman sample' },
