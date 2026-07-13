@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { StyleEconomicsModal } from 'components/managers/page/components/StyleEconomicsModal';
 import {
   useCreateTechCard,
   useUpdateTechCard,
@@ -131,9 +132,8 @@ export function TechCardForm({
   // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read
   // (server nulls the cost block / returns an empty journal; an empty tab would read
   // as "zero cost").
-  const visibleTabs = TABS.filter(
-    (t) => (t.id !== 'costing' && t.id !== 'dev') || canReadCosting,
-  );
+  const visibleTabs = TABS.filter((t) => (t.id !== 'costing' && t.id !== 'dev') || canReadCosting);
+  const [econOpen, setEconOpen] = useState(false);
 
   const numId = id ? parseInt(id, 10) : undefined;
 
@@ -464,10 +464,26 @@ export function TechCardForm({
           {canReadCosting && (
             <div hidden={activeTab !== 'costing'}>
               <Section title='costing'>
+                {isEditMode && numId && (
+                  <div className='mb-3 flex justify-end'>
+                    <Button
+                      type='button'
+                      variant='secondary'
+                      size='lg'
+                      className='uppercase'
+                      onClick={() => setEconOpen(true)}
+                    >
+                      style economics
+                    </Button>
+                  </div>
+                )}
                 <CostingField techCard={techCard} />
               </Section>
             </div>
           )}
+          {canReadCosting && isEditMode && numId ? (
+            <StyleEconomicsModal techCardId={numId} open={econOpen} onOpenChange={setEconOpen} />
+          ) : null}
 
           {/* R&D COST — mounted only with costing:read (field-shaped) */}
           {canReadCosting && (

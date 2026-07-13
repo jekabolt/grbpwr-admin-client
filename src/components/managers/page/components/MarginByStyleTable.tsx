@@ -1,9 +1,10 @@
 import type { MarginByStyleRow } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { FC } from 'react';
+import { FC, useState } from 'react';
 import { generatePath, Link } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
+import { StyleEconomicsModal } from './StyleEconomicsModal';
 
 interface MarginByStyleTableProps {
   marginByStyle: MarginByStyleRow[] | undefined;
@@ -12,6 +13,8 @@ interface MarginByStyleTableProps {
 // Margin rolled up to the tech-card style (across its colourways). Costing-gated: the backend
 // omits this section entirely without costing:read, so an empty list simply hides the report.
 export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle }) => {
+  const [detailOf, setDetailOf] = useState<number | undefined>();
+
   if (!marginByStyle || marginByStyle.length === 0) return null;
 
   const rows = [...marginByStyle]
@@ -36,6 +39,7 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
               <th className='text-right p-2'>COGS</th>
               <th className='text-right p-2'>Gross margin</th>
               <th className='text-right p-2'>Margin %</th>
+              <th className='text-right p-2'></th>
             </tr>
           </thead>
           <tbody>
@@ -71,11 +75,28 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
                 <td className='p-2 text-right'>
                   {r.hasCost ? `${(r.grossMarginPct ?? 0).toFixed(0)}%` : '—'}
                 </td>
+                <td className='p-2 text-right'>
+                  {r.techCardId ? (
+                    <button
+                      type='button'
+                      className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+                      onClick={() => setDetailOf(r.techCardId)}
+                    >
+                      economics
+                    </button>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <StyleEconomicsModal
+        techCardId={detailOf}
+        open={detailOf != null}
+        onOpenChange={(v) => !v && setDetailOf(undefined)}
+      />
       {!anyCosted && (
         <Text variant='inactive' size='small' className='mt-3 block'>
           No styles have a unit cost yet — set costs on tech cards to unlock margin here.

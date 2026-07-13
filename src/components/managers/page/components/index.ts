@@ -21,6 +21,7 @@ export { ProductNameLink } from './ProductNameLink';
 export { PromoTable } from './PromoTable';
 export { ReorderTable } from './ReorderTable';
 export { SizeAnalyticsTable } from './SizeAnalyticsTable';
+export { StyleEconomicsModal } from './StyleEconomicsModal';
 export { SizeRunEfficiencyTable } from './SizeRunEfficiencyTable';
 export { SlowMoversTable } from './SlowMoversTable';
 export { TimeSeriesChart } from './TimeSeriesChart';
