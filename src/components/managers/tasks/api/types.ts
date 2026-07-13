@@ -70,6 +70,7 @@ export interface TaskInsert {
   archiveId: number;
   fittingId: number; // примерка / try-on session (GetFitting)
   productionRunId: number; // производственная партия / production run (GetProductionRun); 0 = none
+  sampleId: number; // образец / sample (GetSample); 0 = none (new-flow NF link)
 }
 
 // Stored card (common.Task): id + content + placement + resolved media + identity.
@@ -133,6 +134,7 @@ export function emptyTaskInsert(): TaskInsert {
     archiveId: 0,
     fittingId: 0,
     productionRunId: 0,
+    sampleId: 0,
   };
 }
 

@@ -1,7 +1,6 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { common_ProductionRun, common_ProductionRunInsert } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -13,10 +12,17 @@ import { useReceiveProductionRun, useSaveProductionRun } from './useProductionRu
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
-type Row = { sizeId: number; plannedQty: number; received: string; defect: string };
+type Row = {
+  productId: number;
+  sizeId: number;
+  plannedQty: number;
+  received: string;
+  defect: string;
+};
 
-// Receiving is two steps against the contract: persist received/defect quantities on the run
-// (UpdateProductionRun), then post stock + optionally set cost_price (ReceiveProductionRun).
+// Receiving is two steps against the contract: persist received/defect on each run LINE
+// (UpdateProductionRun), then post stock into each line's own product + optionally set its
+// cost_price (ReceiveProductionRun — NF-06, no run-level product).
 export function ReceiveModal({
   open,
   onOpenChange,
@@ -31,41 +37,28 @@ export function ReceiveModal({
   const { canWriteCosting } = usePermissions();
   const save = useSaveProductionRun();
   const receive = useReceiveProductionRun();
-  const { data: techCard } = useTechCard(open ? run?.run?.techCardId : undefined);
-  const linkedProducts = techCard?.techCard?.productIds ?? [];
 
   const [rows, setRows] = useState<Row[]>([]);
-  const [productId, setProductId] = useState('');
   // Setting cost_price is a costing write — off (and disabled) without costing:write.
   const [updateCostPrice, setUpdateCostPrice] = useState(false);
   const busy = save.isPending || receive.isPending;
 
-  // Reset ALL per-run state when the modal opens for a (different) run — otherwise the target
-  // productId / checkbox leak across runs and stock could post to the wrong product.
+  // Reset per-run state whenever the modal opens for a (different) run.
   useEffect(() => {
     if (!open) return;
     setRows(
-      (run?.run?.sizes ?? []).map((s) => ({
-        sizeId: s.sizeId ?? 0,
-        plannedQty: s.plannedQty ?? 0,
-        received: s.receivedQty != null ? String(s.receivedQty) : String(s.plannedQty ?? 0),
-        defect: s.defectQty != null ? String(s.defectQty) : '0',
+      (run?.run?.lines ?? []).map((l) => ({
+        productId: l.productId ?? 0,
+        sizeId: l.sizeId ?? 0,
+        plannedQty: l.plannedQty ?? 0,
+        received: l.receivedQty != null ? String(l.receivedQty) : String(l.plannedQty ?? 0),
+        defect: l.defectQty != null ? String(l.defectQty) : '0',
       })),
     );
-    setProductId('');
     setUpdateCostPrice(canWriteCosting);
   }, [run, open, canWriteCosting]);
 
-  useEffect(() => {
-    if (open && linkedProducts.length > 0) setProductId((p) => p || String(linkedProducts[0]));
-  }, [open, linkedProducts]);
-
   const submit = async () => {
-    const pid = Number(productId) || 0;
-    if (!pid) {
-      showMessage('Target product id is required', 'error');
-      return;
-    }
     if (!run?.id || !run.run) return;
     // Guard the counts: no negatives, and defects can't exceed what was received.
     for (const r of rows) {
@@ -82,7 +75,8 @@ export function ReceiveModal({
     }
     const insert: common_ProductionRunInsert = {
       ...run.run,
-      sizes: rows.map((r) => ({
+      lines: rows.map((r) => ({
+        productId: r.productId,
         sizeId: r.sizeId,
         plannedQty: r.plannedQty,
         receivedQty: Number(r.received) || 0,
@@ -90,13 +84,9 @@ export function ReceiveModal({
       })),
     };
     try {
-      // 1) persist the counted quantities, 2) post stock + optional cost_price.
+      // 1) persist the counted quantities, 2) post stock into each line's product + opt. cost_price.
       await save.mutateAsync({ id: run.id, run: insert });
-      const res = await receive.mutateAsync({
-        runId: run.id,
-        productId: pid,
-        updateCostPrice,
-      });
+      const res = await receive.mutateAsync({ runId: run.id, updateCostPrice });
       showMessage(
         res.costPriceUpdated
           ? 'Run received · product cost updated'
@@ -125,13 +115,13 @@ export function ReceiveModal({
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
-            Count received and defect units per size, then post stock.
+            Count received and defect units per line, then post stock into each line's product.
           </DialogPrimitives.Description>
 
           <div className='flex flex-col gap-4 p-4'>
             <div className='grid grid-cols-[1fr_auto_auto] items-center gap-2'>
               <Text variant='uppercase' size='small'>
-                size
+                product · size
               </Text>
               <Text variant='uppercase' size='small'>
                 received
@@ -141,8 +131,8 @@ export function ReceiveModal({
               </Text>
               {rows.map((r, i) => (
                 <RowInputs
-                  key={r.sizeId}
-                  label={findInDictionary(dictionary, r.sizeId, 'size') || String(r.sizeId)}
+                  key={`${r.productId}-${r.sizeId}`}
+                  label={`#${r.productId} · ${findInDictionary(dictionary, r.sizeId, 'size') || r.sizeId}`}
                   planned={r.plannedQty}
                   received={r.received}
                   defect={r.defect}
@@ -164,31 +154,15 @@ export function ReceiveModal({
               ))}
             </div>
 
-            <label className='flex flex-col gap-1 border-t border-textInactiveColor pt-3'>
-              <Text size='small'>target product id (stock is posted here) *</Text>
-              <input
-                className={cell}
-                type='number'
-                min='0'
-                value={productId}
-                onChange={(e) => setProductId(e.target.value)}
-              />
-              {linkedProducts.length > 0 ? (
-                <Text variant='inactive' size='small'>
-                  linked to this tech card: {linkedProducts.join(', ')}
-                </Text>
-              ) : null}
-            </label>
-
             {canWriteCosting && (
-              <label className='flex items-center gap-2'>
+              <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
                 <input
                   type='checkbox'
                   checked={updateCostPrice}
                   onChange={(e) => setUpdateCostPrice(e.target.checked)}
                 />
                 <Text size='small'>
-                  set product cost_price from this run’s actual unit cost
+                  set each product’s cost_price from this run’s actual unit cost
                   {run?.plannedUnitCost?.value
                     ? ` (planned ${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''})`
                     : ''}
@@ -197,7 +171,8 @@ export function ReceiveModal({
             )}
 
             <Text variant='inactive' size='small'>
-              Приёмка приходует сток и переводит партию в received — после этого её нельзя удалить.
+              Приёмка приходует сток по каждой строке в её продукт и переводит партию в received —
+              после этого её нельзя удалить.
             </Text>
           </div>
 

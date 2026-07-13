@@ -43,6 +43,7 @@ export function DevExpensesField({ techCardId }: { techCardId: number }) {
           amount: { value: form.amount.trim() },
           currency: form.currency,
           fittingId: 0,
+          sampleId: 0,
           incurredAt: form.incurredAt ? new Date(form.incurredAt).toISOString() : undefined,
         },
       }),
@@ -71,8 +72,8 @@ export function DevExpensesField({ techCardId }: { techCardId: number }) {
   return (
     <div className='flex flex-col gap-4'>
       <Text variant='inactive' size='small'>
-        Periodic R&amp;D spend on developing this style — shown separately from the unit COGS and NOT
-        folded into the product cost_price.
+        Periodic R&amp;D spend on developing this style — shown separately from the unit COGS and
+        NOT folded into the product cost_price.
       </Text>
 
       {/* Summary */}

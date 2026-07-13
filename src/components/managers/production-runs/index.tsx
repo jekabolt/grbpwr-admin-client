@@ -202,12 +202,12 @@ function RunCard({
 
       <div className='grid grid-cols-1 gap-3 p-3 sm:grid-cols-2'>
         <div className='flex flex-col gap-1'>
-          {(ins?.sizes ?? []).map((s) => (
-            <Text key={s.sizeId} size='small'>
-              {findInDictionary(dictionary, s.sizeId, 'size') || s.sizeId} · план{' '}
-              {s.plannedQty ?? 0}
-              {s.receivedQty != null ? ` / факт ${s.receivedQty}` : ' / факт —'}
-              {s.defectQty ? ` · брак ${s.defectQty}` : ''}
+          {(ins?.lines ?? []).map((l, i) => (
+            <Text key={`${l.productId}-${l.sizeId}-${i}`} size='small'>
+              #{l.productId} · {findInDictionary(dictionary, l.sizeId, 'size') || l.sizeId} · план{' '}
+              {l.plannedQty ?? 0}
+              {l.receivedQty != null ? ` / факт ${l.receivedQty}` : ' / факт —'}
+              {l.defectQty ? ` · брак ${l.defectQty}` : ''}
             </Text>
           ))}
         </div>

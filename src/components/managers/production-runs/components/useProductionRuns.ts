@@ -53,13 +53,14 @@ export function useDeleteProductionRun() {
   });
 }
 
-// Receive posts stock (and optionally sets the product cost_price from the run's actual unit
-// cost). received/defect quantities must already be persisted on the run (via UpdateProductionRun)
+// Receive posts each line's received_qty into that line's own product (NF-06 — no run-level
+// product) and optionally sets each product's cost_price from the run's actual unit cost.
+// received/defect quantities must already be persisted on the run's lines (via UpdateProductionRun)
 // before calling this — the receive RPC itself carries no quantities.
 export function useReceiveProductionRun() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { runId: number; productId: number; updateCostPrice: boolean }) =>
+    mutationFn: (input: { runId: number; updateCostPrice: boolean }) =>
       adminService.ReceiveProductionRun(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: productionRunKeys.all }),
   });

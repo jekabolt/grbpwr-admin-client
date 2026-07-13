@@ -85,6 +85,13 @@ export function MaterialModal({
         fabricWeightGsm: d.fabricWeightGsm.trim() ? { value: d.fabricWeightGsm.trim() } : undefined,
         archived: material?.archived ?? false,
         latestPrice: undefined,
+        // Warehouse-catalog fields (new-flow NF-02) — not editable in this modal yet; preserve
+        // whatever is stored so an update doesn't wipe them.
+        code: material?.code ?? '',
+        color: material?.color ?? '',
+        pantone: material?.pantone ?? '',
+        minStock: material?.minStock,
+        notes: material?.notes ?? '',
       },
       {
         onSuccess: () => {

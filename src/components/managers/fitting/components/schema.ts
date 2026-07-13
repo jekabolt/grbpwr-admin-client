@@ -168,6 +168,7 @@ export function mapFormToFittingInsert(
     // Spread the loaded insert first so fields not yet managed by the form survive
     // the full-replace save (mirrors mapFormToTechCardInsert).
     ...original,
+    sampleId: original?.sampleId ?? 0, // new-flow sample link — not form-managed, preserve
     productId: data.productId || 0,
     techCardId: data.techCardId || 0,
     modelId: data.modelId || 0,

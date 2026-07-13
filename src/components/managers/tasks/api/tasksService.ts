@@ -79,6 +79,7 @@ function mapInsert(i: common_Task['task']): TaskInsert {
     archiveId: i?.archiveId ?? 0,
     fittingId: i?.fittingId ?? 0,
     productionRunId: i?.productionRunId ?? 0,
+    sampleId: i?.sampleId ?? 0,
   };
 }
 

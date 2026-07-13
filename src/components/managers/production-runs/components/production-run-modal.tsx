@@ -7,6 +7,7 @@ import {
   common_ProductionRunInsert,
   common_ProductionRunStatus,
 } from 'api/proto-http/admin';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { CURRENCIES } from 'constants/constants';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -32,6 +33,10 @@ type CostDraft = {
 };
 type Draft = {
   techCardId: number;
+  // NF-06: the run is a product×size grid of lines. This modal supports the common single-product
+  // run — one target product stamped onto every size line. (Multi-product grids aren't editable
+  // here yet; an existing multi-product run loads the first line's product.)
+  productId: number;
   releaseId: number;
   status: common_ProductionRunStatus;
   startedAt: string;
@@ -42,6 +47,7 @@ type Draft = {
 
 const emptyDraft: Draft = {
   techCardId: 0,
+  productId: 0,
   releaseId: 0,
   status: 'PRODUCTION_RUN_STATUS_PLANNED',
   startedAt: '',
@@ -72,13 +78,14 @@ export function ProductionRunModal({
       ins
         ? {
             techCardId: ins.techCardId ?? 0,
+            productId: ins.lines?.[0]?.productId ?? 0,
             releaseId: ins.releaseId ?? 0,
             status: ins.status ?? 'PRODUCTION_RUN_STATUS_PLANNED',
             startedAt: isoToDate(ins.startedAt),
             notes: ins.notes ?? '',
-            sizes: (ins.sizes ?? []).map((s) => ({
-              sizeId: s.sizeId ?? 0,
-              plannedQty: String(s.plannedQty ?? 0),
+            sizes: (ins.lines ?? []).map((l) => ({
+              sizeId: l.sizeId ?? 0,
+              plannedQty: String(l.plannedQty ?? 0),
             })),
             costs: (ins.costs ?? []).map((c) => ({
               kind: c.kind ?? 'PRODUCTION_RUN_COST_KIND_OTHER',
@@ -120,6 +127,11 @@ export function ProductionRunModal({
   });
   const releases = relData?.releases ?? [];
 
+  // Products linked to the run's tech card — receive books each line's stock into its product,
+  // so a line's product must be one of these.
+  const { data: techCard } = useTechCard(open && d.techCardId ? d.techCardId : undefined);
+  const linkedProducts = techCard?.techCard?.productIds ?? [];
+
   const usedSizeIds = new Set(d.sizes.map((s) => s.sizeId));
   const availableSizes = useMemo(
     () => (dictionary?.sizes ?? []).filter((s) => s.id != null && !usedSizeIds.has(s.id)),
@@ -152,6 +164,10 @@ export function ProductionRunModal({
       showMessage('Tech card is required', 'error');
       return;
     }
+    if (!d.productId) {
+      showMessage('Target product is required', 'error');
+      return;
+    }
     if (d.sizes.length === 0) {
       showMessage('Add at least one size', 'error');
       return;
@@ -163,13 +179,20 @@ export function ProductionRunModal({
       startedAt: dateToIso(d.startedAt),
       receivedAt: run?.run?.receivedAt, // set by the receive flow; preserve on edit
       notes: d.notes.trim(),
-      // received/defect stay unset here — they are captured at receive time.
-      sizes: d.sizes.map((s) => ({
-        sizeId: s.sizeId,
-        plannedQty: Number(s.plannedQty) || 0,
-        receivedQty: run?.run?.sizes?.find((x) => x.sizeId === s.sizeId)?.receivedQty,
-        defectQty: run?.run?.sizes?.find((x) => x.sizeId === s.sizeId)?.defectQty,
-      })),
+      // One line per size, all for the chosen product. received/defect stay unset here — they are
+      // captured at receive time (preserved from the matching existing line on edit).
+      lines: d.sizes.map((s) => {
+        const prev = run?.run?.lines?.find(
+          (x) => x.sizeId === s.sizeId && x.productId === d.productId,
+        );
+        return {
+          productId: d.productId,
+          sizeId: s.sizeId,
+          plannedQty: Number(s.plannedQty) || 0,
+          receivedQty: prev?.receivedQty,
+          defectQty: prev?.defectQty,
+        };
+      }),
       costs: d.costs
         .filter((c) => c.amount.trim())
         .map((c) => ({
@@ -180,6 +203,8 @@ export function ProductionRunModal({
           amountBase: undefined, // server folds to base via FX rates
           incurredAt: dateToIso(c.incurredAt),
         })),
+      markerEfficiencyPct: run?.run?.markerEfficiencyPct, // NF marker fields — preserve, not edited here
+      markerNotes: run?.run?.markerNotes,
     };
     save.mutate(
       { id: run?.id ?? 0, run: insert },
@@ -220,7 +245,9 @@ export function ProductionRunModal({
                   className={cell}
                   value={d.techCardId || 0}
                   disabled={isEdit}
-                  onChange={(e) => set({ techCardId: Number(e.target.value) || 0, releaseId: 0 })}
+                  onChange={(e) =>
+                    set({ techCardId: Number(e.target.value) || 0, releaseId: 0, productId: 0 })
+                  }
                 >
                   <option value={0}>— select —</option>
                   {techCards.map((t) => (
@@ -229,6 +256,30 @@ export function ProductionRunModal({
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text size='small'>product * (stock is booked here on receive)</Text>
+                <select
+                  className={cell}
+                  value={d.productId || 0}
+                  onChange={(e) => set({ productId: Number(e.target.value) || 0 })}
+                >
+                  <option value={0}>— select —</option>
+                  {linkedProducts.map((pid) => (
+                    <option key={pid} value={pid}>
+                      product #{pid}
+                    </option>
+                  ))}
+                  {/* keep an already-set product selectable even if the tech card list hasn't loaded */}
+                  {d.productId > 0 && !linkedProducts.includes(d.productId) && (
+                    <option value={d.productId}>product #{d.productId}</option>
+                  )}
+                </select>
+                {d.techCardId > 0 && linkedProducts.length === 0 && (
+                  <Text variant='inactive' size='small'>
+                    this tech card has no linked products — link one on the tech card first
+                  </Text>
+                )}
               </label>
               <label className='flex flex-col gap-1'>
                 <Text size='small'>release (optional — plan from snapshot)</Text>

@@ -1061,12 +1061,12 @@ export type CommerceCoreMetrics = {
   totalRefunded: MetricWithComparison | undefined;
   totalDiscount: MetricWithComparison | undefined;
   productSaleDiscount: MetricWithComparison | undefined;
+  promoCodeDiscount: MetricWithComparison | undefined;
   // revenue (field 1) is NET of VAT. revenue_incl_vat is post-discount/refund revenue BEFORE
   // removing VAT (what the company collected); vat_amount = revenue_incl_vat - revenue. VAT is
   // resolved per order from the destination country (0 for export / pre-feature orders).
   revenueInclVat: MetricWithComparison | undefined;
   vatAmount: MetricWithComparison | undefined;
-  promoCodeDiscount: MetricWithComparison | undefined;
   newSubscribers: MetricWithComparison | undefined;
   newCustomers: MetricWithComparison | undefined;
   repeatCustomersRate: MetricWithComparison | undefined;
@@ -1859,6 +1859,13 @@ export type InventoryValuation = {
   deadStock: InventoryValuationRow[] | undefined;
   writeOffsValue: googletype_Decimal | undefined;
   writeOffsUnits: number | undefined;
+  // Raw-material warehouse (NF-09). Materials valued at moving-average unit cost, base EUR.
+  rawMaterialsValue: googletype_Decimal | undefined;
+  rawMaterialsCount: number | undefined;
+  rawUncostedCount: number | undefined;
+  wipValue: googletype_Decimal | undefined;
+  writeoffsMaterialsValue: googletype_Decimal | undefined;
+  topMaterialsByValue: MaterialValuationRow[] | undefined;
 };
 
 // InventoryValuationRow is one product's frozen stock value: on-hand units × current per-unit
@@ -1870,6 +1877,16 @@ export type InventoryValuationRow = {
   unitCost: googletype_Decimal | undefined;
   value: googletype_Decimal | undefined;
   soldUnits: number | undefined;
+};
+
+// MaterialValuationRow is one raw-material line in the warehouse money view (NF-09).
+export type MaterialValuationRow = {
+  materialId: number | undefined;
+  name: string | undefined;
+  unit: string | undefined;
+  onHand: googletype_Decimal | undefined;
+  avgUnitCostBase: googletype_Decimal | undefined;
+  value: googletype_Decimal | undefined;
 };
 
 export type GetDashboardRequest = {
@@ -1931,6 +1948,7 @@ export type AlertSettings = {
   rateFloorN: number | undefined;
   contributionTrustPct: number | undefined;
   ga4CoverageWarnPct: number | undefined;
+  productionRunStaleDays: number | undefined;
 };
 
 export type GetAlertSettingsRequest = {
@@ -2606,6 +2624,7 @@ export type common_FittingInsert = {
   // The structured "what to change" work list produced by this fitting. Full-replace on update,
   // like callouts; resolved is toggled when a change is carried into the tech card.
   changeRequests: common_FittingChangeRequest[] | undefined;
+  sampleId: number | undefined;
 };
 
 // FittingStatus is the lifecycle state of a fitting session.
@@ -2710,6 +2729,83 @@ export type DeleteFittingRequest = {
 export type DeleteFittingResponse = {
 };
 
+export type AddSampleRequest = {
+  sample: common_SampleInsert | undefined;
+};
+
+// SampleInsert is the writable payload of a sample (сэмпл) — a sewn prototype of a style
+// (new-flow NF-04). number is server-assigned (MAX+1 per tech card) and not part of the payload.
+export type common_SampleInsert = {
+  techCardId: number | undefined;
+  purpose: string | undefined;
+  sizeId: number | undefined;
+  colorwayId: number | undefined;
+  status: string | undefined;
+  fabricSource: string | undefined;
+  notes: string | undefined;
+  startedAt: string | undefined;
+  finishedAt: string | undefined;
+};
+
+export type AddSampleResponse = {
+  id: number | undefined;
+};
+
+export type UpdateSampleRequest = {
+  id: number | undefined;
+  sample: common_SampleInsert | undefined;
+};
+
+export type UpdateSampleResponse = {
+};
+
+export type DeleteSampleRequest = {
+  id: number | undefined;
+};
+
+export type DeleteSampleResponse = {
+};
+
+export type GetSampleRequest = {
+  id: number | undefined;
+};
+
+export type GetSampleResponse = {
+  sample: common_Sample | undefined;
+};
+
+// Sample is a stored sample: the writable payload plus identity, its per-card number, timestamps,
+// and (on GetSample) the composed cost.
+export type common_Sample = {
+  id: number | undefined;
+  sample: common_SampleInsert | undefined;
+  number: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  cost: common_SampleCost | undefined;
+};
+
+// SampleCost is the composed cost of a sample in the base currency (confidential; stripped without
+// costing:read): materials issued from the warehouse plus the manual dev-expense journal.
+export type common_SampleCost = {
+  materialsBase: googletype_Decimal | undefined;
+  manualBase: googletype_Decimal | undefined;
+  totalBase: googletype_Decimal | undefined;
+  hasUncosted: boolean | undefined;
+};
+
+export type ListSamplesRequest = {
+  limit: number | undefined;
+  offset: number | undefined;
+  orderFactor: common_OrderFactor | undefined;
+  techCardId: number | undefined;
+};
+
+export type ListSamplesResponse = {
+  samples: common_Sample[] | undefined;
+  total: number | undefined;
+};
+
 export type AddTaskRequest = {
   task: common_TaskInsert | undefined;
   board: common_TaskBoard | undefined;
@@ -2740,6 +2836,7 @@ export type common_TaskInsert = {
   archiveId: number | undefined;
   fittingId: number | undefined;
   productionRunId: number | undefined;
+  sampleId: number | undefined;
   // Planned start (when work SHOULD begin), the manual counterpart of due_date.
   // The ACTUAL start (when the card first entered IN_PROGRESS) is the
   // server-stamped Task.started_at, not this field. Unset = no planned start.
@@ -3076,6 +3173,29 @@ export type PaymentMethodAllowance = {
 export type UpdateSettingsResponse = {
 };
 
+// PaymentMethodFee is the estimated processing-fee model of a payment method.
+export type PaymentMethodFee = {
+  paymentMethod: common_PaymentMethodNameEnum | undefined;
+  feePct: googletype_Decimal | undefined;
+  feeFixed: googletype_Decimal | undefined;
+};
+
+export type UpsertPaymentMethodFeesRequest = {
+  fees: PaymentMethodFee[] | undefined;
+};
+
+export type UpsertPaymentMethodFeesResponse = {
+};
+
+export type SetShipmentActualCostRequest = {
+  orderUuid: string | undefined;
+  actualCost: googletype_Decimal | undefined;
+  returnShippingCost: googletype_Decimal | undefined;
+};
+
+export type SetShipmentActualCostResponse = {
+};
+
 export type GetBackgroundHeroColorRequest = {
 };
 
@@ -3248,6 +3368,7 @@ export type StyleProductionSummary = {
   actualCostBase: googletype_Decimal | undefined;
   costVariance: googletype_Decimal | undefined;
   hasActuals: boolean | undefined;
+  materialsFromStockBase: googletype_Decimal | undefined;
 };
 
 // StyleEconomics is the "style as a business case" card (task 15 part C): one tech card's lifetime
@@ -3265,6 +3386,8 @@ export type StyleEconomics = {
   // period R&D cost NOT folded into unit COGS), NOT net profit. Unset when the style has no cost.
   netAfterDev: googletype_Decimal | undefined;
   caveat: string | undefined;
+  samplesCount: number | undefined;
+  samplesCostBase: googletype_Decimal | undefined;
 };
 
 // TechCardDevCostSummary is the computed roll-up of a style's development spend (output-only).
@@ -3351,6 +3474,99 @@ export type UpsertOpexEntriesRequest = {
 };
 
 export type UpsertOpexEntriesResponse = {
+};
+
+// OpexLineInsert is one operating-expense line item (NF-08). Amount is in `currency`; it is folded
+// to the base currency server-side via the manual costing FX rates (left uncosted, and excluded
+// from the operating result, when the currency has no rate).
+export type OpexLineInsert = {
+  month: string | undefined;
+  category: string | undefined;
+  label: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  note: string | undefined;
+};
+
+// OpexLine is a stored OPEX line item.
+export type OpexLine = {
+  id: number | undefined;
+  month: string | undefined;
+  category: string | undefined;
+  label: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  amountBase: googletype_Decimal | undefined;
+  costed: boolean | undefined;
+  recurringId: number | undefined;
+  note: string | undefined;
+};
+
+export type UpsertOpexLinesRequest = {
+  lines: OpexLineInsert[] | undefined;
+};
+
+export type UpsertOpexLinesResponse = {
+};
+
+export type DeleteOpexLineRequest = {
+  id: number | undefined;
+};
+
+export type DeleteOpexLineResponse = {
+};
+
+export type ListOpexLinesRequest = {
+  monthFrom: string | undefined;
+  monthTo: string | undefined;
+  category: string | undefined;
+};
+
+export type ListOpexLinesResponse = {
+  lines: OpexLine[] | undefined;
+};
+
+// OpexRecurringInsert is a recurring fixed-cost template (salary, subscription, rent) that a worker
+// materialises into a monthly OpexLine from active_from to min(current month, active_to).
+export type OpexRecurringInsert = {
+  label: string | undefined;
+  category: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  activeFrom: string | undefined;
+  activeTo: string | undefined;
+  note: string | undefined;
+};
+
+// OpexRecurring is a stored recurring OPEX template.
+export type OpexRecurring = {
+  id: number | undefined;
+  recurring: OpexRecurringInsert | undefined;
+  archived: boolean | undefined;
+};
+
+export type UpsertOpexRecurringRequest = {
+  recurring: OpexRecurringInsert | undefined;
+  id: number | undefined;
+};
+
+export type UpsertOpexRecurringResponse = {
+  id: number | undefined;
+};
+
+export type ArchiveOpexRecurringRequest = {
+  id: number | undefined;
+};
+
+export type ArchiveOpexRecurringResponse = {
+};
+
+export type ListOpexRecurringRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListOpexRecurringResponse = {
+  recurring: OpexRecurring[] | undefined;
 };
 
 export type GetOrderReviewsPagedRequest = {
@@ -3656,6 +3872,13 @@ export type common_TechCardInsert = {
   patterns: common_TechCardSizePattern[] | undefined;
   // construction-description aspects with reference images (replaces the flat strings).
   details: common_TechCardDetail[] | undefined;
+  // structural cut-pieces (детали кроя) + per-colourway fabric mapping (NF-05). Full-replace.
+  pieces: common_TechCardPiece[] | undefined;
+  // NF-07 auxiliary items. purpose is "sellable" (default/empty) or "auxiliary"; an auxiliary card
+  // produces a packaging material rather than a product, so it may not link products and its run
+  // output receipts into output_material_id (required before the first run; 0 = unset).
+  purpose: string | undefined;
+  outputMaterialId: number | undefined;
 };
 
 // TechCardStage is the development stage of a tech pack: prototype, fit sample,
@@ -3666,7 +3889,8 @@ export type common_TechCardStage =
   | "TECH_CARD_STAGE_FIT"
   | "TECH_CARD_STAGE_SMS"
   | "TECH_CARD_STAGE_PP"
-  | "TECH_CARD_STAGE_PROD";
+  | "TECH_CARD_STAGE_PROD"
+  | "TECH_CARD_STAGE_IDEA";
 // TechCardApprovalState is the gating release state of a tech card, orthogonal to
 // TechCardStage (which tracks development progress). A factory must only receive a
 // card in the RELEASED state.
@@ -3816,6 +4040,9 @@ export type common_TechCardColorwayUsage = {
   sizeConsumptions: common_TechCardBomSizeConsumption[] | undefined;
   lineTotal: googletype_Decimal | undefined;
   sizeRunTotal: googletype_Decimal | undefined;
+  // explicit presence: 0-based index into TechCardInsert.pieces saying which cut-piece this
+  // consumption norm is about; unset = whole garment (informational, NF-05).
+  pieceIndex?: number;
 };
 
 // TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
@@ -4060,6 +4287,31 @@ export type common_TechCardDetail = {
   mediaIds: number[] | undefined;
 };
 
+// TechCardPiece is one structural cut-piece of the garment (полочка, спинка, обтачка горловины…):
+// how many per garment, whether mirrored/paired, its grainline (долевая) and whether it is fused
+// (клеевая). materials picks, per colourway, which BOM fabric it is cut from. Full-replace child.
+export type common_TechCardPiece = {
+  name: string | undefined;
+  piecesPerGarment: number | undefined;
+  mirrored: boolean | undefined;
+  grainline: string | undefined;
+  fused: boolean | undefined;
+  calloutNumber?: number;
+  note: string | undefined;
+  materials: common_TechCardPieceColorwayMaterial[] | undefined;
+};
+
+// TechCardPieceColorwayMaterial maps ONE cut-piece to its fabric (and optional fusing) for ONE
+// colourway. colorway_index is positional into TechCardInsert.colorways (full-replace recreates
+// colourway ids, so the link is by position — mirrors bom_item_index / operation refs). The BOM
+// refs are positional into TechCardInsert.bom_items.
+export type common_TechCardPieceColorwayMaterial = {
+  colorwayIndex: number | undefined;
+  bomItemIndex?: number;
+  fusingBomItemIndex?: number;
+  note: string | undefined;
+};
+
 export type CreateTechCardResponse = {
   id: number | undefined;
 };
@@ -4148,6 +4400,42 @@ export type CostingFxRate = {
   validFrom: wellKnownTimestamp | undefined;
 };
 
+export type GetCostingFxRatesRequest = {
+};
+
+export type GetCostingFxRatesResponse = {
+  rates: CostingFxRate[] | undefined;
+};
+
+export type UpsertCostingFxRatesRequest = {
+  rates: CostingFxRate[] | undefined;
+};
+
+export type UpsertCostingFxRatesResponse = {
+};
+
+// VatRate is the standard VAT rate for a destination country (ISO 3166-1 alpha-2). A country
+// absent from the list is treated as 0% (export / non-EU).
+export type VatRate = {
+  countryCode: string | undefined;
+  ratePct: googletype_Decimal | undefined;
+  validFrom: wellKnownTimestamp | undefined;
+};
+
+export type GetVatRatesRequest = {
+};
+
+export type GetVatRatesResponse = {
+  rates: VatRate[] | undefined;
+};
+
+export type UpsertVatRatesRequest = {
+  rates: VatRate[] | undefined;
+};
+
+export type UpsertVatRatesResponse = {
+};
+
 // Material catalog (task 10). Create/Update send a common.Material; server-managed fields
 // (id on create, archived, latest_price) are ignored on write.
 export type CreateMaterialRequest = {
@@ -4171,6 +4459,12 @@ export type common_Material = {
   // latest_price is the current (latest-effective) price, if any (read-only; set via
   // AddMaterialPrice). Absent when the material has no price history yet.
   latestPrice: common_MaterialPrice | undefined;
+  // Warehouse catalog fields (new-flow NF-02).
+  code: string | undefined;
+  color: string | undefined;
+  pantone: string | undefined;
+  minStock: googletype_Decimal | undefined;
+  notes: string | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -4286,6 +4580,7 @@ export type common_TechCardDevExpenseInsert = {
   currency: string | undefined;
   fittingId: number | undefined;
   incurredAt: wellKnownTimestamp | undefined;
+  sampleId: number | undefined;
 };
 
 export type AddTechCardDevExpenseResponse = {
@@ -4305,6 +4600,7 @@ export type common_TechCardDevExpense = {
   fittingId: number | undefined;
   incurredAt: wellKnownTimestamp | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  sampleId: number | undefined;
 };
 
 export type DeleteTechCardDevExpenseRequest = {
@@ -4328,9 +4624,9 @@ export type CreateProductionRunRequest = {
   run: common_ProductionRunInsert | undefined;
 };
 
-// ProductionRunInsert is the writable payload for a run (header + size grid). planned_unit_cost /
-// planned_currency are NOT here — they are server-snapshotted at plan time (from the linked
-// tech_card_release or the live card's computed costing) and are read-only on write.
+// ProductionRunInsert is the writable payload for a run (header + colour-model × size lines).
+// planned_unit_cost / planned_currency are NOT here — they are server-snapshotted at plan time
+// (from the linked tech_card_release or the live card's computed costing) and are read-only on write.
 export type common_ProductionRunInsert = {
   techCardId: number | undefined;
   releaseId: number | undefined;
@@ -4338,8 +4634,10 @@ export type common_ProductionRunInsert = {
   startedAt: wellKnownTimestamp | undefined;
   receivedAt: wellKnownTimestamp | undefined;
   notes: string | undefined;
-  sizes: common_ProductionRunSize[] | undefined;
+  lines: common_ProductionRunLine[] | undefined;
   costs: common_ProductionRunCost[] | undefined;
+  markerEfficiencyPct: googletype_Decimal | undefined;
+  markerNotes: string | undefined;
 };
 
 // ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
@@ -4352,9 +4650,13 @@ export type common_ProductionRunStatus =
   | "PRODUCTION_RUN_STATUS_RECEIVED"
   | "PRODUCTION_RUN_STATUS_CLOSED"
   | "PRODUCTION_RUN_STATUS_CANCELLED";
-// ProductionRunSize is one size line of a run: the planned quantity, and — once received — the
-// received and defective counts (unset until the batch is received) that drive plan/fact.
-export type common_ProductionRunSize = {
+// ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
+// size, the planned quantity, and — once received — the received and defective counts (unset until
+// received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
+// published as a product yet), but every line with a received_qty > 0 must carry it at receive
+// time. Replaces the flat ProductionRunSize grid so one marker yields several colour-models (NF-06).
+export type common_ProductionRunLine = {
+  productId: number | undefined;
   sizeId: number | undefined;
   plannedQty: number | undefined;
   receivedQty?: number;
@@ -4437,6 +4739,12 @@ export type common_ProductionRunActuals = {
   unitCostVariance: googletype_Decimal | undefined;
   totalVariance: googletype_Decimal | undefined;
   hasBase: boolean | undefined;
+  // materials issued from the warehouse (NF-06): Σ (issue_production − return_production) ×
+  // unit_cost_base. Folded INTO actual_total_base, so a run can cost its fabric either by hand
+  // (a kind=materials cost article) or from stock issues — or, with the caveat below, both.
+  materialsFromStockBase: googletype_Decimal | undefined;
+  mixedMaterialsSources: boolean | undefined;
+  hasUncostedIssues: boolean | undefined;
 };
 
 // ProductionRunCostByKind is the base-currency total of actual costs of one kind.
@@ -4459,7 +4767,9 @@ export type ListProductionRunsResponse = {
 
 export type ReceiveProductionRunRequest = {
   runId: number | undefined;
-  productId: number | undefined;
+  // NF-06: the run is multi-colourway, so receive no longer takes a product_id — every line's
+  // received_qty is booked into that line's own product. Each product must be linked to the run's
+  // tech card, and at least one line must carry a received quantity.
   updateCostPrice: boolean | undefined;
 };
 
@@ -4467,63 +4777,157 @@ export type ReceiveProductionRunResponse = {
   costPriceUpdated: boolean | undefined;
 };
 
-export type GetCostingFxRatesRequest = {
+export type GetProductionRunMaterialPlanRequest = {
+  runId: number | undefined;
 };
 
-export type GetCostingFxRatesResponse = {
-  rates: CostingFxRate[] | undefined;
+// MaterialPlanRow is the estimated requirement of one catalog material for a run, against stock.
+export type MaterialPlanRow = {
+  materialId: number | undefined;
+  materialName: string | undefined;
+  unit: string | undefined;
+  required: googletype_Decimal | undefined;
+  onHand: googletype_Decimal | undefined;
+  issued: googletype_Decimal | undefined;
+  shortage: googletype_Decimal | undefined;
+  hasSizeNorms: boolean | undefined;
 };
 
-export type UpsertCostingFxRatesRequest = {
-  rates: CostingFxRate[] | undefined;
+export type GetProductionRunMaterialPlanResponse = {
+  rows: MaterialPlanRow[] | undefined;
+  caveats: string[] | undefined;
 };
 
-export type UpsertCostingFxRatesResponse = {
+export type ReceiveMaterialStockRequest = {
+  materialId: number | undefined;
+  quantity: googletype_Decimal | undefined;
+  unitCost: googletype_Decimal | undefined;
+  currency: string | undefined;
+  lot: string | undefined;
+  supplierDoc: string | undefined;
+  occurredAt: string | undefined;
+  comment: string | undefined;
 };
 
-// VatRate is the standard VAT rate for a destination country (ISO 3166-1 alpha-2). A country
-// absent from the list is treated as 0% (export / non-EU).
-export type VatRate = {
-  countryCode: string | undefined;
-  ratePct: googletype_Decimal | undefined;
-  validFrom: wellKnownTimestamp | undefined;
+export type ReceiveMaterialStockResponse = {
+  movement: common_MaterialMovement | undefined;
 };
 
-export type GetVatRatesRequest = {
+// MaterialMovement is one row of the append-only stock ledger. unit_cost* fields are confidential.
+export type common_MaterialMovement = {
+  id: number | undefined;
+  materialId: number | undefined;
+  movementType: common_MaterialMovementType | undefined;
+  quantity: googletype_Decimal | undefined;
+  onHandBefore: googletype_Decimal | undefined;
+  onHandAfter: googletype_Decimal | undefined;
+  unitCost: googletype_Decimal | undefined;
+  currency: string | undefined;
+  unitCostBase: googletype_Decimal | undefined;
+  productionRunId: number | undefined;
+  sampleId: number | undefined;
+  techCardId: number | undefined;
+  lot: string | undefined;
+  supplierDoc: string | undefined;
+  reason: string | undefined;
+  comment: string | undefined;
+  adminUsername: string | undefined;
+  occurredAt: wellKnownTimestamp | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
-export type GetVatRatesResponse = {
-  rates: VatRate[] | undefined;
+// MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
+// always non-negative; the type (with on_hand before/after) encodes the direction.
+export type common_MaterialMovementType =
+  | "MATERIAL_MOVEMENT_TYPE_UNKNOWN"
+  | "MATERIAL_MOVEMENT_TYPE_RECEIPT"
+  | "MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE"
+  | "MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE"
+  | "MATERIAL_MOVEMENT_TYPE_ADJUSTMENT"
+  | "MATERIAL_MOVEMENT_TYPE_WRITEOFF";
+export type IssueMaterialStockRequest = {
+  materialId: number | undefined;
+  quantity: googletype_Decimal | undefined;
+  // exactly one target must be set (> 0)
+  productionRunId: number | undefined;
+  sampleId: number | undefined;
+  isReturn: boolean | undefined;
+  occurredAt: string | undefined;
+  comment: string | undefined;
 };
 
-export type UpsertVatRatesRequest = {
-  rates: VatRate[] | undefined;
+export type IssueMaterialStockResponse = {
+  movement: common_MaterialMovement | undefined;
 };
 
-export type UpsertVatRatesResponse = {
+export type AdjustMaterialStockRequest = {
+  materialId: number | undefined;
+  mode: string | undefined;
+  quantity: googletype_Decimal | undefined;
+  reason: string | undefined;
+  comment: string | undefined;
 };
 
-// PaymentMethodFee is the estimated processing-fee model of a payment method.
-export type PaymentMethodFee = {
-  paymentMethod: common_PaymentMethodNameEnum | undefined;
-  feePct: googletype_Decimal | undefined;
-  feeFixed: googletype_Decimal | undefined;
+export type AdjustMaterialStockResponse = {
+  movement: common_MaterialMovement | undefined;
 };
 
-export type UpsertPaymentMethodFeesRequest = {
-  fees: PaymentMethodFee[] | undefined;
+export type GetMaterialStockRequest = {
+  materialId: number | undefined;
 };
 
-export type UpsertPaymentMethodFeesResponse = {
+export type GetMaterialStockResponse = {
+  stock: common_MaterialStock | undefined;
 };
 
-export type SetShipmentActualCostRequest = {
-  orderUuid: string | undefined;
-  actualCost: googletype_Decimal | undefined;
-  returnShippingCost: googletype_Decimal | undefined;
+// MaterialStock is a material's maintained on-hand balance and moving-average unit cost. The cost
+// fields are confidential (stripped for accounts without costing:read).
+export type common_MaterialStock = {
+  materialId: number | undefined;
+  onHand: googletype_Decimal | undefined;
+  avgUnitCostBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
 };
 
-export type SetShipmentActualCostResponse = {
+export type ListMaterialStockRequest = {
+  section: string | undefined;
+  q: string | undefined;
+  withStockOnly: boolean | undefined;
+  belowMinOnly: boolean | undefined;
+};
+
+export type ListMaterialStockResponse = {
+  rows: common_MaterialStockRow[] | undefined;
+};
+
+// MaterialStockRow is a catalog material joined with its stock balance, valuation and low-stock
+// flag — one row of the warehouse list. Money fields are confidential.
+export type common_MaterialStockRow = {
+  material: common_Material | undefined;
+  onHand: googletype_Decimal | undefined;
+  avgUnitCostBase: googletype_Decimal | undefined;
+  stockValueBase: googletype_Decimal | undefined;
+  minStock: googletype_Decimal | undefined;
+  belowMinStock: boolean | undefined;
+  baseCurrency: string | undefined;
+};
+
+export type ListMaterialMovementsRequest = {
+  limit: number | undefined;
+  offset: number | undefined;
+  materialId: number | undefined;
+  productionRunId: number | undefined;
+  sampleId: number | undefined;
+  movementType: common_MaterialMovementType | undefined;
+};
+
+export type ListMaterialMovementsResponse = {
+  movements: common_MaterialMovement[] | undefined;
+  total: number | undefined;
 };
 
 // AdminPermission grants an account a level of access to one section.
@@ -4662,9 +5066,6 @@ export interface AdminService {
   GetOrderByUUID(request: GetOrderByUUIDRequest): Promise<GetOrderByUUIDResponse>;
   // Updates shipping information for an order
   SetTrackingNumber(request: SetTrackingNumberRequest): Promise<SetTrackingNumberResponse>;
-  // SetShipmentActualCost records the actual carrier invoice (and optional return-leg cost)
-  // for an order's shipment, so contribution margin can use real logistics cost.
-  SetShipmentActualCost(request: SetShipmentActualCostRequest): Promise<SetShipmentActualCostResponse>;
   // Retrieves orders by their status payment method or email
   ListOrders(request: ListOrdersRequest): Promise<ListOrdersResponse>;
   // Processes a refund for an order
@@ -4704,6 +5105,23 @@ export interface AdminService {
   // UpsertOpexEntries records the fixed-cost (OPEX) journal — one amount per month per category,
   // base currency — feeding the dashboard operating result (task 22). Upserts on (month, category).
   UpsertOpexEntries(request: UpsertOpexEntriesRequest): Promise<UpsertOpexEntriesResponse>;
+  // UpsertOpexLines writes OPEX line items (NF-08) — each with its own currency (folded to base) and
+  // a label — upserting on (month, category, label). Requires costing:write.
+  UpsertOpexLines(request: UpsertOpexLinesRequest): Promise<UpsertOpexLinesResponse>;
+  // DeleteOpexLine removes one OPEX line by id. Requires costing:write.
+  DeleteOpexLine(request: DeleteOpexLineRequest): Promise<DeleteOpexLineResponse>;
+  // ListOpexLines returns OPEX lines within an inclusive month range, optional category. Requires
+  // costing:read (returns empty otherwise — the figures are confidential cost data).
+  ListOpexLines(request: ListOpexLinesRequest): Promise<ListOpexLinesResponse>;
+  // UpsertOpexRecurring inserts (id==0) or updates a recurring OPEX template (salary, subscription,
+  // rent) materialised into monthly lines by a worker. Requires costing:write.
+  UpsertOpexRecurring(request: UpsertOpexRecurringRequest): Promise<UpsertOpexRecurringResponse>;
+  // ArchiveOpexRecurring stops a recurring template from materialising further months. Requires
+  // costing:write.
+  ArchiveOpexRecurring(request: ArchiveOpexRecurringRequest): Promise<ArchiveOpexRecurringResponse>;
+  // ListOpexRecurring returns recurring OPEX templates (active-only unless include_archived).
+  // Requires costing:read (returns empty otherwise).
+  ListOpexRecurring(request: ListOpexRecurringRequest): Promise<ListOpexRecurringResponse>;
   // Cancels an order
   CancelOrder(request: CancelOrderRequest): Promise<CancelOrderResponse>;
   // Adds a comment to an order
@@ -4741,6 +5159,12 @@ export interface AdminService {
   // Declared last on purpose (see ListModels ordering note) so GET /fitting/list
   // is not shadowed by GET /fitting/{id}.
   ListFittings(request: ListFittingsRequest): Promise<ListFittingsResponse>;
+  // SAMPLES (new-flow NF-04): sewn prototypes of a style, with a composed cost.
+  AddSample(request: AddSampleRequest): Promise<AddSampleResponse>;
+  UpdateSample(request: UpdateSampleRequest): Promise<UpdateSampleResponse>;
+  DeleteSample(request: DeleteSampleRequest): Promise<DeleteSampleResponse>;
+  GetSample(request: GetSampleRequest): Promise<GetSampleResponse>;
+  ListSamples(request: ListSamplesRequest): Promise<ListSamplesResponse>;
   // AddTask creates a new kanban task from its content plus placement (target
   // board + optional initial column). Server sets created_by (from JWT) and
   // appends the card to the end of its (board,status) column (position).
@@ -4843,6 +5267,18 @@ export interface AdminService {
   // transitions the run to `received`, and optionally sets the product's cost_price from the run's
   // actual unit cost. It is guarded against a double receipt.
   ReceiveProductionRun(request: ReceiveProductionRunRequest): Promise<ReceiveProductionRunResponse>;
+  // GetProductionRunMaterialPlan estimates the fabric/notion requirement of a run from its lines'
+  // colourway norms × planned qty × (1 + wastage), against on-hand and already-issued stock (NF-06).
+  // It is a plan-estimate before the marker; the real consumption comes from stock issues.
+  GetProductionRunMaterialPlan(request: GetProductionRunMaterialPlanRequest): Promise<GetProductionRunMaterialPlanResponse>;
+  // Material warehouse (new-flow NF-01): on-hand balance + moving-average valuation and an
+  // append-only movement ledger per catalog material.
+  ReceiveMaterialStock(request: ReceiveMaterialStockRequest): Promise<ReceiveMaterialStockResponse>;
+  IssueMaterialStock(request: IssueMaterialStockRequest): Promise<IssueMaterialStockResponse>;
+  AdjustMaterialStock(request: AdjustMaterialStockRequest): Promise<AdjustMaterialStockResponse>;
+  GetMaterialStock(request: GetMaterialStockRequest): Promise<GetMaterialStockResponse>;
+  ListMaterialStock(request: ListMaterialStockRequest): Promise<ListMaterialStockResponse>;
+  ListMaterialMovements(request: ListMaterialMovementsRequest): Promise<ListMaterialMovementsResponse>;
   // GetCostingFxRates returns the manual FX rates used to fold multi-currency tech-card
   // costing into the base currency.
   GetCostingFxRates(request: GetCostingFxRatesRequest): Promise<GetCostingFxRatesResponse>;
@@ -4857,6 +5293,9 @@ export interface AdminService {
   // UpsertPaymentMethodFees sets the estimated processing-fee model (percent + fixed) per
   // payment method, used to estimate the fee of orders without a captured Stripe fee.
   UpsertPaymentMethodFees(request: UpsertPaymentMethodFeesRequest): Promise<UpsertPaymentMethodFeesResponse>;
+  // SetShipmentActualCost records the actual carrier invoice (and optional return-leg cost)
+  // for an order's shipment, so contribution margin can use real logistics cost.
+  SetShipmentActualCost(request: SetShipmentActualCostRequest): Promise<SetShipmentActualCostResponse>;
   GetBackgroundHeroColor(request: GetBackgroundHeroColorRequest): Promise<GetBackgroundHeroColorResponse>;
   SetBackgroundHeroColor(request: SetBackgroundHeroColorRequest): Promise<SetBackgroundHeroColorResponse>;
   // AddShipmentCarrier adds a new shipping carrier.
@@ -5452,23 +5891,6 @@ export function createAdminServiceClient(
         method: "SetTrackingNumber",
       }) as Promise<SetTrackingNumberResponse>;
     },
-    SetShipmentActualCost(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/order/shipment/actual-cost`; // eslint-disable-line quotes
-      const body = JSON.stringify(request);
-      const queryParams: string[] = [];
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "POST",
-        body,
-      }, {
-        service: "AdminService",
-        method: "SetShipmentActualCost",
-      }) as Promise<SetShipmentActualCostResponse>;
-    },
     ListOrders(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/orders/list`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -5716,6 +6138,108 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpsertOpexEntries",
       }) as Promise<UpsertOpexEntriesResponse>;
+    },
+    UpsertOpexLines(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/opex/lines/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertOpexLines",
+      }) as Promise<UpsertOpexLinesResponse>;
+    },
+    DeleteOpexLine(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/opex/lines/delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteOpexLine",
+      }) as Promise<DeleteOpexLineResponse>;
+    },
+    ListOpexLines(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/opex/lines/list`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOpexLines",
+      }) as Promise<ListOpexLinesResponse>;
+    },
+    UpsertOpexRecurring(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/opex/recurring/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertOpexRecurring",
+      }) as Promise<UpsertOpexRecurringResponse>;
+    },
+    ArchiveOpexRecurring(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/opex/recurring/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveOpexRecurring",
+      }) as Promise<ArchiveOpexRecurringResponse>;
+    },
+    ListOpexRecurring(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/opex/recurring/list`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOpexRecurring",
+      }) as Promise<ListOpexRecurringResponse>;
     },
     CancelOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
@@ -6079,6 +6603,109 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListFittings",
       }) as Promise<ListFittingsResponse>;
+    },
+    AddSample(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/sample/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddSample",
+      }) as Promise<AddSampleResponse>;
+    },
+    UpdateSample(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/sample/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateSample",
+      }) as Promise<UpdateSampleResponse>;
+    },
+    DeleteSample(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/sample/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteSample",
+      }) as Promise<DeleteSampleResponse>;
+    },
+    GetSample(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/sample/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSample",
+      }) as Promise<GetSampleResponse>;
+    },
+    ListSamples(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/sample/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      if (request.techCardId) {
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSamples",
+      }) as Promise<ListSamplesResponse>;
     },
     AddTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/add`; // eslint-disable-line quotes
@@ -6974,6 +7601,161 @@ export function createAdminServiceClient(
         method: "ReceiveProductionRun",
       }) as Promise<ReceiveProductionRunResponse>;
     },
+    GetProductionRunMaterialPlan(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.runId) {
+        throw new Error("missing required field request.run_id");
+      }
+      const path = `api/admin/production-runs/${request.runId}/material-plan`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProductionRunMaterialPlan",
+      }) as Promise<GetProductionRunMaterialPlanResponse>;
+    },
+    ReceiveMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/receive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReceiveMaterialStock",
+      }) as Promise<ReceiveMaterialStockResponse>;
+    },
+    IssueMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/issue`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "IssueMaterialStock",
+      }) as Promise<IssueMaterialStockResponse>;
+    },
+    AdjustMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/adjust`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AdjustMaterialStock",
+      }) as Promise<AdjustMaterialStockResponse>;
+    },
+    GetMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.materialId) {
+        throw new Error("missing required field request.material_id");
+      }
+      const path = `api/admin/inventory/${request.materialId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMaterialStock",
+      }) as Promise<GetMaterialStockResponse>;
+    },
+    ListMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.section) {
+        queryParams.push(`section=${encodeURIComponent(request.section.toString())}`)
+      }
+      if (request.q) {
+        queryParams.push(`q=${encodeURIComponent(request.q.toString())}`)
+      }
+      if (request.withStockOnly) {
+        queryParams.push(`withStockOnly=${encodeURIComponent(request.withStockOnly.toString())}`)
+      }
+      if (request.belowMinOnly) {
+        queryParams.push(`belowMinOnly=${encodeURIComponent(request.belowMinOnly.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMaterialStock",
+      }) as Promise<ListMaterialStockResponse>;
+    },
+    ListMaterialMovements(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/movements`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.materialId) {
+        queryParams.push(`materialId=${encodeURIComponent(request.materialId.toString())}`)
+      }
+      if (request.productionRunId) {
+        queryParams.push(`productionRunId=${encodeURIComponent(request.productionRunId.toString())}`)
+      }
+      if (request.sampleId) {
+        queryParams.push(`sampleId=${encodeURIComponent(request.sampleId.toString())}`)
+      }
+      if (request.movementType) {
+        queryParams.push(`movementType=${encodeURIComponent(request.movementType.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMaterialMovements",
+      }) as Promise<ListMaterialMovementsResponse>;
+    },
     GetCostingFxRates(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/costing/fx-rates`; // eslint-disable-line quotes
       const body = null;
@@ -7075,6 +7857,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpsertPaymentMethodFees",
       }) as Promise<UpsertPaymentMethodFeesResponse>;
+    },
+    SetShipmentActualCost(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/order/shipment/actual-cost`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetShipmentActualCost",
+      }) as Promise<SetShipmentActualCostResponse>;
     },
     GetBackgroundHeroColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/background-hero-color`; // eslint-disable-line quotes

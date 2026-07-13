@@ -969,6 +969,7 @@ export type FittingInsert = {
   // The structured "what to change" work list produced by this fitting. Full-replace on update,
   // like callouts; resolved is toggled when a change is carried into the tech card.
   changeRequests: FittingChangeRequest[] | undefined;
+  sampleId: number | undefined;
 };
 
 // FittingPattern is one PDF выкройка iteration tried in a fitting (snapshot of the
@@ -1433,307 +1434,6 @@ export type HeroLookbookInsert = {
   translations: HeroCopyTranslation[] | undefined;
 };
 
-// BodyMeasurementName enumerates the body-measurement types captured for a fit
-// model. It is intentionally separate from the garment MeasurementName dictionary.
-export type BodyMeasurementName =
-  | "BODY_MEASUREMENT_NAME_UNKNOWN"
-  // Torso
-  | "BODY_MEASUREMENT_NAME_CHEST"
-  | "BODY_MEASUREMENT_NAME_UNDER_BUST"
-  | "BODY_MEASUREMENT_NAME_WAIST"
-  | "BODY_MEASUREMENT_NAME_HIGH_HIP"
-  | "BODY_MEASUREMENT_NAME_HIP"
-  | "BODY_MEASUREMENT_NAME_NECK_BASE"
-  // Arms
-  | "BODY_MEASUREMENT_NAME_ACROSS_SHOULDER"
-  | "BODY_MEASUREMENT_NAME_SLEEVE_LENGTH"
-  | "BODY_MEASUREMENT_NAME_BICEP"
-  | "BODY_MEASUREMENT_NAME_WRIST"
-  // Legs
-  | "BODY_MEASUREMENT_NAME_INSEAM"
-  | "BODY_MEASUREMENT_NAME_THIGH"
-  | "BODY_MEASUREMENT_NAME_KNEE"
-  | "BODY_MEASUREMENT_NAME_CALF"
-  | "BODY_MEASUREMENT_NAME_ANKLE"
-  // Vertical / lengths
-  | "BODY_MEASUREMENT_NAME_HEIGHT"
-  | "BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT"
-  | "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST"
-  // Widths (front / back)
-  | "BODY_MEASUREMENT_NAME_ACROSS_FRONT"
-  | "BODY_MEASUREMENT_NAME_ACROSS_BACK";
-// ModelMeasurement is a single body measurement value, in millimetres.
-export type ModelMeasurement = {
-  name: BodyMeasurementName | undefined;
-  valueMm: number | undefined;
-};
-
-// ModelInsert is the writable payload for a fit-model profile. Measurements are
-// sparse: include only the ones that are filled in.
-export type ModelInsert = {
-  name: string | undefined;
-  comment: string | undefined;
-  gender: GenderEnum | undefined;
-  measurements: ModelMeasurement[] | undefined;
-  thumbnailId: number | undefined;
-  mediaIds: number[] | undefined;
-  defaultSizeIds: number[] | undefined;
-};
-
-// Model is a stored fit-model profile.
-export type Model = {
-  id: number | undefined;
-  model: ModelInsert | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-  updatedAt: wellKnownTimestamp | undefined;
-  thumbnail: MediaFull | undefined;
-  media: MediaFull[] | undefined;
-};
-
-// ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
-// started (in_progress), then received into stock, then closed; it can be cancelled from any
-// non-terminal state. Stored as its lowercase name in the DB.
-export type ProductionRunStatus =
-  | "PRODUCTION_RUN_STATUS_UNKNOWN"
-  | "PRODUCTION_RUN_STATUS_PLANNED"
-  | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
-  | "PRODUCTION_RUN_STATUS_RECEIVED"
-  | "PRODUCTION_RUN_STATUS_CLOSED"
-  | "PRODUCTION_RUN_STATUS_CANCELLED";
-// ProductionRunCostKind is the article category of an actual production-run cost.
-export type ProductionRunCostKind =
-  | "PRODUCTION_RUN_COST_KIND_UNKNOWN"
-  | "PRODUCTION_RUN_COST_KIND_MATERIALS"
-  | "PRODUCTION_RUN_COST_KIND_CMT"
-  | "PRODUCTION_RUN_COST_KIND_HARDWARE"
-  | "PRODUCTION_RUN_COST_KIND_PACKAGING"
-  | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
-  | "PRODUCTION_RUN_COST_KIND_DUTY"
-  | "PRODUCTION_RUN_COST_KIND_OTHER";
-// ProductionRunSize is one size line of a run: the planned quantity, and — once received — the
-// received and defective counts (unset until the batch is received) that drive plan/fact.
-export type ProductionRunSize = {
-  sizeId: number | undefined;
-  plannedQty: number | undefined;
-  receivedQty?: number;
-  defectQty?: number;
-};
-
-// ProductionRunCost is one actual cost article incurred for a run (phase 2). amount is in
-// `currency`; amount_base is the base-currency equivalent — server-folded via the costing FX
-// rates when left unset on write, or supplied manually — so run totals need no read-time FX.
-export type ProductionRunCost = {
-  kind: ProductionRunCostKind | undefined;
-  description: string | undefined;
-  amount: googletype_Decimal | undefined;
-  currency: string | undefined;
-  amountBase: googletype_Decimal | undefined;
-  incurredAt: wellKnownTimestamp | undefined;
-};
-
-// ProductionRunCostByKind is the base-currency total of actual costs of one kind.
-export type ProductionRunCostByKind = {
-  kind: ProductionRunCostKind | undefined;
-  amountBase: googletype_Decimal | undefined;
-};
-
-// ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
-// cost articles + the phase-1 size grid, against the frozen planned unit cost.
-export type ProductionRunActuals = {
-  actualTotalBase: googletype_Decimal | undefined;
-  baseCurrency: string | undefined;
-  plannedQtyTotal: number | undefined;
-  receivedQtyTotal: number | undefined;
-  defectQtyTotal: number | undefined;
-  actualUnitCost: googletype_Decimal | undefined;
-  defectPctActual: googletype_Decimal | undefined;
-  byKind: ProductionRunCostByKind[] | undefined;
-  plannedTotalBase: googletype_Decimal | undefined;
-  unitCostVariance: googletype_Decimal | undefined;
-  totalVariance: googletype_Decimal | undefined;
-  hasBase: boolean | undefined;
-};
-
-// ProductionRunInsert is the writable payload for a run (header + size grid). planned_unit_cost /
-// planned_currency are NOT here — they are server-snapshotted at plan time (from the linked
-// tech_card_release or the live card's computed costing) and are read-only on write.
-export type ProductionRunInsert = {
-  techCardId: number | undefined;
-  releaseId: number | undefined;
-  status: ProductionRunStatus | undefined;
-  startedAt: wellKnownTimestamp | undefined;
-  receivedAt: wellKnownTimestamp | undefined;
-  notes: string | undefined;
-  sizes: ProductionRunSize[] | undefined;
-  costs: ProductionRunCost[] | undefined;
-};
-
-// ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen
-// plan snapshot, and timestamps.
-export type ProductionRun = {
-  id: number | undefined;
-  run: ProductionRunInsert | undefined;
-  plannedUnitCost: googletype_Decimal | undefined;
-  plannedCurrency: string | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-  updatedAt: wellKnownTimestamp | undefined;
-  actuals: ProductionRunActuals | undefined;
-};
-
-// Subscriber represents the subscriber table
-export type Subscriber = {
-  id: number | undefined;
-  name: string | undefined;
-  email: string | undefined;
-  receivePromoEmails: boolean | undefined;
-};
-
-export type SupportTicketStatus =
-  | "SUPPORT_TICKET_STATUS_UNKNOWN"
-  | "SUPPORT_TICKET_STATUS_SUBMITTED"
-  | "SUPPORT_TICKET_STATUS_IN_PROGRESS"
-  | "SUPPORT_TICKET_STATUS_WAITING_CUSTOMER"
-  | "SUPPORT_TICKET_STATUS_RESOLVED"
-  | "SUPPORT_TICKET_STATUS_CLOSED";
-export type SupportTicketPriority =
-  | "SUPPORT_TICKET_PRIORITY_UNKNOWN"
-  | "SUPPORT_TICKET_PRIORITY_LOW"
-  | "SUPPORT_TICKET_PRIORITY_MEDIUM"
-  | "SUPPORT_TICKET_PRIORITY_HIGH"
-  | "SUPPORT_TICKET_PRIORITY_URGENT";
-export type SupportTicketInsert = {
-  topic: string | undefined;
-  subject: string | undefined;
-  civility: string | undefined;
-  email: string | undefined;
-  firstName: string | undefined;
-  lastName: string | undefined;
-  orderReference: string | undefined;
-  notes: string | undefined;
-  category: string | undefined;
-  priority: SupportTicketPriority | undefined;
-};
-
-export type SupportTicket = {
-  id: number | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-  updatedAt: wellKnownTimestamp | undefined;
-  status: SupportTicketStatus | undefined;
-  resolvedAt: wellKnownTimestamp | undefined;
-  supportTicketInsert: SupportTicketInsert | undefined;
-  caseNumber: string | undefined;
-  category: string | undefined;
-  priority: SupportTicketPriority | undefined;
-  internalNotes: string | undefined;
-};
-
-// TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
-// task belongs to exactly one board. Extend by appending members (never reuse
-// numbers) — 0 stays UNKNOWN per proto3 convention.
-export type TaskBoard =
-  | "TASK_BOARD_UNKNOWN"
-  | "TASK_BOARD_DEVELOPMENT"
-  | "TASK_BOARD_DESIGN"
-  | "TASK_BOARD_MARKETING"
-  | "TASK_BOARD_PRODUCTION"
-  | "TASK_BOARD_SOURCING"
-  | "TASK_BOARD_CONTENT";
-// TaskStatus is the kanban column. A drag between columns is a status change.
-export type TaskStatus =
-  | "TASK_STATUS_UNKNOWN"
-  | "TASK_STATUS_BACKLOG"
-  | "TASK_STATUS_TODO"
-  | "TASK_STATUS_IN_PROGRESS"
-  | "TASK_STATUS_REVIEW"
-  | "TASK_STATUS_DONE";
-export type TaskPriority =
-  | "TASK_PRIORITY_UNKNOWN"
-  | "TASK_PRIORITY_LOW"
-  | "TASK_PRIORITY_MEDIUM"
-  | "TASK_PRIORITY_HIGH"
-  | "TASK_PRIORITY_URGENT";
-// TaskInsert is the writable CONTENT of a task (create/update). Placement on the
-// board — board, status, position — is deliberately NOT here: it is set at
-// AddTask and changed only via MoveTask, so a content edit can never silently
-// re-file a card into another lane/column or reorder it. Other server-managed
-// fields (id, created_by, timestamps, resolved media) also live on Task.
-export type TaskInsert = {
-  title: string | undefined;
-  description: string | undefined;
-  assignee: string | undefined;
-  priority: TaskPriority | undefined;
-  dueDate: wellKnownTimestamp | undefined;
-  labels: string[] | undefined;
-  mediaIds: number[] | undefined;
-  // Optional typed links to existing admin entities (0 / "" = none). Follows the
-  // fitting precedent (several nullable typed FKs, NOT a polymorphic entity_type
-  // ref) so a card can deep-link to the artifact it is about while that artifact
-  // keeps its own state machine (techcard stage/approval, fitting verdict, …).
-  // Each target has a single-get RPC so the card can resolve a title/thumbnail.
-  techCardId: number | undefined;
-  productId: number | undefined;
-  orderUuid: string | undefined;
-  archiveId: number | undefined;
-  fittingId: number | undefined;
-  productionRunId: number | undefined;
-  // Planned start (when work SHOULD begin), the manual counterpart of due_date.
-  // The ACTUAL start (when the card first entered IN_PROGRESS) is the
-  // server-stamped Task.started_at, not this field. Unset = no planned start.
-  startDate: wellKnownTimestamp | undefined;
-};
-
-// TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
-// a done flag. Checklist items are managed by dedicated add/toggle/delete RPCs
-// (NOT bundled into TaskInsert's replace-on-update semantics like labels/media),
-// so a content edit never wipes per-item done state.
-export type TaskChecklistItem = {
-  id: number | undefined;
-  taskId: number | undefined;
-  content: string | undefined;
-  isDone: boolean | undefined;
-  position: number | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-};
-
-// Task is a stored kanban card: its content (TaskInsert), its placement on the
-// board (board/status/position — server-managed, set by AddTask and mutated only
-// by MoveTask), resolved media, and server-stamped identity/timestamps.
-export type Task = {
-  id: number | undefined;
-  task: TaskInsert | undefined;
-  board: TaskBoard | undefined;
-  status: TaskStatus | undefined;
-  position: number | undefined;
-  media: MediaFull[] | undefined;
-  createdBy: string | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-  updatedAt: wellKnownTimestamp | undefined;
-  // Soft-archive: set = the card is archived (hidden from the board and default
-  // list, but preserved and restorable via UnarchiveTask); unset = active.
-  // Orthogonal to placement — archiving does not change board/status/position.
-  archivedAt: wellKnownTimestamp | undefined;
-  checklist: TaskChecklistItem[] | undefined;
-  // Actual start: server-stamped the FIRST time the card enters IN_PROGRESS
-  // (never client-supplied, never cleared on later moves). Unset = the card has
-  // not been started yet. This is distinct from the planned TaskInsert.start_date.
-  startedAt: wellKnownTimestamp | undefined;
-};
-
-// TaskCommentInsert is the writable payload for a comment. author is set
-// server-side from the caller's JWT (not client-supplied).
-export type TaskCommentInsert = {
-  taskId: number | undefined;
-  body: string | undefined;
-};
-
-export type TaskComment = {
-  id: number | undefined;
-  taskId: number | undefined;
-  author: string | undefined;
-  body: string | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-};
-
 // TechCardStage is the development stage of a tech pack: prototype, fit sample,
 // salesman sample, pre-production, production.
 export type TechCardStage =
@@ -1742,7 +1442,8 @@ export type TechCardStage =
   | "TECH_CARD_STAGE_FIT"
   | "TECH_CARD_STAGE_SMS"
   | "TECH_CARD_STAGE_PP"
-  | "TECH_CARD_STAGE_PROD";
+  | "TECH_CARD_STAGE_PROD"
+  | "TECH_CARD_STAGE_IDEA";
 // TechCardApprovalState is the gating release state of a tech card, orthogonal to
 // TechCardStage (which tracks development progress). A factory must only receive a
 // card in the RELEASED state.
@@ -1940,6 +1641,9 @@ export type TechCardColorwayUsage = {
   sizeConsumptions: TechCardBomSizeConsumption[] | undefined;
   lineTotal: googletype_Decimal | undefined;
   sizeRunTotal: googletype_Decimal | undefined;
+  // explicit presence: 0-based index into TechCardInsert.pieces saying which cut-piece this
+  // consumption norm is about; unset = whole garment (informational, NF-05).
+  pieceIndex?: number;
 };
 
 // TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
@@ -2000,6 +1704,12 @@ export type Material = {
   // latest_price is the current (latest-effective) price, if any (read-only; set via
   // AddMaterialPrice). Absent when the material has no price history yet.
   latestPrice: MaterialPrice | undefined;
+  // Warehouse catalog fields (new-flow NF-02).
+  code: string | undefined;
+  color: string | undefined;
+  pantone: string | undefined;
+  minStock: googletype_Decimal | undefined;
+  notes: string | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -2037,6 +1747,7 @@ export type TechCardDevExpenseInsert = {
   currency: string | undefined;
   fittingId: number | undefined;
   incurredAt: wellKnownTimestamp | undefined;
+  sampleId: number | undefined;
 };
 
 // TechCardDevExpense is one stored development-cost journal row. amount_base folds amount to base
@@ -2052,6 +1763,7 @@ export type TechCardDevExpense = {
   fittingId: number | undefined;
   incurredAt: wellKnownTimestamp | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  sampleId: number | undefined;
 };
 
 // TechCardDevCostByKind is the base-currency development spend for one kind.
@@ -2232,6 +1944,31 @@ export type TechCardSignoff = {
   note: string | undefined;
 };
 
+// TechCardPieceColorwayMaterial maps ONE cut-piece to its fabric (and optional fusing) for ONE
+// colourway. colorway_index is positional into TechCardInsert.colorways (full-replace recreates
+// colourway ids, so the link is by position — mirrors bom_item_index / operation refs). The BOM
+// refs are positional into TechCardInsert.bom_items.
+export type TechCardPieceColorwayMaterial = {
+  colorwayIndex: number | undefined;
+  bomItemIndex?: number;
+  fusingBomItemIndex?: number;
+  note: string | undefined;
+};
+
+// TechCardPiece is one structural cut-piece of the garment (полочка, спинка, обтачка горловины…):
+// how many per garment, whether mirrored/paired, its grainline (долевая) and whether it is fused
+// (клеевая). materials picks, per colourway, which BOM fabric it is cut from. Full-replace child.
+export type TechCardPiece = {
+  name: string | undefined;
+  piecesPerGarment: number | undefined;
+  mirrored: boolean | undefined;
+  grainline: string | undefined;
+  fused: boolean | undefined;
+  calloutNumber?: number;
+  note: string | undefined;
+  materials: TechCardPieceColorwayMaterial[] | undefined;
+};
+
 export type TechCardInsert = {
   // identification (Sheet «Титул»)
   styleNumber: string | undefined;
@@ -2287,6 +2024,13 @@ export type TechCardInsert = {
   patterns: TechCardSizePattern[] | undefined;
   // construction-description aspects with reference images (replaces the flat strings).
   details: TechCardDetail[] | undefined;
+  // structural cut-pieces (детали кроя) + per-colourway fabric mapping (NF-05). Full-replace.
+  pieces: TechCardPiece[] | undefined;
+  // NF-07 auxiliary items. purpose is "sellable" (default/empty) or "auxiliary"; an auxiliary card
+  // produces a packaging material rather than a product, so it may not link products and its run
+  // output receipts into output_material_id (required before the first run; 0 = unset).
+  purpose: string | undefined;
+  outputMaterialId: number | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -2315,6 +2059,411 @@ export type TechCardListItem = {
   updatedAt: wellKnownTimestamp | undefined;
   approvalState: TechCardApprovalState | undefined;
   lockVersion: number | undefined;
+};
+
+// MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
+// always non-negative; the type (with on_hand before/after) encodes the direction.
+export type MaterialMovementType =
+  | "MATERIAL_MOVEMENT_TYPE_UNKNOWN"
+  | "MATERIAL_MOVEMENT_TYPE_RECEIPT"
+  | "MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE"
+  | "MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE"
+  | "MATERIAL_MOVEMENT_TYPE_ADJUSTMENT"
+  | "MATERIAL_MOVEMENT_TYPE_WRITEOFF";
+// MaterialStock is a material's maintained on-hand balance and moving-average unit cost. The cost
+// fields are confidential (stripped for accounts without costing:read).
+export type MaterialStock = {
+  materialId: number | undefined;
+  onHand: googletype_Decimal | undefined;
+  avgUnitCostBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// MaterialMovement is one row of the append-only stock ledger. unit_cost* fields are confidential.
+export type MaterialMovement = {
+  id: number | undefined;
+  materialId: number | undefined;
+  movementType: MaterialMovementType | undefined;
+  quantity: googletype_Decimal | undefined;
+  onHandBefore: googletype_Decimal | undefined;
+  onHandAfter: googletype_Decimal | undefined;
+  unitCost: googletype_Decimal | undefined;
+  currency: string | undefined;
+  unitCostBase: googletype_Decimal | undefined;
+  productionRunId: number | undefined;
+  sampleId: number | undefined;
+  techCardId: number | undefined;
+  lot: string | undefined;
+  supplierDoc: string | undefined;
+  reason: string | undefined;
+  comment: string | undefined;
+  adminUsername: string | undefined;
+  occurredAt: wellKnownTimestamp | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// MaterialStockRow is a catalog material joined with its stock balance, valuation and low-stock
+// flag — one row of the warehouse list. Money fields are confidential.
+export type MaterialStockRow = {
+  material: Material | undefined;
+  onHand: googletype_Decimal | undefined;
+  avgUnitCostBase: googletype_Decimal | undefined;
+  stockValueBase: googletype_Decimal | undefined;
+  minStock: googletype_Decimal | undefined;
+  belowMinStock: boolean | undefined;
+  baseCurrency: string | undefined;
+};
+
+// BodyMeasurementName enumerates the body-measurement types captured for a fit
+// model. It is intentionally separate from the garment MeasurementName dictionary.
+export type BodyMeasurementName =
+  | "BODY_MEASUREMENT_NAME_UNKNOWN"
+  // Torso
+  | "BODY_MEASUREMENT_NAME_CHEST"
+  | "BODY_MEASUREMENT_NAME_UNDER_BUST"
+  | "BODY_MEASUREMENT_NAME_WAIST"
+  | "BODY_MEASUREMENT_NAME_HIGH_HIP"
+  | "BODY_MEASUREMENT_NAME_HIP"
+  | "BODY_MEASUREMENT_NAME_NECK_BASE"
+  // Arms
+  | "BODY_MEASUREMENT_NAME_ACROSS_SHOULDER"
+  | "BODY_MEASUREMENT_NAME_SLEEVE_LENGTH"
+  | "BODY_MEASUREMENT_NAME_BICEP"
+  | "BODY_MEASUREMENT_NAME_WRIST"
+  // Legs
+  | "BODY_MEASUREMENT_NAME_INSEAM"
+  | "BODY_MEASUREMENT_NAME_THIGH"
+  | "BODY_MEASUREMENT_NAME_KNEE"
+  | "BODY_MEASUREMENT_NAME_CALF"
+  | "BODY_MEASUREMENT_NAME_ANKLE"
+  // Vertical / lengths
+  | "BODY_MEASUREMENT_NAME_HEIGHT"
+  | "BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT"
+  | "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST"
+  // Widths (front / back)
+  | "BODY_MEASUREMENT_NAME_ACROSS_FRONT"
+  | "BODY_MEASUREMENT_NAME_ACROSS_BACK";
+// ModelMeasurement is a single body measurement value, in millimetres.
+export type ModelMeasurement = {
+  name: BodyMeasurementName | undefined;
+  valueMm: number | undefined;
+};
+
+// ModelInsert is the writable payload for a fit-model profile. Measurements are
+// sparse: include only the ones that are filled in.
+export type ModelInsert = {
+  name: string | undefined;
+  comment: string | undefined;
+  gender: GenderEnum | undefined;
+  measurements: ModelMeasurement[] | undefined;
+  thumbnailId: number | undefined;
+  mediaIds: number[] | undefined;
+  defaultSizeIds: number[] | undefined;
+};
+
+// Model is a stored fit-model profile.
+export type Model = {
+  id: number | undefined;
+  model: ModelInsert | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  thumbnail: MediaFull | undefined;
+  media: MediaFull[] | undefined;
+};
+
+// ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
+// started (in_progress), then received into stock, then closed; it can be cancelled from any
+// non-terminal state. Stored as its lowercase name in the DB.
+export type ProductionRunStatus =
+  | "PRODUCTION_RUN_STATUS_UNKNOWN"
+  | "PRODUCTION_RUN_STATUS_PLANNED"
+  | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
+  | "PRODUCTION_RUN_STATUS_RECEIVED"
+  | "PRODUCTION_RUN_STATUS_CLOSED"
+  | "PRODUCTION_RUN_STATUS_CANCELLED";
+// ProductionRunCostKind is the article category of an actual production-run cost.
+export type ProductionRunCostKind =
+  | "PRODUCTION_RUN_COST_KIND_UNKNOWN"
+  | "PRODUCTION_RUN_COST_KIND_MATERIALS"
+  | "PRODUCTION_RUN_COST_KIND_CMT"
+  | "PRODUCTION_RUN_COST_KIND_HARDWARE"
+  | "PRODUCTION_RUN_COST_KIND_PACKAGING"
+  | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
+  | "PRODUCTION_RUN_COST_KIND_DUTY"
+  | "PRODUCTION_RUN_COST_KIND_OTHER";
+// ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
+// size, the planned quantity, and — once received — the received and defective counts (unset until
+// received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
+// published as a product yet), but every line with a received_qty > 0 must carry it at receive
+// time. Replaces the flat ProductionRunSize grid so one marker yields several colour-models (NF-06).
+export type ProductionRunLine = {
+  productId: number | undefined;
+  sizeId: number | undefined;
+  plannedQty: number | undefined;
+  receivedQty?: number;
+  defectQty?: number;
+};
+
+// ProductionRunCost is one actual cost article incurred for a run (phase 2). amount is in
+// `currency`; amount_base is the base-currency equivalent — server-folded via the costing FX
+// rates when left unset on write, or supplied manually — so run totals need no read-time FX.
+export type ProductionRunCost = {
+  kind: ProductionRunCostKind | undefined;
+  description: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  amountBase: googletype_Decimal | undefined;
+  incurredAt: wellKnownTimestamp | undefined;
+};
+
+// ProductionRunCostByKind is the base-currency total of actual costs of one kind.
+export type ProductionRunCostByKind = {
+  kind: ProductionRunCostKind | undefined;
+  amountBase: googletype_Decimal | undefined;
+};
+
+// ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
+// cost articles + the phase-1 size grid, against the frozen planned unit cost.
+export type ProductionRunActuals = {
+  actualTotalBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
+  plannedQtyTotal: number | undefined;
+  receivedQtyTotal: number | undefined;
+  defectQtyTotal: number | undefined;
+  actualUnitCost: googletype_Decimal | undefined;
+  defectPctActual: googletype_Decimal | undefined;
+  byKind: ProductionRunCostByKind[] | undefined;
+  plannedTotalBase: googletype_Decimal | undefined;
+  unitCostVariance: googletype_Decimal | undefined;
+  totalVariance: googletype_Decimal | undefined;
+  hasBase: boolean | undefined;
+  // materials issued from the warehouse (NF-06): Σ (issue_production − return_production) ×
+  // unit_cost_base. Folded INTO actual_total_base, so a run can cost its fabric either by hand
+  // (a kind=materials cost article) or from stock issues — or, with the caveat below, both.
+  materialsFromStockBase: googletype_Decimal | undefined;
+  mixedMaterialsSources: boolean | undefined;
+  hasUncostedIssues: boolean | undefined;
+};
+
+// ProductionRunInsert is the writable payload for a run (header + colour-model × size lines).
+// planned_unit_cost / planned_currency are NOT here — they are server-snapshotted at plan time
+// (from the linked tech_card_release or the live card's computed costing) and are read-only on write.
+export type ProductionRunInsert = {
+  techCardId: number | undefined;
+  releaseId: number | undefined;
+  status: ProductionRunStatus | undefined;
+  startedAt: wellKnownTimestamp | undefined;
+  receivedAt: wellKnownTimestamp | undefined;
+  notes: string | undefined;
+  lines: ProductionRunLine[] | undefined;
+  costs: ProductionRunCost[] | undefined;
+  markerEfficiencyPct: googletype_Decimal | undefined;
+  markerNotes: string | undefined;
+};
+
+// ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen
+// plan snapshot, and timestamps.
+export type ProductionRun = {
+  id: number | undefined;
+  run: ProductionRunInsert | undefined;
+  plannedUnitCost: googletype_Decimal | undefined;
+  plannedCurrency: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  actuals: ProductionRunActuals | undefined;
+};
+
+// SampleInsert is the writable payload of a sample (сэмпл) — a sewn prototype of a style
+// (new-flow NF-04). number is server-assigned (MAX+1 per tech card) and not part of the payload.
+export type SampleInsert = {
+  techCardId: number | undefined;
+  purpose: string | undefined;
+  sizeId: number | undefined;
+  colorwayId: number | undefined;
+  status: string | undefined;
+  fabricSource: string | undefined;
+  notes: string | undefined;
+  startedAt: string | undefined;
+  finishedAt: string | undefined;
+};
+
+// SampleCost is the composed cost of a sample in the base currency (confidential; stripped without
+// costing:read): materials issued from the warehouse plus the manual dev-expense journal.
+export type SampleCost = {
+  materialsBase: googletype_Decimal | undefined;
+  manualBase: googletype_Decimal | undefined;
+  totalBase: googletype_Decimal | undefined;
+  hasUncosted: boolean | undefined;
+};
+
+// Sample is a stored sample: the writable payload plus identity, its per-card number, timestamps,
+// and (on GetSample) the composed cost.
+export type Sample = {
+  id: number | undefined;
+  sample: SampleInsert | undefined;
+  number: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  cost: SampleCost | undefined;
+};
+
+// Subscriber represents the subscriber table
+export type Subscriber = {
+  id: number | undefined;
+  name: string | undefined;
+  email: string | undefined;
+  receivePromoEmails: boolean | undefined;
+};
+
+export type SupportTicketStatus =
+  | "SUPPORT_TICKET_STATUS_UNKNOWN"
+  | "SUPPORT_TICKET_STATUS_SUBMITTED"
+  | "SUPPORT_TICKET_STATUS_IN_PROGRESS"
+  | "SUPPORT_TICKET_STATUS_WAITING_CUSTOMER"
+  | "SUPPORT_TICKET_STATUS_RESOLVED"
+  | "SUPPORT_TICKET_STATUS_CLOSED";
+export type SupportTicketPriority =
+  | "SUPPORT_TICKET_PRIORITY_UNKNOWN"
+  | "SUPPORT_TICKET_PRIORITY_LOW"
+  | "SUPPORT_TICKET_PRIORITY_MEDIUM"
+  | "SUPPORT_TICKET_PRIORITY_HIGH"
+  | "SUPPORT_TICKET_PRIORITY_URGENT";
+export type SupportTicketInsert = {
+  topic: string | undefined;
+  subject: string | undefined;
+  civility: string | undefined;
+  email: string | undefined;
+  firstName: string | undefined;
+  lastName: string | undefined;
+  orderReference: string | undefined;
+  notes: string | undefined;
+  category: string | undefined;
+  priority: SupportTicketPriority | undefined;
+};
+
+export type SupportTicket = {
+  id: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  status: SupportTicketStatus | undefined;
+  resolvedAt: wellKnownTimestamp | undefined;
+  supportTicketInsert: SupportTicketInsert | undefined;
+  caseNumber: string | undefined;
+  category: string | undefined;
+  priority: SupportTicketPriority | undefined;
+  internalNotes: string | undefined;
+};
+
+// TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
+// task belongs to exactly one board. Extend by appending members (never reuse
+// numbers) — 0 stays UNKNOWN per proto3 convention.
+export type TaskBoard =
+  | "TASK_BOARD_UNKNOWN"
+  | "TASK_BOARD_DEVELOPMENT"
+  | "TASK_BOARD_DESIGN"
+  | "TASK_BOARD_MARKETING"
+  | "TASK_BOARD_PRODUCTION"
+  | "TASK_BOARD_SOURCING"
+  | "TASK_BOARD_CONTENT";
+// TaskStatus is the kanban column. A drag between columns is a status change.
+export type TaskStatus =
+  | "TASK_STATUS_UNKNOWN"
+  | "TASK_STATUS_BACKLOG"
+  | "TASK_STATUS_TODO"
+  | "TASK_STATUS_IN_PROGRESS"
+  | "TASK_STATUS_REVIEW"
+  | "TASK_STATUS_DONE";
+export type TaskPriority =
+  | "TASK_PRIORITY_UNKNOWN"
+  | "TASK_PRIORITY_LOW"
+  | "TASK_PRIORITY_MEDIUM"
+  | "TASK_PRIORITY_HIGH"
+  | "TASK_PRIORITY_URGENT";
+// TaskInsert is the writable CONTENT of a task (create/update). Placement on the
+// board — board, status, position — is deliberately NOT here: it is set at
+// AddTask and changed only via MoveTask, so a content edit can never silently
+// re-file a card into another lane/column or reorder it. Other server-managed
+// fields (id, created_by, timestamps, resolved media) also live on Task.
+export type TaskInsert = {
+  title: string | undefined;
+  description: string | undefined;
+  assignee: string | undefined;
+  priority: TaskPriority | undefined;
+  dueDate: wellKnownTimestamp | undefined;
+  labels: string[] | undefined;
+  mediaIds: number[] | undefined;
+  // Optional typed links to existing admin entities (0 / "" = none). Follows the
+  // fitting precedent (several nullable typed FKs, NOT a polymorphic entity_type
+  // ref) so a card can deep-link to the artifact it is about while that artifact
+  // keeps its own state machine (techcard stage/approval, fitting verdict, …).
+  // Each target has a single-get RPC so the card can resolve a title/thumbnail.
+  techCardId: number | undefined;
+  productId: number | undefined;
+  orderUuid: string | undefined;
+  archiveId: number | undefined;
+  fittingId: number | undefined;
+  productionRunId: number | undefined;
+  sampleId: number | undefined;
+  // Planned start (when work SHOULD begin), the manual counterpart of due_date.
+  // The ACTUAL start (when the card first entered IN_PROGRESS) is the
+  // server-stamped Task.started_at, not this field. Unset = no planned start.
+  startDate: wellKnownTimestamp | undefined;
+};
+
+// TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
+// a done flag. Checklist items are managed by dedicated add/toggle/delete RPCs
+// (NOT bundled into TaskInsert's replace-on-update semantics like labels/media),
+// so a content edit never wipes per-item done state.
+export type TaskChecklistItem = {
+  id: number | undefined;
+  taskId: number | undefined;
+  content: string | undefined;
+  isDone: boolean | undefined;
+  position: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// Task is a stored kanban card: its content (TaskInsert), its placement on the
+// board (board/status/position — server-managed, set by AddTask and mutated only
+// by MoveTask), resolved media, and server-stamped identity/timestamps.
+export type Task = {
+  id: number | undefined;
+  task: TaskInsert | undefined;
+  board: TaskBoard | undefined;
+  status: TaskStatus | undefined;
+  position: number | undefined;
+  media: MediaFull[] | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  // Soft-archive: set = the card is archived (hidden from the board and default
+  // list, but preserved and restorable via UnarchiveTask); unset = active.
+  // Orthogonal to placement — archiving does not change board/status/position.
+  archivedAt: wellKnownTimestamp | undefined;
+  checklist: TaskChecklistItem[] | undefined;
+  // Actual start: server-stamped the FIRST time the card enters IN_PROGRESS
+  // (never client-supplied, never cleared on later moves). Unset = the card has
+  // not been started yet. This is distinct from the planned TaskInsert.start_date.
+  startedAt: wellKnownTimestamp | undefined;
+};
+
+// TaskCommentInsert is the writable payload for a comment. author is set
+// server-side from the caller's JWT (not client-supplied).
+export type TaskCommentInsert = {
+  taskId: number | undefined;
+  body: string | undefined;
+};
+
+export type TaskComment = {
+  id: number | undefined;
+  taskId: number | undefined;
+  author: string | undefined;
+  body: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 
