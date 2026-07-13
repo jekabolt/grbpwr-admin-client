@@ -88,6 +88,7 @@ export enum ROUTES {
   techCardPrint = '/tech-cards/:id/print',
   materials = '/materials',
   productionRuns = '/production-runs',
+  productionRun = '/production-runs/:id',
   tasks = '/tasks',
   taskDetails = '/tasks/:id',
   accounts = '/accounts',

@@ -90,6 +90,11 @@ const Materials = lazy(() =>
 const ProductionRuns = lazy(() =>
   import('components/managers/production-runs').then((m) => ({ default: m.ProductionRuns })),
 );
+const ProductionRunDetail = lazy(() =>
+  import('components/managers/production-runs/detail-page').then((m) => ({
+    default: m.ProductionRunDetail,
+  })),
+);
 const Accounts = lazy(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
@@ -229,6 +234,7 @@ root.render(
                   <Route path={ROUTES.addTechCard} element={<TechCard />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
                   <Route path={ROUTES.materials} element={<Materials />} />
+                  <Route path={ROUTES.productionRun} element={<ProductionRunDetail />} />
                   <Route path={ROUTES.productionRuns} element={<ProductionRuns />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
                   <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
