@@ -4,6 +4,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
+import { inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { useSaveMaterial } from './useMaterials';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
@@ -18,6 +19,12 @@ type Draft = {
   unit: string;
   fabricWidth: string;
   fabricWeightGsm: string;
+  // Warehouse-catalog fields (new-flow NF-02).
+  code: string;
+  color: string;
+  pantone: string;
+  minStock: string;
+  notes: string;
 };
 
 const empty: Draft = {
@@ -30,6 +37,18 @@ const empty: Draft = {
   unit: '',
   fabricWidth: '',
   fabricWeightGsm: '',
+  code: '',
+  color: '',
+  pantone: '',
+  minStock: '',
+  notes: '',
+};
+
+// The unique-code guard is enforced server-side; surface its rejection in plain words.
+const saveErrorMessage = (e: unknown): string => {
+  const status = (e as { status?: number } | undefined)?.status;
+  if (status === 400 || status === 409) return 'Material code already in use — pick a unique code';
+  return e instanceof Error ? e.message : 'Failed to save material';
 };
 
 export function MaterialModal({
@@ -59,6 +78,11 @@ export function MaterialModal({
             unit: material.unit ?? '',
             fabricWidth: material.fabricWidth?.value ?? '',
             fabricWeightGsm: material.fabricWeightGsm?.value ?? '',
+            code: material.code ?? '',
+            color: material.color ?? '',
+            pantone: material.pantone ?? '',
+            minStock: material.minStock?.value ?? '',
+            notes: material.notes ?? '',
           }
         : empty,
     );
@@ -81,25 +105,23 @@ export function MaterialModal({
         composition: d.composition.trim(),
         spec: d.spec.trim(),
         unit: d.unit.trim(),
-        fabricWidth: d.fabricWidth.trim() ? { value: d.fabricWidth.trim() } : undefined,
-        fabricWeightGsm: d.fabricWeightGsm.trim() ? { value: d.fabricWeightGsm.trim() } : undefined,
+        fabricWidth: inputToDecimal(d.fabricWidth),
+        fabricWeightGsm: inputToDecimal(d.fabricWeightGsm),
         archived: material?.archived ?? false,
         latestPrice: undefined,
-        // Warehouse-catalog fields (new-flow NF-02) — not editable in this modal yet; preserve
-        // whatever is stored so an update doesn't wipe them.
-        code: material?.code ?? '',
-        color: material?.color ?? '',
-        pantone: material?.pantone ?? '',
-        minStock: material?.minStock,
-        notes: material?.notes ?? '',
+        // Warehouse-catalog fields (new-flow NF-02).
+        code: d.code.trim(),
+        color: d.color.trim(),
+        pantone: d.pantone.trim(),
+        minStock: inputToDecimal(d.minStock),
+        notes: d.notes.trim(),
       },
       {
         onSuccess: () => {
           showMessage(material ? 'Material updated' : 'Material created', 'success');
           onOpenChange(false);
         },
-        onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to save material', 'error'),
+        onError: (e) => showMessage(saveErrorMessage(e), 'error'),
       },
     );
   };
@@ -189,6 +211,55 @@ export function MaterialModal({
             min='0'
             value={d.fabricWeightGsm}
             onChange={(e) => set({ fabricWeightGsm: e.target.value })}
+          />
+        </label>
+
+        <div className='col-span-2 mt-1 border-t border-textInactiveColor pt-2'>
+          <Text variant='uppercase' size='small'>
+            warehouse
+          </Text>
+        </div>
+        <label className='flex flex-col gap-1'>
+          <Text size='small'>code</Text>
+          <input
+            className={cell}
+            placeholder='unique among active'
+            value={d.code}
+            onChange={(e) => set({ code: e.target.value })}
+          />
+        </label>
+        <label className='flex flex-col gap-1'>
+          <Text size='small'>min stock ({d.unit.trim() || 'unit'})</Text>
+          <input
+            className={cell}
+            inputMode='decimal'
+            placeholder='low-stock alert'
+            value={d.minStock}
+            onChange={(e) => set({ minStock: sanitizeDecimal(e.target.value) })}
+          />
+        </label>
+        <label className='flex flex-col gap-1'>
+          <Text size='small'>color</Text>
+          <input
+            className={cell}
+            value={d.color}
+            onChange={(e) => set({ color: e.target.value })}
+          />
+        </label>
+        <label className='flex flex-col gap-1'>
+          <Text size='small'>pantone</Text>
+          <input
+            className={cell}
+            value={d.pantone}
+            onChange={(e) => set({ pantone: e.target.value })}
+          />
+        </label>
+        <label className='col-span-2 flex flex-col gap-1'>
+          <Text size='small'>notes</Text>
+          <input
+            className={cell}
+            value={d.notes}
+            onChange={(e) => set({ notes: e.target.value })}
           />
         </label>
       </div>
