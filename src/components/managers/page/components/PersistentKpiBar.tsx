@@ -58,15 +58,16 @@ function getKpiMetrics(metrics: BusinessMetrics | undefined, compareEnabled: boo
 
   return [
     {
-      // DB-true headline. Whole euros — cents are false precision at a glance.
-      label: 'Revenue',
+      // DB-true headline, now net of VAT. Whole euros — cents are false precision at a glance.
+      label: 'Net revenue (ex-VAT)',
       display: formatCurrencyWhole(revenue.value),
       delta: buildDelta(compareEnabled, revenue.value, revenue.compareValue, formatCurrencyDelta),
     },
     {
       // The money that actually pays the team: revenue − COGS − shipping. Only meaningful over
       // the costed subset of revenue, so blank it (—) rather than show a misleading partial figure.
-      label: 'Contribution Margin',
+      // Contribution to fixed costs — NOT profit (opex/marketing come out downstream).
+      label: 'Contribution · not profit',
       display: costed ? formatCurrencyWhole(contributionMargin.value) : '—',
       delta: buildDelta(
         compareEnabled,

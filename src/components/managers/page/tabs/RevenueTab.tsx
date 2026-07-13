@@ -152,7 +152,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
             )}
             <div className='space-y-1'>
               <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                Contribution
+                Contribution (not profit)
               </Text>
               <Text className='font-bold text-lg'>{formatCurrency(contributionMargin.value)}</Text>
               <Delta
@@ -162,7 +162,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
                 enabled={compareEnabled}
               />
               <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                {showFees ? 'after shipping & fees' : 'after shipping'}
+                {showFees ? 'after shipping & fees' : 'after shipping'} · before opex
               </Text>
             </div>
           </div>
@@ -182,7 +182,7 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
         <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 border border-textInactiveColor p-4 bg-bgSecondary/20'>
           <div className='space-y-1'>
             <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-              Revenue
+              Net revenue (ex-VAT)
             </Text>
             <Text className='font-bold'>{formatCurrency(revenue.value)}</Text>
             <Delta
@@ -197,6 +197,9 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
               Gross Revenue
             </Text>
             <Text className='font-bold'>{formatCurrency(grossRevenue.value)}</Text>
+            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+              before discounts
+            </Text>
           </div>
           <div className='space-y-1'>
             <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
@@ -251,7 +254,10 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
         </div>
 
         <div className='grid gap-4 md:grid-cols-2'>
-          <TimeSeriesChart title='Revenue' data={coarsenTimeSeries(commerce?.revenueByDay)} />
+          <TimeSeriesChart
+            title='Net revenue (ex-VAT)'
+            data={coarsenTimeSeries(commerce?.revenueByDay)}
+          />
           <TimeSeriesChart
             title='Gross revenue'
             data={coarsenTimeSeries(commerce?.grossRevenueByDay)}
