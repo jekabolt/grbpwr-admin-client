@@ -112,6 +112,11 @@ export function FittingCardList() {
                   <Text variant='inactive' size='small'>
                     {statusLabel(insert?.status)} · {verdictLabel(insert?.verdict)} ·{' '}
                     {fitting.media?.length ?? 0} photo(s)
+                    {insert?.roundNumber ? ` · round ${insert.roundNumber}` : ''}
+                    {insert?.outcome ? ` · ${insert.outcome.replace('_', ' ')}` : ''}
+                    {insert?.changeRequests?.length
+                      ? ` · ${insert.changeRequests.filter((cr) => !cr.resolved).length}/${insert.changeRequests.length} changes open`
+                      : ''}
                   </Text>
                 </div>
                 {canEdit && (

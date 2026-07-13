@@ -33,6 +33,16 @@ const fittingCalloutSchema = z.object({
   posY: z.string().optional().default(''),
 });
 
+// The structured "what to change" work list a fitting produces. calloutNumber optionally ties an
+// item to a numbered photo marker; resolved is toggled when the change is carried into the card.
+const fittingChangeRequestSchema = z.object({
+  id: z.number().int().optional().default(0),
+  target: z.string().optional().default(''),
+  note: z.string().optional().default(''),
+  calloutNumber: z.number().int().optional().default(0),
+  resolved: z.boolean().optional().default(false),
+});
+
 export const fittingSchema = z
   .object({
     // A fitting anchors to a product AND/OR a tech card — at least one must be set
@@ -50,6 +60,11 @@ export const fittingSchema = z
     patterns: z.array(fittingPatternSchema).default([]),
     mediaIds: z.array(z.number()).default([]),
     callouts: z.array(fittingCalloutSchema).default([]),
+    // §4 round tracking: sequence number (0 = server auto-assigns per tech card), structured
+    // outcome ('' = undecided), and the change-request work list.
+    roundNumber: z.number().int().optional().default(0),
+    outcome: z.string().optional().default(''),
+    changeRequests: z.array(fittingChangeRequestSchema).default([]),
   })
   .refine((data) => !!data.productId || !!data.techCardId, {
     message: 'Укажите продукт или тех карту',
@@ -71,6 +86,9 @@ export const fittingDefaultData: FittingFormData = {
   patterns: [],
   mediaIds: [],
   callouts: [],
+  roundNumber: 0,
+  outcome: '',
+  changeRequests: [],
 };
 
 export function todayDateInput(): string {
@@ -130,6 +148,15 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       posX: decimalToInput(c.posX),
       posY: decimalToInput(c.posY),
     })),
+    roundNumber: insert?.roundNumber || 0,
+    outcome: insert?.outcome || '',
+    changeRequests: (insert?.changeRequests ?? []).map((cr) => ({
+      id: cr.id || 0,
+      target: cr.target || '',
+      note: cr.note || '',
+      calloutNumber: cr.calloutNumber || 0,
+      resolved: cr.resolved ?? false,
+    })),
   };
 }
 
@@ -172,11 +199,18 @@ export function mapFormToFittingInsert(
         posX: inputToDecimal(c.posX),
         posY: inputToDecimal(c.posY),
       })),
-    // §4 fittings — not yet form-managed. Preserve from the original on update,
-    // neutral defaults on create (0 = server auto-assigns round; '' = undecided).
-    // TODO: wire round number / outcome selector / change-requests list.
-    roundNumber: original?.roundNumber ?? 0,
-    outcome: original?.outcome ?? '',
-    changeRequests: original?.changeRequests ?? [],
+    // §4 round tracking (form-managed). roundNumber 0 = server auto-assigns per tech card;
+    // outcome '' = undecided. Change requests are full-replace, like callouts — drop blank notes.
+    roundNumber: data.roundNumber || 0,
+    outcome: data.outcome?.trim() || '',
+    changeRequests: (data.changeRequests ?? [])
+      .filter((cr) => cr.note?.trim() || cr.target?.trim())
+      .map((cr) => ({
+        id: cr.id || 0,
+        target: cr.target?.trim() || '',
+        note: cr.note?.trim() || '',
+        calloutNumber: cr.calloutNumber || 0,
+        resolved: cr.resolved ?? false,
+      })),
   };
 }

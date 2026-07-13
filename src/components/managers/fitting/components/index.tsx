@@ -19,6 +19,7 @@ import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { ChangeRequestsFields } from './change-requests-fields';
 import { FittingCallouts } from './fitting-callouts';
 import { FittingMedia } from './fitting-media';
 import { PatternsFields } from './patterns-fields';
@@ -33,6 +34,14 @@ import {
   todayDateInput,
 } from './schema';
 import { SizesFields } from './sizes-fields';
+
+// Structured round outcome (raw strings per the FittingInsert contract; distinct from verdict).
+const fittingOutcomeOptions = [
+  { value: '', label: 'undecided' },
+  { value: 'approved', label: 'approved' },
+  { value: 'new_round', label: 'new round' },
+  { value: 'dropped', label: 'dropped' },
+];
 
 function Section({
   title,
@@ -171,6 +180,15 @@ export function FittingForm({
             <InputField name='fittingDate' type='date' label='fitting date' />
             <SelectField name='status' label='status' items={fittingStatusOptions} />
             <SelectField name='verdict' label='verdict' items={fittingVerdictOptions} />
+            <div className='grid grid-cols-2 gap-3'>
+              <InputField
+                name='roundNumber'
+                type='number'
+                label='round # (0 = auto)'
+                valueAsNumber
+              />
+              <SelectField name='outcome' label='outcome' items={fittingOutcomeOptions} />
+            </div>
             <InputField name='recordedBy' label='recorded by (optional)' placeholder='name' />
             <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={2000} />
           </Section>
@@ -190,6 +208,9 @@ export function FittingForm({
             </Section>
             <Section title='callouts (замечания по посадке)'>
               <FittingCallouts mediaById={mediaById} />
+            </Section>
+            <Section title='change requests (что доработать)'>
+              <ChangeRequestsFields />
             </Section>
           </div>
         </div>
