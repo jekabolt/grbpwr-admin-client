@@ -41,6 +41,7 @@ import { LabelsField } from './labels-field';
 import { LifecycleStrip } from './lifecycle-strip';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
+import { PiecesTab } from './pieces-tab';
 import { ProductIdsField } from './product-ids-field';
 import { DevExpensesField } from './dev-expenses-field';
 import { ReleasesField } from './releases-field';
@@ -67,6 +68,7 @@ const TABS = [
   { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
+  { id: 'pieces', label: 'pieces' },
   { id: 'construction', label: 'construction' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
@@ -81,7 +83,7 @@ type TabId = (typeof TABS)[number]['id'];
 // DEVELOP how it's made, SPEC what ships. History stands alone.
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   { band: 'design', tabs: ['header', 'sketch', 'patterns'] },
-  { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'construction'] },
+  { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'pieces', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'dev', 'issues', 'signoff'] },
   { band: '', tabs: ['history'] },
 ];
@@ -96,6 +98,7 @@ const ERROR_TAB: Record<string, TabId> = {
   sizeQuantities: 'patterns',
   bomItems: 'bom',
   colorways: 'colorways',
+  pieces: 'pieces',
   details: 'header',
   construction: 'construction',
   operations: 'construction',
@@ -601,6 +604,11 @@ export function TechCardForm({
             <Section title='колорвеи — рецепты (материалы по частям)'>
               <ColorwaysField />
             </Section>
+          </div>
+
+          {/* PIECES — cut-piece details + fabric map (NF-05) */}
+          <div hidden={activeTab !== 'pieces'}>
+            <PiecesTab />
           </div>
 
           {/* CONSTRUCTION */}

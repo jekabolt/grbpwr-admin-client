@@ -235,6 +235,27 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
         setValue(`operations.${oi}.bomItemIndex`, idx - 1, { shouldDirty: true });
       }
     });
+    // Cut-piece fabric-map cells reference BOM articles too (fabric + fusing) — renumber both, or a
+    // detail silently maps to the wrong material on the factory floor (nf05-01).
+    const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
+    (pieces ?? []).forEach((p, pi) => {
+      (p.materials ?? []).forEach((m, mi) => {
+        const bIdx = m.bomItemIndex ?? -1;
+        if (bIdx === bi) {
+          setValue(`pieces.${pi}.materials.${mi}.bomItemIndex`, -1, { shouldDirty: true });
+        } else if (bIdx > bi) {
+          setValue(`pieces.${pi}.materials.${mi}.bomItemIndex`, bIdx - 1, { shouldDirty: true });
+        }
+        const fIdx = m.fusingBomItemIndex ?? -1;
+        if (fIdx === bi) {
+          setValue(`pieces.${pi}.materials.${mi}.fusingBomItemIndex`, -1, { shouldDirty: true });
+        } else if (fIdx > bi) {
+          setValue(`pieces.${pi}.materials.${mi}.fusingBomItemIndex`, fIdx - 1, {
+            shouldDirty: true,
+          });
+        }
+      });
+    });
     remove(bi);
   };
 

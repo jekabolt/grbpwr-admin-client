@@ -143,9 +143,34 @@ const colorwayUsageSchema = z.object({
   // per-size grading of a measured material's consumption. When set, the size-run cost
   // folds these against the size run; `consumption` above is the per-garment fallback.
   sizeConsumptions: z.array(sizeConsumptionSchema).default([]),
+  // 0-based index into `pieces` this norm is about; -1 = whole garment (informational, NF-05).
+  // Positional — renumbered when a piece is removed (nf05-01). UI select lands in W4.4.
+  pieceIndex: z.number().optional().default(-1),
   // OUTPUT-ONLY: server-computed spend per garment / over the whole size run.
   lineTotal: z.string().optional().default(''),
   sizeRunTotal: z.string().optional().default(''),
+});
+
+// One cut-piece detail (деталь кроя) + its per-colourway fabric mapping (NF-05). materials is a
+// sparse list keyed by colorwayIndex; a colourway with no entry is simply unmapped. bomItemIndex /
+// fusingBomItemIndex are positional into `bomItems` (-1 = unset), colorwayIndex positional into
+// `colorways` — all renumbered on BOM/colourway removal (nf05-01).
+const pieceMaterialSchema = z.object({
+  colorwayIndex: z.number().optional().default(0),
+  bomItemIndex: z.number().optional().default(-1),
+  fusingBomItemIndex: z.number().optional().default(-1),
+  note: z.string().optional().default(''),
+});
+
+const pieceSchema = z.object({
+  name: z.string().optional().default(''),
+  piecesPerGarment: z.number().optional().default(1),
+  mirrored: z.boolean().optional().default(false),
+  grainline: z.string().optional().default(''),
+  fused: z.boolean().optional().default(false),
+  calloutNumber: z.number().optional().default(0),
+  note: z.string().optional().default(''),
+  materials: z.array(pieceMaterialSchema).default([]),
 });
 
 const colorwaySchema = z.object({
@@ -346,6 +371,8 @@ const techCardObject = z.object({
   // outputMaterialId (required before its first run; 0 = unset).
   purpose: z.string().optional().default('sellable'),
   outputMaterialId: z.number().optional().default(0),
+  // Cut-piece details + per-colourway fabric map (NF-05). Positional refs (nf05-01).
+  pieces: z.array(pieceSchema).default([]),
   // Sketch media split into two independent lists (construction consumes ONLY technicalMedia;
   // callouts pin onto ANY media_id — moodboard or technical, B-1). Each item's `kind` sub-classifies.
   moodboardMedia: z.array(mediaItemSchema).default([]),
@@ -403,6 +430,7 @@ export const techCardDefaultData: TechCardFormData = {
   productIds: [],
   purpose: 'sellable',
   outputMaterialId: 0,
+  pieces: [],
   moodboardMedia: [],
   technicalMedia: [],
   callouts: [],
@@ -551,8 +579,24 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           sizeId: sc.sizeId || 0,
           consumption: decimalToInput(sc.consumption),
         })),
+        pieceIndex: u.pieceIndex ?? -1,
         lineTotal: decimalToInput(u.lineTotal),
         sizeRunTotal: decimalToInput(u.sizeRunTotal),
+      })),
+    })),
+    pieces: (insert?.pieces ?? []).map((p) => ({
+      name: p.name || '',
+      piecesPerGarment: p.piecesPerGarment ?? 1,
+      mirrored: p.mirrored ?? false,
+      grainline: p.grainline || '',
+      fused: p.fused ?? false,
+      calloutNumber: p.calloutNumber ?? 0,
+      note: p.note || '',
+      materials: (p.materials ?? []).map((m) => ({
+        colorwayIndex: m.colorwayIndex ?? 0,
+        bomItemIndex: m.bomItemIndex ?? -1,
+        fusingBomItemIndex: m.fusingBomItemIndex ?? -1,
+        note: m.note || '',
       })),
     })),
     bomItems: (insert?.bomItems ?? []).map((b) => ({
@@ -891,10 +935,40 @@ export function mapFormToTechCardInsert(
             sizeId: sc.sizeId || 0,
             consumption: inputToDecimal(sc.consumption),
           })),
+        pieceIndex:
+          typeof u.pieceIndex === 'number' && u.pieceIndex >= 0 ? u.pieceIndex : undefined,
         // lineTotal + sizeRunTotal are output-only (server-computed) — never sent
         lineTotal: undefined,
         sizeRunTotal: undefined,
       })),
+    })),
+    // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
+    // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
+    pieces: (data.pieces ?? []).map((p) => ({
+      name: p.name?.trim() || '',
+      piecesPerGarment: p.piecesPerGarment || 0,
+      mirrored: p.mirrored ?? false,
+      grainline: p.grainline?.trim() || '',
+      fused: p.fused ?? false,
+      calloutNumber: p.calloutNumber || 0,
+      note: p.note?.trim() || '',
+      materials: (p.materials ?? [])
+        // drop fully-empty cells (no fabric and no fusing) so the map stays sparse
+        .filter(
+          (m) =>
+            (typeof m.bomItemIndex === 'number' && m.bomItemIndex >= 0) ||
+            (typeof m.fusingBomItemIndex === 'number' && m.fusingBomItemIndex >= 0),
+        )
+        .map((m) => ({
+          colorwayIndex: m.colorwayIndex || 0,
+          bomItemIndex:
+            typeof m.bomItemIndex === 'number' && m.bomItemIndex >= 0 ? m.bomItemIndex : undefined,
+          fusingBomItemIndex:
+            typeof m.fusingBomItemIndex === 'number' && m.fusingBomItemIndex >= 0
+              ? m.fusingBomItemIndex
+              : undefined,
+          note: m.note?.trim() || '',
+        })),
     })),
     bomItems: (data.bomItems ?? []).map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,

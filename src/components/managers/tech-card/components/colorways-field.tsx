@@ -659,10 +659,10 @@ function ColorwayCard({
 }
 
 // Colourways = the recipes. Each card chooses which catalog article goes on which part, in
-// what colour and at what consumption (usages). Usages are self-contained per colourway, so
-// removing one is a plain remove (no cross-line matrix to re-index).
+// what colour and at what consumption (usages). Usages are self-contained per colourway, but the
+// pieces tab's fabric map references colourways by index, so removing one must renumber those cells.
 export function ColorwaysField() {
-  const { control, getValues } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'colorways' });
   const productIds = (useWatch({ control, name: 'productIds' }) ?? []) as number[];
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as FormBomItem[];
@@ -685,6 +685,25 @@ export function ColorwaysField() {
       }`,
     })),
   ];
+
+  // Removing colourway `ci` shifts the fabric map's colorwayIndex on every piece: drop cells for
+  // the removed colourway and decrement cells that pointed past it, so a cell never silently maps to
+  // the wrong colour (nf05-01). Then remove the colourway itself.
+  const removeColorway = (ci: number) => {
+    const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
+    (pieces ?? []).forEach((p, pi) => {
+      const materials = p.materials ?? [];
+      if (!materials.some((m) => (m.colorwayIndex ?? 0) >= ci)) return;
+      const next = materials
+        .filter((m) => (m.colorwayIndex ?? 0) !== ci)
+        .map((m) => {
+          const idx = m.colorwayIndex ?? 0;
+          return idx > ci ? { ...m, colorwayIndex: idx - 1 } : m;
+        });
+      setValue(`pieces.${pi}.materials`, next, { shouldDirty: true });
+    });
+    remove(ci);
+  };
 
   // Clone a colourway's whole recipe into a new card (deep-copy usages so the two cards don't
   // share array references); reset the published-product link + computed totals.
@@ -730,7 +749,7 @@ export function ColorwaysField() {
               productOptions={productOptions}
               articleOptions={articleOptions}
               bomItems={bomItems}
-              onRemove={() => remove(index)}
+              onRemove={() => removeColorway(index)}
               onCopy={() => copyColorway(index)}
             />
           ))}
