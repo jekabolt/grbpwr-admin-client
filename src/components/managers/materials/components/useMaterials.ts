@@ -13,7 +13,7 @@ const materialKeys = {
 // production-run status filter, the backend expects the DB short name (`fabric`, `lining`, …),
 // not the enum constant. Inferred (no explicit proto note as there is for run status); if the
 // backend actually matches the enum constant, drop this transform.
-const bomSectionToDbFilter = (section: string): string | undefined =>
+export const bomSectionToDbFilter = (section: string): string | undefined =>
   section ? section.replace('TECH_CARD_BOM_SECTION_', '').toLowerCase() : undefined;
 
 export function useMaterials(section: string, includeArchived: boolean) {
