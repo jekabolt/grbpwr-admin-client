@@ -340,7 +340,7 @@ export const techCardSchema = z.object({
   patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
   productIds: z.array(z.number()).default([]),
   // Sketch media split into two independent lists (construction consumes ONLY technicalMedia;
-  // callouts pin onto technicalMedia). Each item's `kind` sub-classifies within its list.
+  // callouts pin onto ANY media_id — moodboard or technical, B-1). Each item's `kind` sub-classifies.
   moodboardMedia: z.array(mediaItemSchema).default([]),
   technicalMedia: z.array(mediaItemSchema).default([]),
   callouts: z.array(calloutSchema).default([]),
