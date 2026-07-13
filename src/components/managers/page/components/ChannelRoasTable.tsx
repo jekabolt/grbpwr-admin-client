@@ -21,6 +21,7 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
   const rows = data?.rows ?? [];
   if (rows.length === 0) return null;
 
+  const currency = data?.baseCurrency || 'EUR';
   const sorted = [...rows].sort(
     (a, b) => parseDecimal(b.settledRevenue) - parseDecimal(a.settledRevenue),
   );
@@ -54,17 +55,19 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
             {sorted.map((r, i) => (
               <tr key={i} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
                 <td className='p-2'>{channelLabel(r.utmSource, r.utmMedium, r.utmCampaign)}</td>
-                <td className='p-2 text-right'>{formatCurrency(parseDecimal(r.settledRevenue))}</td>
+                <td className='p-2 text-right'>
+                  {formatCurrency(parseDecimal(r.settledRevenue), currency)}
+                </td>
                 <td className='p-2 text-right'>{formatNumber(r.orders ?? 0)}</td>
                 <td className='p-2 text-right'>{formatNumber(r.newCustomers ?? 0)}</td>
                 <td className='p-2 text-right'>
-                  {r.hasSpend ? formatCurrency(parseDecimal(r.spend)) : 'N/A'}
+                  {r.hasSpend ? formatCurrency(parseDecimal(r.spend), currency) : 'N/A'}
                 </td>
                 <td className='p-2 text-right'>
                   {r.hasSpend ? `${(r.roas ?? 0).toFixed(2)}×` : 'N/A'}
                 </td>
                 <td className='p-2 text-right'>
-                  {r.hasSpend ? formatCurrency(r.cac ?? 0) : 'N/A'}
+                  {r.hasSpend ? formatCurrency(r.cac ?? 0, currency) : 'N/A'}
                 </td>
               </tr>
             ))}

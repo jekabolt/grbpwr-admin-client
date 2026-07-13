@@ -167,7 +167,7 @@ export const StyleEconomicsModal: FC<StyleEconomicsModalProps> = ({
           : 'style economics'
       }
       confirmLabel='close'
-      cancelLabel='close'
+      cancelLabel='done'
     >
       {isLoading ? (
         <Text size='small'>loading…</Text>

@@ -94,6 +94,12 @@ export function ProductCostSection({
 
       {canReadCosting && hasProvenance && (
         <div className='flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-textInactiveColor pt-3'>
+          {costInfo?.costPrice?.value && (
+            <Text size='small'>
+              current cost: {eur}
+              {costInfo.costPrice.value}
+            </Text>
+          )}
           <Text variant='inactive' size='small'>
             source
           </Text>
@@ -101,7 +107,10 @@ export function ProductCostSection({
             <Text size='small'>
               from tech card{' '}
               {sourceTcId ? (
-                <Link className='underline' to={generatePath(ROUTES.singleTechCard, { id: `${sourceTcId}` })}>
+                <Link
+                  className='underline'
+                  to={generatePath(ROUTES.singleTechCard, { id: `${sourceTcId}` })}
+                >
                   TC-{sourceTcId}
                 </Link>
               ) : null}

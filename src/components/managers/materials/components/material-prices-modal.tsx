@@ -91,8 +91,7 @@ export function MaterialPricesModal({
                       {decimalToInput(p.price)} {p.currency}
                     </Text>
                     <Text variant='inactive' size='small'>
-                      {p.validFrom ? new Date(p.validFrom).toLocaleDateString() : '—'} ·{' '}
-                      {p.source || 'manual'}
+                      {p.validFrom ? p.validFrom.slice(0, 10) : '—'} · {p.source || 'manual'}
                       {p.note ? ` · ${p.note}` : ''}
                     </Text>
                   </div>

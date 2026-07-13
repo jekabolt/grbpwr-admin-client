@@ -12,8 +12,9 @@ const cellClass =
   'w-24 border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 // Estimated processing-fee model per payment method — feeds contribution margin for
-// non-Stripe methods. Blind write: the contract has no read RPC, so current values
-// are not shown; saving OVERWRITES the stored model (leave a method blank to clear it).
+// non-Stripe methods. Blind write: the contract has no read RPC, so current values are not
+// shown. Only methods with a value entered are sent (a blank method is NOT sent, so it is
+// left as-is on the server — this editor cannot clear an existing fee).
 export function PaymentFeesEditor({
   methods,
   baseCurrency,
