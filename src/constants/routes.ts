@@ -37,6 +37,11 @@ export const SECTION = {
   techCards: 'tech_cards',
   tasks: 'tasks',
   accounts: 'accounts',
+  // Field-shaping section (NOT a screen gate): when an account lacks costing:read
+  // the backend nulls out cost/margin fields across products, tech cards, metrics
+  // and the dashboard. Deliberately absent from the nav arrays — there is no
+  // "costing" page; canRead/canWrite(SECTION.costing) only tidy cost UI visibility.
+  costing: 'costing',
 } as const;
 
 export type SectionKey = (typeof SECTION)[keyof typeof SECTION];
