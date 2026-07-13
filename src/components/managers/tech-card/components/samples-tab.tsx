@@ -4,7 +4,8 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Fragment, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
+import { SampleFittings, SampleMovements } from './sample-panels';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
@@ -210,6 +211,8 @@ function SampleEditor({
 }) {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
+  const { pathname, search } = useLocation();
+  const returnTo = pathname + search;
   const save = useSaveSample();
   const del = useDeleteSample();
   const isEdit = !!sample?.id;
@@ -428,6 +431,14 @@ function SampleEditor({
             </Text>
           ) : null}
         </div>
+      ) : null}
+
+      {/* Movement / fitting sub-panels need a saved sample id (W3.3). */}
+      {isEdit && sample?.id ? (
+        <>
+          <SampleMovements sampleId={sample.id} />
+          <SampleFittings sampleId={sample.id} techCardId={techCardId} returnTo={returnTo} />
+        </>
       ) : null}
 
       <div className='flex items-center justify-end gap-2 border-t border-textInactiveColor pt-2'>
