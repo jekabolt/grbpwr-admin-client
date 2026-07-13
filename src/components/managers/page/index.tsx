@@ -8,9 +8,11 @@ import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { DateRangePicker, PersistentKpiBar } from './components';
+import { AlertSettingsModal } from './components/alert-settings-modal';
 import { OpexModal } from './components/opex-modal';
 import { VatRatesModal } from './components/vat-rates-modal';
 import { GrowthTab, ProductsTab, RevenueTab, ThisWeekTab } from './tabs';
+import { useDashboardQuery } from './useDashboardQuery';
 import type { MetricsPeriod } from './useMetricsQuery';
 import type { MetricsTabId } from './useTabMetricsQuery';
 import { useTabMetricsQuery } from './useTabMetricsQuery';
@@ -65,6 +67,7 @@ export function Analitic() {
   const canConfig = canWrite(SECTION.analytics);
   const [vatOpen, setVatOpen] = useState(false);
   const [opexOpen, setOpexOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
 
   const setActiveTab = (tabId: MetricsTabId) => {
     setSearchParams(
@@ -104,6 +107,13 @@ export function Analitic() {
 
   const compareEnabled = compareMode !== 'COMPARE_MODE_NONE';
 
+  // Operating result + GA4 coverage come from GetDashboard, only needed on the Revenue tab.
+  const { data: dashboard } = useDashboardQuery(period, {
+    enabled: activeTab === 'revenue',
+    customFrom: period === 'custom' ? customFrom : undefined,
+    customTo: period === 'custom' ? customTo : undefined,
+  });
+
   return (
     <div className='flex flex-col gap-8 pb-16'>
       <div className='flex flex-col gap-4'>
@@ -113,11 +123,29 @@ export function Analitic() {
           </Text>
           {canConfig && (
             <div className='flex items-center gap-2'>
-              <Button variant='secondary' size='lg' className='uppercase' onClick={() => setVatOpen(true)}>
+              <Button
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => setVatOpen(true)}
+              >
                 VAT rates
               </Button>
-              <Button variant='secondary' size='lg' className='uppercase' onClick={() => setOpexOpen(true)}>
+              <Button
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => setOpexOpen(true)}
+              >
                 OPEX
+              </Button>
+              <Button
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => setAlertsOpen(true)}
+              >
+                Alerts
               </Button>
             </div>
           )}
@@ -128,6 +156,7 @@ export function Analitic() {
           onOpenChange={setOpexOpen}
           baseCurrency={dictionary?.baseCurrency || 'EUR'}
         />
+        <AlertSettingsModal open={alertsOpen} onOpenChange={setAlertsOpen} />
         <DateRangePicker
           period={period}
           compareMode={compareMode}
@@ -202,7 +231,11 @@ export function Analitic() {
             />
           )}
           {activeTab === 'revenue' && (
-            <RevenueTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+            <RevenueTab
+              metricsResponse={metricsResponse}
+              compareEnabled={compareEnabled}
+              dashboard={dashboard}
+            />
           )}
           {activeTab === 'products' && <ProductsTab metricsResponse={metricsResponse} />}
           {activeTab === 'growth' && <GrowthTab metricsResponse={metricsResponse} />}

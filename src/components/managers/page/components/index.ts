@@ -14,6 +14,7 @@ export { InventoryHealthTable } from './InventoryHealthTable';
 export { InventoryTargetForm } from './InventoryTargetForm';
 export { NotifyMeIntentTable } from './NotifyMeIntentTable';
 export { OOSImpactTable } from './OOSImpactTable';
+export { OperatingResultStrip } from './OperatingResultStrip';
 export { PersistentKpiBar } from './PersistentKpiBar';
 export { ProductCharts } from './ProductCharts';
 export { ProductNameLink } from './ProductNameLink';

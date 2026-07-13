@@ -1,7 +1,7 @@
-import type { GetMetricsResponse } from 'api/proto-http/admin';
+import type { GetDashboardResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import { type FC } from 'react';
 import Text from 'ui/components/text';
-import { FunnelChart, PromoTable, TimeSeriesChart } from '../components';
+import { FunnelChart, OperatingResultStrip, PromoTable, TimeSeriesChart } from '../components';
 import { orderCancellationSharePercent } from '../executiveAlerts';
 import {
   coarsenTimeSeries,
@@ -16,6 +16,7 @@ import {
 interface RevenueTabProps {
   metricsResponse: GetMetricsResponse;
   compareEnabled?: boolean;
+  dashboard?: GetDashboardResponse;
 }
 
 // Below this coverage the margin % is a biased average of an unrepresentative slice; the € totals
@@ -53,7 +54,11 @@ const Delta: FC<{
   );
 };
 
-export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueTabProps) {
+export function RevenueTab({
+  metricsResponse,
+  compareEnabled = false,
+  dashboard,
+}: RevenueTabProps) {
   const metrics = metricsResponse.business;
   const commerce = metrics?.commerce;
   const margin = metrics?.margin;
@@ -175,6 +180,9 @@ export function RevenueTab({ metricsResponse, compareEnabled = false }: RevenueT
           </div>
         )}
       </div>
+
+      {/* Operating result (contribution − opex − marketing) + GA4 coverage, from GetDashboard. */}
+      <OperatingResultStrip dashboard={dashboard} />
 
       <div className='space-y-6'>
         <h3 className='text-textBaseSize font-bold uppercase'>Revenue &amp; Orders</h3>
