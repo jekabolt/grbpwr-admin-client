@@ -54,6 +54,16 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
   });
 }
 
+// Development board (GetStylePipeline, gap-01): per-stage counts + a few light preview cards per
+// column, in one call instead of six ListTechCards. cardsPerStage caps the preview list per stage.
+export function useStylePipeline(cardsPerStage = 6) {
+  return useQuery({
+    queryKey: [...techCardKeys.all, 'pipeline', cardsPerStage],
+    queryFn: () => adminService.GetStylePipeline({ cardsPerStage }),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useTechCard(id: number | undefined) {
   return useQuery({
     queryKey: techCardKeys.detail(id!),

@@ -5,7 +5,7 @@ import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
@@ -46,8 +46,12 @@ export function TechCardList() {
   const deleteTechCard = useDeleteTechCard();
   const canEdit = usePermissions().canWrite(SECTION.techCards);
 
+  // Seed the stage filter from ?stage= so the board's "see all" hand-off lands pre-filtered (R-1).
+  const [searchParams] = useSearchParams();
   const [name, setName] = useState('');
-  const [stage, setStage] = useState<common_TechCardStage>(ALL_STAGES);
+  const [stage, setStage] = useState<common_TechCardStage>(
+    (searchParams.get('stage') as common_TechCardStage) || ALL_STAGES,
+  );
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteTechCards(
     { name: name.trim() || undefined, stage: stage === ALL_STAGES ? undefined : stage },
     LIMIT,
