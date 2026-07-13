@@ -1,4 +1,5 @@
 import type { GetDashboardResponse, GetMetricsResponse } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { type FC } from 'react';
 import Text from 'ui/components/text';
 import { FunnelChart, OperatingResultStrip, PromoTable, TimeSeriesChart } from '../components';
@@ -59,6 +60,7 @@ export function RevenueTab({
   compareEnabled = false,
   dashboard,
 }: RevenueTabProps) {
+  const { canReadCosting } = usePermissions();
   const metrics = metricsResponse.business;
   const commerce = metrics?.commerce;
   const margin = metrics?.margin;
@@ -90,96 +92,102 @@ export function RevenueTab({
 
   return (
     <div className='space-y-6'>
-      {/* Profit is the point — lead with it. Margin is over the costed revenue subset. */}
-      <div className='space-y-2'>
-        <div className='flex flex-wrap items-center justify-between gap-2'>
-          <h3 className='text-textBaseSize font-bold uppercase'>Profit &amp; Margin</h3>
-          <Text variant='inactive' size='small'>
-            {costCoverage > 0
-              ? `over the ${costCoverage.toFixed(0)}% of revenue with a product cost set`
-              : 'set product costs to unlock'}
-            {uncostedCount > 0 &&
-              ` · ${uncostedCount} product${uncostedCount === 1 ? '' : 's'} missing cost`}
-          </Text>
-        </div>
-        {costCoverage > 0 ? (
-          <div
-            className={`grid grid-cols-2 ${showFees ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3 border-2 border-textInactiveColor/20 p-4 bg-bgSecondary/30`}
-          >
-            <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                COGS
-              </Text>
-              <Text className='font-bold text-lg'>{formatCurrency(revenueCost.value)}</Text>
-            </div>
-            <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                Gross Profit
-              </Text>
-              <Text className='font-bold text-lg'>{formatCurrency(grossMargin.value)}</Text>
-              <Delta
-                cur={grossMargin.value}
-                prev={grossMargin.compareValue}
-                kind='currency'
-                enabled={compareEnabled}
-              />
-            </div>
-            <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                Gross Margin
-              </Text>
-              <Text className='font-bold text-lg'>
-                {marginPctTrusted ? `${grossMarginPct.value.toFixed(0)}%` : '—'}
-              </Text>
-              {marginPctTrusted ? (
-                <Delta
-                  cur={grossMarginPct.value}
-                  prev={grossMarginPct.compareValue}
-                  kind='pp'
-                  enabled={compareEnabled}
-                />
-              ) : (
-                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                  need ≥{COVERAGE_FLOOR_FOR_PCT}% costed
-                </Text>
-              )}
-            </div>
-            {showFees && (
-              <div className='space-y-1'>
-                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                  Payment fees
-                </Text>
-                <Text className='font-bold text-lg'>−{formatCurrency(paymentFees.value)}</Text>
-                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                  processor cut
-                </Text>
-              </div>
-            )}
-            <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                Contribution (not profit)
-              </Text>
-              <Text className='font-bold text-lg'>{formatCurrency(contributionMargin.value)}</Text>
-              <Delta
-                cur={contributionMargin.value}
-                prev={contributionMargin.compareValue}
-                kind='currency'
-                enabled={compareEnabled}
-              />
-              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
-                {showFees ? 'after shipping & fees' : 'after shipping'} · before opex
-              </Text>
-            </div>
-          </div>
-        ) : (
-          <div className='border border-textInactiveColor p-4 bg-bgSecondary/20'>
+      {/* Profit is the point — lead with it. Margin is over the costed revenue subset.
+          Gated on costing:read: without it the server nulls the money fields, so we hide the
+          whole block rather than trust costCoveragePct (which may not be nulled) and risk €0.00. */}
+      {canReadCosting && (
+        <div className='space-y-2'>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <h3 className='text-textBaseSize font-bold uppercase'>Profit &amp; Margin</h3>
             <Text variant='inactive' size='small'>
-              No product costs entered yet — add cost (EUR) on products to see gross profit, margin
-              %, and contribution here.
+              {costCoverage > 0
+                ? `over the ${costCoverage.toFixed(0)}% of revenue with a product cost set`
+                : 'set product costs to unlock'}
+              {uncostedCount > 0 &&
+                ` · ${uncostedCount} product${uncostedCount === 1 ? '' : 's'} missing cost`}
             </Text>
           </div>
-        )}
-      </div>
+          {costCoverage > 0 ? (
+            <div
+              className={`grid grid-cols-2 ${showFees ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3 border-2 border-textInactiveColor/20 p-4 bg-bgSecondary/30`}
+            >
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                  COGS
+                </Text>
+                <Text className='font-bold text-lg'>{formatCurrency(revenueCost.value)}</Text>
+              </div>
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                  Gross Profit
+                </Text>
+                <Text className='font-bold text-lg'>{formatCurrency(grossMargin.value)}</Text>
+                <Delta
+                  cur={grossMargin.value}
+                  prev={grossMargin.compareValue}
+                  kind='currency'
+                  enabled={compareEnabled}
+                />
+              </div>
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                  Gross Margin
+                </Text>
+                <Text className='font-bold text-lg'>
+                  {marginPctTrusted ? `${grossMarginPct.value.toFixed(0)}%` : '—'}
+                </Text>
+                {marginPctTrusted ? (
+                  <Delta
+                    cur={grossMarginPct.value}
+                    prev={grossMarginPct.compareValue}
+                    kind='pp'
+                    enabled={compareEnabled}
+                  />
+                ) : (
+                  <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                    need ≥{COVERAGE_FLOOR_FOR_PCT}% costed
+                  </Text>
+                )}
+              </div>
+              {showFees && (
+                <div className='space-y-1'>
+                  <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                    Payment fees
+                  </Text>
+                  <Text className='font-bold text-lg'>−{formatCurrency(paymentFees.value)}</Text>
+                  <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                    processor cut
+                  </Text>
+                </div>
+              )}
+              <div className='space-y-1'>
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                  Contribution (not profit)
+                </Text>
+                <Text className='font-bold text-lg'>
+                  {formatCurrency(contributionMargin.value)}
+                </Text>
+                <Delta
+                  cur={contributionMargin.value}
+                  prev={contributionMargin.compareValue}
+                  kind='currency'
+                  enabled={compareEnabled}
+                />
+                <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                  {showFees ? 'after shipping & fees' : 'after shipping'} · before opex
+                </Text>
+              </div>
+            </div>
+          ) : (
+            <div className='border border-textInactiveColor p-4 bg-bgSecondary/20'>
+              <Text variant='inactive' size='small'>
+                No product costs entered yet — add cost (EUR) on products to see gross profit,
+                margin %, and contribution here.
+              </Text>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Operating result (contribution − opex − marketing) + GA4 coverage, from GetDashboard. */}
       <OperatingResultStrip dashboard={dashboard} />

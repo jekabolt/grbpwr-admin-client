@@ -128,7 +128,7 @@ export function TechCardForm({
   const navigate = useNavigate();
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
-  const { canWrite, canReadCosting } = usePermissions();
+  const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
   // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read
   // (server nulls the cost block / returns an empty journal; an empty tab would read
   // as "zero cost").
@@ -173,7 +173,7 @@ export function TechCardForm({
 
   async function doSubmit(data: TechCardFormData) {
     setConflict(false);
-    const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard);
+    const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting);
     try {
       if (isEditMode) {
         await updateTechCard.mutateAsync({

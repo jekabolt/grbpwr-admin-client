@@ -770,6 +770,11 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
 export function mapFormToTechCardInsert(
   data: TechCardFormData,
   original?: common_TechCardInsert,
+  // When the editor lacks costing:write the costing block is hidden and the form holds an
+  // empty costing (the server nulled it on read for non-costing readers). Recomputing from
+  // that empty form would send `costing: undefined` and — under full-replace — WIPE the stored
+  // costing. Preserve the original block instead so a non-costing editor can never destroy it.
+  canWriteCosting: boolean = true,
 ): common_TechCardInsert {
   return {
     ...original,
@@ -918,7 +923,8 @@ export function mapFormToTechCardInsert(
       note: l.note?.trim() || '',
     })),
     packaging: mapPackagingOut(data.packaging),
-    costing: mapCostingOut(data.costing),
+    // Only a costing:write editor may change costing; everyone else preserves what was loaded.
+    costing: canWriteCosting ? mapCostingOut(data.costing) : original?.costing,
     issues: (data.issues ?? []).map((i) => ({
       operationNumber: i.operationNumber || 0,
       calloutNumber: i.calloutNumber || 0,

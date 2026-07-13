@@ -60,7 +60,10 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
           </Text>
         </div>
       )}
-      <fieldset disabled={!canWriteCosting} className='grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'>
+      <fieldset
+        disabled={!canWriteCosting}
+        className='grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
+      >
         <DecimalField name='costing.cmtCost' label='CMT cost / изделие' />
         <DecimalField name='costing.hardwareCost' label='hardware / изделие' />
         <DecimalField name='costing.packagingCost' label='packaging / изделие' />
@@ -74,7 +77,9 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         масштабируется на тираж (order qty). Ценообразование (наценка/опт/розница) живёт на
         опубликованном продукте, не здесь.
       </Text>
-      <TextareaField name='costing.notes' label='notes' rows={2} maxLength={2000} />
+      <fieldset disabled={!canWriteCosting} className='border-0 p-0'>
+        <TextareaField name='costing.notes' label='notes' rows={2} maxLength={2000} />
+      </fieldset>
 
       <div className='space-y-2 border-t border-textInactiveColor pt-3'>
         <Text variant='uppercase' size='small'>
@@ -137,19 +142,25 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
               </Text>
               {/* Base-currency rollup (folded via costing FX rates) — this is the figure that
                   seeds the product's cost_price. Absent when a currency has no FX rate. */}
-              {rollup?.baseCurrency && (rollup?.unitCostBase?.value || rollup?.orderCostBase?.value) ? (
-                <Text size='small' className='block'>
-                  base ({rollup.baseCurrency}): / изделие {decimalToInput(rollup?.unitCostBase) || '—'}{' '}
-                  · тираж {decimalToInput(rollup?.orderCostBase) || '—'}{' '}
-                  <Text variant='inactive' size='small'>
-                    (seeds product cost)
+              {
+                rollup?.baseCurrency &&
+                (rollup?.unitCostBase?.value || rollup?.orderCostBase?.value) ? (
+                  <Text size='small' className='block'>
+                    base ({rollup.baseCurrency}): / изделие{' '}
+                    {decimalToInput(rollup?.unitCostBase) || '—'} · тираж{' '}
+                    {decimalToInput(rollup?.orderCostBase) || '—'}{' '}
+                    <Text variant='inactive' size='small'>
+                      (seeds product cost)
+                    </Text>
                   </Text>
-                </Text>
-              ) : rollup?.hasUnconvertedCurrencies ? null : (
-                <Text variant='inactive' size='small'>
-                  base-currency cost unavailable — add a costing FX rate for every currency used
-                </Text>
-              )}
+                ) : rollup?.hasUnconvertedCurrencies ? null : rollup?.unitCost?.value ||
+                  rollup?.orderCost?.value ? (
+                  // There IS a cost, but no base figure — that's genuinely a missing FX rate.
+                  <Text variant='inactive' size='small'>
+                    base-currency cost unavailable — add a costing FX rate for every currency used
+                  </Text>
+                ) : null /* no cost entered yet (e.g. only SAM times) — nothing to convert */
+              }
               {rollup?.hasUnconvertedCurrencies && (
                 <div className='border border-warning p-2'>
                   <Text size='small' className='block text-warning'>
