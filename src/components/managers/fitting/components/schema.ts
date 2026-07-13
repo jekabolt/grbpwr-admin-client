@@ -50,6 +50,7 @@ export const fittingSchema = z
     // (пыльники, кофры, …) can be fitted against their tech card instead.
     productId: z.number().int().optional().default(0), // 0 = unset
     techCardId: z.number().int().optional().default(0), // optional link to the tech card (style)
+    sampleId: z.number().int().optional().default(0), // optional link to the specific sample tried on
     modelId: z.number().int().optional().default(0),
     fittingDate: z.string().optional().default(''), // YYYY-MM-DD in the UI
     comment: z.string().optional().default(''),
@@ -76,6 +77,7 @@ export type FittingFormData = z.input<typeof fittingSchema>;
 export const fittingDefaultData: FittingFormData = {
   productId: 0,
   techCardId: 0,
+  sampleId: 0,
   modelId: 0,
   fittingDate: '',
   comment: '',
@@ -114,6 +116,7 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
   return {
     productId: insert?.productId || 0,
     techCardId: insert?.techCardId || 0,
+    sampleId: insert?.sampleId || 0,
     modelId: insert?.modelId || 0,
     fittingDate: timestampToDateInput(insert?.fittingDate),
     comment: insert?.comment || '',
@@ -168,7 +171,7 @@ export function mapFormToFittingInsert(
     // Spread the loaded insert first so fields not yet managed by the form survive
     // the full-replace save (mirrors mapFormToTechCardInsert).
     ...original,
-    sampleId: original?.sampleId ?? 0, // new-flow sample link — not form-managed, preserve
+    sampleId: data.sampleId || 0, // new-flow sample link (form-managed, W3.4)
     productId: data.productId || 0,
     techCardId: data.techCardId || 0,
     modelId: data.modelId || 0,
