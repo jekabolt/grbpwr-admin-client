@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { AttentionStrip } from './components/attention-strip';
 import { TechCardList } from './components/tech-card-list';
 import { FxRatesModal } from './components/fx-rates-modal';
 
@@ -35,6 +36,7 @@ export function TechCards() {
         </div>
       </div>
 
+      <AttentionStrip />
       <FxRatesModal open={fxOpen} onOpenChange={setFxOpen} />
       <TechCardList />
     </div>
