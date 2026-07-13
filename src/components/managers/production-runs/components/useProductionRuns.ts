@@ -58,6 +58,16 @@ export function useProductionRun(id: number, enabled: boolean) {
   });
 }
 
+// Estimated material requirement of a run against stock (GetProductionRunMaterialPlan). Lives under
+// the run's detail key so an issue (which invalidates that key) refreshes the plan's shortages.
+export function useMaterialPlan(runId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: [...productionRunKeys.detail(runId), 'materialPlan'],
+    queryFn: () => adminService.GetProductionRunMaterialPlan({ runId }),
+    enabled,
+  });
+}
+
 // Create (id = 0) or update. planned_unit_cost is snapshotted server-side from the tech card
 // / release; actuals are computed on read — we only ever send the ProductionRunInsert.
 export function useSaveProductionRun() {

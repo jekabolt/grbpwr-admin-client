@@ -11,6 +11,7 @@ import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { LinesGrid } from './components/lines-grid';
 import { MarkerBlock } from './components/marker-block';
+import { MaterialPlan } from './components/material-plan';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import { isRunLocked, isRunReceivable, runStatusLabel } from './components/options';
@@ -127,6 +128,8 @@ export function ProductionRunDetail() {
       <LinesGrid run={run} canEdit={canEdit} locked={locked} />
 
       <MarkerBlock run={run} canEdit={canEdit} locked={locked} />
+
+      <MaterialPlan run={run} canEdit={canEdit} />
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal open={receiveOpen} onOpenChange={setReceiveOpen} run={run} />
