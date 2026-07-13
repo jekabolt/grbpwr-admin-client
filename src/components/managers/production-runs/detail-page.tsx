@@ -1,5 +1,6 @@
 import { common_ProductionRun, common_ProductionRunActuals } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { MovementsList } from 'components/managers/materials/components/movements-tab';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -140,6 +141,13 @@ export function ProductionRunDetail() {
       <MaterialPlan run={run} canEdit={canEdit} />
 
       <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} />
+
+      <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-4'>
+        <Text variant='uppercase' size='small'>
+          material movements
+        </Text>
+        <MovementsList filter={{ productionRunId: run.id }} />
+      </div>
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal open={receiveOpen} onOpenChange={setReceiveOpen} run={run} />

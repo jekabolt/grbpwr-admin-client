@@ -7,13 +7,13 @@ import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { MaterialPicker } from './material-picker';
 import { useMaterials } from './useMaterials';
-import { useMaterialMovements } from './useWarehouse';
+import { MovementFilter, useMaterialMovements } from './useWarehouse';
 import { movementDelta, movementTypeFilterOptions, movementTypeLabel } from './warehouse-options';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 
-// A movement's reference target, deep-linked where a destination exists (production run detail
-// lands in W2; sample lives inside its tech card, wired in W3).
+// A movement's reference target, deep-linked where a destination exists (the production run detail
+// page; a sample lives inside its tech card, wired in W3).
 function MovementRef({
   runId,
   sampleId,
@@ -25,7 +25,7 @@ function MovementRef({
 }) {
   if (runId)
     return (
-      <Link to={`/production-runs?runId=${runId}`} className='underline'>
+      <Link to={`/production-runs/${runId}`} className='underline'>
         PR-{runId}
       </Link>
     );
@@ -34,8 +34,102 @@ function MovementRef({
   return <>—</>;
 }
 
-export function MovementsTab() {
+// The movement ledger table for a given filter (query + paging + display). Reused by the warehouse
+// movements tab and, with a fixed run filter, by the production-run detail page.
+export function MovementsList({ filter }: { filter: MovementFilter }) {
   const { canReadCosting } = usePermissions();
+  const { data: matData } = useMaterials('', true);
+  const materialLabel = useMemo(() => {
+    const map = new Map<number, string>();
+    (matData?.materials ?? []).forEach((m) => {
+      if (m.id) map.set(Number(m.id), `${m.code ? `${m.code} · ` : ''}${m.name ?? `#${m.id}`}`);
+    });
+    return map;
+  }, [matData]);
+
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useMaterialMovements(filter, 50);
+  const movements = useMemo(() => (data?.pages ?? []).flatMap((p) => p.movements), [data]);
+
+  if (isLoading) return <Text size='small'>loading…</Text>;
+  if (isError)
+    return (
+      <Text size='small'>
+        Movements are unavailable — the warehouse backend may not be deployed.
+      </Text>
+    );
+  if (movements.length === 0)
+    return (
+      <Text variant='inactive' size='small'>
+        no movements
+      </Text>
+    );
+
+  return (
+    <div className='overflow-x-auto'>
+      <table className='w-full border-collapse'>
+        <thead>
+          <tr>
+            <th className={`${cell} text-left uppercase`}>date</th>
+            <th className={`${cell} text-left uppercase`}>type</th>
+            <th className={`${cell} text-left uppercase`}>material</th>
+            <th className={`${cell} text-right uppercase`}>Δ</th>
+            <th className={`${cell} text-right uppercase`}>on hand</th>
+            {canReadCosting ? <th className={`${cell} text-right uppercase`}>unit cost</th> : null}
+            <th className={`${cell} text-left uppercase`}>ref</th>
+            <th className={`${cell} text-left uppercase`}>by</th>
+          </tr>
+        </thead>
+        <tbody>
+          {movements.map((m) => (
+            <tr key={m.id}>
+              <td className={cell}>{String(m.occurredAt ?? '').slice(0, 10) || '—'}</td>
+              <td className={cell}>{movementTypeLabel(m.movementType)}</td>
+              <td className={cell}>
+                {materialLabel.get(Number(m.materialId)) ?? `#${m.materialId}`}
+              </td>
+              <td className={`${cell} text-right`}>
+                {movementDelta(m.onHandBefore?.value, m.onHandAfter?.value) ||
+                  decimalToInput(m.quantity)}
+              </td>
+              <td className={`${cell} text-right`}>{decimalToInput(m.onHandAfter) || '—'}</td>
+              {canReadCosting ? (
+                <td className={`${cell} text-right`}>
+                  {m.unitCost?.value ? `${decimalToInput(m.unitCost)} ${m.currency || ''}` : '—'}
+                </td>
+              ) : null}
+              <td className={cell}>
+                <MovementRef
+                  runId={m.productionRunId || undefined}
+                  sampleId={m.sampleId || undefined}
+                  lot={m.lot || undefined}
+                />
+              </td>
+              <td className={cell}>{m.adminUsername || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {hasNextPage ? (
+        <div className='mt-2 flex justify-center'>
+          <Button
+            type='button'
+            variant='secondary'
+            size='lg'
+            className='uppercase'
+            disabled={isFetchingNextPage}
+            onClick={() => fetchNextPage()}
+          >
+            {isFetchingNextPage ? 'loading…' : 'load more'}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// The warehouse /materials movements tab: URL-driven filters (R-1) over the shared MovementsList.
+export function MovementsTab() {
   const [params, setParams] = useSearchParams();
 
   const materialId = Number(params.get('material')) || 0;
@@ -58,29 +152,6 @@ export function MovementsTab() {
       },
       { replace: true },
     );
-
-  const { data: matData } = useMaterials('', true);
-  const materialLabel = useMemo(() => {
-    const map = new Map<number, string>();
-    (matData?.materials ?? []).forEach((m) => {
-      if (m.id) map.set(Number(m.id), `${m.code ? `${m.code} · ` : ''}${m.name ?? `#${m.id}`}`);
-    });
-    return map;
-  }, [matData]);
-
-  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
-    useMaterialMovements(
-      {
-        materialId,
-        productionRunId: runId,
-        sampleId,
-        movementType: type,
-        occurredFrom: from,
-        occurredTo: to,
-      },
-      50,
-    );
-  const movements = useMemo(() => (data?.pages ?? []).flatMap((p) => p.movements), [data]);
 
   return (
     <div className='flex flex-col gap-4'>
@@ -119,81 +190,16 @@ export function MovementsTab() {
         </label>
       </div>
 
-      {isLoading ? (
-        <Text size='small'>loading…</Text>
-      ) : isError ? (
-        <Text size='small'>
-          Movements are unavailable — the warehouse backend may not be deployed.
-        </Text>
-      ) : movements.length === 0 ? (
-        <Text variant='inactive' size='small'>
-          no movements
-        </Text>
-      ) : (
-        <div className='overflow-x-auto'>
-          <table className='w-full border-collapse'>
-            <thead>
-              <tr>
-                <th className={`${cell} text-left uppercase`}>date</th>
-                <th className={`${cell} text-left uppercase`}>type</th>
-                <th className={`${cell} text-left uppercase`}>material</th>
-                <th className={`${cell} text-right uppercase`}>Δ</th>
-                <th className={`${cell} text-right uppercase`}>on hand</th>
-                {canReadCosting ? (
-                  <th className={`${cell} text-right uppercase`}>unit cost</th>
-                ) : null}
-                <th className={`${cell} text-left uppercase`}>ref</th>
-                <th className={`${cell} text-left uppercase`}>by</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movements.map((m) => (
-                <tr key={m.id}>
-                  <td className={cell}>{String(m.occurredAt ?? '').slice(0, 10) || '—'}</td>
-                  <td className={cell}>{movementTypeLabel(m.movementType)}</td>
-                  <td className={cell}>
-                    {materialLabel.get(Number(m.materialId)) ?? `#${m.materialId}`}
-                  </td>
-                  <td className={`${cell} text-right`}>
-                    {movementDelta(m.onHandBefore?.value, m.onHandAfter?.value) ||
-                      decimalToInput(m.quantity)}
-                  </td>
-                  <td className={`${cell} text-right`}>{decimalToInput(m.onHandAfter) || '—'}</td>
-                  {canReadCosting ? (
-                    <td className={`${cell} text-right`}>
-                      {m.unitCost?.value
-                        ? `${decimalToInput(m.unitCost)} ${m.currency || ''}`
-                        : '—'}
-                    </td>
-                  ) : null}
-                  <td className={cell}>
-                    <MovementRef
-                      runId={m.productionRunId || undefined}
-                      sampleId={m.sampleId || undefined}
-                      lot={m.lot || undefined}
-                    />
-                  </td>
-                  <td className={cell}>{m.adminUsername || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {hasNextPage ? (
-            <div className='mt-2 flex justify-center'>
-              <Button
-                type='button'
-                variant='secondary'
-                size='lg'
-                className='uppercase'
-                disabled={isFetchingNextPage}
-                onClick={() => fetchNextPage()}
-              >
-                {isFetchingNextPage ? 'loading…' : 'load more'}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      )}
+      <MovementsList
+        filter={{
+          materialId,
+          productionRunId: runId,
+          sampleId,
+          movementType: type,
+          occurredFrom: from,
+          occurredTo: to,
+        }}
+      />
     </div>
   );
 }

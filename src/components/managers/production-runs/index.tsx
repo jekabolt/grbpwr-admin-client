@@ -5,11 +5,12 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
-import { isRunLocked, isRunReceivable, runStatusLabel } from './components/options';
+import { isRunLocked, isRunReceivable, runDetailPath, runStatusLabel } from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import {
@@ -160,7 +161,10 @@ function RunCard({
     <div className='border border-textInactiveColor'>
       <div className='flex flex-wrap items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-3 py-2'>
         <Text size='small'>
-          PR-{run.id} · TC-{ins?.techCardId}
+          <Link to={runDetailPath(run.id ?? 0)} className='underline'>
+            PR-{run.id}
+          </Link>{' '}
+          · TC-{ins?.techCardId}
           {ins?.releaseId ? ` · rel ${ins.releaseId}` : ''} · {runStatusLabel(ins?.status)}
         </Text>
         <div className='flex items-center gap-2'>
