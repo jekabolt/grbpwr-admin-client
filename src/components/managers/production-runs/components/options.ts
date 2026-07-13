@@ -1,4 +1,9 @@
 import { common_ProductionRunCostKind, common_ProductionRunStatus } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
+
+// Path to a run's detail page. Lives here (not on the detail module) so the create/edit modal can
+// navigate to it without importing its parent page — that would be a cycle.
+export const runDetailPath = (id: number) => ROUTES.productionRun.replace(':id', String(id));
 
 // Lifecycle statuses. RECEIVED is reached only through ReceiveProductionRun (which posts
 // stock) — never offered as a manual edit; UNKNOWN is never surfaced.

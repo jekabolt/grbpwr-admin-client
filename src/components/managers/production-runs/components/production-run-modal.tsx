@@ -1,61 +1,40 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import {
-  common_ProductionRun,
-  common_ProductionRunCostKind,
-  common_ProductionRunInsert,
-  common_ProductionRunStatus,
-} from 'api/proto-http/admin';
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { CURRENCIES } from 'constants/constants';
-import { findInDictionary } from 'lib/features/findInDictionary';
-import { useDictionary } from 'lib/providers/dictionary-provider';
+import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { decimalToInput, inputToDecimal } from 'utils/decimal';
-import { runCostKindOptions, runStatusLabel, runStatusOptions } from './options';
-import { useSaveProductionRun } from './useProductionRuns';
+import { decimalToInput } from 'utils/decimal';
+import { runDetailPath, runStatusLabel, runStatusOptions } from './options';
+import { useSaveProductionRun, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const isoToDate = (ts?: string) => (ts ? ts.slice(0, 10) : '');
 const dateToIso = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : undefined);
 
-type SizeDraft = { sizeId: number; plannedQty: string };
-type CostDraft = {
-  kind: string;
-  description: string;
-  amount: string;
-  currency: string;
-  incurredAt: string;
-};
 type Draft = {
   techCardId: number;
-  // NF-06: the run is a product×size grid of lines. This modal supports the common single-product
-  // run — one target product stamped onto every size line. (Multi-product grids aren't editable
-  // here yet; an existing multi-product run loads the first line's product.)
-  productId: number;
   releaseId: number;
   status: common_ProductionRunStatus;
   startedAt: string;
   notes: string;
-  sizes: SizeDraft[];
-  costs: CostDraft[];
 };
 
 const emptyDraft: Draft = {
   techCardId: 0,
-  productId: 0,
   releaseId: 0,
   status: 'PRODUCTION_RUN_STATUS_PLANNED',
   startedAt: '',
   notes: '',
-  sizes: [],
-  costs: [],
 };
 
+// The run's header/meta only. Lines, marker and costs are edited on the detail page (NF-06 makes a
+// run a multi-colourway grid — a single-product modal would collapse it). Create bootstraps an
+// empty run and jumps to its detail; edit is a read-modify-write of just these fields, so it can't
+// wipe the lines/costs saved on the detail page.
 export function ProductionRunModal({
   open,
   onOpenChange,
@@ -66,9 +45,11 @@ export function ProductionRunModal({
   run?: common_ProductionRun;
 }) {
   const { showMessage } = useSnackBarStore();
-  const { dictionary } = useDictionary();
-  const save = useSaveProductionRun();
+  const navigate = useNavigate();
+  const create = useSaveProductionRun();
+  const update = useUpdateRunSection();
   const isEdit = !!run?.id;
+  const busy = create.isPending || update.isPending;
   const [d, setD] = useState<Draft>(emptyDraft);
 
   useEffect(() => {
@@ -78,28 +59,15 @@ export function ProductionRunModal({
       ins
         ? {
             techCardId: ins.techCardId ?? 0,
-            productId: ins.lines?.[0]?.productId ?? 0,
             releaseId: ins.releaseId ?? 0,
             status: ins.status ?? 'PRODUCTION_RUN_STATUS_PLANNED',
             startedAt: isoToDate(ins.startedAt),
             notes: ins.notes ?? '',
-            sizes: (ins.lines ?? []).map((l) => ({
-              sizeId: l.sizeId ?? 0,
-              plannedQty: String(l.plannedQty ?? 0),
-            })),
-            costs: (ins.costs ?? []).map((c) => ({
-              kind: c.kind ?? 'PRODUCTION_RUN_COST_KIND_OTHER',
-              description: c.description ?? '',
-              amount: decimalToInput(c.amount),
-              currency: c.currency ?? 'EUR',
-              incurredAt: isoToDate(c.incurredAt),
-            })),
           }
         : emptyDraft,
     );
   }, [run, open]);
 
-  // Tech-card picker options (create only — editing keeps the run's tech card fixed).
   const { data: tcData } = useQuery({
     queryKey: ['techCardsForRun'],
     queryFn: () =>
@@ -119,7 +87,6 @@ export function ProductionRunModal({
   });
   const techCards = tcData?.techCards ?? [];
 
-  // Releases of the selected tech card (optional "plan from release").
   const { data: relData } = useQuery({
     queryKey: ['techCardReleasesForRun', d.techCardId],
     queryFn: () => adminService.ListTechCardReleases({ techCardId: d.techCardId }),
@@ -127,91 +94,59 @@ export function ProductionRunModal({
   });
   const releases = relData?.releases ?? [];
 
-  // Products linked to the run's tech card — receive books each line's stock into its product,
-  // so a line's product must be one of these.
-  const { data: techCard } = useTechCard(open && d.techCardId ? d.techCardId : undefined);
-  const linkedProducts = techCard?.techCard?.productIds ?? [];
-
-  const usedSizeIds = new Set(d.sizes.map((s) => s.sizeId));
-  const availableSizes = useMemo(
-    () => (dictionary?.sizes ?? []).filter((s) => s.id != null && !usedSizeIds.has(s.id)),
-    [dictionary, d.sizes],
-  );
-
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
-
-  const addSize = () => {
-    const next = availableSizes[0];
-    if (!next?.id) return;
-    set({ sizes: [...d.sizes, { sizeId: next.id, plannedQty: '' }] });
-  };
-  const addCost = () =>
-    set({
-      costs: [
-        ...d.costs,
-        {
-          kind: 'PRODUCTION_RUN_COST_KIND_MATERIALS',
-          description: '',
-          amount: '',
-          currency: 'EUR',
-          incurredAt: '',
-        },
-      ],
-    });
 
   const submit = () => {
     if (!d.techCardId) {
       showMessage('Tech card is required', 'error');
       return;
     }
-    if (!d.productId) {
-      showMessage('Target product is required', 'error');
+    if (isEdit && run?.id) {
+      // Patch only the meta; RMW preserves lines / costs / marker edited on the detail page.
+      update.mutate(
+        {
+          id: run.id,
+          patch: {
+            releaseId: d.releaseId || undefined,
+            status: d.status,
+            startedAt: dateToIso(d.startedAt),
+            notes: d.notes.trim(),
+          },
+        },
+        {
+          onSuccess: () => {
+            showMessage('Run updated', 'success');
+            onOpenChange(false);
+          },
+          onError: (e) =>
+            showMessage(e instanceof Error ? e.message : 'Failed to save run', 'error'),
+        },
+      );
       return;
     }
-    if (d.sizes.length === 0) {
-      showMessage('Add at least one size', 'error');
-      return;
-    }
-    const insert: common_ProductionRunInsert = {
-      techCardId: d.techCardId,
-      releaseId: d.releaseId || undefined,
-      status: d.status,
-      startedAt: dateToIso(d.startedAt),
-      receivedAt: run?.run?.receivedAt, // set by the receive flow; preserve on edit
-      notes: d.notes.trim(),
-      // One line per size, all for the chosen product. received/defect stay unset here — they are
-      // captured at receive time (preserved from the matching existing line on edit).
-      lines: d.sizes.map((s) => {
-        const prev = run?.run?.lines?.find(
-          (x) => x.sizeId === s.sizeId && x.productId === d.productId,
-        );
-        return {
-          productId: d.productId,
-          sizeId: s.sizeId,
-          plannedQty: Number(s.plannedQty) || 0,
-          receivedQty: prev?.receivedQty,
-          defectQty: prev?.defectQty,
-        };
-      }),
-      costs: d.costs
-        .filter((c) => c.amount.trim())
-        .map((c) => ({
-          kind: c.kind as common_ProductionRunCostKind,
-          description: c.description.trim(),
-          amount: inputToDecimal(c.amount),
-          currency: c.currency,
-          amountBase: undefined, // server folds to base via FX rates
-          incurredAt: dateToIso(c.incurredAt),
-        })),
-      markerEfficiencyPct: run?.run?.markerEfficiencyPct, // NF marker fields — preserve, not edited here
-      markerNotes: run?.run?.markerNotes,
-    };
-    save.mutate(
-      { id: run?.id ?? 0, run: insert },
+    // Create an empty run, then jump to its detail to plan lines / marker / costs.
+    create.mutate(
       {
-        onSuccess: () => {
-          showMessage(isEdit ? 'Run updated' : 'Run created', 'success');
+        id: 0,
+        run: {
+          techCardId: d.techCardId,
+          releaseId: d.releaseId || undefined,
+          status: d.status,
+          startedAt: dateToIso(d.startedAt),
+          receivedAt: undefined,
+          notes: d.notes.trim(),
+          lines: [],
+          costs: [],
+          markerEfficiencyPct: undefined,
+          markerNotes: undefined,
+        },
+      },
+      {
+        onSuccess: (res) => {
+          showMessage('Run created', 'success');
           onOpenChange(false);
+          const id = (res as { id?: number })?.id;
+          if (id) navigate(runDetailPath(id));
         },
         onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save run', 'error'),
       },
@@ -222,7 +157,7 @@ export function ProductionRunModal({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[600px] lg:-translate-x-1/2'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[520px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               {isEdit ? `production run PR-${run?.id}` : 'new production run'}
@@ -234,7 +169,7 @@ export function ProductionRunModal({
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
-            Plan a production run: tech card, sizes and actual cost lines.
+            The run's tech card, release, status and dates. Plan lines on the detail page.
           </DialogPrimitives.Description>
 
           <div className='flex flex-col gap-4 p-4'>
@@ -245,9 +180,7 @@ export function ProductionRunModal({
                   className={cell}
                   value={d.techCardId || 0}
                   disabled={isEdit}
-                  onChange={(e) =>
-                    set({ techCardId: Number(e.target.value) || 0, releaseId: 0, productId: 0 })
-                  }
+                  onChange={(e) => set({ techCardId: Number(e.target.value) || 0, releaseId: 0 })}
                 >
                   <option value={0}>— select —</option>
                   {techCards.map((t) => (
@@ -256,30 +189,6 @@ export function ProductionRunModal({
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className='flex flex-col gap-1'>
-                <Text size='small'>product * (stock is booked here on receive)</Text>
-                <select
-                  className={cell}
-                  value={d.productId || 0}
-                  onChange={(e) => set({ productId: Number(e.target.value) || 0 })}
-                >
-                  <option value={0}>— select —</option>
-                  {linkedProducts.map((pid) => (
-                    <option key={pid} value={pid}>
-                      product #{pid}
-                    </option>
-                  ))}
-                  {/* keep an already-set product selectable even if the tech card list hasn't loaded */}
-                  {d.productId > 0 && !linkedProducts.includes(d.productId) && (
-                    <option value={d.productId}>product #{d.productId}</option>
-                  )}
-                </select>
-                {d.techCardId > 0 && linkedProducts.length === 0 && (
-                  <Text variant='inactive' size='small'>
-                    this tech card has no linked products — link one on the tech card first
-                  </Text>
-                )}
               </label>
               <label className='flex flex-col gap-1'>
                 <Text size='small'>release (optional — plan from snapshot)</Text>
@@ -306,9 +215,6 @@ export function ProductionRunModal({
                   value={d.status}
                   onChange={(e) => set({ status: e.target.value as common_ProductionRunStatus })}
                 >
-                  {/* RECEIVED/UNKNOWN aren't manually settable, but an edited run may already
-                      be in one — surface it so the select round-trips instead of silently
-                      coercing to the first option (a status downgrade). */}
                   {!runStatusOptions.some((o) => o.value === d.status) && (
                     <option value={d.status}>{runStatusLabel(d.status)}</option>
                   )}
@@ -330,162 +236,6 @@ export function ProductionRunModal({
               </label>
             </div>
 
-            {/* sizes */}
-            <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
-              <div className='flex items-center justify-between'>
-                <Text variant='uppercase' size='small'>
-                  planned sizes *
-                </Text>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='lg'
-                  className='uppercase'
-                  disabled={availableSizes.length === 0}
-                  onClick={addSize}
-                >
-                  add size
-                </Button>
-              </div>
-              {d.sizes.length === 0 ? (
-                <Text variant='inactive' size='small'>
-                  no sizes
-                </Text>
-              ) : (
-                d.sizes.map((s, i) => (
-                  <div key={s.sizeId} className='flex items-center gap-2'>
-                    <span className='w-24 shrink-0'>
-                      <Text size='small'>
-                        {findInDictionary(dictionary, s.sizeId, 'size') || s.sizeId}
-                      </Text>
-                    </span>
-                    <input
-                      className={cell}
-                      type='number'
-                      min='0'
-                      placeholder='planned qty'
-                      value={s.plannedQty}
-                      onChange={(e) =>
-                        setD((prev) => {
-                          const sizes = [...prev.sizes];
-                          sizes[i] = { ...sizes[i], plannedQty: e.target.value };
-                          return { ...prev, sizes };
-                        })
-                      }
-                    />
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      aria-label='remove size'
-                      onClick={() =>
-                        setD((prev) => ({ ...prev, sizes: prev.sizes.filter((_, j) => j !== i) }))
-                      }
-                    >
-                      ✕
-                    </Button>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* actual cost lines */}
-            <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
-              <div className='flex items-center justify-between'>
-                <Text variant='uppercase' size='small'>
-                  actual cost lines
-                </Text>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='lg'
-                  className='uppercase'
-                  onClick={addCost}
-                >
-                  add cost
-                </Button>
-              </div>
-              <Text variant='inactive' size='small'>
-                Фактические статьи затрат партии; сервер свернёт их в базовую валюту (amount_base).
-              </Text>
-              {d.costs.map((c, i) => (
-                <div key={i} className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
-                  <select
-                    className={cell}
-                    value={c.kind}
-                    onChange={(e) =>
-                      setD((prev) => {
-                        const costs = [...prev.costs];
-                        costs[i] = { ...costs[i], kind: e.target.value };
-                        return { ...prev, costs };
-                      })
-                    }
-                  >
-                    {runCostKindOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    className={`${cell} sm:col-span-2`}
-                    placeholder='description'
-                    value={c.description}
-                    onChange={(e) =>
-                      setD((prev) => {
-                        const costs = [...prev.costs];
-                        costs[i] = { ...costs[i], description: e.target.value };
-                        return { ...prev, costs };
-                      })
-                    }
-                  />
-                  <input
-                    className={cell}
-                    type='number'
-                    step='0.01'
-                    min='0'
-                    placeholder='amount'
-                    value={c.amount}
-                    onChange={(e) =>
-                      setD((prev) => {
-                        const costs = [...prev.costs];
-                        costs[i] = { ...costs[i], amount: e.target.value };
-                        return { ...prev, costs };
-                      })
-                    }
-                  />
-                  <div className='flex gap-1'>
-                    <select
-                      className={cell}
-                      value={c.currency}
-                      onChange={(e) =>
-                        setD((prev) => {
-                          const costs = [...prev.costs];
-                          costs[i] = { ...costs[i], currency: e.target.value };
-                          return { ...prev, costs };
-                        })
-                      }
-                    >
-                      {CURRENCIES.map((cur) => (
-                        <option key={cur.value} value={cur.value}>
-                          {cur.value}
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      aria-label='remove cost'
-                      onClick={() =>
-                        setD((prev) => ({ ...prev, costs: prev.costs.filter((_, j) => j !== i) }))
-                      }
-                    >
-                      ✕
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
             <label className='flex flex-col gap-1'>
               <Text size='small'>notes</Text>
               <textarea
@@ -495,20 +245,21 @@ export function ProductionRunModal({
                 onChange={(e) => set({ notes: e.target.value })}
               />
             </label>
+
+            {!isEdit && (
+              <Text variant='inactive' size='small'>
+                After creating, you'll plan colour-model × size lines, marker and costs on the run
+                page.
+              </Text>
+            )}
           </div>
 
           <div className='sticky bottom-0 flex justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>
-            <Button
-              type='button'
-              variant='main'
-              size='lg'
-              disabled={save.isPending}
-              onClick={submit}
-            >
-              {save.isPending ? 'saving…' : 'save'}
+            <Button type='button' variant='main' size='lg' disabled={busy} onClick={submit}>
+              {busy ? 'saving…' : isEdit ? 'save' : 'create'}
             </Button>
           </div>
         </DialogPrimitives.Content>

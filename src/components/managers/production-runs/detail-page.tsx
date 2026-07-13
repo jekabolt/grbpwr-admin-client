@@ -14,14 +14,13 @@ import { MarkerBlock } from './components/marker-block';
 import { MaterialPlan } from './components/material-plan';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
+import { RunCosts } from './components/run-costs';
 import { isRunLocked, isRunReceivable, runStatusLabel } from './components/options';
 import {
   deleteRunErrorMessage,
   useDeleteProductionRun,
   useProductionRun,
 } from './components/useProductionRuns';
-
-export const runDetailPath = (id: number) => ROUTES.productionRun.replace(':id', String(id));
 
 export function ProductionRunDetail() {
   const { id } = useParams<{ id: string }>();
@@ -130,6 +129,8 @@ export function ProductionRunDetail() {
       <MarkerBlock run={run} canEdit={canEdit} locked={locked} />
 
       <MaterialPlan run={run} canEdit={canEdit} />
+
+      <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} />
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal open={receiveOpen} onOpenChange={setReceiveOpen} run={run} />
