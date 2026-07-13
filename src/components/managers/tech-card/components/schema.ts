@@ -341,6 +341,11 @@ const techCardObject = z.object({
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
   patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
   productIds: z.array(z.number()).default([]),
+  // NF-07 auxiliary items: purpose is 'sellable' (default) or 'auxiliary' (produces a packaging
+  // material, not a product). An auxiliary card links no products and its run output receipts into
+  // outputMaterialId (required before its first run; 0 = unset).
+  purpose: z.string().optional().default('sellable'),
+  outputMaterialId: z.number().optional().default(0),
   // Sketch media split into two independent lists (construction consumes ONLY technicalMedia;
   // callouts pin onto ANY media_id — moodboard or technical, B-1). Each item's `kind` sub-classifies.
   moodboardMedia: z.array(mediaItemSchema).default([]),
@@ -396,6 +401,8 @@ export const techCardDefaultData: TechCardFormData = {
   sizeQuantities: [],
   patterns: [],
   productIds: [],
+  purpose: 'sellable',
+  outputMaterialId: 0,
   moodboardMedia: [],
   technicalMedia: [],
   callouts: [],
@@ -503,6 +510,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       sizeBytes: Number(p.sizeBytes) || 0,
     })),
     productIds: insert?.productIds ?? [],
+    purpose: insert?.purpose || 'sellable',
+    outputMaterialId: insert?.outputMaterialId || 0,
     ...splitSketchMedia(insert),
     callouts: (insert?.callouts ?? []).map((c) => ({
       number: c.number || 0,
@@ -833,7 +842,11 @@ export function mapFormToTechCardInsert(
         filename: p.filename?.trim() || '',
         sizeBytes: p.sizeBytes || 0,
       })),
-    productIds: data.productIds ?? [],
+    // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
+    // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
+    purpose: data.purpose || 'sellable',
+    outputMaterialId: data.purpose === 'auxiliary' ? data.outputMaterialId || 0 : 0,
+    productIds: data.purpose === 'auxiliary' ? [] : data.productIds ?? [],
     moodboardMedia: (data.moodboardMedia ?? []).map(mapMediaItemOut),
     technicalMedia: (data.technicalMedia ?? []).map(mapMediaItemOut),
     callouts: (data.callouts ?? []).map((c) => ({

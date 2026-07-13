@@ -100,6 +100,13 @@ export const techCardStageOptions: Array<{ value: common_TechCardStage; label: s
   { value: 'TECH_CARD_STAGE_PROD', label: 'production' },
 ];
 
+// NF-07: a card is either a sellable garment or an auxiliary item (dust bag, shopper…) that
+// produces a packaging material instead of a product. Raw string values per the contract.
+export const techCardPurposeOptions: Array<{ value: string; label: string }> = [
+  { value: 'sellable', label: 'sellable garment' },
+  { value: 'auxiliary', label: 'auxiliary (packaging item)' },
+];
+
 // Tech-card release gate, orthogonal to stage (server defaults UNKNOWN→DRAFT).
 export const techCardApprovalStateOptions: Array<{
   value: common_TechCardApprovalState;

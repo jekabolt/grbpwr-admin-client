@@ -63,6 +63,8 @@ export function LifecycleStrip({
   productCount,
   frozen,
   canEdit,
+  planRunDisabled,
+  planRunDisabledReason,
   onStageChange,
   onGoSamples,
   onAddSample,
@@ -74,6 +76,8 @@ export function LifecycleStrip({
   productCount: number;
   frozen: boolean;
   canEdit: boolean;
+  planRunDisabled?: boolean;
+  planRunDisabledReason?: string;
   onStageChange: (stage: common_TechCardStage) => void;
   onGoSamples: () => void;
   onAddSample: () => void;
@@ -189,9 +193,22 @@ export function LifecycleStrip({
                 + fitting
               </Link>
             </Button>
-            <Button asChild variant='secondary' size='lg' className='uppercase'>
-              <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>plan run</Link>
-            </Button>
+            {planRunDisabled ? (
+              <Button
+                type='button'
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                disabled
+                title={planRunDisabledReason}
+              >
+                plan run
+              </Button>
+            ) : (
+              <Button asChild variant='secondary' size='lg' className='uppercase'>
+                <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>plan run</Link>
+              </Button>
+            )}
           </div>
         )}
       </div>

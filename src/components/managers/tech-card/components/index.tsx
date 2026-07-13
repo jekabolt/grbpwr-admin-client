@@ -10,10 +10,13 @@ import {
   formatTechCardDate,
   techCardErrorMessage,
 } from 'components/managers/tech-cards/components/utils';
+import { MaterialModal } from 'components/managers/materials/components/material-modal';
+import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import {
   techCardApprovalStateOptions,
   techCardGenderOptions,
   techCardMeasurementUnitOptions,
+  techCardPurposeOptions,
   techCardStageOptions,
 } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -205,6 +208,14 @@ export function TechCardForm({
   const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
     '') as string;
   const productCount = (useWatch({ control: form.control, name: 'productIds' }) ?? []).length;
+
+  // NF-07 auxiliary items: an aux card produces a packaging material, links no products, and needs
+  // an output material set before its first run.
+  const purpose = (useWatch({ control: form.control, name: 'purpose' }) ?? 'sellable') as string;
+  const outputMaterialId = (useWatch({ control: form.control, name: 'outputMaterialId' }) ??
+    0) as number;
+  const isAux = purpose === 'auxiliary';
+  const [materialModalOpen, setMaterialModalOpen] = useState(false);
 
   // IDEA is a "light" card (screen E): only the concept-relevant tabs show; the rest reappear when
   // the stage advances, their echoed fields untouched. Not disabled — hidden.
@@ -417,6 +428,8 @@ export function TechCardForm({
           productCount={productCount}
           frozen={frozen}
           canEdit={canWrite(SECTION.techCards)}
+          planRunDisabled={isAux && !outputMaterialId}
+          planRunDisabledReason='set an output material before planning an auxiliary run'
           onStageChange={(next) => form.setValue('stage', next, { shouldDirty: true })}
           onGoSamples={() => navTo('samples')}
           onAddSample={() => navTo('samples', { sample: 'new' })}
@@ -481,6 +494,7 @@ export function TechCardForm({
               </Section>
 
               <Section title='classification' className='w-full lg:w-1/2'>
+                <SelectField name='purpose' label='purpose' items={techCardPurposeOptions} />
                 <SelectField
                   name='targetGender'
                   label='target gender'
@@ -504,9 +518,40 @@ export function TechCardForm({
               <TextareaField name='notes' label='notes' rows={2} maxLength={2000} />
             </Section>
 
-            <Section title='linked products'>
-              <ProductIdsField />
-            </Section>
+            {isAux ? (
+              <Section title='output material'>
+                <Text variant='inactive' size='small'>
+                  runs of this card receipt into material stock, not product stock. Pick the
+                  packaging material this card produces (required before its first run).
+                </Text>
+                <div className='max-w-md'>
+                  <MaterialPicker
+                    value={outputMaterialId}
+                    onChange={(mid) =>
+                      form.setValue('outputMaterialId', mid, { shouldDirty: true })
+                    }
+                    section='TECH_CARD_BOM_SECTION_PACKAGING'
+                    disabled={!canWrite(SECTION.techCards)}
+                    placeholder='search packaging material'
+                  />
+                </div>
+                {canWrite(SECTION.techCards) && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='lg'
+                    className='uppercase'
+                    onClick={() => setMaterialModalOpen(true)}
+                  >
+                    + create material
+                  </Button>
+                )}
+              </Section>
+            ) : (
+              <Section title='linked products'>
+                <ProductIdsField />
+              </Section>
+            )}
           </div>
 
           {/* SKETCH */}
@@ -656,6 +701,13 @@ export function TechCardForm({
           </div>
         </fieldset>
       </form>
+
+      {/* Create a packaging material inline for the aux output picker (prefilled section). */}
+      <MaterialModal
+        open={materialModalOpen}
+        onOpenChange={setMaterialModalOpen}
+        defaultSection='TECH_CARD_BOM_SECTION_PACKAGING'
+      />
     </Form>
   );
 }

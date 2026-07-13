@@ -55,10 +55,13 @@ export function MaterialModal({
   open,
   onOpenChange,
   material,
+  defaultSection,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   material?: common_Material;
+  // Pre-select the section when creating a fresh material (e.g. packaging from the aux output picker).
+  defaultSection?: common_TechCardBomSection;
 }) {
   const { showMessage } = useSnackBarStore();
   const save = useSaveMaterial();
@@ -84,9 +87,9 @@ export function MaterialModal({
             minStock: material.minStock?.value ?? '',
             notes: material.notes ?? '',
           }
-        : empty,
+        : { ...empty, section: defaultSection ?? empty.section },
     );
-  }, [material, open]);
+  }, [material, open, defaultSection]);
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
 
