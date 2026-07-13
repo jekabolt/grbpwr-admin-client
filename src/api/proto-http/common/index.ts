@@ -2001,7 +2001,9 @@ export type TechCardInsert = {
   // moodboard_media — mood / inspiration / reference / fabric-swatch photos (design intent)
   // technical_media — flat sketches used in construction (front / back / detail / lining / preview)
   // Construction consumes ONLY technical_media. Each item's `kind` sub-classifies within its
-  // list. Both are full-replace on update; callouts pin onto technical_media by media_id.
+  // list. Both are full-replace on update. A callout pins onto ANY media_id on the card — moodboard
+  // OR technical (the backend does not restrict the category), so at the idea stage a callout can pin
+  // onto a moodboard/reference image before any technical sketch exists.
   moodboardMedia: TechCardMediaItem[] | undefined;
   technicalMedia: TechCardMediaItem[] | undefined;
   callouts: TechCardCallout[] | undefined;

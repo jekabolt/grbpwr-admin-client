@@ -2799,6 +2799,8 @@ export type ListSamplesRequest = {
   offset: number | undefined;
   orderFactor: common_OrderFactor | undefined;
   techCardId: number | undefined;
+  status: string | undefined;
+  purpose: string | undefined;
 };
 
 export type ListSamplesResponse = {
@@ -3849,7 +3851,9 @@ export type common_TechCardInsert = {
   // moodboard_media — mood / inspiration / reference / fabric-swatch photos (design intent)
   // technical_media — flat sketches used in construction (front / back / detail / lining / preview)
   // Construction consumes ONLY technical_media. Each item's `kind` sub-classifies within its
-  // list. Both are full-replace on update; callouts pin onto technical_media by media_id.
+  // list. Both are full-replace on update. A callout pins onto ANY media_id on the card — moodboard
+  // OR technical (the backend does not restrict the category), so at the idea stage a callout can pin
+  // onto a moodboard/reference image before any technical sketch exists.
   moodboardMedia: common_TechCardMediaItem[] | undefined;
   technicalMedia: common_TechCardMediaItem[] | undefined;
   callouts: common_TechCardCallout[] | undefined;
@@ -4923,6 +4927,8 @@ export type ListMaterialMovementsRequest = {
   productionRunId: number | undefined;
   sampleId: number | undefined;
   movementType: common_MaterialMovementType | undefined;
+  occurredFrom: string | undefined;
+  occurredTo: string | undefined;
 };
 
 export type ListMaterialMovementsResponse = {
@@ -6694,6 +6700,12 @@ export function createAdminServiceClient(
       if (request.techCardId) {
         queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
+      if (request.status) {
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
+      }
+      if (request.purpose) {
+        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -7742,6 +7754,12 @@ export function createAdminServiceClient(
       }
       if (request.movementType) {
         queryParams.push(`movementType=${encodeURIComponent(request.movementType.toString())}`)
+      }
+      if (request.occurredFrom) {
+        queryParams.push(`occurredFrom=${encodeURIComponent(request.occurredFrom.toString())}`)
+      }
+      if (request.occurredTo) {
+        queryParams.push(`occurredTo=${encodeURIComponent(request.occurredTo.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
