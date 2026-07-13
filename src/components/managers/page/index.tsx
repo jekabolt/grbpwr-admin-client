@@ -1,15 +1,13 @@
 import type { CompareMode } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { SECTION } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { subDays } from 'date-fns';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { DateRangePicker, PersistentKpiBar } from './components';
 import { AlertSettingsModal } from './components/alert-settings-modal';
-import { OpexModal } from './components/opex-modal';
 import { VatRatesModal } from './components/vat-rates-modal';
 import { GrowthTab, ProductsTab, RevenueTab, ThisWeekTab } from './tabs';
 import { useChannelRoasQuery } from './useChannelRoasQuery';
@@ -64,10 +62,9 @@ export function Analitic() {
   const activeTab = parseTabFromUrl(tabParam);
 
   const { canWrite } = usePermissions();
-  const { dictionary } = useDictionary();
+  const navigate = useNavigate();
   const canConfig = canWrite(SECTION.analytics);
   const [vatOpen, setVatOpen] = useState(false);
-  const [opexOpen, setOpexOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
 
   const setActiveTab = (tabId: MetricsTabId) => {
@@ -143,7 +140,7 @@ export function Analitic() {
                 variant='secondary'
                 size='lg'
                 className='uppercase'
-                onClick={() => setOpexOpen(true)}
+                onClick={() => navigate(ROUTES.opex)}
               >
                 OPEX
               </Button>
@@ -159,11 +156,6 @@ export function Analitic() {
           )}
         </div>
         <VatRatesModal open={vatOpen} onOpenChange={setVatOpen} />
-        <OpexModal
-          open={opexOpen}
-          onOpenChange={setOpexOpen}
-          baseCurrency={dictionary?.baseCurrency || 'EUR'}
-        />
         <AlertSettingsModal open={alertsOpen} onOpenChange={setAlertsOpen} />
         <DateRangePicker
           period={period}
