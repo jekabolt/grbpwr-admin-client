@@ -92,6 +92,7 @@ export enum ROUTES {
   tasks = '/tasks',
   taskDetails = '/tasks/:id',
   accounts = '/accounts',
+  opex = '/opex',
 }
 
 // Primary navigation, grouped by domain. Desktop renders each group as a top-bar
@@ -102,6 +103,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'operations',
     items: [
       { label: 'analytics', route: ROUTES.main, section: SECTION.analytics },
+      { label: 'opex', route: ROUTES.opex, section: SECTION.analytics },
       { label: 'orders', route: ROUTES.orders, section: SECTION.orders },
       { label: 'fulfillment', route: ROUTES.fulfillment, section: SECTION.fulfillment },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks },

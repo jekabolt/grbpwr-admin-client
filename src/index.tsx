@@ -99,6 +99,9 @@ const Accounts = lazy(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
 const Tasks = lazy(() => import('components/managers/tasks').then((m) => ({ default: m.Tasks })));
+const Opex = lazy(() =>
+  import('components/managers/opex/page').then((m) => ({ default: m.OpexPage })),
+);
 const TaskDetail = lazy(() =>
   import('components/managers/tasks/task-detail/page').then((m) => ({ default: m.TaskDetail })),
 );
@@ -237,6 +240,7 @@ root.render(
                   <Route path={ROUTES.productionRun} element={<ProductionRunDetail />} />
                   <Route path={ROUTES.productionRuns} element={<ProductionRuns />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
+                  <Route path={ROUTES.opex} element={<Opex />} />
                   <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
                   <Route path={ROUTES.accounts} element={<Accounts />} />
                 </Route>
