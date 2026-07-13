@@ -754,6 +754,10 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     hasUnconvertedCurrencies: undefined,
     totalSam: undefined,
     colorwayCosts: undefined,
+    // Base-currency roll-up (server-folded via costing FX rates) — output-only.
+    unitCostBase: undefined,
+    orderCostBase: undefined,
+    baseCurrency: undefined,
   };
 }
 

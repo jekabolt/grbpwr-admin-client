@@ -133,8 +133,14 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
   };
 }
 
-export function mapFormToFittingInsert(data: FittingFormData): common_FittingInsert {
+export function mapFormToFittingInsert(
+  data: FittingFormData,
+  original?: common_FittingInsert,
+): common_FittingInsert {
   return {
+    // Spread the loaded insert first so fields not yet managed by the form survive
+    // the full-replace save (mirrors mapFormToTechCardInsert).
+    ...original,
     productId: data.productId || 0,
     techCardId: data.techCardId || 0,
     modelId: data.modelId || 0,
@@ -166,5 +172,11 @@ export function mapFormToFittingInsert(data: FittingFormData): common_FittingIns
         posX: inputToDecimal(c.posX),
         posY: inputToDecimal(c.posY),
       })),
+    // §4 fittings — not yet form-managed. Preserve from the original on update,
+    // neutral defaults on create (0 = server auto-assigns round; '' = undecided).
+    // TODO: wire round number / outcome selector / change-requests list.
+    roundNumber: original?.roundNumber ?? 0,
+    outcome: original?.outcome ?? '',
+    changeRequests: original?.changeRequests ?? [],
   };
 }

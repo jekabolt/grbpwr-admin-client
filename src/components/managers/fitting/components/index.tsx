@@ -106,7 +106,7 @@ export function FittingForm({
   }, [fitting?.media, picked]);
 
   async function handleSubmit(data: FittingFormData) {
-    const fittingInsert = mapFormToFittingInsert(data);
+    const fittingInsert = mapFormToFittingInsert(data, fitting?.fitting);
     try {
       if (isEditMode) {
         await updateFitting.mutateAsync({ id: parseInt(id || '0', 10), fitting: fittingInsert });

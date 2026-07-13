@@ -78,6 +78,7 @@ function mapInsert(i: common_Task['task']): TaskInsert {
     orderUuid: i?.orderUuid ?? '',
     archiveId: i?.archiveId ?? 0,
     fittingId: i?.fittingId ?? 0,
+    productionRunId: i?.productionRunId ?? 0,
   };
 }
 

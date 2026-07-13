@@ -128,7 +128,8 @@ export type StockChangeSource =
   | "STOCK_CHANGE_SOURCE_ORDER_PAID"
   | "STOCK_CHANGE_SOURCE_ORDER_CUSTOM"
   | "STOCK_CHANGE_SOURCE_ORDER_RETURNED"
-  | "STOCK_CHANGE_SOURCE_ORDER_CANCELLED";
+  | "STOCK_CHANGE_SOURCE_ORDER_CANCELLED"
+  | "STOCK_CHANGE_SOURCE_PRODUCTION_RECEIVED";
 export type StockChangeReason =
   | "STOCK_CHANGE_REASON_UNSPECIFIED"
   // admin_new_product reasons
@@ -958,6 +959,16 @@ export type FittingInsert = {
   // wrong with the fit at a point on a specific photo (media_ids). Full-replace on
   // update, like sizes/media/patterns.
   callouts: FittingCallout[] | undefined;
+  // This fitting's number in the tech card's try-on sequence (task 13). 0 = unset: the
+  // server auto-assigns the next number (max+1) per tech card on create when the fitting is
+  // anchored to a card. A non-zero value is honoured (manual override); unique per card.
+  roundNumber: number | undefined;
+  // Structured round outcome (distinct from the free verdict): approved | new_round | dropped.
+  // "" = undecided.
+  outcome: string | undefined;
+  // The structured "what to change" work list produced by this fitting. Full-replace on update,
+  // like callouts; resolved is toggled when a change is carried into the tech card.
+  changeRequests: FittingChangeRequest[] | undefined;
 };
 
 // FittingPattern is one PDF выкройка iteration tried in a fitting (snapshot of the
@@ -979,6 +990,18 @@ export type FittingCallout = {
   mediaId: number | undefined;
   posX: googletype_Decimal | undefined;
   posY: googletype_Decimal | undefined;
+};
+
+// FittingChangeRequest is one structured change produced by a fitting (task 13): the target area
+// to change, a note, an optional link to a photo callout pin, and a resolved flag (set when the
+// change has been carried into the tech card). The lightweight replacement for the removed POM
+// feedback loop — it records WHY the spec changed without the full point/grade machinery.
+export type FittingChangeRequest = {
+  id: number | undefined;
+  target: string | undefined;
+  note: string | undefined;
+  calloutNumber: number | undefined;
+  resolved: boolean | undefined;
 };
 
 // Fitting is a stored try-on session with resolved media for display.
@@ -1467,6 +1490,96 @@ export type Model = {
   media: MediaFull[] | undefined;
 };
 
+// ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
+// started (in_progress), then received into stock, then closed; it can be cancelled from any
+// non-terminal state. Stored as its lowercase name in the DB.
+export type ProductionRunStatus =
+  | "PRODUCTION_RUN_STATUS_UNKNOWN"
+  | "PRODUCTION_RUN_STATUS_PLANNED"
+  | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
+  | "PRODUCTION_RUN_STATUS_RECEIVED"
+  | "PRODUCTION_RUN_STATUS_CLOSED"
+  | "PRODUCTION_RUN_STATUS_CANCELLED";
+// ProductionRunCostKind is the article category of an actual production-run cost.
+export type ProductionRunCostKind =
+  | "PRODUCTION_RUN_COST_KIND_UNKNOWN"
+  | "PRODUCTION_RUN_COST_KIND_MATERIALS"
+  | "PRODUCTION_RUN_COST_KIND_CMT"
+  | "PRODUCTION_RUN_COST_KIND_HARDWARE"
+  | "PRODUCTION_RUN_COST_KIND_PACKAGING"
+  | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
+  | "PRODUCTION_RUN_COST_KIND_DUTY"
+  | "PRODUCTION_RUN_COST_KIND_OTHER";
+// ProductionRunSize is one size line of a run: the planned quantity, and — once received — the
+// received and defective counts (unset until the batch is received) that drive plan/fact.
+export type ProductionRunSize = {
+  sizeId: number | undefined;
+  plannedQty: number | undefined;
+  receivedQty?: number;
+  defectQty?: number;
+};
+
+// ProductionRunCost is one actual cost article incurred for a run (phase 2). amount is in
+// `currency`; amount_base is the base-currency equivalent — server-folded via the costing FX
+// rates when left unset on write, or supplied manually — so run totals need no read-time FX.
+export type ProductionRunCost = {
+  kind: ProductionRunCostKind | undefined;
+  description: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  amountBase: googletype_Decimal | undefined;
+  incurredAt: wellKnownTimestamp | undefined;
+};
+
+// ProductionRunCostByKind is the base-currency total of actual costs of one kind.
+export type ProductionRunCostByKind = {
+  kind: ProductionRunCostKind | undefined;
+  amountBase: googletype_Decimal | undefined;
+};
+
+// ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
+// cost articles + the phase-1 size grid, against the frozen planned unit cost.
+export type ProductionRunActuals = {
+  actualTotalBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
+  plannedQtyTotal: number | undefined;
+  receivedQtyTotal: number | undefined;
+  defectQtyTotal: number | undefined;
+  actualUnitCost: googletype_Decimal | undefined;
+  defectPctActual: googletype_Decimal | undefined;
+  byKind: ProductionRunCostByKind[] | undefined;
+  plannedTotalBase: googletype_Decimal | undefined;
+  unitCostVariance: googletype_Decimal | undefined;
+  totalVariance: googletype_Decimal | undefined;
+  hasBase: boolean | undefined;
+};
+
+// ProductionRunInsert is the writable payload for a run (header + size grid). planned_unit_cost /
+// planned_currency are NOT here — they are server-snapshotted at plan time (from the linked
+// tech_card_release or the live card's computed costing) and are read-only on write.
+export type ProductionRunInsert = {
+  techCardId: number | undefined;
+  releaseId: number | undefined;
+  status: ProductionRunStatus | undefined;
+  startedAt: wellKnownTimestamp | undefined;
+  receivedAt: wellKnownTimestamp | undefined;
+  notes: string | undefined;
+  sizes: ProductionRunSize[] | undefined;
+  costs: ProductionRunCost[] | undefined;
+};
+
+// ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen
+// plan snapshot, and timestamps.
+export type ProductionRun = {
+  id: number | undefined;
+  run: ProductionRunInsert | undefined;
+  plannedUnitCost: googletype_Decimal | undefined;
+  plannedCurrency: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  actuals: ProductionRunActuals | undefined;
+};
+
 // Subscriber represents the subscriber table
 export type Subscriber = {
   id: number | undefined;
@@ -1562,6 +1675,7 @@ export type TaskInsert = {
   orderUuid: string | undefined;
   archiveId: number | undefined;
   fittingId: number | undefined;
+  productionRunId: number | undefined;
   // Planned start (when work SHOULD begin), the manual counterpart of due_date.
   // The ACTUAL start (when the card first entered IN_PROGRESS) is the
   // server-stamped Task.started_at, not this field. Unset = no planned start.
@@ -1864,6 +1978,98 @@ export type TechCardBomItem = {
   fabricWeightGsm: googletype_Decimal | undefined;
   fabricDirection: TechCardFabricDirection | undefined;
   wastagePercent: googletype_Decimal | undefined;
+  // material_id optionally links this line to a catalog Material (task 10). The line keeps its
+  // own snapshot fields regardless; 0 means unlinked (free-text / legacy).
+  materialId: number | undefined;
+};
+
+// Material is a catalog material — shared nomenclature a tech-card BOM line can optionally link
+// to. Descriptive fields only; price lives in the append-only MaterialPrice history.
+export type Material = {
+  id: number | undefined;
+  name: string | undefined;
+  section: TechCardBomSection | undefined;
+  supplier: string | undefined;
+  supplierRef: string | undefined;
+  composition: string | undefined;
+  spec: string | undefined;
+  unit: string | undefined;
+  fabricWidth: googletype_Decimal | undefined;
+  fabricWeightGsm: googletype_Decimal | undefined;
+  archived: boolean | undefined;
+  // latest_price is the current (latest-effective) price, if any (read-only; set via
+  // AddMaterialPrice). Absent when the material has no price history yet.
+  latestPrice: MaterialPrice | undefined;
+};
+
+// MaterialPrice is one point in a material's append-only price history. Prices are in the
+// purchase currency (fold to base via costing FX rates).
+export type MaterialPrice = {
+  materialId: number | undefined;
+  price: googletype_Decimal | undefined;
+  currency: string | undefined;
+  validFrom: wellKnownTimestamp | undefined;
+  source: string | undefined;
+  note: string | undefined;
+};
+
+// TechCardReleaseMeta is the header of an immutable release snapshot (task 11) without the
+// JSON blob — the frozen spec + planned unit cost captured when a card entered `released`.
+// The full snapshot (a proto-JSON contract TechCard) is fetched via GetTechCardRelease.
+export type TechCardReleaseMeta = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  version: string | undefined;
+  releasedBy: string | undefined;
+  unitCost: googletype_Decimal | undefined;
+  currency: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardDevExpenseInsert is the writable payload for one development (R&D) cost row (task 14):
+// a one-off "spent Amount on Kind" record. amount_base is computed server-side (via costing FX);
+// clients do not send it.
+export type TechCardDevExpenseInsert = {
+  techCardId: number | undefined;
+  kind: string | undefined;
+  description: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  fittingId: number | undefined;
+  incurredAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardDevExpense is one stored development-cost journal row. amount_base folds amount to base
+// (EUR) via costing FX (unset when the currency has no rate).
+export type TechCardDevExpense = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  kind: string | undefined;
+  description: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  amountBase: googletype_Decimal | undefined;
+  fittingId: number | undefined;
+  incurredAt: wellKnownTimestamp | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardDevCostByKind is the base-currency development spend for one kind.
+export type TechCardDevCostByKind = {
+  kind: string | undefined;
+  amountBase: googletype_Decimal | undefined;
+};
+
+// TechCardDevCostSummary is the computed roll-up of a style's development spend (output-only).
+export type TechCardDevCostSummary = {
+  totalBase: googletype_Decimal | undefined;
+  hasUnconverted: boolean | undefined;
+  byKind: TechCardDevCostByKind[] | undefined;
+  // Amortized informational figure: production unit_cost + total_base / Σ order_qty — how much
+  // development adds to each unit at the current size run. Unset when order_qty is 0 or the
+  // production unit cost is unavailable. NOT part of cost_price (development is a period cost).
+  unitCostWithDev: googletype_Decimal | undefined;
+  orderQty: number | undefined;
 };
 
 // TechCardSizeQuantity is the production order quantity for a size (size run).
@@ -2007,6 +2213,13 @@ export type TechCardCosting = {
   hasUnconvertedCurrencies: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
   colorwayCosts: TechCardColorwayCost[] | undefined;
+  // OUTPUT-ONLY base-currency rollup. The unit/order cost of the primary colourway folded into
+  // the base currency via the manual costing FX rates. Set ONLY when every currency involved
+  // has a rate — this is the figure the product-cost seed uses, so a non-base costing can seed
+  // cost_price too. Absent when a needed rate is missing (then has_unconverted_currencies).
+  unitCostBase: googletype_Decimal | undefined;
+  orderCostBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
 };
 
 // TechCardSignoff records one responsible role's sign-off of a sheet, so the
