@@ -1,13 +1,7 @@
-import {
-  common_ProductionRun,
-  common_ProductionRunActuals,
-  common_ProductionRunLine,
-} from 'api/proto-http/admin';
+import { common_ProductionRun, common_ProductionRunActuals } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
-import { findInDictionary } from 'lib/features/findInDictionary';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -15,6 +9,7 @@ import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
+import { LinesGrid } from './components/lines-grid';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import { isRunLocked, isRunReceivable, runStatusLabel } from './components/options';
@@ -128,16 +123,7 @@ export function ProductionRunDetail() {
 
       {canReadCosting ? <PlanFactBlock run={run} actuals={actuals} /> : null}
 
-      {/* Read-only lines (the editable colour-model × size grid lands in W2.2). */}
-      <Section title='lines (colour-model × size)'>
-        {(ins?.lines ?? []).length === 0 ? (
-          <Text variant='inactive' size='small'>
-            no lines
-          </Text>
-        ) : (
-          <LinesReadonly lines={ins?.lines ?? []} />
-        )}
-      </Section>
+      <LinesGrid run={run} canEdit={canEdit} locked={locked} />
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal open={receiveOpen} onOpenChange={setReceiveOpen} run={run} />
@@ -150,33 +136,6 @@ export function ProductionRunDetail() {
       >
         <Text size='small'>Удалить план партии? Действие необратимо.</Text>
       </ConfirmationModal>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className='flex flex-col gap-2'>
-      <Text variant='uppercase' size='small'>
-        {title}
-      </Text>
-      {children}
-    </div>
-  );
-}
-
-function LinesReadonly({ lines }: { lines: common_ProductionRunLine[] }) {
-  const { dictionary } = useDictionary();
-  return (
-    <div className='flex flex-col gap-1'>
-      {lines.map((l, i) => (
-        <Text key={`${l.productId}-${l.sizeId}-${i}`} size='small'>
-          {l.productId ? `#${l.productId}` : '(no product)'} ·{' '}
-          {findInDictionary(dictionary, l.sizeId, 'size') || l.sizeId} · план {l.plannedQty ?? 0}
-          {l.receivedQty != null ? ` / факт ${l.receivedQty}` : ' / факт —'}
-          {l.defectQty ? ` · брак ${l.defectQty}` : ''}
-        </Text>
-      ))}
     </div>
   );
 }

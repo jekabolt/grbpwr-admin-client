@@ -3,6 +3,32 @@ import { adminService } from 'api/api';
 import { common_ProductionRunInsert } from 'api/proto-http/admin';
 import { runStatusToDbFilter } from './options';
 
+// Read-modify-write a single section of a run's insert (R-17). UpdateProductionRun is a
+// full-replace with no lock_version, so each detail-page section (lines / marker / costs)
+// re-fetches the latest run immediately before saving and overrides ONLY its own keys — a
+// marker edit can't clobber concurrently-saved lines, and vice versa. The race window shrinks
+// to the fetch→save gap; a true lock_version on runs is a backend follow-up.
+export function useUpdateRunSection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      patch,
+    }: {
+      id: number;
+      patch: Partial<common_ProductionRunInsert>;
+    }) => {
+      const fresh = await adminService.GetProductionRun({ id });
+      const base = (fresh.run?.run ?? {}) as common_ProductionRunInsert;
+      return adminService.UpdateProductionRun({ id, run: { ...base, ...patch } });
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: productionRunKeys.all });
+      qc.invalidateQueries({ queryKey: productionRunKeys.detail(v.id) });
+    },
+  });
+}
+
 export const productionRunKeys = {
   all: ['productionRuns'] as const,
   list: (techCardId: number, status: string) =>
