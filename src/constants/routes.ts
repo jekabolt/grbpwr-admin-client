@@ -35,6 +35,7 @@ export const SECTION = {
   models: 'models',
   fittings: 'fittings',
   techCards: 'tech_cards',
+  production: 'production',
   tasks: 'tasks',
   accounts: 'accounts',
   // Field-shaping section (NOT a screen gate): when an account lacks costing:read
@@ -86,6 +87,7 @@ export enum ROUTES {
   singleTechCard = '/tech-cards/:id',
   techCardPrint = '/tech-cards/:id/print',
   materials = '/materials',
+  productionRuns = '/production-runs',
   tasks = '/tasks',
   taskDetails = '/tasks/:id',
   accounts = '/accounts',
@@ -121,6 +123,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'fittings', route: ROUTES.fittings, section: SECTION.fittings },
       { label: 'tech cards', route: ROUTES.techCards, section: SECTION.techCards },
       { label: 'materials', route: ROUTES.materials, section: SECTION.techCards },
+      { label: 'production', route: ROUTES.productionRuns, section: SECTION.production },
     ],
   },
   {
