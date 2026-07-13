@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
-import { runCostKindOptions, runStatusOptions } from './options';
+import { runCostKindOptions, runStatusLabel, runStatusOptions } from './options';
 import { useSaveProductionRun } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -255,6 +255,12 @@ export function ProductionRunModal({
                   value={d.status}
                   onChange={(e) => set({ status: e.target.value as common_ProductionRunStatus })}
                 >
+                  {/* RECEIVED/UNKNOWN aren't manually settable, but an edited run may already
+                      be in one — surface it so the select round-trips instead of silently
+                      coercing to the first option (a status downgrade). */}
+                  {!runStatusOptions.some((o) => o.value === d.status) && (
+                    <option value={d.status}>{runStatusLabel(d.status)}</option>
+                  )}
                   {runStatusOptions.map((o) => (
                     <option key={o.value} value={o.value}>
                       {o.label}
