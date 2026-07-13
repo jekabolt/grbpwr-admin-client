@@ -38,6 +38,7 @@ import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
 import { ProductIdsField } from './product-ids-field';
 import { DevExpensesField } from './dev-expenses-field';
+import { ReleasesField } from './releases-field';
 import { RevisionsField } from './revisions-field';
 import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
@@ -510,6 +511,15 @@ export function TechCardForm({
             </Section>
             <Section title='revision log'>
               <RevisionsField />
+            </Section>
+            <Section title='releases'>
+              {isEditMode && numId ? (
+                <ReleasesField techCardId={numId} />
+              ) : (
+                <Text variant='inactive' size='small'>
+                  a frozen snapshot is created when the card is saved as “released”
+                </Text>
+              )}
             </Section>
           </div>
         </fieldset>
