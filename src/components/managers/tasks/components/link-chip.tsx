@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
+import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
 import { Link } from 'react-router-dom';
 import { TaskLink } from '../utils/links';
 
@@ -39,6 +40,13 @@ function useLinkName(link: TaskLink) {
           const date = formatFittingDate(f.fittingDate);
           return [date, statusLabel(f.status)].filter(Boolean).join(' · ') || null;
         }
+        if (link.kind === 'sample') {
+          // No name field — compose the per-card number + purpose.
+          const r = await adminService.GetSample({ id: link.id });
+          const s = r?.sample;
+          if (!s) return null;
+          return `#${s.number ?? link.id} · ${samplePurposeLabel(s.sample?.purpose)}`;
+        }
         return null;
       } catch {
         return null;
@@ -53,6 +61,7 @@ const KIND_PREFIX: Record<TaskLink['kind'], string> = {
   order: 'order',
   archive: 'drop',
   fitting: 'примерка',
+  sample: 'образец',
 };
 
 export function LinkChip({ link, onNavigate }: { link: TaskLink; onNavigate?: () => void }) {

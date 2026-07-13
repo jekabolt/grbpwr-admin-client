@@ -3,10 +3,12 @@ import type {
   common_Fitting,
   common_Order,
   common_Product,
+  common_Sample,
   common_TechCardListItem,
 } from 'api/proto-http/admin';
 import type { common_ArchiveList } from 'api/proto-http/frontend';
 import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
+import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
 import { EntityConfig, EntityOption } from '../components/entity-picker';
 
 // Maps the four typed task links to their real admin/frontend list + single-get
@@ -182,6 +184,40 @@ export const fittingConfig: EntityConfig = {
   resolve: async (value) => {
     const r = await adminService.GetFitting({ id: value as number });
     return r?.fitting ? fittingOption(r.fitting) : null;
+  },
+};
+
+// ---- sample / образец (ListSamples across all styles — B-4) -----------------
+// A sample has no name; label from its per-card number + purpose, id sublabel carrying its style.
+function sampleOption(s: common_Sample): EntityOption {
+  const tc = s.sample?.techCardId;
+  return {
+    value: s.id ?? 0,
+    label: `образец #${s.number ?? '?'} · ${samplePurposeLabel(s.sample?.purpose)}`,
+    sublabel: `#${s.id}${tc ? ` · техкарта #${tc}` : ''}`,
+  };
+}
+
+export const sampleConfig: EntityConfig = {
+  kind: 'sample',
+  empty: 0,
+  mode: 'client',
+  searchPlaceholder: 'search образцы by #/purpose…',
+  emptyResult: 'no samples',
+  load: async () => {
+    const r = await adminService.ListSamples({
+      limit: 100,
+      offset: 0,
+      orderFactor: 'ORDER_FACTOR_DESC',
+      techCardId: 0,
+      status: '',
+      purpose: '',
+    });
+    return (r.samples ?? []).map(sampleOption);
+  },
+  resolve: async (value) => {
+    const r = await adminService.GetSample({ id: value as number });
+    return r?.sample ? sampleOption(r.sample) : null;
   },
 };
 

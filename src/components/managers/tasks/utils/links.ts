@@ -1,6 +1,6 @@
 import { TaskInsert } from '../api/types';
 
-export type LinkKind = 'techcard' | 'product' | 'order' | 'archive' | 'fitting';
+export type LinkKind = 'techcard' | 'product' | 'order' | 'archive' | 'fitting' | 'sample';
 
 export interface TaskLink {
   kind: LinkKind;
@@ -53,6 +53,18 @@ export function taskLinks(t: TaskInsert): TaskLink[] {
       label: `примерка #${t.fittingId}`,
       to: `/fittings/${t.fittingId}`,
     });
+  // A sample lives inside its tech card's samples tab; deep-link there when the owning style is
+  // also linked, else fall back to the tech-cards list (no standalone sample route).
+  if (t.sampleId > 0)
+    links.push({
+      kind: 'sample',
+      id: t.sampleId,
+      label: `образец #${t.sampleId}`,
+      to:
+        t.techCardId > 0
+          ? `/tech-cards/${t.techCardId}?tab=samples&sample=${t.sampleId}`
+          : `/tech-cards`,
+    });
   return links;
 }
 
@@ -62,6 +74,7 @@ export function taskLinkCount(t: TaskInsert): number {
     (t.productId > 0 ? 1 : 0) +
     (t.orderUuid ? 1 : 0) +
     (t.archiveId > 0 ? 1 : 0) +
-    (t.fittingId > 0 ? 1 : 0)
+    (t.fittingId > 0 ? 1 : 0) +
+    (t.sampleId > 0 ? 1 : 0)
   );
 }

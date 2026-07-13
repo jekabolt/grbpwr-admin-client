@@ -22,6 +22,7 @@ import {
   fittingConfig,
   orderConfig,
   productConfig,
+  sampleConfig,
   techCardConfig,
 } from '../utils/entity-configs';
 import { AssigneeSelect } from './assignee-select';
@@ -295,6 +296,19 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                         value={field.value}
                         onChange={field.onChange}
                         config={fittingConfig}
+                      />
+                    )}
+                  />
+                </Field>
+                <Field label='образец'>
+                  <Controller
+                    control={control}
+                    name='sampleId'
+                    render={({ field }) => (
+                      <EntityPicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        config={sampleConfig}
                       />
                     )}
                   />
