@@ -37,6 +37,7 @@ import { LabelsField } from './labels-field';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
 import { ProductIdsField } from './product-ids-field';
+import { DevExpensesField } from './dev-expenses-field';
 import { RevisionsField } from './revisions-field';
 import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
@@ -61,6 +62,7 @@ const TABS = [
   { id: 'construction', label: 'construction' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
+  { id: 'dev', label: 'R&D cost' },
   { id: 'issues', label: 'issues' },
   { id: 'signoff', label: 'sign-off' },
   { id: 'history', label: 'history' },
@@ -125,9 +127,12 @@ export function TechCardForm({
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
   const { canWrite, canReadCosting } = usePermissions();
-  // Costing tab is field-shaped: hidden entirely without costing:read (server nulls
-  // the cost block anyway; showing an empty tab would read as "zero cost").
-  const visibleTabs = TABS.filter((t) => t.id !== 'costing' || canReadCosting);
+  // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read
+  // (server nulls the cost block / returns an empty journal; an empty tab would read
+  // as "zero cost").
+  const visibleTabs = TABS.filter(
+    (t) => (t.id !== 'costing' && t.id !== 'dev') || canReadCosting,
+  );
 
   const numId = id ? parseInt(id, 10) : undefined;
 
@@ -459,6 +464,21 @@ export function TechCardForm({
             <div hidden={activeTab !== 'costing'}>
               <Section title='costing'>
                 <CostingField techCard={techCard} />
+              </Section>
+            </div>
+          )}
+
+          {/* R&D COST — mounted only with costing:read (field-shaped) */}
+          {canReadCosting && (
+            <div hidden={activeTab !== 'dev'}>
+              <Section title='R&D development cost'>
+                {isEditMode && numId ? (
+                  <DevExpensesField techCardId={numId} />
+                ) : (
+                  <Text variant='inactive' size='small'>
+                    save this tech card first, then you can log development costs
+                  </Text>
+                )}
               </Section>
             </div>
           )}
