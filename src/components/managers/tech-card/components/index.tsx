@@ -20,7 +20,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
@@ -52,6 +52,7 @@ import {
   techCardDefaultData,
   techCardSchema,
 } from './schema';
+import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { TechCardFittings } from './tech-card-fittings';
 
@@ -59,6 +60,7 @@ const TABS = [
   { id: 'header', label: 'header' },
   { id: 'sketch', label: 'sketch' },
   { id: 'patterns', label: 'patterns' },
+  { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
   { id: 'construction', label: 'construction' },
@@ -70,6 +72,15 @@ const TABS = [
   { id: 'history', label: 'history' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
+
+// Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
+// DEVELOP how it's made, SPEC what ships. History stands alone.
+const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
+  { band: 'design', tabs: ['header', 'sketch', 'patterns'] },
+  { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'construction'] },
+  { band: 'spec', tabs: ['labels', 'costing', 'dev', 'issues', 'signoff'] },
+  { band: '', tabs: ['history'] },
+];
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
 const ERROR_TAB: Record<string, TabId> = {
@@ -131,8 +142,12 @@ export function TechCardForm({
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
   // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read
   // (server nulls the cost block / returns an empty journal; an empty tab would read
-  // as "zero cost").
-  const visibleTabs = TABS.filter((t) => (t.id !== 'costing' && t.id !== 'dev') || canReadCosting);
+  // as "zero cost"). Samples need a saved card (id).
+  const isTabVisible = (t: TabId) => {
+    if ((t === 'costing' || t === 'dev') && !canReadCosting) return false;
+    if (t === 'samples' && !isEditMode) return false;
+    return true;
+  };
   const [econOpen, setEconOpen] = useState(false);
 
   const numId = id ? parseInt(id, 10) : undefined;
@@ -143,7 +158,20 @@ export function TechCardForm({
     mode: 'onSubmit',
   });
 
-  const [activeTab, setActiveTab] = useState<TabId>('header');
+  // Active tab lives in the URL (?tab=) so a section — and, on the samples tab, a specific sample
+  // (?sample=) — is deep-linkable (R-1). Switching tabs drops a stale ?sample=.
+  const [params, setParams] = useSearchParams();
+  const activeTab: TabId = (params.get('tab') as TabId) || 'header';
+  const setActiveTab = (id: TabId) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('tab', id);
+        if (id !== 'samples') p.delete('sample');
+        return p;
+      },
+      { replace: true },
+    );
   const [conflict, setConflict] = useState(false);
   // bump to jump to the BOM tab and pulse the empty composition fields (from labels care-gen)
   const [bomHighlight, setBomHighlight] = useState(0);
@@ -304,31 +332,47 @@ export function TechCardForm({
         </div>
 
         <nav
-          className='flex gap-1 overflow-x-auto border-b border-textInactiveColor px-2.5'
+          className='flex items-center gap-1 overflow-x-auto border-b border-textInactiveColor px-2.5'
           aria-label='Tech card sections'
         >
-          {visibleTabs.map((tab) => {
-            const active = activeTab === tab.id;
-            const hasError = errorTabs.has(tab.id);
+          {TAB_GROUPS.map((group, gi) => {
+            const groupTabs = group.tabs
+              .map((id) => TABS.find((t) => t.id === id)!)
+              .filter((t) => isTabVisible(t.id));
+            if (groupTabs.length === 0) return null;
             return (
-              <button
-                key={tab.id}
-                type='button'
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-textBaseSize uppercase transition-colors ${
-                  active
-                    ? 'border-textInactiveColor text-textColor'
-                    : 'border-transparent text-textInactiveColor hover:text-textColor'
-                }`}
-              >
-                {tab.label}
-                {tab.id === 'issues' && openIssues > 0 && (
-                  <span className='border border-textInactiveColor px-1 text-textBaseSize leading-none'>
-                    {openIssues}
-                  </span>
+              <div key={gi} className='flex items-center'>
+                {gi > 0 && <span className='mx-1 h-4 w-px bg-textInactiveColor' aria-hidden />}
+                {group.band && (
+                  <Text variant='inactive' size='small' className='px-1 uppercase'>
+                    {group.band}
+                  </Text>
                 )}
-                {hasError && <span className='size-1.5 rounded-full bg-error' aria-hidden />}
-              </button>
+                {groupTabs.map((tab) => {
+                  const active = activeTab === tab.id;
+                  const hasError = errorTabs.has(tab.id);
+                  return (
+                    <button
+                      key={tab.id}
+                      type='button'
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-textBaseSize uppercase transition-colors ${
+                        active
+                          ? 'border-textInactiveColor text-textColor'
+                          : 'border-transparent text-textInactiveColor hover:text-textColor'
+                      }`}
+                    >
+                      {tab.label}
+                      {tab.id === 'issues' && openIssues > 0 && (
+                        <span className='border border-textInactiveColor px-1 text-textBaseSize leading-none'>
+                          {openIssues}
+                        </span>
+                      )}
+                      {hasError && <span className='size-1.5 rounded-full bg-error' aria-hidden />}
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
@@ -427,6 +471,20 @@ export function TechCardForm({
               <PatternsField />
             </Section>
           </div>
+
+          {/* SAMPLES — edit-mode only (needs a saved card id) */}
+          {isEditMode && numId ? (
+            <div hidden={activeTab !== 'samples'}>
+              <Section title='samples (сэмплы)'>
+                <SamplesTab
+                  techCardId={numId}
+                  techCard={techCard}
+                  canEdit={canWrite(SECTION.techCards)}
+                  canReadCosting={canReadCosting}
+                />
+              </Section>
+            </div>
+          ) : null}
 
           {/* BOM */}
           <div hidden={activeTab !== 'bom'}>
