@@ -80,7 +80,7 @@ export function useMaterialMovements(filter: MovementFilter = {}, limit = 50) {
 // A stock movement changes balances (and possibly the moving average) — invalidate the whole
 // warehouse tree. The catalog (useMaterials) is untouched. Each mutation returns the posted
 // MaterialMovement so callers can report `on hand before → after`.
-function useMovementMutation<TReq>(fn: (req: TReq) => Promise<unknown>) {
+function useMovementMutation<TReq, TRes>(fn: (req: TReq) => Promise<TRes>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
