@@ -105,6 +105,40 @@ const STOREFRONT_ORIGIN = (() => {
   }
 })();
 
+// ---- order tracking -------------------------------------------------------
+
+// Storefront order route expects a /{country}/{locale} prefix; the order lookup itself
+// is keyed by uuid + email, so any valid prefix resolves. Match the app default used by
+// the archive preview.
+const ORDER_TRACKING_COUNTRY = 'gb';
+const ORDER_TRACKING_LOCALE = 'en';
+
+/**
+ * Absolute storefront URL a customer can open (or scan) to view their order, e.g.
+ *   https://grbpwr.com/gb/en/order/ORD-XXXX/<base64-email>
+ *
+ * Origin comes from VITE_STOREFRONT_URL (set per environment in Vercel: beta admin →
+ * beta.grbpwr.com, prod admin → grbpwr.com), so the link always targets the storefront
+ * paired with THIS admin's backend — a beta order resolves on beta, a prod order on prod.
+ * The email is base64-encoded exactly as the storefront's order route expects. Returns ''
+ * when either input is missing so callers can conditionally render.
+ */
+export function buildOrderTrackingUrl(
+  orderUuid: string | undefined,
+  email: string | undefined,
+): string {
+  if (!orderUuid?.trim() || !email?.trim()) return '';
+  let b64Email: string;
+  try {
+    b64Email = btoa(email.trim());
+  } catch {
+    return ''; // non-Latin1 email — can't encode
+  }
+  return `${STOREFRONT_ORIGIN}/${ORDER_TRACKING_COUNTRY}/${ORDER_TRACKING_LOCALE}/order/${encodeURIComponent(
+    orderUuid.trim(),
+  )}/${b64Email}`;
+}
+
 // ---- build ----------------------------------------------------------------
 
 /** Serialize a StorefrontLink to the URL string stored in the form / contract. */
