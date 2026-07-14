@@ -92,6 +92,9 @@ export function SamplesTab({
           canEdit={canEdit}
           canReadCosting={canReadCosting}
           onClose={() => setExpanded('')}
+          // A fresh sample opens straight into its editor — the sub-panels it needs next
+          // (issue materials, dev expenses, fittings) only exist on a saved id.
+          onCreated={(id) => setExpanded(String(id))}
         />
       )}
 
@@ -106,13 +109,15 @@ export function SamplesTab({
         <div className='overflow-x-auto'>
           <table className='w-full border-collapse'>
             <thead>
+              {/* No cost column: the contract never fills cost on list rows (GetSample only) —
+                  an all-dashes column read as "no sample has cost". The composed cost shows
+                  inside the open editor. */}
               <tr>
                 <th className={th}>#</th>
                 <th className={th}>purpose</th>
                 <th className={th}>size</th>
                 <th className={th}>fabric</th>
                 <th className={th}>status</th>
-                {canReadCosting ? <th className={th}>cost</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -134,17 +139,10 @@ export function SamplesTab({
                       <td className={td}>{sizeName(s.sample?.sizeId)}</td>
                       <td className={td}>{sampleFabricSourceLabel(s.sample?.fabricSource)}</td>
                       <td className={td}>{sampleStatusLabel(s.sample?.status)}</td>
-                      {canReadCosting ? (
-                        <td className={td}>
-                          {s.cost?.totalBase?.value
-                            ? `${decimalToInput(s.cost.totalBase)} ${s.cost.hasUncosted ? '· partial' : ''}`
-                            : '—'}
-                        </td>
-                      ) : null}
                     </tr>
                     {open ? (
                       <tr>
-                        <td className={td} colSpan={canReadCosting ? 6 : 5}>
+                        <td className={td} colSpan={5}>
                           <SampleEditor
                             sample={s}
                             techCardId={techCardId}
@@ -203,6 +201,7 @@ function SampleEditor({
   canEdit,
   canReadCosting,
   onClose,
+  onCreated,
 }: {
   sample?: common_Sample;
   techCardId: number;
@@ -210,6 +209,8 @@ function SampleEditor({
   canEdit: boolean;
   canReadCosting: boolean;
   onClose: () => void;
+  // Create-mode only: called with the fresh server id instead of onClose.
+  onCreated?: (id: number) => void;
 }) {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
@@ -219,22 +220,30 @@ function SampleEditor({
   const del = useDeleteSample();
   const isEdit = !!sample?.id;
 
-  // GetSample resolves the composed cost (not present on the list row).
+  // GetSample resolves the composed cost (never present on list rows).
   const { data: full } = useSample(sample?.id ?? 0, isEdit && canReadCosting);
-  const cost = full?.sample?.cost ?? sample?.cost;
+  const cost = full?.sample?.cost;
 
   const [d, setD] = useState<Draft>(draftFrom(sample));
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  // Any list refetch (issue modal close, a colleague's edit) re-delivers `sample` — without
+  // the dirty guard that reset silently overwrote in-progress edits with server state.
+  const [dirty, setDirty] = useState(false);
   // Resolved media for display: seed from the sample's resolved photos, add freshly-picked ones.
   const [mediaById, setMediaById] = useState<Map<number, common_MediaFull>>(new Map());
   useEffect(() => {
+    if (dirty) return;
     setD(draftFrom(sample));
     const m = new Map<number, common_MediaFull>();
     (sample?.media ?? []).forEach((mf) => mf.id && m.set(mf.id, mf));
     setMediaById(m);
-  }, [sample]);
+  }, [sample, dirty]);
 
-  const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
+  const set = (patch: Partial<Draft>) => {
+    setDirty(true);
+    setD((prev) => ({ ...prev, ...patch }));
+  };
   const sizeIds = techCard?.techCard?.sizeIds ?? [];
 
   const mediaLinks = d.mediaIds
@@ -254,7 +263,7 @@ function SampleEditor({
 
   const submit = async () => {
     try {
-      await save.mutateAsync({
+      const savedId = await save.mutateAsync({
         id: sample?.id ?? 0,
         sample: {
           techCardId,
@@ -271,8 +280,12 @@ function SampleEditor({
           patternNote: d.patternNote.trim(),
         },
       });
+      setDirty(false);
       showMessage(isEdit ? 'Sample saved' : 'Sample created', 'success');
-      if (!isEdit) onClose();
+      if (!isEdit) {
+        if (savedId && onCreated) onCreated(savedId);
+        else onClose();
+      }
     } catch (e) {
       showMessage(e instanceof Error ? e.message : 'Failed to save sample', 'error');
     }
@@ -452,7 +465,13 @@ function SampleEditor({
       ) : null}
 
       <div className='flex items-center justify-end gap-2 border-t border-textInactiveColor pt-2'>
-        <Button type='button' variant='secondary' size='lg' className='uppercase' onClick={onClose}>
+        <Button
+          type='button'
+          variant='secondary'
+          size='lg'
+          className='uppercase'
+          onClick={() => (dirty ? setDiscardOpen(true) : onClose())}
+        >
           close
         </Button>
         {canEdit && isEdit && (
@@ -488,6 +507,16 @@ function SampleEditor({
         confirmLabel='delete'
       >
         <Text size='small'>Delete this sample? Its material movements block deletion.</Text>
+      </ConfirmationModal>
+
+      <ConfirmationModal
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirm={onClose}
+        title='discard unsaved changes?'
+        confirmLabel='discard'
+      >
+        <Text size='small'>This sample has unsaved edits — closing will discard them.</Text>
       </ConfirmationModal>
     </div>
   );

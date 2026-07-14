@@ -49,7 +49,10 @@ export function TechCardFittings({ techCardId }: { techCardId: number }) {
           <Text variant='inactive' size='small'>
             fittings linked to this style
           </Text>
-          {totalUnresolved > 0 && (
+          {/* Keep the toggle visible while the unresolved filter is ACTIVE even at zero —
+              resolving the last change request otherwise stranded the user on an empty
+              filtered list with no visible way to clear ?fits=unresolved. */}
+          {(unresolvedOnly || totalUnresolved > 0) && (
             <div className='flex items-center gap-1'>
               <button
                 type='button'

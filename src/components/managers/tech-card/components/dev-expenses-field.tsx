@@ -8,7 +8,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SamplePicker } from './sample-picker';
-import { useSamples } from './useSamples';
+import { sampleKeys, useSamples } from './useSamples';
 
 const KINDS = ['sample', 'materials', 'labour', 'outsourcing', 'other'];
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
@@ -72,6 +72,9 @@ export function DevExpensesField({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
+      // A sample-attributed expense changes that sample's composed cost (GetSample.manualBase) —
+      // refresh the sample tree too, or the "cost: … + manual …" line above stays stale.
+      qc.invalidateQueries({ queryKey: sampleKeys.all });
       // Keep the picked sample/kind for the next entry; only clear the per-row fields.
       setForm((f) => ({ ...f, description: '', amount: '', incurredAt: '' }));
       showMessage('Dev expense added', 'success');
@@ -83,6 +86,7 @@ export function DevExpensesField({
     mutationFn: (id: number) => adminService.DeleteTechCardDevExpense({ id }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: sampleKeys.all });
       showMessage('Dev expense removed', 'success');
     },
     onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to remove', 'error'),
@@ -92,8 +96,14 @@ export function DevExpensesField({
   const expenses = scoped ? allExpenses.filter((e) => e.sampleId === scopedSampleId) : allExpenses;
   const summary = data?.summary;
   // In scoped mode the card summary is misleading — subtotal just this sample's rows.
+  // Uncosted rows (no FX rate → no amountBase) parse to NaN; count them as 0 so one such row
+  // doesn't poison the whole sum into '—' (the ⚠ partial flag already says it's incomplete).
   const scopedTotal = useMemo(
-    () => expenses.reduce((sum, e) => sum + parseDecimalNumber(e.amountBase?.value), 0),
+    () =>
+      expenses.reduce((sum, e) => {
+        const n = parseDecimalNumber(e.amountBase?.value);
+        return sum + (Number.isFinite(n) ? n : 0);
+      }, 0),
     [expenses],
   );
   const scopedHasUnconverted = scoped && expenses.some((e) => !e.amountBase?.value);

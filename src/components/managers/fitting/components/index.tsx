@@ -11,7 +11,7 @@ import { SamplePicker } from 'components/managers/tech-card/components/sample-pi
 import { fittingStatusOptions, fittingVerdictOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -84,8 +84,10 @@ export function FittingForm({
   const initialTechCardId = Number(searchParams.get('techCardId')) || 0;
   const initialSampleId = Number(searchParams.get('sampleId')) || 0;
   // Where to go after saving — the sample panel passes ?returnTo=<its URL> so we land back there
-  // instead of the flat fittings list (R-5).
-  const returnTo = searchParams.get('returnTo') || '';
+  // instead of the flat fittings list (R-5). Only in-app paths: an absolute/protocol-relative
+  // value would make navigate() throw AFTER a successful create, reading as a failed submit.
+  const rawReturnTo = searchParams.get('returnTo') || '';
+  const returnTo = rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//') ? rawReturnTo : '';
 
   const form = useForm<FittingFormData>({
     resolver: zodResolver(fittingSchema),
@@ -116,9 +118,14 @@ export function FittingForm({
   // The sample chooser is only meaningful once a style is linked (ListSamples needs a tech card).
   const selectedTechCardId = form.watch('techCardId');
   const selectedSampleId = form.watch('sampleId');
-  // Drop a stale sample link if the style is unlinked — a sample belongs to its tech card.
+  // Drop a stale sample link whenever the style changes — a sample belongs to its tech card.
+  // Tracking the previous id also covers a direct A→B switch (possible on a cold cache, when
+  // the picker shows the search box before GetTechCard resolves), not just unlink→relink.
+  const prevTechCardId = useRef(selectedTechCardId);
   useEffect(() => {
-    if (!selectedTechCardId && selectedSampleId) {
+    const changed = prevTechCardId.current !== selectedTechCardId;
+    prevTechCardId.current = selectedTechCardId;
+    if (changed && selectedSampleId) {
       form.setValue('sampleId', 0, { shouldDirty: true });
     }
   }, [selectedTechCardId, selectedSampleId, form]);
@@ -161,8 +168,10 @@ export function FittingForm({
       >
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
+            {/* Back respects ?returnTo= so bailing from the sample-panel loop lands back in
+                the sample, not on the flat fittings list. */}
             <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.fittings}>← fittings</Link>
+              <Link to={returnTo || ROUTES.fittings}>← back</Link>
             </Button>
             <Text variant='uppercase' size='large'>
               {isEditMode ? 'edit fitting' : 'new fitting'}
@@ -263,7 +272,7 @@ export function FittingForm({
             variant='secondary'
             size='lg'
             className='uppercase cursor-pointer'
-            onClick={() => navigate(ROUTES.fittings)}
+            onClick={() => navigate(returnTo || ROUTES.fittings)}
           >
             cancel
           </Button>

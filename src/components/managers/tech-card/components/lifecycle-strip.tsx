@@ -63,6 +63,7 @@ export function LifecycleStrip({
   productCount,
   frozen,
   canEdit,
+  unsaved,
   planRunDisabled,
   planRunDisabledReason,
   onStageChange,
@@ -76,6 +77,9 @@ export function LifecycleStrip({
   productCount: number;
   frozen: boolean;
   canEdit: boolean;
+  // The stepper writes stage into the FORM — flag it so a clicked stage doesn't read as
+  // already persisted next to the server-derived counters.
+  unsaved?: boolean;
   planRunDisabled?: boolean;
   planRunDisabledReason?: string;
   onStageChange: (stage: common_TechCardStage) => void;
@@ -133,6 +137,11 @@ export function LifecycleStrip({
         <Text variant='inactive' size='small' className='uppercase'>
           approval: {approvalLabel}
         </Text>
+        {unsaved ? (
+          <Text variant='inactive' size='small' className='uppercase'>
+            · unsaved — save the card to keep the stage
+          </Text>
+        ) : null}
       </div>
 
       {/* Counters — each links to the section that owns the entity. */}

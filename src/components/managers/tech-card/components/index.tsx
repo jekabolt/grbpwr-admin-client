@@ -153,8 +153,13 @@ export function TechCardForm({
 
   // URL-driven state. ?stage=… seeds a freshly-created card's stage ([new idea] → IDEA); ?tab=…
   // and ?sample=/?fits= make the open section / sample / fittings-filter deep-linkable (R-1).
+  // Both params are validated — a mistyped shared link must not seed a garbage enum into the
+  // form (the backend would 400 with no field pointer) or park the page on a blank tab.
   const [params, setParams] = useSearchParams();
-  const initialStage = (params.get('stage') as TechCardFormData['stage']) || undefined;
+  const stageParam = params.get('stage');
+  const initialStage = techCardStageOptions.some((o) => o.value === stageParam)
+    ? (stageParam as TechCardFormData['stage'])
+    : undefined;
 
   const form = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema),
@@ -168,7 +173,8 @@ export function TechCardForm({
 
   // Switching tabs drops a stale ?sample= / ?fits=; extra params (a sample to open, a fittings
   // filter) can be set in the same navigation (spine deep links).
-  const activeTab: TabId = (params.get('tab') as TabId) || 'header';
+  const tabParam = params.get('tab');
+  const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'header';
   const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
       (prev) => {
@@ -198,8 +204,6 @@ export function TechCardForm({
   const colorways = (useWatch({ control: form.control, name: 'colorways' }) ?? []) as Array<{
     labDipStatus?: string;
   }>;
-  const canRelease = colorways.every((c) => c.labDipStatus === LAB_DIP_APPROVED);
-
   const issues = (useWatch({ control: form.control, name: 'issues' }) ?? []) as Array<{
     status?: string;
   }>;
@@ -208,6 +212,10 @@ export function TechCardForm({
   // Lifecycle spine inputs: current stage/approval drive the stepper + next-hint; linked-product
   // count feeds the counter row.
   const stage = (useWatch({ control: form.control, name: 'stage' }) ?? '') as string;
+  // Release freezes the card as the factory-facing spec — an IDEA draft (no real style number,
+  // no spec tabs filled; the lab-dip check is vacuously true over zero colourways) can't be one.
+  const canRelease =
+    stage !== 'TECH_CARD_STAGE_IDEA' && colorways.every((c) => c.labDipStatus === LAB_DIP_APPROVED);
   const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
     '') as string;
   const productCount = (useWatch({ control: form.control, name: 'productIds' }) ?? []).length;
@@ -220,33 +228,41 @@ export function TechCardForm({
   const isAux = purpose === 'auxiliary';
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
 
+  const errorTabs = new Set(
+    Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header'),
+  );
+
   // IDEA is a "light" card (screen E): only the concept-relevant tabs show; the rest reappear when
-  // the stage advances, their echoed fields untouched. Not disabled — hidden.
+  // the stage advances, their echoed fields untouched. Not disabled — hidden. A tab carrying a
+  // validation error stays visible even at IDEA, or the error dot would point at an invisible tab.
   const isIdea = stage === 'TECH_CARD_STAGE_IDEA';
   const IDEA_TABS: TabId[] = ['header', 'sketch', 'samples', 'history'];
   // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read (server nulls
   // the cost block / returns an empty journal; an empty tab would read as "zero cost"). Samples
   // need a saved card (id).
   const isTabVisible = (t: TabId) => {
-    if (isIdea && !IDEA_TABS.includes(t)) return false;
+    if (isIdea && !IDEA_TABS.includes(t)) return errorTabs.has(t);
     if ((t === 'costing' || t === 'dev') && !canReadCosting) return false;
     if (t === 'samples' && !isEditMode) return false;
     return true;
   };
-  // If the open tab becomes hidden (e.g. switching a card to IDEA while on the BOM tab), fall back
-  // to header so the body isn't blank.
+  // If the open tab becomes hidden (switching a card to IDEA while on the BOM tab, or permissions
+  // resolving and taking the costing tab away), fall back to header so the body isn't blank.
   useEffect(() => {
     if (!isTabVisible(activeTab)) navTo('header');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isIdea]);
-
-  const errorTabs = new Set(
-    Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header'),
-  );
+  }, [activeTab, isIdea, canReadCosting, isEditMode]);
 
   async function doSubmit(data: TechCardFormData) {
     setConflict(false);
     const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting);
+    // The mapper mints an IDEA-<ts> draft number when the field is blank — write it back into
+    // the form, or every save of a blank IDEA card mints a NEW identity (and the header keeps
+    // showing nothing).
+    if (!data.styleNumber?.trim() && techCardInsert.styleNumber) {
+      data = { ...data, styleNumber: techCardInsert.styleNumber };
+      form.setValue('styleNumber', techCardInsert.styleNumber);
+    }
     try {
       if (isEditMode) {
         await updateTechCard.mutateAsync({
@@ -354,7 +370,13 @@ export function TechCardForm({
                     variant='secondary'
                     size='lg'
                     className='uppercase'
-                    title={canRelease ? '' : 'Approve every colourway lab-dip before release'}
+                    title={
+                      canRelease
+                        ? ''
+                        : isIdea
+                          ? 'An IDEA draft cannot be released — advance the stage first'
+                          : 'Approve every colourway lab-dip before release'
+                    }
                     disabled={!canRelease || saving}
                     onClick={() => submitWithApproval(RELEASED)}
                   >
@@ -431,6 +453,7 @@ export function TechCardForm({
           productCount={productCount}
           frozen={frozen}
           canEdit={canWrite(SECTION.techCards)}
+          unsaved={form.formState.isDirty}
           planRunDisabled={isAux && !outputMaterialId}
           planRunDisabledReason='set an output material before planning an auxiliary run'
           onStageChange={(next) => form.setValue('stage', next, { shouldDirty: true })}
@@ -498,6 +521,19 @@ export function TechCardForm({
 
               <Section title='classification' className='w-full lg:w-1/2'>
                 <SelectField name='purpose' label='purpose' items={techCardPurposeOptions} />
+                {/* Purpose is mutually exclusive with the other side's links and the save is a
+                    full replace — flag the destruction BEFORE it happens, it's not reversible. */}
+                {isAux && productCount > 0 && (
+                  <Text variant='error' size='small'>
+                    ! saving as auxiliary permanently unlinks {productCount} linked product
+                    {productCount > 1 ? 's' : ''}
+                  </Text>
+                )}
+                {!isAux && outputMaterialId > 0 && (
+                  <Text variant='error' size='small'>
+                    ! saving as sellable clears the output material
+                  </Text>
+                )}
                 <SelectField
                   name='targetGender'
                   label='target gender'
@@ -577,20 +613,6 @@ export function TechCardForm({
               <PatternsField />
             </Section>
           </div>
-
-          {/* SAMPLES — edit-mode only (needs a saved card id) */}
-          {isEditMode && numId ? (
-            <div hidden={activeTab !== 'samples'}>
-              <Section title='samples (сэмплы)'>
-                <SamplesTab
-                  techCardId={numId}
-                  techCard={techCard}
-                  canEdit={canWrite(SECTION.techCards)}
-                  canReadCosting={canReadCosting}
-                />
-              </Section>
-            </div>
-          ) : null}
 
           {/* BOM */}
           <div hidden={activeTab !== 'bom'}>
@@ -708,6 +730,23 @@ export function TechCardForm({
             </Section>
           </div>
         </fieldset>
+
+        {/* SAMPLES — edit-mode only (needs a saved card id). OUTSIDE the frozen fieldset: a
+            released card must still allow reading — paging the material ledger, opening/closing
+            sample rows — so editing is gated explicitly instead of by the disabled fieldset
+            (which killed every native button, read paths included). */}
+        {isEditMode && numId ? (
+          <div hidden={activeTab !== 'samples'}>
+            <Section title='samples (сэмплы)'>
+              <SamplesTab
+                techCardId={numId}
+                techCard={techCard}
+                canEdit={canWrite(SECTION.techCards) && !frozen}
+                canReadCosting={canReadCosting}
+              />
+            </Section>
+          </div>
+        ) : null}
       </form>
 
       {/* Create a packaging material inline for the aux output picker (prefilled section). */}

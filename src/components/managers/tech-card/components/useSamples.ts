@@ -36,11 +36,19 @@ export function useSample(id: number, enabled: boolean) {
   });
 }
 
+// Resolves to the sample's id (server-assigned on create) so callers can open the fresh
+// sample's editor — its sub-panels (movements / dev expenses / fittings) need a saved id.
 export function useSaveSample() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, sample }: { id: number; sample: common_SampleInsert }) =>
-      id ? adminService.UpdateSample({ id, sample }) : adminService.AddSample({ sample }),
+    mutationFn: async ({ id, sample }: { id: number; sample: common_SampleInsert }) => {
+      if (id) {
+        await adminService.UpdateSample({ id, sample });
+        return id;
+      }
+      const res = await adminService.AddSample({ sample });
+      return res.id ?? 0;
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: sampleKeys.all }),
   });
 }
