@@ -56,6 +56,10 @@ export function Analitic() {
   const [compareMode, setCompareMode] = useState<CompareMode>('COMPARE_MODE_NONE');
   const [customFrom, setCustomFrom] = useState(defaultCustom.from);
   const [customTo, setCustomTo] = useState(defaultCustom.to);
+  // Arbitrary compare baseline (GetMetrics compare_period). Set only when the operator picks a
+  // "Custom baseline" window; clearing it falls back to the compare_mode preset.
+  const [compareFrom, setCompareFrom] = useState<Date | undefined>(undefined);
+  const [compareTo, setCompareTo] = useState<Date | undefined>(undefined);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -92,6 +96,23 @@ export function Analitic() {
     setCustomTo(to);
   };
 
+  // Selecting a preset (none / previous) clears any custom baseline so the two never conflict.
+  const handleCompareModeChange = (m: CompareMode) => {
+    setCompareMode(m);
+    setCompareFrom(undefined);
+    setCompareTo(undefined);
+  };
+
+  // Picking a custom baseline window implies a real compare mode (previous-period), which
+  // compare_period then overrides with this explicit window on GetMetrics.
+  const handleCompareBaselineChange = (from: Date, to: Date) => {
+    setCompareFrom(from);
+    setCompareTo(to);
+    setCompareMode('COMPARE_MODE_PREVIOUS_PERIOD');
+  };
+
+  const hasBaseline = !!(compareFrom && compareTo);
+
   const {
     data: metricsResponse,
     isLoading,
@@ -101,15 +122,20 @@ export function Analitic() {
     compareMode,
     customFrom: period === 'custom' ? customFrom : undefined,
     customTo: period === 'custom' ? customTo : undefined,
+    compareFrom,
+    compareTo,
   });
 
   const compareEnabled = compareMode !== 'COMPARE_MODE_NONE';
 
   // Operating result + GA4 coverage come from GetDashboard, only needed on the Revenue tab.
+  // GetDashboard supports only the compare_mode preset (no arbitrary baseline), so when a custom
+  // baseline is active we suppress the dashboard compare rather than show a mismatched "vs prev".
   const { data: dashboard } = useDashboardQuery(period, {
     enabled: activeTab === 'revenue',
     customFrom: period === 'custom' ? customFrom : undefined,
     customTo: period === 'custom' ? customTo : undefined,
+    compareMode: hasBaseline ? 'COMPARE_MODE_NONE' : compareMode,
   });
 
   // Settled-revenue channel ROAS lives on the Growth tab next to GA4 attribution.
@@ -162,9 +188,12 @@ export function Analitic() {
           compareMode={compareMode}
           customFrom={customFrom}
           customTo={customTo}
+          compareFrom={compareFrom}
+          compareTo={compareTo}
           onPeriodChange={handlePeriodChange}
-          onCompareModeChange={setCompareMode}
+          onCompareModeChange={handleCompareModeChange}
           onCustomRangeChange={handleCustomRangeChange}
+          onCompareBaselineChange={handleCompareBaselineChange}
         />
         <PersistentKpiBar metrics={metricsResponse?.business} compareEnabled={compareEnabled} />
       </div>

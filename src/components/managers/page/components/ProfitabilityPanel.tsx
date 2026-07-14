@@ -13,6 +13,10 @@ import {
 interface ProfitabilityPanelProps {
   profitability: ProfitabilitySection | undefined;
   compareEnabled?: boolean;
+  // Period-over-period change of the operating result, from GetDashboard's DashboardComparison.
+  // ProfitabilitySection.operatingResult is a plain Decimal with no compare, so this is the only
+  // source of its delta. Percent change; higher is better.
+  operatingResultChangePct?: number;
 }
 
 // Below this coverage the margin % is a biased average of an unrepresentative slice — match the
@@ -96,9 +100,23 @@ const UnitTile: FC<{ label: string; value: ReactNode; sub?: ReactNode; muted?: b
  * fields without costing:read). Absorbs the operating-result waterfall that used to live in
  * OperatingResultStrip, so the money story appears once, period-consistent, with compare deltas.
  */
+// Percent-change delta node in the shared arrow grammar (higher is better).
+const PctDelta: FC<{ pct: number | undefined; enabled: boolean }> = ({ pct, enabled }) => {
+  if (!enabled || pct == null || !Number.isFinite(pct)) return null;
+  const color = pct > 0 ? 'text-success' : pct < 0 ? 'text-error' : 'text-textInactiveColor';
+  const arrow = pct > 0 ? '↑ ' : pct < 0 ? '↓ ' : '';
+  return (
+    <Text variant='uppercase' className={`text-textBaseSize ${color}`}>
+      {arrow}
+      {Math.abs(pct).toFixed(0)}% vs prev
+    </Text>
+  );
+};
+
 export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
   profitability,
   compareEnabled = false,
+  operatingResultChangePct,
 }) => {
   if (!profitability) return null;
 
@@ -198,6 +216,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
                   value={formatCurrency(operating)}
                   strong
                   valueTone={operating < 0 ? 'text-error' : ''}
+                  delta={<PctDelta pct={operatingResultChangePct} enabled={compareEnabled} />}
                 />
               </div>
             </>
