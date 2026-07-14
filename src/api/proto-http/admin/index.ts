@@ -181,6 +181,12 @@ export type common_ShipmentCarrierInsert = {
   description: string | undefined;
   trackingUrl: string | undefined;
   expectedDeliveryTime: string | undefined;
+  // aftership_slug is the AfterShip courier slug used to auto-track this carrier's shipments.
+  // Empty = the carrier has no tracking API, so its orders are auto-delivered only by the timer.
+  aftershipSlug: string | undefined;
+  // auto_deliver_after_hours is the timer safety-net window: hours after shipment to silently mark
+  // an order delivered when no real delivery signal arrived. 0 = use the server default (14 days).
+  autoDeliverAfterHours: number | undefined;
 };
 
 export type common_ShipmentCarrierPrice = {
@@ -635,6 +641,29 @@ export type common_StockChangeReason =
   // order_cancelled reasons
   | "STOCK_CHANGE_REASON_ORDER_CANCELLED";
 export type UpdateProductSizeStockResponse = {
+};
+
+// ProductCustoms is a product's international-shipping customs data. country_of_origin is ISO-2.
+export type ProductCustoms = {
+  hsCode: string | undefined;
+  countryOfOrigin: string | undefined;
+  customsDescription: string | undefined;
+};
+
+export type GetProductCustomsRequest = {
+  productId: number | undefined;
+};
+
+export type GetProductCustomsResponse = {
+  customs: ProductCustoms | undefined;
+};
+
+export type SetProductCustomsRequest = {
+  productId: number | undefined;
+  customs: ProductCustoms | undefined;
+};
+
+export type SetProductCustomsResponse = {
 };
 
 export type ListStockChangeHistoryRequest = {
@@ -3365,6 +3394,89 @@ export type MarkFulfillmentDeliveredRequest = {
 export type MarkFulfillmentDeliveredResponse = {
 };
 
+// ShippingParcel is the physical parcel a label is generated for. Weight is in
+// grams; dimensions are whole centimetres (0 = unknown, omitted from the label).
+export type ShippingParcel = {
+  weightGrams: number | undefined;
+  lengthCm: number | undefined;
+  widthCm: number | undefined;
+  heightCm: number | undefined;
+  boxType: string | undefined;
+};
+
+export type PrepareShippingLabelRequest = {
+  orderUuid: string | undefined;
+};
+
+export type PrepareShippingLabelResponse = {
+  parcel: ShippingParcel | undefined;
+  complete: boolean | undefined;
+  missingProductIds: number[] | undefined;
+  carrierId: number | undefined;
+  carrierName: string | undefined;
+  labelsEnabled: boolean | undefined;
+  alreadyGenerated: boolean | undefined;
+  labelUrl: string | undefined;
+  trackingCode: string | undefined;
+};
+
+export type GenerateShippingLabelRequest = {
+  orderUuid: string | undefined;
+  parcel: ShippingParcel | undefined;
+  shippingOptionCode: string | undefined;
+};
+
+export type GenerateShippingLabelResponse = {
+  trackingCode: string | undefined;
+  labelUrl: string | undefined;
+  carrierShipmentId: string | undefined;
+  shippingOptionCode: string | undefined;
+  carrierName: string | undefined;
+};
+
+// ShippingOption is one Sendcloud shipping option (carrier + service) with its quote. code is the
+// shipping_option_code passed back to GenerateShippingLabel to select it.
+export type ShippingOption = {
+  code: string | undefined;
+  carrierCode: string | undefined;
+  carrierName: string | undefined;
+  productName: string | undefined;
+  totalCharge: googletype_Decimal | undefined;
+  currency: string | undefined;
+  transitDays: number | undefined;
+  deliveryDate: string | undefined;
+};
+
+export type GetShippingOptionsRequest = {
+  orderUuid: string | undefined;
+  parcel: ShippingParcel | undefined;
+};
+
+export type GetShippingOptionsResponse = {
+  options: ShippingOption[] | undefined;
+};
+
+export type VoidShippingLabelRequest = {
+  orderUuid: string | undefined;
+};
+
+export type VoidShippingLabelResponse = {
+};
+
+export type SchedulePickupRequest = {
+  carrierCode: string | undefined;
+  date: string | undefined;
+  quantity: number | undefined;
+  fromTime: string | undefined;
+  toTime: string | undefined;
+};
+
+export type SchedulePickupResponse = {
+  pickupId: string | undefined;
+  confirmed: boolean | undefined;
+  message: string | undefined;
+};
+
 export type UpdateSettingsRequest = {
   shipmentCarriers: ShipmentCarrierAllowancePrice[] | undefined;
   paymentMethods: PaymentMethodAllowance[] | undefined;
@@ -3438,6 +3550,8 @@ export type AddShipmentCarrierRequest = {
   description: string | undefined;
   allowedRegions: common_ShippingRegion[] | undefined;
   allowed: boolean | undefined;
+  aftershipSlug: string | undefined;
+  autoDeliverAfterHours: number | undefined;
 };
 
 export type AddShipmentCarrierResponse = {
@@ -3453,6 +3567,8 @@ export type UpdateShipmentCarrierRequest = {
   description: string | undefined;
   allowedRegions: common_ShippingRegion[] | undefined;
   allowed: boolean | undefined;
+  aftershipSlug: string | undefined;
+  autoDeliverAfterHours: number | undefined;
 };
 
 export type UpdateShipmentCarrierResponse = {
@@ -4428,8 +4544,8 @@ export type common_TechCardPackaging = {
   unitsPerBox: number | undefined;
   boxMarking: string | undefined;
   boxDimensions: string | undefined;
-  weightNet: googletype_Decimal | undefined;
-  weightGross: googletype_Decimal | undefined;
+  weightNetGrams: number | undefined;
+  weightGrossGrams: number | undefined;
   notes: string | undefined;
 };
 
@@ -5474,6 +5590,11 @@ export interface AdminService {
   DeleteProductByID(request: DeleteProductByIDRequest): Promise<DeleteProductByIDResponse>;
   // Updates the stock for a specific product size.
   UpdateProductSizeStock(request: UpdateProductSizeStockRequest): Promise<UpdateProductSizeStockResponse>;
+  // GetProductCustoms returns a product's international-shipping customs data (HS code, origin,
+  // declared description).
+  GetProductCustoms(request: GetProductCustomsRequest): Promise<GetProductCustomsResponse>;
+  // SetProductCustoms sets a product's customs data used to build international shipping labels.
+  SetProductCustoms(request: SetProductCustomsRequest): Promise<SetProductCustomsResponse>;
   // Forces a product's confidential cost_price to be (re)seeded from a tech card, overriding
   // any manual value. If tech_card_id is set it also becomes the product's primary card;
   // otherwise the product's existing primary card is used.
@@ -5663,6 +5784,25 @@ export interface AdminService {
   // MarkFulfillmentDelivered performs the real delivered transition for a shipped
   // order.
   MarkFulfillmentDelivered(request: MarkFulfillmentDeliveredRequest): Promise<MarkFulfillmentDeliveredResponse>;
+  // PrepareShippingLabel returns the default parcel (weight/box derived from the
+  // order's tech cards, editable) plus whether label generation is available, so the
+  // UI can pre-fill the label form before generating. Read-only.
+  PrepareShippingLabel(request: PrepareShippingLabelRequest): Promise<PrepareShippingLabelResponse>;
+  // GenerateShippingLabel announces the order's parcel with Sendcloud (carrier label
+  // + tracking number), then performs the real shipped transition via the shared ship
+  // path. Returns the printable label URL. Gated by fulfillment perms.
+  GenerateShippingLabel(request: GenerateShippingLabelRequest): Promise<GenerateShippingLabelResponse>;
+  // GetShippingOptions fetches the shipping options (carrier + service + quote)
+  // available for the order's parcel via Sendcloud, so an operator can pick one
+  // before generating. Read-only.
+  GetShippingOptions(request: GetShippingOptionsRequest): Promise<GetShippingOptionsResponse>;
+  // VoidShippingLabel cancels a generated label with the carrier and reverts the
+  // order Shipped -> Confirmed so it can be regenerated. Gated by fulfillment perms.
+  VoidShippingLabel(request: VoidShippingLabelRequest): Promise<VoidShippingLabelResponse>;
+  // SchedulePickup books a carrier pickup from the warehouse origin for the day
+  // (Sendcloud's end-of-day handover equivalent; v3 has no generic manifest API).
+  // Gated by fulfillment perms.
+  SchedulePickup(request: SchedulePickupRequest): Promise<SchedulePickupResponse>;
   // CreateTechCard creates a new tech card (техкарта) with its nested sections.
   CreateTechCard(request: CreateTechCardRequest): Promise<CreateTechCardResponse>;
   // GetTechCard returns a tech card by id with its nested sections resolved.
@@ -6110,6 +6250,43 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpdateProductSizeStock",
       }) as Promise<UpdateProductSizeStockResponse>;
+    },
+    GetProductCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.productId) {
+        throw new Error("missing required field request.product_id");
+      }
+      const path = `api/admin/product/${request.productId}/customs`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProductCustoms",
+      }) as Promise<GetProductCustomsResponse>;
+    },
+    SetProductCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/product/customs`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetProductCustoms",
+      }) as Promise<SetProductCustomsResponse>;
     },
     SyncProductCostFromTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/product/cost/sync-from-tech-card`; // eslint-disable-line quotes
@@ -7639,6 +7816,94 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "MarkFulfillmentDelivered",
       }) as Promise<MarkFulfillmentDeliveredResponse>;
+    },
+    PrepareShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.orderUuid) {
+        throw new Error("missing required field request.order_uuid");
+      }
+      const path = `api/admin/fulfillment/label/${request.orderUuid}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PrepareShippingLabel",
+      }) as Promise<PrepareShippingLabelResponse>;
+    },
+    GenerateShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/label`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateShippingLabel",
+      }) as Promise<GenerateShippingLabelResponse>;
+    },
+    GetShippingOptions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/label/options`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetShippingOptions",
+      }) as Promise<GetShippingOptionsResponse>;
+    },
+    VoidShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/label/void`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "VoidShippingLabel",
+      }) as Promise<VoidShippingLabelResponse>;
+    },
+    SchedulePickup(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/pickup`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SchedulePickup",
+      }) as Promise<SchedulePickupResponse>;
     },
     CreateTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/add`; // eslint-disable-line quotes

@@ -55,10 +55,11 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
   const onSubmit: SubmitHandler<ShippingSchema> = async (data: ShippingSchema) => {
     try {
       setIsLoading(true);
-      const { from, to, ...rest } = data;
+      const { from, to, autoDeliverAfterHours, ...rest } = data;
       const payload = {
         ...rest,
         expectedDeliveryTime: `${from}-${to}`,
+        autoDeliverAfterHours: Number(autoDeliverAfterHours) || 0,
       };
       if (id) {
         await adminService.UpdateShipmentCarrier({
@@ -105,6 +106,22 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
                 </div>
               </div>
               <InputField name='trackingUrl' label='Tracking URL' />
+              <div className='flex flex-col gap-4'>
+                <Text variant='uppercase' className='leading-none'>
+                  Auto-tracking (AfterShip)
+                </Text>
+                <InputField
+                  name='aftershipSlug'
+                  label='AfterShip Slug'
+                  placeholder='e.g. dhl (empty = timer-only)'
+                />
+                <InputField
+                  name='autoDeliverAfterHours'
+                  type='number'
+                  min='0'
+                  label='Auto-deliver After (hours, 0 = default)'
+                />
+              </div>
             </div>
             <div className='flex flex-col gap-6'>
               <div className='space-y-1'>

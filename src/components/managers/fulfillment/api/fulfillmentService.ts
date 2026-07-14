@@ -6,12 +6,21 @@ import type {
   common_FulfillmentColumnCards,
   common_OrderFull,
   common_OrderStripeDetails,
+  PrepareShippingLabelResponse,
+  ShippingOption as ProtoShippingOption,
+  ShippingParcel as ProtoShippingParcel,
 } from 'api/proto-http/admin';
 import {
   FulfillmentAnnotation,
   FulfillmentCard,
   FulfillmentChecklistItem,
   FulfillmentColumnCards,
+  GeneratedLabel,
+  LabelPrep,
+  SchedulePickupInput,
+  SchedulePickupResult,
+  ShippingOptionVM,
+  ShippingParcel,
 } from './types';
 
 // fulfillmentService is the single seam between the fulfillment UI and the
@@ -35,6 +44,16 @@ export interface FulfillmentService {
   deleteChecklistItem(id: number): Promise<void>;
   ship(orderUuid: string, trackingCode: string): Promise<void>;
   markDelivered(orderUuid: string): Promise<void>;
+  // Shipping labels (Sendcloud)
+  prepareLabel(orderUuid: string): Promise<LabelPrep>;
+  getShippingOptions(orderUuid: string, parcel: ShippingParcel): Promise<ShippingOptionVM[]>;
+  generateLabel(
+    orderUuid: string,
+    parcel: ShippingParcel,
+    shippingOptionCode?: string,
+  ): Promise<GeneratedLabel>;
+  voidLabel(orderUuid: string): Promise<void>;
+  schedulePickup(input: SchedulePickupInput): Promise<SchedulePickupResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +102,43 @@ function mapAnnotation(
   };
 }
 
+function mapParcel(p: ProtoShippingParcel | undefined): ShippingParcel {
+  return {
+    weightGrams: p?.weightGrams ?? 0,
+    lengthCm: p?.lengthCm ?? 0,
+    widthCm: p?.widthCm ?? 0,
+    heightCm: p?.heightCm ?? 0,
+    boxType: p?.boxType ?? '',
+  };
+}
+
+function mapPrep(r: PrepareShippingLabelResponse): LabelPrep {
+  return {
+    parcel: mapParcel(r.parcel),
+    complete: r.complete ?? false,
+    missingProductIds: r.missingProductIds ?? [],
+    carrierId: r.carrierId ?? 0,
+    carrierName: r.carrierName ?? '',
+    labelsEnabled: r.labelsEnabled ?? false,
+    alreadyGenerated: r.alreadyGenerated ?? false,
+    labelUrl: r.labelUrl ?? '',
+    trackingCode: r.trackingCode ?? '',
+  };
+}
+
+function mapOption(o: ProtoShippingOption): ShippingOptionVM {
+  return {
+    code: o.code ?? '',
+    carrierCode: o.carrierCode ?? '',
+    carrierName: o.carrierName ?? '',
+    productName: o.productName ?? '',
+    totalCharge: o.totalCharge?.value ?? '',
+    currency: o.currency ?? '',
+    transitDays: o.transitDays ?? 0,
+    deliveryDate: o.deliveryDate ?? '',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Live backend adapter — thin, typed wrappers over the generated AdminService.
 // ---------------------------------------------------------------------------
@@ -121,4 +177,39 @@ export const fulfillmentService: FulfillmentService = {
 
   markDelivered: (orderUuid) =>
     adminService.MarkFulfillmentDelivered({ orderUuid }).then(() => undefined),
+
+  prepareLabel: (orderUuid) => adminService.PrepareShippingLabel({ orderUuid }).then(mapPrep),
+
+  getShippingOptions: (orderUuid, parcel) =>
+    adminService
+      .GetShippingOptions({ orderUuid, parcel })
+      .then((r) => (r.options ?? []).map(mapOption)),
+
+  generateLabel: (orderUuid, parcel, shippingOptionCode) =>
+    adminService
+      .GenerateShippingLabel({ orderUuid, parcel, shippingOptionCode: shippingOptionCode ?? '' })
+      .then((r) => ({
+        trackingCode: r.trackingCode ?? '',
+        labelUrl: r.labelUrl ?? '',
+        carrierShipmentId: r.carrierShipmentId ?? '',
+        shippingOptionCode: r.shippingOptionCode ?? '',
+        carrierName: r.carrierName ?? '',
+      })),
+
+  voidLabel: (orderUuid) => adminService.VoidShippingLabel({ orderUuid }).then(() => undefined),
+
+  schedulePickup: (input) =>
+    adminService
+      .SchedulePickup({
+        carrierCode: input.carrierCode,
+        date: input.date,
+        quantity: input.quantity,
+        fromTime: input.fromTime ?? '',
+        toTime: input.toTime ?? '',
+      })
+      .then((r) => ({
+        pickupId: r.pickupId ?? '',
+        confirmed: r.confirmed ?? false,
+        message: r.message ?? '',
+      })),
 };

@@ -7,6 +7,7 @@ import {
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
+import { ProductCustomsSection } from './customs/customs-section';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
@@ -251,6 +252,15 @@ export function ProductForm({
         {productId && !isCopyMode && (
           <Section title='fittings'>
             <FittingsReadonlyList productId={Number(productId)} />
+          </Section>
+        )}
+
+        {productId && !isCopyMode && (
+          <Section title='customs'>
+            <ProductCustomsSection
+              productId={Number(productId)}
+              canWrite={canWrite(SECTION.products)}
+            />
           </Section>
         )}
       </form>

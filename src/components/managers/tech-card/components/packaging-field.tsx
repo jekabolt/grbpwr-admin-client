@@ -1,5 +1,4 @@
 import ComboField from 'ui/form/fields/combo-field';
-import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { bagStickerOptions, foldingMethodOptions, polybagOptions } from './tech-card-options';
@@ -31,8 +30,20 @@ export function PackagingField() {
         />
         <InputField name='packaging.boxMarking' label='box marking' />
         <InputField name='packaging.boxDimensions' label='box dimensions (L×W×H)' />
-        <DecimalField name='packaging.weightNet' label='weight net' />
-        <DecimalField name='packaging.weightGross' label='weight gross' />
+        <InputField
+          name='packaging.weightNetGrams'
+          type='number'
+          valueAsNumber
+          keyboardRestriction={/[0-9]/}
+          label='weight net (g)'
+        />
+        <InputField
+          name='packaging.weightGrossGrams'
+          type='number'
+          valueAsNumber
+          keyboardRestriction={/[0-9]/}
+          label='weight gross (g)'
+        />
       </div>
       <TextareaField name='packaging.notes' label='notes' rows={2} maxLength={2000} />
     </div>

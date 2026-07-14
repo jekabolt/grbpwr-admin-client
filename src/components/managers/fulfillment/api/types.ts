@@ -56,3 +56,70 @@ export interface FulfillmentColumnCards {
 export function emptyAnnotation(orderUuid: string): FulfillmentAnnotation {
   return { orderUuid, assignee: '', notes: '', checklist: [] };
 }
+
+// ---------------------------------------------------------------------------
+// Shipping labels (Sendcloud) — proto beefb0e
+// ---------------------------------------------------------------------------
+
+// The physical parcel a label is generated for. Weight in grams; dimensions in
+// whole centimetres (0 = unknown, omitted from the label).
+export interface ShippingParcel {
+  weightGrams: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+  boxType: string; // carrier box type; '' => "custom"
+}
+
+export function emptyParcel(): ShippingParcel {
+  return { weightGrams: 0, lengthCm: 0, widthCm: 0, heightCm: 0, boxType: '' };
+}
+
+// PrepareShippingLabel result — everything the label form needs to pre-fill.
+export interface LabelPrep {
+  parcel: ShippingParcel; // default derived from tech cards, editable
+  complete: boolean; // false => some products lack weight/box; a manual override is required
+  missingProductIds: number[];
+  carrierId: number;
+  carrierName: string;
+  labelsEnabled: boolean; // Sendcloud configured (else operators enter tracking manually)
+  alreadyGenerated: boolean; // a label already exists for this shipment
+  labelUrl: string; // existing label URL when alreadyGenerated
+  trackingCode: string; // existing tracking code, if any
+}
+
+// One Sendcloud shipping option (carrier + service) with its quote.
+export interface ShippingOptionVM {
+  code: string; // shipping_option_code passed back to generate to select it
+  carrierCode: string;
+  carrierName: string;
+  productName: string;
+  totalCharge: string; // decimal value string, e.g. "6.95"
+  currency: string;
+  transitDays: number; // 0 = not provided
+  deliveryDate: string; // ISO date; '' if not provided
+}
+
+// GenerateShippingLabel result.
+export interface GeneratedLabel {
+  trackingCode: string;
+  labelUrl: string; // durable printable label PDF URL (our bucket)
+  carrierShipmentId: string;
+  shippingOptionCode: string;
+  carrierName: string;
+}
+
+// SchedulePickup input/result (end-of-day carrier handover).
+export interface SchedulePickupInput {
+  carrierCode: string; // Sendcloud carrier to collect (e.g. "dhl")
+  date: string; // pickup day, YYYY-MM-DD
+  quantity: number; // parcel count (>=1)
+  fromTime?: string; // optional window start HH:MM:SS
+  toTime?: string; // optional window end HH:MM:SS
+}
+
+export interface SchedulePickupResult {
+  pickupId: string;
+  confirmed: boolean;
+  message: string; // provider status
+}

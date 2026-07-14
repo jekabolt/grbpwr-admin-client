@@ -280,8 +280,8 @@ const packagingSchema = z.object({
   unitsPerBox: z.number().optional().default(0),
   boxMarking: z.string().optional().default(''),
   boxDimensions: z.string().optional().default(''),
-  weightNet: z.string().optional().default(''), // decimal as string
-  weightGross: z.string().optional().default(''), // decimal as string
+  weightNetGrams: z.number().optional().default(0), // whole grams (0 = unset)
+  weightGrossGrams: z.number().optional().default(0), // whole grams (0 = unset)
   notes: z.string().optional().default(''),
 });
 
@@ -317,8 +317,8 @@ export const emptyPackaging: z.input<typeof packagingSchema> = {
   unitsPerBox: 0,
   boxMarking: '',
   boxDimensions: '',
-  weightNet: '',
-  weightGross: '',
+  weightNetGrams: 0,
+  weightGrossGrams: 0,
   notes: '',
 };
 
@@ -687,8 +687,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           unitsPerBox: insert.packaging.unitsPerBox || 0,
           boxMarking: insert.packaging.boxMarking || '',
           boxDimensions: insert.packaging.boxDimensions || '',
-          weightNet: decimalToInput(insert.packaging.weightNet),
-          weightGross: decimalToInput(insert.packaging.weightGross),
+          weightNetGrams: insert.packaging.weightNetGrams || 0,
+          weightGrossGrams: insert.packaging.weightGrossGrams || 0,
           notes: insert.packaging.notes || '',
         }
       : { ...emptyPackaging },
@@ -775,8 +775,8 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
       p?.unitsPerBox,
       p?.boxMarking,
       p?.boxDimensions,
-      p?.weightNet,
-      p?.weightGross,
+      p?.weightNetGrams,
+      p?.weightGrossGrams,
       p?.notes,
     ])
   ) {
@@ -790,8 +790,8 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
     unitsPerBox: p?.unitsPerBox || 0,
     boxMarking: p?.boxMarking?.trim() || '',
     boxDimensions: p?.boxDimensions?.trim() || '',
-    weightNet: inputToDecimal(p?.weightNet),
-    weightGross: inputToDecimal(p?.weightGross),
+    weightNetGrams: p?.weightNetGrams || 0,
+    weightGrossGrams: p?.weightGrossGrams || 0,
     notes: p?.notes?.trim() || '',
   };
 }

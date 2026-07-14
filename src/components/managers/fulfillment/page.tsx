@@ -9,12 +9,9 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { FulfillmentCard } from './api/types';
 import { FulfillmentBoard } from './components/fulfillment-board';
-import { ShipModal } from './components/ship-modal';
-import {
-  useFulfillmentBoard,
-  useMarkFulfillmentDelivered,
-  useShipFulfillmentOrder,
-} from './hooks/useFulfillment';
+import { PickupModal } from './components/pickup-modal';
+import { ShipLabelModal } from './components/ship-label-modal';
+import { useFulfillmentBoard, useMarkFulfillmentDelivered } from './hooks/useFulfillment';
 
 function BoardSkeleton() {
   return (
@@ -40,11 +37,11 @@ export function Fulfillment() {
 
   const { data: columns = [], isLoading, isError, error, refetch } = useFulfillmentBoard();
 
-  const ship = useShipFulfillmentOrder();
   const deliver = useMarkFulfillmentDelivered();
 
   const [shipping, setShipping] = useState<FulfillmentCard | null>(null);
   const [delivering, setDelivering] = useState<FulfillmentCard | null>(null);
+  const [pickupOpen, setPickupOpen] = useState(false);
 
   // Client-side board filters. Assignee is the whole point of the annotation —
   // "mine" makes a shared queue workable when several people pack orders.
@@ -68,19 +65,7 @@ export function Fulfillment() {
 
   const noneVisible = filtersActive && filteredColumns.every((col) => col.cards.length === 0);
 
-  const actingUuid = ship.isPending
-    ? ship.variables?.orderUuid
-    : deliver.isPending
-      ? deliver.variables
-      : undefined;
-
-  function confirmShip(trackingCode: string) {
-    if (!shipping) return;
-    ship.mutate(
-      { orderUuid: shipping.orderUuid, trackingCode },
-      { onSuccess: () => setShipping(null) },
-    );
-  }
+  const actingUuid = deliver.isPending ? deliver.variables : undefined;
 
   function confirmDeliver() {
     if (!delivering || deliver.isPending) return;
@@ -107,8 +92,8 @@ export function Fulfillment() {
           fulfillment
         </Text>
         <Text variant='label' size='small'>
-          Orders to pack and ship, oldest first. Ship records a tracking code and notifies the
-          customer; delivered closes it out.
+          Orders to pack and ship, oldest first. Ship generates a carrier label (or records a
+          tracking code) and notifies the customer; delivered closes it out.
         </Text>
       </div>
 
@@ -160,6 +145,16 @@ export function Fulfillment() {
                 clear
               </button>
             )}
+            {writable && (
+              <Button
+                variant='secondary'
+                size='lg'
+                className='ml-auto'
+                onClick={() => setPickupOpen(true)}
+              >
+                schedule pickup
+              </Button>
+            )}
           </div>
 
           {noneVisible && (
@@ -191,13 +186,14 @@ export function Fulfillment() {
         </>
       )}
 
-      <ShipModal
+      <ShipLabelModal
         open={!!shipping}
         onOpenChange={(o) => !o && setShipping(null)}
+        orderUuid={shipping?.orderUuid ?? null}
         orderLabel={shipping ? `#${shipping.orderId}` : ''}
-        saving={ship.isPending}
-        onConfirm={confirmShip}
       />
+
+      <PickupModal open={pickupOpen} onOpenChange={setPickupOpen} />
 
       <ConfirmationModal
         open={!!delivering}

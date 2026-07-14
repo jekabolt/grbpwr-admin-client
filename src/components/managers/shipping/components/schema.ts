@@ -12,6 +12,8 @@ export const shippingSchema = z
     to: z.string(),
     prices: z.record(z.string(), z.object({ value: z.string() })),
     trackingUrl: z.string(),
+    aftershipSlug: z.string(),
+    autoDeliverAfterHours: z.string(), // hours as string (like from/to); '' → 0 on submit
   })
   .superRefine((data, ctx) => {
     const fromNum = parseFloat(data.from);
@@ -47,6 +49,8 @@ export const defaultShipping = {
   to: '',
   prices: {},
   trackingUrl: '',
+  aftershipSlug: '',
+  autoDeliverAfterHours: '',
 };
 
 export type ShippingSchema = z.infer<typeof shippingSchema>;
@@ -76,7 +80,13 @@ export function transformDictionaryToShipping(dictionary: any, id?: number): Shi
       to: match ? match[2] : '',
       prices: carrier.prices,
       trackingUrl: carrier.shipmentCarrier?.trackingUrl,
+      aftershipSlug: carrier.shipmentCarrier?.aftershipSlug,
+      autoDeliverAfterHours: carrier.shipmentCarrier?.autoDeliverAfterHours,
     };
+    // numeric hours → the string the form field expects (0/undefined → blank)
+    source.autoDeliverAfterHours = source.autoDeliverAfterHours
+      ? String(source.autoDeliverAfterHours)
+      : '';
   }
 
   const pricesMap: Record<string, { value: string }> = {};
@@ -113,5 +123,7 @@ export function transformDictionaryToShipping(dictionary: any, id?: number): Shi
     to,
     prices: pricesMap,
     trackingUrl: source.trackingUrl ?? '',
+    aftershipSlug: source.aftershipSlug ?? '',
+    autoDeliverAfterHours: source.autoDeliverAfterHours ?? '',
   };
 }
