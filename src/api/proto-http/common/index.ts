@@ -628,6 +628,35 @@ export type PaymentInsert = {
   clientSecret: string | undefined;
   isTransactionDone: boolean | undefined;
   expiredAt: wellKnownTimestamp | undefined;
+  // payment_method_type is the most specific label for how the customer paid:
+  // the card wallet (apple_pay, google_pay, link) when tokenised through a wallet,
+  // otherwise the payment-method type (card, klarna, ...). Empty when uncaptured.
+  paymentMethodType: string | undefined;
+  // receipt_url is Stripe's hosted receipt for the charge (customer-facing). Empty
+  // for non-Stripe methods or when no receipt was produced.
+  receiptUrl: string | undefined;
+};
+
+// OrderStripeDetails carries admin-only financial and Stripe metadata for an order.
+// It is NOT part of the customer-facing order (kept off common.Order/common.Payment,
+// which the storefront shares) and is attached only to admin responses. All amounts
+// are in the base currency (EUR); fields are empty when not captured.
+export type OrderStripeDetails = {
+  // total_settled_base is the actual amount Stripe settled in the base currency (EUR)
+  // at Stripe's FX rate — the authoritative "how much we received" figure.
+  totalSettledBase: googletype_Decimal | undefined;
+  // payment_fee is the Stripe processing fee (EUR) from the same balance transaction.
+  paymentFee: googletype_Decimal | undefined;
+  // net_settled_base = total_settled_base - payment_fee (EUR), what actually reached us.
+  netSettledBase: googletype_Decimal | undefined;
+  // stripe_exchange_rate is the presentment->settlement FX rate Stripe applied at the sale.
+  stripeExchangeRate: googletype_Decimal | undefined;
+  cardBrand: string | undefined;
+  cardLast4: string | undefined;
+  riskLevel: string | undefined;
+  // stripe_dashboard_url deep-links to the payment in the Stripe dashboard (test vs live
+  // resolved from the order's payment method). Empty when the PaymentIntent id is unknown.
+  stripeDashboardUrl: string | undefined;
 };
 
 // PaymentMethod represents the payment_method table

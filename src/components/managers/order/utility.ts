@@ -11,6 +11,7 @@ export const useOrderDetails = (uuid: string) => {
   const showMessage = useSnackBarStore((state) => state.showMessage);
   const [state, setState] = useState<OrderDetailsState>({
     orderDetails: undefined,
+    stripeDetails: undefined,
     dictionary: undefined,
     orderStatus: undefined,
     isLoading: false,
@@ -28,6 +29,7 @@ export const useOrderDetails = (uuid: string) => {
       setState((prev) => ({
         ...prev,
         orderDetails: order.order,
+        stripeDetails: order.stripeDetails,
         dictionary: dictionary,
         orderStatus: getOrderStatusName(dictionary, order.order?.order?.orderStatusId),
       }));

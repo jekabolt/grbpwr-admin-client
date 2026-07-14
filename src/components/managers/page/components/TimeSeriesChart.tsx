@@ -21,6 +21,12 @@ interface TimeSeriesChartProps {
   valueFormat?: 'currency' | 'number';
   /** Values above this are flagged as likely-invalid (e.g. a daily % that exceeds 100). */
   maxSane?: number;
+  /** Unit suffix appended to number values in the axis/tooltip (e.g. "d" for days). */
+  unit?: string;
+  /** Decimal places for number values (default 0). Ignored for currency. */
+  decimals?: number;
+  /** Append each point's order `count` to the tooltip (e.g. "5.4 d · 12 orders"). */
+  showCount?: boolean;
 }
 
 export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
@@ -29,8 +35,14 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
   compareData,
   valueFormat = 'currency',
   maxSane,
+  unit,
+  decimals = 0,
+  showCount = false,
 }) => {
-  const formatValue = valueFormat === 'currency' ? formatCurrency : formatNumber;
+  const formatValue = (v: number) =>
+    valueFormat === 'currency'
+      ? formatCurrency(v)
+      : `${formatNumber(v, decimals)}${unit ? ` ${unit}` : ''}`;
 
   // For number format (e.g. orders), backend may use 'count' instead of 'value'
   const getValue = (p: TimeSeriesPoint) =>
@@ -42,6 +54,7 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
       : '',
   );
   const values = (data ?? []).map(getValue);
+  const counts = (data ?? []).map((p) => p.count ?? 0);
   const compareValues = (compareData ?? []).map(getValue);
   const hasCompare = compareValues.length > 0;
 
@@ -52,9 +65,16 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
   const tooltipFormatter = (raw: TooltipComponentFormatterCallbackParams) => {
     const items = Array.isArray(raw) ? raw : [raw];
     const label = items[0]?.name ?? '';
+    const idx = items[0]?.dataIndex;
+    const count = typeof idx === 'number' ? counts[idx] : undefined;
+    const countSuffix =
+      showCount && count != null && count > 0
+        ? ` · ${formatNumber(count)} order${count === 1 ? '' : 's'}`
+        : '';
     const rows = items
       .map(
-        (it) => `${it.marker ?? ''}${it.seriesName}: <b>${formatValue(Number(it.value ?? 0))}</b>`,
+        (it) =>
+          `${it.marker ?? ''}${it.seriesName}: <b>${formatValue(Number(it.value ?? 0))}</b>${countSuffix}`,
       )
       .join('<br/>');
     return `<div style="font-size:11px;line-height:1.6">${label}<br/>${rows}</div>`;

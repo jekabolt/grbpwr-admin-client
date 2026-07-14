@@ -12,8 +12,19 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     'METRICS_SECTION_CAMPAIGN_ATTRIBUTION',
     // Only technical signal that's an ops (money) concern — surfaced as an alert on Overview.
     'METRICS_SECTION_PAYMENT_FAILURES',
+    // analytics-v2: month revenue forecast strip (calendar-month anchored, ignores the picker).
+    'METRICS_SECTION_FORECAST',
   ],
-  revenue: ['METRICS_SECTION_BUSINESS', 'METRICS_SECTION_FUNNEL'],
+  revenue: [
+    'METRICS_SECTION_BUSINESS',
+    'METRICS_SECTION_FUNNEL',
+    // analytics-v2: fulfilment lead-time pipeline + on-time rate inside Shipping & Delivery.
+    'METRICS_SECTION_DELIVERY',
+    // analytics-v2: full P&L + unit economics (costing-gated by the server).
+    'METRICS_SECTION_PROFITABILITY',
+    // analytics-v2: order-value distribution (basket-size histogram).
+    'METRICS_SECTION_ORDER_VALUE_BANDS',
+  ],
   products: [
     'METRICS_SECTION_BUSINESS',
     'METRICS_SECTION_SIZE_ANALYTICS',
@@ -36,7 +47,12 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
   // Growth folds the old Customers (repeat economics + cross-sell, from BUSINESS) and Traffic
   // (campaigns + channel mix + DB geo). Cut as too low-n at boutique volume: COHORT_RETENTION,
   // ORDER_SEQUENCE, SPENDING_CURVE, ENTRY_PRODUCTS, CATEGORY_LOYALTY.
-  growth: ['METRICS_SECTION_BUSINESS', 'METRICS_SECTION_CAMPAIGN_ATTRIBUTION'],
+  growth: [
+    'METRICS_SECTION_BUSINESS',
+    'METRICS_SECTION_CAMPAIGN_ATTRIBUTION',
+    // analytics-v2: per-country economics / logistics / demand matrix.
+    'METRICS_SECTION_GEOGRAPHY',
+  ],
   // 'technical' tab removed from the operator dashboard: Web Vitals / 404s / exceptions /
   // form errors / browser / session duration / user journeys are SRE metrics, wrong persona.
   // Payment failures (the one money-relevant signal) moved to the Overview alert.

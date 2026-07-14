@@ -46,6 +46,23 @@ Earlier proto bump:
 |---|-----|-------|--------|-----|
 | 9 | **Fix `ordersByStatus`** — count each order's current/terminal status once, not transitions (its sum currently exceeds the order count). | Med | S | Removes the cancellation-denominator workaround (`orderCancellationSharePercent` still divides by `ordersCount`, not the status-row sum); makes any status breakdown honest. |
 
+## Stripe settlement (proto @52bc0b6 — order-detail data landed, aggregates still needed)
+
+The `order stripe financials` bump added **per-order** settlement metadata (`common.OrderStripeDetails`
+on `GetOrderByUUID` / `GetFulfillmentCard`: settled EUR, Stripe fee, net settled, FX rate, card
+brand/last4, risk level, dashboard URL) plus `PaymentInsert.paymentMethodType` / `receiptUrl`. Those
+are consumed on the order detail page and the fulfillment card. None of it is in any analytics RPC or
+`ListOrders`, so the dashboard cannot show true settled/fee/FX/risk aggregates without the asks below.
+Client-side rollup via per-order `GetOrderByUUID` is an N+1 over the period and is not on the table.
+
+| # | Ask | Value | Effort | Why |
+|---|-----|-------|--------|-----|
+| S1 | **Settlement aggregate** on `GetMetrics` (new section) or `GetDashboard`: period `settled_revenue`, `payment_fees_actual`, `net_settled`, `effective_fee_rate`, `fx_drag_pct` (billed-at-book vs settled), each `MetricWithComparison`, + `coverage_pct` (share of revenue with settlement data, same grammar as `costCoveragePct`). | High | M | Unlocks the "did the bank receive what we billed" settlement strip; today only `MarginMetrics.paymentFees` exists at the aggregate. |
+| S2 | **Mix by `payment_method_type`** (wallet level: apple_pay / google_pay / link / card / klarna) with revenue, orders, actual fee sum. | Med | S | Upgrades the enum-level `revenueByPaymentMethod` (now rendered as the Revenue-tab "Payments" section) to a fee-negotiation view; no wallet split today. |
+| S3 | **Risk on lists** — `risk_level` on `ListOrders` rows and fulfillment board tiles, + period counts by `risk_level`. | Med | S | Lets elevated/highest orders surface pre-ship without opening each card; today the Radar banner only appears on the fulfillment card detail. |
+| S4 | **Confirm `MarginMetrics.paymentFees` source** — actual Stripe balance-transaction fees, or modeled from `PaymentMethodFee` settings? If modeled, add actual alongside. | Low | S | Decides the fee-tile subtitle wording (`processor cut · modeled` vs `· actual`) and whether modeled-vs-actual drift is its own signal. |
+| S5 | **Refund semantics of `OrderStripeDetails`** — are settled figures restated after a refund or frozen at capture? | Low | S | Decides the microcopy on the order-detail settlement block (currently assumes frozen-at-capture: shows "at capture · refund not netted" on refunded orders). |
+
 ## Explicitly NOT worth building
 
 - Ad-spend/ROAS pipeline beyond the manual `UpsertChannelSpend` entry — **unless** paid ads become a real line item. For a mostly-organic hype brand, a full GA4-reconciled spend integration is effort disproportionate to a number nobody acts on.

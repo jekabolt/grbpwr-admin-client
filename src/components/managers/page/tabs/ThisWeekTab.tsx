@@ -1,9 +1,10 @@
 import type { CompareMode, GetMetricsResponse } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
+import { format } from 'date-fns';
 import { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Text from 'ui/components/text';
-import { ExecutiveHealthStrip, TimeSeriesChart } from '../components';
+import { ExecutiveHealthStrip, ForecastStrip, TimeSeriesChart } from '../components';
 import type { MetricsPeriod } from '../useMetricsQuery';
 import {
   coarsenTimeSeries,
@@ -130,14 +131,23 @@ export function ThisWeekTab({
         </div>
       )}
 
+      <ForecastStrip forecast={metricsResponse.revenueForecast} />
+
       <div className='space-y-6'>
         <h3 className='text-textBaseSize font-bold uppercase'>Orders</h3>
-        <div className='max-w-xl'>
+        <div className='max-w-xl space-y-2'>
           <TimeSeriesChart
             title='Orders'
             data={coarsenTimeSeries(getTimeSeries(metricsRecord, 'ordersByDay'))}
             valueFormat='number'
           />
+          {commerce?.peakDay?.date && parseDecimal(commerce.peakDay.revenue) > 0 && (
+            <Text className='text-labelColor text-textBaseSize'>
+              Peak: {format(new Date(commerce.peakDay.date), 'EEE d MMM')} ·{' '}
+              {formatCurrency(parseDecimal(commerce.peakDay.revenue))} ·{' '}
+              {formatNumber(commerce.peakDay.orders ?? 0)} orders
+            </Text>
+          )}
         </div>
       </div>
 
