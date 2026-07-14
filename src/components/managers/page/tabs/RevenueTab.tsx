@@ -238,6 +238,7 @@ export function RevenueTab({
         <ProfitabilityPanel
           profitability={metricsResponse.profitability}
           compareEnabled={compareEnabled}
+          operatingResultChangePct={dashboard?.compare?.operatingResultChangePct}
         />
       )}
 
