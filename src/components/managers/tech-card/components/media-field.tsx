@@ -40,8 +40,10 @@ export function MediaField({
   mediaById: Map<number, common_MediaFull>;
   onPickedMedia: (items: common_MediaFull[]) => void;
 }) {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name });
+  const siblingName: MediaListName =
+    name === 'moodboardMedia' ? 'technicalMedia' : 'moodboardMedia';
   const isMoodboard = name === 'moodboardMedia';
   const kinds = isMoodboard ? MOODBOARD_KINDS : TECHNICAL_KINDS;
   const kindOptions = techCardMediaKindOptions.filter((o) => kinds.includes(o.value));
@@ -57,12 +59,32 @@ export function MediaField({
   });
 
   function handleAdd(items: common_MediaFull[]) {
-    const fresh = items.filter((it) => it.id != null && !selectedIds.includes(it.id));
+    // Dedupe against BOTH lists — the callout canvas assumes media ids are unique across
+    // technical ∪ moodboard (pin labels T#/M#, active-view matching by mediaId).
+    const siblingIds = (getValues(siblingName) ?? []).map((m) => m.mediaId);
+    const fresh = items.filter(
+      (it) => it.id != null && !selectedIds.includes(it.id) && !siblingIds.includes(it.id),
+    );
     if (!fresh.length) return;
     onPickedMedia(fresh);
     for (const it of fresh) {
       append({ mediaId: it.id as number, kind: defaultKind });
     }
+  }
+
+  // Removing an image must unpin its callouts in the same edit (mini nf05-01: the pin is a
+  // by-id ref) — otherwise the payload carries a media id that is on neither list while the
+  // pin select shows "unanchored".
+  function removeAt(index: number) {
+    const removedId = fields[index]?.mediaId;
+    remove(index);
+    if (!removedId) return;
+    const callouts = getValues('callouts') ?? [];
+    callouts.forEach((c, ci) => {
+      if (c.mediaId === removedId) {
+        setValue(`callouts.${ci}.mediaId`, 0, { shouldDirty: true });
+      }
+    });
   }
 
   return (
@@ -106,7 +128,7 @@ export function MediaField({
                     aria-label='remove sketch'
                     onClick={(e: React.MouseEvent) => {
                       e.stopPropagation();
-                      remove(index);
+                      removeAt(index);
                     }}
                     className='absolute right-1 top-1 z-20 border border-textInactiveColor bg-bgColor px-1 leading-none'
                   >

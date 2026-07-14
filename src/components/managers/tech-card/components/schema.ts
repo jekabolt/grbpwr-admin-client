@@ -458,11 +458,16 @@ function measurementUnitOrDefault(unit?: string): string {
 }
 
 // Both sketch-media lists (moodboard / technical) share the { mediaId, kind, caption } shape.
+// `fallbackKind` keeps the default list-appropriate: an UNKNOWN-kind moodboard item defaulted to
+// FRONT (a technical kind), rendering a blank select and persisting the wrong kind on save.
 type FormMediaItem = z.input<typeof mediaItemSchema>;
-function mapMediaItemToForm(m: common_TechCardMediaItem): FormMediaItem {
+function mapMediaItemToForm(
+  m: common_TechCardMediaItem,
+  fallbackKind: common_TechCardMediaKind = DEFAULT_MEDIA_KIND,
+): FormMediaItem {
   return {
     mediaId: m.mediaId || 0,
-    kind: m.kind && m.kind !== 'TECH_CARD_MEDIA_KIND_UNKNOWN' ? m.kind : DEFAULT_MEDIA_KIND,
+    kind: m.kind && m.kind !== 'TECH_CARD_MEDIA_KIND_UNKNOWN' ? m.kind : fallbackKind,
     caption: m.caption || '',
   };
 }
@@ -489,8 +494,10 @@ function splitSketchMedia(insert?: common_TechCardInsert): {
   moodboardMedia: FormMediaItem[];
   technicalMedia: FormMediaItem[];
 } {
-  const moodboardMedia = (insert?.moodboardMedia ?? []).map(mapMediaItemToForm);
-  const technicalMedia = (insert?.technicalMedia ?? []).map(mapMediaItemToForm);
+  const moodboardMedia = (insert?.moodboardMedia ?? []).map((m) =>
+    mapMediaItemToForm(m, 'TECH_CARD_MEDIA_KIND_MOODBOARD'),
+  );
+  const technicalMedia = (insert?.technicalMedia ?? []).map((m) => mapMediaItemToForm(m));
   if (moodboardMedia.length || technicalMedia.length) return { moodboardMedia, technicalMedia };
   const legacy = (insert as { media?: common_TechCardMediaItem[] } | undefined)?.media ?? [];
   const mood: FormMediaItem[] = [];
@@ -946,18 +953,22 @@ export function mapFormToTechCardInsert(
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
     pieces: (data.pieces ?? []).map((p) => ({
       name: p.name?.trim() || '',
-      piecesPerGarment: p.piecesPerGarment || 0,
+      // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
+      // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload
+      piecesPerGarment: p.piecesPerGarment || 1,
       mirrored: p.mirrored ?? false,
       grainline: p.grainline?.trim() || '',
       fused: p.fused ?? false,
       calloutNumber: p.calloutNumber || 0,
       note: p.note?.trim() || '',
       materials: (p.materials ?? [])
-        // drop fully-empty cells (no fabric and no fusing) so the map stays sparse
+        // drop fully-empty cells (no fabric, no fusing, no note) so the map stays sparse —
+        // a note-only cell (written by another client) must survive an unrelated save
         .filter(
           (m) =>
             (typeof m.bomItemIndex === 'number' && m.bomItemIndex >= 0) ||
-            (typeof m.fusingBomItemIndex === 'number' && m.fusingBomItemIndex >= 0),
+            (typeof m.fusingBomItemIndex === 'number' && m.fusingBomItemIndex >= 0) ||
+            !!m.note?.trim(),
         )
         .map((m) => ({
           colorwayIndex: m.colorwayIndex || 0,

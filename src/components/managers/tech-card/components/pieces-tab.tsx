@@ -173,10 +173,10 @@ export function PiecesTab() {
                         <input
                           className={`${cell} w-20`}
                           type='number'
-                          min='0'
+                          min='1'
                           value={p.piecesPerGarment ?? 1}
                           onChange={(e) =>
-                            setValue(`pieces.${pi}.piecesPerGarment`, Number(e.target.value) || 0, {
+                            setValue(`pieces.${pi}.piecesPerGarment`, Number(e.target.value) || 1, {
                               shouldDirty: true,
                             })
                           }

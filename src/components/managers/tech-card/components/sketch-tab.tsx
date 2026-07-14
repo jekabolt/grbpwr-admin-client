@@ -125,11 +125,16 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
     };
   }, [setValue]);
 
+  // max+1, not length+1: after a mid-list delete, length+1 duplicates an existing number —
+  // and pieces/operations/issues reference callouts BY number.
+  const nextNumber = () =>
+    Math.max(0, ...callouts.map((c) => (Number.isFinite(c.number) ? Number(c.number) : 0))) + 1;
+
   function addAt(e: React.MouseEvent) {
     if (dragIdxRef.current != null || activeViewId == null) return;
     const { x, y } = coords(e.clientX, e.clientY);
     append({
-      number: fields.length + 1,
+      number: nextNumber(),
       part: '',
       description: '',
       dimensions: '',
@@ -272,7 +277,7 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
           className='uppercase'
           onClick={() =>
             append({
-              number: fields.length + 1,
+              number: nextNumber(),
               part: '',
               description: '',
               dimensions: '',
