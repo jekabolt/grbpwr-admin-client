@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_Material, common_MaterialPrice } from 'api/proto-http/admin';
+import { PackagingBomItem, common_Material, common_MaterialPrice } from 'api/proto-http/admin';
 
 const materialKeys = {
   all: ['materials'] as const,
@@ -60,5 +60,26 @@ export function useAddMaterialPrice() {
     mutationFn: (price: common_MaterialPrice) => adminService.AddMaterialPrice({ price }),
     // invalidate both the price history and the list (latest_price on each material).
     onSuccess: () => qc.invalidateQueries({ queryKey: materialKeys.all }),
+  });
+}
+
+// Packaging BOM (gap-07 v2 B): ONE global recipe — the materials consumed per order (qty_per_order,
+// e.g. a shipping box) and per item (qty_per_item, e.g. a polybag), booked as OPEX/COGS on ship.
+// UpsertPackagingBom is a FULL REPLACE of the whole list (submit every row at once, not per-row);
+// material_name / material_unit are output-only (the server fills them from the material).
+export const packagingBomKey = ['packagingBom'] as const;
+
+export function usePackagingBom() {
+  return useQuery({
+    queryKey: packagingBomKey,
+    queryFn: () => adminService.ListPackagingBom({}),
+  });
+}
+
+export function useUpsertPackagingBom() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (items: PackagingBomItem[]) => adminService.UpsertPackagingBom({ items }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: packagingBomKey }),
   });
 }
