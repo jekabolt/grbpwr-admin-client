@@ -251,6 +251,8 @@ function RecurringFormModal({
           activeFrom: monthToApi(d.activeFrom),
           activeTo: d.activeTo ? monthToApi(d.activeTo) : '',
           note: d.note.trim(),
+          // gap-07 v2 A: salary link to the employee registry — registry UI not built yet.
+          employeeId: 0,
         },
       });
       showMessage(existing ? 'Template saved' : 'Template added', 'success');

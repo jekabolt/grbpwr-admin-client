@@ -1621,6 +1621,11 @@ export type TechCardColorway = {
   // the colour's material recipe: which catalog article (bom_item_index) goes on which
   // garment part, in what colour, at what consumption. Per-colourway divergence lives here.
   usages: TechCardColorwayUsage[] | undefined;
+  // OUTPUT-ONLY stable row id (B-10): set on Get/List so a sample can be linked to a colourway
+  // (Sample.colorway_id). Ignored on write — a card save full-replaces colourways with fresh ids
+  // (the server re-points existing sample links by colourway identity, case-folded code+name), so
+  // re-read the card and use a fresh id right before linking a sample.
+  id: number | undefined;
 };
 
 // TechCardColorwayUsage is one material use inside a colourway: which catalog article
@@ -1971,6 +1976,9 @@ export type TechCardPiece = {
 
 export type TechCardInsert = {
   // identification (Sheet «Титул»)
+  // Артикул. Required from the PROTO stage onward; OPTIONAL (empty) while stage == IDEA — an idea
+  // is by definition pre-article (NF-03/B-2). Moving a card out of IDEA without a real style
+  // number is rejected with InvalidArgument.
   styleNumber: string | undefined;
   name: string | undefined;
   brand: string | undefined;
@@ -2073,6 +2081,9 @@ export type TechCardListItem = {
   // moodboard image; otherwise the PREVIEW-kind sketch (falling back to the first technical, then any
   // media). Empty when the card has no media. Resolved server-side to avoid an N+1 GetTechCard.
   previewUrl: string | undefined;
+  // Card purpose: "sellable" (default) or "auxiliary" (NF-07). Lets a board/list badge auxiliary
+  // cards (dust bags, shoppers…) without an N+1 GetTechCard, mirroring TechCard.purpose.
+  purpose: string | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
@@ -2118,6 +2129,25 @@ export type MaterialMovement = {
   adminUsername: string | undefined;
   occurredAt: wellKnownTimestamp | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  productId: number | undefined;
+  lotId: number | undefined;
+};
+
+// MaterialLot is a received batch (roll / dye-lot) of a material (gap-07 v2 D): a supplier lot code
+// with a running remaining quantity, for traceability and colour matching. unit_cost is
+// informational only — valuation stays moving-average; a lot is NOT a FIFO costing basis.
+export type MaterialLot = {
+  id: number | undefined;
+  materialId: number | undefined;
+  lotCode: string | undefined;
+  supplierDoc: string | undefined;
+  receivedQty: googletype_Decimal | undefined;
+  remainingQty: googletype_Decimal | undefined;
+  unitCost: googletype_Decimal | undefined;
+  currency: string | undefined;
+  receivedAt: wellKnownTimestamp | undefined;
+  note: string | undefined;
+  archived: boolean | undefined;
 };
 
 // MaterialStockRow is a catalog material joined with its stock balance, valuation and low-stock
@@ -2209,6 +2239,15 @@ export type ProductionRunCostKind =
   | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
   | "PRODUCTION_RUN_COST_KIND_DUTY"
   | "PRODUCTION_RUN_COST_KIND_OTHER";
+// ProductionMarkerSource is the CAD/nesting software (or hand entry) a marker record came from.
+export type ProductionMarkerSource =
+  | "PRODUCTION_MARKER_SOURCE_UNKNOWN"
+  | "PRODUCTION_MARKER_SOURCE_GERBER"
+  | "PRODUCTION_MARKER_SOURCE_OPTITEX"
+  | "PRODUCTION_MARKER_SOURCE_LECTRA"
+  | "PRODUCTION_MARKER_SOURCE_AUDACES"
+  | "PRODUCTION_MARKER_SOURCE_MANUAL"
+  | "PRODUCTION_MARKER_SOURCE_OTHER";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -2261,6 +2300,39 @@ export type ProductionRunActuals = {
   materialsFromStockBase: googletype_Decimal | undefined;
   mixedMaterialsSources: boolean | undefined;
   hasUncostedIssues: boolean | undefined;
+  // Per-colourway material cost (gap-07 v2 C): stock issues grouped by the product_id they were cut
+  // for. Covers materials_from_stock only (manual cost articles stay run-level). Issues with no
+  // product_id fall into unattributed_materials_base, not any colourway.
+  byColorway: ProductionRunColorwayCost[] | undefined;
+  unattributedMaterialsBase: googletype_Decimal | undefined;
+};
+
+// ProductionRunColorwayCost is one colour-model's slice of a run's material-from-stock cost (gap-07
+// v2 C): the net material issued for that product and, if it received units, its per-unit material
+// cost. Manual (non-stock) cost articles are run-level and are NOT split here.
+export type ProductionRunColorwayCost = {
+  productId: number | undefined;
+  receivedQty: number | undefined;
+  materialsFromStockBase: googletype_Decimal | undefined;
+  materialsUnitCost: googletype_Decimal | undefined;
+  hasUncosted: boolean | undefined;
+};
+
+// ProductionRunMarker is one imported nesting marker (раскладка / lay) of a run (gap-07 v2 E): the
+// CAD source, the fabric width and lay length it was nested on, the units it yields, its
+// fabric-utilisation %, an optional fabric/size, and a reference URL to the exported marker file.
+// It is planning / traceability data — nothing here feeds the run's actual cost or cost_price.
+export type ProductionRunMarker = {
+  source: ProductionMarkerSource | undefined;
+  markerName: string | undefined;
+  sizeId: number | undefined;
+  materialId: number | undefined;
+  markerWidth: googletype_Decimal | undefined;
+  layLength: googletype_Decimal | undefined;
+  unitsPerMarker: number | undefined;
+  efficiencyPct: googletype_Decimal | undefined;
+  markerFileUrl: string | undefined;
+  notes: string | undefined;
 };
 
 // ProductionRunInsert is the writable payload for a run (header + colour-model × size lines).
@@ -2277,6 +2349,7 @@ export type ProductionRunInsert = {
   costs: ProductionRunCost[] | undefined;
   markerEfficiencyPct: googletype_Decimal | undefined;
   markerNotes: string | undefined;
+  markers: ProductionRunMarker[] | undefined;
 };
 
 // ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen
@@ -2289,6 +2362,10 @@ export type ProductionRun = {
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   actuals: ProductionRunActuals | undefined;
+  // Optimistic-lock token, bumped on every UpdateProductionRun. Echo into
+  // UpdateProductionRunRequest.expected_lock_version so a list→edit needs no extra GET (mirrors
+  // TechCard.lock_version).
+  lockVersion: number | undefined;
 };
 
 // SampleInsert is the writable payload of a sample (сэмпл) — a sewn prototype of a style

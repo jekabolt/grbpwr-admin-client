@@ -295,6 +295,10 @@ export function IssueStockModal({
         isReturn,
         occurredAt,
         comment: comment.trim(),
+        // gap-07 v2: optional per-colourway (product_id) and structured-lot attribution — not
+        // surfaced in this generic issue modal yet.
+        productId: 0,
+        lotId: 0,
       });
       showMessage(posted(res.movement), 'success');
       onOpenChange(false);

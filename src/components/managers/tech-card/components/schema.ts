@@ -391,7 +391,7 @@ const techCardObject = z.object({
   revisions: z.array(revisionSchema).default([]),
 });
 
-// style_number is required past the IDEA stage; at IDEA it may be blank (auto-filled on save).
+// style_number is required past the IDEA stage; at IDEA it may be blank (the backend accepts it).
 export const techCardSchema = techCardObject.superRefine((data, ctx) => {
   if (data.stage !== 'TECH_CARD_STAGE_IDEA' && !data.styleNumber?.trim()) {
     ctx.addIssue({
@@ -849,13 +849,11 @@ export function mapFormToTechCardInsert(
   // costing. Preserve the original block instead so a non-costing editor can never destroy it.
   canWriteCosting: boolean = true,
 ): common_TechCardInsert {
-  // B-2: the backend requires style_number even for an IDEA card, so fill an empty one with a draft
-  // `IDEA-<base36 time>` the user renames before PROTO. Edits preserve the existing number (the form
-  // seeds it from the loaded card), so this only ever fires on a fresh blank IDEA concept.
-  const trimmedStyleNumber = data.styleNumber?.trim() || '';
-  const styleNumber =
-    trimmedStyleNumber ||
-    (data.stage === 'TECH_CARD_STAGE_IDEA' ? `IDEA-${Date.now().toString(36).toUpperCase()}` : '');
+  // B-2: an IDEA card may carry an empty style_number — the backend now accepts it while
+  // stage == IDEA and only enforces a real number when the card moves out (to PROTO+). So we
+  // send whatever the user typed verbatim; the schema refine below still requires a number at
+  // non-IDEA stages, blocking a stage advance client-side before the server would reject it.
+  const styleNumber = data.styleNumber?.trim() || '';
   return {
     ...original,
     styleNumber,

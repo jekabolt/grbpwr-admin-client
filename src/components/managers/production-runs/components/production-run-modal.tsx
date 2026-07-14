@@ -9,7 +9,11 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { isRunLocked, runDetailPath, runStatusLabel, runStatusOptions } from './options';
-import { useSaveProductionRun, useUpdateRunSection } from './useProductionRuns';
+import {
+  updateRunErrorMessage,
+  useSaveProductionRun,
+  useUpdateRunSection,
+} from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const isoToDate = (ts?: string) => (ts ? ts.slice(0, 10) : '');
@@ -129,8 +133,7 @@ export function ProductionRunModal({
             showMessage('Run updated', 'success');
             onOpenChange(false);
           },
-          onError: (e) =>
-            showMessage(e instanceof Error ? e.message : 'Failed to save run', 'error'),
+          onError: (e) => showMessage(updateRunErrorMessage(e), 'error'),
         },
       );
       return;
@@ -150,6 +153,7 @@ export function ProductionRunModal({
           costs: [],
           markerEfficiencyPct: undefined,
           markerNotes: undefined,
+          markers: [],
         },
       },
       {

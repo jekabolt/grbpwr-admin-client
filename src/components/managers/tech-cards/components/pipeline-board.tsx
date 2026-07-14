@@ -1,6 +1,7 @@
 import { common_TechCardListItem, common_TechCardStage } from 'api/proto-http/admin';
 import { Link, useNavigate } from 'react-router-dom';
 import Text from 'ui/components/text';
+import { AuxBadge } from './aux-badge';
 import { approvalStateLabel } from './utils';
 import { useStylePipeline } from './useTechCardQuery';
 
@@ -122,9 +123,12 @@ function PipelineCard({ card }: { card: common_TechCardListItem }) {
         ) : null}
       </div>
       <div className='flex min-w-0 flex-col'>
-        <Text variant='uppercase' size='small' className='truncate'>
-          {card.styleNumber || '—'}
-        </Text>
+        <div className='flex items-center gap-1.5'>
+          <Text variant='uppercase' size='small' className='truncate'>
+            {card.styleNumber || '—'}
+          </Text>
+          <AuxBadge purpose={card.purpose} />
+        </div>
         <Text variant='inactive' size='small' className='truncate'>
           {card.name || '—'}
         </Text>

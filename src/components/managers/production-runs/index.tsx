@@ -73,23 +73,18 @@ export function ProductionRuns() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { data, isLoading, isError } = useProductionRuns(Number(techCardId) || 0, status);
+  // ?stale=<days> (attention-strip deep link): ask the backend for only the non-terminal runs
+  // sitting at least that long — the same server-side predicate the strip counts, so the link
+  // shows exactly those runs (no client rescan of the full list).
+  const staleDays = Number(searchParams.get('stale')) || 0;
+  const { data, isLoading, isError } = useProductionRuns(
+    Number(techCardId) || 0,
+    status,
+    staleDays,
+  );
   const del = useDeleteProductionRun();
   const { showMessage } = useSnackBarStore();
-  // ?stale=<days> (attention-strip deep link): show only non-terminal runs sitting at least
-  // that long — the same predicate the strip counted, so the link shows exactly those runs.
-  const staleDays = Number(searchParams.get('stale')) || 0;
-  const allRuns = data?.runs ?? [];
-  const runs = staleDays
-    ? allRuns.filter((r) => {
-        const s = r.run?.status ?? '';
-        if (s !== 'PRODUCTION_RUN_STATUS_PLANNED' && s !== 'PRODUCTION_RUN_STATUS_IN_PROGRESS')
-          return false;
-        const started = r.run?.startedAt ?? r.createdAt;
-        if (!started) return false;
-        return (Date.now() - new Date(started).getTime()) / 86_400_000 >= staleDays;
-      })
-    : allRuns;
+  const runs = data?.runs ?? [];
 
   const openCreate = () => {
     setEditing(undefined);

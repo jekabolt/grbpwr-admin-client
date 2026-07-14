@@ -10,7 +10,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { runCostKindOptions } from './options';
-import { useUpdateRunSection } from './useProductionRuns';
+import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const isoToDate = (ts?: string) => (ts ? ts.slice(0, 10) : '');
@@ -113,7 +113,7 @@ export function RunCosts({
       setDirty(false);
       showMessage('Costs saved', 'success');
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save costs', 'error');
+      showMessage(updateRunErrorMessage(e), 'error');
     }
   };
 

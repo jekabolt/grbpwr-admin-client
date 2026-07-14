@@ -4,11 +4,12 @@ import { common_ProductionRunInsert, common_ProductionRunLine } from 'api/proto-
 import { stockChangeHistoryKeys } from 'components/managers/product/components/stock/useStockChangeHistory';
 import { runStatusToDbFilter } from './options';
 
-// Read-modify-write a single section of a run's insert (R-17). UpdateProductionRun is a
-// full-replace with no lock_version, so each detail-page section (lines / marker / costs)
-// re-fetches the latest run immediately before saving and overrides ONLY its own keys — a
-// marker edit can't clobber concurrently-saved lines, and vice versa. The race window shrinks
-// to the fetch→save gap; a true lock_version on runs is a backend follow-up.
+// Read-modify-write a single section of a run's insert (R-17). Each detail-page section
+// (lines / marker / costs) re-fetches the latest run immediately before saving and overrides
+// ONLY its own keys — a marker edit can't clobber concurrently-saved lines, and vice versa.
+// #9: the fetched run's lock_version is now echoed back as expected_lock_version, so the server
+// rejects (Aborted → HTTP 409) if a concurrent writer bumped it in the fetch→save gap instead of
+// silently last-write-winning. A run predating the field reads lock_version 0 → legacy behaviour.
 // `mergeLines` derives the new lines FROM the fresh ones (receive uses it to stamp counted
 // quantities per (product, size) without replacing concurrently-edited lines wholesale).
 export function useUpdateRunSection() {
@@ -25,9 +26,10 @@ export function useUpdateRunSection() {
     }) => {
       const fresh = await adminService.GetProductionRun({ id });
       const base = (fresh.run?.run ?? {}) as common_ProductionRunInsert;
+      const expectedLockVersion = fresh.run?.lockVersion ?? 0;
       const run = { ...base, ...patch };
       if (mergeLines) run.lines = mergeLines(base.lines ?? []);
-      return adminService.UpdateProductionRun({ id, run });
+      return adminService.UpdateProductionRun({ id, run, expectedLockVersion });
     },
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });
@@ -36,16 +38,28 @@ export function useUpdateRunSection() {
   });
 }
 
+// #9: an optimistic-lock conflict (Aborted → HTTP 409) means another writer saved the run between
+// this section's read and write. Surface a reload-and-retry hint rather than the raw gateway text;
+// silently retrying would re-introduce the last-write-wins the lock exists to prevent.
+export function updateRunErrorMessage(e: unknown): string {
+  const status = (e as { status?: number } | undefined)?.status;
+  if (status === 409) return 'Партия была изменена в другом окне — обновите страницу и повторите';
+  return e instanceof Error ? e.message : 'Не удалось сохранить изменения партии';
+}
+
 export const productionRunKeys = {
   all: ['productionRuns'] as const,
-  list: (techCardId: number, status: string) =>
-    [...productionRunKeys.all, 'list', techCardId, status] as const,
+  list: (techCardId: number, status: string, staleDays = 0) =>
+    [...productionRunKeys.all, 'list', techCardId, status, staleDays] as const,
   detail: (id: number) => [...productionRunKeys.all, 'detail', id] as const,
 };
 
-export function useProductionRuns(techCardId: number, status: string) {
+// #10: stale_days > 0 asks the backend for only the non-terminal runs that have sat at least that
+// long (the "stale" set the attention strip counts), replacing a client scan of two full status
+// pages. 0 = no staleness filter.
+export function useProductionRuns(techCardId: number, status: string, staleDays = 0) {
   return useQuery({
-    queryKey: productionRunKeys.list(techCardId, status),
+    queryKey: productionRunKeys.list(techCardId, status, staleDays),
     queryFn: () =>
       adminService.ListProductionRuns({
         techCardId: techCardId || undefined,
@@ -53,6 +67,7 @@ export function useProductionRuns(techCardId: number, status: string) {
         status: runStatusToDbFilter(status),
         limit: 200,
         offset: 0,
+        staleDays: staleDays || undefined,
       }),
   });
 }
@@ -82,7 +97,7 @@ export function useSaveProductionRun() {
   return useMutation({
     mutationFn: ({ id, run }: { id: number; run: common_ProductionRunInsert }) =>
       id
-        ? adminService.UpdateProductionRun({ id, run })
+        ? adminService.UpdateProductionRun({ id, run, expectedLockVersion: 0 })
         : adminService.CreateProductionRun({ run }),
     onSuccess: () => qc.invalidateQueries({ queryKey: productionRunKeys.all }),
   });
