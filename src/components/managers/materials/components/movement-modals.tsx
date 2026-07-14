@@ -236,6 +236,7 @@ export function IssueStockModal({
   defaultTarget,
   defaultQty,
   lockTarget,
+  colorways,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -244,6 +245,9 @@ export function IssueStockModal({
   defaultTarget?: { productionRunId?: number; sampleId?: number };
   defaultQty?: string;
   lockTarget?: boolean;
+  // gap-07 v2 C: the run's colourways, so a run issue can be attributed to the product it was cut
+  // for (feeds ProductionRunActuals.by_colorway). Only meaningful when issuing to a run.
+  colorways?: { productId: number; label: string }[];
 }) {
   const { showMessage } = useSnackBarStore();
   const issue = useIssueMaterialStock();
@@ -256,6 +260,8 @@ export function IssueStockModal({
   // gap-07 v2 D: optionally attribute the issue to a specific received lot (roll / dye-lot) for
   // traceability — informational only, never a costing basis.
   const [lotId, setLotId] = useState(0);
+  // gap-07 v2 C: which colourway (product) this fabric was cut for; 0 = whole run (unattributed).
+  const [productId, setProductId] = useState(0);
 
   const defRun = defaultTarget?.productionRunId ?? 0;
   const defSample = defaultTarget?.sampleId ?? 0;
@@ -270,6 +276,7 @@ export function IssueStockModal({
     setOccurredAt(todayISO());
     setComment('');
     setLotId(0);
+    setProductId(0);
   }, [open, defaultQty, defRun, defSample]);
 
   // Lots to draw from: this material's non-archived batches with stock left. Only fetched while
@@ -311,9 +318,9 @@ export function IssueStockModal({
         isReturn,
         occurredAt,
         comment: comment.trim(),
-        // gap-07 v2: lot attribution (below); per-colourway product_id attribution is set from the
-        // run's colourway on the run-detail issue flow, not this generic modal.
-        productId: 0,
+        // gap-07 v2: colourway (product_id) attribution only applies to a run issue; lot (lot_id)
+        // is optional traceability. Both default to 0 (whole-run / unspecified).
+        productId: targetKind === 'run' ? productId : 0,
         lotId,
       });
       showMessage(posted(res.movement), 'success');
@@ -384,6 +391,23 @@ export function IssueStockModal({
           </Field>
         </div>
       )}
+
+      {targetKind === 'run' && colorways && colorways.length > 0 ? (
+        <Field label='colourway (optional — attributes cost)'>
+          <select
+            className={cell}
+            value={productId || 0}
+            onChange={(e) => setProductId(Number(e.target.value) || 0)}
+          >
+            <option value={0}>— whole run (unattributed) —</option>
+            {colorways.map((c) => (
+              <option key={c.productId} value={c.productId}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
 
       <label className='flex items-center gap-2'>
         <input type='checkbox' checked={isReturn} onChange={(e) => setIsReturn(e.target.checked)} />
