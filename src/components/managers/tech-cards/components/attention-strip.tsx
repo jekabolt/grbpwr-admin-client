@@ -39,18 +39,35 @@ export function AttentionStrip() {
   });
   const staleDays = alerts.data?.settings?.productionRunStaleDays || 14;
 
-  const runs = useQuery({
-    queryKey: ['attention', 'runs'],
+  // Fetch status-filtered pages (one per non-terminal status) so the 200-row cap applies to the
+  // relevant subset: unfiltered newest-first paging dropped exactly the OLD planned/in-progress
+  // runs — the ones most likely stale — silently undercounting (potentially to 0).
+  const plannedRuns = useQuery({
+    queryKey: ['attention', 'runs', 'planned'],
     queryFn: () =>
       adminService.ListProductionRuns({
         techCardId: undefined,
-        status: undefined,
+        status: 'planned',
         limit: 200,
         offset: 0,
       }),
     enabled: canRuns,
   });
-  const staleRuns = (runs.data?.runs ?? []).filter((r) => {
+  const inProgressRuns = useQuery({
+    queryKey: ['attention', 'runs', 'in_progress'],
+    queryFn: () =>
+      adminService.ListProductionRuns({
+        techCardId: undefined,
+        status: 'in_progress',
+        limit: 200,
+        offset: 0,
+      }),
+    enabled: canRuns,
+  });
+  const staleRuns = [
+    ...(plannedRuns.data?.runs ?? []),
+    ...(inProgressRuns.data?.runs ?? []),
+  ].filter((r) => {
     if (
       !NON_TERMINAL.has(
         r.run?.status ? r.run.status.replace('PRODUCTION_RUN_STATUS_', '').toLowerCase() : '',
@@ -76,7 +93,9 @@ export function AttentionStrip() {
   const fittingsThisWeek = (fittings.data?.fittings ?? []).filter((f) => {
     if (f.fitting?.status !== 'FITTING_STATUS_PLANNED') return false;
     const d = ageDays(f.fitting?.fittingDate); // negative = in the future
-    return d <= 0 && d > -7;
+    // d < 1 (not <= 0): a fitting planned for this morning must not drop off the strip
+    // mid-day just because its timestamp is now a few hours in the past.
+    return d < 1 && d > -7;
   }).length;
 
   const fragments: { key: string; label: string; to: string }[] = [];
@@ -90,7 +109,9 @@ export function AttentionStrip() {
     fragments.push({
       key: 'runs',
       label: `${staleRuns} run${staleRuns > 1 ? 's' : ''} stale ${staleDays}d+`,
-      to: ROUTES.productionRuns,
+      // ?stale=<days> — the runs list applies the same client-side staleness filter, so the
+      // link shows exactly the counted runs instead of the full unfiltered list.
+      to: `${ROUTES.productionRuns}?stale=${staleDays}`,
     });
   if (fittingsThisWeek > 0)
     fragments.push({

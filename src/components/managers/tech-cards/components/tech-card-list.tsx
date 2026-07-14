@@ -46,16 +46,30 @@ export function TechCardList() {
   const deleteTechCard = useDeleteTechCard();
   const canEdit = usePermissions().canWrite(SECTION.techCards);
 
-  // Seed the stage filter from ?stage= so the board's "see all" hand-off lands pre-filtered (R-1).
-  const [searchParams] = useSearchParams();
+  // The stage filter lives in the URL (R-1): the board's "see all" hand-off lands pre-filtered,
+  // the Select writes back, and a reload/share reproduces the same view. Validated — a mangled
+  // ?stage= must not be sent to the API (it would return nothing and read as an empty list).
+  const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState('');
-  const [stage, setStage] = useState<common_TechCardStage>(
-    (searchParams.get('stage') as common_TechCardStage) || ALL_STAGES,
-  );
-  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteTechCards(
-    { name: name.trim() || undefined, stage: stage === ALL_STAGES ? undefined : stage },
-    LIMIT,
-  );
+  const stageParam = searchParams.get('stage');
+  const stage: common_TechCardStage = techCardStageOptions.some((o) => o.value === stageParam)
+    ? (stageParam as common_TechCardStage)
+    : ALL_STAGES;
+  const setStage = (next: string) =>
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next && next !== ALL_STAGES) p.set('stage', next);
+        else p.delete('stage');
+        return p;
+      },
+      { replace: true },
+    );
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteTechCards(
+      { name: name.trim() || undefined, stage: stage === ALL_STAGES ? undefined : stage },
+      LIMIT,
+    );
   const { ref, inView } = useInView({ rootMargin: '200px' });
   const [pendingDelete, setPendingDelete] = useState<{ id: number } | null>(null);
 
@@ -95,7 +109,7 @@ export function TechCardList() {
               name='stage'
               value={stage}
               items={stageFilterItems}
-              onValueChange={(val: string) => setStage((val as common_TechCardStage) ?? ALL_STAGES)}
+              onValueChange={(val: string) => setStage(val ?? ALL_STAGES)}
             />
           </div>
         </div>
@@ -108,6 +122,12 @@ export function TechCardList() {
         <div className='flex justify-center py-20'>
           <Text variant='inactive' className='animate-pulse'>
             loading tech cards…
+          </Text>
+        </div>
+      ) : isError ? (
+        <div className='flex justify-center py-20'>
+          <Text variant='inactive' className='uppercase'>
+            failed to load tech cards — refresh to retry
           </Text>
         </div>
       ) : techCards.length === 0 ? (

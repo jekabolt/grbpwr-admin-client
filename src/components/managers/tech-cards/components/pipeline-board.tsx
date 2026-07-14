@@ -25,13 +25,23 @@ const stageRank = (s?: string) => {
 const stageLabelOf = (s?: string) => STAGE_ORDER.find((o) => o.value === s)?.label ?? '—';
 
 export function PipelineBoard() {
-  const { data, isLoading } = useStylePipeline(6);
+  const { data, isLoading, isError } = useStylePipeline(6);
 
   if (isLoading) {
     return (
       <div className='flex justify-center py-20'>
         <Text variant='inactive' className='animate-pulse'>
           loading pipeline…
+        </Text>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className='flex justify-center py-20'>
+        <Text variant='inactive' className='uppercase'>
+          failed to load the pipeline — refresh to retry
         </Text>
       </div>
     );

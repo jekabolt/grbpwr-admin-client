@@ -76,7 +76,20 @@ export function ProductionRuns() {
   const { data, isLoading, isError } = useProductionRuns(Number(techCardId) || 0, status);
   const del = useDeleteProductionRun();
   const { showMessage } = useSnackBarStore();
-  const runs = data?.runs ?? [];
+  // ?stale=<days> (attention-strip deep link): show only non-terminal runs sitting at least
+  // that long — the same predicate the strip counted, so the link shows exactly those runs.
+  const staleDays = Number(searchParams.get('stale')) || 0;
+  const allRuns = data?.runs ?? [];
+  const runs = staleDays
+    ? allRuns.filter((r) => {
+        const s = r.run?.status ?? '';
+        if (s !== 'PRODUCTION_RUN_STATUS_PLANNED' && s !== 'PRODUCTION_RUN_STATUS_IN_PROGRESS')
+          return false;
+        const started = r.run?.startedAt ?? r.createdAt;
+        if (!started) return false;
+        return (Date.now() - new Date(started).getTime()) / 86_400_000 >= staleDays;
+      })
+    : allRuns;
 
   const openCreate = () => {
     setEditing(undefined);
@@ -128,6 +141,16 @@ export function ProductionRuns() {
           value={techCardId}
           onChange={(e) => patchFilters({ techCardId: e.target.value })}
         />
+        {staleDays > 0 ? (
+          <button
+            type='button'
+            className={`${cell} uppercase`}
+            title='clear staleness filter'
+            onClick={() => patchFilters({ stale: '' })}
+          >
+            stale ≥{staleDays}d ✕
+          </button>
+        ) : null}
       </div>
 
       {isLoading ? (
