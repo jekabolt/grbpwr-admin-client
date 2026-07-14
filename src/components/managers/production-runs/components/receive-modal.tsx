@@ -1,5 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { common_ProductionRun } from 'api/proto-http/admin';
+import { common_Material, common_ProductionRun } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
+import { materialLabel } from './aux-run-plan';
 import { useReceiveProductionRun, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -23,14 +24,23 @@ type Row = {
 // Receiving is two steps against the contract: persist received/defect on each run LINE
 // (UpdateProductionRun), then post stock into each line's own product + optionally set its
 // cost_price (ReceiveProductionRun — NF-06, no run-level product).
+// Auxiliary runs (NF-07 / B-3) reuse the same two steps, but the single product-less line's
+// received qty is booked into the tech card's output_material_id in the MATERIAL warehouse: no
+// per-product grouping, no orphan guard, and cost_price is a no-op (there is no product).
 export function ReceiveModal({
   open,
   onOpenChange,
   run,
+  isAux = false,
+  outputMaterialId = 0,
+  outputMaterial,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   run?: common_ProductionRun;
+  isAux?: boolean;
+  outputMaterialId?: number;
+  outputMaterial?: common_Material;
 }) {
   const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
@@ -53,6 +63,14 @@ export function ReceiveModal({
     });
     return out;
   }, [rows]);
+
+  // The aux run is a single product-less line; find its flat index for the received/defect inputs.
+  const auxIdx = useMemo(() => {
+    const i = rows.findIndex((r) => !r.productId);
+    return i >= 0 ? i : 0;
+  }, [rows]);
+  const auxDest = materialLabel(outputMaterial, outputMaterialId);
+  const auxUnit = outputMaterial?.unit?.trim();
 
   // Reset per-run state on the CLOSED → OPEN transition only. The naive [run, open] deps
   // re-ran mid-flow — step 1's own invalidation refetches `run` on the detail page and the
@@ -83,15 +101,24 @@ export function ReceiveModal({
 
   const submit = async () => {
     if (!run?.id || !run.run) return;
-    // NF-06: a line with received > 0 is booked into its own product — it must have one. Publish
-    // the colour-model as a product (or zero its received qty) before receiving.
-    const orphans = rows.filter((r) => (Number(r.received) || 0) > 0 && !r.productId);
-    if (orphans.length > 0) {
-      showMessage(
-        `${orphans.length} line(s) have no product — publish the product or set received to 0`,
-        'error',
-      );
-      return;
+    if (isAux) {
+      // NF-07: aux receive books into output_material_id — the card must name one, or the RPC
+      // fails with FailedPrecondition.
+      if (!outputMaterialId) {
+        showMessage('Set an output material on the tech card before receiving', 'error');
+        return;
+      }
+    } else {
+      // NF-06: a line with received > 0 is booked into its own product — it must have one. Publish
+      // the colour-model as a product (or zero its received qty) before receiving.
+      const orphans = rows.filter((r) => (Number(r.received) || 0) > 0 && !r.productId);
+      if (orphans.length > 0) {
+        showMessage(
+          `${orphans.length} line(s) have no product — publish the product or set received to 0`,
+          'error',
+        );
+        return;
+      }
     }
     // Guard the counts: no negatives, and defects can't exceed what was received.
     for (const r of rows) {
@@ -134,12 +161,18 @@ export function ReceiveModal({
       return;
     }
     try {
-      // Step 2 posts stock into each line's product + optionally sets cost_price.
-      const res = await receive.mutateAsync({ runId: run.id, updateCostPrice });
+      // Step 2 posts stock into each line's product (or the output material for aux) + optionally
+      // sets cost_price (no-op for aux).
+      const res = await receive.mutateAsync({
+        runId: run.id,
+        updateCostPrice: isAux ? false : updateCostPrice,
+      });
       showMessage(
-        res.costPriceUpdated
-          ? 'Run received · product cost updated'
-          : 'Run received · stock posted',
+        isAux
+          ? 'Run received · material stock posted'
+          : res.costPriceUpdated
+            ? 'Run received · product cost updated'
+            : 'Run received · stock posted',
         'success',
       );
       onOpenChange(false);
@@ -179,16 +212,16 @@ export function ReceiveModal({
                 no lines planned — plan quantities on the run page first
               </Text>
             ) : null}
-            {groups.map((g) => (
-              <div key={g.productId} className='flex flex-col gap-1'>
+
+            {isAux && rows.length > 0 ? (
+              <div className='flex flex-col gap-1'>
                 <Text size='small'>
-                  {g.productId
-                    ? `#${g.productId}`
-                    : '(unassigned — publish a product to book stock)'}
+                  → {auxDest || 'output material'}
+                  {auxUnit ? ` · ${auxUnit}` : ''} · booked into the material warehouse
                 </Text>
                 <div className='grid grid-cols-[1fr_auto_auto] items-center gap-2'>
                   <Text variant='uppercase' size='small'>
-                    size
+                    quantity
                   </Text>
                   <Text variant='uppercase' size='small'>
                     received
@@ -196,34 +229,76 @@ export function ReceiveModal({
                   <Text variant='uppercase' size='small'>
                     defect
                   </Text>
-                  {g.items.map(({ r, i }) => (
-                    <RowInputs
-                      key={`${r.productId}-${r.sizeId}`}
-                      label={String(findInDictionary(dictionary, r.sizeId, 'size') || r.sizeId)}
-                      planned={r.plannedQty}
-                      received={r.received}
-                      defect={r.defect}
-                      onReceived={(v) =>
-                        setRows((prev) => {
-                          const next = [...prev];
-                          next[i] = { ...next[i], received: v };
-                          return next;
-                        })
-                      }
-                      onDefect={(v) =>
-                        setRows((prev) => {
-                          const next = [...prev];
-                          next[i] = { ...next[i], defect: v };
-                          return next;
-                        })
-                      }
-                    />
-                  ))}
+                  <RowInputs
+                    label={auxUnit || 'units'}
+                    planned={rows[auxIdx]?.plannedQty ?? 0}
+                    received={rows[auxIdx]?.received ?? '0'}
+                    defect={rows[auxIdx]?.defect ?? '0'}
+                    onReceived={(v) =>
+                      setRows((prev) => {
+                        const next = [...prev];
+                        next[auxIdx] = { ...next[auxIdx], received: v };
+                        return next;
+                      })
+                    }
+                    onDefect={(v) =>
+                      setRows((prev) => {
+                        const next = [...prev];
+                        next[auxIdx] = { ...next[auxIdx], defect: v };
+                        return next;
+                      })
+                    }
+                  />
                 </div>
               </div>
-            ))}
+            ) : null}
 
-            {canWriteCosting && (
+            {!isAux &&
+              groups.map((g) => (
+                <div key={g.productId} className='flex flex-col gap-1'>
+                  <Text size='small'>
+                    {g.productId
+                      ? `#${g.productId}`
+                      : '(unassigned — publish a product to book stock)'}
+                  </Text>
+                  <div className='grid grid-cols-[1fr_auto_auto] items-center gap-2'>
+                    <Text variant='uppercase' size='small'>
+                      size
+                    </Text>
+                    <Text variant='uppercase' size='small'>
+                      received
+                    </Text>
+                    <Text variant='uppercase' size='small'>
+                      defect
+                    </Text>
+                    {g.items.map(({ r, i }) => (
+                      <RowInputs
+                        key={`${r.productId}-${r.sizeId}`}
+                        label={String(findInDictionary(dictionary, r.sizeId, 'size') || r.sizeId)}
+                        planned={r.plannedQty}
+                        received={r.received}
+                        defect={r.defect}
+                        onReceived={(v) =>
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], received: v };
+                            return next;
+                          })
+                        }
+                        onDefect={(v) =>
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], defect: v };
+                            return next;
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+            {!isAux && canWriteCosting && (
               <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
                 <input
                   type='checkbox'
@@ -240,8 +315,9 @@ export function ReceiveModal({
             )}
 
             <Text variant='inactive' size='small'>
-              Приёмка приходует сток по каждой строке в её продукт и переводит партию в received —
-              после этого её нельзя удалить.
+              {isAux
+                ? 'Приёмка приходует выпуск в склад материала (output material) и переводит партию в received — после этого её нельзя удалить.'
+                : 'Приёмка приходует сток по каждой строке в её продукт и переводит партию в received — после этого её нельзя удалить.'}
             </Text>
           </div>
 

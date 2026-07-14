@@ -1,15 +1,17 @@
 import { common_ProductionRun, common_ProductionRunActuals } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
+import { AuxRunPlan } from './components/aux-run-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MarkerBlock } from './components/marker-block';
 import { MaterialPlan } from './components/material-plan';
@@ -40,6 +42,17 @@ export function ProductionRunDetail() {
   const { data: techCard } = useTechCard(ins?.techCardId ? ins.techCardId : undefined);
   const tcName = techCard?.techCard?.styleNumber || techCard?.techCard?.name || '';
 
+  // NF-07 / B-3: an auxiliary card produces a MATERIAL, not products. Its run is a single
+  // product-less quantity received into output_material_id, so it swaps the colour-model grid for
+  // a plain quantity plan and the receive posts into the material warehouse.
+  const isAux = techCard?.techCard?.purpose === 'auxiliary';
+  const outputMaterialId = techCard?.techCard?.outputMaterialId ?? 0;
+  const { data: materialsData } = useMaterials('', true, isAux);
+  const outputMaterial = useMemo(
+    () => (materialsData?.materials ?? []).find((m) => m.id === outputMaterialId),
+    [materialsData, outputMaterialId],
+  );
+
   const [editOpen, setEditOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -47,9 +60,12 @@ export function ProductionRunDetail() {
   const locked = isRunLocked(ins?.status);
   const receivable = isRunReceivable(ins?.status);
   // Lines planned but not yet tied to a product can't be booked on receive (NF-06) — hint it.
-  const unassignedPlanned = (ins?.lines ?? []).filter(
-    (l) => (l.plannedQty ?? 0) > 0 && !l.productId,
-  ).length;
+  // Auxiliary lines legitimately carry no product (they book into a material), so never flag them.
+  const unassignedPlanned = isAux
+    ? 0
+    : (ins?.lines ?? []).filter((l) => (l.plannedQty ?? 0) > 0 && !l.productId).length;
+  // An aux run can't be received until the card names an output material (FailedPrecondition).
+  const auxNoMaterial = isAux && !outputMaterialId;
 
   const confirmDelete = () =>
     del.mutate(runId, {
@@ -99,9 +115,11 @@ export function ProductionRunDetail() {
                 size='lg'
                 className='uppercase'
                 title={
-                  unassignedPlanned
-                    ? `${unassignedPlanned} line(s) have no product — publish them or zero their received qty`
-                    : undefined
+                  auxNoMaterial
+                    ? 'set an output material on the tech card before receiving'
+                    : unassignedPlanned
+                      ? `${unassignedPlanned} line(s) have no product — publish them or zero their received qty`
+                      : undefined
                 }
                 onClick={() => setReceiveOpen(true)}
               >
@@ -134,7 +152,17 @@ export function ProductionRunDetail() {
 
       {canReadCosting ? <PlanFactBlock run={run} actuals={actuals} /> : null}
 
-      <LinesGrid run={run} canEdit={canEdit} locked={locked} />
+      {isAux ? (
+        <AuxRunPlan
+          run={run}
+          canEdit={canEdit}
+          locked={locked}
+          outputMaterialId={outputMaterialId}
+          outputMaterial={outputMaterial}
+        />
+      ) : (
+        <LinesGrid run={run} canEdit={canEdit} locked={locked} />
+      )}
 
       <MarkerBlock run={run} canEdit={canEdit} locked={locked} />
 
@@ -150,7 +178,14 @@ export function ProductionRunDetail() {
       </div>
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
-      <ReceiveModal open={receiveOpen} onOpenChange={setReceiveOpen} run={run} />
+      <ReceiveModal
+        open={receiveOpen}
+        onOpenChange={setReceiveOpen}
+        run={run}
+        isAux={isAux}
+        outputMaterialId={outputMaterialId}
+        outputMaterial={outputMaterial}
+      />
       <ConfirmationModal
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
