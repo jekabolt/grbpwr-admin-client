@@ -62,9 +62,9 @@ export const fittingSchema = z
     mediaIds: z.array(z.number()).default([]),
     callouts: z.array(fittingCalloutSchema).default([]),
     // §4 round tracking: sequence number (0 = server auto-assigns per tech card), structured
-    // outcome ('' = undecided), and the change-request work list.
+    // outcome ('undecided' sentinel in the form ↔ '' on the wire), and the change-request work list.
     roundNumber: z.number().int().optional().default(0),
-    outcome: z.string().optional().default(''),
+    outcome: z.string().optional().default('undecided'),
     changeRequests: z.array(fittingChangeRequestSchema).default([]),
   })
   .refine((data) => !!data.productId || !!data.techCardId, {
@@ -89,7 +89,7 @@ export const fittingDefaultData: FittingFormData = {
   mediaIds: [],
   callouts: [],
   roundNumber: 0,
-  outcome: '',
+  outcome: 'undecided',
   changeRequests: [],
 };
 
@@ -152,7 +152,8 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       posY: decimalToInput(c.posY),
     })),
     roundNumber: insert?.roundNumber || 0,
-    outcome: insert?.outcome || '',
+    // '' on the wire → the non-empty 'undecided' sentinel the Select needs
+    outcome: insert?.outcome || 'undecided',
     changeRequests: (insert?.changeRequests ?? []).map((cr) => ({
       id: cr.id || 0,
       target: cr.target || '',
@@ -204,9 +205,10 @@ export function mapFormToFittingInsert(
         posY: inputToDecimal(c.posY),
       })),
     // §4 round tracking (form-managed). roundNumber 0 = server auto-assigns per tech card;
-    // outcome '' = undecided. Change requests are full-replace, like callouts — drop blank notes.
+    // the 'undecided' sentinel maps back to '' on the wire. Change requests are full-replace,
+    // like callouts — drop blank notes.
     roundNumber: data.roundNumber || 0,
-    outcome: data.outcome?.trim() || '',
+    outcome: data.outcome === 'undecided' ? '' : data.outcome?.trim() || '',
     changeRequests: (data.changeRequests ?? [])
       .filter((cr) => cr.note?.trim() || cr.target?.trim())
       .map((cr) => ({
