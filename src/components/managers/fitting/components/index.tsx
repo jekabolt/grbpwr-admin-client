@@ -37,8 +37,10 @@ import {
 import { SizesFields } from './sizes-fields';
 
 // Structured round outcome (raw strings per the FittingInsert contract; distinct from verdict).
+// The wire uses '' for undecided, but a Radix <Select.Item> may not carry an empty-string value —
+// the form/UI use the 'undecided' sentinel and the schema maps it back to '' on save.
 const fittingOutcomeOptions = [
-  { value: '', label: 'undecided' },
+  { value: 'undecided', label: 'undecided' },
   { value: 'approved', label: 'approved' },
   { value: 'new_round', label: 'new round' },
   { value: 'dropped', label: 'dropped' },
