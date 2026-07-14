@@ -914,7 +914,10 @@ export function mapFormToTechCardInsert(
       name: c.name?.trim() || '',
       labDipStatus: (c.labDipStatus ||
         'TECH_CARD_LAB_DIP_STATUS_UNKNOWN') as common_TechCardLabDipStatus,
-      productId: c.productId || 0,
+      // Aux exclusivity extends to per-colourway FKs: an auxiliary card links no products, so a
+      // colourway keeping its productId would send an inconsistent payload (products unlinked at
+      // the card level but still referenced per colourway).
+      productId: data.purpose === 'auxiliary' ? 0 : c.productId || 0,
       comment: c.comment?.trim() || '',
       pantone: c.pantone?.trim() || '',
       pantoneSystem: c.pantoneSystem?.trim() || '',
