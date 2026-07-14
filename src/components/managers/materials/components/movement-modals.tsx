@@ -10,6 +10,7 @@ import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } f
 import {
   useAdjustMaterialStock,
   useIssueMaterialStock,
+  useMaterialLots,
   useReceiveMaterialStock,
 } from './useWarehouse';
 
@@ -252,6 +253,9 @@ export function IssueStockModal({
   const [isReturn, setIsReturn] = useState(false);
   const [occurredAt, setOccurredAt] = useState(todayISO());
   const [comment, setComment] = useState('');
+  // gap-07 v2 D: optionally attribute the issue to a specific received lot (roll / dye-lot) for
+  // traceability — informational only, never a costing basis.
+  const [lotId, setLotId] = useState(0);
 
   const defRun = defaultTarget?.productionRunId ?? 0;
   const defSample = defaultTarget?.sampleId ?? 0;
@@ -265,7 +269,19 @@ export function IssueStockModal({
     setIsReturn(false);
     setOccurredAt(todayISO());
     setComment('');
+    setLotId(0);
   }, [open, defaultQty, defRun, defSample]);
+
+  // Lots to draw from: this material's non-archived batches with stock left. Only fetched while
+  // the modal is open (a returned lot with 0 remaining stays selectable if it was pre-picked).
+  const { data: lotsData } = useMaterialLots(
+    target.materialId,
+    false,
+    open && target.materialId > 0,
+  );
+  const lots = (lotsData?.lots ?? []).filter(
+    (l) => l.id === lotId || Number(l.remainingQty?.value ?? '0') > 0,
+  );
 
   const qtyNum = parseDecimalNumber(quantity);
   const onHandNum = parseDecimalNumber(target.onHand);
@@ -295,10 +311,10 @@ export function IssueStockModal({
         isReturn,
         occurredAt,
         comment: comment.trim(),
-        // gap-07 v2: optional per-colourway (product_id) and structured-lot attribution — not
-        // surfaced in this generic issue modal yet.
+        // gap-07 v2: lot attribution (below); per-colourway product_id attribution is set from the
+        // run's colourway on the run-detail issue flow, not this generic modal.
         productId: 0,
-        lotId: 0,
+        lotId,
       });
       showMessage(posted(res.movement), 'success');
       onOpenChange(false);
@@ -381,6 +397,23 @@ export function IssueStockModal({
           onChange={(e) => setOccurredAt(e.target.value)}
         />
       </Field>
+      {lots.length > 0 ? (
+        <Field label='lot (optional)'>
+          <select
+            className={cell}
+            value={lotId || 0}
+            onChange={(e) => setLotId(Number(e.target.value) || 0)}
+          >
+            <option value={0}>— any / unspecified —</option>
+            {lots.map((l) => (
+              <option key={l.id} value={l.id ?? 0}>
+                {l.lotCode || `lot #${l.id}`} · rem {decimalToInput(l.remainingQty) || '0'}
+                {target.unit ? ` ${target.unit}` : ''}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
       <Field label='comment'>
         <input className={cell} value={comment} onChange={(e) => setComment(e.target.value)} />
       </Field>

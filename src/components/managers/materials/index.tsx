@@ -2,14 +2,16 @@ import { useSearchParams } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { cn } from 'lib/utility';
 import { CatalogTab } from './components/catalog-tab';
+import { LotsTab } from './components/lots-tab';
 import { StockTab } from './components/stock-tab';
 import { MovementsTab } from './components/movements-tab';
 
-type Tab = 'catalog' | 'stock' | 'movements';
+type Tab = 'catalog' | 'stock' | 'movements' | 'lots';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'catalog', label: 'catalog' },
   { id: 'stock', label: 'stock' },
   { id: 'movements', label: 'movements' },
+  { id: 'lots', label: 'lots' },
 ];
 
 // /materials is three views of one nomenclature: the catalog (articles + prices), the warehouse
@@ -60,7 +62,15 @@ export function Materials() {
         ))}
       </div>
 
-      {tab === 'stock' ? <StockTab /> : tab === 'movements' ? <MovementsTab /> : <CatalogTab />}
+      {tab === 'stock' ? (
+        <StockTab />
+      ) : tab === 'movements' ? (
+        <MovementsTab />
+      ) : tab === 'lots' ? (
+        <LotsTab />
+      ) : (
+        <CatalogTab />
+      )}
     </div>
   );
 }

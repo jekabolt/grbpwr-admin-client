@@ -18,6 +18,8 @@ export const warehouseKeys = {
   stock: (filter: MaterialStockFilter) => [...warehouseKeys.all, 'stock', filter] as const,
   movements: (filter: MovementFilter, limit: number) =>
     [...warehouseKeys.all, 'movements', filter, limit] as const,
+  lots: (materialId: number, includeArchived: boolean) =>
+    [...warehouseKeys.all, 'lots', materialId, includeArchived] as const,
 };
 
 export type MaterialStockFilter = {
@@ -95,6 +97,19 @@ function useMovementMutation<TReq, TRes>(fn: (req: TReq) => Promise<TRes>) {
       if (target.productionRunId) qc.invalidateQueries({ queryKey: productionRunKeys.all });
       if (target.sampleId) qc.invalidateQueries({ queryKey: sampleKeys.all });
     },
+  });
+}
+
+// Material lots (gap-07 v2 D): received batches (roll / dye-lot) of a material with a running
+// remaining quantity, for traceability + colour matching. Read-only from the client — lots are
+// created as a side effect of receives; unit_cost is informational (valuation stays moving-avg,
+// NOT FIFO). materialId 0 lists across all materials. Lives under the warehouse tree so a receive
+// (which invalidates warehouseKeys.all) also refreshes the lot list.
+export function useMaterialLots(materialId: number, includeArchived: boolean, enabled = true) {
+  return useQuery({
+    queryKey: warehouseKeys.lots(materialId, includeArchived),
+    queryFn: () => adminService.ListMaterialLots({ materialId, includeArchived }),
+    enabled,
   });
 }
 
