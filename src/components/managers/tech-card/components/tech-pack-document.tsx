@@ -611,8 +611,9 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                 <KV
                   k='weight net / gross'
                   v={
-                    (dec(tc.packaging.weightNet) || dec(tc.packaging.weightGross)) &&
-                    `${dec(tc.packaging.weightNet) || '—'} / ${dec(tc.packaging.weightGross) || '—'}`
+                    tc.packaging.weightNetGrams || tc.packaging.weightGrossGrams
+                      ? `${tc.packaging.weightNetGrams || '—'} / ${tc.packaging.weightGrossGrams || '—'} g`
+                      : ''
                   }
                 />
               </div>
