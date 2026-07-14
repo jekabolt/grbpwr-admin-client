@@ -25,6 +25,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useMemo } from 'react';
 import { decimalToInput } from 'utils/decimal';
 import { PatternQR } from 'ui/components/pattern-qr';
+import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
 
 const mapOf = (opts: ReadonlyArray<{ value: string; label: string }>) =>
@@ -131,17 +132,20 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
       {/* COVER / IDENTITY */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
-          <div>
-            <div className='text-[10px] uppercase tracking-[0.2em] text-labelColor'>
-              {tc.brand || 'GRBPWR'} · tech pack
-            </div>
-            <div className='text-2xl font-bold uppercase leading-tight'>
-              {tc.name || 'untitled'}
-            </div>
-            <div className='text-sm'>
-              style <span className='font-semibold'>{tc.styleNumber || '—'}</span>
-              {tc.collection ? ` · ${tc.collection}` : ''}
-              {tc.season ? ` · ${tc.season}` : ''}
+          <div className='flex items-start gap-3'>
+            <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-black' />
+            <div>
+              <div className='text-[10px] uppercase tracking-[0.2em] text-labelColor'>
+                {tc.brand || 'GRBPWR'} · tech pack
+              </div>
+              <div className='text-2xl font-bold uppercase leading-tight'>
+                {tc.name || 'untitled'}
+              </div>
+              <div className='text-sm'>
+                style <span className='font-semibold'>{tc.styleNumber || '—'}</span>
+                {tc.collection ? ` · ${tc.collection}` : ''}
+                {tc.season ? ` · ${tc.season}` : ''}
+              </div>
             </div>
           </div>
           <div className='text-right text-[11px] leading-tight'>
