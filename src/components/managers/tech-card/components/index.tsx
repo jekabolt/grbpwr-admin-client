@@ -256,13 +256,6 @@ export function TechCardForm({
   async function doSubmit(data: TechCardFormData) {
     setConflict(false);
     const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting);
-    // The mapper mints an IDEA-<ts> draft number when the field is blank — write it back into
-    // the form, or every save of a blank IDEA card mints a NEW identity (and the header keeps
-    // showing nothing).
-    if (!data.styleNumber?.trim() && techCardInsert.styleNumber) {
-      data = { ...data, styleNumber: techCardInsert.styleNumber };
-      form.setValue('styleNumber', techCardInsert.styleNumber);
-    }
     try {
       if (isEditMode) {
         await updateTechCard.mutateAsync({
@@ -500,12 +493,12 @@ export function TechCardForm({
                 <InputField
                   name='styleNumber'
                   label={isIdea ? 'style number' : 'style number *'}
-                  placeholder={isIdea ? 'auto IDEA-… draft' : 'артикул'}
+                  placeholder={isIdea ? 'optional — set before PROTO' : 'артикул'}
                 />
                 {isIdea && (
                   <Text variant='inactive' size='small'>
-                    optional at idea — a draft number is assigned on save; set the real one before
-                    PROTO
+                    optional while this is an idea — a real style number is required before the card
+                    can advance to PROTO
                   </Text>
                 )}
                 <InputField name='name' label='name *' placeholder='название изделия' />
