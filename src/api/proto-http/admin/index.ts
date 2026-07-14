@@ -1011,6 +1011,16 @@ export type GetMetricsRequest = {
   sections: MetricsSection[] | undefined;
   limit: number | undefined;
   trendGranularity: TrendGranularity | undefined;
+  // Explicit comparison window — an arbitrary analyst baseline (e.g. "this week vs the launch
+  // week", "Black Friday vs a normal week") instead of the fixed compare_mode presets. When BOTH
+  // from and to are set it OVERRIDES compare_mode; otherwise compare_mode applies. from inclusive,
+  // to exclusive, same as the primary period.
+  comparePeriod: TimeRange | undefined;
+};
+
+export type TimeRange = {
+  from: wellKnownTimestamp | undefined;
+  to: wellKnownTimestamp | undefined;
 };
 
 export type GetMetricsResponse = {
@@ -1080,11 +1090,6 @@ export type BusinessMetrics = {
   margin: MarginMetrics | undefined;
   traffic: TrafficMetrics | undefined;
   email: EmailMetrics | undefined;
-};
-
-export type TimeRange = {
-  from: wellKnownTimestamp | undefined;
-  to: wellKnownTimestamp | undefined;
 };
 
 // CommerceCoreMetrics is the DB-authoritative commerce view: sales, customers, discounts,
@@ -2068,6 +2073,10 @@ export type GetDashboardRequest = {
   endAt: wellKnownTimestamp | undefined;
   // Max rows per action list (top-by-margin, reorder, clear, drops). 0 = server default.
   limit: number | undefined;
+  // Period-over-period comparison of the headline figures. NONE/UNSPECIFIED (default) = no
+  // comparison; PREVIOUS_PERIOD = the same-length window immediately before; SAME_PERIOD_LAST_YEAR
+  // = the same calendar dates a year earlier. When a real mode is set, the response carries `compare`.
+  compareMode: CompareMode | undefined;
 };
 
 // DashboardAlert is a server-computed, threshold-driven alert. Rate-based alerts are gated on
@@ -2111,6 +2120,34 @@ export type GetDashboardResponse = {
   opexTotal: googletype_Decimal | undefined;
   marketingSpend: googletype_Decimal | undefined;
   opexCaveat: string | undefined;
+  // Period-over-period comparison of the six headline figures. Present only when the request set
+  // compare_mode to a real mode. Every headline metric is higher-is-better, so a positive change
+  // is always a good move (no per-field direction flag needed). The margin/contribution/operating
+  // figures here (values AND change fields) are confidential and redacted for accounts without
+  // costing:read, exactly like their top-level twins.
+  compare: DashboardComparison | undefined;
+};
+
+// DashboardComparison is the prior-period snapshot of the dashboard headline figures plus the
+// period-over-period change, so each headline tile can render "€42,300 ▲12% vs prev". *_change_pct
+// is 100*(current−prior)/prior, left 0 when prior is 0 (no base). The gross-margin-% delta is a
+// percentage-POINT change (change_pp), NOT a percent-of-a-percent. revenue and orders are public;
+// the margin/contribution/operating figures and their change fields are confidential (redacted
+// without costing:read).
+export type DashboardComparison = {
+  period: TimeRange | undefined;
+  revenue: googletype_Decimal | undefined;
+  revenueChangePct: number | undefined;
+  orders: number | undefined;
+  ordersChangePct: number | undefined;
+  grossMargin: googletype_Decimal | undefined;
+  grossMarginChangePct: number | undefined;
+  grossMarginPct: number | undefined;
+  grossMarginPctChangePp: number | undefined;
+  contributionMargin: googletype_Decimal | undefined;
+  contributionMarginChangePct: number | undefined;
+  operatingResult: googletype_Decimal | undefined;
+  operatingResultChangePct: number | undefined;
 };
 
 // AlertSettings are the operator-tunable thresholds behind the dashboard alerts.
@@ -6380,6 +6417,12 @@ export function createAdminServiceClient(
       if (request.trendGranularity) {
         queryParams.push(`trendGranularity=${encodeURIComponent(request.trendGranularity.toString())}`)
       }
+      if (request.comparePeriod?.from) {
+        queryParams.push(`comparePeriod.from=${encodeURIComponent(request.comparePeriod.from.toString())}`)
+      }
+      if (request.comparePeriod?.to) {
+        queryParams.push(`comparePeriod.to=${encodeURIComponent(request.comparePeriod.to.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -6405,6 +6448,9 @@ export function createAdminServiceClient(
       }
       if (request.limit) {
         queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.compareMode) {
+        queryParams.push(`compareMode=${encodeURIComponent(request.compareMode.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
