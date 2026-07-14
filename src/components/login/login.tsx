@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
-import { Logo } from 'ui/icons/logo';
+import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import * as Yup from 'yup';
 import { isTokenExpired } from './protectedRoute';
 
@@ -33,7 +33,8 @@ export const LoginBlock: FC = () => {
       localStorage.setItem('authToken', response.authToken);
       navigate(ROUTES.main, { replace: true });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Invalid username or password. Please try again.';
+      const msg =
+        e instanceof Error ? e.message : 'Invalid username or password. Please try again.';
       setGeneralError(msg);
     } finally {
       setSubmitting(false);
@@ -54,8 +55,8 @@ export const LoginBlock: FC = () => {
       >
         {({ isSubmitting, handleSubmit }) => (
           <form onSubmit={handleSubmit} className='items-center flex flex-col gap-4 w-64'>
-            <div className='w-1/5 flex justify-center'>
-              <Logo />
+            <div className='flex w-20 justify-center'>
+              <GrbpwrMark className='w-full text-textColor' />
             </div>
             <div className='w-full space-y-3'>
               <Field as={Input} name='username' placeholder='username' className='h-10' />

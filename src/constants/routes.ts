@@ -66,6 +66,7 @@ export enum ROUTES {
   settings = '/settings',
   orders = '/orders',
   orderDetails = '/orders/:uuid',
+  orderInvoice = '/orders/:uuid/invoice',
   fulfillment = '/fulfillment',
   fulfillmentCard = '/fulfillment/:uuid',
   customOrders = '/custom-orders',

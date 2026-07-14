@@ -6,16 +6,13 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
 import { FormProvider, useForm } from 'react-hook-form';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
-import { Logo } from 'ui/icons/logo';
 import { Buyer } from './components/buyer';
 import { Comment } from './components/comment';
-import { Description } from './components/description';
 import { OrderTable } from './components/order-table';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
@@ -113,10 +110,6 @@ export function OrderDetails() {
   return (
     <FormProvider {...form}>
       <div className='flex w-full flex-col gap-6 pb-24'>
-        <div className='hidden h-10 self-start print:block'>
-          <Logo />
-        </div>
-
         {/* Screen header */}
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3 print:hidden'>
           <div className='flex flex-wrap items-center gap-3'>
@@ -143,20 +136,10 @@ export function OrderDetails() {
             <Text variant='inactive' size='small'>
               placed {orderPlaced}
             </Text>
-            <Button
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={() => window.print()}
-            >
-              print
+            <Button asChild variant='secondary' size='lg' className='uppercase'>
+              <Link to={`/orders/${uuid}/invoice`}>invoice</Link>
             </Button>
           </div>
-        </div>
-
-        {/* Print-only header (keeps the original print document layout) */}
-        <div className='hidden print:block'>
-          <Description orderDetails={orderDetails} orderStatus={orderStatus} isPrinting />
         </div>
 
         {isLoading && !order ? (
@@ -299,15 +282,6 @@ export function OrderDetails() {
           refundOrder={handleRefundConfirm}
         />
       </div>
-      {createPortal(
-        <Text
-          variant='uppercase'
-          className='font-bold hidden print:block print:absolute print:bottom-0 print:inset-x-0'
-        >
-          If you have any questions, please send an email to customercare@grbpwr.com
-        </Text>,
-        document.body,
-      )}
     </FormProvider>
   );
 }
