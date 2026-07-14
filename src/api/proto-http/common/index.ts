@@ -700,6 +700,12 @@ export type ShipmentCarrierInsert = {
   description: string | undefined;
   trackingUrl: string | undefined;
   expectedDeliveryTime: string | undefined;
+  // aftership_slug is the AfterShip courier slug used to auto-track this carrier's shipments.
+  // Empty = the carrier has no tracking API, so its orders are auto-delivered only by the timer.
+  aftershipSlug: string | undefined;
+  // auto_deliver_after_hours is the timer safety-net window: hours after shipment to silently mark
+  // an order delivered when no real delivery signal arrived. 0 = use the server default (14 days).
+  autoDeliverAfterHours: number | undefined;
 };
 
 export type ShipmentCarrier = {
@@ -1905,8 +1911,8 @@ export type TechCardPackaging = {
   unitsPerBox: number | undefined;
   boxMarking: string | undefined;
   boxDimensions: string | undefined;
-  weightNet: googletype_Decimal | undefined;
-  weightGross: googletype_Decimal | undefined;
+  weightNetGrams: number | undefined;
+  weightGrossGrams: number | undefined;
   notes: string | undefined;
 };
 
