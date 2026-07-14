@@ -2,6 +2,7 @@ import { ADMIN_GROUP, ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { FC, ReactNode, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { GrbpwrMark } from './icons/grbpwr-mark';
 import { Button } from './components/button';
 import { LeftSideNavMenu } from './components/left-side-nav-menu';
 import { NavDropdownMenu } from './components/nav-dropdown-menu';
@@ -43,7 +44,10 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
             size='lg'
             className='text-center transition-colors hover:opacity-70 active:opacity-50'
           >
-            <Link to='/'>grbpwr</Link>
+            <Link to='/' className='flex items-center gap-2'>
+              <GrbpwrMark className='h-5 w-5 shrink-0' />
+              grbpwr
+            </Link>
           </Button>
         </div>
 

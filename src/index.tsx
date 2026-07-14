@@ -84,6 +84,9 @@ const TechCard = lazy(() =>
 const TechCardPrint = lazy(() =>
   import('components/managers/tech-card/print-page').then((m) => ({ default: m.TechCardPrint })),
 );
+const OrderInvoicePrint = lazy(() =>
+  import('components/managers/order/invoice-page').then((m) => ({ default: m.OrderInvoicePrint })),
+);
 const Materials = lazy(() =>
   import('components/managers/materials').then((m) => ({ default: m.Materials })),
 );
@@ -253,6 +256,7 @@ root.render(
                     no app chrome to isolate via fragile print CSS. */}
                 <Route path='/' element={<ProtectedBare />}>
                   <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
+                  <Route path={ROUTES.orderInvoice} element={<OrderInvoicePrint />} />
                 </Route>
               </Routes>
             </Suspense>
