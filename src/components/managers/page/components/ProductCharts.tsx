@@ -67,9 +67,10 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
 
   const categoryData =
     commerce?.revenueByCategory?.map((c) => ({
-      name: (c.categoryName || `#${c.categoryId}`).slice(0, 20),
+      name: (c.categoryDisplayName || c.categoryName || `#${c.categoryId}`).slice(0, 20),
       value: parseDecimal(c.value),
       count: c.count ?? 0,
+      sharePct: c.sharePct,
     })) ?? [];
 
   // Horizontal bar swaps axes: the category helper feeds yAxis, the value helper xAxis.
@@ -130,13 +131,25 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
     ],
   };
 
+  const categoryTooltip = (raw: TooltipComponentFormatterCallbackParams) => {
+    const items = Array.isArray(raw) ? raw : [raw];
+    const idx = items[0]?.dataIndex;
+    const share = typeof idx === 'number' ? categoryData[idx]?.sharePct : undefined;
+    const label = items[0]?.name ?? '';
+    const shareLine =
+      share != null && share > 0 ? ` <span style="color:#666">· ${share.toFixed(0)}%</span>` : '';
+    return `<div style="font-size:11px;line-height:1.6">${label}<br/><b>${formatCurrency(
+      Number(items[0]?.value ?? 0),
+    )}</b>${shareLine}</div>`;
+  };
+
   const categoryOption: EChartsOption = {
     grid: { ...gridBase },
     tooltip: {
       ...tooltipBase,
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      formatter: makeTooltipFormatter(formatCurrency),
+      formatter: categoryTooltip,
     },
     xAxis: hValueAxis({ axisLabel: { formatter: (v: number) => formatCurrency(v) } }),
     yAxis: hCategoryAxis({

@@ -2,6 +2,7 @@ import type { common_AddressInsert } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { Buyer } from 'components/managers/order/components/buyer';
 import { OrderTable } from 'components/managers/order/components/order-table';
+import { RiskBanner, SettlementCompact } from 'components/managers/order/components/stripe-details';
 import {
   formatDateShort,
   getOrderStatusName,
@@ -60,7 +61,7 @@ export function FulfillmentCardDetail() {
   const { uuid } = useParams<{ uuid: string }>();
   const { dictionary } = useDictionary();
 
-  const { canRead, canWrite: canWriteSection, resolved } = usePermissions();
+  const { canRead, canWrite: canWriteSection, canReadCosting, resolved } = usePermissions();
   const canView = !resolved || canRead(SECTION.fulfillment);
   const canWrite = canWriteSection(SECTION.fulfillment);
   const canReadOrders = canRead(SECTION.orders);
@@ -113,6 +114,7 @@ export function FulfillmentCardDetail() {
 
   const order = data.order;
   const annotation = data.annotation;
+  const stripeDetails = data.stripeDetails;
   const o = order.order;
   const currency = o?.currency ?? '';
   const statusName = getOrderStatusName(dictionary, o?.orderStatusId);
@@ -192,6 +194,9 @@ export function FulfillmentCardDetail() {
         </div>
       </div>
 
+      {/* Stripe Radar risk — same screen as the ship action so it can't be missed. */}
+      <RiskBanner riskLevel={stripeDetails?.riskLevel} />
+
       {/* Body */}
       <div className='grid grid-cols-1 gap-6 md:grid-cols-[1fr_20rem]'>
         {/* Main — items + summary */}
@@ -242,6 +247,8 @@ export function FulfillmentCardDetail() {
               </div>
             )}
           </div>
+
+          {canReadCosting && <SettlementCompact stripeDetails={stripeDetails} />}
         </aside>
       </div>
 

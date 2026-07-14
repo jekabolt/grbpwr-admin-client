@@ -5,6 +5,7 @@ import type {
   common_FulfillmentChecklistItem,
   common_FulfillmentColumnCards,
   common_OrderFull,
+  common_OrderStripeDetails,
 } from 'api/proto-http/admin';
 import {
   FulfillmentAnnotation,
@@ -22,9 +23,11 @@ import {
 // reuse the existing order-display components (Buyer, OrderTable, …) unchanged.
 export interface FulfillmentService {
   getBoard(deliveredLimit?: number): Promise<FulfillmentColumnCards[]>;
-  getCard(
-    orderUuid: string,
-  ): Promise<{ order: common_OrderFull | undefined; annotation: FulfillmentAnnotation }>;
+  getCard(orderUuid: string): Promise<{
+    order: common_OrderFull | undefined;
+    annotation: FulfillmentAnnotation;
+    stripeDetails: common_OrderStripeDetails | undefined;
+  }>;
   setAssignee(orderUuid: string, assignee: string): Promise<void>;
   setNotes(orderUuid: string, notes: string): Promise<void>;
   addChecklistItem(orderUuid: string, content: string): Promise<{ id: number }>;
@@ -93,6 +96,7 @@ export const fulfillmentService: FulfillmentService = {
     adminService.GetFulfillmentCard({ orderUuid }).then((r) => ({
       order: r.order,
       annotation: mapAnnotation(orderUuid, r.annotation),
+      stripeDetails: r.stripeDetails,
     })),
 
   setAssignee: (orderUuid, assignee) =>

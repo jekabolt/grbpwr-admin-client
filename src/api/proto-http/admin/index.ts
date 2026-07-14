@@ -59,7 +59,11 @@ export type MetricsSection =
   | "METRICS_SECTION_SELL_THROUGH_BY_DROP"
   | "METRICS_SECTION_MARGIN_BY_STYLE"
   | "METRICS_SECTION_COGS_STRUCTURE"
-  | "METRICS_SECTION_INVENTORY_VALUATION";
+  | "METRICS_SECTION_INVENTORY_VALUATION"
+  | "METRICS_SECTION_ORDER_VALUE_BANDS"
+  | "METRICS_SECTION_DELIVERY"
+  | "METRICS_SECTION_FORECAST"
+  | "METRICS_SECTION_PROFITABILITY";
 export type AlertSeverity =
   | "ALERT_SEVERITY_UNSPECIFIED"
   | "ALERT_SEVERITY_INFO"
@@ -771,6 +775,9 @@ export type GetOrderByUUIDRequest = {
 
 export type GetOrderByUUIDResponse = {
   order: common_OrderFull | undefined;
+  // stripe_details holds admin-only settlement/Stripe metadata (EUR received, fee,
+  // FX rate, card, dashboard link) not present on the customer-facing order.
+  stripeDetails: common_OrderStripeDetails | undefined;
 };
 
 export type common_OrderFull = {
@@ -842,6 +849,13 @@ export type common_PaymentInsert = {
   clientSecret: string | undefined;
   isTransactionDone: boolean | undefined;
   expiredAt: wellKnownTimestamp | undefined;
+  // payment_method_type is the most specific label for how the customer paid:
+  // the card wallet (apple_pay, google_pay, link) when tokenised through a wallet,
+  // otherwise the payment-method type (card, klarna, ...). Empty when uncaptured.
+  paymentMethodType: string | undefined;
+  // receipt_url is Stripe's hosted receipt for the charge (customer-facing). Empty
+  // for non-Stripe methods or when no receipt was produced.
+  receiptUrl: string | undefined;
 };
 
 // Shipment represents the shipment table
@@ -945,6 +959,28 @@ export type common_FitScaleEnum =
   | "FIT_SCALE_ENUM_TRUE_TO_SIZE"
   | "FIT_SCALE_ENUM_SLIGHTLY_LARGE"
   | "FIT_SCALE_ENUM_RUNS_LARGE";
+// OrderStripeDetails carries admin-only financial and Stripe metadata for an order.
+// It is NOT part of the customer-facing order (kept off common.Order/common.Payment,
+// which the storefront shares) and is attached only to admin responses. All amounts
+// are in the base currency (EUR); fields are empty when not captured.
+export type common_OrderStripeDetails = {
+  // total_settled_base is the actual amount Stripe settled in the base currency (EUR)
+  // at Stripe's FX rate — the authoritative "how much we received" figure.
+  totalSettledBase: googletype_Decimal | undefined;
+  // payment_fee is the Stripe processing fee (EUR) from the same balance transaction.
+  paymentFee: googletype_Decimal | undefined;
+  // net_settled_base = total_settled_base - payment_fee (EUR), what actually reached us.
+  netSettledBase: googletype_Decimal | undefined;
+  // stripe_exchange_rate is the presentment->settlement FX rate Stripe applied at the sale.
+  stripeExchangeRate: googletype_Decimal | undefined;
+  cardBrand: string | undefined;
+  cardLast4: string | undefined;
+  riskLevel: string | undefined;
+  // stripe_dashboard_url deep-links to the payment in the Stripe dashboard (test vs live
+  // resolved from the order's payment method). Empty when the PaymentIntent id is unknown.
+  stripeDashboardUrl: string | undefined;
+};
+
 export type SetTrackingNumberRequest = {
   orderUuid: string | undefined;
   trackingCode: string | undefined;
@@ -1028,6 +1064,10 @@ export type GetMetricsResponse = {
   marginByStyle: MarginByStyleRow[] | undefined;
   cogsStructure: CogsStructureRow[] | undefined;
   inventoryValuation: InventoryValuation | undefined;
+  orderValueBands: OrderValueBandRow[] | undefined;
+  delivery: DeliverySection | undefined;
+  revenueForecast: RevenueForecast | undefined;
+  profitability: ProfitabilitySection | undefined;
 };
 
 // BusinessMetrics groups the overview metrics by data provenance so consumers can tell
@@ -1111,6 +1151,10 @@ export type CommerceCoreMetrics = {
   returningCustomersByDayCompare: TimeSeriesPoint[] | undefined;
   shippedByDayCompare: TimeSeriesPoint[] | undefined;
   deliveredByDayCompare: TimeSeriesPoint[] | undefined;
+  uniqueCustomers: MetricWithComparison | undefined;
+  peakDay: PeakDay | undefined;
+  discountRatePct: MetricWithComparison | undefined;
+  newVsReturning: NewVsReturningSplit | undefined;
 };
 
 export type MetricWithComparison = {
@@ -1151,6 +1195,7 @@ export type GeographyMetric = {
   compareCount: number | undefined;
   sharePct: number | undefined;
   avgOrderValue: googletype_Decimal | undefined;
+  changePct: number | undefined;
 };
 
 export type RegionMetric = {
@@ -1194,6 +1239,7 @@ export type CategoryMetric = {
   value: googletype_Decimal | undefined;
   count: number | undefined;
   categoryDisplayName: string | undefined;
+  sharePct: number | undefined;
 };
 
 export type CrossSellPair = {
@@ -1223,6 +1269,24 @@ export type TimeSeriesPoint = {
   date: wellKnownTimestamp | undefined;
   value: googletype_Decimal | undefined;
   count: number | undefined;
+};
+
+export type PeakDay = {
+  date: wellKnownTimestamp | undefined;
+  revenue: googletype_Decimal | undefined;
+  orders: number | undefined;
+};
+
+export type NewVsReturningSplit = {
+  newOrders: MetricWithComparison | undefined;
+  newRevenue: MetricWithComparison | undefined;
+  newAov: MetricWithComparison | undefined;
+  returningOrders: MetricWithComparison | undefined;
+  returningRevenue: MetricWithComparison | undefined;
+  returningAov: MetricWithComparison | undefined;
+  newRevenueSharePct: number | undefined;
+  newRevenueByDay: TimeSeriesPoint[] | undefined;
+  returningRevenueByDay: TimeSeriesPoint[] | undefined;
 };
 
 // MarginMetrics is the DB-trusted COGS / margin view (from product.cost_price), computed over
@@ -1775,6 +1839,50 @@ export type ProductEngagementMetricsPct = {
 export type GeographySection = {
   byCountry: GeographyMetric[] | undefined;
   sessionsByCountry: GeographySessionMetric[] | undefined;
+  economicsByCountry: CountryEconomicsRow[] | undefined;
+  logisticsByCountry: CountryLogisticsRow[] | undefined;
+  demandByCountry: CountryDemandRow[] | undefined;
+};
+
+export type CountryEconomicsRow = {
+  country: string | undefined;
+  revenue: googletype_Decimal | undefined;
+  orders: number | undefined;
+  revenueCost: googletype_Decimal | undefined;
+  grossMargin: googletype_Decimal | undefined;
+  grossMarginPct: number | undefined;
+  costCoveragePct: number | undefined;
+  shippingCost: googletype_Decimal | undefined;
+  paymentFees: googletype_Decimal | undefined;
+  contributionMargin: googletype_Decimal | undefined;
+  profitPerOrder: googletype_Decimal | undefined;
+  totalDiscount: googletype_Decimal | undefined;
+  ltvAvg: googletype_Decimal | undefined;
+  ltvSample: number | undefined;
+};
+
+export type CountryLogisticsRow = {
+  country: string | undefined;
+  avgDaysPlacedToDelivered: number | undefined;
+  avgDaysPlacedToShipped: number | undefined;
+  onTimeRatePct: number | undefined;
+  deliveredSample: number | undefined;
+  avgShippingCost: googletype_Decimal | undefined;
+  refundRatePct: number | undefined;
+  refundOrders: number | undefined;
+};
+
+export type CountryDemandRow = {
+  country: string | undefined;
+  sessions: number | undefined;
+  orders: number | undefined;
+  conversionRatePct: number | undefined;
+  aov: googletype_Decimal | undefined;
+  newCustomers: number | undefined;
+  returningCustomers: number | undefined;
+  newSharePct: number | undefined;
+  topCategories: CategoryMetric[] | undefined;
+  caveat: string | undefined;
 };
 
 export type CustomerSegmentRow = {
@@ -1887,6 +1995,70 @@ export type MaterialValuationRow = {
   onHand: googletype_Decimal | undefined;
   avgUnitCostBase: googletype_Decimal | undefined;
   value: googletype_Decimal | undefined;
+};
+
+export type OrderValueBandRow = {
+  label: string | undefined;
+  from: googletype_Decimal | undefined;
+  to: googletype_Decimal | undefined;
+  orders: number | undefined;
+  revenue: googletype_Decimal | undefined;
+  ordersSharePct: number | undefined;
+  revenueSharePct: number | undefined;
+  avgOrderValue: googletype_Decimal | undefined;
+};
+
+export type DeliverySection = {
+  avgDaysPlacedToShipped: number | undefined;
+  avgDaysShippedToDelivered: number | undefined;
+  avgDaysPlacedToDelivered: number | undefined;
+  medianDaysPlacedToDelivered: number | undefined;
+  onTimeRatePct: number | undefined;
+  onTimeSample: number | undefined;
+  etaCoveragePct: number | undefined;
+  deliveredCoveragePct: number | undefined;
+  deliveredSample: number | undefined;
+  shippedSample: number | undefined;
+  avgDeliveryDaysByWeek: TimeSeriesPoint[] | undefined;
+  caveat: string | undefined;
+};
+
+export type RevenueForecast = {
+  month: wellKnownTimestamp | undefined;
+  mtdActual: googletype_Decimal | undefined;
+  forecast: googletype_Decimal | undefined;
+  forecastLow: googletype_Decimal | undefined;
+  forecastHigh: googletype_Decimal | undefined;
+  runRate: googletype_Decimal | undefined;
+  method: string | undefined;
+  elapsedDays: number | undefined;
+  remainingDays: number | undefined;
+  lastYearMonthTotal: googletype_Decimal | undefined;
+  caveat: string | undefined;
+};
+
+export type ProfitabilitySection = {
+  grossMargin: MetricWithComparison | undefined;
+  grossMarginPct: MetricWithComparison | undefined;
+  costCoveragePct: number | undefined;
+  totalDiscount: MetricWithComparison | undefined;
+  productSaleDiscount: MetricWithComparison | undefined;
+  promoCodeDiscount: MetricWithComparison | undefined;
+  discountRatePct: MetricWithComparison | undefined;
+  contributionMargin: MetricWithComparison | undefined;
+  cpo: MetricWithComparison | undefined;
+  blendedCac: MetricWithComparison | undefined;
+  hasSpend: boolean | undefined;
+  ltv: googletype_Decimal | undefined;
+  ltvCacRatio: number | undefined;
+  fulfilmentCostPerOrder: MetricWithComparison | undefined;
+  refundRate: MetricWithComparison | undefined;
+  totalRefunded: MetricWithComparison | undefined;
+  opexTotal: googletype_Decimal | undefined;
+  marketingSpend: googletype_Decimal | undefined;
+  operatingResult: googletype_Decimal | undefined;
+  opexCaveat: string | undefined;
+  caveat: string | undefined;
 };
 
 export type GetDashboardRequest = {
@@ -3075,6 +3247,9 @@ export type GetFulfillmentCardRequest = {
 export type GetFulfillmentCardResponse = {
   order: common_OrderFull | undefined;
   annotation: common_FulfillmentAnnotation | undefined;
+  // stripe_details holds admin-only settlement/Stripe metadata (EUR received, fee,
+  // FX rate, card, dashboard link) not present on the customer-facing order.
+  stripeDetails: common_OrderStripeDetails | undefined;
 };
 
 // FulfillmentAnnotation is the board-owned overlay on an order: an assignee,
