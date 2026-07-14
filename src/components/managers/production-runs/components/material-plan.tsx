@@ -5,9 +5,10 @@ import {
   IssueStockModal,
   MovementTarget,
 } from 'components/managers/materials/components/movement-modals';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
@@ -39,6 +40,21 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
   const { data, isLoading, isError, refetch, isFetching } = useMaterialPlan(runId, runId > 0);
   const rows = data?.rows ?? [];
   const caveats = data?.caveats ?? [];
+
+  // The run's colourways (products) so an issue can be attributed to the one it was cut for
+  // (gap-07 v2 C) — only the published ones, since attribution keys on product_id.
+  const techCardId = run.run?.techCardId ?? 0;
+  const { data: techCard } = useTechCard(techCardId ? techCardId : undefined);
+  const colorways = useMemo(
+    () =>
+      (techCard?.techCard?.colorways ?? [])
+        .filter((c) => (c.productId ?? 0) > 0)
+        .map((c) => ({
+          productId: c.productId ?? 0,
+          label: `${c.code ? `${c.code} · ` : ''}${c.name ?? `#${c.productId}`}`,
+        })),
+    [techCard],
+  );
 
   const [issue, setIssue] = useState<{ target: MovementTarget; qty: string } | undefined>();
 
@@ -191,6 +207,7 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
           defaultTarget={{ productionRunId: runId }}
           defaultQty={issue.qty}
           lockTarget
+          colorways={colorways}
         />
       ) : null}
     </div>

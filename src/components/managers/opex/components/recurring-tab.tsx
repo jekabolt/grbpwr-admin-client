@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
+import { useEmployees } from 'components/managers/employees/utils/hooks';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   monthToApi,
@@ -173,6 +174,7 @@ type Draft = {
   activeFrom: string;
   activeTo: string;
   note: string;
+  employeeId: number;
 };
 
 function RecurringFormModal({
@@ -186,8 +188,11 @@ function RecurringFormModal({
 }) {
   const { showMessage } = useSnackBarStore();
   const upsert = useUpsertOpexRecurring();
+  // Employees to link a salary template to (gap-07 v2 A). Only fetched while the modal is open.
+  const { data: employeeData } = useEmployees(false, open);
+  const employees = employeeData?.employees ?? [];
 
-  const [d, setD] = useState<Draft>({
+  const emptyDraft: Draft = {
     label: '',
     category: 'salaries',
     amount: '',
@@ -195,7 +200,9 @@ function RecurringFormModal({
     activeFrom: '',
     activeTo: '',
     note: '',
-  });
+    employeeId: 0,
+  };
+  const [d, setD] = useState<Draft>(emptyDraft);
 
   useEffect(() => {
     if (!open) return;
@@ -210,17 +217,11 @@ function RecurringFormModal({
             activeFrom: toMonth(ins.activeFrom),
             activeTo: toMonth(ins.activeTo),
             note: ins.note ?? '',
+            employeeId: ins.employeeId ?? 0,
           }
-        : {
-            label: '',
-            category: 'salaries',
-            amount: '',
-            currency: 'EUR',
-            activeFrom: '',
-            activeTo: '',
-            note: '',
-          },
+        : emptyDraft,
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existing, open]);
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
@@ -251,8 +252,8 @@ function RecurringFormModal({
           activeFrom: monthToApi(d.activeFrom),
           activeTo: d.activeTo ? monthToApi(d.activeTo) : '',
           note: d.note.trim(),
-          // gap-07 v2 A: salary link to the employee registry — registry UI not built yet.
-          employeeId: 0,
+          // gap-07 v2 A: optional link to the employee registry (salary templates).
+          employeeId: d.employeeId || 0,
         },
       });
       showMessage(existing ? 'Template saved' : 'Template added', 'success');
@@ -304,6 +305,29 @@ function RecurringFormModal({
                 ))}
               </datalist>
             </label>
+            {employees.length > 0 || d.employeeId > 0 ? (
+              <label className='flex flex-col gap-1'>
+                <Text size='small'>employee (optional — salary link)</Text>
+                <select
+                  className={cell}
+                  value={d.employeeId || 0}
+                  onChange={(e) => set({ employeeId: Number(e.target.value) || 0 })}
+                >
+                  <option value={0}>— none —</option>
+                  {/* A linked employee since archived is no longer in the list — keep it selectable
+                      so editing the template doesn't silently drop the link. */}
+                  {d.employeeId > 0 && !employees.some((e) => e.id === d.employeeId) ? (
+                    <option value={d.employeeId}>employee #{d.employeeId}</option>
+                  ) : null}
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id ?? 0}>
+                      {e.employee?.fullName || `employee #${e.id}`}
+                      {e.employee?.role ? ` · ${e.employee.role}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className='grid grid-cols-[1fr_7rem] gap-2'>
               <label className='flex flex-col gap-1'>
                 <Text size='small'>amount</Text>
