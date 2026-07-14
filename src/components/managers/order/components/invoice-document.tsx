@@ -1,7 +1,9 @@
 import { common_Dictionary } from 'api/proto-http/admin';
 import { common_AddressInsert, common_OrderFull } from 'api/proto-http/frontend';
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
+import { buildOrderTrackingUrl } from 'lib/storefront-links';
 import { ReactNode } from 'react';
+import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 
 const TD = 'border border-black px-1.5 py-1 align-top';
@@ -127,6 +129,11 @@ export function InvoiceDocument({
   const paymentMethod = payment?.paymentMethod?.replace('PAYMENT_METHOD_NAME_ENUM_', '');
   const paid = !!payment?.isTransactionDone;
 
+  // Customer-facing link to this order on the storefront, scannable off the printed
+  // invoice. Origin tracks the admin environment (beta admin → beta store), so it works
+  // in both. Only shown when we have the uuid + email needed to resolve it.
+  const trackingUrl = buildOrderTrackingUrl(order.uuid, buyer?.email);
+
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
       {/* HEADER / IDENTITY */}
@@ -144,10 +151,20 @@ export function InvoiceDocument({
               <div className='break-all text-[11px] text-labelColor'>ref {order.uuid || '—'}</div>
             </div>
           </div>
-          <div className='shrink-0 text-right text-[11px] leading-tight'>
-            <div className='font-semibold uppercase'>{orderStatus || '—'}</div>
-            <div>placed {formatDateShort(order.placed, true) || '—'}</div>
-            <div className='text-labelColor'>{currency || '—'}</div>
+          <div className='flex shrink-0 items-start gap-4'>
+            <div className='text-right text-[11px] leading-tight'>
+              <div className='font-semibold uppercase'>{orderStatus || '—'}</div>
+              <div>placed {formatDateShort(order.placed, true) || '—'}</div>
+              <div className='text-labelColor'>{currency || '—'}</div>
+            </div>
+            {trackingUrl && (
+              <div className='shrink-0 text-center'>
+                <PatternQR value={trackingUrl} size={76} />
+                <div className='mt-1 text-[8px] uppercase tracking-wide text-labelColor'>
+                  scan to view order
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </header>
