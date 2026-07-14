@@ -10,6 +10,7 @@ import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } f
 import {
   useAdjustMaterialStock,
   useIssueMaterialStock,
+  useMaterialLots,
   useReceiveMaterialStock,
 } from './useWarehouse';
 
@@ -235,6 +236,7 @@ export function IssueStockModal({
   defaultTarget,
   defaultQty,
   lockTarget,
+  colorways,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -243,6 +245,9 @@ export function IssueStockModal({
   defaultTarget?: { productionRunId?: number; sampleId?: number };
   defaultQty?: string;
   lockTarget?: boolean;
+  // gap-07 v2 C: the run's colourways, so a run issue can be attributed to the product it was cut
+  // for (feeds ProductionRunActuals.by_colorway). Only meaningful when issuing to a run.
+  colorways?: { productId: number; label: string }[];
 }) {
   const { showMessage } = useSnackBarStore();
   const issue = useIssueMaterialStock();
@@ -252,6 +257,11 @@ export function IssueStockModal({
   const [isReturn, setIsReturn] = useState(false);
   const [occurredAt, setOccurredAt] = useState(todayISO());
   const [comment, setComment] = useState('');
+  // gap-07 v2 D: optionally attribute the issue to a specific received lot (roll / dye-lot) for
+  // traceability — informational only, never a costing basis.
+  const [lotId, setLotId] = useState(0);
+  // gap-07 v2 C: which colourway (product) this fabric was cut for; 0 = whole run (unattributed).
+  const [productId, setProductId] = useState(0);
 
   const defRun = defaultTarget?.productionRunId ?? 0;
   const defSample = defaultTarget?.sampleId ?? 0;
@@ -265,7 +275,20 @@ export function IssueStockModal({
     setIsReturn(false);
     setOccurredAt(todayISO());
     setComment('');
+    setLotId(0);
+    setProductId(0);
   }, [open, defaultQty, defRun, defSample]);
+
+  // Lots to draw from: this material's non-archived batches with stock left. Only fetched while
+  // the modal is open (a returned lot with 0 remaining stays selectable if it was pre-picked).
+  const { data: lotsData } = useMaterialLots(
+    target.materialId,
+    false,
+    open && target.materialId > 0,
+  );
+  const lots = (lotsData?.lots ?? []).filter(
+    (l) => l.id === lotId || Number(l.remainingQty?.value ?? '0') > 0,
+  );
 
   const qtyNum = parseDecimalNumber(quantity);
   const onHandNum = parseDecimalNumber(target.onHand);
@@ -295,10 +318,10 @@ export function IssueStockModal({
         isReturn,
         occurredAt,
         comment: comment.trim(),
-        // gap-07 v2: optional per-colourway (product_id) and structured-lot attribution — not
-        // surfaced in this generic issue modal yet.
-        productId: 0,
-        lotId: 0,
+        // gap-07 v2: colourway (product_id) attribution only applies to a run issue; lot (lot_id)
+        // is optional traceability. Both default to 0 (whole-run / unspecified).
+        productId: targetKind === 'run' ? productId : 0,
+        lotId,
       });
       showMessage(posted(res.movement), 'success');
       onOpenChange(false);
@@ -369,6 +392,23 @@ export function IssueStockModal({
         </div>
       )}
 
+      {targetKind === 'run' && colorways && colorways.length > 0 ? (
+        <Field label='colourway (optional — attributes cost)'>
+          <select
+            className={cell}
+            value={productId || 0}
+            onChange={(e) => setProductId(Number(e.target.value) || 0)}
+          >
+            <option value={0}>— whole run (unattributed) —</option>
+            {colorways.map((c) => (
+              <option key={c.productId} value={c.productId}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+
       <label className='flex items-center gap-2'>
         <input type='checkbox' checked={isReturn} onChange={(e) => setIsReturn(e.target.checked)} />
         <Text size='small'>this is a return (leftover back to stock)</Text>
@@ -381,6 +421,23 @@ export function IssueStockModal({
           onChange={(e) => setOccurredAt(e.target.value)}
         />
       </Field>
+      {lots.length > 0 ? (
+        <Field label='lot (optional)'>
+          <select
+            className={cell}
+            value={lotId || 0}
+            onChange={(e) => setLotId(Number(e.target.value) || 0)}
+          >
+            <option value={0}>— any / unspecified —</option>
+            {lots.map((l) => (
+              <option key={l.id} value={l.id ?? 0}>
+                {l.lotCode || `lot #${l.id}`} · rem {decimalToInput(l.remainingQty) || '0'}
+                {target.unit ? ` ${target.unit}` : ''}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
       <Field label='comment'>
         <input className={cell} value={comment} onChange={(e) => setComment(e.target.value)} />
       </Field>

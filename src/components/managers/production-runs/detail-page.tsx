@@ -1,4 +1,8 @@
-import { common_ProductionRun, common_ProductionRunActuals } from 'api/proto-http/admin';
+import {
+  common_ProductionRun,
+  common_ProductionRunActuals,
+  common_TechCardColorway,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
@@ -152,6 +156,12 @@ export function ProductionRunDetail() {
 
       {canReadCosting ? <PlanFactBlock run={run} actuals={actuals} /> : null}
 
+      {canReadCosting &&
+      actuals &&
+      ((actuals.byColorway?.length ?? 0) > 0 || actuals.unattributedMaterialsBase?.value) ? (
+        <ColorwayCostBlock actuals={actuals} colorways={techCard?.techCard?.colorways ?? []} />
+      ) : null}
+
       {isAux ? (
         <AuxRunPlan
           run={run}
@@ -248,6 +258,83 @@ function PlanFactBlock({
           ! some cost article could not be folded to base — totals are partial
         </Text>
       ) : null}
+    </div>
+  );
+}
+
+// Per-colourway material cost (gap-07 v2 C): stock issues grouped by the product_id they were cut
+// for. Only materials-from-stock is split — manual cost articles stay run-level — and issues booked
+// without a colourway fall into "unattributed". Read-only; costing-gated by the caller.
+const cwCell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+function ColorwayCostBlock({
+  actuals,
+  colorways,
+}: {
+  actuals: common_ProductionRunActuals;
+  colorways: common_TechCardColorway[];
+}) {
+  const cur = actuals.baseCurrency || '';
+  const label = (productId?: number) => {
+    const c = colorways.find((x) => (x.productId ?? 0) === productId && (productId ?? 0) > 0);
+    if (c) return `${c.code ? `${c.code} · ` : ''}${c.name ?? `#${productId}`}`;
+    return productId ? `#${productId}` : '(unattributed)';
+  };
+  const rows = actuals.byColorway ?? [];
+  const unattributed = actuals.unattributedMaterialsBase;
+
+  return (
+    <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+      <Text variant='uppercase' size='small'>
+        materials by colourway
+      </Text>
+      <div className='overflow-x-auto'>
+        <table className='border-collapse'>
+          <thead>
+            <tr>
+              <th className={`${cwCell} text-left uppercase`}>colourway</th>
+              <th className={`${cwCell} text-right uppercase`}>received</th>
+              <th className={`${cwCell} text-right uppercase`}>materials (stock)</th>
+              <th className={`${cwCell} text-right uppercase`}>/ unit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.productId}>
+                <td className={cwCell}>
+                  {label(r.productId)}
+                  {r.hasUncosted ? (
+                    <Text variant='inactive' size='small'>
+                      ! some issues uncosted — understated
+                    </Text>
+                  ) : null}
+                </td>
+                <td className={`${cwCell} text-right`}>{r.receivedQty ?? 0}</td>
+                <td className={`${cwCell} text-right`}>
+                  {r.materialsFromStockBase?.value ? decimalToInput(r.materialsFromStockBase) : '—'}{' '}
+                  {r.materialsFromStockBase?.value ? cur : ''}
+                </td>
+                <td className={`${cwCell} text-right`}>
+                  {r.materialsUnitCost?.value ? decimalToInput(r.materialsUnitCost) : '—'}
+                </td>
+              </tr>
+            ))}
+            {unattributed?.value && Number(unattributed.value) !== 0 ? (
+              <tr>
+                <td className={cwCell}>(unattributed)</td>
+                <td className={`${cwCell} text-right`}>—</td>
+                <td className={`${cwCell} text-right`}>
+                  {decimalToInput(unattributed)} {cur}
+                </td>
+                <td className={`${cwCell} text-right`}>—</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+      <Text variant='inactive' size='small'>
+        only stock-issued materials are split here; manual cost articles stay run-level. Attribute
+        an issue to a colourway from its “issue…” action to move it out of unattributed.
+      </Text>
     </div>
   );
 }
