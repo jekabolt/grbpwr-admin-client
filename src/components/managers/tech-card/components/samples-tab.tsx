@@ -55,6 +55,10 @@ export function SamplesTab({
   const sizeName = (sizeId?: number) =>
     sizeId ? String(findInDictionary(dictionary, sizeId, 'size') || sizeId) : '—';
 
+  const colorways = techCard?.techCard?.colorways ?? [];
+  const colorwayName = (id?: number) =>
+    id ? colorwayLabel(colorways.find((c) => c.id === id)) : '—';
+
   const setExpanded = (v: string) =>
     setParams(
       (prev) => {
@@ -116,6 +120,7 @@ export function SamplesTab({
                 <th className={th}>#</th>
                 <th className={th}>purpose</th>
                 <th className={th}>size</th>
+                <th className={th}>colourway</th>
                 <th className={th}>fabric</th>
                 <th className={th}>status</th>
               </tr>
@@ -137,12 +142,13 @@ export function SamplesTab({
                       </td>
                       <td className={td}>{samplePurposeLabel(s.sample?.purpose)}</td>
                       <td className={td}>{sizeName(s.sample?.sizeId)}</td>
+                      <td className={td}>{colorwayName(s.sample?.colorwayId)}</td>
                       <td className={td}>{sampleFabricSourceLabel(s.sample?.fabricSource)}</td>
                       <td className={td}>{sampleStatusLabel(s.sample?.status)}</td>
                     </tr>
                     {open ? (
                       <tr>
-                        <td className={td} colSpan={5}>
+                        <td className={td} colSpan={6}>
                           <SampleEditor
                             sample={s}
                             techCardId={techCardId}
@@ -168,6 +174,7 @@ export function SamplesTab({
 type Draft = {
   purpose: string;
   sizeId: number;
+  colorwayId: number;
   status: string;
   fabricSource: string;
   notes: string;
@@ -183,6 +190,7 @@ function draftFrom(s?: common_Sample): Draft {
   return {
     purpose: i?.purpose || 'proto',
     sizeId: i?.sizeId ?? 0,
+    colorwayId: i?.colorwayId ?? 0,
     status: i?.status || 'planned',
     fabricSource: i?.fabricSource || 'sample',
     notes: i?.notes ?? '',
@@ -192,6 +200,12 @@ function draftFrom(s?: common_Sample): Draft {
     patternUrl: i?.patternUrl ?? '',
     patternNote: i?.patternNote ?? '',
   };
+}
+
+// A colourway's label for a picker / display cell (keyed by its stable id, not index).
+function colorwayLabel(c?: { code?: string; name?: string; id?: number }): string {
+  if (!c) return '—';
+  return c.name || c.code || `колорвей #${c.id ?? '?'}`;
 }
 
 function SampleEditor({
@@ -245,6 +259,10 @@ function SampleEditor({
     setD((prev) => ({ ...prev, ...patch }));
   };
   const sizeIds = techCard?.techCard?.sizeIds ?? [];
+  // B-10: colourways carry a stable, output-only id (re-pointed by identity when the card is
+  // full-replaced on save). Reading them off the live `techCard` query means the picker always
+  // offers fresh ids — the exact ones to link a sample to right now.
+  const colorways = techCard?.techCard?.colorways ?? [];
 
   const mediaLinks = d.mediaIds
     .map((id) => mediaById.get(id))
@@ -269,7 +287,7 @@ function SampleEditor({
           techCardId,
           purpose: d.purpose,
           sizeId: d.sizeId || 0,
-          colorwayId: sample?.sample?.colorwayId ?? 0, // preserved; no reliable colourway id to pick (B-10)
+          colorwayId: d.colorwayId || 0,
           status: d.status,
           fabricSource: d.fabricSource,
           notes: d.notes.trim(),
@@ -330,6 +348,27 @@ function SampleEditor({
             {sizeIds.map((sid) => (
               <option key={sid} value={sid}>
                 {findInDictionary(dictionary, sid, 'size') || sid}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className='flex flex-col gap-1'>
+          <Text size='small'>colourway</Text>
+          <select
+            className={cell}
+            disabled={!canEdit || colorways.length === 0}
+            value={d.colorwayId || 0}
+            onChange={(e) => set({ colorwayId: Number(e.target.value) || 0 })}
+          >
+            <option value={0}>— unset —</option>
+            {/* A saved colourway the picker no longer offers (renamed then re-saved, so its id
+                changed) — keep it selectable so an existing link isn't silently dropped on save. */}
+            {d.colorwayId > 0 && !colorways.some((c) => c.id === d.colorwayId) ? (
+              <option value={d.colorwayId}>колорвей #{d.colorwayId}</option>
+            ) : null}
+            {colorways.map((c) => (
+              <option key={c.id} value={c.id ?? 0}>
+                {colorwayLabel(c)}
               </option>
             ))}
           </select>
