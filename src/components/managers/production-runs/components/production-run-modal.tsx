@@ -150,6 +150,7 @@ export function ProductionRunModal({
           costs: [],
           markerEfficiencyPct: undefined,
           markerNotes: undefined,
+          markers: [],
         },
       },
       {

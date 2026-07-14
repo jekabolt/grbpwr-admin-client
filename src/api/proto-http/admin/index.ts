@@ -3542,6 +3542,7 @@ export type OpexRecurringInsert = {
   activeFrom: string | undefined;
   activeTo: string | undefined;
   note: string | undefined;
+  employeeId: number | undefined;
 };
 
 // OpexRecurring is a stored recurring OPEX template.
@@ -3573,6 +3574,51 @@ export type ListOpexRecurringRequest = {
 
 export type ListOpexRecurringResponse = {
   recurring: OpexRecurring[] | undefined;
+};
+
+// EmployeeInsert is a person in the salary registry (gap-07 v2 A): identity + employment window + an
+// informational default monthly cost. The booked cost stays in the OPEX journal (an OpexRecurring
+// template with employee_id set); default_monthly_cost only pre-fills that template, it is never a
+// cost figure in any report.
+export type EmployeeInsert = {
+  fullName: string | undefined;
+  role: string | undefined;
+  employmentStart: string | undefined;
+  employmentEnd: string | undefined;
+  defaultCurrency: string | undefined;
+  defaultMonthlyCost: googletype_Decimal | undefined;
+  note: string | undefined;
+};
+
+// Employee is a stored registry row.
+export type Employee = {
+  id: number | undefined;
+  employee: EmployeeInsert | undefined;
+  archived: boolean | undefined;
+};
+
+export type UpsertEmployeeRequest = {
+  employee: EmployeeInsert | undefined;
+  id: number | undefined;
+};
+
+export type UpsertEmployeeResponse = {
+  id: number | undefined;
+};
+
+export type ArchiveEmployeeRequest = {
+  id: number | undefined;
+};
+
+export type ArchiveEmployeeResponse = {
+};
+
+export type ListEmployeesRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListEmployeesResponse = {
+  employees: Employee[] | undefined;
 };
 
 export type GetOrderReviewsPagedRequest = {
@@ -3825,6 +3871,9 @@ export type CreateTechCardRequest = {
 
 export type common_TechCardInsert = {
   // identification (Sheet «Титул»)
+  // Артикул. Required from the PROTO stage onward; OPTIONAL (empty) while stage == IDEA — an idea
+  // is by definition pre-article (NF-03/B-2). Moving a card out of IDEA without a real style
+  // number is rejected with InvalidArgument.
   styleNumber: string | undefined;
   name: string | undefined;
   brand: string | undefined;
@@ -4029,6 +4078,11 @@ export type common_TechCardColorway = {
   // the colour's material recipe: which catalog article (bom_item_index) goes on which
   // garment part, in what colour, at what consumption. Per-colourway divergence lives here.
   usages: common_TechCardColorwayUsage[] | undefined;
+  // OUTPUT-ONLY stable row id (B-10): set on Get/List so a sample can be linked to a colourway
+  // (Sample.colorway_id). Ignored on write — a card save full-replaces colourways with fresh ids
+  // (the server re-points existing sample links by colourway identity, case-folded code+name), so
+  // re-read the card and use a fresh id right before linking a sample.
+  id: number | undefined;
 };
 
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
@@ -4410,6 +4464,9 @@ export type common_TechCardListItem = {
   // moodboard image; otherwise the PREVIEW-kind sketch (falling back to the first technical, then any
   // media). Empty when the card has no media. Resolved server-side to avoid an N+1 GetTechCard.
   previewUrl: string | undefined;
+  // Card purpose: "sellable" (default) or "auxiliary" (NF-07). Lets a board/list badge auxiliary
+  // cards (dust bags, shoppers…) without an N+1 GetTechCard, mirroring TechCard.purpose.
+  purpose: string | undefined;
 };
 
 // GetStylePipeline is the development board: one column per lifecycle stage
@@ -4675,6 +4732,7 @@ export type common_ProductionRunInsert = {
   costs: common_ProductionRunCost[] | undefined;
   markerEfficiencyPct: googletype_Decimal | undefined;
   markerNotes: string | undefined;
+  markers: common_ProductionRunMarker[] | undefined;
 };
 
 // ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
@@ -4722,6 +4780,32 @@ export type common_ProductionRunCostKind =
   | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
   | "PRODUCTION_RUN_COST_KIND_DUTY"
   | "PRODUCTION_RUN_COST_KIND_OTHER";
+// ProductionRunMarker is one imported nesting marker (раскладка / lay) of a run (gap-07 v2 E): the
+// CAD source, the fabric width and lay length it was nested on, the units it yields, its
+// fabric-utilisation %, an optional fabric/size, and a reference URL to the exported marker file.
+// It is planning / traceability data — nothing here feeds the run's actual cost or cost_price.
+export type common_ProductionRunMarker = {
+  source: common_ProductionMarkerSource | undefined;
+  markerName: string | undefined;
+  sizeId: number | undefined;
+  materialId: number | undefined;
+  markerWidth: googletype_Decimal | undefined;
+  layLength: googletype_Decimal | undefined;
+  unitsPerMarker: number | undefined;
+  efficiencyPct: googletype_Decimal | undefined;
+  markerFileUrl: string | undefined;
+  notes: string | undefined;
+};
+
+// ProductionMarkerSource is the CAD/nesting software (or hand entry) a marker record came from.
+export type common_ProductionMarkerSource =
+  | "PRODUCTION_MARKER_SOURCE_UNKNOWN"
+  | "PRODUCTION_MARKER_SOURCE_GERBER"
+  | "PRODUCTION_MARKER_SOURCE_OPTITEX"
+  | "PRODUCTION_MARKER_SOURCE_LECTRA"
+  | "PRODUCTION_MARKER_SOURCE_AUDACES"
+  | "PRODUCTION_MARKER_SOURCE_MANUAL"
+  | "PRODUCTION_MARKER_SOURCE_OTHER";
 export type CreateProductionRunResponse = {
   id: number | undefined;
 };
@@ -4729,6 +4813,10 @@ export type CreateProductionRunResponse = {
 export type UpdateProductionRunRequest = {
   id: number | undefined;
   run: common_ProductionRunInsert | undefined;
+  // Optimistic-lock guard from GetProductionRun/list. >0 enforces the lock: a mismatch means the run
+  // changed under the editor -> Aborted (reload and retry). 0 keeps the legacy last-write-wins
+  // behaviour, so pre-existing clients are unaffected (#9).
+  expectedLockVersion: number | undefined;
 };
 
 export type UpdateProductionRunResponse = {
@@ -4759,6 +4847,10 @@ export type common_ProductionRun = {
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   actuals: common_ProductionRunActuals | undefined;
+  // Optimistic-lock token, bumped on every UpdateProductionRun. Echo into
+  // UpdateProductionRunRequest.expected_lock_version so a list→edit needs no extra GET (mirrors
+  // TechCard.lock_version).
+  lockVersion: number | undefined;
 };
 
 // ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
@@ -4782,6 +4874,11 @@ export type common_ProductionRunActuals = {
   materialsFromStockBase: googletype_Decimal | undefined;
   mixedMaterialsSources: boolean | undefined;
   hasUncostedIssues: boolean | undefined;
+  // Per-colourway material cost (gap-07 v2 C): stock issues grouped by the product_id they were cut
+  // for. Covers materials_from_stock only (manual cost articles stay run-level). Issues with no
+  // product_id fall into unattributed_materials_base, not any colourway.
+  byColorway: common_ProductionRunColorwayCost[] | undefined;
+  unattributedMaterialsBase: googletype_Decimal | undefined;
 };
 
 // ProductionRunCostByKind is the base-currency total of actual costs of one kind.
@@ -4790,11 +4887,26 @@ export type common_ProductionRunCostByKind = {
   amountBase: googletype_Decimal | undefined;
 };
 
+// ProductionRunColorwayCost is one colour-model's slice of a run's material-from-stock cost (gap-07
+// v2 C): the net material issued for that product and, if it received units, its per-unit material
+// cost. Manual (non-stock) cost articles are run-level and are NOT split here.
+export type common_ProductionRunColorwayCost = {
+  productId: number | undefined;
+  receivedQty: number | undefined;
+  materialsFromStockBase: googletype_Decimal | undefined;
+  materialsUnitCost: googletype_Decimal | undefined;
+  hasUncosted: boolean | undefined;
+};
+
 export type ListProductionRunsRequest = {
   techCardId: number | undefined;
   status: string | undefined;
   limit: number | undefined;
   offset: number | undefined;
+  // >0: return only "stale" runs — still open (planned/in_progress) and created more than N days ago
+  // (the same rule as the stale_open_production_run dashboard alert). Server-side so the attention
+  // filter/strip does not client-scan the two status pages (#10). 0 = no staleness filter.
+  staleDays: number | undefined;
 };
 
 export type ListProductionRunsResponse = {
@@ -4807,6 +4919,14 @@ export type ReceiveProductionRunRequest = {
   // NF-06: the run is multi-colourway, so receive no longer takes a product_id — every line's
   // received_qty is booked into that line's own product. Each product must be linked to the run's
   // tech card, and at least one line must carry a received quantity.
+  // AUXILIARY runs (NF-07/B-3): when the run's tech card has purpose=auxiliary this same RPC
+  // receives the output into the MATERIAL warehouse instead of product stock. Lines must NOT carry
+  // a product_id (rejected with InvalidArgument — not ignored); Σ received_qty is booked into the
+  // card's output_material_id as one receipt_production movement whose unit cost is the run's
+  // actual per-unit base cost (manual cost articles + materials-from-stock, net of returns) — it
+  // moves that material's moving average, or books uncosted when the actuals are incomplete. A
+  // card without output_material_id fails with FailedPrecondition. update_cost_price is a no-op
+  // for auxiliary runs (cost_price_updated is always false — there is no product).
   updateCostPrice: boolean | undefined;
 };
 
@@ -4872,6 +4992,8 @@ export type common_MaterialMovement = {
   adminUsername: string | undefined;
   occurredAt: wellKnownTimestamp | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  productId: number | undefined;
+  lotId: number | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
@@ -4895,6 +5017,8 @@ export type IssueMaterialStockRequest = {
   isReturn: boolean | undefined;
   occurredAt: string | undefined;
   comment: string | undefined;
+  productId: number | undefined;
+  lotId: number | undefined;
 };
 
 export type IssueMaterialStockResponse = {
@@ -4968,6 +5092,58 @@ export type ListMaterialMovementsRequest = {
 export type ListMaterialMovementsResponse = {
   movements: common_MaterialMovement[] | undefined;
   total: number | undefined;
+};
+
+// PackagingBomItem is one line of the global packaging recipe (gap-07 v2 B): a material consumed on
+// ship — qty_per_order once per shipment plus qty_per_item × the order's unit count. material_name /
+// material_unit are resolved server-side for display and ignored on write.
+export type PackagingBomItem = {
+  materialId: number | undefined;
+  materialName: string | undefined;
+  materialUnit: string | undefined;
+  qtyPerOrder: googletype_Decimal | undefined;
+  qtyPerItem: googletype_Decimal | undefined;
+  active: boolean | undefined;
+};
+
+export type UpsertPackagingBomRequest = {
+  items: PackagingBomItem[] | undefined;
+};
+
+export type UpsertPackagingBomResponse = {
+};
+
+export type ListPackagingBomRequest = {
+};
+
+export type ListPackagingBomResponse = {
+  items: PackagingBomItem[] | undefined;
+};
+
+export type ListMaterialLotsRequest = {
+  materialId: number | undefined;
+  includeArchived: boolean | undefined;
+};
+
+export type ListMaterialLotsResponse = {
+  lots: common_MaterialLot[] | undefined;
+};
+
+// MaterialLot is a received batch (roll / dye-lot) of a material (gap-07 v2 D): a supplier lot code
+// with a running remaining quantity, for traceability and colour matching. unit_cost is
+// informational only — valuation stays moving-average; a lot is NOT a FIFO costing basis.
+export type common_MaterialLot = {
+  id: number | undefined;
+  materialId: number | undefined;
+  lotCode: string | undefined;
+  supplierDoc: string | undefined;
+  receivedQty: googletype_Decimal | undefined;
+  remainingQty: googletype_Decimal | undefined;
+  unitCost: googletype_Decimal | undefined;
+  currency: string | undefined;
+  receivedAt: wellKnownTimestamp | undefined;
+  note: string | undefined;
+  archived: boolean | undefined;
 };
 
 // AdminPermission grants an account a level of access to one section.
@@ -5162,6 +5338,14 @@ export interface AdminService {
   // ListOpexRecurring returns recurring OPEX templates (active-only unless include_archived).
   // Requires costing:read (returns empty otherwise).
   ListOpexRecurring(request: ListOpexRecurringRequest): Promise<ListOpexRecurringResponse>;
+  // UpsertEmployee inserts (id==0) or updates an employee-registry row — the person behind a salary
+  // OpexRecurring template (gap-07 v2 A). Requires analytics:write.
+  UpsertEmployee(request: UpsertEmployeeRequest): Promise<UpsertEmployeeResponse>;
+  // ArchiveEmployee soft-archives an employee; linked recurring templates keep their employee_id.
+  // Requires analytics:write.
+  ArchiveEmployee(request: ArchiveEmployeeRequest): Promise<ArchiveEmployeeResponse>;
+  // ListEmployees returns registry rows (active-only unless include_archived). Requires analytics:read.
+  ListEmployees(request: ListEmployeesRequest): Promise<ListEmployeesResponse>;
   // Cancels an order
   CancelOrder(request: CancelOrderRequest): Promise<CancelOrderResponse>;
   // Adds a comment to an order
@@ -5322,6 +5506,12 @@ export interface AdminService {
   GetMaterialStock(request: GetMaterialStockRequest): Promise<GetMaterialStockResponse>;
   ListMaterialStock(request: ListMaterialStockRequest): Promise<ListMaterialStockResponse>;
   ListMaterialMovements(request: ListMaterialMovementsRequest): Promise<ListMaterialMovementsResponse>;
+  // UpsertPackagingBom full-replaces the global packaging recipe consumed on ship (gap-07 v2 B).
+  UpsertPackagingBom(request: UpsertPackagingBomRequest): Promise<UpsertPackagingBomResponse>;
+  // ListPackagingBom returns the packaging recipe (material name/unit + per-order/per-item quantities).
+  ListPackagingBom(request: ListPackagingBomRequest): Promise<ListPackagingBomResponse>;
+  // ListMaterialLots returns a material's structured lots / rolls (gap-07 v2 D).
+  ListMaterialLots(request: ListMaterialLotsRequest): Promise<ListMaterialLotsResponse>;
   // GetCostingFxRates returns the manual FX rates used to fold multi-currency tech-card
   // costing into the base currency.
   GetCostingFxRates(request: GetCostingFxRatesRequest): Promise<GetCostingFxRatesResponse>;
@@ -6283,6 +6473,57 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListOpexRecurring",
       }) as Promise<ListOpexRecurringResponse>;
+    },
+    UpsertEmployee(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/employees/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertEmployee",
+      }) as Promise<UpsertEmployeeResponse>;
+    },
+    ArchiveEmployee(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/employees/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveEmployee",
+      }) as Promise<ArchiveEmployeeResponse>;
+    },
+    ListEmployees(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/employees/list`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListEmployees",
+      }) as Promise<ListEmployeesResponse>;
     },
     CancelOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
@@ -7637,6 +7878,9 @@ export function createAdminServiceClient(
       if (request.offset) {
         queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
+      if (request.staleDays) {
+        queryParams.push(`staleDays=${encodeURIComponent(request.staleDays.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -7830,6 +8074,63 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListMaterialMovements",
       }) as Promise<ListMaterialMovementsResponse>;
+    },
+    UpsertPackagingBom(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/packaging-bom/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertPackagingBom",
+      }) as Promise<UpsertPackagingBomResponse>;
+    },
+    ListPackagingBom(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/packaging-bom`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListPackagingBom",
+      }) as Promise<ListPackagingBomResponse>;
+    },
+    ListMaterialLots(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.materialId) {
+        throw new Error("missing required field request.material_id");
+      }
+      const path = `api/admin/inventory/${request.materialId}/lots`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMaterialLots",
+      }) as Promise<ListMaterialLotsResponse>;
     },
     GetCostingFxRates(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/costing/fx-rates`; // eslint-disable-line quotes

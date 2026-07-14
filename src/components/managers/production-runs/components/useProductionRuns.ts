@@ -27,7 +27,7 @@ export function useUpdateRunSection() {
       const base = (fresh.run?.run ?? {}) as common_ProductionRunInsert;
       const run = { ...base, ...patch };
       if (mergeLines) run.lines = mergeLines(base.lines ?? []);
-      return adminService.UpdateProductionRun({ id, run });
+      return adminService.UpdateProductionRun({ id, run, expectedLockVersion: 0 });
     },
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });
@@ -53,6 +53,7 @@ export function useProductionRuns(techCardId: number, status: string) {
         status: runStatusToDbFilter(status),
         limit: 200,
         offset: 0,
+        staleDays: undefined,
       }),
   });
 }
@@ -82,7 +83,7 @@ export function useSaveProductionRun() {
   return useMutation({
     mutationFn: ({ id, run }: { id: number; run: common_ProductionRunInsert }) =>
       id
-        ? adminService.UpdateProductionRun({ id, run })
+        ? adminService.UpdateProductionRun({ id, run, expectedLockVersion: 0 })
         : adminService.CreateProductionRun({ run }),
     onSuccess: () => qc.invalidateQueries({ queryKey: productionRunKeys.all }),
   });

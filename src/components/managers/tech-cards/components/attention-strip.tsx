@@ -50,6 +50,7 @@ export function AttentionStrip() {
         status: 'planned',
         limit: 200,
         offset: 0,
+        staleDays: undefined,
       }),
     enabled: canRuns,
   });
@@ -61,6 +62,7 @@ export function AttentionStrip() {
         status: 'in_progress',
         limit: 200,
         offset: 0,
+        staleDays: undefined,
       }),
     enabled: canRuns,
   });
