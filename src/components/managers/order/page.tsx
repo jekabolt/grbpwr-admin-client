@@ -68,6 +68,7 @@ export function OrderDetails() {
 
   const {
     orderDetails,
+    stripeDetails,
     orderStatus,
     isLoading,
     isPrinting,
@@ -85,7 +86,7 @@ export function OrderDetails() {
 
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
   const [isShipCostOpen, setIsShipCostOpen] = useState(false);
-  const { canWrite } = usePermissions();
+  const { canWrite, canReadCosting } = usePermissions();
   const canEditOrder = canWrite(SECTION.orders);
 
   const form = useForm<{ refundReason: string; notes: string }>({
@@ -224,7 +225,13 @@ export function OrderDetails() {
               </Section>
 
               <Section title='payment' className='print:hidden'>
-                <Payment orderDetails={orderDetails} isPrinting={isPrinting} />
+                <Payment
+                  orderDetails={orderDetails}
+                  stripeDetails={stripeDetails}
+                  showSettlement={canReadCosting}
+                  isRefunded={isRefunded}
+                  isPrinting={isPrinting}
+                />
               </Section>
 
               {canEditOrder &&

@@ -1,10 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { common_OrderFull } from 'api/proto-http/admin';
+import type { common_OrderFull, common_OrderStripeDetails } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { fulfillmentService } from '../api/fulfillmentService';
 import { FulfillmentAnnotation } from '../api/types';
 
-type CardData = { order: common_OrderFull | undefined; annotation: FulfillmentAnnotation };
+type CardData = {
+  order: common_OrderFull | undefined;
+  annotation: FulfillmentAnnotation;
+  stripeDetails: common_OrderStripeDetails | undefined;
+};
 
 export const fulfillmentKeys = {
   all: ['fulfillment'] as const,

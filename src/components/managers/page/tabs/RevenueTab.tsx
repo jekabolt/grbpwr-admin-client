@@ -1,8 +1,18 @@
 import type { GetDashboardResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { type FC } from 'react';
+import { Link } from 'react-router-dom';
 import Text from 'ui/components/text';
-import { FunnelChart, OperatingResultStrip, PromoTable, TimeSeriesChart } from '../components';
+import {
+  DeliveryPanel,
+  FunnelChart,
+  OperatingResultStrip,
+  OrderValueBandsTable,
+  PaymentMixTable,
+  ProfitabilityPanel,
+  PromoTable,
+  TimeSeriesChart,
+} from '../components';
 import { orderCancellationSharePercent } from '../executiveAlerts';
 import {
   coarsenTimeSeries,
@@ -70,6 +80,7 @@ export function RevenueTab({
   const orders = getMetricComparison(commerce?.ordersCount as any);
   const aov = getMetricComparison(commerce?.avgOrderValue as any);
   const refundRate = getMetricComparison(commerce?.refundRate as any);
+  const discountRate = getMetricComparison(commerce?.discountRatePct as any);
   const cancellationPct = orderCancellationSharePercent(metrics);
 
   const ordersN = orders.value;
@@ -87,8 +98,35 @@ export function RevenueTab({
   const marginPctTrusted = costCoverage >= COVERAGE_FLOOR_FOR_PCT;
   // Processor fees bridge gross profit → contribution; only show the line once they're captured.
   const showFees = paymentFees.value > 0;
+  // Directional processor cut as a share of net revenue — a creeping rate is the signal to watch.
+  // paymentFees (from MarginMetrics) and net revenue may be scoped differently by the backend
+  // (fees can be summed over a different order set than the costed-revenue view), so treat this as
+  // a trend indicator, not an exact rate. Scope is backend ask S4 in docs/analytics-backend-asks.md.
+  const feeRatePct = revenue.value > 0 ? (paymentFees.value / revenue.value) * 100 : null;
   // Products with no cost entered are why margin is partial/dark — name the gap to close it.
   const uncostedCount = margin?.uncostedProductIds?.length ?? 0;
+
+  // Compact door-to-door / on-time stat for the Shipping & Delivery summary line (collapsed view).
+  const delivery = metricsResponse.delivery;
+  const deliverySummary = (() => {
+    if (!delivery) return null;
+    const parts: string[] = [];
+    if ((delivery.deliveredSample ?? 0) >= 10 && (delivery.medianDaysPlacedToDelivered ?? 0) > 0) {
+      parts.push(`${delivery.medianDaysPlacedToDelivered!.toFixed(1)} d median door-to-door`);
+    }
+    if ((delivery.onTimeSample ?? 0) >= 10) {
+      parts.push(`${(delivery.onTimeRatePct ?? 0).toFixed(0)}% on-time`);
+    }
+    return parts.length > 0 ? parts.join(' · ') : null;
+  })();
+
+  // Top revenue band for the "Order value distribution" summary line (collapsed view).
+  const bands = metricsResponse.orderValueBands ?? [];
+  const topBand = bands.length
+    ? bands.reduce((best, b) => ((b.revenueSharePct ?? 0) > (best.revenueSharePct ?? 0) ? b : best))
+    : null;
+  const topRevenueBandLabel = topBand?.label ?? null;
+  const topRevenueBandShare = topBand ? (topBand.revenueSharePct ?? 0).toFixed(0) : null;
 
   return (
     <div className='space-y-6'>
@@ -155,6 +193,11 @@ export function RevenueTab({
                     Payment fees
                   </Text>
                   <Text className='font-bold text-lg'>−{formatCurrency(paymentFees.value)}</Text>
+                  {feeRatePct != null && (
+                    <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                      {feeRatePct.toFixed(1)}% of revenue
+                    </Text>
+                  )}
                   <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
                     processor cut
                   </Text>
@@ -189,7 +232,16 @@ export function RevenueTab({
         </div>
       )}
 
-      {/* Operating result (contribution − opex − marketing) + GA4 coverage, from GetDashboard. */}
+      {/* Full P&L waterfall + unit economics (costing-gated). Absorbs the operating-result
+          waterfall that used to live in OperatingResultStrip. */}
+      {canReadCosting && (
+        <ProfitabilityPanel
+          profitability={metricsResponse.profitability}
+          compareEnabled={compareEnabled}
+        />
+      )}
+
+      {/* GA4 coverage note, from GetDashboard (the waterfall moved into ProfitabilityPanel). */}
       <OperatingResultStrip dashboard={dashboard} />
 
       <div className='space-y-6'>
@@ -216,6 +268,11 @@ export function RevenueTab({
             <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
               before discounts
             </Text>
+            {discountRate.value > 0 && (
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                −{discountRate.value.toFixed(1)}% discounts
+              </Text>
+            )}
           </div>
           <div className='space-y-1'>
             <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
@@ -281,6 +338,29 @@ export function RevenueTab({
         </div>
       </div>
 
+      {(metricsResponse.orderValueBands?.length ?? 0) > 0 && (
+        <details className='border border-textInactiveColor'>
+          <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-bgSecondary/30 px-4 py-3 hover:bg-bgSecondary/50'>
+            <span className='text-textBaseSize font-bold uppercase'>Order value distribution</span>
+            {topRevenueBandLabel && (
+              <span className='text-textBaseSize text-labelColor normal-case'>
+                {topRevenueBandLabel} carries {topRevenueBandShare}% of revenue
+              </span>
+            )}
+          </summary>
+          <div className='space-y-3 p-4'>
+            <Text className='text-textBaseSize text-textInactiveColor leading-relaxed'>
+              Net revenue by basket size. Compare each band's share of revenue against its share of
+              orders — a few large baskets usually carry most of the money.
+            </Text>
+            <OrderValueBandsTable
+              bands={metricsResponse.orderValueBands}
+              aovValue={aov.value}
+            />
+          </div>
+        </details>
+      )}
+
       <details className='border border-textInactiveColor' open>
         <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
           Purchase Funnel
@@ -294,10 +374,14 @@ export function RevenueTab({
       </details>
 
       <details className='border border-textInactiveColor'>
-        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-          Shipping & Delivery
+        <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-bgSecondary/30 px-4 py-3 hover:bg-bgSecondary/50'>
+          <span className='text-textBaseSize font-bold uppercase'>Shipping &amp; Delivery</span>
+          {deliverySummary && (
+            <span className='text-textBaseSize text-labelColor normal-case'>{deliverySummary}</span>
+          )}
         </summary>
         <div className='space-y-6 p-4'>
+          <DeliveryPanel delivery={delivery} />
           <div className='grid gap-4 md:grid-cols-2'>
             <TimeSeriesChart
               title='Units sold'
@@ -318,6 +402,24 @@ export function RevenueTab({
           </div>
         </div>
       </details>
+
+      {(commerce?.revenueByPaymentMethod?.length ?? 0) > 0 && (
+        <details className='border border-textInactiveColor'>
+          <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
+            Payments
+          </summary>
+          <div className='space-y-3 p-4'>
+            <Text className='text-textBaseSize text-textInactiveColor leading-relaxed'>
+              Revenue by payment method over the period. Settled revenue by channel lives in{' '}
+              <Link to={{ search: '?tab=growth' }} className='underline hover:text-blue'>
+                Growth
+              </Link>
+              .
+            </Text>
+            <PaymentMixTable methods={commerce?.revenueByPaymentMethod} />
+          </div>
+        </details>
+      )}
 
       <PromoTable metrics={metrics} />
     </div>

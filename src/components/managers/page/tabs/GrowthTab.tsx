@@ -1,11 +1,14 @@
 import type { GetChannelRoasSettledResponse, GetMetricsResponse } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import Text from 'ui/components/text';
 import {
   CampaignAttributionTable,
   ChannelRoasTable,
   ChannelSpendForm,
+  CountryMatrix,
   CrossSellTable,
   GeographyCharts,
+  NewVsReturningPanel,
   TrafficCharts,
 } from '../components';
 import { formatAvgDaysBetweenOrders, formatNumber, getMetricComparison } from '../utils';
@@ -21,6 +24,7 @@ interface GrowthTabProps {
  * Absorbs the former standalone Customers tab (a 3-number card didn't warrant its own tab).
  */
 export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
+  const { canReadCosting } = usePermissions();
   const metrics = metricsResponse.business;
   const commerce = metrics?.commerce;
   const sampleSize = commerce?.clvDistribution?.sampleSize ?? 0;
@@ -28,6 +32,8 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
   const repeatRate = getMetricComparison(commerce?.repeatCustomersRate as any);
   const ordersPerCustomer = getMetricComparison(commerce?.avgOrdersPerCustomer as any);
   const daysBetweenOrders = getMetricComparison(commerce?.avgDaysBetweenOrders as any);
+  const uniqueBuyers = getMetricComparison(commerce?.uniqueCustomers as any);
+  const showUniqueBuyers = uniqueBuyers.value > 0;
 
   return (
     <div className='space-y-10'>
@@ -47,7 +53,11 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
           </div>
         )}
 
-        <div className='grid grid-cols-1 md:grid-cols-3 gap-3 border border-textInactiveColor p-4 bg-bgSecondary/20'>
+        <div
+          className={`grid grid-cols-1 gap-3 border border-textInactiveColor p-4 bg-bgSecondary/20 ${
+            showUniqueBuyers ? 'md:grid-cols-4' : 'md:grid-cols-3'
+          }`}
+        >
           <div className='space-y-1'>
             <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
               Repeat customer rate
@@ -79,7 +89,20 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
               avg gap to next order
             </Text>
           </div>
+          {showUniqueBuyers && (
+            <div className='space-y-1'>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                Unique buyers
+              </Text>
+              <Text className='font-bold text-lg'>{formatNumber(uniqueBuyers.value)}</Text>
+              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+                distinct emails this period
+              </Text>
+            </div>
+          )}
         </div>
+
+        <NewVsReturningPanel split={commerce?.newVsReturning} />
 
         <CrossSellTable metrics={metrics} />
       </div>
@@ -100,8 +123,10 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
 
       <div className='grid gap-8 md:grid-cols-2'>
         <TrafficCharts metrics={metrics} />
-        <GeographyCharts metrics={metrics} />
+        <GeographyCharts metrics={metrics} geography={metricsResponse.geography} />
       </div>
+
+      <CountryMatrix geography={metricsResponse.geography} canReadCosting={canReadCosting} />
     </div>
   );
 }
