@@ -23,6 +23,10 @@ export const TAB_SECTIONS: Record<MetricsTabId, MetricsSection[]> = {
     'METRICS_SECTION_DEAD_STOCK',
     'METRICS_SECTION_OOS_IMPACT',
     'METRICS_SECTION_NOTIFY_ME_INTENT',
+    // Costing-gated economics reports (backend omits them without costing:read).
+    'METRICS_SECTION_MARGIN_BY_STYLE',
+    'METRICS_SECTION_COGS_STRUCTURE',
+    'METRICS_SECTION_INVENTORY_VALUATION',
     // Cut (vanity micro-interaction telemetry, no operator decision): PRODUCT_ENGAGEMENT,
     // TIME_ON_PAGE, PRODUCT_ZOOM, IMAGE_SWIPES, SIZE_GUIDE_CLICKS, DETAILS_EXPANSION.
     // Cut (thin/misleading at boutique catalog size): REVENUE_PARETO (trivially steep 80/20),

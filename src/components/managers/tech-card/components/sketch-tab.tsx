@@ -53,11 +53,28 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'callouts' });
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
-  // Callouts pin onto the TECHNICAL sketches (construction media), not the moodboard.
-  const media = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
+  // Callouts pin onto ANY card media — technical sketches OR moodboard references (B-1). This lets a
+  // callout annotate a reference image at the idea stage, before any technical sketch exists. Combine
+  // both lists; each candidate keeps its source + per-list index for labelling.
+  const technicalMedia = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
     mediaId: number;
     kind?: string;
   }>;
+  const moodboardMedia = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as Array<{
+    mediaId: number;
+    kind?: string;
+  }>;
+  const media = useMemo(
+    () => [
+      ...technicalMedia.map((m, i) => ({ ...m, source: 'technical' as const, localIndex: i })),
+      ...moodboardMedia.map((m, i) => ({ ...m, source: 'moodboard' as const, localIndex: i })),
+    ],
+    [technicalMedia, moodboardMedia],
+  );
+  const viewLabel = (m: { source: 'technical' | 'moodboard'; kind?: string }) =>
+    `${m.source === 'moodboard' ? 'mood · ' : ''}${
+      kindLabels[m.kind ?? ''] ?? (m.source === 'moodboard' ? 'reference' : 'view')
+    }`;
 
   const views = media.filter((m) => {
     const f = mediaById.get(m.mediaId);
@@ -108,11 +125,16 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
     };
   }, [setValue]);
 
+  // max+1, not length+1: after a mid-list delete, length+1 duplicates an existing number —
+  // and pieces/operations/issues reference callouts BY number.
+  const nextNumber = () =>
+    Math.max(0, ...callouts.map((c) => (Number.isFinite(c.number) ? Number(c.number) : 0))) + 1;
+
   function addAt(e: React.MouseEvent) {
     if (dragIdxRef.current != null || activeViewId == null) return;
     const { x, y } = coords(e.clientX, e.clientY);
     append({
-      number: fields.length + 1,
+      number: nextNumber(),
       part: '',
       description: '',
       dimensions: '',
@@ -124,9 +146,11 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
 
   const pinOptions = [
     { value: 0, label: '— unanchored —' },
-    ...media.map((m, i) => ({
+    ...media.map((m) => ({
       value: m.mediaId,
-      label: `#${i + 1} ${kindLabels[m.kind ?? ''] ?? 'sketch'}`,
+      label: `${m.source === 'moodboard' ? 'M' : 'T'}#${m.localIndex + 1} ${
+        kindLabels[m.kind ?? ''] ?? (m.source === 'moodboard' ? 'reference' : 'sketch')
+      }`,
     })),
   ];
 
@@ -151,7 +175,7 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
                     : 'border-textInactiveColor text-textColor hover:border-textInactiveColor',
                 )}
               >
-                {kindLabels[v.kind ?? ''] ?? 'view'}
+                {viewLabel(v)}
               </button>
             ))}
           </div>
@@ -253,7 +277,7 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
           className='uppercase'
           onClick={() =>
             append({
-              number: fields.length + 1,
+              number: nextNumber(),
               part: '',
               description: '',
               dimensions: '',

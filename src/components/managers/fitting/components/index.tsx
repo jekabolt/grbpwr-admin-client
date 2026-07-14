@@ -7,10 +7,11 @@ import {
 } from 'components/managers/fittings/components/useFittingQuery';
 import { ModelMeasurementsView } from 'components/managers/model/components/measurements-view';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
+import { SamplePicker } from 'components/managers/tech-card/components/sample-picker';
 import { fittingStatusOptions, fittingVerdictOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -19,6 +20,7 @@ import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { ChangeRequestsFields } from './change-requests-fields';
 import { FittingCallouts } from './fitting-callouts';
 import { FittingMedia } from './fitting-media';
 import { PatternsFields } from './patterns-fields';
@@ -33,6 +35,14 @@ import {
   todayDateInput,
 } from './schema';
 import { SizesFields } from './sizes-fields';
+
+// Structured round outcome (raw strings per the FittingInsert contract; distinct from verdict).
+const fittingOutcomeOptions = [
+  { value: '', label: 'undecided' },
+  { value: 'approved', label: 'approved' },
+  { value: 'new_round', label: 'new round' },
+  { value: 'dropped', label: 'dropped' },
+];
 
 function Section({
   title,
@@ -69,14 +79,26 @@ export function FittingForm({
   const { canWrite } = usePermissions();
   const { data: models } = useAllModels();
   const [searchParams] = useSearchParams();
-  // Deep-link from the tech card editor: /add-fitting?techCardId=123 pre-links the style.
+  // Deep-link from the tech card editor: /add-fitting?techCardId=123 pre-links the style;
+  // the sample panel adds &sampleId=45 to pre-link the specific sample tried on (W3.4).
   const initialTechCardId = Number(searchParams.get('techCardId')) || 0;
+  const initialSampleId = Number(searchParams.get('sampleId')) || 0;
+  // Where to go after saving — the sample panel passes ?returnTo=<its URL> so we land back there
+  // instead of the flat fittings list (R-5). Only in-app paths: an absolute/protocol-relative
+  // value would make navigate() throw AFTER a successful create, reading as a failed submit.
+  const rawReturnTo = searchParams.get('returnTo') || '';
+  const returnTo = rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//') ? rawReturnTo : '';
 
   const form = useForm<FittingFormData>({
     resolver: zodResolver(fittingSchema),
     defaultValues: fitting
       ? mapFittingToForm(fitting)
-      : { ...fittingDefaultData, fittingDate: todayDateInput(), techCardId: initialTechCardId },
+      : {
+          ...fittingDefaultData,
+          fittingDate: todayDateInput(),
+          techCardId: initialTechCardId,
+          sampleId: initialSampleId,
+        },
     mode: 'onSubmit',
   });
 
@@ -93,6 +115,20 @@ export function FittingForm({
 
   const selectedModelId = form.watch('modelId');
   const selectedModel = (models ?? []).find((m) => m.id === selectedModelId);
+  // The sample chooser is only meaningful once a style is linked (ListSamples needs a tech card).
+  const selectedTechCardId = form.watch('techCardId');
+  const selectedSampleId = form.watch('sampleId');
+  // Drop a stale sample link whenever the style changes — a sample belongs to its tech card.
+  // Tracking the previous id also covers a direct A→B switch (possible on a cold cache, when
+  // the picker shows the search box before GetTechCard resolves), not just unlink→relink.
+  const prevTechCardId = useRef(selectedTechCardId);
+  useEffect(() => {
+    const changed = prevTechCardId.current !== selectedTechCardId;
+    prevTechCardId.current = selectedTechCardId;
+    if (changed && selectedSampleId) {
+      form.setValue('sampleId', 0, { shouldDirty: true });
+    }
+  }, [selectedTechCardId, selectedSampleId, form]);
 
   // Resolved-media map shared by the photo picker and the callouts editor, so a
   // freshly-picked photo can be annotated before the fitting is saved (saved
@@ -106,7 +142,7 @@ export function FittingForm({
   }, [fitting?.media, picked]);
 
   async function handleSubmit(data: FittingFormData) {
-    const fittingInsert = mapFormToFittingInsert(data);
+    const fittingInsert = mapFormToFittingInsert(data, fitting?.fitting);
     try {
       if (isEditMode) {
         await updateFitting.mutateAsync({ id: parseInt(id || '0', 10), fitting: fittingInsert });
@@ -115,7 +151,7 @@ export function FittingForm({
       } else {
         await createFitting.mutateAsync(fittingInsert);
         showMessage('fitting created', 'success');
-        navigate(ROUTES.fittings);
+        navigate(returnTo || ROUTES.fittings);
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to submit fitting';
@@ -132,8 +168,10 @@ export function FittingForm({
       >
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
+            {/* Back respects ?returnTo= so bailing from the sample-panel loop lands back in
+                the sample, not on the flat fittings list. */}
             <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.fittings}>← fittings</Link>
+              <Link to={returnTo || ROUTES.fittings}>← back</Link>
             </Button>
             <Text variant='uppercase' size='large'>
               {isEditMode ? 'edit fitting' : 'new fitting'}
@@ -159,6 +197,23 @@ export function FittingForm({
               укажите продукт или тех карту (для пыльников, кофров и т.п. — по тех карте, без
               продукта)
             </Text>
+            {!!selectedTechCardId && (
+              <div className='space-y-1'>
+                <Text variant='uppercase' size='small'>
+                  sample (optional)
+                </Text>
+                <SamplePicker
+                  techCardId={selectedTechCardId}
+                  value={selectedSampleId ?? 0}
+                  onChange={(sampleId) =>
+                    form.setValue('sampleId', sampleId, { shouldDirty: true })
+                  }
+                />
+                <Text variant='inactive' size='small'>
+                  какой именно сэмпл примеряли (для истории примерок сэмпла)
+                </Text>
+              </div>
+            )}
             <SelectField
               name='modelId'
               label='model (optional)'
@@ -171,6 +226,15 @@ export function FittingForm({
             <InputField name='fittingDate' type='date' label='fitting date' />
             <SelectField name='status' label='status' items={fittingStatusOptions} />
             <SelectField name='verdict' label='verdict' items={fittingVerdictOptions} />
+            <div className='grid grid-cols-2 gap-3'>
+              <InputField
+                name='roundNumber'
+                type='number'
+                label='round # (0 = auto)'
+                valueAsNumber
+              />
+              <SelectField name='outcome' label='outcome' items={fittingOutcomeOptions} />
+            </div>
             <InputField name='recordedBy' label='recorded by (optional)' placeholder='name' />
             <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={2000} />
           </Section>
@@ -191,6 +255,9 @@ export function FittingForm({
             <Section title='callouts (замечания по посадке)'>
               <FittingCallouts mediaById={mediaById} />
             </Section>
+            <Section title='change requests (что доработать)'>
+              <ChangeRequestsFields />
+            </Section>
           </div>
         </div>
       </form>
@@ -205,7 +272,7 @@ export function FittingForm({
             variant='secondary'
             size='lg'
             className='uppercase cursor-pointer'
-            onClick={() => navigate(ROUTES.fittings)}
+            onClick={() => navigate(returnTo || ROUTES.fittings)}
           >
             cancel
           </Button>

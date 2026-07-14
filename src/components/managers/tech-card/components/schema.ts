@@ -143,9 +143,34 @@ const colorwayUsageSchema = z.object({
   // per-size grading of a measured material's consumption. When set, the size-run cost
   // folds these against the size run; `consumption` above is the per-garment fallback.
   sizeConsumptions: z.array(sizeConsumptionSchema).default([]),
+  // 0-based index into `pieces` this norm is about; -1 = whole garment (informational, NF-05).
+  // Positional — renumbered when a piece is removed (nf05-01). UI select lands in W4.4.
+  pieceIndex: z.number().optional().default(-1),
   // OUTPUT-ONLY: server-computed spend per garment / over the whole size run.
   lineTotal: z.string().optional().default(''),
   sizeRunTotal: z.string().optional().default(''),
+});
+
+// One cut-piece detail (деталь кроя) + its per-colourway fabric mapping (NF-05). materials is a
+// sparse list keyed by colorwayIndex; a colourway with no entry is simply unmapped. bomItemIndex /
+// fusingBomItemIndex are positional into `bomItems` (-1 = unset), colorwayIndex positional into
+// `colorways` — all renumbered on BOM/colourway removal (nf05-01).
+const pieceMaterialSchema = z.object({
+  colorwayIndex: z.number().optional().default(0),
+  bomItemIndex: z.number().optional().default(-1),
+  fusingBomItemIndex: z.number().optional().default(-1),
+  note: z.string().optional().default(''),
+});
+
+const pieceSchema = z.object({
+  name: z.string().optional().default(''),
+  piecesPerGarment: z.number().optional().default(1),
+  mirrored: z.boolean().optional().default(false),
+  grainline: z.string().optional().default(''),
+  fused: z.boolean().optional().default(false),
+  calloutNumber: z.number().optional().default(0),
+  note: z.string().optional().default(''),
+  materials: z.array(pieceMaterialSchema).default([]),
 });
 
 const colorwaySchema = z.object({
@@ -187,6 +212,9 @@ const bomItemSchema = z.object({
   fabricWeightGsm: z.string().optional().default(''),
   fabricDirection: z.string().optional().default('TECH_CARD_FABRIC_DIRECTION_UNKNOWN'),
   wastagePercent: z.string().optional().default(''),
+  // optional link to a catalog Material (0 = unlinked free-text line). The line keeps its own
+  // snapshot fields regardless of the link.
+  materialId: z.number().optional().default(0),
 });
 
 // One construction-description aspect (Sheet «Титул», lower block): freeform text + optional
@@ -305,9 +333,11 @@ export const emptyCosting: z.input<typeof costingSchema> = {
   notes: '',
 };
 
-export const techCardSchema = z.object({
-  // identification
-  styleNumber: z.string().min(1, 'Style number is required'),
+const techCardObject = z.object({
+  // identification. style_number is optional in the form so an IDEA concept can be created without
+  // an article number; a conditional refine below still requires it past IDEA, and an empty IDEA
+  // number is auto-filled with a draft on save (B-2, backend still requires the field).
+  styleNumber: z.string().optional().default(''),
   name: z.string().min(1, 'Name is required'),
   brand: z.string().optional().default(''),
   season: z.string().optional().default(''),
@@ -336,8 +366,15 @@ export const techCardSchema = z.object({
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
   patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
   productIds: z.array(z.number()).default([]),
+  // NF-07 auxiliary items: purpose is 'sellable' (default) or 'auxiliary' (produces a packaging
+  // material, not a product). An auxiliary card links no products and its run output receipts into
+  // outputMaterialId (required before its first run; 0 = unset).
+  purpose: z.string().optional().default('sellable'),
+  outputMaterialId: z.number().optional().default(0),
+  // Cut-piece details + per-colourway fabric map (NF-05). Positional refs (nf05-01).
+  pieces: z.array(pieceSchema).default([]),
   // Sketch media split into two independent lists (construction consumes ONLY technicalMedia;
-  // callouts pin onto technicalMedia). Each item's `kind` sub-classifies within its list.
+  // callouts pin onto ANY media_id — moodboard or technical, B-1). Each item's `kind` sub-classifies.
   moodboardMedia: z.array(mediaItemSchema).default([]),
   technicalMedia: z.array(mediaItemSchema).default([]),
   callouts: z.array(calloutSchema).default([]),
@@ -354,7 +391,18 @@ export const techCardSchema = z.object({
   revisions: z.array(revisionSchema).default([]),
 });
 
-export type TechCardFormData = z.input<typeof techCardSchema>;
+// style_number is required past the IDEA stage; at IDEA it may be blank (auto-filled on save).
+export const techCardSchema = techCardObject.superRefine((data, ctx) => {
+  if (data.stage !== 'TECH_CARD_STAGE_IDEA' && !data.styleNumber?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Style number is required',
+      path: ['styleNumber'],
+    });
+  }
+});
+
+export type TechCardFormData = z.input<typeof techCardObject>;
 
 export const techCardDefaultData: TechCardFormData = {
   styleNumber: '',
@@ -380,6 +428,9 @@ export const techCardDefaultData: TechCardFormData = {
   sizeQuantities: [],
   patterns: [],
   productIds: [],
+  purpose: 'sellable',
+  outputMaterialId: 0,
+  pieces: [],
   moodboardMedia: [],
   technicalMedia: [],
   callouts: [],
@@ -407,11 +458,16 @@ function measurementUnitOrDefault(unit?: string): string {
 }
 
 // Both sketch-media lists (moodboard / technical) share the { mediaId, kind, caption } shape.
+// `fallbackKind` keeps the default list-appropriate: an UNKNOWN-kind moodboard item defaulted to
+// FRONT (a technical kind), rendering a blank select and persisting the wrong kind on save.
 type FormMediaItem = z.input<typeof mediaItemSchema>;
-function mapMediaItemToForm(m: common_TechCardMediaItem): FormMediaItem {
+function mapMediaItemToForm(
+  m: common_TechCardMediaItem,
+  fallbackKind: common_TechCardMediaKind = DEFAULT_MEDIA_KIND,
+): FormMediaItem {
   return {
     mediaId: m.mediaId || 0,
-    kind: m.kind && m.kind !== 'TECH_CARD_MEDIA_KIND_UNKNOWN' ? m.kind : DEFAULT_MEDIA_KIND,
+    kind: m.kind && m.kind !== 'TECH_CARD_MEDIA_KIND_UNKNOWN' ? m.kind : fallbackKind,
     caption: m.caption || '',
   };
 }
@@ -438,8 +494,10 @@ function splitSketchMedia(insert?: common_TechCardInsert): {
   moodboardMedia: FormMediaItem[];
   technicalMedia: FormMediaItem[];
 } {
-  const moodboardMedia = (insert?.moodboardMedia ?? []).map(mapMediaItemToForm);
-  const technicalMedia = (insert?.technicalMedia ?? []).map(mapMediaItemToForm);
+  const moodboardMedia = (insert?.moodboardMedia ?? []).map((m) =>
+    mapMediaItemToForm(m, 'TECH_CARD_MEDIA_KIND_MOODBOARD'),
+  );
+  const technicalMedia = (insert?.technicalMedia ?? []).map((m) => mapMediaItemToForm(m));
   if (moodboardMedia.length || technicalMedia.length) return { moodboardMedia, technicalMedia };
   const legacy = (insert as { media?: common_TechCardMediaItem[] } | undefined)?.media ?? [];
   const mood: FormMediaItem[] = [];
@@ -487,6 +545,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       sizeBytes: Number(p.sizeBytes) || 0,
     })),
     productIds: insert?.productIds ?? [],
+    purpose: insert?.purpose || 'sellable',
+    outputMaterialId: insert?.outputMaterialId || 0,
     ...splitSketchMedia(insert),
     callouts: (insert?.callouts ?? []).map((c) => ({
       number: c.number || 0,
@@ -526,8 +586,24 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           sizeId: sc.sizeId || 0,
           consumption: decimalToInput(sc.consumption),
         })),
+        pieceIndex: u.pieceIndex ?? -1,
         lineTotal: decimalToInput(u.lineTotal),
         sizeRunTotal: decimalToInput(u.sizeRunTotal),
+      })),
+    })),
+    pieces: (insert?.pieces ?? []).map((p) => ({
+      name: p.name || '',
+      piecesPerGarment: p.piecesPerGarment ?? 1,
+      mirrored: p.mirrored ?? false,
+      grainline: p.grainline || '',
+      fused: p.fused ?? false,
+      calloutNumber: p.calloutNumber ?? 0,
+      note: p.note || '',
+      materials: (p.materials ?? []).map((m) => ({
+        colorwayIndex: m.colorwayIndex ?? 0,
+        bomItemIndex: m.bomItemIndex ?? -1,
+        fusingBomItemIndex: m.fusingBomItemIndex ?? -1,
+        note: m.note || '',
       })),
     })),
     bomItems: (insert?.bomItems ?? []).map((b) => ({
@@ -552,6 +628,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           ? b.fabricDirection
           : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
       wastagePercent: decimalToInput(b.wastagePercent),
+      materialId: b.materialId ?? 0,
     })),
     details: (insert?.details ?? []).map((d) => ({
       key: d.key || '',
@@ -754,6 +831,10 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     hasUnconvertedCurrencies: undefined,
     totalSam: undefined,
     colorwayCosts: undefined,
+    // Base-currency roll-up (server-folded via costing FX rates) — output-only.
+    unitCostBase: undefined,
+    orderCostBase: undefined,
+    baseCurrency: undefined,
   };
 }
 
@@ -762,10 +843,22 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
 export function mapFormToTechCardInsert(
   data: TechCardFormData,
   original?: common_TechCardInsert,
+  // When the editor lacks costing:write the costing block is hidden and the form holds an
+  // empty costing (the server nulled it on read for non-costing readers). Recomputing from
+  // that empty form would send `costing: undefined` and — under full-replace — WIPE the stored
+  // costing. Preserve the original block instead so a non-costing editor can never destroy it.
+  canWriteCosting: boolean = true,
 ): common_TechCardInsert {
+  // B-2: the backend requires style_number even for an IDEA card, so fill an empty one with a draft
+  // `IDEA-<base36 time>` the user renames before PROTO. Edits preserve the existing number (the form
+  // seeds it from the loaded card), so this only ever fires on a fresh blank IDEA concept.
+  const trimmedStyleNumber = data.styleNumber?.trim() || '';
+  const styleNumber =
+    trimmedStyleNumber ||
+    (data.stage === 'TECH_CARD_STAGE_IDEA' ? `IDEA-${Date.now().toString(36).toUpperCase()}` : '');
   return {
     ...original,
-    styleNumber: data.styleNumber.trim(),
+    styleNumber,
     name: data.name.trim(),
     brand: data.brand?.trim() || '',
     season: data.season?.trim() || '',
@@ -800,7 +893,11 @@ export function mapFormToTechCardInsert(
         filename: p.filename?.trim() || '',
         sizeBytes: p.sizeBytes || 0,
       })),
-    productIds: data.productIds ?? [],
+    // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
+    // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
+    purpose: data.purpose || 'sellable',
+    outputMaterialId: data.purpose === 'auxiliary' ? data.outputMaterialId || 0 : 0,
+    productIds: data.purpose === 'auxiliary' ? [] : data.productIds ?? [],
     moodboardMedia: (data.moodboardMedia ?? []).map(mapMediaItemOut),
     technicalMedia: (data.technicalMedia ?? []).map(mapMediaItemOut),
     callouts: (data.callouts ?? []).map((c) => ({
@@ -817,7 +914,10 @@ export function mapFormToTechCardInsert(
       name: c.name?.trim() || '',
       labDipStatus: (c.labDipStatus ||
         'TECH_CARD_LAB_DIP_STATUS_UNKNOWN') as common_TechCardLabDipStatus,
-      productId: c.productId || 0,
+      // Aux exclusivity extends to per-colourway FKs: an auxiliary card links no products, so a
+      // colourway keeping its productId would send an inconsistent payload (products unlinked at
+      // the card level but still referenced per colourway).
+      productId: data.purpose === 'auxiliary' ? 0 : c.productId || 0,
       comment: c.comment?.trim() || '',
       pantone: c.pantone?.trim() || '',
       pantoneSystem: c.pantoneSystem?.trim() || '',
@@ -845,10 +945,44 @@ export function mapFormToTechCardInsert(
             sizeId: sc.sizeId || 0,
             consumption: inputToDecimal(sc.consumption),
           })),
+        pieceIndex:
+          typeof u.pieceIndex === 'number' && u.pieceIndex >= 0 ? u.pieceIndex : undefined,
         // lineTotal + sizeRunTotal are output-only (server-computed) — never sent
         lineTotal: undefined,
         sizeRunTotal: undefined,
       })),
+    })),
+    // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
+    // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
+    pieces: (data.pieces ?? []).map((p) => ({
+      name: p.name?.trim() || '',
+      // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
+      // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload
+      piecesPerGarment: p.piecesPerGarment || 1,
+      mirrored: p.mirrored ?? false,
+      grainline: p.grainline?.trim() || '',
+      fused: p.fused ?? false,
+      calloutNumber: p.calloutNumber || 0,
+      note: p.note?.trim() || '',
+      materials: (p.materials ?? [])
+        // drop fully-empty cells (no fabric, no fusing, no note) so the map stays sparse —
+        // a note-only cell (written by another client) must survive an unrelated save
+        .filter(
+          (m) =>
+            (typeof m.bomItemIndex === 'number' && m.bomItemIndex >= 0) ||
+            (typeof m.fusingBomItemIndex === 'number' && m.fusingBomItemIndex >= 0) ||
+            !!m.note?.trim(),
+        )
+        .map((m) => ({
+          colorwayIndex: m.colorwayIndex || 0,
+          bomItemIndex:
+            typeof m.bomItemIndex === 'number' && m.bomItemIndex >= 0 ? m.bomItemIndex : undefined,
+          fusingBomItemIndex:
+            typeof m.fusingBomItemIndex === 'number' && m.fusingBomItemIndex >= 0
+              ? m.fusingBomItemIndex
+              : undefined,
+          note: m.note?.trim() || '',
+        })),
     })),
     bomItems: (data.bomItems ?? []).map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
@@ -867,6 +1001,7 @@ export function mapFormToTechCardInsert(
       fabricDirection: (b.fabricDirection ||
         'TECH_CARD_FABRIC_DIRECTION_UNKNOWN') as common_TechCardFabricDirection,
       wastagePercent: inputToDecimal(b.wastagePercent),
+      materialId: b.materialId || 0,
     })),
     details: (data.details ?? [])
       .map((d) => ({
@@ -909,7 +1044,8 @@ export function mapFormToTechCardInsert(
       note: l.note?.trim() || '',
     })),
     packaging: mapPackagingOut(data.packaging),
-    costing: mapCostingOut(data.costing),
+    // Only a costing:write editor may change costing; everyone else preserves what was loaded.
+    costing: canWriteCosting ? mapCostingOut(data.costing) : original?.costing,
     issues: (data.issues ?? []).map((i) => ({
       operationNumber: i.operationNumber || 0,
       calloutNumber: i.calloutNumber || 0,

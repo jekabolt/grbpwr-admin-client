@@ -35,8 +35,14 @@ export const SECTION = {
   models: 'models',
   fittings: 'fittings',
   techCards: 'tech_cards',
+  production: 'production',
   tasks: 'tasks',
   accounts: 'accounts',
+  // Field-shaping section (NOT a screen gate): when an account lacks costing:read
+  // the backend nulls out cost/margin fields across products, tech cards, metrics
+  // and the dashboard. Deliberately absent from the nav arrays — there is no
+  // "costing" page; canRead/canWrite(SECTION.costing) only tidy cost UI visibility.
+  costing: 'costing',
 } as const;
 
 export type SectionKey = (typeof SECTION)[keyof typeof SECTION];
@@ -80,9 +86,13 @@ export enum ROUTES {
   addTechCard = '/add-tech-card',
   singleTechCard = '/tech-cards/:id',
   techCardPrint = '/tech-cards/:id/print',
+  materials = '/materials',
+  productionRuns = '/production-runs',
+  productionRun = '/production-runs/:id',
   tasks = '/tasks',
   taskDetails = '/tasks/:id',
   accounts = '/accounts',
+  opex = '/opex',
 }
 
 // Primary navigation, grouped by domain. Desktop renders each group as a top-bar
@@ -93,6 +103,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'operations',
     items: [
       { label: 'analytics', route: ROUTES.main, section: SECTION.analytics },
+      { label: 'opex', route: ROUTES.opex, section: SECTION.analytics },
       { label: 'orders', route: ROUTES.orders, section: SECTION.orders },
       { label: 'fulfillment', route: ROUTES.fulfillment, section: SECTION.fulfillment },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks },
@@ -114,6 +125,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'models', route: ROUTES.models, section: SECTION.models },
       { label: 'fittings', route: ROUTES.fittings, section: SECTION.fittings },
       { label: 'tech cards', route: ROUTES.techCards, section: SECTION.techCards },
+      { label: 'materials', route: ROUTES.materials, section: SECTION.techCards },
+      { label: 'production', route: ROUTES.productionRuns, section: SECTION.production },
     ],
   },
   {

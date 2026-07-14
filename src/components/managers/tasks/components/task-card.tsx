@@ -23,8 +23,9 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
   const t = task.task;
   const due = dueMeta(t.dueDate);
   const linkCount =
-    [t.techCardId, t.productId, t.archiveId, t.fittingId].filter((v) => v > 0).length +
-    (t.orderUuid ? 1 : 0);
+    [t.techCardId, t.productId, t.archiveId, t.fittingId, t.sampleId, t.productionRunId].filter(
+      (v) => v > 0,
+    ).length + (t.orderUuid ? 1 : 0);
   const checkTotal = task.checklist.length;
   const checkDone = task.checklist.filter((c) => c.isDone).length;
   const isArchived = !!task.archivedAt;

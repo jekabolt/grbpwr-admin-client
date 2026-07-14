@@ -64,3 +64,6 @@ Thumbs.db
 .vite
 .vercel
 .env*
+
+# nested git worktrees (local only)
+.claude/worktrees/

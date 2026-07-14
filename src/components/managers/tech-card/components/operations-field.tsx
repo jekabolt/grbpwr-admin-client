@@ -286,7 +286,7 @@ export function OperationsField({
   addRequest?: { placement: string; nonce: number } | null;
   onAdded?: () => void;
 } = {}) {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'operations' });
 
   // append here (this field array owns the rendered list) when the panel requests it
@@ -296,6 +296,23 @@ export function OperationsField({
     onAdded?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addRequest?.nonce]);
+
+  // Operation numbers are positional — the mapper re-stamps (i+1)*10 on every save — so
+  // removing op k renumbers everything after it. issues[].operationNumber references ops BY
+  // NUMBER: remap them in the same edit (same class as nf05-01, laundered through the number),
+  // or an issue flagged on op 20 silently points at the WRONG operation on the factory sheet.
+  const removeOperation = (index: number) => {
+    const removedNumber = (index + 1) * 10;
+    remove(index);
+    const issues = getValues('issues') ?? [];
+    issues.forEach((iss, ii) => {
+      const n = iss.operationNumber ?? 0;
+      if (!n) return;
+      if (n === removedNumber) setValue(`issues.${ii}.operationNumber`, 0, { shouldDirty: true });
+      else if (n > removedNumber)
+        setValue(`issues.${ii}.operationNumber`, n - 10, { shouldDirty: true });
+    });
+  };
 
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLine[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
@@ -345,7 +362,7 @@ export function OperationsField({
             <OperationRow
               key={f.id}
               index={index}
-              onRemove={() => remove(index)}
+              onRemove={() => removeOperation(index)}
               bomOptions={bomOptions}
               pinOptions={pinOptions}
               bomLines={bomItems}

@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { StyleEconomicsModal } from 'components/managers/page/components/StyleEconomicsModal';
 import {
   useCreateTechCard,
   useUpdateTechCard,
@@ -9,17 +10,20 @@ import {
   formatTechCardDate,
   techCardErrorMessage,
 } from 'components/managers/tech-cards/components/utils';
+import { MaterialModal } from 'components/managers/materials/components/material-modal';
+import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import {
   techCardApprovalStateOptions,
   techCardGenderOptions,
   techCardMeasurementUnitOptions,
+  techCardPurposeOptions,
   techCardStageOptions,
 } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
@@ -34,9 +38,13 @@ import { DetailsEditor } from './details-editor';
 import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
 import { LabelsField } from './labels-field';
+import { LifecycleStrip } from './lifecycle-strip';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
+import { PiecesTab } from './pieces-tab';
 import { ProductIdsField } from './product-ids-field';
+import { DevExpensesField } from './dev-expenses-field';
+import { ReleasesField } from './releases-field';
 import { RevisionsField } from './revisions-field';
 import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
@@ -49,6 +57,7 @@ import {
   techCardDefaultData,
   techCardSchema,
 } from './schema';
+import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { TechCardFittings } from './tech-card-fittings';
 
@@ -56,16 +65,28 @@ const TABS = [
   { id: 'header', label: 'header' },
   { id: 'sketch', label: 'sketch' },
   { id: 'patterns', label: 'patterns' },
+  { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
+  { id: 'pieces', label: 'pieces' },
   { id: 'construction', label: 'construction' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
+  { id: 'dev', label: 'R&D cost' },
   { id: 'issues', label: 'issues' },
   { id: 'signoff', label: 'sign-off' },
   { id: 'history', label: 'history' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
+
+// Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
+// DEVELOP how it's made, SPEC what ships. History stands alone.
+const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
+  { band: 'design', tabs: ['header', 'sketch', 'patterns'] },
+  { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'pieces', 'construction'] },
+  { band: 'spec', tabs: ['labels', 'costing', 'dev', 'issues', 'signoff'] },
+  { band: '', tabs: ['history'] },
+];
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
 const ERROR_TAB: Record<string, TabId> = {
@@ -77,6 +98,7 @@ const ERROR_TAB: Record<string, TabId> = {
   sizeQuantities: 'patterns',
   bomItems: 'bom',
   colorways: 'colorways',
+  pieces: 'pieces',
   details: 'header',
   construction: 'construction',
   operations: 'construction',
@@ -124,17 +146,48 @@ export function TechCardForm({
   const navigate = useNavigate();
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
-  const { canWrite } = usePermissions();
+  const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
+  const [econOpen, setEconOpen] = useState(false);
 
   const numId = id ? parseInt(id, 10) : undefined;
 
+  // URL-driven state. ?stage=… seeds a freshly-created card's stage ([new idea] → IDEA); ?tab=…
+  // and ?sample=/?fits= make the open section / sample / fittings-filter deep-linkable (R-1).
+  // Both params are validated — a mistyped shared link must not seed a garbage enum into the
+  // form (the backend would 400 with no field pointer) or park the page on a blank tab.
+  const [params, setParams] = useSearchParams();
+  const stageParam = params.get('stage');
+  const initialStage = techCardStageOptions.some((o) => o.value === stageParam)
+    ? (stageParam as TechCardFormData['stage'])
+    : undefined;
+
   const form = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema),
-    defaultValues: techCard ? mapTechCardToForm(techCard) : techCardDefaultData,
+    defaultValues: techCard
+      ? mapTechCardToForm(techCard)
+      : initialStage
+        ? { ...techCardDefaultData, stage: initialStage }
+        : techCardDefaultData,
     mode: 'onSubmit',
   });
 
-  const [activeTab, setActiveTab] = useState<TabId>('header');
+  // Switching tabs drops a stale ?sample= / ?fits=; extra params (a sample to open, a fittings
+  // filter) can be set in the same navigation (spine deep links).
+  const tabParam = params.get('tab');
+  const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'header';
+  const navTo = (id: TabId, extra?: Record<string, string>) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('tab', id);
+        if (id !== 'samples') p.delete('sample');
+        p.delete('fits');
+        for (const [k, v] of Object.entries(extra ?? {})) p.set(k, v);
+        return p;
+      },
+      { replace: true },
+    );
+  const setActiveTab = (id: TabId) => navTo(id);
   const [conflict, setConflict] = useState(false);
   // bump to jump to the BOM tab and pulse the empty composition fields (from labels care-gen)
   const [bomHighlight, setBomHighlight] = useState(0);
@@ -151,20 +204,65 @@ export function TechCardForm({
   const colorways = (useWatch({ control: form.control, name: 'colorways' }) ?? []) as Array<{
     labDipStatus?: string;
   }>;
-  const canRelease = colorways.every((c) => c.labDipStatus === LAB_DIP_APPROVED);
-
   const issues = (useWatch({ control: form.control, name: 'issues' }) ?? []) as Array<{
     status?: string;
   }>;
   const openIssues = issues.filter((i) => i.status === 'TECH_CARD_ISSUE_STATUS_OPEN').length;
 
+  // Lifecycle spine inputs: current stage/approval drive the stepper + next-hint; linked-product
+  // count feeds the counter row.
+  const stage = (useWatch({ control: form.control, name: 'stage' }) ?? '') as string;
+  // Release freezes the card as the factory-facing spec — an IDEA draft (no real style number,
+  // no spec tabs filled; the lab-dip check is vacuously true over zero colourways) can't be one.
+  const canRelease =
+    stage !== 'TECH_CARD_STAGE_IDEA' && colorways.every((c) => c.labDipStatus === LAB_DIP_APPROVED);
+  const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
+    '') as string;
+  const productCount = (useWatch({ control: form.control, name: 'productIds' }) ?? []).length;
+
+  // NF-07 auxiliary items: an aux card produces a packaging material, links no products, and needs
+  // an output material set before its first run.
+  const purpose = (useWatch({ control: form.control, name: 'purpose' }) ?? 'sellable') as string;
+  const outputMaterialId = (useWatch({ control: form.control, name: 'outputMaterialId' }) ??
+    0) as number;
+  const isAux = purpose === 'auxiliary';
+  const [materialModalOpen, setMaterialModalOpen] = useState(false);
+
   const errorTabs = new Set(
     Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header'),
   );
 
+  // IDEA is a "light" card (screen E): only the concept-relevant tabs show; the rest reappear when
+  // the stage advances, their echoed fields untouched. Not disabled — hidden. A tab carrying a
+  // validation error stays visible even at IDEA, or the error dot would point at an invisible tab.
+  const isIdea = stage === 'TECH_CARD_STAGE_IDEA';
+  const IDEA_TABS: TabId[] = ['header', 'sketch', 'samples', 'history'];
+  // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read (server nulls
+  // the cost block / returns an empty journal; an empty tab would read as "zero cost"). Samples
+  // need a saved card (id).
+  const isTabVisible = (t: TabId) => {
+    if (isIdea && !IDEA_TABS.includes(t)) return errorTabs.has(t);
+    if ((t === 'costing' || t === 'dev') && !canReadCosting) return false;
+    if (t === 'samples' && !isEditMode) return false;
+    return true;
+  };
+  // If the open tab becomes hidden (switching a card to IDEA while on the BOM tab, or permissions
+  // resolving and taking the costing tab away), fall back to header so the body isn't blank.
+  useEffect(() => {
+    if (!isTabVisible(activeTab)) navTo('header');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isIdea, canReadCosting, isEditMode]);
+
   async function doSubmit(data: TechCardFormData) {
     setConflict(false);
-    const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard);
+    const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting);
+    // The mapper mints an IDEA-<ts> draft number when the field is blank — write it back into
+    // the form, or every save of a blank IDEA card mints a NEW identity (and the header keeps
+    // showing nothing).
+    if (!data.styleNumber?.trim() && techCardInsert.styleNumber) {
+      data = { ...data, styleNumber: techCardInsert.styleNumber };
+      form.setValue('styleNumber', techCardInsert.styleNumber);
+    }
     try {
       if (isEditMode) {
         await updateTechCard.mutateAsync({
@@ -272,7 +370,13 @@ export function TechCardForm({
                     variant='secondary'
                     size='lg'
                     className='uppercase'
-                    title={canRelease ? '' : 'Approve every colourway lab-dip before release'}
+                    title={
+                      canRelease
+                        ? ''
+                        : isIdea
+                          ? 'An IDEA draft cannot be released — advance the stage first'
+                          : 'Approve every colourway lab-dip before release'
+                    }
                     disabled={!canRelease || saving}
                     onClick={() => submitWithApproval(RELEASED)}
                   >
@@ -295,35 +399,71 @@ export function TechCardForm({
         </div>
 
         <nav
-          className='flex gap-1 overflow-x-auto border-b border-textInactiveColor px-2.5'
+          className='flex items-center gap-1 overflow-x-auto border-b border-textInactiveColor px-2.5'
           aria-label='Tech card sections'
         >
-          {TABS.map((tab) => {
-            const active = activeTab === tab.id;
-            const hasError = errorTabs.has(tab.id);
+          {TAB_GROUPS.map((group, gi) => {
+            const groupTabs = group.tabs
+              .map((id) => TABS.find((t) => t.id === id)!)
+              .filter((t) => isTabVisible(t.id));
+            if (groupTabs.length === 0) return null;
             return (
-              <button
-                key={tab.id}
-                type='button'
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-textBaseSize uppercase transition-colors ${
-                  active
-                    ? 'border-textInactiveColor text-textColor'
-                    : 'border-transparent text-textInactiveColor hover:text-textColor'
-                }`}
-              >
-                {tab.label}
-                {tab.id === 'issues' && openIssues > 0 && (
-                  <span className='border border-textInactiveColor px-1 text-textBaseSize leading-none'>
-                    {openIssues}
-                  </span>
+              <div key={gi} className='flex items-center'>
+                {gi > 0 && <span className='mx-1 h-4 w-px bg-textInactiveColor' aria-hidden />}
+                {group.band && (
+                  <Text variant='inactive' size='small' className='px-1 uppercase'>
+                    {group.band}
+                  </Text>
                 )}
-                {hasError && <span className='size-1.5 rounded-full bg-error' aria-hidden />}
-              </button>
+                {groupTabs.map((tab) => {
+                  const active = activeTab === tab.id;
+                  const hasError = errorTabs.has(tab.id);
+                  return (
+                    <button
+                      key={tab.id}
+                      type='button'
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-textBaseSize uppercase transition-colors ${
+                        active
+                          ? 'border-textInactiveColor text-textColor'
+                          : 'border-transparent text-textInactiveColor hover:text-textColor'
+                      }`}
+                    >
+                      {tab.label}
+                      {tab.id === 'issues' && openIssues > 0 && (
+                        <span className='border border-textInactiveColor px-1 text-textBaseSize leading-none'>
+                          {openIssues}
+                        </span>
+                      )}
+                      {hasError && <span className='size-1.5 rounded-full bg-error' aria-hidden />}
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
       </div>
+
+      {isEditMode && numId ? (
+        <LifecycleStrip
+          techCardId={numId}
+          stage={stage}
+          approvalState={approvalState}
+          productCount={productCount}
+          frozen={frozen}
+          canEdit={canWrite(SECTION.techCards)}
+          unsaved={form.formState.isDirty}
+          planRunDisabled={isAux && !outputMaterialId}
+          planRunDisabledReason='set an output material before planning an auxiliary run'
+          onStageChange={(next) => form.setValue('stage', next, { shouldDirty: true })}
+          onGoSamples={() => navTo('samples')}
+          onAddSample={() => navTo('samples', { sample: 'new' })}
+          onGoFittings={(unresolvedOnly) =>
+            navTo('history', unresolvedOnly ? { fits: 'unresolved' } : undefined)
+          }
+        />
+      ) : null}
 
       {conflict && (
         <div className='mt-3 flex flex-wrap items-center justify-between gap-3 border border-textInactiveColor bg-highlightColor/10 p-3'>
@@ -357,7 +497,17 @@ export function TechCardForm({
           <div hidden={activeTab !== 'header'} className='flex flex-col gap-6'>
             <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
               <Section title='identification' className='w-full lg:w-1/2'>
-                <InputField name='styleNumber' label='style number *' placeholder='артикул' />
+                <InputField
+                  name='styleNumber'
+                  label={isIdea ? 'style number' : 'style number *'}
+                  placeholder={isIdea ? 'auto IDEA-… draft' : 'артикул'}
+                />
+                {isIdea && (
+                  <Text variant='inactive' size='small'>
+                    optional at idea — a draft number is assigned on save; set the real one before
+                    PROTO
+                  </Text>
+                )}
                 <InputField name='name' label='name *' placeholder='название изделия' />
                 <InputField name='brand' label='brand' />
                 <SeasonField />
@@ -370,6 +520,20 @@ export function TechCardForm({
               </Section>
 
               <Section title='classification' className='w-full lg:w-1/2'>
+                <SelectField name='purpose' label='purpose' items={techCardPurposeOptions} />
+                {/* Purpose is mutually exclusive with the other side's links and the save is a
+                    full replace — flag the destruction BEFORE it happens, it's not reversible. */}
+                {isAux && productCount > 0 && (
+                  <Text variant='error' size='small'>
+                    ! saving as auxiliary permanently unlinks {productCount} linked product
+                    {productCount > 1 ? 's' : ''}
+                  </Text>
+                )}
+                {!isAux && outputMaterialId > 0 && (
+                  <Text variant='error' size='small'>
+                    ! saving as sellable clears the output material
+                  </Text>
+                )}
                 <SelectField
                   name='targetGender'
                   label='target gender'
@@ -393,9 +557,40 @@ export function TechCardForm({
               <TextareaField name='notes' label='notes' rows={2} maxLength={2000} />
             </Section>
 
-            <Section title='linked products'>
-              <ProductIdsField />
-            </Section>
+            {isAux ? (
+              <Section title='output material'>
+                <Text variant='inactive' size='small'>
+                  runs of this card receipt into material stock, not product stock. Pick the
+                  packaging material this card produces (required before its first run).
+                </Text>
+                <div className='max-w-md'>
+                  <MaterialPicker
+                    value={outputMaterialId}
+                    onChange={(mid) =>
+                      form.setValue('outputMaterialId', mid, { shouldDirty: true })
+                    }
+                    section='TECH_CARD_BOM_SECTION_PACKAGING'
+                    disabled={!canWrite(SECTION.techCards)}
+                    placeholder='search packaging material'
+                  />
+                </div>
+                {canWrite(SECTION.techCards) && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='lg'
+                    className='uppercase'
+                    onClick={() => setMaterialModalOpen(true)}
+                  >
+                    + create material
+                  </Button>
+                )}
+              </Section>
+            ) : (
+              <Section title='linked products'>
+                <ProductIdsField />
+              </Section>
+            )}
           </div>
 
           {/* SKETCH */}
@@ -433,6 +628,11 @@ export function TechCardForm({
             </Section>
           </div>
 
+          {/* PIECES — cut-piece details + fabric map (NF-05) */}
+          <div hidden={activeTab !== 'pieces'}>
+            <PiecesTab />
+          </div>
+
           {/* CONSTRUCTION */}
           <div hidden={activeTab !== 'construction'}>
             <ConstructionTab techCard={techCard} />
@@ -451,12 +651,45 @@ export function TechCardForm({
             </Section>
           </div>
 
-          {/* COSTING */}
-          <div hidden={activeTab !== 'costing'}>
-            <Section title='costing'>
-              <CostingField techCard={techCard} />
-            </Section>
-          </div>
+          {/* COSTING — mounted only with costing:read (field-shaped) */}
+          {canReadCosting && (
+            <div hidden={activeTab !== 'costing'}>
+              <Section title='costing'>
+                {isEditMode && numId && (
+                  <div className='mb-3 flex justify-end'>
+                    <Button
+                      type='button'
+                      variant='secondary'
+                      size='lg'
+                      className='uppercase'
+                      onClick={() => setEconOpen(true)}
+                    >
+                      style economics
+                    </Button>
+                  </div>
+                )}
+                <CostingField techCard={techCard} />
+              </Section>
+            </div>
+          )}
+          {canReadCosting && isEditMode && numId ? (
+            <StyleEconomicsModal techCardId={numId} open={econOpen} onOpenChange={setEconOpen} />
+          ) : null}
+
+          {/* R&D COST — mounted only with costing:read (field-shaped) */}
+          {canReadCosting && (
+            <div hidden={activeTab !== 'dev'}>
+              <Section title='R&D development cost'>
+                {isEditMode && numId ? (
+                  <DevExpensesField techCardId={numId} />
+                ) : (
+                  <Text variant='inactive' size='small'>
+                    save this tech card first, then you can log development costs
+                  </Text>
+                )}
+              </Section>
+            </div>
+          )}
 
           {/* ISSUES */}
           <div hidden={activeTab !== 'issues'}>
@@ -486,9 +719,42 @@ export function TechCardForm({
             <Section title='revision log'>
               <RevisionsField />
             </Section>
+            <Section title='releases'>
+              {isEditMode && numId ? (
+                <ReleasesField techCardId={numId} />
+              ) : (
+                <Text variant='inactive' size='small'>
+                  a frozen snapshot is created when the card is saved as “released”
+                </Text>
+              )}
+            </Section>
           </div>
         </fieldset>
+
+        {/* SAMPLES — edit-mode only (needs a saved card id). OUTSIDE the frozen fieldset: a
+            released card must still allow reading — paging the material ledger, opening/closing
+            sample rows — so editing is gated explicitly instead of by the disabled fieldset
+            (which killed every native button, read paths included). */}
+        {isEditMode && numId ? (
+          <div hidden={activeTab !== 'samples'}>
+            <Section title='samples (сэмплы)'>
+              <SamplesTab
+                techCardId={numId}
+                techCard={techCard}
+                canEdit={canWrite(SECTION.techCards) && !frozen}
+                canReadCosting={canReadCosting}
+              />
+            </Section>
+          </div>
+        ) : null}
       </form>
+
+      {/* Create a packaging material inline for the aux output picker (prefilled section). */}
+      <MaterialModal
+        open={materialModalOpen}
+        onOpenChange={setMaterialModalOpen}
+        defaultSection='TECH_CARD_BOM_SECTION_PACKAGING'
+      />
     </Form>
   );
 }
