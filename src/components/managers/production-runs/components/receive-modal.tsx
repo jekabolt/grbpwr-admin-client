@@ -9,7 +9,11 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { materialLabel } from './aux-run-plan';
-import { useReceiveProductionRun, useUpdateRunSection } from './useProductionRuns';
+import {
+  updateRunErrorMessage,
+  useReceiveProductionRun,
+  useUpdateRunSection,
+} from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
@@ -157,7 +161,7 @@ export function ReceiveModal({
           }),
       });
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save received counts', 'error');
+      showMessage(updateRunErrorMessage(e), 'error');
       return;
     }
     try {

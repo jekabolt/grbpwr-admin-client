@@ -7,7 +7,6 @@ import Text from 'ui/components/text';
 
 const DAY = 86_400_000;
 const ageDays = (ts?: string) => (ts ? (Date.now() - new Date(ts).getTime()) / DAY : 0);
-const NON_TERMINAL = new Set(['planned', 'in_progress']);
 
 // "What needs attention" across the flow, surfaced where the styles live (R-6): materials below
 // their min stock, production runs sitting too long, and fittings due this week. Each fragment is a
@@ -39,45 +38,23 @@ export function AttentionStrip() {
   });
   const staleDays = alerts.data?.settings?.productionRunStaleDays || 14;
 
-  // Fetch status-filtered pages (one per non-terminal status) so the 200-row cap applies to the
-  // relevant subset: unfiltered newest-first paging dropped exactly the OLD planned/in-progress
-  // runs — the ones most likely stale — silently undercounting (potentially to 0).
-  const plannedRuns = useQuery({
-    queryKey: ['attention', 'runs', 'planned'],
+  // #10: one server-side stale query — stale_days returns only the non-terminal runs sitting at
+  // least that long, so the 200-row cap no longer drops exactly the old runs we're counting. Wait
+  // for the alert settings (success OR error → 14 fallback) so the threshold is resolved before the
+  // query fires, and re-run if the setting changes (staleDays is in the key).
+  const staleRunsQuery = useQuery({
+    queryKey: ['attention', 'runs', 'stale', staleDays],
     queryFn: () =>
       adminService.ListProductionRuns({
         techCardId: undefined,
-        status: 'planned',
+        status: undefined,
         limit: 200,
         offset: 0,
-        staleDays: undefined,
+        staleDays,
       }),
-    enabled: canRuns,
+    enabled: canRuns && !alerts.isLoading,
   });
-  const inProgressRuns = useQuery({
-    queryKey: ['attention', 'runs', 'in_progress'],
-    queryFn: () =>
-      adminService.ListProductionRuns({
-        techCardId: undefined,
-        status: 'in_progress',
-        limit: 200,
-        offset: 0,
-        staleDays: undefined,
-      }),
-    enabled: canRuns,
-  });
-  const staleRuns = [
-    ...(plannedRuns.data?.runs ?? []),
-    ...(inProgressRuns.data?.runs ?? []),
-  ].filter((r) => {
-    if (
-      !NON_TERMINAL.has(
-        r.run?.status ? r.run.status.replace('PRODUCTION_RUN_STATUS_', '').toLowerCase() : '',
-      )
-    )
-      return false;
-    return ageDays(r.run?.startedAt ?? r.createdAt) >= staleDays;
-  }).length;
+  const staleRuns = staleRunsQuery.data?.total ?? staleRunsQuery.data?.runs?.length ?? 0;
 
   const fittings = useQuery({
     queryKey: ['attention', 'fittings'],
@@ -111,8 +88,8 @@ export function AttentionStrip() {
     fragments.push({
       key: 'runs',
       label: `${staleRuns} run${staleRuns > 1 ? 's' : ''} stale ${staleDays}d+`,
-      // ?stale=<days> — the runs list applies the same client-side staleness filter, so the
-      // link shows exactly the counted runs instead of the full unfiltered list.
+      // ?stale=<days> — the runs list runs the same server-side stale_days query, so the link
+      // shows exactly the counted runs instead of the full unfiltered list.
       to: `${ROUTES.productionRuns}?stale=${staleDays}`,
     });
   if (fittingsThisWeek > 0)

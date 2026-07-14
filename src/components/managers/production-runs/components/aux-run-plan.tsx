@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { useUpdateRunSection } from './useProductionRuns';
+import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
 const input = 'w-32 border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
@@ -78,7 +78,7 @@ export function AuxRunPlan({
       setDirty(false);
       showMessage('Plan saved', 'success');
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save plan', 'error');
+      showMessage(updateRunErrorMessage(e), 'error');
     }
   };
 

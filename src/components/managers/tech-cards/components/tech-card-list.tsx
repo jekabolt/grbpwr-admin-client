@@ -11,6 +11,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
+import { AuxBadge } from './aux-badge';
 import { approvalStateLabel, formatTechCardDate, stageLabel } from './utils';
 import { useDeleteTechCard, useInfiniteTechCards } from './useTechCardQuery';
 
@@ -166,7 +167,10 @@ export function TechCardList() {
                       <Text variant='uppercase'>{tc.styleNumber || '—'}</Text>
                     </td>
                     <td className='px-2 py-2'>
-                      <Text>{tc.name || '—'}</Text>
+                      <div className='flex items-center gap-2'>
+                        <Text>{tc.name || '—'}</Text>
+                        <AuxBadge purpose={tc.purpose} />
+                      </div>
                     </td>
                     <td className='px-2 py-2'>
                       <Text variant='inactive'>{tc.brand || '—'}</Text>
