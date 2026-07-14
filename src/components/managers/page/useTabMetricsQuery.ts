@@ -65,6 +65,8 @@ export const tabMetricsKeys = {
     period: string;
     endAt?: string;
     compareMode?: CompareMode;
+    compareFrom?: string;
+    compareTo?: string;
   }) => [...tabMetricsKeys.all, params] as const,
 };
 
@@ -75,6 +77,10 @@ export function useTabMetricsQuery(
     compareMode?: CompareMode;
     customFrom?: Date;
     customTo?: Date;
+    // Arbitrary compare baseline ("this week vs launch week"). When both are set the backend
+    // uses this window instead of the compare_mode preset (compare_period overrides compare_mode).
+    compareFrom?: Date;
+    compareTo?: Date;
     limit?: number;
   },
 ) {
@@ -85,6 +91,10 @@ export function useTabMetricsQuery(
       : period;
 
   const sections = TAB_SECTIONS[tabId];
+  const comparePeriod =
+    options?.compareFrom && options?.compareTo
+      ? { from: options.compareFrom.toISOString(), to: options.compareTo.toISOString() }
+      : undefined;
 
   return useQuery({
     queryKey: tabMetricsKeys.tabMetrics({
@@ -92,12 +102,15 @@ export function useTabMetricsQuery(
       period: periodParam,
       endAt: options?.customTo?.toISOString(),
       compareMode: options?.compareMode,
+      compareFrom: options?.compareFrom?.toISOString(),
+      compareTo: options?.compareTo?.toISOString(),
     }),
     queryFn: async (): Promise<GetMetricsResponse> => {
       const response = await adminService.GetMetrics({
         period: periodParam,
         endAt: options?.customTo?.toISOString(),
         compareMode: options?.compareMode,
+        comparePeriod,
         sections,
         limit: options?.limit,
         trendGranularity: undefined,
