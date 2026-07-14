@@ -134,8 +134,11 @@ export function buildOrderTrackingUrl(
   } catch {
     return ''; // non-Latin1 email — can't encode
   }
+  // The storefront order route is case-sensitive and keys on the UPPERCASE order reference
+  // (e.g. /gb/en/order/ORD-XXXX/<b64email>). The backend can return the uuid lowercased, which
+  // 404s the link — so normalise to upper case here before encoding.
   return `${STOREFRONT_ORIGIN}/${ORDER_TRACKING_COUNTRY}/${ORDER_TRACKING_LOCALE}/order/${encodeURIComponent(
-    orderUuid.trim(),
+    orderUuid.trim().toUpperCase(),
   )}/${b64Email}`;
 }
 
