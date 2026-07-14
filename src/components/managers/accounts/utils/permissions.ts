@@ -69,6 +69,12 @@ export function usePermissions() {
     canWrite: (section?: string) => hasSection(section, ACCESS.WRITE),
     canManageAccounts: hasSection(SECTION.accounts, ACCESS.READ),
     canManageAccountsWrite: hasSection(SECTION.accounts, ACCESS.WRITE),
+    // Costing is field-shaping, not a screen gate: canReadCosting decides whether
+    // cost/margin widgets are shown at all (hide them when false — never render a
+    // fake €0.00), canWriteCosting whether cost inputs / cost-writing actions are
+    // enabled. Backend nulls the fields regardless; this only tidies the UI.
+    canReadCosting: hasSection(SECTION.costing, ACCESS.READ),
+    canWriteCosting: hasSection(SECTION.costing, ACCESS.WRITE),
     sections: sectionsData?.sections ?? [],
   };
 }

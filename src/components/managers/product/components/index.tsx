@@ -1,6 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
-import { common_ProductFull, common_SizeWithMeasurementInsert } from 'api/proto-http/admin';
+import {
+  common_ProductFull,
+  common_SizeWithMeasurementInsert,
+  ProductCostInfo,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -13,6 +17,7 @@ import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { defaultData, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
+import { ProductCostSection } from './cost-section';
 import { MediaAds } from './media-ads';
 import { SizeMeasurements } from './size-measurements';
 import { Tags } from './tags';
@@ -24,6 +29,7 @@ type Props = {
   isAddingProduct: boolean;
   isCopyMode: boolean;
   product: common_ProductFull | undefined;
+  costInfo?: ProductCostInfo;
   productId?: string;
   onEditModeChange: (isEditMode: boolean) => void;
   onStockUpdated?: () => void;
@@ -34,6 +40,7 @@ export function ProductForm({
   isAddingProduct = false,
   isCopyMode,
   product,
+  costInfo,
   productId,
   onEditModeChange,
   onStockUpdated,
@@ -43,7 +50,7 @@ export function ProductForm({
   const [mediaClearKey, setMediaClearKey] = useState(0);
   const editMode = isEditMode || isAddingProduct;
   const navigate = useNavigate();
-  const { canWrite } = usePermissions();
+  const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
 
   const initialValues =
     product && (!isAddingProduct || isCopyMode) ? mapProductFullToFormData(product) : defaultData;
@@ -220,6 +227,18 @@ export function ProductForm({
             />
           </Section>
         </div>
+
+        {(canReadCosting || canWriteCosting) && (
+          <Section title='cost'>
+            <ProductCostSection
+              editMode={editMode}
+              costInfo={costInfo}
+              productId={productId}
+              isAddingProduct={isAddingProduct}
+              onCostSynced={onStockUpdated}
+            />
+          </Section>
+        )}
 
         <Section title='sizes & stock'>
           <SizeMeasurements

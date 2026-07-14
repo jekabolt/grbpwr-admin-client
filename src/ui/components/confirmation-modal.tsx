@@ -11,6 +11,9 @@ interface Props {
   confirmLabel?: string;
   cancelLabel?: string;
   confirmDisabled?: boolean;
+  // Form-style dialogs set this false and close themselves in the mutation's onSuccess —
+  // the default auto-close would dismiss (and wipe) the form on a validation/backend error.
+  closeOnConfirm?: boolean;
 }
 
 export function ConfirmationModal({
@@ -23,6 +26,7 @@ export function ConfirmationModal({
   confirmLabel = 'confirm',
   cancelLabel = 'cancel',
   confirmDisabled,
+  closeOnConfirm = true,
 }: Props) {
   const handleCancel = () => {
     onOpenChange(false);
@@ -31,7 +35,7 @@ export function ConfirmationModal({
 
   const handleConfirm = () => {
     onConfirm();
-    onOpenChange(false);
+    if (closeOnConfirm) onOpenChange(false);
   };
 
   return (

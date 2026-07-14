@@ -92,11 +92,19 @@ export const fittingVerdictOptions: Array<{ value: common_FittingVerdict; label:
 
 // Tech-card development stage (excludes the UNKNOWN sentinel; server defaults UNKNOWN→PROTO).
 export const techCardStageOptions: Array<{ value: common_TechCardStage; label: string }> = [
+  { value: 'TECH_CARD_STAGE_IDEA', label: 'idea' },
   { value: 'TECH_CARD_STAGE_PROTO', label: 'proto' },
   { value: 'TECH_CARD_STAGE_FIT', label: 'fit sample' },
   { value: 'TECH_CARD_STAGE_SMS', label: 'salesman sample' },
   { value: 'TECH_CARD_STAGE_PP', label: 'pre-production' },
   { value: 'TECH_CARD_STAGE_PROD', label: 'production' },
+];
+
+// NF-07: a card is either a sellable garment or an auxiliary item (dust bag, shopper…) that
+// produces a packaging material instead of a product. Raw string values per the contract.
+export const techCardPurposeOptions: Array<{ value: string; label: string }> = [
+  { value: 'sellable', label: 'sellable garment' },
+  { value: 'auxiliary', label: 'auxiliary (packaging item)' },
 ];
 
 // Tech-card release gate, orthogonal to stage (server defaults UNKNOWN→DRAFT).

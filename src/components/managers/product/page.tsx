@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { common_ProductFull } from 'api/proto-http/admin';
+import { common_ProductFull, ProductCostInfo } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
@@ -11,6 +11,8 @@ export const Product: FC = () => {
   const { pathname } = useLocation();
   const isCopyMode = pathname.includes('/copy');
   const [product, setProduct] = useState<common_ProductFull | undefined>();
+  // cost_info is null when the caller lacks costing:read — the block stays hidden.
+  const [costInfo, setCostInfo] = useState<ProductCostInfo | undefined>();
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
 
   const fetchProduct = async () => {
@@ -22,6 +24,7 @@ export const Product: FC = () => {
       }
       const response = await adminService.GetProductByID({ id: productId });
       setProduct(response.product);
+      setCostInfo(response.costInfo);
     }
   };
 
@@ -36,6 +39,7 @@ export const Product: FC = () => {
       isAddingProduct={isCopyMode || !id}
       isCopyMode={isCopyMode}
       product={product}
+      costInfo={costInfo}
       productId={id}
       onEditModeChange={setIsEditMode}
       onStockUpdated={fetchProduct}

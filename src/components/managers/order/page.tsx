@@ -20,6 +20,7 @@ import { OrderTable } from './components/order-table';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
 import { RefundConfirmation } from './components/refund-confirmation';
+import { ShipmentCostModal } from './components/shipment-cost-modal';
 import { ShippingBillingToggle } from './components/shipping-billing-toggle';
 import { NewTrackCode } from './components/shipping-information/new-track-code';
 import { StatusHistory } from './components/status-history';
@@ -81,10 +82,12 @@ export function OrderDetails() {
     saveTrackingNumber,
     markAsDelivered,
     refundOrder,
+    setShipmentActualCost,
     toggleOrderItemsSelection,
   } = useOrderDetails(uuid || '');
 
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
+  const [isShipCostOpen, setIsShipCostOpen] = useState(false);
   const { canWrite } = usePermissions();
   const canEditOrder = canWrite(SECTION.orders);
 
@@ -257,8 +260,16 @@ export function OrderDetails() {
           </div>
         )}
 
-        {canEditOrder && (showDeliver || showRefund) && (
+        {canEditOrder && (
           <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>
+            <Button
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => setIsShipCostOpen(true)}
+            >
+              record shipping cost
+            </Button>
             {showDeliver && (
               <Button variant='main' size='lg' className='uppercase' onClick={markAsDelivered}>
                 mark as delivered
@@ -273,6 +284,12 @@ export function OrderDetails() {
             )}
           </div>
         )}
+
+        <ShipmentCostModal
+          open={isShipCostOpen}
+          onOpenChange={setIsShipCostOpen}
+          onSubmit={setShipmentActualCost}
+        />
 
         <RefundConfirmation
           orderDetails={orderDetails}

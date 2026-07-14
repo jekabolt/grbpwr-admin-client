@@ -21,6 +21,7 @@ export const techCardKeys = {
   list: (filter: TechCardFilter) => [...techCardKeys.lists(), filter] as const,
   details: () => [...techCardKeys.all, 'detail'] as const,
   detail: (id: number) => [...techCardKeys.details(), id] as const,
+  pipeline: () => [...techCardKeys.all, 'pipeline'] as const,
 };
 
 // Infinite list, optionally filtered. ListTechCards returns `total` (matching count
@@ -50,6 +51,16 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
     },
     getNextPageParam: (lastPage) => lastPage.nextOffset,
     initialPageParam: 0,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// Development board (GetStylePipeline, gap-01): per-stage counts + a few light preview cards per
+// column, in one call instead of six ListTechCards. cardsPerStage caps the preview list per stage.
+export function useStylePipeline(cardsPerStage = 6) {
+  return useQuery({
+    queryKey: [...techCardKeys.pipeline(), cardsPerStage],
+    queryFn: () => adminService.GetStylePipeline({ cardsPerStage }),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -93,6 +104,9 @@ export function useCreateTechCard() {
     mutationFn: (techCard: common_TechCardInsert) => adminService.CreateTechCard({ techCard }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
+      // The pipeline board is a separate key — a create/stage-change/delete must move the
+      // card between columns, not leave it parked for the 5-min staleTime.
+      queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });
     },
   });
 }
@@ -112,6 +126,7 @@ export function useUpdateTechCard() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
       queryClient.invalidateQueries({ queryKey: techCardKeys.detail(variables.id) });
+      queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });
     },
   });
 }
@@ -123,6 +138,7 @@ export function useDeleteTechCard() {
     onSuccess: (_data, id) => {
       queryClient.removeQueries({ queryKey: techCardKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });
     },
   });
 }

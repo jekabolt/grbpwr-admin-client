@@ -64,6 +64,7 @@ const emptyUsage = {
   consumption: '',
   quantity: '',
   sizeConsumptions: [],
+  pieceIndex: -1,
   lineTotal: '',
   sizeRunTotal: '',
 };
@@ -295,12 +296,14 @@ function UsageRow({
   ci,
   ui,
   articleOptions,
+  pieceOptions,
   bomItems,
   onRemove,
 }: {
   ci: number;
   ui: number;
   articleOptions: Array<{ value: number; label: string }>;
+  pieceOptions: Array<{ value: number; label: string }>;
   bomItems: FormBomItem[];
   onRemove: () => void;
 }) {
@@ -359,6 +362,19 @@ function UsageRow({
         </Text>
       )}
 
+      {/* Optional: which cut-piece this consumption norm is about (informational, NF-05). Only
+          shown once the pieces tab has pieces to reference. */}
+      {pieceOptions.length > 1 && (
+        <div className='sm:w-1/2'>
+          <SelectField
+            name={`${base}.pieceIndex`}
+            label='деталь (норма на деталь, опц.)'
+            items={pieceOptions}
+            valueAsNumber
+          />
+        </div>
+      )}
+
       <div className='grid grid-cols-2 gap-2'>
         <div className='flex items-end gap-2'>
           <div className='flex-1'>
@@ -411,6 +427,7 @@ function ColorwayCard({
   index,
   productOptions,
   articleOptions,
+  pieceOptions,
   bomItems,
   onRemove,
   onCopy,
@@ -418,6 +435,7 @@ function ColorwayCard({
   index: number;
   productOptions: Array<{ value: number; label: string }>;
   articleOptions: Array<{ value: number; label: string }>;
+  pieceOptions: Array<{ value: number; label: string }>;
   bomItems: FormBomItem[];
   onRemove: () => void;
   onCopy: () => void;
@@ -590,6 +608,7 @@ function ColorwayCard({
                 ci={index}
                 ui={ui}
                 articleOptions={articleOptions}
+                pieceOptions={pieceOptions}
                 bomItems={bomItems}
                 onRemove={() => usages.remove(ui)}
               />
@@ -659,14 +678,22 @@ function ColorwayCard({
 }
 
 // Colourways = the recipes. Each card chooses which catalog article goes on which part, in
-// what colour and at what consumption (usages). Usages are self-contained per colourway, so
-// removing one is a plain remove (no cross-line matrix to re-index).
+// what colour and at what consumption (usages). Usages are self-contained per colourway, but the
+// pieces tab's fabric map references colourways by index, so removing one must renumber those cells.
 export function ColorwaysField() {
-  const { control, getValues } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'colorways' });
   const productIds = (useWatch({ control, name: 'productIds' }) ?? []) as number[];
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as FormBomItem[];
+  const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{ name?: string }>;
   const productMap = useProductsByIds(productIds);
+
+  // Optional link from a usage to a cut-piece (usage.pieceIndex, "норма на деталь"). -1 = whole
+  // garment. Positional into `pieces`; kept valid by the pieces tab's remove-renumber (nf05-01).
+  const pieceOptions = [
+    { value: -1, label: '— whole garment —' },
+    ...pieces.map((p, pi) => ({ value: pi, label: p.name?.trim() || `piece ${pi + 1}` })),
+  ];
 
   const productOptions = [
     { value: 0, label: '— none —' },
@@ -685,6 +712,25 @@ export function ColorwaysField() {
       }`,
     })),
   ];
+
+  // Removing colourway `ci` shifts the fabric map's colorwayIndex on every piece: drop cells for
+  // the removed colourway and decrement cells that pointed past it, so a cell never silently maps to
+  // the wrong colour (nf05-01). Then remove the colourway itself.
+  const removeColorway = (ci: number) => {
+    const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
+    (pieces ?? []).forEach((p, pi) => {
+      const materials = p.materials ?? [];
+      if (!materials.some((m) => (m.colorwayIndex ?? 0) >= ci)) return;
+      const next = materials
+        .filter((m) => (m.colorwayIndex ?? 0) !== ci)
+        .map((m) => {
+          const idx = m.colorwayIndex ?? 0;
+          return idx > ci ? { ...m, colorwayIndex: idx - 1 } : m;
+        });
+      setValue(`pieces.${pi}.materials`, next, { shouldDirty: true });
+    });
+    remove(ci);
+  };
 
   // Clone a colourway's whole recipe into a new card (deep-copy usages so the two cards don't
   // share array references); reset the published-product link + computed totals.
@@ -729,8 +775,9 @@ export function ColorwaysField() {
               index={index}
               productOptions={productOptions}
               articleOptions={articleOptions}
+              pieceOptions={pieceOptions}
               bomItems={bomItems}
-              onRemove={() => remove(index)}
+              onRemove={() => removeColorway(index)}
               onCopy={() => copyColorway(index)}
             />
           ))}

@@ -1,11 +1,17 @@
 import type { CompareMode } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { ROUTES, SECTION } from 'constants/routes';
 import { subDays } from 'date-fns';
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { DateRangePicker, PersistentKpiBar } from './components';
+import { AlertSettingsModal } from './components/alert-settings-modal';
+import { VatRatesModal } from './components/vat-rates-modal';
 import { GrowthTab, ProductsTab, RevenueTab, ThisWeekTab } from './tabs';
+import { useChannelRoasQuery } from './useChannelRoasQuery';
+import { useDashboardQuery } from './useDashboardQuery';
 import type { MetricsPeriod } from './useMetricsQuery';
 import type { MetricsTabId } from './useTabMetricsQuery';
 import { useTabMetricsQuery } from './useTabMetricsQuery';
@@ -55,6 +61,12 @@ export function Analitic() {
   const tabParam = searchParams.get('tab');
   const activeTab = parseTabFromUrl(tabParam);
 
+  const { canWrite } = usePermissions();
+  const navigate = useNavigate();
+  const canConfig = canWrite(SECTION.analytics);
+  const [vatOpen, setVatOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+
   const setActiveTab = (tabId: MetricsTabId) => {
     setSearchParams(
       (prev) => {
@@ -93,12 +105,58 @@ export function Analitic() {
 
   const compareEnabled = compareMode !== 'COMPARE_MODE_NONE';
 
+  // Operating result + GA4 coverage come from GetDashboard, only needed on the Revenue tab.
+  const { data: dashboard } = useDashboardQuery(period, {
+    enabled: activeTab === 'revenue',
+    customFrom: period === 'custom' ? customFrom : undefined,
+    customTo: period === 'custom' ? customTo : undefined,
+  });
+
+  // Settled-revenue channel ROAS lives on the Growth tab next to GA4 attribution.
+  const { data: channelRoas } = useChannelRoasQuery(period, {
+    enabled: activeTab === 'growth',
+    customFrom: period === 'custom' ? customFrom : undefined,
+    customTo: period === 'custom' ? customTo : undefined,
+  });
+
   return (
     <div className='flex flex-col gap-8 pb-16'>
       <div className='flex flex-col gap-4'>
-        <Text variant='uppercase' className='text-lg font-bold'>
-          Analytics Dashboard
-        </Text>
+        <div className='flex flex-wrap items-center justify-between gap-3'>
+          <Text variant='uppercase' className='text-lg font-bold'>
+            Analytics Dashboard
+          </Text>
+          {canConfig && (
+            <div className='flex items-center gap-2'>
+              <Button
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => setVatOpen(true)}
+              >
+                VAT rates
+              </Button>
+              <Button
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => navigate(ROUTES.opex)}
+              >
+                OPEX
+              </Button>
+              <Button
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => setAlertsOpen(true)}
+              >
+                Alerts
+              </Button>
+            </div>
+          )}
+        </div>
+        <VatRatesModal open={vatOpen} onOpenChange={setVatOpen} />
+        <AlertSettingsModal open={alertsOpen} onOpenChange={setAlertsOpen} />
         <DateRangePicker
           period={period}
           compareMode={compareMode}
@@ -173,10 +231,16 @@ export function Analitic() {
             />
           )}
           {activeTab === 'revenue' && (
-            <RevenueTab metricsResponse={metricsResponse} compareEnabled={compareEnabled} />
+            <RevenueTab
+              metricsResponse={metricsResponse}
+              compareEnabled={compareEnabled}
+              dashboard={dashboard}
+            />
           )}
           {activeTab === 'products' && <ProductsTab metricsResponse={metricsResponse} />}
-          {activeTab === 'growth' && <GrowthTab metricsResponse={metricsResponse} />}
+          {activeTab === 'growth' && (
+            <GrowthTab metricsResponse={metricsResponse} channelRoas={channelRoas} />
+          )}
         </div>
       )}
     </div>

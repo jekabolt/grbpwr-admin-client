@@ -2,10 +2,13 @@ import type { GetMetricsResponse } from 'api/proto-http/admin';
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
+  CogsStructureTable,
   DeadStockTable,
   DropVerdictTable,
   InventoryHealthTable,
   InventoryTargetForm,
+  InventoryValuationTable,
+  MarginByStyleTable,
   NotifyMeIntentTable,
   OOSImpactTable,
   ProductCharts,
@@ -55,7 +58,10 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
     (metricsResponse.sizeRunEfficiency?.length ?? 0) > 0 ||
     (metricsResponse.inventoryHealth?.length ?? 0) > 0 ||
     (metricsResponse.notifyMeIntent?.length ?? 0) > 0 ||
-    (metricsResponse.oosImpact?.length ?? 0) > 0;
+    (metricsResponse.oosImpact?.length ?? 0) > 0 ||
+    (metricsResponse.marginByStyle?.length ?? 0) > 0 ||
+    (metricsResponse.cogsStructure?.length ?? 0) > 0 ||
+    !!metricsResponse.inventoryValuation?.totalStockValue?.value;
 
   return (
     <div className='space-y-6'>
@@ -90,6 +96,19 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
             </div>
           </details>
 
+          {((metricsResponse.marginByStyle?.length ?? 0) > 0 ||
+            (metricsResponse.cogsStructure?.length ?? 0) > 0) && (
+            <details className='border border-textInactiveColor' open>
+              <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
+                Margin &amp; COGS
+              </summary>
+              <div className='space-y-6 p-4'>
+                <MarginByStyleTable marginByStyle={metricsResponse.marginByStyle} />
+                <CogsStructureTable cogsStructure={metricsResponse.cogsStructure} />
+              </div>
+            </details>
+          )}
+
           <details className='border border-textInactiveColor' open>
             <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
               Sizes
@@ -110,6 +129,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
               </div>
               <ReorderTable inventoryHealth={metricsResponse.inventoryHealth} />
               <InventoryHealthTable inventoryHealth={metricsResponse.inventoryHealth} />
+              <InventoryValuationTable inventoryValuation={metricsResponse.inventoryValuation} />
               <NotifyMeIntentTable notifyMeIntent={metricsResponse.notifyMeIntent} />
               <OOSImpactTable oosImpact={metricsResponse.oosImpact} />
             </div>

@@ -12,6 +12,8 @@ type Props = {
   openElement: React.ReactNode | ((isOpen: boolean) => React.ReactNode);
   title?: string;
   contentProps?: Popover.PopoverContentProps;
+  // e.g. { 'aria-label': 'more actions' } when openElement is an icon with no text.
+  triggerProps?: Popover.PopoverTriggerProps;
   className?: string;
   gap?: 'default' | 'large';
   variant?: 'default' | 'no-borders';
@@ -22,6 +24,7 @@ export default function GenericPopover({
   title,
   children,
   contentProps,
+  triggerProps,
   className,
   gap = 'default',
   variant = 'default',
@@ -30,7 +33,7 @@ export default function GenericPopover({
 
   return (
     <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
-      <Popover.Trigger className='flex items-center'>
+      <Popover.Trigger className='flex items-center' {...triggerProps}>
         {typeof openElement === 'function' ? openElement(isOpen) : openElement}
       </Popover.Trigger>
       <PopoverContent

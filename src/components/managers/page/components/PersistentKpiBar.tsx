@@ -1,4 +1,5 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { type FC } from 'react';
 import Text from 'ui/components/text';
 import {
@@ -43,7 +44,11 @@ function coverageNote(costCoverage: number): string | null {
   return null;
 }
 
-function getKpiMetrics(metrics: BusinessMetrics | undefined, compareEnabled: boolean): KpiMetric[] {
+function getKpiMetrics(
+  metrics: BusinessMetrics | undefined,
+  compareEnabled: boolean,
+  canReadCosting: boolean,
+): KpiMetric[] {
   if (!metrics) return [];
 
   const commerce = metrics.commerce;
@@ -53,20 +58,23 @@ function getKpiMetrics(metrics: BusinessMetrics | undefined, compareEnabled: boo
   const grossMarginPct = getMetricComparison(margin?.grossMarginPct as any);
   const contributionMargin = getMetricComparison(margin?.contributionMargin as any);
   // Share (%) of revenue whose product has a cost set — margin is computed only over it.
+  // Also gate on costing:read: the server nulls the money fields without it, so never show
+  // a €0/0% margin to a costing-blind user even if costCoveragePct itself isn't nulled.
   const costCoverage = margin?.costCoveragePct ?? 0;
-  const costed = costCoverage > 0;
+  const costed = costCoverage > 0 && canReadCosting;
 
   return [
     {
-      // DB-true headline. Whole euros — cents are false precision at a glance.
-      label: 'Revenue',
+      // DB-true headline, now net of VAT. Whole euros — cents are false precision at a glance.
+      label: 'Net revenue (ex-VAT)',
       display: formatCurrencyWhole(revenue.value),
       delta: buildDelta(compareEnabled, revenue.value, revenue.compareValue, formatCurrencyDelta),
     },
     {
       // The money that actually pays the team: revenue − COGS − shipping. Only meaningful over
       // the costed subset of revenue, so blank it (—) rather than show a misleading partial figure.
-      label: 'Contribution Margin',
+      // Contribution to fixed costs — NOT profit (opex/marketing come out downstream).
+      label: 'Contribution · not profit',
       display: costed ? formatCurrencyWhole(contributionMargin.value) : '—',
       delta: buildDelta(
         compareEnabled,
@@ -75,7 +83,7 @@ function getKpiMetrics(metrics: BusinessMetrics | undefined, compareEnabled: boo
         formatCurrencyDelta,
         !costed,
       ),
-      note: coverageNote(costCoverage),
+      note: canReadCosting ? coverageNote(costCoverage) : null,
     },
     {
       // Profit rate, not activity. Delta in percentage POINTS (change_absolute), not "rate of a rate".
@@ -88,7 +96,7 @@ function getKpiMetrics(metrics: BusinessMetrics | undefined, compareEnabled: boo
         (d) => `${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d).toFixed(1)}pp`,
         !costed,
       ),
-      note: coverageNote(costCoverage),
+      note: canReadCosting ? coverageNote(costCoverage) : null,
     },
     {
       label: 'Orders',
@@ -135,7 +143,8 @@ function KpiMetricCard({ metric }: { metric: KpiMetric }) {
 }
 
 export const PersistentKpiBar: FC<PersistentKpiBarProps> = ({ metrics, compareEnabled }) => {
-  const kpiMetrics = getKpiMetrics(metrics, compareEnabled);
+  const { canReadCosting } = usePermissions();
+  const kpiMetrics = getKpiMetrics(metrics, compareEnabled, canReadCosting);
 
   if (kpiMetrics.length === 0) return null;
 
