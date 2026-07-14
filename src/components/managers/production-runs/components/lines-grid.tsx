@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { useUpdateRunSection } from './useProductionRuns';
+import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 const key = (productId: number, sizeId: number) => `${productId}:${sizeId}`;
@@ -168,7 +168,7 @@ export function LinesGrid({
       setDirty(false);
       showMessage('Lines saved', 'success');
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save lines', 'error');
+      showMessage(updateRunErrorMessage(e), 'error');
     }
   };
 

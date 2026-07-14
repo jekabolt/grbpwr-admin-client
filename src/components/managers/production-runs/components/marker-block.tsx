@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
-import { useUpdateRunSection } from './useProductionRuns';
+import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
@@ -76,7 +76,7 @@ export function MarkerBlock({
       setDirty(false);
       showMessage('Marker saved', 'success');
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save marker', 'error');
+      showMessage(updateRunErrorMessage(e), 'error');
     }
   };
 

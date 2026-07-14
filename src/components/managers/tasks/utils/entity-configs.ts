@@ -246,6 +246,7 @@ export const runConfig: EntityConfig = {
       status: undefined,
       limit: 100,
       offset: undefined,
+      staleDays: undefined,
     });
     return (r.runs ?? []).map(runOption);
   },

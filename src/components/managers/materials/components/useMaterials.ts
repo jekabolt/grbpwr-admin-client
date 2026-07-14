@@ -16,11 +16,12 @@ const materialKeys = {
 export const bomSectionToDbFilter = (section: string): string | undefined =>
   section ? section.replace('TECH_CARD_BOM_SECTION_', '').toLowerCase() : undefined;
 
-export function useMaterials(section: string, includeArchived: boolean) {
+export function useMaterials(section: string, includeArchived: boolean, enabled = true) {
   return useQuery({
     queryKey: materialKeys.list(section, includeArchived),
     queryFn: () =>
       adminService.ListMaterials({ section: bomSectionToDbFilter(section), includeArchived }),
+    enabled,
   });
 }
 
