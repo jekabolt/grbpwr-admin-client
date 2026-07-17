@@ -1,6 +1,7 @@
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { BomLineSelect } from './bom-line-picker';
 import { pieceCodeOptions } from './piece-codes';
 import { TechCardFormData } from './schema';
 
@@ -18,12 +19,6 @@ const FABRIC_SECTIONS = [
   'TECH_CARD_BOM_SECTION_INSULATION',
 ];
 const FUSING_SECTIONS = ['TECH_CARD_BOM_SECTION_INTERLINING'];
-const SECTION_SHORT: Record<string, string> = {
-  TECH_CARD_BOM_SECTION_FABRIC: 'fabric',
-  TECH_CARD_BOM_SECTION_LINING: 'lining',
-  TECH_CARD_BOM_SECTION_INTERLINING: 'interlining',
-  TECH_CARD_BOM_SECTION_INSULATION: 'insulation',
-};
 const grainlineOptions = ['lengthwise', 'crosswise', 'bias'];
 
 type FormPiece = NonNullable<TechCardFormData['pieces']>[number];
@@ -45,28 +40,6 @@ export function PiecesTab() {
     section?: string;
   }>;
 
-  const bomLabel = (gi: number) => {
-    const b = bomItems[gi];
-    if (!b) return `#${gi + 1}`;
-    const section = b.section ? ` · ${SECTION_SHORT[b.section] ?? ''}` : '';
-    return `${b.name?.trim() || `#${gi + 1}`}${section}`;
-  };
-  const optionsForSections = (sections: string[]) => [
-    { value: -1, label: '— none —' },
-    ...bomItems
-      .map((b, gi) => ({ b, gi }))
-      .filter(({ b }) => sections.includes(b.section ?? ''))
-      .map(({ gi }) => ({ value: gi, label: bomLabel(gi) })),
-  ];
-  const fabricOptions = optionsForSections(FABRIC_SECTIONS);
-  const fusingOptions = optionsForSections(FUSING_SECTIONS);
-  // Keep the currently-mapped article selectable even if its BOM section was later changed out of
-  // the filtered set, so editing a section never silently blanks a cell's stored choice.
-  const withCurrent = (options: { value: number; label: string }[], current: number) =>
-    current < 0 || options.some((o) => o.value === current)
-      ? options
-      : [...options, { value: current, label: bomLabel(current) }];
-
   // Fabric-map cell read/write. materials is sparse — a colourway with no entry is unmapped.
   const cellFor = (pi: number, ci: number) =>
     (pieces[pi]?.materials ?? []).find((m) => (m.colorwayIndex ?? 0) === ci);
@@ -76,7 +49,7 @@ export function PiecesTab() {
     const nextEntry: FormMaterial =
       at >= 0
         ? { ...materials[at], ...patch }
-        : { colorwayIndex: ci, bomItemIndex: -1, fusingBomItemIndex: -1, note: '', ...patch };
+        : { colorwayIndex: ci, bomLineKey: '', fusingBomLineKey: '', note: '', ...patch };
     const next =
       at >= 0 ? materials.map((m, i) => (i === at ? nextEntry : m)) : [...materials, nextEntry];
     setValue(`pieces.${pi}.materials`, next, { shouldDirty: true });
@@ -296,42 +269,26 @@ export function PiecesTab() {
                       </td>
                       {colorways.map((_, ci) => {
                         const c = cellFor(pi, ci);
-                        const fabricVal = c?.bomItemIndex ?? -1;
-                        const fusingVal = c?.fusingBomItemIndex ?? -1;
-                        const missingFusing = !!p.fused && fusingVal < 0;
+                        const fabricVal = c?.bomLineKey ?? '';
+                        const fusingVal = c?.fusingBomLineKey ?? '';
+                        const missingFusing = !!p.fused && !fusingVal;
                         return (
                           <td key={ci} className={td}>
                             <div className='flex flex-col gap-1'>
-                              <select
-                                className={cell}
+                              <BomLineSelect
                                 value={fabricVal}
-                                onChange={(e) =>
-                                  setCell(pi, ci, { bomItemIndex: Number(e.target.value) })
-                                }
-                              >
-                                {withCurrent(fabricOptions, fabricVal).map((o) => (
-                                  <option key={o.value} value={o.value}>
-                                    {o.label}
-                                  </option>
-                                ))}
-                              </select>
+                                onChange={(lk) => setCell(pi, ci, { bomLineKey: lk })}
+                                sections={FABRIC_SECTIONS}
+                                noneLabel='— fabric —'
+                              />
                               {p.fused && (
                                 <div className='flex items-center gap-1'>
-                                  <select
-                                    className={cell}
+                                  <BomLineSelect
                                     value={fusingVal}
-                                    onChange={(e) =>
-                                      setCell(pi, ci, {
-                                        fusingBomItemIndex: Number(e.target.value),
-                                      })
-                                    }
-                                  >
-                                    {withCurrent(fusingOptions, fusingVal).map((o) => (
-                                      <option key={o.value} value={o.value}>
-                                        {o.value === -1 ? '— fusing —' : o.label}
-                                      </option>
-                                    ))}
-                                  </select>
+                                    onChange={(lk) => setCell(pi, ci, { fusingBomLineKey: lk })}
+                                    sections={FUSING_SECTIONS}
+                                    noneLabel='— fusing —'
+                                  />
                                   {missingFusing && (
                                     <span className='text-error' title='fused piece needs a fusing'>
                                       !

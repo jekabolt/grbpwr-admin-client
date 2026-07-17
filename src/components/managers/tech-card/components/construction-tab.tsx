@@ -164,7 +164,7 @@ function ConstructionSketch({
 }
 
 type FormUsage = {
-  bomItemIndex?: number;
+  bomLineKey?: string;
   placement?: string;
   color?: string;
   pantone?: string;
@@ -175,7 +175,7 @@ type FormUsage = {
 type FormOperation = {
   node?: string;
   placement?: string;
-  bomItemIndex?: number;
+  bomLineKey?: string;
   operationNumber?: number;
 };
 
@@ -192,16 +192,16 @@ function ColorwayMaterialsPanel({
   onAddOperation,
 }: {
   usages: FormUsage[];
-  bomItems: Array<{ name?: string; section?: string }>;
+  bomItems: Array<{ name?: string; section?: string; lineKey?: string }>;
   operations: FormOperation[];
-  activeBom: number | null;
-  onActiveBomChange: (n: number | null) => void;
+  activeBom: string | null;
+  onActiveBomChange: (k: string | null) => void;
   onAddOperation: (placement: string) => void;
 }) {
   // only usages with a chosen article are real materials
   const filled = usages
-    .map((u, ui) => ({ u, ui, bi: u.bomItemIndex ?? -1 }))
-    .filter(({ bi }) => bi >= 0);
+    .map((u, ui) => ({ u, ui, bomLineKey: u.bomLineKey ?? '' }))
+    .filter(({ bomLineKey }) => !!bomLineKey);
 
   if (filled.length === 0) {
     return (
@@ -221,21 +221,21 @@ function ColorwayMaterialsPanel({
 
   return (
     <ul className='max-h-96 space-y-1 overflow-auto'>
-      {filled.map(({ u, ui, bi }) => {
-        const article = bomItems[bi];
+      {filled.map(({ u, ui, bomLineKey }) => {
+        const article = bomItems.find((b) => b.lineKey === bomLineKey);
         const colour = u.color?.trim() || u.pantone?.trim();
         const matchedOps = operations
           .map((o, oi) => ({ o, oi }))
           .filter(
             ({ o }) =>
               (norm(o.placement) && norm(o.placement) === norm(u.placement)) ||
-              (o.bomItemIndex ?? -1) === bi,
+              (o.bomLineKey && o.bomLineKey === bomLineKey),
           );
-        const active = activeBom === bi;
+        const active = activeBom === bomLineKey;
         return (
           <li
             key={ui}
-            onMouseEnter={() => onActiveBomChange(bi)}
+            onMouseEnter={() => onActiveBomChange(bomLineKey)}
             onMouseLeave={() => onActiveBomChange(null)}
             className={cn(
               'flex flex-col gap-0.5 border px-2 py-1 text-textBaseSize transition-colors',
@@ -248,7 +248,7 @@ function ColorwayMaterialsPanel({
                   {u.placement?.trim() || 'без части'}
                 </span>
                 {' · '}
-                {article?.name?.trim() || `артикул #${bi + 1}`}
+                {article?.name?.trim() || 'артикул'}
               </span>
               <span className='shrink-0 text-textBaseSize uppercase opacity-70'>
                 {bomSectionLabels[article?.section ?? ''] ?? ''}
@@ -298,10 +298,11 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     name?: string;
     section?: string;
+    lineKey?: string;
   }>;
 
   const [activePin, setActivePin] = useState<number | null>(null);
-  const [activeBom, setActiveBom] = useState<number | null>(null);
+  const [activeBom, setActiveBom] = useState<string | null>(null);
   const [colorwayIdx, setColorwayIdx] = useState(0);
   const [addPart, setAddPart] = useState<string | null>(null);
   // Signal OperationsField to append (it owns the operations field array — a separate

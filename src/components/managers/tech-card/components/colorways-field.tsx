@@ -3,7 +3,7 @@ import { useProductsByIds } from 'components/managers/fittings/components/useRes
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { techCardBomSectionOptions, techCardLabDipStatusOptions } from 'constants/filter';
+import { techCardLabDipStatusOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, useRef, useState } from 'react';
@@ -18,6 +18,7 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { sanitizeDecimal } from 'utils/decimal';
+import { BomLinePicker } from './bom-line-picker';
 import { TechCardFormData } from './schema';
 import { placementOptions } from './tech-card-options';
 
@@ -32,10 +33,6 @@ const MEASURED_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_INSULATION',
   'TECH_CARD_BOM_SECTION_THREAD',
 ]);
-
-const sectionLabels: Record<string, string> = Object.fromEntries(
-  techCardBomSectionOptions.map((o) => [o.value, o.label]),
-);
 
 const labDipLabels: Record<string, string> = Object.fromEntries(
   techCardLabDipStatusOptions.map((o) => [o.value, o.label]),
@@ -57,7 +54,7 @@ function toPickerHex(value: string): string {
 }
 
 const emptyUsage = {
-  bomItemIndex: -1,
+  bomLineKey: '',
   placement: '',
   color: '',
   pantone: '',
@@ -98,6 +95,7 @@ type FormBomItem = {
   unitPrice?: string;
   currency?: string;
   wastagePercent?: string;
+  lineKey?: string;
 };
 
 // Client-side preview of the whole-run spend for a measured usage (the backend computes the
@@ -295,30 +293,27 @@ function UsagePerSize({ ci, ui, article }: { ci: number; ui: number; article?: F
 function UsageRow({
   ci,
   ui,
-  articleOptions,
   pieceOptions,
   bomItems,
   onRemove,
 }: {
   ci: number;
   ui: number;
-  articleOptions: Array<{ value: number; label: string }>;
   pieceOptions: Array<{ value: number; label: string }>;
   bomItems: FormBomItem[];
   onRemove: () => void;
 }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const base = `colorways.${ci}.usages.${ui}` as const;
-  const bomItemIndex = useWatch({ control, name: `${base}.bomItemIndex` }) as number | undefined;
+  const bomLineKey = (useWatch({ control, name: `${base}.bomLineKey` }) as string) || '';
   const lineTotal = (useWatch({ control, name: `${base}.lineTotal` }) as string) || '';
   const sizeRunTotal = (useWatch({ control, name: `${base}.sizeRunTotal` }) as string) || '';
   const color = ((useWatch({ control, name: `${base}.color` }) as string) || '').trim();
   const colorIsHex = /^#[0-9a-fA-F]{3,8}$/.test(color);
   const placement = ((useWatch({ control, name: `${base}.placement` }) as string) || '').trim();
 
-  const idx = typeof bomItemIndex === 'number' ? bomItemIndex : -1;
-  const outOfRange = idx >= 0 && idx >= bomItems.length;
-  const article = idx >= 0 && !outOfRange ? bomItems[idx] : undefined;
+  const article = bomLineKey ? bomItems.find((b) => b.lineKey === bomLineKey) : undefined;
+  const outOfRange = !!bomLineKey && !article;
   const measured = !article || MEASURED_SECTIONS.has(article.section ?? '');
   const unit = article?.unit?.trim() || '';
 
@@ -339,11 +334,10 @@ function UsageRow({
       </div>
 
       <div className='grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_12rem_auto]'>
-        <SelectField
-          name={`${base}.bomItemIndex`}
+        <BomLinePicker
+          name={`${base}.bomLineKey`}
           label='материал (артикул)'
-          items={articleOptions}
-          valueAsNumber
+          noneLabel='— артикул —'
         />
         <ComboField
           name={`${base}.placement`}
@@ -426,7 +420,6 @@ function UsageRow({
 function ColorwayCard({
   index,
   productOptions,
-  articleOptions,
   pieceOptions,
   bomItems,
   onRemove,
@@ -434,7 +427,6 @@ function ColorwayCard({
 }: {
   index: number;
   productOptions: Array<{ value: number; label: string }>;
-  articleOptions: Array<{ value: number; label: string }>;
   pieceOptions: Array<{ value: number; label: string }>;
   bomItems: FormBomItem[];
   onRemove: () => void;
@@ -607,14 +599,13 @@ function ColorwayCard({
                 key={f.id}
                 ci={index}
                 ui={ui}
-                articleOptions={articleOptions}
                 pieceOptions={pieceOptions}
                 bomItems={bomItems}
                 onRemove={() => usages.remove(ui)}
               />
             ))}
           </div>
-        ) : articleOptions.length <= 1 ? (
+        ) : bomItems.length === 0 ? (
           <Text variant='inactive' size='small'>
             добавьте артикулы на вкладке BOM — затем выбирайте их здесь для каждой части изделия
           </Text>
@@ -623,7 +614,7 @@ function ColorwayCard({
             нет материалов — добавьте первый
           </Text>
         )}
-        {articleOptions.length > 1 && (
+        {bomItems.length > 0 && (
           <Button
             type='button'
             className='uppercase'
@@ -703,16 +694,6 @@ export function ColorwaysField() {
     }),
   ];
 
-  const articleOptions = [
-    { value: -1, label: '— артикул —' },
-    ...bomItems.map((b, bi) => ({
-      value: bi,
-      label: `${b.name?.trim() || `#${bi + 1}`}${
-        b.section ? ` · ${sectionLabels[b.section] ?? ''}` : ''
-      }`,
-    })),
-  ];
-
   // Removing colourway `ci` shifts the fabric map's colorwayIndex on every piece: drop cells for
   // the removed colourway and decrement cells that pointed past it, so a cell never silently maps to
   // the wrong colour (nf05-01). Then remove the colourway itself.
@@ -774,7 +755,6 @@ export function ColorwaysField() {
               key={f.id}
               index={index}
               productOptions={productOptions}
-              articleOptions={articleOptions}
               pieceOptions={pieceOptions}
               bomItems={bomItems}
               onRemove={() => removeColorway(index)}

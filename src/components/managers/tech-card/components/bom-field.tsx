@@ -1,3 +1,5 @@
+import { common_Material, common_TechCardBomSection } from 'api/proto-http/admin';
+import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
@@ -14,6 +16,7 @@ import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { TechCardFormData } from './schema';
 import { unitOptions } from './tech-card-options';
+import { ulid } from 'utils/ulid';
 
 // A new catalog article — meta + price only. Colour, placement and consumption are chosen
 // per colourway on the colorways tab.
@@ -34,24 +37,31 @@ const emptyBomItem = {
   fabricDirection: 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
   wastagePercent: '',
   materialId: 0,
+  id: 0,
+  lineKey: '', // minted on append (see BomField) so downstream refs are stable from creation
 };
 
 // Optionally link this BOM line to a catalog Material. Picking one snapshots the catalog's
 // meta (name/section/supplier/composition/spec/unit/fabric + latest price) onto the line, so
 // the line stays self-contained even after the catalog changes. `materialId` records the link.
+// A "+ create" button makes a new material inline (Q9a) — no round-trip to /materials, and it is
+// auto-selected on the line once created.
 function MaterialLinkField({ index }: { index: number }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const materialId = useWatch({ control, name: `bomItems.${index}.materialId` }) as
     | number
     | undefined;
+  const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as
+    | common_TechCardBomSection
+    | undefined;
   const { data } = useMaterials('', false);
   const materials = data?.materials ?? [];
+  const [createOpen, setCreateOpen] = useState(false);
 
-  const pick = (idStr: string) => {
-    const id = Number(idStr) || 0;
-    setValue(`bomItems.${index}.materialId`, id, { shouldDirty: true });
-    const m = materials.find((x) => x.id === id);
-    if (!m) return;
+  // Snapshot a catalog material's meta onto this line (S23: the line stays self-contained). Fabric
+  // dims read from the typed CTI attrs, falling back to the legacy flat fields.
+  const snapshotFrom = (m: common_Material) => {
+    setValue(`bomItems.${index}.materialId`, m.id ?? 0, { shouldDirty: true });
     const put = (field: string, val?: string) => {
       if (val) setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
     };
@@ -62,11 +72,18 @@ function MaterialLinkField({ index }: { index: number }) {
     put('composition', m.composition);
     put('spec', m.spec);
     put('unit', m.unit);
-    put('fabricWidth', m.fabricWidth?.value);
-    put('fabricWeightGsm', m.fabricWeightGsm?.value);
+    put('fabricWidth', m.fabricAttrs?.widthCm?.value || m.fabricWidth?.value);
+    put('fabricWeightGsm', m.fabricAttrs?.weightGsm?.value || m.fabricWeightGsm?.value);
     // latest_price is costing-gated (absent without access) — seed price only when present.
     put('unitPrice', m.latestPrice?.price?.value);
     put('currency', m.latestPrice?.currency);
+  };
+
+  const pick = (idStr: string) => {
+    const id = Number(idStr) || 0;
+    setValue(`bomItems.${index}.materialId`, id, { shouldDirty: true });
+    const m = materials.find((x) => x.id === id);
+    if (m) snapshotFrom(m);
   };
 
   return (
@@ -74,24 +91,41 @@ function MaterialLinkField({ index }: { index: number }) {
       <Text size='small' variant='label'>
         catalog material (optional)
       </Text>
-      <select
-        className='w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize'
-        value={materialId || 0}
-        onChange={(e) => pick(e.target.value)}
-      >
-        <option value={0}>— not linked (free text) —</option>
-        {materials.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name}
-            {m.supplier ? ` · ${m.supplier}` : ''}
-          </option>
-        ))}
-      </select>
+      <div className='flex items-center gap-2'>
+        <select
+          className='w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize'
+          value={materialId || 0}
+          onChange={(e) => pick(e.target.value)}
+        >
+          <option value={0}>— not linked (free text) —</option>
+          {materials.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+              {m.supplier ? ` · ${m.supplier}` : ''}
+            </option>
+          ))}
+        </select>
+        <Button
+          type='button'
+          variant='secondary'
+          className='shrink-0 whitespace-nowrap uppercase'
+          onClick={() => setCreateOpen(true)}
+        >
+          + create
+        </Button>
+      </div>
       {materialId ? (
         <Text size='small' variant='inactive'>
           Поля ниже — снимок из справочника; их можно править для этого стиля.
         </Text>
       ) : null}
+      {/* Inline create — prefill the section from this BOM line; auto-select on create. */}
+      <MaterialModal
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        defaultSection={rowSection}
+        onCreated={(_id, m) => snapshotFrom(m)}
+      />
     </div>
   );
 }
@@ -211,51 +245,38 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightComposition]);
 
-  // Colourway usages and operations reference BOM articles by index. Removing article `bi`
-  // shifts every later index down by one — drop refs that pointed AT it and decrement refs
-  // that pointed PAST it, so the references stay valid (and the backend accepts them).
+  // Stable line_key (§2.3): downstream refs point at the article's key, not its position — so
+  // removing an article NEVER renumbers anything. We only clear refs that pointed AT the removed
+  // article (its key is gone); refs to other articles are untouched. Kills the S2/S3 renumbering.
   const removeArticle = (bi: number) => {
-    const colorways = (getValues('colorways') ?? []) as TechCardFormData['colorways'];
-    (colorways ?? []).forEach((c, ci) => {
-      (c.usages ?? []).forEach((u, ui) => {
-        const idx = u.bomItemIndex ?? -1;
-        if (idx === bi) {
-          setValue(`colorways.${ci}.usages.${ui}.bomItemIndex`, -1, { shouldDirty: true });
-        } else if (idx > bi) {
-          setValue(`colorways.${ci}.usages.${ui}.bomItemIndex`, idx - 1, { shouldDirty: true });
+    const removedKey = (getValues(`bomItems.${bi}.lineKey`) as string) || '';
+    if (removedKey) {
+      const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
+      (operations ?? []).forEach((o, oi) => {
+        if (o.bomLineKey === removedKey) {
+          setValue(`operations.${oi}.bomLineKey`, '', { shouldDirty: true });
         }
       });
-    });
-    const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
-    (operations ?? []).forEach((o, oi) => {
-      const idx = o.bomItemIndex ?? -1;
-      if (idx === bi) {
-        setValue(`operations.${oi}.bomItemIndex`, -1, { shouldDirty: true });
-      } else if (idx > bi) {
-        setValue(`operations.${oi}.bomItemIndex`, idx - 1, { shouldDirty: true });
-      }
-    });
-    // Cut-piece fabric-map cells reference BOM articles too (fabric + fusing) — renumber both, or a
-    // detail silently maps to the wrong material on the factory floor (nf05-01).
-    const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
-    (pieces ?? []).forEach((p, pi) => {
-      (p.materials ?? []).forEach((m, mi) => {
-        const bIdx = m.bomItemIndex ?? -1;
-        if (bIdx === bi) {
-          setValue(`pieces.${pi}.materials.${mi}.bomItemIndex`, -1, { shouldDirty: true });
-        } else if (bIdx > bi) {
-          setValue(`pieces.${pi}.materials.${mi}.bomItemIndex`, bIdx - 1, { shouldDirty: true });
-        }
-        const fIdx = m.fusingBomItemIndex ?? -1;
-        if (fIdx === bi) {
-          setValue(`pieces.${pi}.materials.${mi}.fusingBomItemIndex`, -1, { shouldDirty: true });
-        } else if (fIdx > bi) {
-          setValue(`pieces.${pi}.materials.${mi}.fusingBomItemIndex`, fIdx - 1, {
-            shouldDirty: true,
-          });
-        }
+      const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
+      (pieces ?? []).forEach((p, pi) => {
+        (p.materials ?? []).forEach((m, mi) => {
+          if (m.bomLineKey === removedKey) {
+            setValue(`pieces.${pi}.materials.${mi}.bomLineKey`, '', { shouldDirty: true });
+          }
+          if (m.fusingBomLineKey === removedKey) {
+            setValue(`pieces.${pi}.materials.${mi}.fusingBomLineKey`, '', { shouldDirty: true });
+          }
+        });
       });
-    });
+      const colorways = (getValues('colorways') ?? []) as TechCardFormData['colorways'];
+      (colorways ?? []).forEach((c, ci) => {
+        (c.usages ?? []).forEach((u, ui) => {
+          if (u.bomLineKey === removedKey) {
+            setValue(`colorways.${ci}.usages.${ui}.bomLineKey`, '', { shouldDirty: true });
+          }
+        });
+      });
+    }
     remove(bi);
   };
 
@@ -285,7 +306,7 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
         type='button'
         variant='main'
         className='uppercase'
-        onClick={() => append({ ...emptyBomItem })}
+        onClick={() => append({ ...emptyBomItem, lineKey: ulid() })}
       >
         add BOM article
       </Button>

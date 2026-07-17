@@ -7,6 +7,7 @@ import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { BomLinePicker } from './bom-line-picker';
 import {
   OPERATION_TYPE_PRESETS,
   attachmentOptions,
@@ -33,7 +34,7 @@ export const emptyOperation = {
   operationType: NONE_OP_TYPE,
   machine: '',
   zone: NONE_ZONE,
-  bomItemIndex: -1, // -1 = no material linked
+  bomLineKey: '', // '' = no material linked
   calloutNumber: 0, // 0 = no sketch pin linked
   seamType: '',
   seamAllowance: '',
@@ -48,7 +49,7 @@ export const emptyOperation = {
 };
 
 type PickerOption = { value: number; label: string };
-type BomLine = { name?: string; section?: string };
+type BomLine = { lineKey?: string; name?: string; section?: string };
 
 // One assembly operation. The compact line reads like a sentence (verb · node · part ·
 // machine · material · pin); the rare/industrial fields hide behind «детали». The op number
@@ -56,7 +57,6 @@ type BomLine = { name?: string; section?: string };
 function OperationRow({
   index,
   onRemove,
-  bomOptions,
   pinOptions,
   bomLines,
   activePin,
@@ -66,13 +66,12 @@ function OperationRow({
 }: {
   index: number;
   onRemove: () => void;
-  bomOptions: PickerOption[];
   pinOptions: PickerOption[];
   bomLines: BomLine[];
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
-  activeBom?: number | null;
-  onActiveBomChange?: (n: number | null) => void;
+  activeBom?: string | null;
+  onActiveBomChange?: (k: string | null) => void;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const [open, setOpen] = useState(false);
@@ -80,13 +79,13 @@ function OperationRow({
   const opType = useWatch({ control, name: `operations.${index}.operationType` }) as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
     0) as number;
-  const bomItemIndex = (useWatch({ control, name: `operations.${index}.bomItemIndex` }) ??
-    -1) as number;
-  const linkedMaterial = bomItemIndex >= 0 ? bomLines[bomItemIndex] : undefined;
-  const bomOutOfRange = bomItemIndex >= 0 && bomItemIndex >= bomLines.length;
+  const bomLineKey = (useWatch({ control, name: `operations.${index}.bomLineKey` }) ??
+    '') as string;
+  const linkedMaterial = bomLineKey ? bomLines.find((b) => b.lineKey === bomLineKey) : undefined;
+  const bomOutOfRange = !!bomLineKey && !linkedMaterial;
   const linked =
     (!!activePin && activePin > 0 && calloutNumber === activePin) ||
-    (activeBom != null && bomItemIndex >= 0 && bomItemIndex === activeBom);
+    (activeBom != null && !!bomLineKey && bomLineKey === activeBom);
 
   // Apply the verb's machine / stitch defaults on a real change (skip the initial mount so
   // loading an existing card never auto-dirties the form), filling only blank fields.
@@ -115,8 +114,8 @@ function OperationRow({
       firstBomRun.current = false;
       return;
     }
-    if (bomItemIndex < 0 || bomItemIndex >= bomLines.length) return;
-    const line = bomLines[bomItemIndex];
+    if (!bomLineKey) return;
+    const line = bomLines.find((b) => b.lineKey === bomLineKey);
     if (line?.section === 'TECH_CARD_BOM_SECTION_THREAD' && line.name?.trim()) {
       const cur = getValues(`operations.${index}`);
       if (!cur.thread?.trim()) {
@@ -124,13 +123,13 @@ function OperationRow({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bomItemIndex, index, getValues, setValue]);
+  }, [bomLineKey, index, getValues, setValue]);
 
   return (
     <div
       onMouseEnter={() => {
         onActivePinChange?.(calloutNumber > 0 ? calloutNumber : null);
-        onActiveBomChange?.(bomItemIndex >= 0 ? bomItemIndex : null);
+        onActiveBomChange?.(bomLineKey || null);
       }}
       onMouseLeave={() => {
         onActivePinChange?.(null);
@@ -188,11 +187,10 @@ function OperationRow({
           options={placementOptions}
         />
         <ComboField name={`operations.${index}.machine`} label='машина' options={machineOptions} />
-        <SelectField
-          name={`operations.${index}.bomItemIndex`}
+        <BomLinePicker
+          name={`operations.${index}.bomLineKey`}
           label='мат. напрямую'
-          items={bomOptions}
-          valueAsNumber
+          noneLabel='— материал —'
         />
         <SelectField
           name={`operations.${index}.calloutNumber`}
@@ -280,8 +278,8 @@ export function OperationsField({
 }: {
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
-  activeBom?: number | null;
-  onActiveBomChange?: (n: number | null) => void;
+  activeBom?: string | null;
+  onActiveBomChange?: (k: string | null) => void;
   // request from the construction panel to append an operation for a part (nonce dedupes)
   addRequest?: { placement: string; nonce: number } | null;
   onAdded?: () => void;
@@ -320,17 +318,6 @@ export function OperationsField({
     part?: string;
   }>;
 
-  const bomOptions = useMemo<PickerOption[]>(
-    () => [
-      { value: -1, label: '— материал —' },
-      ...bomItems.map((b, i) => ({
-        value: i,
-        label: b.name?.trim() ? `${i + 1}. ${b.name}` : `материал ${i + 1}`,
-      })),
-    ],
-    [bomItems],
-  );
-
   const pinOptions = useMemo<PickerOption[]>(
     () => [
       { value: 0, label: '— пин —' },
@@ -363,7 +350,6 @@ export function OperationsField({
               key={f.id}
               index={index}
               onRemove={() => removeOperation(index)}
-              bomOptions={bomOptions}
               pinOptions={pinOptions}
               bomLines={bomItems}
               activePin={activePin}
