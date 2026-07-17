@@ -35,7 +35,13 @@ export function LinesGrid({
   const editable = canEdit && !locked;
 
   const { data: techCard } = useTechCard(run.run?.techCardId ? run.run.techCardId : undefined);
-  const colorways = useMemo(() => techCard?.techCard?.colorways ?? [], [techCard]);
+  // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always empty;
+  // colour-model labels fall back to `#<productId>`. Source real data from
+  // GetColorwaysPaged by style / AdminColorwayRef instead.
+  const colorways = useMemo(
+    () => [] as { productId?: number; code?: string; name?: string; id?: number }[],
+    [techCard],
+  );
   const cardSizeIds = useMemo(() => techCard?.techCard?.sizeIds ?? [], [techCard]);
   const sizeQuantities = useMemo(() => techCard?.techCard?.sizeQuantities ?? [], [techCard]);
 

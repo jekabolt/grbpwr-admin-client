@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { ProductPicker } from 'components/managers/custom-orders/components/prodcut-picker';
 import { useProductCatalog } from 'components/managers/fittings/components/useProductCatalog';
 import { useEffect, useState } from 'react';
@@ -8,9 +8,9 @@ import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { FittingFormData } from './schema';
 
-function productName(product?: common_Product): string {
+function productName(product?: common_Colorway): string {
   return (
-    product?.productDisplay?.productBody?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`
+    product?.display?.productBody?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`
   );
 }
 
@@ -21,7 +21,7 @@ export function ProductField() {
   const { field, fieldState } = useController({ control, name: 'productId' });
 
   const { products, hasMore, loadMore } = useProductCatalog();
-  const [selected, setSelected] = useState<common_Product | undefined>();
+  const [selected, setSelected] = useState<common_Colorway | undefined>();
 
   // Resolve the selected product object for display when only the id is known.
   useEffect(() => {
@@ -37,9 +37,9 @@ export function ProductField() {
     }
     let active = true;
     adminService
-      .GetProductByID({ id })
+      .GetColorwayByID({ id })
       .then((res) => {
-        if (active) setSelected(res.product?.product);
+        if (active) setSelected(res.product?.colorway);
       })
       .catch(() => {});
     return () => {
@@ -47,7 +47,7 @@ export function ProductField() {
     };
   }, [field.value, products]);
 
-  const handleSave = (picked: common_Product[]) => {
+  const handleSave = (picked: common_Colorway[]) => {
     const chosen = picked[0];
     field.onChange(chosen?.id ?? 0);
     setSelected(chosen);
@@ -59,7 +59,7 @@ export function ProductField() {
         <div className='flex items-center gap-3 border border-textInactiveColor p-2'>
           <div className='w-16 shrink-0'>
             <Media
-              src={selected.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+              src={selected.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
               alt='thumbnail'
               aspectRatio='1/1'
               fit='contain'

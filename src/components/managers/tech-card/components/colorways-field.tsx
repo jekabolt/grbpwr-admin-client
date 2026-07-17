@@ -1,4 +1,4 @@
-import { common_MediaFull, common_Product } from 'api/proto-http/admin';
+import { common_MediaFull, common_Colorway } from 'api/proto-http/admin';
 import { useProductsByIds } from 'components/managers/fittings/components/useResolvers';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
@@ -87,8 +87,8 @@ const emptyColorway = {
   usages: [],
 };
 
-function productName(product?: common_Product): string {
-  return product?.productDisplay?.productBody?.translations?.[0]?.name ?? '';
+function productName(product?: common_Colorway): string {
+  return product?.display?.productBody?.translations?.[0]?.name ?? '';
 }
 
 type FormBomItem = {

@@ -1,14 +1,14 @@
 import {
   common_GenderEnum,
-  common_ProductBodyInsert,
-  common_ProductFull,
-  common_ProductInsert,
-  common_ProductInsertTranslation,
-  common_ProductNew,
-  common_ProductTagInsert,
+  common_ColorwayBodyInsert,
+  common_ColorwayFull,
+  common_ColorwayInsert,
+  common_ColorwayInsertTranslation,
+  common_ColorwayNew,
+  common_ColorwayTagInsert,
   common_SeasonEnum,
   common_SizeWithMeasurementInsert,
-  UpsertProductRequest,
+  UpsertColorwayRequest,
 } from 'api/proto-http/admin';
 import { currencySymbols, LANGUAGES } from 'constants/constants';
 import isEqual from 'lodash/isEqual';
@@ -16,10 +16,13 @@ import { ProductFormData } from '../utility/schema';
 import { getNonEmptySizeMeasurements } from '../utility/sizes';
 
 export function mapProductDataToForm(data: ProductFormData) {
-  const productBodyInsert: common_ProductBodyInsert = {
+  const productBodyInsert: common_ColorwayBodyInsert = {
     brand: data.product.productBodyInsert.brand,
-    color: data.product.productBodyInsert.color,
-    colorHex: data.product.productBodyInsert.colorHex,
+    // R1/R9: colour identity is now the dictionary color_code (FK Dictionary.colors); the free-text
+    // color/color_hex were removed. color_hex_override is an optional per-colourway shade override.
+    colorCode: data.product.productBodyInsert.colorCode,
+    colorHexOverride: data.product.productBodyInsert.colorHexOverride || undefined,
+    dictionaryColor: undefined, // output-only; resolved server-side from color_code
     countryOfOrigin: data.product.productBodyInsert.countryOfOrigin,
     salePercentage: data.product.productBodyInsert.salePercentage,
     topCategoryId: parseInt(data.product.productBodyInsert.topCategoryId),
@@ -29,17 +32,21 @@ export function mapProductDataToForm(data: ProductFormData) {
     modelWearsSizeId: parseInt(data.product.productBodyInsert.modelWearsSizeId || '0'),
     careInstructions: data.product.productBodyInsert.careInstructions,
     composition: data.product.productBodyInsert.composition,
+    // R6: visibility is owned by the stored lifecycle status now; `hidden` stays on the write path
+    // during the intermediate contract and is driven by the lifecycle controls, not a form toggle.
     hidden: data.product.productBodyInsert.hidden,
     minTier: parseInt(data.product.productBodyInsert.minTier || '0'),
     targetGender: data.product.productBodyInsert.targetGender as common_GenderEnum,
-    version: data.product.productBodyInsert.version,
+    // `version` was removed in PR6 (never round-tripped).
     collection: data.product.productBodyInsert.collection,
     preorder: toWellKnownTimestamp(data.product.productBodyInsert.preorder),
     fit: data.product.productBodyInsert.fit,
+    // TODO(final-bump): season moves to a typed SkuSeason {code, year} on the owning Style
+    // (UpdateStyle); the colourway write path keeps the legacy SeasonEnum until then.
     season: (data.product.productBodyInsert.season as common_SeasonEnum) || undefined,
   };
 
-  const translations: common_ProductInsertTranslation[] = data.product.translations.map(
+  const translations: common_ColorwayInsertTranslation[] = data.product.translations.map(
     (translation) => ({
       languageId: parseInt(translation.languageId.toString()),
       name: translation.name,
@@ -49,7 +56,7 @@ export function mapProductDataToForm(data: ProductFormData) {
 
   const mediaIds: number[] = data.mediaIds;
 
-  const tags: common_ProductTagInsert[] = data.tags.map((tag) => ({
+  const tags: common_ColorwayTagInsert[] = data.tags.map((tag) => ({
     tag: tag.tag,
   }));
 
@@ -82,7 +89,7 @@ export function mapProductDataToForm(data: ProductFormData) {
   const costTrimmed = data.product.costPrice?.trim();
   const costPrice = costTrimmed && parseFloat(costTrimmed) > 0 ? { value: costTrimmed } : undefined;
 
-  const product: common_ProductInsert = {
+  const product: common_ColorwayInsert = {
     productBodyInsert,
     thumbnailMediaId: data.product.thumbnailMediaId,
     secondaryThumbnailMediaId: data.product.secondaryThumbnailMediaId || 0,
@@ -91,7 +98,7 @@ export function mapProductDataToForm(data: ProductFormData) {
     costPrice,
   };
 
-  const productNew: common_ProductNew = {
+  const productNew: common_ColorwayNew = {
     product,
     prices,
     mediaIds,
@@ -103,41 +110,35 @@ export function mapProductDataToForm(data: ProductFormData) {
 }
 
 export function mapProductFullToFormData(
-  productFull: common_ProductFull | undefined,
+  productFull: common_ColorwayFull | undefined,
 ): ProductFormData {
-  const productDisplay = productFull?.product?.productDisplay;
+  const productDisplay = productFull?.colorway?.display;
   const productBody = productDisplay?.productBody;
   const productBodyInsert = productBody?.productBodyInsert;
 
-  const sizeMeasurements = productFull?.sizes?.map((size) => {
-    const sizeMeasurements =
-      productFull?.measurements?.filter((measurement) => measurement.productSizeId === size.id) ||
-      [];
-
+  // R5: the size chart moved to the owning Style (StyleSizeChart, full-replace). ColorwayFull no
+  // longer carries per-variant `measurements`, so we can only prefill the stock quantities here.
+  // TODO(final-bump): load the resolved chart from GetStyleSizeChart and merge it in for display.
+  const sizeMeasurements = productFull?.variants?.map((variant) => {
     return {
       productSize: {
         quantity: {
-          value: size.quantity?.value || '0',
+          value: variant.quantity?.value || '0',
         },
-        sizeId: size.sizeId || 1,
+        sizeId: variant.sizeId || 1,
       },
-      measurements: sizeMeasurements.map((measurement) => ({
-        measurementNameId: measurement.measurementNameId || 0,
-        measurementValue: {
-          value: measurement.measurementValue?.value || '0',
-        },
-      })),
+      measurements: [] as { measurementNameId: number; measurementValue: { value: string } }[],
     };
   }) || [{ productSize: { quantity: { value: '0' }, sizeId: 0 }, measurements: [] }];
 
   const tags =
     productFull?.tags?.map((tag) => ({
-      tag: tag.productTagInsert?.tag || '',
+      tag: tag.tagInsert?.tag || '',
     })) || [];
 
   const mediaIds = productFull?.media?.map((media) => media.id || 0).filter((id) => id > 0) || [];
 
-  const apiPrices = productFull?.product?.prices ?? [];
+  const apiPrices = productFull?.colorway?.prices ?? [];
   const prices = Object.keys(currencySymbols).map((currency) => {
     const fromApi = apiPrices.find((p) => p.currency === currency);
     return {
@@ -153,8 +154,8 @@ export function mapProductFullToFormData(
         brand: productBodyInsert?.brand || '',
         careInstructions: productBodyInsert?.careInstructions || '',
         composition: productBodyInsert?.composition || '',
-        color: productBodyInsert?.color || '',
-        colorHex: productBodyInsert?.colorHex || '',
+        colorCode: productBodyInsert?.colorCode || '',
+        colorHexOverride: productBodyInsert?.colorHexOverride || '',
         countryOfOrigin: productBodyInsert?.countryOfOrigin || '',
         salePercentage: {
           value: productBodyInsert?.salePercentage?.value || '0',
@@ -166,12 +167,13 @@ export function mapProductFullToFormData(
           ? productBodyInsert.subCategoryId.toString()
           : '',
         typeId: productBodyInsert?.typeId ? productBodyInsert.typeId.toString() : '',
-        hidden: productBodyInsert?.hidden || false,
+        // R6: visibility is owned by the stored lifecycle status; keep the vestigial `hidden` write
+        // field in sync with it so an upsert never contradicts a Hide/Unhide transition.
+        hidden: productFull?.colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_HIDDEN',
         minTier: productBodyInsert?.minTier?.toString() ?? '0',
         targetGender: productBodyInsert?.targetGender || ('' as common_GenderEnum),
         modelWearsHeightCm: productBodyInsert?.modelWearsHeightCm?.toString() || undefined,
         modelWearsSizeId: productBodyInsert?.modelWearsSizeId?.toString() || undefined,
-        version: productBodyInsert?.version || '',
         collection: productBodyInsert?.collection || '',
         fit: productBodyInsert?.fit || '',
         season: productBodyInsert?.season || undefined,
@@ -228,13 +230,13 @@ export const comparisonOfInitialProductValues = (obj1: any, obj2: any): boolean 
 };
 
 export const createProductPayload = (
-  values: common_ProductNew,
+  values: common_ColorwayNew,
   id: string | undefined,
   isCopyMode: boolean,
-): UpsertProductRequest => ({
+): UpsertColorwayRequest => ({
   id: isCopyMode ? undefined : id ? parseInt(id) : undefined,
   product: {
     ...values,
     sizeMeasurements: getNonEmptySizeMeasurements(values),
-  } as common_ProductNew,
+  } as common_ColorwayNew,
 });

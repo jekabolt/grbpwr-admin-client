@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
@@ -15,14 +15,14 @@ const HIDDEN_ON_MOBILE_STYLE = 'hidden lg:table-cell';
 type ColumnDef = {
   label: string;
   className?: string;
-  accessor: (product: common_Product) => React.ReactNode;
+  accessor: (product: common_Colorway) => React.ReactNode;
 };
 
 interface ProductsPickerData {
   open: boolean;
   selectedProductIds: number[];
   onClose: () => void;
-  onSave: (newSelectedProducts: common_Product[]) => void;
+  onSave: (newSelectedProducts: common_Colorway[]) => void;
   onOpenRequest?: () => void;
   /** Single-select mode: radio picker, choosing one replaces any prior pick. */
   single?: boolean;
@@ -38,8 +38,8 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
 }) => {
   const calculateOffset = (page: number, limit: number) => (page - 1) * limit;
 
-  const [allProducts, setAllProducts] = useState<common_Product[]>([]);
-  const [selectedProducts, setSelectedProducts] = useState<common_Product[]>([]);
+  const [allProducts, setAllProducts] = useState<common_Colorway[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<common_Colorway[]>([]);
   const { dictionary } = useDictionary();
   const categories = dictionary?.categories || [];
 
@@ -57,7 +57,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   useEffect(() => {
     if (open) {
       const fetchProducts = async () => {
-        const response = await adminService.GetProductsPaged({
+        const response = await adminService.GetColorwaysPaged({
           limit: newLimit,
           offset: offset,
           sortFactors: ['SORT_FACTOR_CREATED_AT'],
@@ -69,7 +69,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         if (Array.isArray(response.products)) {
           setAllProducts((prevProducts) => {
             const combinedProducts = [...prevProducts, ...(response.products || [])];
-            const uniqueProducts = combinedProducts.reduce<common_Product[]>((acc, current) => {
+            const uniqueProducts = combinedProducts.reduce<common_Colorway[]>((acc, current) => {
               if (!acc.find((product) => product.id === current.id)) {
                 acc.push(current);
               }
@@ -95,7 +95,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
     onClose();
   };
 
-  const handleSelectionChange = (product: common_Product) => {
+  const handleSelectionChange = (product: common_Colorway) => {
     if (single) {
       // One target only — replace any prior pick.
       setSelectedProducts([product]);
@@ -117,7 +117,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
     () => [
       {
         label: 'SELECT',
-        accessor: (product: common_Product) => {
+        accessor: (product: common_Colorway) => {
           const isSelected = selectedProducts.some((p) => p.id === product.id);
           return (
             <input
@@ -132,7 +132,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       },
       {
         label: 'ID',
-        accessor: (product: common_Product) => (
+        accessor: (product: common_Colorway) => (
           <Link
             to={`${BASE_PATH}/products/${product.id}`}
             target='_blank'
@@ -144,10 +144,10 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       },
       {
         label: 'THUMBNAIL',
-        accessor: (product: common_Product) => (
+        accessor: (product: common_Colorway) => (
           <div className='flex items-center justify-center w-24 max-w-full h-full mx-auto overflow-hidden'>
             <Media
-              src={product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+              src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
               alt='thumbnail'
               aspectRatio='1/1'
               fit='contain'
@@ -157,27 +157,27 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       },
       {
         label: 'NAME',
-        accessor: (product: common_Product) =>
-          product.productDisplay?.productBody?.translations?.[0]?.name ??
-          (product.productDisplay?.productBody as any)?.name,
+        accessor: (product: common_Colorway) =>
+          product.display?.productBody?.translations?.[0]?.name ??
+          (product.display?.productBody as any)?.name,
       },
       {
         label: 'IS HIDDEN',
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: (product: common_Product) => {
+        accessor: (product: common_Colorway) => {
           const hidden =
-            product.productDisplay?.productBody?.productBodyInsert?.hidden ??
-            (product.productDisplay?.productBody as any)?.hidden;
+            product.display?.productBody?.productBodyInsert?.hidden ??
+            (product.display?.productBody as any)?.hidden;
           return hidden ? 'Yes' : 'No';
         },
       },
       {
         label: 'PRICE',
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: (product: common_Product) => {
+        accessor: (product: common_Colorway) => {
           const price =
             product.prices?.[1]?.price?.value ??
-            (product.productDisplay?.productBody as any)?.price?.value;
+            (product.display?.productBody as any)?.price?.value;
           const currency = product.prices?.[1]?.currency ?? '';
           return `${price ?? ''} ${currency}`.trim();
         },
@@ -185,20 +185,20 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       {
         label: 'SALE %',
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: (product: common_Product) => {
+        accessor: (product: common_Colorway) => {
           const sale =
-            product.productDisplay?.productBody?.productBodyInsert?.salePercentage?.value ??
-            (product.productDisplay?.productBody as any)?.salePercentage?.value;
+            product.display?.productBody?.productBodyInsert?.salePercentage?.value ??
+            (product.display?.productBody as any)?.salePercentage?.value;
           return sale != null ? `${sale}%` : '';
         },
       },
       {
         label: 'CATEGORY',
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: (product: common_Product) => {
+        accessor: (product: common_Colorway) => {
           const categoryId =
-            product.productDisplay?.productBody?.productBodyInsert?.topCategoryId ??
-            (product.productDisplay?.productBody as any)?.categoryId;
+            product.display?.productBody?.productBodyInsert?.topCategoryId ??
+            (product.display?.productBody as any)?.categoryId;
           const category = categories.find((c) => c.id === categoryId);
           return category ? category.name?.replace('CATEGORY_ENUM_', '') : 'Unknown';
         },

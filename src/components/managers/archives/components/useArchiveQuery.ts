@@ -36,6 +36,9 @@ export function useArchiveDetails(
         id: id!,
         heading: archiveData?.heading || 'string',
         tag: archiveData?.tag || 'string',
+        // TODO(final-bump/route-E): resolve by the public `code` (tail of /timeline/{pretty}-{code}).
+        // The backend keeps the legacy id/heading/tag lookup during the coordinated URL cutover.
+        code: undefined,
       });
       return response.archive;
     },

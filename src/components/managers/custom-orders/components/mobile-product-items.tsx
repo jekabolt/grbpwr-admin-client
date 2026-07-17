@@ -1,5 +1,5 @@
 import type { common_Category } from 'api/proto-http/admin';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { Link } from 'react-router-dom';
@@ -7,9 +7,9 @@ import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 
 export type ProductListProps = {
-  products: common_Product[];
-  pendingSelection: common_Product[];
-  togglePending: (product: common_Product) => void;
+  products: common_Colorway[];
+  pendingSelection: common_Colorway[];
+  togglePending: (product: common_Colorway) => void;
   categories: common_Category[] | undefined;
 };
 
@@ -29,11 +29,11 @@ export function MobileProductItems({
         products.map((product) => {
           const isSelected = pendingSelection.some((p) => p.id === product.id);
           const name =
-            product.productDisplay?.productBody?.translations?.[0]?.name ??
-            (product.productDisplay?.productBody as any)?.name;
+            product.display?.productBody?.translations?.[0]?.name ??
+            (product.display?.productBody as any)?.name;
           const categoryId =
-            product.productDisplay?.productBody?.productBodyInsert?.topCategoryId ??
-            (product.productDisplay?.productBody as any)?.categoryId;
+            product.display?.productBody?.productBodyInsert?.topCategoryId ??
+            (product.display?.productBody as any)?.categoryId;
           const category = categories?.find((c) => c.id === categoryId);
           const categoryName = category ? category.name?.replace('CATEGORY_ENUM_', '') : 'Unknown';
           return (
@@ -51,7 +51,7 @@ export function MobileProductItems({
             >
               <div className='w-16 h-16 shrink-0 overflow-hidden rounded-none'>
                 <Media
-                  src={product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+                  src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
                   alt='thumbnail'
                   aspectRatio='1/1'
                   fit='contain'

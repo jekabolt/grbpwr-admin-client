@@ -11,7 +11,6 @@ import {
   common_TechCardFabricDirection,
   common_TechCardIssueSeverity,
   common_TechCardIssueStatus,
-  common_TechCardLabDipStatus,
   common_TechCardLabelType,
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
@@ -19,6 +18,9 @@ import {
   common_TechCardMediaKind,
   common_TechCardStage,
 } from 'api/proto-http/admin';
+// LabDip status lives in the common module and is no longer re-exported through admin (the admin
+// TechCardColorway surface that referenced it was removed in the R1 merge).
+import { TechCardLabDipStatus as common_TechCardLabDipStatus } from 'api/proto-http/common';
 
 interface Colors {
   name: string;

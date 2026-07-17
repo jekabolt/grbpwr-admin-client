@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import type { CreateCustomOrderRequest } from 'api/proto-http/admin';
-import { common_Dictionary, common_Product } from 'api/proto-http/admin';
+import { common_Dictionary, common_Colorway } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { getFilteredSizes } from 'components/managers/product/utility/sizes';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -22,24 +22,24 @@ import { SelectedProduct } from './selected-product';
 import { ShippingFieldsGroup } from './shipping-fields-group';
 
 interface CustomOrderFormProps {
-  selectedProducts: common_Product[];
+  selectedProducts: common_Colorway[];
   onSuccess?: () => void;
   productPickerProps?: {
-    products: common_Product[];
+    products: common_Colorway[];
     hasMore: boolean;
-    handleSaveProducts: (products: common_Product[]) => void;
+    handleSaveProducts: (products: common_Colorway[]) => void;
     loadMore: () => void;
   };
 }
 
 function buildItemsFromProducts(
-  products: common_Product[],
+  products: common_Colorway[],
   dictionary: common_Dictionary | undefined,
 ): CustomOrderFormData['items'] {
   return products.map((p) => {
     const baseCurrency = dictionary?.baseCurrency ?? 'USD';
     const productPrice = p.prices?.find((p) => p.currency === baseCurrency)?.price?.value ?? '0';
-    const productBody = p.productDisplay?.productBody?.productBodyInsert;
+    const productBody = p.display?.productBody?.productBodyInsert;
     const topCategoryId = Number(productBody?.topCategoryId) || 0;
     const typeId = Number(productBody?.typeId) || 0;
     const filteredSizes = getFilteredSizes(dictionary, topCategoryId, typeId, {

@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { ProductCostInfo } from 'api/proto-http/admin';
+import { ColorwayCostInfo } from 'api/proto-http/admin';
 import { generatePath, Link } from 'react-router-dom';
 import { useFormContext } from 'react-hook-form';
 import { useState } from 'react';
@@ -23,7 +23,7 @@ export function ProductCostSection({
   onCostSynced,
 }: {
   editMode: boolean;
-  costInfo?: ProductCostInfo;
+  costInfo?: ColorwayCostInfo;
   productId?: string;
   isAddingProduct: boolean;
   onCostSynced?: () => void;
@@ -48,7 +48,7 @@ export function ProductCostSection({
     if (!productId) return;
     setSyncing(true);
     try {
-      const res = await adminService.SyncProductCostFromTechCard({
+      const res = await adminService.SyncColorwayCostFromStyle({
         productId: Number(productId),
         techCardId: 0, // use the product's existing primary card
       });

@@ -1,10 +1,10 @@
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { ProductItem } from './product-item';
 export function ProductGrid({
   products,
   refresh,
 }: {
-  products: common_Product[];
+  products: common_Colorway[];
   refresh: (id: number | undefined) => void;
 }) {
   return (

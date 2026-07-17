@@ -1,4 +1,4 @@
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import {
   buildStorefrontLink,
@@ -54,7 +54,7 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
   const [link, setLink] = useState<StorefrontLink>(() => parseStorefrontLink(raw));
   const [productModalOpen, setProductModalOpen] = useState(false);
   // Resolved product for display only (thumbnail); the link stores just the slug.
-  const [pickedProduct, setPickedProduct] = useState<common_Product | null>(null);
+  const [pickedProduct, setPickedProduct] = useState<common_Colorway | null>(null);
 
   // Re-sync when the form value changes from outside (form reset / duplicate),
   // but not on our own writes (then raw already equals build(link)).
@@ -146,10 +146,10 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
         <div className='space-y-2'>
           {link.slug ? (
             <div className='flex items-center gap-2'>
-              {showProduct?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl && (
+              {showProduct?.display?.thumbnail?.media?.thumbnail?.mediaUrl && (
                 <div className='w-12 shrink-0'>
                   <Media
-                    src={showProduct.productDisplay.thumbnail.media.thumbnail.mediaUrl}
+                    src={showProduct.display.thumbnail.media.thumbnail.mediaUrl}
                     alt='product'
                     aspectRatio='1/1'
                     fit='cover'

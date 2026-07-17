@@ -14,7 +14,6 @@ import { Composition } from './composition/composition';
 import { PriceFields } from './price-fields';
 import { SalePreorderFields } from './sale-preorder-fields';
 import { TierAccessFields } from './tier-access-fields';
-import { VisibilityField } from './visibility-field';
 
 const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped', 'tailored'];
 
@@ -36,9 +35,18 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
 
   const filteredSizes = getFilteredSizes(dictionary, topCategoryId || 0);
 
+  // R9: collection options from the controlled dictionary (archived hidden). Free-text value kept
+  // for the intermediate contract; final bump switches to collection_id on the Style.
+  const collectionItems = useMemo(
+    () =>
+      (dictionary?.collections ?? [])
+        .filter((c) => !c.archived && c.name)
+        .map((c) => ({ label: c.name || '', value: c.name || '' })),
+    [dictionary?.collections],
+  );
+
   return (
     <div className='space-y-10'>
-      <VisibilityField editMode={editMode} />
       <UnifiedTranslationFields
         fieldPrefix='product.translations'
         fields={[
@@ -50,12 +58,18 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
 
       <div className='space-y-3'>
         <InputField name='product.productBodyInsert.brand' label='brand' readOnly={!editMode} />
-        <InputField name='product.productBodyInsert.version' label='version' readOnly={!editMode} />
-        <InputField
+        {/* R9: collection is a controlled dictionary now; the picker is fed from DictionaryProvider.
+            TODO(final-bump): the write path moves from free-text `collection` to `collection_id` on
+            the owning Style (UpdateStyle). */}
+        <SelectField
+          fullWidth
           name='product.productBodyInsert.collection'
           label='collection'
+          items={collectionItems}
           readOnly={!editMode}
         />
+        {/* TODO(final-bump): season becomes a typed SkuSeason {code, year} on the owning Style
+            (UpdateStyle); the intermediate colourway contract still carries the legacy SeasonEnum. */}
         <SelectField
           name='product.productBodyInsert.season'
           label='season'

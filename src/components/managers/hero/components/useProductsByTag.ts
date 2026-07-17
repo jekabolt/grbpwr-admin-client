@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 
 export const productsByTagKeys = {
   all: ['productsByTag'] as const,
@@ -15,7 +15,7 @@ export function useProductsByTag(tag: string | undefined | null, enabled = true)
         return [];
       }
 
-      const response = await adminService.GetProductsPaged({
+      const response = await adminService.GetColorwaysPaged({
         limit: 1000,
         offset: 0,
         sortFactors: ['SORT_FACTOR_CREATED_AT'],
@@ -26,7 +26,7 @@ export function useProductsByTag(tag: string | undefined | null, enabled = true)
         showHidden: true,
       });
 
-      return (response.products || []) as common_Product[];
+      return (response.products || []) as common_Colorway[];
     },
     enabled: enabled && !!tag && tag.trim().length > 0,
     staleTime: 2 * 60 * 1000,

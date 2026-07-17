@@ -1,5 +1,5 @@
 import type { common_Category } from 'api/proto-http/admin';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
 import { Link } from 'react-router-dom';
 import Media from 'ui/components/media';
@@ -7,7 +7,7 @@ import Media from 'ui/components/media';
 export type ProductPickerColumnDef = {
   label: string;
   className?: string;
-  accessor: (product: common_Product) => React.ReactNode;
+  accessor: (product: common_Colorway) => React.ReactNode;
 };
 
 export const PRODUCT_PICKER_COLUMNS = [
@@ -22,7 +22,7 @@ export function getProductPickerColumns(params: {
 }): ProductPickerColumnDef[] {
   const { categories } = params;
 
-  const accessors: Array<(product: common_Product) => React.ReactNode> = [
+  const accessors: Array<(product: common_Colorway) => React.ReactNode> = [
     (product) => (
       <Link
         to={`${BASE_PATH}/products/${product.id}`}
@@ -36,7 +36,7 @@ export function getProductPickerColumns(params: {
     (product) => (
       <div className='flex items-center justify-center w-24 max-w-full h-full mx-auto overflow-hidden'>
         <Media
-          src={product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+          src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
           alt='thumbnail'
           aspectRatio='1/1'
           fit='contain'
@@ -44,12 +44,12 @@ export function getProductPickerColumns(params: {
       </div>
     ),
     (product) =>
-      product.productDisplay?.productBody?.translations?.[0]?.name ??
-      (product.productDisplay?.productBody as any)?.name,
+      product.display?.productBody?.translations?.[0]?.name ??
+      (product.display?.productBody as any)?.name,
     (product) => {
       const categoryId =
-        product.productDisplay?.productBody?.productBodyInsert?.topCategoryId ??
-        (product.productDisplay?.productBody as any)?.categoryId;
+        product.display?.productBody?.productBodyInsert?.topCategoryId ??
+        (product.display?.productBody as any)?.categoryId;
       const category = categories?.find((c) => c.id === categoryId);
       return category ? category.name?.replace('CATEGORY_ENUM_', '') : 'Unknown';
     },

@@ -10,7 +10,6 @@ import {
   common_TechCardInsert,
   common_TechCardIssueSeverity,
   common_TechCardIssueStatus,
-  common_TechCardLabDipStatus,
   common_TechCardLabelType,
   common_TechCardMeasurementUnit,
   common_TechCardMediaItem,
@@ -20,7 +19,11 @@ import {
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
   common_TechCardStage,
+  googletype_Decimal,
 } from 'api/proto-http/admin';
+// TODO(final-bump): TechCardLabDipStatus is no longer re-exported from 'api/proto-http/admin'
+// in the intermediate contract — import it from common directly.
+import { TechCardLabDipStatus as common_TechCardLabDipStatus } from 'api/proto-http/common';
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
@@ -509,13 +512,48 @@ function splitSketchMedia(insert?: common_TechCardInsert): {
   return { moodboardMedia: mood, technicalMedia: tech };
 }
 
+// TODO(final-bump): common_TechCardInsert no longer carries `colorways` (R1 merge — a
+// colourway is now a product, referenced by colorwayId). This shape lets the form-mapping
+// below keep compiling against an always-empty source; source real colourway data from
+// GetColorwaysPaged by style / AdminColorwayRef instead.
+type LegacyColorwaySource = {
+  code?: string;
+  name?: string;
+  labDipStatus?: common_TechCardLabDipStatus;
+  productId?: number;
+  comment?: string;
+  pantone?: string;
+  pantoneSystem?: string;
+  hex?: string;
+  swatchMediaId?: number;
+  labDipRound?: number;
+  labDipSubmittedAt?: string;
+  labDipDecidedAt?: string;
+  labDipDecidedBy?: string;
+  labDipRejectReason?: string;
+  usages?: {
+    bomItemIndex?: number;
+    placement?: string;
+    color?: string;
+    pantone?: string;
+    consumption?: googletype_Decimal;
+    quantity?: googletype_Decimal;
+    sizeConsumptions?: { sizeId?: number; consumption?: googletype_Decimal }[];
+    pieceIndex?: number;
+    lineTotal?: googletype_Decimal;
+    sizeRunTotal?: googletype_Decimal;
+  }[];
+};
+
 export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
   const insert = techCard.techCard;
   return {
     styleNumber: insert?.styleNumber || '',
     name: insert?.name || '',
     brand: insert?.brand || '',
-    season: insert?.season || '',
+    // TODO(final-bump): season is no longer on TechCardInsert (moved to skuSeason on the
+    // style write path, not yet surfaced in this form).
+    season: '',
     collection: insert?.collection || '',
     version: insert?.version || '',
     designer: insert?.designer || '',
@@ -544,7 +582,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // so the form value passes z.number() (a string would silently block save).
       sizeBytes: Number(p.sizeBytes) || 0,
     })),
-    productIds: insert?.productIds ?? [],
+    // TODO(final-bump): productIds is no longer on TechCardInsert — a colourway now carries
+    // its own product link.
+    productIds: [],
     purpose: insert?.purpose || 'sellable',
     outputMaterialId: insert?.outputMaterialId || 0,
     ...splitSketchMedia(insert),
@@ -557,7 +597,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       posX: decimalToInput(c.posX),
       posY: decimalToInput(c.posY),
     })),
-    colorways: (insert?.colorways ?? []).map((c) => ({
+    // TODO(final-bump): insert.colorways is gone (see LegacyColorwaySource above) — this map
+    // is now permanently over an empty array.
+    colorways: ([] as LegacyColorwaySource[]).map((c) => ({
       code: c.code || '',
       name: c.name || '',
       labDipStatus:
@@ -600,7 +642,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       calloutNumber: p.calloutNumber ?? 0,
       note: p.note || '',
       materials: (p.materials ?? []).map((m) => ({
-        colorwayIndex: m.colorwayIndex ?? 0,
+        // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
+        colorwayIndex: m.colorwayId ?? 0,
         bomItemIndex: m.bomItemIndex ?? -1,
         fusingBomItemIndex: m.fusingBomItemIndex ?? -1,
         note: m.note || '',
@@ -859,7 +902,9 @@ export function mapFormToTechCardInsert(
     styleNumber,
     name: data.name.trim(),
     brand: data.brand?.trim() || '',
-    season: data.season?.trim() || '',
+    // TODO(final-bump): season/productIds/colorways moved off the style write path (R1
+    // merge) — season lives on skuSeason (not yet surfaced in this form), productIds/
+    // colorways are managed per-colourway (product), not on TechCardInsert.
     collection: data.collection?.trim() || '',
     version: data.version?.trim() || '',
     designer: data.designer?.trim() || '',
@@ -895,7 +940,6 @@ export function mapFormToTechCardInsert(
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
     purpose: data.purpose || 'sellable',
     outputMaterialId: data.purpose === 'auxiliary' ? data.outputMaterialId || 0 : 0,
-    productIds: data.purpose === 'auxiliary' ? [] : data.productIds ?? [],
     moodboardMedia: (data.moodboardMedia ?? []).map(mapMediaItemOut),
     technicalMedia: (data.technicalMedia ?? []).map(mapMediaItemOut),
     callouts: (data.callouts ?? []).map((c) => ({
@@ -906,49 +950,6 @@ export function mapFormToTechCardInsert(
       mediaId: c.mediaId || 0,
       posX: inputToDecimal(c.posX),
       posY: inputToDecimal(c.posY),
-    })),
-    colorways: (data.colorways ?? []).map((c) => ({
-      code: c.code?.trim() || '',
-      name: c.name?.trim() || '',
-      labDipStatus: (c.labDipStatus ||
-        'TECH_CARD_LAB_DIP_STATUS_UNKNOWN') as common_TechCardLabDipStatus,
-      // Aux exclusivity extends to per-colourway FKs: an auxiliary card links no products, so a
-      // colourway keeping its productId would send an inconsistent payload (products unlinked at
-      // the card level but still referenced per colourway).
-      productId: data.purpose === 'auxiliary' ? 0 : c.productId || 0,
-      comment: c.comment?.trim() || '',
-      pantone: c.pantone?.trim() || '',
-      pantoneSystem: c.pantoneSystem?.trim() || '',
-      hex: c.hex?.trim() || '',
-      swatchMediaId: c.swatchMediaId || 0,
-      labDipRound: c.labDipRound || 0,
-      labDipSubmittedAt: c.labDipSubmittedAt
-        ? dateInputToTimestamp(c.labDipSubmittedAt)
-        : undefined,
-      labDipDecidedAt: c.labDipDecidedAt ? dateInputToTimestamp(c.labDipDecidedAt) : undefined,
-      labDipDecidedBy: c.labDipDecidedBy?.trim() || '',
-      labDipRejectReason: c.labDipRejectReason?.trim() || '',
-      usages: (c.usages ?? []).map((u) => ({
-        bomItemIndex:
-          typeof u.bomItemIndex === 'number' && u.bomItemIndex >= 0 ? u.bomItemIndex : undefined,
-        placement: u.placement?.trim() || '',
-        color: u.color?.trim() || '',
-        pantone: u.pantone?.trim() || '',
-        consumption: inputToDecimal(u.consumption),
-        quantity: inputToDecimal(u.quantity),
-        // per-size grading — drop blank cells; an all-blank set sends [] (per-garment fallback)
-        sizeConsumptions: (u.sizeConsumptions ?? [])
-          .filter((sc) => sc.consumption?.trim())
-          .map((sc) => ({
-            sizeId: sc.sizeId || 0,
-            consumption: inputToDecimal(sc.consumption),
-          })),
-        pieceIndex:
-          typeof u.pieceIndex === 'number' && u.pieceIndex >= 0 ? u.pieceIndex : undefined,
-        // lineTotal + sizeRunTotal are output-only (server-computed) — never sent
-        lineTotal: undefined,
-        sizeRunTotal: undefined,
-      })),
     })),
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
@@ -972,7 +973,8 @@ export function mapFormToTechCardInsert(
             !!m.note?.trim(),
         )
         .map((m) => ({
-          colorwayIndex: m.colorwayIndex || 0,
+          // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
+          colorwayId: m.colorwayIndex || 0,
           bomItemIndex:
             typeof m.bomItemIndex === 'number' && m.bomItemIndex >= 0 ? m.bomItemIndex : undefined,
           fusingBomItemIndex:
@@ -1067,6 +1069,9 @@ export function mapFormToTechCardInsert(
       section: r.section?.trim() || '',
       changeNote: r.changeNote?.trim() || '',
     })),
+    // TODO(final-bump): skuSeason replaces the removed free-text `season` as the style's
+    // season identity, but isn't yet surfaced in this form — leave unset for now.
+    skuSeason: undefined,
     // Cast: TechCardInsert keys are required-but-nullable; we set every section above and
     // echo any still-unhandled proto field from `original`. Untouched keys are omitted on
     // create (absent == empty on the wire), which the structural type can't express.

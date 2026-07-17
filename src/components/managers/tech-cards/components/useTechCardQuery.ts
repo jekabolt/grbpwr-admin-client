@@ -37,8 +37,9 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
         stage: filter.stage ?? 'TECH_CARD_STAGE_UNKNOWN',
         gender: filter.gender ?? 'GENDER_ENUM_UNKNOWN',
         brand: filter.brand ?? '',
-        season: filter.season ?? '',
         name: filter.name ?? '',
+        purpose: undefined,
+        skuSeason: undefined,
         productId: filter.productId ?? 0,
       });
       const techCards = response.techCards || [];

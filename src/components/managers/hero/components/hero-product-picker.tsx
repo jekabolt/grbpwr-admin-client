@@ -1,4 +1,4 @@
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { useFormContext } from 'react-hook-form';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
@@ -26,7 +26,7 @@ export function HeroProductPicker({ uid, api, formPath, single }: HeroProductPic
   const { setValue } = useFormContext();
   const selected = api.products[uid] || [];
 
-  const commit = (products: common_Product[]) => {
+  const commit = (products: common_Colorway[]) => {
     const list = single ? products.slice(0, 1) : products;
     const ids = list.map((p) => p.id).filter((id): id is number => id !== undefined);
     setValue(formPath as any, single ? ids[0] ?? undefined : ids, {
@@ -50,7 +50,7 @@ export function HeroProductPicker({ uid, api, formPath, single }: HeroProductPic
         {selected.map((p, i) => (
           <div key={p.id ?? i} className='relative w-20'>
             <Media
-              src={p.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+              src={p.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
               alt='product'
               aspectRatio='1/1'
               fit='cover'

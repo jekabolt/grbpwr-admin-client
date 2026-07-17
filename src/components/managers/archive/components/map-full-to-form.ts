@@ -1,4 +1,4 @@
-import { common_ArchiveFull, common_MediaFull, common_Product } from 'api/proto-http/admin';
+import { common_ArchiveFull, common_MediaFull, common_Colorway } from 'api/proto-http/admin';
 import { v4 as uuidv4 } from 'uuid';
 import { ArchiveFormData, defaultData } from './schema';
 
@@ -22,10 +22,10 @@ function mediaUrl(m?: common_MediaFull): string {
  */
 export function mapArchiveFullToForm(
   archive?: common_ArchiveFull,
-): ArchiveFormData & { productsByUid: Record<string, common_Product[]> } {
+): ArchiveFormData & { productsByUid: Record<string, common_Colorway[]> } {
   if (!archive) return { ...defaultData, productsByUid: {} };
 
-  const productsByUid: Record<string, common_Product[]> = {};
+  const productsByUid: Record<string, common_Colorway[]> = {};
 
   const items = (archive.items || [])
     .filter((i) => i.type)
@@ -79,7 +79,7 @@ export function mapArchiveFullToForm(
           };
         }
         case 'ARCHIVE_ITEM_TYPE_PRODUCTS_TAG': {
-          const products = (i.productsTag?.products || []).filter(Boolean) as common_Product[];
+          const products = (i.productsTag?.products || []).filter(Boolean) as common_Colorway[];
           if (products.length) productsByUid[_uid] = products;
           // `limit` is write-only (the read model returns resolved products, not
           // the rule) — it resets to blank on edit, a contract limitation.
@@ -92,7 +92,7 @@ export function mapArchiveFullToForm(
           };
         }
         case 'ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL': {
-          const products = (i.productsManual?.products || []).filter(Boolean) as common_Product[];
+          const products = (i.productsManual?.products || []).filter(Boolean) as common_Colorway[];
           if (products.length) productsByUid[_uid] = products;
           return {
             type: i.type,

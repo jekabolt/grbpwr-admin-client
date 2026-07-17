@@ -1,5 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -11,13 +11,13 @@ import type { ProductListProps } from './mobile-product-items';
 import { MobileProductItems } from './mobile-product-items';
 
 interface ProductPickerProps {
-  products: common_Product[];
-  selectedProducts: common_Product[];
+  products: common_Colorway[];
+  selectedProducts: common_Colorway[];
   hasMore: boolean;
   triggerClassName?: string;
   /** When true, only one product can be selected (picking another replaces it). */
   singleSelect?: boolean;
-  handleSaveProducts: (products: common_Product[]) => void;
+  handleSaveProducts: (products: common_Colorway[]) => void;
   loadMore: () => void;
 }
 
@@ -33,7 +33,7 @@ export function ProductPicker({
   const { dictionary } = useDictionary();
   const { ref, inView } = useInView({ rootMargin: '100px' });
   const [open, setOpen] = useState(false);
-  const [pendingSelection, setPendingSelection] = useState<common_Product[]>([]);
+  const [pendingSelection, setPendingSelection] = useState<common_Colorway[]>([]);
 
   useEffect(() => {
     if (inView && hasMore && products.length > 0) {
@@ -48,7 +48,7 @@ export function ProductPicker({
   }, [open, selectedProducts]);
 
   const togglePending = useCallback(
-    (product: common_Product) => {
+    (product: common_Colorway) => {
       setPendingSelection((prev) => {
         const isSelected = prev.some((p) => p.id === product.id);
         if (isSelected) {

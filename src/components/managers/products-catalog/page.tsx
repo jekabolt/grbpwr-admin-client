@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { DEFAULT_PRODUCT_LIMIT } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -18,7 +18,7 @@ import { getProductPagedParans } from './components/utility';
 
 export default function ProductsCatalog() {
   const [searchParams] = useSearchParams();
-  const [products, setProducts] = useState<common_Product[]>([]);
+  const [products, setProducts] = useState<common_Colorway[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
   const [count, setCount] = useState({ loaded: 0, hasMore: false });
@@ -45,7 +45,7 @@ export default function ProductsCatalog() {
         ? Math.max(1, parseInt(params.limit, 10) || DEFAULT_PRODUCT_LIMIT)
         : DEFAULT_PRODUCT_LIMIT;
       try {
-        const response = await adminService.GetProductsPaged({
+        const response = await adminService.GetColorwaysPaged({
           limit,
           offset: 0,
           ...getProductPagedParans({ ...params, currency: baseCurrency }),

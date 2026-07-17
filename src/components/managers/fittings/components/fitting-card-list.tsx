@@ -42,9 +42,9 @@ export function FittingCardList() {
   const modelMap = useModelsByIds(fittings.map((f) => f.fitting?.modelId ?? 0));
 
   const productName = (id?: number) =>
-    id ? productMap.get(id)?.productDisplay?.productBody?.translations?.[0]?.name ?? `#${id}` : '—';
+    id ? productMap.get(id)?.display?.productBody?.translations?.[0]?.name ?? `#${id}` : '—';
   const productThumb = (id?: number) =>
-    (id && productMap.get(id)?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl) || '';
+    (id && productMap.get(id)?.display?.thumbnail?.media?.thumbnail?.mediaUrl) || '';
   const modelName = (id?: number) => (id ? modelMap.get(id)?.model?.name || `#${id}` : '—');
 
   function confirmDelete() {

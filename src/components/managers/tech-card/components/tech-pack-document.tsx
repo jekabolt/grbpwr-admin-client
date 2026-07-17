@@ -74,6 +74,32 @@ function KV({ k, v }: { k: string; v?: ReactNode }) {
   );
 }
 
+// TODO(final-bump): common_TechCardInsert no longer carries `colorways` (R1 merge — a
+// colourway is now a product). This shape lets the read-only tech-pack view keep compiling
+// against an always-empty source; source real colourway data from GetColorwaysPaged by
+// style / AdminColorwayRef instead.
+type LegacyColorwayRead = {
+  id?: number;
+  code?: string;
+  name?: string;
+  hex?: string;
+  pantone?: string;
+  pantoneSystem?: string;
+  labDipStatus?: string;
+  labDipRound?: number;
+  usages?: {
+    bomItemIndex?: number;
+    quantity?: googletype_Decimal;
+    consumption?: googletype_Decimal;
+    sizeConsumptions?: unknown[];
+    color?: string;
+    pantone?: string;
+    placement?: string;
+    sizeRunTotal?: googletype_Decimal;
+    lineTotal?: googletype_Decimal;
+  }[];
+};
+
 // Full printable tech-pack document for one tech card. Pure presentational — reads the
 // loaded card (server truth, so save before exporting). Self-contained black-on-white so
 // it prints/PDFs identically regardless of the app theme. See print-page for the @media
@@ -122,7 +148,9 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
   const sizeName = (id?: number) => (id ? sizeById.get(id) ?? `#${id}` : '—');
   const unitAbbr = tc.measurementUnit === 'TECH_CARD_MEASUREMENT_UNIT_MM' ? 'mm' : 'cm';
   const sizeIds = tc.sizeIds ?? [];
-  const colorways = tc.colorways ?? [];
+  // TODO(final-bump): tc.colorways is gone (see LegacyColorwayRead above) — always empty now;
+  // colourway name/code lookups below fall back to `#<id>`.
+  const colorways = [] as LegacyColorwayRead[];
   const captionById = new Map<number, { caption?: string; kind?: string }>();
   for (const m of [...(tc.technicalMedia ?? []), ...(tc.moodboardMedia ?? [])])
     if (m.mediaId != null) captionById.set(m.mediaId, { caption: m.caption, kind: m.kind });
@@ -144,7 +172,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               <div className='text-sm'>
                 style <span className='font-semibold'>{tc.styleNumber || '—'}</span>
                 {tc.collection ? ` · ${tc.collection}` : ''}
-                {tc.season ? ` · ${tc.season}` : ''}
+                {/* TODO(final-bump): season no longer on TechCardInsert (moved to skuSeason). */}
               </div>
             </div>
           </div>
@@ -655,12 +683,13 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               </thead>
               <tbody>
                 {(tc.costing.colorwayCosts ?? []).map((cc, i) => {
-                  const cw = colorways[cc.colorwayIndex ?? -1];
+                  // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
+                  const cw = colorways[cc.colorwayId ?? -1];
                   return (
                     <tr key={i} className='break-inside-avoid'>
                       <td className={TD}>
-                        {cw?.name || cw?.code || `#${(cc.colorwayIndex ?? 0) + 1}`}
-                        {cc.colorwayIndex === 0 ? ' (primary)' : ''}
+                        {cw?.name || cw?.code || `#${(cc.colorwayId ?? 0) + 1}`}
+                        {cc.colorwayId === 0 ? ' (primary)' : ''}
                       </td>
                       <td className={`${TD} whitespace-nowrap text-right`}>
                         {dec(cc.materialsPerUnit) || '—'}

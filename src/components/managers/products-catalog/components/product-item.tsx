@@ -1,6 +1,6 @@
 import { CheckIcon } from '@radix-ui/react-icons';
 import { adminService } from 'api/api';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
@@ -12,17 +12,20 @@ import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import { Overlay } from 'ui/components/overlay';
 import Text from 'ui/components/text';
+import { StatusBadge } from 'components/managers/product/components/lifecycle-controls';
 
 export function ProductItem({
   product,
   refresh,
 }: {
-  product: common_Product;
+  product: common_Colorway;
   refresh: (id: number | undefined) => void;
 }) {
-  const thumbnail = product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl;
-  const isHidden = product.productDisplay?.productBody?.productBodyInsert?.hidden;
-  const description = `[${product.id}] ${product.productDisplay?.productBody?.productBodyInsert?.brand} ${product.productDisplay?.productBody?.translations?.[0]?.name}`;
+  const thumbnail = product.display?.thumbnail?.media?.thumbnail?.mediaUrl;
+  // R6: dim/badge anything not live on the storefront (draft/hidden/archived), driven by the stored
+  // lifecycle status rather than the vestigial `hidden` flag.
+  const isActive = product.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE';
+  const description = `[${product.id}] ${product.display?.productBody?.productBodyInsert?.brand} ${product.display?.productBody?.translations?.[0]?.name}`;
   const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const navigate = useNavigate();
@@ -32,12 +35,16 @@ export function ProductItem({
     e.stopPropagation();
     if (confirmDelete === id) {
       try {
-        await adminService.DeleteProductByID({ id });
-        showMessage('PRODUCT WAS SUCCESSFULLY DELETED', 'success');
+        // R6: archive-not-delete. Terminal transition guarded by the colourway's optimistic lock.
+        await adminService.ArchiveColorwayByID({
+          colorwayId: id,
+          expectedVersion: product.lockVersion ?? 0,
+        });
+        showMessage('PRODUCT WAS SUCCESSFULLY ARCHIVED', 'success');
         setConfirmDelete(undefined);
         refresh(id);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Failed to delete product';
+        const msg = e instanceof Error ? e.message : 'Failed to archive product';
         showMessage(msg, 'error');
       }
     } else {
@@ -66,11 +73,9 @@ export function ProductItem({
           type={isVideo(thumbnail) ? 'video' : 'image'}
           controls={isVideo(thumbnail)}
         />
-        {isHidden && (
-          <span className='absolute top-1 left-1 z-30 bg-textColor px-1.5 py-0.5'>
-            <Text className='!text-bgColor' size='small' variant='uppercase'>
-              hidden
-            </Text>
+        {!isActive && (
+          <span className='absolute top-1 left-1 z-30'>
+            <StatusBadge status={product.status} />
           </span>
         )}
         {canEdit && (
@@ -94,7 +99,7 @@ export function ProductItem({
             copy
           </Button>
         )}
-        {isHidden && <Overlay cover='container' />}
+        {!isActive && <Overlay cover='container' />}
       </div>
       <Text className='w-full break-words' variant='underLineWithColor'>
         {description}

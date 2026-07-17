@@ -26,10 +26,10 @@ function useLinkName(link: TaskLink) {
           return { name: r?.techCard?.techCard?.name || null };
         }
         if (link.kind === 'product') {
-          const r: any = await adminService.GetProductByID({ id: link.id });
+          const r: any = await adminService.GetColorwayByID({ id: link.id });
           return {
             name:
-              r?.product?.product?.productDisplay?.productBody?.translations?.[0]?.name ||
+              r?.product?.product?.display?.productBody?.translations?.[0]?.name ||
               r?.product?.product?.slug ||
               null,
           };

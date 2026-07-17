@@ -67,7 +67,7 @@ export function useUpdateStock({
       showMessage('Product ID is required', 'error');
       return;
     }
-    const payload: Parameters<typeof adminService.UpdateProductSizeStock>[0] = {
+    const payload: Parameters<typeof adminService.UpdateVariantStock>[0] = {
       productId,
       mode: data.mode,
       sizeId: data.sizeId,
@@ -77,7 +77,7 @@ export function useUpdateStock({
       direction: data.mode === 'STOCK_ADJUSTMENT_MODE_ADJUST' ? data.direction : undefined,
     };
     try {
-      await adminService.UpdateProductSizeStock(payload);
+      await adminService.UpdateVariantStock(payload);
       showMessage('Stock updated successfully', 'success');
       form.reset();
       queryClient.invalidateQueries({ queryKey: stockChangeHistoryKeys.all });

@@ -1,4 +1,4 @@
-import { common_MediaFull, common_Product } from 'api/proto-http/admin';
+import { common_MediaFull, common_Colorway } from 'api/proto-http/admin';
 import { common_ArchiveFull, common_ArchiveList } from 'api/proto-http/frontend';
 import { UseFieldArrayInsert, UseFieldArrayMove, UseFieldArrayRemove } from 'react-hook-form';
 import { ProductSelectionApi } from '../components/useProductSelection';
@@ -33,21 +33,21 @@ export interface HeroProductEntityInterface {
   index: number;
   uid: string;
   entity: any;
-  product: { [uid: string]: common_Product[] };
+  product: { [uid: string]: common_Colorway[] };
   title: string;
   prefix?: string;
   isModalOpen?: boolean;
   showProductPicker?: boolean;
   currentEntityUid?: string | null;
-  handleProductsReorder?: (newProductsOrder: common_Product[], uid: string) => void;
+  handleProductsReorder?: (newProductsOrder: common_Colorway[], uid: string) => void;
   handleOpenProductSelection?: (uid: string) => void;
   handleCloseModal?: () => void;
-  handleSaveNewSelection?: (selectedProduct: common_Product[], index: number, uid: string) => void;
+  handleSaveNewSelection?: (selectedProduct: common_Colorway[], index: number, uid: string) => void;
 }
 
 export interface FeatureArchiveProps {
   archive: { [key: number]: common_ArchiveFull[] };
-  // product: { [key: number]: common_Product[] }
+  // product: { [key: number]: common_Colorway[] }
   index: number;
   currentEntityIndex: number | null;
   open: boolean;

@@ -1,4 +1,4 @@
-import { common_MediaFull, common_ProductFull } from 'api/proto-http/admin';
+import { common_MediaFull, common_ColorwayFull } from 'api/proto-http/admin';
 import { MediaPreviewWithSelector } from 'components/managers/media/components/media-preview-with-selector';
 import { useEffect, useState } from 'react';
 import { Control, useController } from 'react-hook-form';
@@ -25,7 +25,7 @@ const CONFIG = {
 } as const;
 
 type Props = {
-  product?: common_ProductFull;
+  product?: common_ColorwayFull;
   control: Control<ProductFormData>;
   variant?: keyof typeof CONFIG;
   editMode?: boolean;
@@ -38,7 +38,7 @@ export function Thumbnail({ product, control, variant = 'primary', editMode }: P
     control,
   });
   const [thumbnail, setThumbnail] = useState<common_MediaFull | undefined>();
-  const productDisplayMedia = product?.product?.productDisplay?.[config.productPath];
+  const productDisplayMedia = product?.colorway?.display?.[config.productPath];
   const productMediaId = productDisplayMedia?.id;
 
   useEffect(() => {

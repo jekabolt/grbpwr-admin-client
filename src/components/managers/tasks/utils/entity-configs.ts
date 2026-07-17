@@ -2,7 +2,7 @@ import { adminService, frontendService } from 'api/api';
 import type {
   common_Fitting,
   common_Order,
-  common_Product,
+  common_Colorway,
   common_ProductionRun,
   common_Sample,
   common_TechCardListItem,
@@ -40,8 +40,9 @@ export const techCardConfig: EntityConfig = {
       stage: undefined,
       gender: undefined,
       brand: undefined,
-      season: undefined,
       name: q || undefined,
+      purpose: undefined,
+      skuSeason: undefined,
       productId: undefined,
     });
     return (r.techCards ?? []).map(techCardOption);
@@ -58,17 +59,17 @@ export const techCardConfig: EntityConfig = {
   },
 };
 
-// ---- product (GetProductsPaged has no name search → client filter) ----------
-function productName(p: common_Product): string {
-  const body = p.productDisplay?.productBody;
+// ---- product (GetColorwaysPaged has no name search → client filter) ----------
+function productName(p: common_Colorway): string {
+  const body = p.display?.productBody;
   return body?.translations?.[0]?.name || p.slug || `product #${p.id}`;
 }
-function productOption(p: common_Product): EntityOption {
+function productOption(p: common_Colorway): EntityOption {
   return {
     value: p.id ?? 0,
     label: productName(p),
-    sublabel: p.sku || p.slug || `#${p.id}`,
-    thumbnail: p.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl,
+    sublabel: p.baseSku || p.slug || `#${p.id}`,
+    thumbnail: p.display?.thumbnail?.media?.thumbnail?.mediaUrl,
   };
 }
 
@@ -79,7 +80,7 @@ export const productConfig: EntityConfig = {
   searchPlaceholder: 'search products by name / sku…',
   emptyResult: 'no products',
   load: async () => {
-    const r = await adminService.GetProductsPaged({
+    const r = await adminService.GetColorwaysPaged({
       limit: 100,
       offset: undefined,
       sortFactors: undefined,
@@ -90,8 +91,8 @@ export const productConfig: EntityConfig = {
     return (r.products ?? []).map(productOption);
   },
   resolve: async (value) => {
-    const r: any = await adminService.GetProductByID({ id: value as number });
-    const p: common_Product | undefined = r?.product?.product;
+    const r: any = await adminService.GetColorwayByID({ id: value as number });
+    const p: common_Colorway | undefined = r?.product?.product;
     return p ? productOption(p) : null;
   },
 };

@@ -1,4 +1,4 @@
-import { common_Dictionary, common_GenderEnum, common_ProductNew } from 'api/proto-http/admin';
+import { common_Dictionary, common_GenderEnum, common_ColorwayNew } from 'api/proto-http/admin';
 import { sortItems } from 'lib/features/filter-size-measurements';
 
 interface FilterSizesOptions {
@@ -54,7 +54,7 @@ export function getFilteredSizes(
   });
 }
 
-export const getNonEmptySizeMeasurements = (values: common_ProductNew) => {
+export const getNonEmptySizeMeasurements = (values: common_ColorwayNew) => {
   return values.sizeMeasurements?.filter(
     (sizeMeasurement) =>
       sizeMeasurement &&

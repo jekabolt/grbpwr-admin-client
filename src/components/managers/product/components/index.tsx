@@ -1,9 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import {
-  common_ProductFull,
+  common_ColorwayFull,
   common_SizeWithMeasurementInsert,
-  ProductCostInfo,
+  ColorwayCostInfo,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
@@ -19,6 +19,7 @@ import { Form } from 'ui/form';
 import { defaultData, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
 import { ProductCostSection } from './cost-section';
+import { LifecycleControls, StatusBadge } from './lifecycle-controls';
 import { MediaAds } from './media-ads';
 import { SizeMeasurements } from './size-measurements';
 import { Tags } from './tags';
@@ -29,8 +30,8 @@ type Props = {
   isEditMode: boolean;
   isAddingProduct: boolean;
   isCopyMode: boolean;
-  product: common_ProductFull | undefined;
-  costInfo?: ProductCostInfo;
+  product: common_ColorwayFull | undefined;
+  costInfo?: ColorwayCostInfo;
   productId?: string;
   onEditModeChange: (isEditMode: boolean) => void;
   onStockUpdated?: () => void;
@@ -98,7 +99,7 @@ export function ProductForm({
     const payload = createProductPayload(filteredData, productId, isCopyMode);
 
     try {
-      await adminService.UpsertProduct(payload);
+      await adminService.UpsertColorway(payload);
       setIsFormChanged(false);
       form.reset(data, { keepValues: true });
       showMessage(isAddingProduct ? 'Product created' : 'Product updated', 'success');
@@ -114,7 +115,7 @@ export function ProductForm({
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to save product';
       showMessage(message, 'error');
-      console.error('UpsertProduct error', e);
+      console.error('UpsertColorway error', e);
     }
   }
 
@@ -142,13 +143,12 @@ export function ProductForm({
     showMessage(message, 'error');
   };
 
-  const productDisplayBody = product?.product?.productDisplay?.productBody;
-  const productHidden = productDisplayBody?.productBodyInsert?.hidden;
+  const productDisplayBody = product?.colorway?.display?.productBody;
   const headerTitle = isAddingProduct
     ? isCopyMode
       ? 'copy product'
       : 'new product'
-    : `[${product?.product?.id ?? productId ?? ''}] ${
+    : `[${product?.colorway?.id ?? productId ?? ''}] ${
         productDisplayBody?.productBodyInsert?.brand ?? ''
       } ${productDisplayBody?.translations?.[0]?.name ?? ''}`.trim();
 
@@ -179,13 +179,7 @@ export function ProductForm({
             <Text variant='uppercase' size='large'>
               {headerTitle || 'product'}
             </Text>
-            {productHidden && (
-              <span className='bg-textColor px-1.5 py-0.5'>
-                <Text className='!text-bgColor' size='small' variant='uppercase'>
-                  hidden
-                </Text>
-              </span>
-            )}
+            <StatusBadge status={product?.colorway?.status} />
             {!editMode && (
               <Text variant='inactive' size='small'>
                 view only
@@ -193,6 +187,18 @@ export function ProductForm({
             )}
           </div>
         </div>
+
+        {/* R6: stored lifecycle — publish/hide/unhide/archive act on the persisted colourway,
+            independent of the form's edit state. Only for existing (saved) colourways. */}
+        {productId && !isCopyMode && !isAddingProduct && product?.colorway?.id != null && (
+          <LifecycleControls
+            colorwayId={product.colorway.id}
+            status={product.colorway.status}
+            lockVersion={product.colorway.lockVersion}
+            canWrite={canWrite(SECTION.products)}
+            onChanged={onStockUpdated}
+          />
+        )}
 
         <div className='flex flex-col lg:flex-row lg:items-start gap-6'>
           <Section title='media' className='w-full lg:w-1/2'>
