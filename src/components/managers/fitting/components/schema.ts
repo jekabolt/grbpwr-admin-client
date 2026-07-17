@@ -33,14 +33,18 @@ const fittingCalloutSchema = z.object({
   posY: z.string().optional().default(''),
 });
 
-// The structured "what to change" work list a fitting produces. calloutNumber optionally ties an
-// item to a numbered photo marker; resolved is toggled when the change is carried into the card.
+// The structured "what to change" work list a fitting produces (S26). target is the change CATEGORY;
+// zone + pieceId are the structured LOCATION; status (open|resolved) replaces the legacy boolean;
+// carriedFromId links an item to the one in the previous round it continues.
 const fittingChangeRequestSchema = z.object({
   id: z.number().int().optional().default(0),
   target: z.string().optional().default(''),
   note: z.string().optional().default(''),
   calloutNumber: z.number().int().optional().default(0),
-  resolved: z.boolean().optional().default(false),
+  zone: z.string().optional().default('TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
+  pieceId: z.number().int().optional().default(0),
+  status: z.string().optional().default('open'),
+  carriedFromId: z.number().int().optional().default(0),
 });
 
 export const fittingSchema = z
@@ -159,7 +163,11 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       target: cr.target || '',
       note: cr.note || '',
       calloutNumber: cr.calloutNumber || 0,
-      resolved: cr.resolved ?? false,
+      zone: cr.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
+      pieceId: cr.pieceId || 0,
+      // status (open|resolved) is authoritative; fall back to the legacy boolean for old rows.
+      status: cr.status || (cr.resolved ? 'resolved' : 'open'),
+      carriedFromId: cr.carriedFromId || 0,
     })),
   };
 }
@@ -205,18 +213,32 @@ export function mapFormToFittingInsert(
         posY: inputToDecimal(c.posY),
       })),
     // §4 round tracking (form-managed). roundNumber 0 = server auto-assigns per tech card;
-    // the 'undecided' sentinel maps back to '' on the wire. Change requests are full-replace,
-    // like callouts — drop blank notes.
+    // the 'undecided' sentinel maps back to '' on the wire.
     roundNumber: data.roundNumber || 0,
     outcome: data.outcome === 'undecided' ? '' : data.outcome?.trim() || '',
-    changeRequests: (data.changeRequests ?? [])
-      .filter((cr) => cr.note?.trim() || cr.target?.trim())
-      .map((cr) => ({
-        id: cr.id || 0,
-        target: cr.target?.trim() || '',
-        note: cr.note?.trim() || '',
-        calloutNumber: cr.calloutNumber || 0,
-        resolved: cr.resolved ?? false,
-      })),
+    // Change requests (S26): on CREATE, send the form's structured initial batch. On EDIT they are
+    // managed individually via the dedicated CRUD (stable ids for carry-over) — echo the server's
+    // CURRENT set (from the refetched `original`) so UpdateFitting's full-replace never clobbers them.
+    changeRequests: original
+      ? original.changeRequests ?? []
+      : (data.changeRequests ?? [])
+          .filter((cr) => cr.note?.trim() || cr.target?.trim())
+          .map((cr) => {
+            const status = cr.status || 'open';
+            return {
+              id: cr.id || 0,
+              target: cr.target?.trim() || '',
+              note: cr.note?.trim() || '',
+              calloutNumber: cr.calloutNumber || 0,
+              resolved: status === 'resolved',
+              zone: cr.zone && cr.zone !== 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN' ? cr.zone : '',
+              pieceId: cr.pieceId || 0,
+              status,
+              carriedFromId: cr.carriedFromId || 0,
+              createdBy: '',
+              fittingId: 0,
+              roundNumber: 0,
+            };
+          }),
   };
 }

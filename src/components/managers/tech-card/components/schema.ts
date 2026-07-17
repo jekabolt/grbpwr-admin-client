@@ -19,6 +19,7 @@ import {
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
   common_TechCardStage,
+  common_StyleNumberSource,
   googletype_Decimal,
 } from 'api/proto-http/admin';
 // TODO(final-bump): TechCardLabDipStatus is no longer re-exported from 'api/proto-http/admin'
@@ -26,6 +27,8 @@ import {
 import { TechCardLabDipStatus as common_TechCardLabDipStatus } from 'api/proto-http/common';
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
+import { isUlid, ulid } from 'utils/ulid';
+import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { z } from 'zod';
 
 // Tech-card form. Covers the full TechCardInsert: header ("Титул"), sketch media
@@ -64,14 +67,6 @@ function hasContent(values: Array<string | number | undefined>): boolean {
 const DEFAULT_MEDIA_KIND: common_TechCardMediaKind = 'TECH_CARD_MEDIA_KIND_FRONT';
 const DEFAULT_BOM_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_FABRIC';
 const DEFAULT_LAB_DIP: common_TechCardLabDipStatus = 'TECH_CARD_LAB_DIP_STATUS_PENDING';
-
-const revisionSchema = z.object({
-  version: z.string().optional().default(''),
-  revisionDate: z.string().optional().default(''), // YYYY-MM-DD in the UI
-  author: z.string().optional().default(''),
-  section: z.string().optional().default(''),
-  changeNote: z.string().optional().default(''),
-});
 
 const sizeQuantitySchema = z.object({
   sizeId: z.number().optional().default(0), // ∈ size_ids
@@ -137,7 +132,8 @@ const calloutSchema = z.object({
 // which garment part (placement), the colour it takes in THIS colourway, and how much is
 // consumed (per-garment and/or per-size). lineTotal/sizeRunTotal are output-only.
 const colorwayUsageSchema = z.object({
-  bomItemIndex: z.number().optional().default(-1), // index into bomItems; -1 = none
+  // BOM reference by stable line_key (§2.3); '' = none.
+  bomLineKey: z.string().optional().default(''),
   placement: z.string().optional().default(''),
   color: z.string().optional().default(''),
   pantone: z.string().optional().default(''),
@@ -160,8 +156,9 @@ const colorwayUsageSchema = z.object({
 // `colorways` — all renumbered on BOM/colourway removal (nf05-01).
 const pieceMaterialSchema = z.object({
   colorwayIndex: z.number().optional().default(0),
-  bomItemIndex: z.number().optional().default(-1),
-  fusingBomItemIndex: z.number().optional().default(-1),
+  // fabric / fusing BOM references by stable line_key (§2.3); '' = unset.
+  bomLineKey: z.string().optional().default(''),
+  fusingBomLineKey: z.string().optional().default(''),
   note: z.string().optional().default(''),
 });
 
@@ -218,6 +215,11 @@ const bomItemSchema = z.object({
   // optional link to a catalog Material (0 = unlinked free-text line). The line keeps its own
   // snapshot fields regardless of the link.
   materialId: z.number().optional().default(0),
+  // Stable line identity (Q9/§2.3). `id` is the server PK (read-only, 0 = not yet saved); `lineKey`
+  // is the client-generated ULID minted when the row is created in the UI, round-tripped so the
+  // server keyed-reconciles by it and downstream refs (operations/pieces/usages) stay valid.
+  id: z.number().optional().default(0),
+  lineKey: z.string().optional().default(''),
 });
 
 // One construction-description aspect (Sheet «Титул», lower block): freeform text + optional
@@ -259,7 +261,9 @@ const operationSchema = z.object({
   operationType: z.string().optional().default('TECH_CARD_OPERATION_TYPE_UNKNOWN'),
   zone: z.string().optional().default('TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
   attachment: z.string().optional().default(''), // приспособление (binder / folder / hemmer)
-  bomItemIndex: z.number().optional().default(-1), // index into bomItems; -1 = none
+  // BOM reference by stable line_key (§2.3) — no positional index, so removing/reordering a BOM
+  // line never renumbers this. '' = no direct material link.
+  bomLineKey: z.string().optional().default(''),
   calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
   // garment part this operation works on; resolves its real material via the selected
   // colourway's usage on the same part.
@@ -341,17 +345,16 @@ const techCardObject = z.object({
   // an article number; a conditional refine below still requires it past IDEA, and an empty IDEA
   // number is auto-filled with a draft on save (B-2, backend still requires the field).
   styleNumber: z.string().optional().default(''),
+  // How style_number was set (Q1): GENERATED = came from SuggestStyleNumber; MANUAL = hand-typed
+  // override (passes the strict server validator). Drives the format hint + override affordance.
+  styleNumberSource: z.string().optional().default('STYLE_NUMBER_SOURCE_GENERATED'),
   name: z.string().min(1, 'Name is required'),
   brand: z.string().optional().default(''),
   season: z.string().optional().default(''),
   collection: z.string().optional().default(''),
-  version: z.string().optional().default(''),
-  designer: z.string().optional().default(''),
-  // NB: form key is `constructorName`, not `constructor` — RHF/dot-path get/set
-  // resolves a `constructor` key to Object.prototype.constructor (field._f undefined
-  // → crash on mount). Mapped to/from the proto's `constructor` field below.
-  constructorName: z.string().optional().default(''),
-  technologist: z.string().optional().default(''),
+  // version / designer / constructor / technologist / approvedBy removed from the contract
+  // (Q1/Q5): the card's version is the release sequence (Rev.N) + the auto-journal, and roles are
+  // admin-account assignments managed via the role-assignment RPCs (see RolesField).
   status: z.string().optional().default(''),
   // classification FKs (0 = unset). categoryId is the selected LEAF category.
   categoryId: z.number().optional().default(0),
@@ -362,7 +365,6 @@ const techCardObject = z.object({
   stage: z.string().optional().default(DEFAULT_STAGE),
   approvalState: z.string().optional().default(DEFAULT_APPROVAL_STATE),
   measurementUnit: z.string().optional().default(DEFAULT_MEASUREMENT_UNIT),
-  approvedBy: z.string().optional().default(''),
   notes: z.string().optional().default(''),
   // children
   sizeIds: z.array(z.number()).default([]),
@@ -391,7 +393,6 @@ const techCardObject = z.object({
   costing: costingSchema,
   issues: z.array(issueSchema).default([]),
   signoffs: z.array(signoffSchema).default([]),
-  revisions: z.array(revisionSchema).default([]),
 });
 
 // style_number is required past the IDEA stage; at IDEA it may be blank (the backend accepts it).
@@ -409,14 +410,11 @@ export type TechCardFormData = z.input<typeof techCardObject>;
 
 export const techCardDefaultData: TechCardFormData = {
   styleNumber: '',
+  styleNumberSource: 'STYLE_NUMBER_SOURCE_GENERATED',
   name: '',
   brand: '',
   season: '',
   collection: '',
-  version: '',
-  designer: '',
-  constructorName: '',
-  technologist: '',
   status: '',
   categoryId: 0,
   baseModelId: 0,
@@ -425,7 +423,6 @@ export const techCardDefaultData: TechCardFormData = {
   stage: DEFAULT_STAGE,
   approvalState: DEFAULT_APPROVAL_STATE,
   measurementUnit: DEFAULT_MEASUREMENT_UNIT,
-  approvedBy: '',
   notes: '',
   sizeIds: [],
   sizeQuantities: [],
@@ -447,7 +444,6 @@ export const techCardDefaultData: TechCardFormData = {
   costing: { ...emptyCosting },
   issues: [],
   signoffs: [],
-  revisions: [],
 };
 
 function stageOrDefault(stage?: string): string {
@@ -533,6 +529,7 @@ type LegacyColorwaySource = {
   labDipRejectReason?: string;
   usages?: {
     bomItemIndex?: number;
+    bomLineKey?: string;
     placement?: string;
     color?: string;
     pantone?: string;
@@ -545,20 +542,62 @@ type LegacyColorwaySource = {
   }[];
 };
 
+// One BOM line → form row. Mints a stable line_key for a legacy line that has none, so downstream
+// refs can be keyed by it immediately (it persists on the next save).
+function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[number]) {
+  return {
+    section:
+      b.section && b.section !== 'TECH_CARD_BOM_SECTION_UNKNOWN' ? b.section : DEFAULT_BOM_SECTION,
+    name: b.name || '',
+    supplier: b.supplier || '',
+    supplierRef: b.supplierRef || '',
+    color: b.color || '',
+    composition: b.composition || '',
+    spec: b.spec || '',
+    unit: b.unit || '',
+    unitPrice: decimalToInput(b.unitPrice),
+    currency: b.currency || '',
+    comment: b.comment || '',
+    fabricWidth: decimalToInput(b.fabricWidth),
+    fabricWeightGsm: decimalToInput(b.fabricWeightGsm),
+    fabricDirection:
+      b.fabricDirection && b.fabricDirection !== 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN'
+        ? b.fabricDirection
+        : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
+    wastagePercent: decimalToInput(b.wastagePercent),
+    materialId: b.materialId ?? 0,
+    id: b.id ?? 0,
+    lineKey: b.lineKey && isUlid(b.lineKey) ? b.lineKey : ulid(),
+  };
+}
+
 export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
   const insert = techCard.techCard;
+  // Resolve BOM line identities up front (§2.3) so downstream refs can be keyed by stable line_key.
+  // A legacy line saved before line_key existed gets a fresh key on read (persists on next save).
+  const bomItemsForm = (insert?.bomItems ?? []).map(mapBomItemToForm);
+  const bomKeyByIndex = bomItemsForm.map((b) => b.lineKey);
+  const refKey = (bomLineKey?: string, bomItemIndex?: number): string => {
+    if (bomLineKey && isUlid(bomLineKey)) return bomLineKey;
+    if (
+      typeof bomItemIndex === 'number' &&
+      bomItemIndex >= 0 &&
+      bomItemIndex < bomKeyByIndex.length
+    )
+      return bomKeyByIndex[bomItemIndex];
+    return '';
+  };
   return {
     styleNumber: insert?.styleNumber || '',
+    styleNumberSource:
+      insert?.styleNumberSource && insert.styleNumberSource !== 'STYLE_NUMBER_SOURCE_UNKNOWN'
+        ? insert.styleNumberSource
+        : 'STYLE_NUMBER_SOURCE_GENERATED',
     name: insert?.name || '',
     brand: insert?.brand || '',
-    // TODO(final-bump): season is no longer on TechCardInsert (moved to skuSeason on the
-    // style write path, not yet surfaced in this form).
-    season: '',
+    // season is the structured SkuSeason on the wire (Q1); show it as the form's label.
+    season: skuToSeasonLabel(insert?.skuSeason),
     collection: insert?.collection || '',
-    version: insert?.version || '',
-    designer: insert?.designer || '',
-    constructorName: insert?.constructor || '',
-    technologist: insert?.technologist || '',
     status: insert?.status || '',
     categoryId: insert?.categoryId || 0,
     baseModelId: insert?.baseModelId || 0,
@@ -567,7 +606,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     stage: stageOrDefault(insert?.stage),
     approvalState: approvalStateOrDefault(insert?.approvalState),
     measurementUnit: measurementUnitOrDefault(insert?.measurementUnit),
-    approvedBy: insert?.approvedBy || '',
     notes: insert?.notes || '',
     sizeIds: insert?.sizeIds ?? [],
     sizeQuantities: (insert?.sizeQuantities ?? []).map((q) => ({
@@ -618,7 +656,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       labDipDecidedBy: c.labDipDecidedBy || '',
       labDipRejectReason: c.labDipRejectReason || '',
       usages: (c.usages ?? []).map((u) => ({
-        bomItemIndex: u.bomItemIndex ?? -1,
+        bomLineKey: refKey(u.bomLineKey, u.bomItemIndex),
         placement: u.placement || '',
         color: u.color || '',
         pantone: u.pantone || '',
@@ -644,35 +682,12 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       materials: (p.materials ?? []).map((m) => ({
         // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
         colorwayIndex: m.colorwayId ?? 0,
-        bomItemIndex: m.bomItemIndex ?? -1,
-        fusingBomItemIndex: m.fusingBomItemIndex ?? -1,
+        bomLineKey: refKey(m.bomLineKey, m.bomItemIndex),
+        fusingBomLineKey: refKey(m.fusingBomLineKey, m.fusingBomItemIndex),
         note: m.note || '',
       })),
     })),
-    bomItems: (insert?.bomItems ?? []).map((b) => ({
-      section:
-        b.section && b.section !== 'TECH_CARD_BOM_SECTION_UNKNOWN'
-          ? b.section
-          : DEFAULT_BOM_SECTION,
-      name: b.name || '',
-      supplier: b.supplier || '',
-      supplierRef: b.supplierRef || '',
-      color: b.color || '',
-      composition: b.composition || '',
-      spec: b.spec || '',
-      unit: b.unit || '',
-      unitPrice: decimalToInput(b.unitPrice),
-      currency: b.currency || '',
-      comment: b.comment || '',
-      fabricWidth: decimalToInput(b.fabricWidth),
-      fabricWeightGsm: decimalToInput(b.fabricWeightGsm),
-      fabricDirection:
-        b.fabricDirection && b.fabricDirection !== 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN'
-          ? b.fabricDirection
-          : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
-      wastagePercent: decimalToInput(b.wastagePercent),
-      materialId: b.materialId ?? 0,
-    })),
+    bomItems: bomItemsForm,
     details: (insert?.details ?? []).map((d) => ({
       key: d.key || '',
       text: d.text || '',
@@ -706,7 +721,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       operationType: o.operationType || 'TECH_CARD_OPERATION_TYPE_UNKNOWN',
       zone: o.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
       attachment: o.attachment || '',
-      bomItemIndex: o.bomItemIndex ?? -1,
+      bomLineKey: refKey(o.bomLineKey, o.bomItemIndex),
       calloutNumber: o.calloutNumber || 0,
       placement: o.placement || '',
     })),
@@ -770,13 +785,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       signedBy: s.signedBy || '',
       signedAt: timestampToDateInput(s.signedAt),
       note: s.note || '',
-    })),
-    revisions: (insert?.revisions ?? []).map((r) => ({
-      version: r.version || '',
-      revisionDate: timestampToDateInput(r.revisionDate),
-      author: r.author || '',
-      section: r.section || '',
-      changeNote: r.changeNote || '',
     })),
   };
 }
@@ -897,19 +905,38 @@ export function mapFormToTechCardInsert(
   // send whatever the user typed verbatim; the schema refine below still requires a number at
   // non-IDEA stages, blocking a stage advance client-side before the server would reject it.
   const styleNumber = data.styleNumber?.trim() || '';
+  // Resolve BOM lines first (§2.3): keep/mint a stable line_key per row and build a lineKey→index
+  // map, so every downstream ref sends the durable bomLineKey (server keyed-reconciles by it) plus a
+  // consistent positional bomItemIndex for the legacy/transition path.
+  const bomLines = (data.bomItems ?? []).map((b) => ({
+    ...b,
+    lineKey: isUlid(b.lineKey) ? b.lineKey : ulid(),
+  }));
+  const bomIndexByKey = new Map<string, number>();
+  bomLines.forEach((b, i) => bomIndexByKey.set(b.lineKey, i));
+  const outBomRef = (
+    lineKey?: string,
+  ): { bomLineKey: string | undefined; bomItemIndex: number | undefined } => {
+    const lk = (lineKey || '').trim();
+    if (!lk) return { bomLineKey: undefined, bomItemIndex: undefined };
+    // idx undefined = the referenced line was removed (dangling) — still send the key; the server
+    // resolves/RESTRICTs and returns a field-tagged error rather than silently mis-mapping.
+    return { bomLineKey: lk, bomItemIndex: bomIndexByKey.get(lk) };
+  };
   return {
     ...original,
     styleNumber,
+    // Empty override collapses to GENERATED so an idea/blank number never persists as a MANUAL
+    // claim; a real hand-typed value keeps whatever source the field set.
+    styleNumberSource: (styleNumber
+      ? data.styleNumberSource || 'STYLE_NUMBER_SOURCE_GENERATED'
+      : 'STYLE_NUMBER_SOURCE_GENERATED') as common_StyleNumberSource,
     name: data.name.trim(),
     brand: data.brand?.trim() || '',
     // TODO(final-bump): season/productIds/colorways moved off the style write path (R1
     // merge) — season lives on skuSeason (not yet surfaced in this form), productIds/
     // colorways are managed per-colourway (product), not on TechCardInsert.
     collection: data.collection?.trim() || '',
-    version: data.version?.trim() || '',
-    designer: data.designer?.trim() || '',
-    constructor: data.constructorName?.trim() || '',
-    technologist: data.technologist?.trim() || '',
     status: data.status?.trim() || '',
     categoryId: data.categoryId || 0,
     baseModelId: data.baseModelId || 0,
@@ -920,7 +947,6 @@ export function mapFormToTechCardInsert(
       'TECH_CARD_APPROVAL_STATE_UNKNOWN') as common_TechCardApprovalState,
     measurementUnit: (data.measurementUnit ||
       'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN') as common_TechCardMeasurementUnit,
-    approvedBy: data.approvedBy?.trim() || '',
     notes: data.notes?.trim() || '',
     // children edited here — override the echoed `original` values
     sizeIds: data.sizeIds ?? [],
@@ -966,25 +992,25 @@ export function mapFormToTechCardInsert(
       materials: (p.materials ?? [])
         // drop fully-empty cells (no fabric, no fusing, no note) so the map stays sparse —
         // a note-only cell (written by another client) must survive an unrelated save
-        .filter(
-          (m) =>
-            (typeof m.bomItemIndex === 'number' && m.bomItemIndex >= 0) ||
-            (typeof m.fusingBomItemIndex === 'number' && m.fusingBomItemIndex >= 0) ||
-            !!m.note?.trim(),
-        )
-        .map((m) => ({
-          // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
-          colorwayId: m.colorwayIndex || 0,
-          bomItemIndex:
-            typeof m.bomItemIndex === 'number' && m.bomItemIndex >= 0 ? m.bomItemIndex : undefined,
-          fusingBomItemIndex:
-            typeof m.fusingBomItemIndex === 'number' && m.fusingBomItemIndex >= 0
-              ? m.fusingBomItemIndex
-              : undefined,
-          note: m.note?.trim() || '',
-        })),
+        .filter((m) => !!m.bomLineKey?.trim() || !!m.fusingBomLineKey?.trim() || !!m.note?.trim())
+        .map((m) => {
+          const fabric = outBomRef(m.bomLineKey);
+          const fusing = outBomRef(m.fusingBomLineKey);
+          return {
+            // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
+            colorwayId: m.colorwayIndex || 0,
+            // durable line_key refs (§2.3) + a consistent positional index for the transition path.
+            bomLineKey: fabric.bomLineKey,
+            bomItemIndex: fabric.bomItemIndex,
+            fusingBomLineKey: fusing.bomLineKey,
+            fusingBomItemIndex: fusing.bomItemIndex,
+            bomItemId: undefined,
+            fusingBomItemId: undefined,
+            note: m.note?.trim() || '',
+          };
+        }),
     })),
-    bomItems: (data.bomItems ?? []).map((b) => ({
+    bomItems: bomLines.map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
       name: b.name?.trim() || '',
       supplier: b.supplier?.trim() || '',
@@ -1002,6 +1028,11 @@ export function mapFormToTechCardInsert(
         'TECH_CARD_FABRIC_DIRECTION_UNKNOWN') as common_TechCardFabricDirection,
       wastagePercent: inputToDecimal(b.wastagePercent),
       materialId: b.materialId || 0,
+      // Stable identity (§2.3): keep the server PK + the resolved line_key. material_snapshot is
+      // server-managed (read-only) — never sent.
+      id: b.id || 0,
+      lineKey: b.lineKey,
+      materialSnapshot: undefined,
     })),
     details: (data.details ?? [])
       .map((d) => ({
@@ -1011,30 +1042,35 @@ export function mapFormToTechCardInsert(
       }))
       .filter((d) => d.key || d.text || d.mediaIds.length > 0),
     construction: mapConstructionOut(data.construction),
-    operations: (data.operations ?? []).map((o, i) => ({
-      node: o.node?.trim() || '',
-      description: o.description?.trim() || '',
-      seamType: o.seamType?.trim() || '',
-      stitchesPerCm: inputToDecimal(o.stitchesPerCm),
-      topstitchWidth: o.topstitchWidth?.trim() || '',
-      thread: o.thread?.trim() || '',
-      note: o.note?.trim() || '',
-      // operation number is positional (server is authoritative); send (i+1)*10 so a
-      // freshly-created card reads back sensibly before the server recomputes.
-      operationNumber: (i + 1) * 10,
-      machine: o.machine?.trim() || '',
-      seamAllowance: o.seamAllowance?.trim() || '',
-      needle: o.needle?.trim() || '',
-      timeNorm: inputToDecimal(o.timeNorm),
-      operationType: (o.operationType ||
-        'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType,
-      zone: (o.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN') as common_TechCardConstructionZone,
-      attachment: o.attachment?.trim() || '',
-      bomItemIndex:
-        typeof o.bomItemIndex === 'number' && o.bomItemIndex >= 0 ? o.bomItemIndex : undefined,
-      calloutNumber: o.calloutNumber || 0,
-      placement: o.placement?.trim() || '',
-    })),
+    operations: (data.operations ?? []).map((o, i) => {
+      const bomRef = outBomRef(o.bomLineKey);
+      return {
+        node: o.node?.trim() || '',
+        description: o.description?.trim() || '',
+        seamType: o.seamType?.trim() || '',
+        stitchesPerCm: inputToDecimal(o.stitchesPerCm),
+        topstitchWidth: o.topstitchWidth?.trim() || '',
+        thread: o.thread?.trim() || '',
+        note: o.note?.trim() || '',
+        // operation number is positional (server is authoritative); send (i+1)*10 so a
+        // freshly-created card reads back sensibly before the server recomputes.
+        operationNumber: (i + 1) * 10,
+        machine: o.machine?.trim() || '',
+        seamAllowance: o.seamAllowance?.trim() || '',
+        needle: o.needle?.trim() || '',
+        timeNorm: inputToDecimal(o.timeNorm),
+        operationType: (o.operationType ||
+          'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType,
+        zone: (o.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN') as common_TechCardConstructionZone,
+        attachment: o.attachment?.trim() || '',
+        // durable BOM reference (§2.3) + a consistent positional index for the transition path.
+        bomLineKey: bomRef.bomLineKey,
+        bomItemIndex: bomRef.bomItemIndex,
+        bomItemId: undefined,
+        calloutNumber: o.calloutNumber || 0,
+        placement: o.placement?.trim() || '',
+      };
+    }),
     labels: (data.labels ?? []).map((l) => ({
       labelType: (l.labelType || 'TECH_CARD_LABEL_TYPE_UNKNOWN') as common_TechCardLabelType,
       content: l.content?.trim() || '',
@@ -1062,16 +1098,10 @@ export function mapFormToTechCardInsert(
       signedAt: s.signedAt ? dateInputToTimestamp(s.signedAt) : undefined,
       note: s.note?.trim() || '',
     })),
-    revisions: (data.revisions ?? []).map((r) => ({
-      version: r.version?.trim() || '',
-      revisionDate: dateInputToTimestamp(r.revisionDate),
-      author: r.author?.trim() || '',
-      section: r.section?.trim() || '',
-      changeNote: r.changeNote?.trim() || '',
-    })),
-    // TODO(final-bump): skuSeason replaces the removed free-text `season` as the style's
-    // season identity, but isn't yet surfaced in this form — leave unset for now.
-    skuSeason: undefined,
+    // revisions removed from the write payload (Q1): the auto-journal is server-appended and
+    // read-only (common_TechCard.revisions), never client-supplied.
+    // Season identity (Q1): parse the form label back into the structured SkuSeason.
+    skuSeason: parseSeasonToSku(data.season),
     // Cast: TechCardInsert keys are required-but-nullable; we set every section above and
     // echo any still-unhandled proto field from `original`. Untouched keys are omitted on
     // create (absent == empty on the wire), which the structural type can't express.

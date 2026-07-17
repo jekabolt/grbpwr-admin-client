@@ -2,6 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Fitting, common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
+  fittingSaveErrorMessage,
   useCreateFitting,
   useUpdateFitting,
 } from 'components/managers/fittings/components/useFittingQuery';
@@ -147,7 +148,12 @@ export function FittingForm({
     const fittingInsert = mapFormToFittingInsert(data, fitting?.fitting);
     try {
       if (isEditMode) {
-        await updateFitting.mutateAsync({ id: parseInt(id || '0', 10), fitting: fittingInsert });
+        await updateFitting.mutateAsync({
+          id: parseInt(id || '0', 10),
+          fitting: fittingInsert,
+          // S25: echo the lock_version the form loaded — a stale value is rejected (409).
+          expectedLockVersion: fitting?.lockVersion ?? 0,
+        });
         showMessage('fitting updated', 'success');
         form.reset(data);
       } else {
@@ -156,8 +162,7 @@ export function FittingForm({
         navigate(returnTo || ROUTES.fittings);
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to submit fitting';
-      showMessage(msg, 'error');
+      showMessage(fittingSaveErrorMessage(error), 'error');
       console.error('Failed to submit fitting', error);
     }
   }
@@ -258,7 +263,11 @@ export function FittingForm({
               <FittingCallouts mediaById={mediaById} />
             </Section>
             <Section title='change requests (что доработать)'>
-              <ChangeRequestsFields />
+              <ChangeRequestsFields
+                fittingId={isEditMode ? parseInt(id || '0', 10) : 0}
+                techCardId={selectedTechCardId || undefined}
+                serverChangeRequests={fitting?.fitting?.changeRequests}
+              />
             </Section>
           </div>
         </div>

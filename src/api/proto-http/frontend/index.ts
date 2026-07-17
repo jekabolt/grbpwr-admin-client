@@ -584,6 +584,7 @@ export type common_Dictionary = {
   tags: common_Tag[] | undefined;
   skuContractVersion: string | undefined;
   revisions: common_DictionaryRevision[] | undefined;
+  categorySizeSystems: common_CategorySizeSystem[] | undefined;
 };
 
 // Category represents a hierarchical category structure
@@ -731,6 +732,19 @@ export type common_DictionaryRevision = {
   updatedAt: wellKnownTimestamp | undefined;
 };
 
+// CategorySizeSystem maps a category-tree node to a permitted SizeSkuSystem (S10/WS5, migration
+// 0175). A row targets EITHER category_id (a broad category/sub-category node) OR type_id (a specific
+// leaf type) -- never both set; 0 means unset. The admin size picker resolves a style's category
+// chain against this table (most specific match wins: type_id, then category_id) to filter which
+// size systems/sizes it offers; CreateVariant and the style's size-range write (UpdateTechCard)
+// enforce the same rule server-side.
+export type common_CategorySizeSystem = {
+  id: number | undefined;
+  categoryId: number | undefined;
+  typeId: number | undefined;
+  skuSystem: common_SizeSkuSystem | undefined;
+};
+
 export type GetColorwayRequest = {
   baseSku: string | undefined;
 };
@@ -770,6 +784,24 @@ export type StorefrontColorwayDisplay = {
   modelWearsSizeCode: string | undefined;
   categoryLabels: string[] | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // composition_entries is the structured fibre composition (S17/M1 fix), populated from
+  // style_composition; empty when the style has no structural composition data yet. Additive,
+  // typed replacement for the JSON-in-composition-string overload that was proposed and reverted —
+  // composition (above) stays legacy plain text always, never version- or data-gated JSON.
+  compositionEntries: common_CompositionEntry[] | undefined;
+};
+
+// CompositionEntry is one fibre share of a style's structured composition (S17), resolved with its
+// dictionary display name. M1 fix: the typed replacement for overloading the free-text `composition`
+// field with an encoded array of these once style_composition gains rows — that overload is removed;
+// `composition` on the wire is legacy plain text ONLY, always, and composition_entries (StorefrontColorwayDisplay,
+// TechCard) is the structured projection, populated from style_composition, empty when the style has
+// none yet. percent mirrors style_composition.percent (DECIMAL(5,2)): a decimal, not int32, because an
+// equal-split derivation (S17, DeriveStyleComposition) can produce fractional shares (e.g. 33.33).
+export type common_CompositionEntry = {
+  fiberCode: string | undefined;
+  name: string | undefined;
+  percent: googletype_Decimal | undefined;
 };
 
 export type StorefrontVariant = {
@@ -1482,10 +1514,13 @@ export interface FrontendService {
   UnsubscribeNewsletter(request: UnsubscribeNewsletterRequest): Promise<UnsubscribeNewsletterResponse>;
   // NotifyMe adds an email to the waitlist for a specific product/size when out of stock
   NotifyMe(request: NotifyMeRequest): Promise<NotifyMeResponse>;
-  // GetArchivesPaged retrieves paged archives.
-  GetArchivesPaged(request: GetArchivesPagedRequest): Promise<GetArchivesPagedResponse>;
   // GetArchive retrieves an archive by its stable public code (the /timeline URL tail).
   GetArchive(request: GetArchiveRequest): Promise<GetArchiveResponse>;
+  // GetArchivesPaged retrieves paged archives. NOTE on ordering: grpc-gateway's mux prepends
+  // handlers, so the LAST-declared route for a method wins. The literal `/archive/paged` GET must be
+  // declared AFTER the `/archive/{code}` GET — otherwise {code} captures "paged" (beta smoke caught
+  // exactly that shadowing).
+  GetArchivesPaged(request: GetArchivesPagedRequest): Promise<GetArchivesPagedResponse>;
   // Submit a support ticket
   SubmitSupportTicket(request: SubmitSupportTicketRequest): Promise<SubmitSupportTicketResponse>;
   // Submit reviews for a delivered order (order-level + per-item, requires delivered order + buyer email)
@@ -1843,32 +1878,6 @@ export function createFrontendServiceClient(
         method: "NotifyMe",
       }) as Promise<NotifyMeResponse>;
     },
-    GetArchivesPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/frontend/archive/paged`; // eslint-disable-line quotes
-      const body = null;
-      const queryParams: string[] = [];
-      if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
-      }
-      if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
-      }
-      if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
-      }
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "GET",
-        body,
-      }, {
-        service: "FrontendService",
-        method: "GetArchivesPaged",
-      }) as Promise<GetArchivesPagedResponse>;
-    },
     GetArchive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
         throw new Error("missing required field request.code");
@@ -1897,6 +1906,32 @@ export function createFrontendServiceClient(
         service: "FrontendService",
         method: "GetArchive",
       }) as Promise<GetArchiveResponse>;
+    },
+    GetArchivesPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/frontend/archive/paged`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "FrontendService",
+        method: "GetArchivesPaged",
+      }) as Promise<GetArchivesPagedResponse>;
     },
     SubmitSupportTicket(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/frontend/support/ticket`; // eslint-disable-line quotes

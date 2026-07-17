@@ -14,6 +14,7 @@ import Text from 'ui/components/text';
 import { Buyer } from './components/buyer';
 import { Comment } from './components/comment';
 import { OrderTable } from './components/order-table';
+import { OrderPackingSpec } from './components/packing-spec';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
 import { RefundConfirmation } from './components/refund-confirmation';
@@ -249,6 +250,8 @@ export function OrderDetails() {
             </div>
           </div>
         )}
+
+        <OrderPackingSpec orderUuid={uuid || ''} />
 
         {canEditOrder && (
           <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>

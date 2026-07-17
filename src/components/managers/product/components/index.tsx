@@ -10,7 +10,6 @@ import { useEffect, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
 import { generatePath, Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import InputField from 'ui/form/fields/input-field';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { defaultData, ProductFormData, productSchema } from '../utility/schema';
@@ -19,6 +18,7 @@ import { ProductCostSection } from './cost-section';
 import { LifecycleControls, StatusBadge } from './lifecycle-controls';
 import { MediaAds } from './media-ads';
 import { SizeMeasurements } from './size-measurements';
+import { StylePicker } from './style-picker';
 import { StyleSection } from './style-section';
 import { Tags } from './tags';
 import { Thumbnail } from './thumbnail';
@@ -237,23 +237,7 @@ export function ProductForm({
           </Section>
 
           <Section title='details' className='w-full lg:w-1/2'>
-            {isAddingProduct && (
-              <div className='flex flex-col gap-1'>
-                <InputField
-                  name='styleId'
-                  label='attach to style (tech card) id'
-                  type='number'
-                  min='1'
-                  placeholder='style id'
-                  readOnly={!editMode}
-                />
-                <Text variant='inactive' size='small'>
-                  A colourway belongs to a style. Enter the tech-card id to attach it to (copy prefills
-                  the source’s style). Variants, size chart and publishing come after creating the
-                  draft.
-                </Text>
-              </div>
-            )}
+            {isAddingProduct && <StylePicker name='styleId' disabled={!editMode} />}
             <BodyFields editMode={editMode} />
             <Tags
               isAddingProduct={isAddingProduct}

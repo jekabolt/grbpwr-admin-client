@@ -31,7 +31,7 @@ export function useSaveMaterial() {
   return useMutation({
     mutationFn: (material: common_Material) =>
       material.id
-        ? adminService.UpdateMaterial({ material })
+        ? adminService.UpdateMaterial({ material, expectedLockVersion: material.lockVersion ?? 0 })
         : adminService.CreateMaterial({ material }),
     onSuccess: () => qc.invalidateQueries({ queryKey: materialKeys.all }),
   });
