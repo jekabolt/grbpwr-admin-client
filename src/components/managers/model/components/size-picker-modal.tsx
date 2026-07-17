@@ -1,4 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
+import { common_SizeSkuSystem } from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
@@ -14,6 +15,7 @@ export function SizePickerModal({
   selectedIds,
   onToggle,
   gender,
+  allowedSizeSystems,
   triggerLabel = 'select sizes',
   title = 'sizes',
   triggerClassName,
@@ -21,6 +23,9 @@ export function SizePickerModal({
   selectedIds: number[];
   onToggle: (id: number) => void;
   gender?: string;
+  // When set (S10/WS5), only offer sizes in these SKU systems — resolved from the style's category
+  // (already-selected sizes stay visible so an existing choice is never hidden). Unset = all sizes.
+  allowedSizeSystems?: common_SizeSkuSystem[];
   triggerLabel?: string;
   title?: string;
   triggerClassName?: string;
@@ -28,11 +33,20 @@ export function SizePickerModal({
   const { dictionary } = useDictionary();
   const [open, setOpen] = useState(false);
 
-  const groups = useMemo(
-    () => groupSizesByCategory(dictionary?.sizes ?? [], gender),
-    [dictionary?.sizes, gender],
-  );
   const selected = new Set(selectedIds);
+  const filteredSizes = useMemo(() => {
+    const sizes = dictionary?.sizes ?? [];
+    if (!allowedSizeSystems?.length) return sizes;
+    const allow = new Set(allowedSizeSystems);
+    return sizes.filter(
+      (s) => allow.has(s.skuSystem ?? 'SIZE_SKU_SYSTEM_UNKNOWN') || selected.has(s.id ?? 0),
+    );
+  }, [dictionary?.sizes, allowedSizeSystems, selectedIds]);
+
+  const groups = useMemo(
+    () => groupSizesByCategory(filteredSizes, gender),
+    [filteredSizes, gender],
+  );
 
   return (
     <DialogPrimitives.Root open={open} onOpenChange={setOpen}>

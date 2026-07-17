@@ -6,6 +6,7 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
+import { permittedSizeSystems } from 'utils/size-systems';
 import { TechCardFormData } from './schema';
 
 // Size range / grade for the tech card (FK size ids). Sizes are picked via the
@@ -19,6 +20,12 @@ export function SizeIdsField() {
 
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const gender = useWatch({ control, name: 'targetGender' }) as string | undefined;
+  // Restrict the offered sizes to the style category's permitted SKU systems (S10/WS5).
+  const categoryId = useWatch({ control, name: 'categoryId' }) as number | undefined;
+  const allowedSizeSystems = useMemo(
+    () => permittedSizeSystems(dictionary?.categories, dictionary?.categorySizeSystems, categoryId),
+    [dictionary?.categories, dictionary?.categorySizeSystems, categoryId],
+  );
   const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as Array<{ sizeId?: number }>;
   const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
     usages?: Array<{ sizeConsumptions?: Array<{ sizeId?: number }> }>;
@@ -105,6 +112,7 @@ export function SizeIdsField() {
         selectedIds={sizeIds}
         onToggle={toggle}
         gender={gender}
+        allowedSizeSystems={allowedSizeSystems}
         triggerLabel='select sizes'
         title='size range'
       />
