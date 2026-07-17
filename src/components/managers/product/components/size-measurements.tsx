@@ -1,11 +1,9 @@
 import { adminService } from 'api/api';
 import { common_Variant } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
@@ -18,7 +16,6 @@ import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle'
 import { StockHistory } from './stock/stock-history';
 import { UpdateStock } from './stock/update-stock';
 import { ToggleSizeNames } from './toggle-sizenames';
-import { buildChartCells } from './utils';
 import { VariantsPanel } from './variants-panel';
 
 const cellClass = 'text-center border-r border-textInactiveColor';
@@ -44,10 +41,8 @@ export function SizeMeasurements({
   onStockUpdated?: () => void;
 } = {}) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const { watch, setValue, getValues } = useFormContext<ProductFormData>();
   const values = watch();
-  const [savingChart, setSavingChart] = useState(false);
   const { requireConfirmation, confirmationModal } = useEditConfirmation(editMode);
   const { measurementsNames, handleToggleChange } = useSizeMeasurementsToggle();
   const { measurements, selectedSubCategoryName, selectedTypeName } = useMeasurements(
@@ -165,32 +160,6 @@ export function SizeMeasurements({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [styleId]);
 
-  async function saveChart() {
-    if (!styleId) return;
-    setSavingChart(true);
-    try {
-      await adminService.UpdateStyleSizeChart({
-        styleId,
-        expectedLockVersion: lockVersion,
-        cells: buildChartCells(getValues('sizeMeasurements')),
-      });
-      showMessage('Size chart saved', 'success');
-      onStockUpdated?.();
-    } catch (e) {
-      const err = e as Error & { status?: number };
-      showMessage(
-        err?.status === 409
-          ? 'This style changed since you loaded it — reload and retry.'
-          : err instanceof Error
-            ? err.message
-            : 'Failed to save size chart',
-        'error',
-      );
-    } finally {
-      setSavingChart(false);
-    }
-  }
-
   const handleSizeChange = async (
     event: React.ChangeEvent<HTMLInputElement>,
     sizeId: number | undefined,
@@ -222,58 +191,6 @@ export function SizeMeasurements({
     handleLastSizeCheck(sizeId, value);
   };
 
-  const handleMeasurementChange = async (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-    sizeId: number | undefined,
-    measurementNameId: number | undefined,
-  ) => {
-    const measurementValue = e.target.value;
-    if (!sizeId) return;
-    const ok = await requireConfirmation(sizeId);
-    if (!ok) return;
-
-    let sizeIndex = values.sizeMeasurements?.findIndex(
-      (sizeMeasurement) => sizeMeasurement.productSize?.sizeId === sizeId,
-    );
-
-    const wasNewEntry = sizeIndex === -1 || sizeIndex === undefined;
-    if (wasNewEntry) {
-      const currentLength = values.sizeMeasurements?.length || 0;
-      setValue(
-        'sizeMeasurements',
-        [
-          ...(values.sizeMeasurements || []),
-          { productSize: { sizeId, quantity: { value: '0' } }, measurements: [] },
-        ],
-        { shouldDirty: true },
-      );
-      sizeIndex = currentLength;
-    }
-
-    const measurementsPath = `sizeMeasurements[${sizeIndex}].measurements`;
-    const currentMeasurements = wasNewEntry
-      ? []
-      : values.sizeMeasurements?.[sizeIndex]?.measurements || [];
-    const measurementIndex = currentMeasurements.findIndex(
-      (m) => m.measurementNameId === measurementNameId,
-    );
-
-    if (measurementIndex > -1) {
-      setValue(
-        `${measurementsPath}[${measurementIndex}].measurementValue.value` as any,
-        measurementValue,
-        { shouldDirty: true },
-      );
-    } else {
-      const newMeasurement = {
-        measurementNameId,
-        measurementValue: { value: measurementValue },
-      };
-      const updatedMeasurements = [...currentMeasurements, newMeasurement];
-      setValue(measurementsPath as any, updatedMeasurements, { shouldDirty: true });
-    }
-  };
-
   return (
     <div className='w-full space-y-3'>
       <ConfirmationModal
@@ -299,20 +216,12 @@ export function SizeMeasurements({
             {totalUnits === 1 ? '' : 's'}
             {productId != null && ' · stock is read-only here — use “update stock”'}
           </Text>
+          <Text variant='inactive' size='small'>
+            measurements are the style’s size chart (shared by all colourways) — edit them on the
+            tech card
+          </Text>
         </div>
         <div className='flex flex-wrap gap-2'>
-          {editMode && styleId != null && (
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              disabled={savingChart}
-              onClick={saveChart}
-            >
-              {savingChart ? 'saving…' : 'save size chart'}
-            </Button>
-          )}
           {productId != null && (
             <>
               <StockHistory productId={productId} sizes={productSizesForStock} />
@@ -406,13 +315,9 @@ export function SizeMeasurements({
                               (measurement) => measurement.measurementNameId === m.id,
                             )?.measurementValue?.value || ''
                           }
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                            if (/^\d*$/.test(e.target.value)) {
-                              handleMeasurementChange(e, size.id, m.id);
-                            }
-                          }}
+                          readOnly
                           className='w-full border-none text-center'
-                          disabled={!editMode}
+                          disabled
                         />
                       </td>
                     );
