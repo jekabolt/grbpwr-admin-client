@@ -5658,6 +5658,14 @@ export type common_TechCard = {
   // style_composition; empty when the style has no structural composition data yet. Read-only,
   // admin/constructor view — the storefront's equivalent is StorefrontColorwayDisplay.composition_entries.
   compositionEntries: common_CompositionEntry[] | undefined;
+  // fit / composition (legacy free-text) / care_instructions are style catalogue facts stored on
+  // the tech_card row but WRITTEN via UpdateStyle (StylePatch), not the tech-card write — so they are
+  // read-only projections here, surfaced for the constructor to display and edit-in-place (the admin
+  // saves them through UpdateStyle). composition is always legacy plain text on the wire (M1); the
+  // structured fibre breakdown is composition_entries above.
+  fit: string | undefined;
+  composition: string | undefined;
+  careInstructions: string | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in

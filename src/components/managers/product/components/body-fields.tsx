@@ -5,6 +5,7 @@ import { useFormContext } from 'react-hook-form';
 import CountryList from 'react-select-country-list';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
+import Text from 'ui/components/text';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { getFilteredSizes } from '../utility/sizes';
 import { Care } from './care/care';
@@ -57,30 +58,33 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
       />
 
       <div className='space-y-3'>
-        <InputField name='product.productBodyInsert.brand' label='brand' readOnly={!editMode} />
-        {/* R4/R9: collection is a style fact written via UpdateStyle (StylePatch.collection, still
-            free-text); the picker is fed from the controlled dictionary in DictionaryProvider. Saved
-            by the Style section, not the colourway save. */}
+        {/* Style facts (brand, collection, season, gender, fit, category, composition, care) are shared
+            by every colourway of the style — edited on the tech card, read-only here. Only the
+            colourway's own attributes (colour, country, prices, sale, tier) and model-wears (the
+            per-colourway photo-shoot note) stay editable. */}
+        <Text variant='inactive' size='small'>
+          Brand, collection, season, gender, fit, category, composition and care are style facts —
+          edit them on the tech card.
+        </Text>
+        <InputField name='product.productBodyInsert.brand' label='brand' readOnly />
         <SelectField
           fullWidth
           name='product.productBodyInsert.collection'
           label='collection'
           items={collectionItems}
-          readOnly={!editMode}
+          readOnly
         />
-        {/* R4: season is a style fact (StylePatch.season, SeasonEnum) written via UpdateStyle by the
-            Style section. The sku_season year lives on the tech card / CloneStyleForSeason. */}
         <SelectField
           name='product.productBodyInsert.season'
           label='season'
           items={SEASON_OPTIONS}
-          readOnly={!editMode}
+          readOnly
         />
         <SelectField
           name='product.productBodyInsert.targetGender'
           label='gender'
           items={genderOptions}
-          readOnly={!editMode}
+          readOnly
         />
         <SelectField
           name='product.productBodyInsert.fit'
@@ -89,9 +93,9 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
             label: fit,
             value: fit,
           }))}
-          readOnly={!editMode}
+          readOnly
         />
-        <CategoryFields editMode={editMode} />
+        <CategoryFields editMode={false} />
         <ColorFields editMode={editMode} />
         <SelectField
           fullWidth
@@ -117,8 +121,8 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
           }))}
           readOnly={!editMode}
         />
-        <Care editMode={editMode} />
-        <Composition editMode={editMode} />
+        <Care editMode={false} />
+        <Composition editMode={false} />
         <TierAccessFields editMode={editMode} />
       </div>
     </div>

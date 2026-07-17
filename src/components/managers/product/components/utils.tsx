@@ -123,6 +123,11 @@ export const STYLE_UPDATE_MASK = [
   'typeId',
 ].join(',');
 
+// The colourway card owns only model-wears among the style facts now (the rest moved to the tech
+// card, read-only here) — so its UpdateStyle writes just those two columns; the backend honors the
+// mask and leaves every other fact untouched.
+export const MODEL_WEARS_UPDATE_MASK = ['modelWearsHeightCm', 'modelWearsSizeId'].join(',');
+
 // The whole style size chart as flat cells (R5 full-replace). Empty/zero measurements are dropped.
 export function buildChartCells(
   sizeMeasurements: ProductFormData['sizeMeasurements'],
