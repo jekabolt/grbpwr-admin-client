@@ -3257,6 +3257,17 @@ export type DeleteArchiveByIdRequest = {
 export type DeleteArchiveByIdResponse = {
 };
 
+export type GetArchivesPagedRequest = {
+  limit: number | undefined;
+  offset: number | undefined;
+  orderFactor: common_OrderFactor | undefined;
+};
+
+export type GetArchivesPagedResponse = {
+  archives: common_ArchiveList[] | undefined;
+  total: number | undefined;
+};
+
 export type AddModelRequest = {
   model: common_ModelInsert | undefined;
 };
@@ -6243,6 +6254,11 @@ export interface AdminService {
   // DeleteArchiveById deletes an archive by ID.
   DeleteArchiveById(request: DeleteArchiveByIdRequest): Promise<DeleteArchiveByIdResponse>;
   GetArchiveByID(request: GetArchiveByIDRequest): Promise<GetArchiveByIDResponse>;
+  // GetArchivesPaged is the ADMIN archive list: unlike the storefront projection it carries the
+  // numeric ids the admin write path (UpdateArchive/DeleteArchiveById/HeroFeaturedArchiveInsert)
+  // keys on (R3: internal ids stay on the admin surface). Registered after GetArchiveByID so the
+  // literal `/paged` GET wins over `/{id}` in grpc-gateway's prepend-mux ordering.
+  GetArchivesPaged(request: GetArchivesPagedRequest): Promise<GetArchivesPagedResponse>;
   // AddModel creates a new fit-model profile.
   AddModel(request: AddModelRequest): Promise<AddModelResponse>;
   // GetModel returns a fit-model profile by id.
@@ -8118,6 +8134,32 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetArchiveByID",
       }) as Promise<GetArchiveByIDResponse>;
+    },
+    GetArchivesPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/archive/paged`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetArchivesPaged",
+      }) as Promise<GetArchivesPagedResponse>;
     },
     AddModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/model/add`; // eslint-disable-line quotes

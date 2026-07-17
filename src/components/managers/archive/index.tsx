@@ -13,10 +13,6 @@ export function Archive() {
   const isAddingArchive = !handle;
   const tail = handle ? handle.split('-').pop() : undefined;
   const { data, isLoading, isError, refetch } = useArchiveDetails(tail);
-  // Admin writes (UpdateArchive) still key on the internal numeric id. The storefront detail no longer
-  // carries it, so we recover it from the URL tail: a numeric tail is a pre-migration internal id; a
-  // non-numeric tail is the public code, for which the id-based write is unavailable (see remainder).
-  const writeId = tail && /^\d+$/.test(tail) ? tail : undefined;
 
   if (isEditMode && isLoading) {
     return (
@@ -51,7 +47,8 @@ export function Archive() {
     <ArchiveForm
       isEditMode={isEditMode}
       isAddingArchive={isAddingArchive}
-      id={writeId}
+      // UpdateArchive keys on the internal numeric id, carried by the admin archive detail.
+      id={data?.archiveList?.id != null ? String(data.archiveList.id) : undefined}
       archive={data}
     />
   );
