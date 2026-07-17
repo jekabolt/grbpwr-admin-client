@@ -1,4 +1,5 @@
 import {
+  common_Dictionary,
   common_Fitting,
   common_MediaFull,
   common_Sample,
@@ -9,7 +10,7 @@ import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -78,10 +79,13 @@ export function SamplesTab({
   const sizeName = (sizeId?: number) =>
     sizeId ? String(findInDictionary(dictionary, sizeId, 'size') || sizeId) : '—';
 
-  // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always empty;
-  // colourway name lookups fall back to `#<id>`. Source real data from GetColorwaysPaged by
-  // style / AdminColorwayRef instead.
-  const colorways = [] as { productId?: number; code?: string; name?: string; id?: number }[];
+  // Style colourways (R1: a colourway is a product; techCardId === styleId) from the live
+  // techCard read — techCard.colorways already carries AdminColorwayRef[], the same source
+  // construction-tab.tsx / colorway-recipe.tsx use, so no separate GetColorwaysPaged call.
+  const colorways = useMemo(
+    () => resolveColorways(techCard, dictionary),
+    [techCard?.colorways, dictionary?.colors],
+  );
   const colorwayName = (id?: number) =>
     id ? colorwayLabel(colorways.find((c) => c.id === id)) : '—';
 
@@ -315,6 +319,25 @@ function draftFrom(s?: common_Sample): Draft {
   };
 }
 
+// Style colourways (R1: a colourway is a product; techCardId === styleId), resolved from the
+// live techCard read — techCard.colorways is AdminColorwayRef[], not the form's legacy empty
+// echo. Colour name resolves from dictionary.colors by colorCode, same pattern as
+// construction-tab.tsx / colorway-recipe.tsx.
+function resolveColorways(
+  techCard: common_TechCard | undefined,
+  dictionary: common_Dictionary | undefined,
+): { productId?: number; code?: string; name?: string; id?: number }[] {
+  return (techCard?.colorways ?? []).map((cw) => {
+    const dc = dictionary?.colors?.find((c) => c.code === cw.colorCode);
+    return {
+      productId: cw.colorwayId ?? 0,
+      code: cw.colorCode ?? '',
+      name: dc?.name ?? cw.colorCode ?? '',
+      id: cw.colorwayId ?? 0,
+    };
+  });
+}
+
 // A colourway's label for a picker / display cell (keyed by its stable id, not index).
 function colorwayLabel(c?: { code?: string; name?: string; id?: number }): string {
   if (!c) return '—';
@@ -378,10 +401,10 @@ function SampleEditor({
   // B-10: colourways carry a stable, output-only id (re-pointed by identity when the card is
   // full-replaced on save). Reading them off the live `techCard` query means the picker always
   // offers fresh ids — the exact ones to link a sample to right now.
-  // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always empty;
-  // the picker falls back to a bare "колорвей #<id>" option. Source real data from
-  // GetColorwaysPaged by style / AdminColorwayRef instead.
-  const colorways = [] as { productId?: number; code?: string; name?: string; id?: number }[];
+  const colorways = useMemo(
+    () => resolveColorways(techCard, dictionary),
+    [techCard?.colorways, dictionary?.colors],
+  );
 
   const mediaLinks = d.mediaIds
     .map((id) => mediaById.get(id))

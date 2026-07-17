@@ -52,7 +52,7 @@ export function ColorFields({ editMode }: { editMode: boolean }) {
       />
       {!activeColors.length && (
         <Text variant='inactive' size='small'>
-          no colors in the dictionary yet — add them under settings › colors
+          no colors in the dictionary yet — add them under dictionaries › colors
         </Text>
       )}
     </div>

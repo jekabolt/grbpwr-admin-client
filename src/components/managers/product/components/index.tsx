@@ -238,7 +238,7 @@ export function ProductForm({
 
           <Section title='details' className='w-full lg:w-1/2'>
             {isAddingProduct && <StylePicker name='styleId' disabled={!editMode} />}
-            <BodyFields editMode={editMode} />
+            <BodyFields editMode={editMode} isAddingProduct={isAddingProduct} />
             <Tags
               isAddingProduct={isAddingProduct}
               isEditMode={isEditMode}
@@ -251,12 +251,16 @@ export function ProductForm({
         {/* R4: style facts (brand, season, collection, gender, fit, categories, composition, care,
             model-wears) are shared by every colourway of the style and save through UpdateStyle under
             their own optimistic lock — isolated here so a blocked season change (frozen siblings) does
-            not fail the colourway save. */}
-        {editMode && !isAddingProduct && product?.colorway?.styleId != null && (
+            not fail the colourway save. Shown outside editMode too (read-only) so model-wears stays
+            visible without entering edit — not gated on editMode the way the rest of this form is;
+            <StyleSection/> derives its own canEdit from the editMode prop instead. Never shown in
+            add-mode: there is no created colourway yet for this section's own Save to attach to. */}
+        {!isAddingProduct && product?.colorway?.styleId != null && (
           <StyleSection
             styleId={product.colorway.styleId}
             lockVersion={product.colorway.lockVersion}
             canWrite={canWrite(SECTION.products)}
+            editMode={editMode}
             onChanged={onStockUpdated}
           />
         )}

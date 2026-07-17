@@ -1,5 +1,6 @@
 import { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useFormContext, useWatch } from 'react-hook-form';
 import Text from 'ui/components/text';
 import CurrencySelect from 'ui/form/fields/currency-select';
@@ -16,6 +17,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   // Cost inputs are writable only with costing:write (the tab itself is hidden without
   // costing:read — see the editor's TABS). Backend enforces; this disables the UI.
   const { canWriteCosting } = usePermissions();
+  const { dictionary } = useDictionary();
   const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
     usages?: Array<{ consumption?: string; sizeConsumptions?: Array<{ consumption?: string }> }>;
   }>;
@@ -34,13 +36,15 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
 
   const rollup = techCard?.techCard?.costing;
   const colorwayCosts = rollup?.colorwayCosts ?? [];
-  // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always empty;
-  // the label below falls back to `колорвей #<id>`. Source real data from GetColorwaysPaged
-  // by style / AdminColorwayRef instead.
-  const storedColorways = [] as { productId?: number; code?: string; name?: string; id?: number }[];
-  const colorwayLabel = (index?: number) => {
-    const c = index != null ? storedColorways[index] : undefined;
-    return c?.name || c?.code || `колорвей #${(index ?? 0) + 1}`;
+  // colorway_cost rows are keyed by the real colorwayId (0 = the card's primary/base costing,
+  // not tied to one colourway) — resolve labels from the live techCard.colorways
+  // (AdminColorwayRef[], R1: a colourway is a product) + dictionary.colors, same pattern as
+  // construction-tab.tsx.
+  const storedColorways = techCard?.colorways ?? [];
+  const colorwayLabel = (id?: number) => {
+    const cw = id ? storedColorways.find((c) => c.colorwayId === id) : undefined;
+    const dc = cw ? dictionary?.colors?.find((c) => c.code === cw.colorCode) : undefined;
+    return dc?.name || cw?.colorCode || (id ? `колорвей #${id}` : 'колорвей');
   };
 
   const materialsTotal = rollup?.materialsTotal ?? [];
@@ -96,7 +100,6 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                 {colorwayCosts.map((cc, i) => (
                   <div key={i} className='border border-textInactiveColor p-2'>
                     <Text size='small' className='block'>
-                      {/* TODO(final-bump): proto field renamed colorwayIndex -> colorwayId. */}
                       {colorwayLabel(cc.colorwayId)}
                       {cc.colorwayId === 0 ? ' (основной)' : ''}
                     </Text>
