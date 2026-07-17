@@ -33,6 +33,7 @@ import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { BomField } from './bom-field';
 import { ColorwaysField } from './colorways-field';
+import { CompositionEntries } from './composition-entries';
 import { ConstructionTab } from './construction-tab';
 import { CostEstimateField } from './cost-estimate-field';
 import { CostingField } from './costing-field';
@@ -721,6 +722,15 @@ export function TechCardForm({
           {/* BOM */}
           <div hidden={activeTab !== 'bom'}>
             <Section title='bill of materials — справочник артикулов'>
+              {/* Structured style fibre composition (S17/M1) — typed composition_entries, read-only. */}
+              {(techCard?.compositionEntries?.length ?? 0) > 0 && (
+                <div className='border-b border-textInactiveColor pb-3'>
+                  <CompositionEntries
+                    entries={techCard?.compositionEntries}
+                    label='style fibre composition'
+                  />
+                </div>
+              )}
               <BomField highlightComposition={bomHighlight} />
             </Section>
           </div>

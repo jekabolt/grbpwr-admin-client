@@ -270,9 +270,9 @@ function BomItemRow({
           )}
         >
           {linked ? (
-            // TODO(await-bump): render structured composition once the contract exposes typed
-            // composition_entries — for now this is the catalog's raw composition string,
-            // read-only while linked.
+            // M1: the material's `composition` string is legacy plain text — shown as-is, never
+            // parsed. The style's STRUCTURED fibre composition is the typed composition_entries
+            // projection (see CompositionEntries at the top of the BOM tab), not this per-line string.
             <ReadOnlyMirrorField
               label='composition'
               value={mirror(linkedMaterial?.composition, 'composition')}

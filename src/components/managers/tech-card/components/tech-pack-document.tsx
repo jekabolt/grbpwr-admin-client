@@ -1,4 +1,5 @@
 import { common_MediaFull, common_TechCard, googletype_Decimal } from 'api/proto-http/admin';
+import { formatCompositionEntries } from './composition-entries';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import {
@@ -199,6 +200,10 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
           <KV k='sample size' v={sizeName(tc.baseSampleSizeId)} />
           <KV k='measurement unit' v={unitL[tc.measurementUnit ?? ''] ?? unitAbbr} />
           <KV k='size range' v={sizeIds.map(sizeName).join(', ')} />
+          {/* structured fibre composition (S17/M1 typed composition_entries); omitted when empty */}
+          {has(techCard.compositionEntries) && (
+            <KV k='composition' v={formatCompositionEntries(techCard.compositionEntries)} />
+          )}
         </div>
         <div>
           <KV k='designer' v={designer} />
