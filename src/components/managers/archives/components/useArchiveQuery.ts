@@ -1,6 +1,11 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService, frontendService } from 'api/api';
-import { common_ArchiveInsert } from 'api/proto-http/admin';
+import { common_ArchiveFull, common_ArchiveInsert, common_ArchiveList } from 'api/proto-http/admin';
+
+// R3/storefront-projections: the archive list & detail RPCs return the storefront projection now
+// (StorefrontArchiveList/Full — code-keyed, structurally identical to the admin models for the fields
+// the admin UI reads, but with no numeric `id`). We surface them as the admin common_* types so the
+// existing archive/hero screens keep compiling; see the id/code note on useArchiveDetails.
 
 export const archiveKeys = {
   all: ['archives'] as const,
@@ -19,29 +24,28 @@ export function useArchives(limit: number = 50, offset: number = 0) {
         offset,
         orderFactor: 'ORDER_FACTOR_DESC',
       });
-      return response.archives || [];
+      return (response.archives || []) as unknown as common_ArchiveList[];
     },
     staleTime: 5 * 60 * 1000,
   });
 }
 
-// Route-E: the timeline detail URL is /timeline/{pretty}-{code}; `tail` is the segment after the
-// last '-'. It is the public archive `code`. During the coordinated URL cutover, rows migrated
-// before the code backfill have no code yet, so a purely numeric tail is the internal archive id and
-// we resolve it through the retained legacy id lookup. TODO(final-bump): drop the numeric-id branch
-// once every archive has a code.
+// Route-E: the timeline detail URL is /timeline/{pretty}-{code}; `tail` is the segment after the last
+// '-' — the archive's stable public `code`. The legacy numeric-id lookup is gone (every archive is
+// code-backfilled): the detail always resolves by code. The returned StorefrontArchiveFull is
+// structurally compatible with common_ArchiveFull for the form's read fields (it drops only the
+// numeric id, which the admin write path sources from the URL tail, not from here).
 export function useArchiveDetails(tail: string | undefined) {
-  const isLegacyId = !!tail && /^\d+$/.test(tail);
   return useQuery({
     queryKey: archiveKeys.detail(tail ?? ''),
     queryFn: async () => {
       const response = await frontendService.GetArchive({
-        id: isLegacyId ? Number(tail) : undefined,
+        id: undefined,
         heading: undefined,
         tag: undefined,
-        code: isLegacyId ? undefined : tail,
+        code: tail,
       });
-      return response.archive;
+      return response.archive as unknown as common_ArchiveFull | undefined;
     },
     enabled: !!tail,
     staleTime: 5 * 60 * 1000,
@@ -92,7 +96,7 @@ export function useInfiniteArchives(limit: number = 50) {
         orderFactor: 'ORDER_FACTOR_DESC',
       });
       return {
-        archives: response.archives || [],
+        archives: (response.archives || []) as unknown as common_ArchiveList[],
         nextOffset: response.archives?.length === limit ? pageParam + limit : undefined,
       };
     },
