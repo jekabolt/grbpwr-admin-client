@@ -264,13 +264,6 @@ export function FittingForm({
             <Section title='callouts (замечания по посадке)'>
               <FittingCallouts mediaById={mediaById} />
             </Section>
-            <Section title='change requests (что доработать)'>
-              <ChangeRequestsFields
-                fittingId={isEditMode ? parseInt(id || '0', 10) : 0}
-                techCardId={selectedTechCardId || undefined}
-                serverChangeRequests={fitting?.fitting?.changeRequests}
-              />
-            </Section>
           </div>
         </div>
       </form>
