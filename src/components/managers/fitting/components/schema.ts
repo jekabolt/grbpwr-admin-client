@@ -49,10 +49,10 @@ const fittingChangeRequestSchema = z.object({
 
 export const fittingSchema = z
   .object({
-    // A fitting anchors to a product AND/OR a tech card — at least one must be set
-    // (backend contract). Product is optional so accessories without a catalog product
-    // (пыльники, кофры, …) can be fitted against their tech card instead.
-    productId: z.number().int().optional().default(0), // 0 = unset
+    // A fitting anchors to the tech card (style) and its sample — a fitting tries a SAMPLE, not a
+    // catalogue product. productId is a legacy anchor kept for old records; new fittings require a
+    // tech card and link the sample tried on.
+    productId: z.number().int().optional().default(0), // 0 = unset (legacy; not surfaced in the editor)
     techCardId: z.number().int().optional().default(0), // optional link to the tech card (style)
     sampleId: z.number().int().optional().default(0), // optional link to the specific sample tried on
     modelId: z.number().int().optional().default(0),
@@ -71,9 +71,9 @@ export const fittingSchema = z
     outcome: z.string().optional().default('undecided'),
     changeRequests: z.array(fittingChangeRequestSchema).default([]),
   })
-  .refine((data) => !!data.productId || !!data.techCardId, {
-    message: 'Укажите продукт или тех карту',
-    path: ['productId'],
+  .refine((data) => !!data.techCardId, {
+    message: 'Укажите тех карту (примерка делается по её сэмплу)',
+    path: ['techCardId'],
   });
 
 export type FittingFormData = z.input<typeof fittingSchema>;

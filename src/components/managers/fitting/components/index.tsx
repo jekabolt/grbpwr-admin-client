@@ -25,7 +25,6 @@ import { ChangeRequestsFields } from './change-requests-fields';
 import { FittingCallouts } from './fitting-callouts';
 import { FittingMedia } from './fitting-media';
 import { PatternsFields } from './patterns-fields';
-import { ProductField } from './product-field';
 import { TechCardField } from './tech-card-field';
 import {
   FittingFormData,
@@ -186,28 +185,31 @@ export function FittingForm({
           </div>
         </div>
 
+        {/* Change requests are the actionable output of a fitting (what to fix, carried into the next
+            round and the tech card) — surfaced full-width at the top, not buried below the fold. */}
+        <Section title='change requests (что доработать) — главный итог примерки'>
+          <ChangeRequestsFields
+            fittingId={isEditMode ? parseInt(id || '0', 10) : 0}
+            techCardId={selectedTechCardId || undefined}
+            serverChangeRequests={fitting?.fitting?.changeRequests}
+          />
+        </Section>
+
         <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
           <Section title='session' className='w-full lg:w-1/2'>
             <div className='space-y-1'>
               <Text variant='uppercase' size='small'>
-                product (optional)
-              </Text>
-              <ProductField />
-            </div>
-            <div className='space-y-1'>
-              <Text variant='uppercase' size='small'>
-                tech card (style)
+                tech card (style) *
               </Text>
               <TechCardField />
             </div>
             <Text variant='inactive' size='small'>
-              укажите продукт или тех карту (для пыльников, кофров и т.п. — по тех карте, без
-              продукта)
+              примерка делается по тех карте и её сэмплу (а не по продукту)
             </Text>
             {!!selectedTechCardId && (
               <div className='space-y-1'>
                 <Text variant='uppercase' size='small'>
-                  sample (optional)
+                  sample (tried on)
                 </Text>
                 <SamplePicker
                   techCardId={selectedTechCardId}
@@ -217,7 +219,7 @@ export function FittingForm({
                   }
                 />
                 <Text variant='inactive' size='small'>
-                  какой именно сэмпл примеряли (для истории примерок сэмпла)
+                  какой именно сэмпл примеряли — примерка привязывается к нему
                 </Text>
               </div>
             )}

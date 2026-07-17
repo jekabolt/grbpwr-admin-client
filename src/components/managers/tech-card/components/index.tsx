@@ -659,7 +659,7 @@ export function TechCardForm({
               <HeaderMetaFields />
             </Section>
 
-            <Section title='style facts — fit / composition / care (shared by all colourways)'>
+            <Section title='style facts — fit / care (shared by all colourways)'>
               <StyleFactsField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
             </Section>
 
