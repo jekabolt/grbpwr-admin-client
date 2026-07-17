@@ -88,7 +88,7 @@ const emptyColorway = {
 };
 
 function productName(product?: common_Colorway): string {
-  return product?.display?.productBody?.translations?.[0]?.name ?? '';
+  return product?.display?.translations?.[0]?.name ?? '';
 }
 
 type FormBomItem = {

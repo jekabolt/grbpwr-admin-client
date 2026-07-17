@@ -43,13 +43,9 @@ export function getProductPickerColumns(params: {
         />
       </div>
     ),
-    (product) =>
-      product.display?.productBody?.translations?.[0]?.name ??
-      (product.display?.productBody as any)?.name,
+    (product) => product.display?.translations?.[0]?.name,
     (product) => {
-      const categoryId =
-        product.display?.productBody?.productBodyInsert?.topCategoryId ??
-        (product.display?.productBody as any)?.categoryId;
+      const categoryId = product.display?.merchandising?.topCategoryId;
       const category = categories?.find((c) => c.id === categoryId);
       return category ? category.name?.replace('CATEGORY_ENUM_', '') : 'Unknown';
     },

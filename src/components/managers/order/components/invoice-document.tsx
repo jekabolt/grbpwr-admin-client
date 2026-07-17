@@ -103,9 +103,6 @@ export function InvoiceDocument({
   );
   const isRefunded = orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED';
 
-  const sizeName = (id?: number) =>
-    dictionary?.sizes?.find((s) => s.id === id)?.name?.replace('SIZE_ENUM_', '') ?? '—';
-
   const carrierName = dictionary?.shipmentCarriers?.find((c) => c.id === shipment?.carrierId)
     ?.shipmentCarrier?.carrier;
 
@@ -244,7 +241,7 @@ export function InvoiceDocument({
                 return (
                   <tr key={r.item.id ?? i} className='break-inside-avoid'>
                     <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
-                    <td className={`${TD} whitespace-nowrap`}>{r.item.sku || '—'}</td>
+                    <td className={`${TD} whitespace-nowrap`}>{r.item.variantSkuSnapshot || '—'}</td>
                     <td className={TD}>
                       <div className='font-medium'>{r.item.translations?.[0]?.name || '—'}</div>
                       <div className='text-labelColor'>
@@ -252,7 +249,7 @@ export function InvoiceDocument({
                         {refunded ? ' · refunded' : ''}
                       </div>
                     </td>
-                    <td className={`${TD} text-center`}>{sizeName(r.item.orderItem?.sizeId)}</td>
+                    <td className={`${TD} text-center`}>{r.item.sizeNameSnapshot || '—'}</td>
                     <td className={`${TD} whitespace-nowrap text-right`}>
                       {money(r.unit)}
                       {r.sale > 0 && (

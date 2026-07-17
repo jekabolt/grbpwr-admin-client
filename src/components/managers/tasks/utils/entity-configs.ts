@@ -7,7 +7,7 @@ import type {
   common_Sample,
   common_TechCardListItem,
 } from 'api/proto-http/admin';
-import type { common_ArchiveList } from 'api/proto-http/frontend';
+import type { StorefrontArchiveList } from 'api/proto-http/frontend';
 import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
@@ -61,8 +61,7 @@ export const techCardConfig: EntityConfig = {
 
 // ---- product (GetColorwaysPaged has no name search → client filter) ----------
 function productName(p: common_Colorway): string {
-  const body = p.display?.productBody;
-  return body?.translations?.[0]?.name || p.slug || `product #${p.id}`;
+  return p.display?.translations?.[0]?.name || p.slug || `product #${p.id}`;
 }
 function productOption(p: common_Colorway): EntityOption {
   return {
@@ -86,13 +85,13 @@ export const productConfig: EntityConfig = {
       sortFactors: undefined,
       orderFactor: 'ORDER_FACTOR_DESC',
       filterConditions: undefined,
-      showHidden: true,
+      statuses: undefined,
     });
-    return (r.products ?? []).map(productOption);
+    return (r.colorways ?? []).map(productOption);
   },
   resolve: async (value) => {
-    const r: any = await adminService.GetColorwayByID({ id: value as number });
-    const p: common_Colorway | undefined = r?.product?.product;
+    const r: any = await adminService.GetColorwayByID({ colorwayId: value as number });
+    const p: common_Colorway | undefined = r?.colorway?.colorway;
     return p ? productOption(p) : null;
   },
 };
@@ -146,11 +145,18 @@ export const orderConfig: EntityConfig = {
 };
 
 // ---- archive / timeline drop (frontendService.GetArchivesPaged, no search) --
-function archiveOption(a: common_ArchiveList): EntityOption {
+// NOTE(R6 cutover): StorefrontArchiveList (the storefront-facing list item) no longer carries the
+// internal numeric `id` — only admin's own common_ArchiveList does. archiveConfig.resolve still
+// round-trips through adminService.GetArchiveByID({ id }), so this option's `value` needs a real
+// id. Falling back to `any` here to unblock the typecheck; hero/components/archive-picker.tsx hits
+// the identical gap (also reads `.id` off a StorefrontArchiveList) and should be reconciled the
+// same way — ideally both move to `code`-based identity instead of this cast.
+function archiveOption(a: StorefrontArchiveList): EntityOption {
+  const id = (a as any).id ?? 0;
   return {
-    value: a.id ?? 0,
-    label: a.translations?.[0]?.heading || a.slug || `drop #${a.id}`,
-    sublabel: a.tag || `#${a.id}`,
+    value: id,
+    label: a.translations?.[0]?.heading || a.slug || `drop #${id}`,
+    sublabel: a.tag || `#${id}`,
     thumbnail: a.thumbnail?.media?.thumbnail?.mediaUrl,
   };
 }

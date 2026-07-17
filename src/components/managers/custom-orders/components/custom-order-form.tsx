@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import type { CreateCustomOrderRequest } from 'api/proto-http/admin';
-import { common_Dictionary, common_Colorway } from 'api/proto-http/admin';
+import { common_CustomOrderItemInsert, common_Dictionary, common_Colorway } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { getFilteredSizes } from 'components/managers/product/utility/sizes';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -39,11 +39,11 @@ function buildItemsFromProducts(
   return products.map((p) => {
     const baseCurrency = dictionary?.baseCurrency ?? 'USD';
     const productPrice = p.prices?.find((p) => p.currency === baseCurrency)?.price?.value ?? '0';
-    const productBody = p.display?.productBody?.productBodyInsert;
-    const topCategoryId = Number(productBody?.topCategoryId) || 0;
-    const typeId = Number(productBody?.typeId) || 0;
+    const merch = p.display?.merchandising;
+    const topCategoryId = Number(merch?.topCategoryId) || 0;
+    const typeId = Number(merch?.typeId) || 0;
     const filteredSizes = getFilteredSizes(dictionary, topCategoryId, typeId, {
-      gender: productBody?.targetGender,
+      gender: merch?.targetGender,
     });
     const firstSizeId = filteredSizes[0]?.id ?? 1;
     return {
@@ -97,13 +97,31 @@ export function CustomOrderForm({
     const billingAddress = data.billingSameAsShipping
       ? { ...data.shippingAddress }
       : data.billingAddress;
-    const payload = {
-      ...data,
-      billingAddress,
-      currency,
-    };
     try {
-      const response = await adminService.CreateCustomOrder(payload as CreateCustomOrderRequest);
+      // R2/p021: a custom-order line references a variant now. The picker yields colourways (no
+      // variants), and the form tracks the chosen size per line, so resolve size_id -> variant_id per
+      // colourway before building the request.
+      const items: common_CustomOrderItemInsert[] = [];
+      for (const item of data.items) {
+        const full = await adminService.GetColorwayByID({ colorwayId: item.productId });
+        const variant = full.colorway?.variants?.find((v) => v.sizeId === item.sizeId);
+        if (!variant?.variantId) {
+          showMessage('Selected size is not an available variant of the product', 'error');
+          return;
+        }
+        items.push({
+          quantity: item.quantity,
+          customPrice: item.customPrice,
+          variantId: variant.variantId,
+        });
+      }
+      const payload: CreateCustomOrderRequest = {
+        ...data,
+        items,
+        billingAddress,
+        currency,
+      } as CreateCustomOrderRequest;
+      const response = await adminService.CreateCustomOrder(payload);
       showMessage('Custom order created successfully', 'success');
       onSuccess?.();
       if (response.order?.uuid) {

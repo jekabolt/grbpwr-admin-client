@@ -23,10 +23,10 @@ export function useProductsByTag(tag: string | undefined | null, enabled = true)
         filterConditions: {
           byTag: tag.trim(),
         } as any,
-        showHidden: true,
+        statuses: undefined,
       });
 
-      return (response.products || []) as common_Colorway[];
+      return (response.colorways || []) as common_Colorway[];
     },
     enabled: enabled && !!tag && tag.trim().length > 0,
     staleTime: 2 * 60 * 1000,

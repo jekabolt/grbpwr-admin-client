@@ -9,9 +9,7 @@ import Text from 'ui/components/text';
 import { TechCardFormData } from './schema';
 
 function productName(product?: common_Colorway): string {
-  return (
-    product?.display?.productBody?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`
-  );
+  return product?.display?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`;
 }
 
 // Catalog products linked to this tech card (FK product ids). Multi-select via the

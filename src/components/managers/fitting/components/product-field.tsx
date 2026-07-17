@@ -9,9 +9,7 @@ import Text from 'ui/components/text';
 import { FittingFormData } from './schema';
 
 function productName(product?: common_Colorway): string {
-  return (
-    product?.display?.productBody?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`
-  );
+  return product?.display?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`;
 }
 
 // Single-product selector for the fitting form. Reuses the shared (multi-select)
@@ -37,9 +35,9 @@ export function ProductField() {
     }
     let active = true;
     adminService
-      .GetColorwayByID({ id })
+      .GetColorwayByID({ colorwayId: id })
       .then((res) => {
-        if (active) setSelected(res.product?.colorway);
+        if (active) setSelected(res.colorway?.colorway);
       })
       .catch(() => {});
     return () => {

@@ -63,12 +63,11 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
           sortFactors: ['SORT_FACTOR_CREATED_AT'],
           orderFactor: 'ORDER_FACTOR_DESC',
           filterConditions: undefined,
-          // Hidden products must not be featurable in the hero.
-          showHidden: false,
+          statuses: undefined,
         });
-        if (Array.isArray(response.products)) {
+        if (Array.isArray(response.colorways)) {
           setAllProducts((prevProducts) => {
-            const combinedProducts = [...prevProducts, ...(response.products || [])];
+            const combinedProducts = [...prevProducts, ...(response.colorways || [])];
             const uniqueProducts = combinedProducts.reduce<common_Colorway[]>((acc, current) => {
               if (!acc.find((product) => product.id === current.id)) {
                 acc.push(current);
@@ -157,17 +156,13 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       },
       {
         label: 'NAME',
-        accessor: (product: common_Colorway) =>
-          product.display?.productBody?.translations?.[0]?.name ??
-          (product.display?.productBody as any)?.name,
+        accessor: (product: common_Colorway) => product.display?.translations?.[0]?.name,
       },
       {
         label: 'IS HIDDEN',
         className: HIDDEN_ON_MOBILE_STYLE,
         accessor: (product: common_Colorway) => {
-          const hidden =
-            product.display?.productBody?.productBodyInsert?.hidden ??
-            (product.display?.productBody as any)?.hidden;
+          const hidden = product.status === 'COLORWAY_LIFECYCLE_STATUS_HIDDEN';
           return hidden ? 'Yes' : 'No';
         },
       },
@@ -175,9 +170,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         label: 'PRICE',
         className: HIDDEN_ON_MOBILE_STYLE,
         accessor: (product: common_Colorway) => {
-          const price =
-            product.prices?.[1]?.price?.value ??
-            (product.display?.productBody as any)?.price?.value;
+          const price = product.prices?.[1]?.price?.value;
           const currency = product.prices?.[1]?.currency ?? '';
           return `${price ?? ''} ${currency}`.trim();
         },
@@ -186,9 +179,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         label: 'SALE %',
         className: HIDDEN_ON_MOBILE_STYLE,
         accessor: (product: common_Colorway) => {
-          const sale =
-            product.display?.productBody?.productBodyInsert?.salePercentage?.value ??
-            (product.display?.productBody as any)?.salePercentage?.value;
+          const sale = product.display?.merchandising?.salePercentage?.value;
           return sale != null ? `${sale}%` : '';
         },
       },
@@ -196,9 +187,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         label: 'CATEGORY',
         className: HIDDEN_ON_MOBILE_STYLE,
         accessor: (product: common_Colorway) => {
-          const categoryId =
-            product.display?.productBody?.productBodyInsert?.topCategoryId ??
-            (product.display?.productBody as any)?.categoryId;
+          const categoryId = product.display?.merchandising?.topCategoryId;
           const category = categories.find((c) => c.id === categoryId);
           return category ? category.name?.replace('CATEGORY_ENUM_', '') : 'Unknown';
         },

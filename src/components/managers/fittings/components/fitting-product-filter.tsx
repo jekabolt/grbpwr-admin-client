@@ -31,9 +31,9 @@ export function FittingProductFilter({
     }
     let active = true;
     adminService
-      .GetColorwayByID({ id: productId })
+      .GetColorwayByID({ colorwayId: productId })
       .then((res) => {
-        if (active) setSelected(res.product?.colorway);
+        if (active) setSelected(res.colorway?.colorway);
       })
       .catch(() => {});
     return () => {
@@ -57,7 +57,7 @@ export function FittingProductFilter({
             />
           </span>
           <Text size='small'>
-            {selected.display?.productBody?.translations?.[0]?.name ?? `#${selected.id}`}
+            {selected.display?.translations?.[0]?.name ?? `#${selected.id}`}
           </Text>
         </div>
       )}

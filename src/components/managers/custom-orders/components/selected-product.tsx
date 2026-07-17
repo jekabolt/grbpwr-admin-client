@@ -16,11 +16,11 @@ export function SelectedProduct({
   itemIdx: number;
 }) {
   const { dictionary } = useDictionary();
-  const name = product?.display?.productBody?.translations?.[0]?.name;
-  const productBody = product?.display?.productBody?.productBodyInsert;
-  const topCategoryId = Number(productBody?.topCategoryId) || 0;
-  const typeId = Number(productBody?.typeId) || 0;
-  const targetGender = productBody?.targetGender;
+  const name = product?.display?.translations?.[0]?.name;
+  const merchandising = product?.display?.merchandising;
+  const topCategoryId = Number(merchandising?.topCategoryId) || 0;
+  const typeId = Number(merchandising?.typeId) || 0;
+  const targetGender = merchandising?.targetGender;
 
   const sizeItems = useMemo(() => {
     const opts = { gender: targetGender };

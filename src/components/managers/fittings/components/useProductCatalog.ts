@@ -21,10 +21,10 @@ export function useProductCatalog(limit = 50) {
           sortFactors: ['SORT_FACTOR_CREATED_AT'],
           orderFactor: 'ORDER_FACTOR_DESC',
           filterConditions: undefined,
-          showHidden: true,
+          statuses: undefined,
         });
         if (!active) return;
-        const next = res.products || [];
+        const next = res.colorways || [];
         if (next.length < limit) setHasMore(false);
         setProducts((prev) => {
           const combined = [...prev, ...next];

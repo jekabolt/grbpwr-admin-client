@@ -23,10 +23,10 @@ export function useCustomOrder() {
           sortFactors: ['SORT_FACTOR_CREATED_AT'],
           orderFactor: 'ORDER_FACTOR_DESC',
           filterConditions: undefined,
-          showHidden: true,
+          statuses: undefined,
         });
-        if (Array.isArray(response.products)) {
-          const newProducts = response.products || [];
+        if (Array.isArray(response.colorways)) {
+          const newProducts = response.colorways || [];
           if (newProducts.length < LIMIT) {
             setHasMore(false);
           }

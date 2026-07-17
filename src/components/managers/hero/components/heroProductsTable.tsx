@@ -144,29 +144,21 @@ export const HeroProductTable: FC<
                 )}
               </td>
               <td className='border border-text p-2'>
-                <Text>{product.display?.productBody?.translations?.[0].name}</Text>
+                <Text>{product.display?.translations?.[0]?.name}</Text>
               </td>
               <td className='border border-text p-2'>
                 <Text>
-                  {product.display?.productBody?.productBodyInsert?.hidden
-                    ? 'hidden'
-                    : 'shown'}
+                  {product.status === 'COLORWAY_LIFECYCLE_STATUS_HIDDEN' ? 'hidden' : 'shown'}
                 </Text>
               </td>
               <td className='border border-text p-2'>
                 <Text>{`${product.prices?.[1].price?.value} ${product.prices?.[1].currency}`}</Text>
               </td>
               <td className='border border-text p-2'>
-                <Text>
-                  {`${product.display?.productBody?.productBodyInsert?.salePercentage?.value} %`}
-                </Text>
+                <Text>{`${product.display?.merchandising?.salePercentage?.value} %`}</Text>
               </td>
               <td className='border border-text p-2'>
-                <Text>
-                  {getCategoryName(
-                    product.display?.productBody?.productBodyInsert?.topCategoryId,
-                  )}
-                </Text>
+                <Text>{getCategoryName(product.display?.merchandising?.topCategoryId)}</Text>
               </td>
               {isFeaturedProducts && (
                 <td className='border border-text'>

@@ -11,7 +11,10 @@ export function useProductsByIds(ids: number[]) {
   const results = useQueries({
     queries: unique.map((id) => ({
       queryKey: ['products', 'detail', id],
-      queryFn: async () => (await adminService.GetColorwayByID({ id })).product?.colorway ?? null,
+      queryFn: async () => {
+        const res = await adminService.GetColorwayByID({ colorwayId: id });
+        return res.colorway?.colorway ?? null;
+      },
       staleTime: 5 * 60 * 1000,
     })),
   });

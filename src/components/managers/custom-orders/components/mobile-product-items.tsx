@@ -28,12 +28,8 @@ export function MobileProductItems({
       ) : (
         products.map((product) => {
           const isSelected = pendingSelection.some((p) => p.id === product.id);
-          const name =
-            product.display?.productBody?.translations?.[0]?.name ??
-            (product.display?.productBody as any)?.name;
-          const categoryId =
-            product.display?.productBody?.productBodyInsert?.topCategoryId ??
-            (product.display?.productBody as any)?.categoryId;
+          const name = product.display?.translations?.[0]?.name;
+          const categoryId = product.display?.merchandising?.topCategoryId;
           const category = categories?.find((c) => c.id === categoryId);
           const categoryName = category ? category.name?.replace('CATEGORY_ENUM_', '') : 'Unknown';
           return (
