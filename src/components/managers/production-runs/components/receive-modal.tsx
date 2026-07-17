@@ -194,7 +194,7 @@ export function ReceiveModal({
   return (
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
-        <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
+        <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[520px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>

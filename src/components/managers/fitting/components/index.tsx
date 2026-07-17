@@ -9,7 +9,7 @@ import {
 import { ModelMeasurementsView } from 'components/managers/model/components/measurements-view';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { SamplePicker } from 'components/managers/tech-card/components/sample-picker';
-import { fittingStatusOptions, fittingVerdictOptions } from 'constants/filter';
+import { fittingStatusOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -234,7 +234,6 @@ export function FittingForm({
             )}
             <InputField name='fittingDate' type='date' label='fitting date' />
             <SelectField name='status' label='status' items={fittingStatusOptions} />
-            <SelectField name='verdict' label='verdict' items={fittingVerdictOptions} />
             <div className='grid grid-cols-2 gap-3'>
               <InputField
                 name='roundNumber'
