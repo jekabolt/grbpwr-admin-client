@@ -67,6 +67,7 @@ import {
 } from './schema';
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
+import { SizeChartField } from './size-chart-field';
 import { TechCardFittings } from './tech-card-fittings';
 import { useTechCardDraft } from './useTechCardDraft';
 
@@ -713,6 +714,9 @@ export function TechCardForm({
                 </Text>
                 <SizeQuantitiesField />
               </div>
+            </Section>
+            <Section title='размерная таблица (межурменты) — общая для всех колорвеев стиля'>
+              <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
             </Section>
             <Section title='выкройки (PDF) — по размерам'>
               <PatternsField />
