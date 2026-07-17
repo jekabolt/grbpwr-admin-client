@@ -32,7 +32,7 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { BomField } from './bom-field';
-import { ColorwaysField } from './colorways-field';
+import { ColorwayRecipes } from './colorway-recipe';
 import { CompositionEntries } from './composition-entries';
 import { ConstructionTab } from './construction-tab';
 import { CostEstimateField } from './cost-estimate-field';
@@ -735,10 +735,21 @@ export function TechCardForm({
             </Section>
           </div>
 
-          {/* COLORWAYS — рецепты: какой артикул на какую часть, цвет и расход */}
+          {/* COLORWAYS — рецепты: какой артикул на какую часть, цвет и расход (colourway-owned) */}
           <div hidden={activeTab !== 'colorways'}>
             <Section title='колорвеи — рецепты (материалы по частям)'>
-              <ColorwaysField />
+              {isEditMode && numId ? (
+                <ColorwayRecipes
+                  techCard={techCard}
+                  techCardId={numId}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                />
+              ) : (
+                <Text variant='inactive' size='small'>
+                  save the card first — colourways are products; their material recipes are edited
+                  here once the style exists.
+                </Text>
+              )}
             </Section>
           </div>
 
