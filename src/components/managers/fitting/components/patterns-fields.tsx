@@ -12,14 +12,14 @@ import { FittingFormData } from './schema';
 
 // Iteration выкройка for a fitting (§5): the pattern actually tried on, uploaded via the
 // shared PatternUploadButton. sizeId is optional (0 = not size-specific) and sourced from
-// the fitting's own sizes. "Скопировать из тех карты" seeds it from the linked card's
-// final patterns so an iteration can start from the current pattern.
-export function PatternsFields() {
+// the linked sample's size (a fitting tries one sample, which carries one sizeId — the old
+// multi-size picker this used to read from is gone). "Скопировать из тех карты" seeds it
+// from the linked card's final patterns so an iteration can start from the current pattern.
+export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
   const { control } = useFormContext<FittingFormData>();
   const { dictionary } = useDictionary();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
 
-  const sizes = (useWatch({ control, name: 'sizes' }) ?? []) as Array<{ sizeId?: number }>;
   const techCardId = (useWatch({ control, name: 'techCardId' }) as number) || 0;
   const { data: linkedCard } = useTechCard(techCardId || undefined);
   const cardPatterns = linkedCard?.techCard?.patterns ?? [];
@@ -30,16 +30,13 @@ export function PatternsFields() {
     return m;
   }, [dictionary?.sizes]);
 
-  // Size options = the fitting's own sizes, unioned with any size already on a pattern (e.g.
+  // Size options = the sample's own size, unioned with any size already on a pattern (e.g.
   // copied from the tech card) so every row's dropdown shows a real label rather than blank.
   const patternSizeIds = fields
     .map((f) => (f as { sizeId?: number }).sizeId)
     .filter((id): id is number => !!id);
   const optionSizeIds = [
-    ...new Set([
-      ...sizes.map((s) => s.sizeId).filter((id): id is number => !!id),
-      ...patternSizeIds,
-    ]),
+    ...new Set([...(sampleSizeId ? [sampleSizeId] : []), ...patternSizeIds]),
   ];
   const sizeOptions = [
     { value: 0, label: '— общий —' },
