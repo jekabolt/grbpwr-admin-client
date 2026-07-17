@@ -90,6 +90,16 @@ export const polybagOptions = [
 
 export const bagStickerOptions = ['размерный', 'штрих-код', 'состав/уход', 'без стикера'];
 
+// inserts = loose items dropped in the box alongside the product, not part of it. Everyone
+// starts blank — hint list only, backend takes free text.
+export const insertsOptions = [
+  'папиросная бумага',
+  'thank-you card',
+  'care card',
+  'стикер',
+  'без вложений',
+];
+
 // Construction-description aspects (details[]). The editor seeds these named rows; users can
 // add custom keys too. key is the stable proto value; label is what the tailor sees.
 export const detailAspects: Array<{ key: string; label: string }> = [

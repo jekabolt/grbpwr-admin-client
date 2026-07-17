@@ -1,4 +1,5 @@
 import type { StyleEconomics } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FC } from 'react';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
@@ -61,7 +62,11 @@ function Body({ economics }: { economics: StyleEconomics }) {
         {costed ? (
           <>
             <Row label='Unit cost' value={formatCurrency(parseDecimal(sales?.unitCost))} />
-            <Row label='COGS' value={formatCurrency(parseDecimal(sales?.revenueCost))} />
+            <Row
+              label='COGS'
+              value={formatCurrency(parseDecimal(sales?.revenueCost))}
+              sub='cost of goods sold'
+            />
             <Row
               label='Gross margin'
               value={`${formatCurrency(parseDecimal(sales?.grossMargin))} · ${(sales?.grossMarginPct ?? 0).toFixed(0)}%`}
@@ -88,11 +93,18 @@ function Body({ economics }: { economics: StyleEconomics }) {
             value={formatCurrency(parseDecimal(k.amountBase))}
           />
         ))}
+        {(e.samplesCount ?? 0) > 0 || parseDecimal(e.samplesCostBase) > 0 ? (
+          <Row
+            label='Physical samples'
+            value={`${formatNumber(e.samplesCount ?? 0)} · ${formatCurrency(parseDecimal(e.samplesCostBase))}`}
+            sub='informational — separate from the Samples dev cost above, not included in it'
+          />
+        ) : null}
         {dev?.unitCostWithDev?.value ? (
           <Row
             label='Unit cost + dev'
             value={formatCurrency(parseDecimal(dev.unitCostWithDev))}
-            sub={`amortized over ${formatNumber(dev.orderQty ?? 0)} · informational`}
+            sub={`amortized over ${formatNumber(dev.orderQty ?? 0)} units · informational only, not part of net after dev`}
           />
         ) : null}
       </Section>
@@ -155,6 +167,7 @@ export const StyleEconomicsModal: FC<StyleEconomicsModalProps> = ({
 }) => {
   const { data, isLoading, isError } = useStyleEconomics(techCardId, open);
   const economics = data?.economics;
+  const { canReadCosting } = usePermissions();
 
   return (
     <ConfirmationModal
@@ -167,13 +180,19 @@ export const StyleEconomicsModal: FC<StyleEconomicsModalProps> = ({
           : 'style economics'
       }
       confirmLabel='close'
-      cancelLabel='done'
     >
+      <Text variant='inactive' size='small' className='mb-2 block'>
+        Lifetime sales for this style, set against what it cost to develop and produce.
+      </Text>
       {isLoading ? (
         <Text size='small'>loading…</Text>
       ) : isError || !economics ? (
         <Text variant='inactive' size='small'>
-          No economics available for this style (needs sales and costing access).
+          {!canReadCosting
+            ? 'Costing access is required to view economics for this style — ask an admin to grant it.'
+            : isError
+              ? 'Could not load economics for this style right now — try again shortly.'
+              : 'This style has no recorded sales or development activity yet.'}
         </Text>
       ) : (
         <Body economics={economics} />

@@ -75,6 +75,7 @@ import { useTechCardDraft } from './useTechCardDraft';
 const TABS = [
   { id: 'header', label: 'header' },
   { id: 'sketch', label: 'sketch' },
+  { id: 'moodboard', label: 'moodboard' },
   { id: 'patterns', label: 'patterns' },
   { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
@@ -93,7 +94,7 @@ type TabId = (typeof TABS)[number]['id'];
 // Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
 // DEVELOP how it's made, SPEC what ships. History stands alone.
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
-  { band: 'design', tabs: ['header', 'sketch', 'patterns'] },
+  { band: 'design', tabs: ['header', 'sketch', 'moodboard', 'patterns'] },
   { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'pieces', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'dev', 'issues', 'signoff'] },
   { band: '', tabs: ['history'] },
@@ -101,7 +102,7 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
 const ERROR_TAB: Record<string, TabId> = {
-  moodboardMedia: 'sketch',
+  moodboardMedia: 'moodboard',
   technicalMedia: 'sketch',
   callouts: 'sketch',
   patterns: 'patterns',
@@ -257,7 +258,8 @@ export function TechCardForm({
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
   const sectionFilled: Partial<Record<TabId, boolean>> = {
     header: !!name?.trim() && (stage === 'TECH_CARD_STAGE_IDEA' || !!styleNumber?.trim()),
-    sketch: len(moodboardMedia) + len(technicalMedia) > 0,
+    sketch: len(technicalMedia) > 0,
+    moodboard: len(moodboardMedia) > 0,
     patterns: len(sizeIdsW) > 0,
     bom: len(bomItemsW) > 0,
     colorways: colorways.length > 0,
@@ -279,7 +281,7 @@ export function TechCardForm({
   // the stage advances, their echoed fields untouched. Not disabled — hidden. A tab carrying a
   // validation error stays visible even at IDEA, or the error dot would point at an invisible tab.
   const isIdea = stage === 'TECH_CARD_STAGE_IDEA';
-  const IDEA_TABS: TabId[] = ['header', 'sketch', 'samples', 'history'];
+  const IDEA_TABS: TabId[] = ['header', 'sketch', 'moodboard', 'samples', 'history'];
   // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read (server nulls
   // the cost block / returns an empty journal; an empty tab would read as "zero cost"). Samples
   // need a saved card (id).
@@ -659,7 +661,7 @@ export function TechCardForm({
               <HeaderMetaFields />
             </Section>
 
-            <Section title='style facts — fit / composition / care (shared by all colourways)'>
+            <Section title='style facts — fit / care (shared by all colourways)'>
               <StyleFactsField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
             </Section>
 
@@ -706,7 +708,11 @@ export function TechCardForm({
 
           {/* SKETCH */}
           <div hidden={activeTab !== 'sketch'}>
-            <SketchTab techCard={techCard} />
+            <SketchTab techCard={techCard} view='sketch' />
+          </div>
+
+          <div hidden={activeTab !== 'moodboard'}>
+            <SketchTab techCard={techCard} view='moodboard' />
           </div>
 
           {/* PATTERNS (size range + per-size PDF выкройки) */}

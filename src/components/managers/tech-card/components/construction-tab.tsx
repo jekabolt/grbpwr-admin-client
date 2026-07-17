@@ -1,5 +1,6 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { techCardBomSectionOptions, techCardMediaKindOptions } from 'constants/filter';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -289,17 +290,43 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as Array<
     FormOperation & { calloutNumber?: number }
   >;
-  const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
-    code?: string;
-    name?: string;
-    hex?: string;
-    usages?: FormUsage[];
-  }>;
+  const { dictionary } = useDictionary();
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     name?: string;
     section?: string;
     lineKey?: string;
   }>;
+  // Read colourways from the FRESH tech-card read (React Query), not the form: the form's `colorways`
+  // is a legacy empty echo (mapTechCardToForm maps it from []), so construction showed nothing even
+  // when the style has colourways. Colourways are separate products (CreateColorway) whose recipes
+  // are saved via UpdateColorwayRecipe — the read carries them (same source the recipe editor uses).
+  const colorways = useMemo(
+    () =>
+      (techCard?.colorways ?? []).map((cw) => {
+        const dc = dictionary?.colors?.find((c) => c.code === cw.colorCode);
+        return {
+          code: cw.colorCode ?? '',
+          name: dc?.name ?? cw.colorCode ?? '',
+          hex: dc?.hex ?? '',
+          usages: (cw.usages ?? []).map<FormUsage>((u) => ({
+            bomLineKey:
+              u.bomLineKey ||
+              (typeof u.bomItemIndex === 'number' ? bomItems[u.bomItemIndex]?.lineKey : '') ||
+              '',
+            placement: u.placement ?? '',
+            color: u.color ?? '',
+            pantone: u.pantone ?? '',
+            consumption: u.consumption?.value ?? '',
+            quantity: u.quantity?.value ?? '',
+            sizeConsumptions: (u.sizeConsumptions ?? []).map((s) => ({
+              sizeId: s.sizeId,
+              consumption: s.consumption?.value ?? '',
+            })),
+          })),
+        };
+      }),
+    [techCard?.colorways, dictionary?.colors, bomItems],
+  );
 
   const [activePin, setActivePin] = useState<number | null>(null);
   const [activeBom, setActiveBom] = useState<string | null>(null);

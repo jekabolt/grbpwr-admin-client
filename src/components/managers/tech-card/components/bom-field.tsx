@@ -183,10 +183,11 @@ function BomItemRow({
   highlight?: boolean;
 }) {
   const { control, getValues } = useFormContext<TechCardFormData>();
-  // materialId > 0 = this line is linked to a catalog Material: the identity fields below render
-  // as a read-only mirror instead of editable inputs (S23) so hand-edits can no longer diverge
-  // from the catalog. The overlay that stays editable either way is section/unit/unitPrice/
-  // currency/wastagePercent/fabricDirection/comment/color.
+  // materialId > 0 = this line is linked to a catalog Material: the material's own facts below render
+  // as a read-only mirror instead of editable inputs (S23) so a hand-edit can no longer diverge from
+  // the catalog (e.g. a fabric line silently set to section=hardware). What the material defines —
+  // section, unit, base colour, spec, composition, supplier, unit price — is mirrored; what belongs to
+  // THIS line's use of it stays editable: consumption/wastage/fabric-direction/currency/comment.
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const linked = materialId > 0;
@@ -202,6 +203,8 @@ function BomItemRow({
     catalogValue?.trim()
       ? catalogValue
       : (getValues(`bomItems.${index}.${field}` as never) as string);
+  const sectionLabel = (v?: string): string =>
+    techCardBomSectionOptions.find((o) => o.value === v)?.label ?? v ?? '';
 
   return (
     <div className='space-y-3 border border-textInactiveColor p-3'>
@@ -221,22 +224,33 @@ function BomItemRow({
 
       <div className='grid grid-cols-1 gap-3 lg:grid-cols-3'>
         <MaterialLinkField index={index} />
-        <SelectField
-          name={`bomItems.${index}.section`}
-          label='section *'
-          items={techCardBomSectionOptions}
-        />
+        {linked ? (
+          <ReadOnlyMirrorField
+            label='section'
+            value={sectionLabel(mirror(linkedMaterial?.section, 'section'))}
+          />
+        ) : (
+          <SelectField
+            name={`bomItems.${index}.section`}
+            label='section *'
+            items={techCardBomSectionOptions}
+          />
+        )}
         {linked ? (
           <ReadOnlyMirrorField label='name' value={mirror(linkedMaterial?.name, 'name')} />
         ) : (
           <InputField name={`bomItems.${index}.name`} label='name *' />
         )}
-        <ComboField
-          name={`bomItems.${index}.unit`}
-          label='unit'
-          options={unitOptions}
-          placeholder='м / pcs'
-        />
+        {linked ? (
+          <ReadOnlyMirrorField label='unit' value={mirror(linkedMaterial?.unit, 'unit')} />
+        ) : (
+          <ComboField
+            name={`bomItems.${index}.unit`}
+            label='unit'
+            options={unitOptions}
+            placeholder='м / pcs'
+          />
+        )}
         {linked ? (
           <ReadOnlyMirrorField
             label='supplier'
@@ -253,7 +267,14 @@ function BomItemRow({
         ) : (
           <InputField name={`bomItems.${index}.supplierRef`} label='supplier ref' />
         )}
-        <InputField name={`bomItems.${index}.color`} label='base color (ref)' />
+        {linked ? (
+          <ReadOnlyMirrorField
+            label='base color (ref)'
+            value={mirror(linkedMaterial?.color, 'color')}
+          />
+        ) : (
+          <InputField name={`bomItems.${index}.color`} label='base color (ref)' />
+        )}
         {linked ? (
           <ReadOnlyMirrorField
             label='spec (width / weight)'
@@ -284,7 +305,14 @@ function BomItemRow({
       </div>
 
       <div className='grid grid-cols-2 items-end gap-3 lg:grid-cols-3'>
-        <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
+        {linked ? (
+          <ReadOnlyMirrorField
+            label='unit price'
+            value={mirror(linkedMaterial?.latestPrice?.price?.value, 'unitPrice')}
+          />
+        ) : (
+          <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
+        )}
         <CurrencySelect name={`bomItems.${index}.currency`} label='currency' />
       </div>
 

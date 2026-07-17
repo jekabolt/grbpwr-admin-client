@@ -243,8 +243,18 @@ export function PackagingRecipeField({
             <thead>
               <tr>
                 <th className={th}>material</th>
-                <th className={th}>qty / order</th>
-                <th className={th}>qty / item</th>
+                <th className={th}>
+                  qty / order
+                  <div className='mt-0.5 text-[10px] font-normal normal-case text-textInactiveColor'>
+                    раз на отгрузку (коробка, наполнитель)
+                  </div>
+                </th>
+                <th className={th}>
+                  qty / item
+                  <div className='mt-0.5 text-[10px] font-normal normal-case text-textInactiveColor'>
+                    на каждую единицу (пыльник, хэнгтег)
+                  </div>
+                </th>
                 <th className={th}>active</th>
                 {canEdit ? <th className={th} /> : null}
               </tr>
