@@ -281,6 +281,7 @@ export type common_Collection = {
   countWomen: number | undefined;
   code: string | undefined;
   archived: boolean | undefined;
+  id: number | undefined;
 };
 
 export type common_Language = {
@@ -418,76 +419,106 @@ export type DeleteFromBucketRequest = {
 export type DeleteFromBucketResponse = {
 };
 
-export type UpsertColorwayRequest = {
-  id: number | undefined;
-  product: common_ColorwayNew | undefined;
-};
-
-export type common_ColorwayNew = {
-  product: common_ColorwayInsert | undefined;
-  sizeMeasurements: common_SizeWithMeasurementInsert[] | undefined;
+// CreateColorway/UpdateColorway/UpdateStyle replace the coupled UpsertColorway (R2/R4 write
+// decomposition, §6). A colourway is created DRAFT against an existing style and carries only
+// colourway-owned fields; the style facts are patched separately through UpdateStyle under a shared
+// optimistic lock.
+export type CreateColorwayRequest = {
+  styleId: number | undefined;
+  merchandising: common_ColorwayMerchandisingInsert | undefined;
+  development: common_ColorwayDevelopmentInsert | undefined;
+  thumbnailMediaId: number | undefined;
+  secondaryThumbnailMediaId: number | undefined;
   mediaIds: number[] | undefined;
   tags: common_ColorwayTagInsert[] | undefined;
   prices: common_ColorwayPriceInsert[] | undefined;
-};
-
-export type common_ColorwayInsert = {
-  productBodyInsert: common_ColorwayBodyInsert | undefined;
-  thumbnailMediaId: number | undefined;
   translations: common_ColorwayInsertTranslation[] | undefined;
-  secondaryThumbnailMediaId: number | undefined;
-  // Legacy duplicate of ColorwayNew.prices. New clients must use the top-level field.
-  // Kept during the compatibility window so already generated clients continue to decode.
-  prices: common_ColorwayPriceInsert[] | undefined;
-  // cost_price is the confidential per-unit cost of goods (COGS) in base currency (EUR),
-  // used for margin analytics. Omit/empty to leave the stored value unchanged on update.
-  // Deliberately on ColorwayInsert (write-only) and NOT on ColorwayBodyInsert, so it is
-  // never serialized on the storefront product read path.
   costPrice: googletype_Decimal | undefined;
+  countryCode: string | undefined;
 };
 
-export type common_ColorwayBodyInsert = {
+// ColorwayMerchandisingInsert (R8: renamed from ColorwayBodyInsert) carries the colourway-owned
+// merchandising fields ONLY. The garment/style facts (brand, season, collection, target_gender, fit,
+// composition, care instructions, model-wears, categories) are owned by the Style and written via
+// UpdateStyle (R4/§14.7) — they are reserved here. The free-text country_of_origin is replaced by the
+// ISO country_code (R9).
+export type common_ColorwayMerchandisingInsert = {
   preorder: wellKnownTimestamp | undefined;
-  brand: string | undefined;
   // Optional per-colorway shade override. When absent, clients use dictionary_color.hex.
   colorHexOverride?: string;
-  countryOfOrigin: string | undefined;
+  salePercentage: googletype_Decimal | undefined;
+  // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
+  minTier: number | undefined;
   // REQUIRED canonical FK to Dictionary.colors; the sole color/SKU identity on writes.
   colorCode: string | undefined;
   // OUTPUT-ONLY resolved dictionary entry. Ignored on write.
   dictionaryColor: common_Color | undefined;
-  salePercentage: googletype_Decimal | undefined;
-  topCategoryId: number | undefined;
-  subCategoryId: number | undefined;
-  typeId: number | undefined;
-  modelWearsHeightCm: number | undefined;
-  modelWearsSizeId: number | undefined;
-  careInstructions: string | undefined;
-  composition: string | undefined;
-  hidden: boolean | undefined;
-  targetGender: common_GenderEnum | undefined;
-  season: common_SeasonEnum | undefined;
-  collection: string | undefined;
-  fit: string | undefined;
-  // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
-  minTier: number | undefined;
+  // country_code is the ISO 3166-1 alpha-2 manufacture country (R9; FK Country dict). Colourway-owned.
+  countryCode: string | undefined;
 };
 
-export type common_GenderEnum =
-  | "GENDER_ENUM_UNKNOWN"
-  | "GENDER_ENUM_MALE"
-  | "GENDER_ENUM_FEMALE"
-  | "GENDER_ENUM_UNISEX";
-export type common_SeasonEnum =
-  | "SEASON_ENUM_UNKNOWN"
-  | "SEASON_ENUM_SS"
-  | "SEASON_ENUM_FW"
-  | "SEASON_ENUM_PF"
-  | "SEASON_ENUM_RC";
-export type common_ColorwayInsertTranslation = {
-  languageId: number | undefined;
+// ColorwayDevelopmentInsert carries the PLM / lab-dip development fields that moved onto the colourway
+// (product) in the R1 merge: ex tech_card_colorway.code/name/hex/comment become dev_code/name/dev_hex/
+// comment. Lives in techcard.proto to reach TechCardLabDipStatus and the usage recipe without a circular
+// import (product.proto cannot import techcard.proto). NOTE: `usages` (the material recipe) is keyed by
+// an explicit colorway_id = product.id (R1/§14.3); the positional colorway_index model is gone.
+export type common_ColorwayDevelopmentInsert = {
+  devCode: string | undefined;
   name: string | undefined;
-  description: string | undefined;
+  labDipStatus: common_TechCardLabDipStatus | undefined;
+  comment: string | undefined;
+  pantone: string | undefined;
+  pantoneSystem: string | undefined;
+  devHex: string | undefined;
+  swatchMediaId: number | undefined;
+  labDipRound: number | undefined;
+  labDipSubmittedAt: wellKnownTimestamp | undefined;
+  labDipDecidedAt: wellKnownTimestamp | undefined;
+  labDipDecidedBy: string | undefined;
+  labDipRejectReason: string | undefined;
+  usages: common_TechCardColorwayUsage[] | undefined;
+  displayOrder: number | undefined;
+};
+
+// TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
+export type common_TechCardLabDipStatus =
+  | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
+  | "TECH_CARD_LAB_DIP_STATUS_PENDING"
+  | "TECH_CARD_LAB_DIP_STATUS_SUBMITTED"
+  | "TECH_CARD_LAB_DIP_STATUS_APPROVED"
+  | "TECH_CARD_LAB_DIP_STATUS_REJECTED";
+// TechCardColorwayUsage is one material use inside a colourway: which catalog article
+// (bom_item_index) goes on which garment part (placement), the colour it takes HERE, and
+// how much is consumed (per-garment and/or per-size). The BOM is a pure article catalog;
+// per-colourway divergence lives here.
+export type common_TechCardColorwayUsage = {
+  // explicit presence: index 0 is a real BOM line, distinct from "unset"
+  // (mirrors TechCardOperation.bom_item_index).
+  bomItemIndex?: number;
+  placement: string | undefined;
+  // matched (trim+lower) against TechCardOperation.placement
+  color: string | undefined;
+  // independent of the colourway swatch pantone (ColorwayDevelopmentInsert.pantone)
+  pantone: string | undefined;
+  consumption: googletype_Decimal | undefined;
+  quantity: googletype_Decimal | undefined;
+  sizeConsumptions: common_TechCardBomSizeConsumption[] | undefined;
+  lineTotal: googletype_Decimal | undefined;
+  sizeRunTotal: googletype_Decimal | undefined;
+  // explicit presence: 0-based index into TechCardInsert.pieces saying which cut-piece this
+  // consumption norm is about; unset = whole garment (informational, NF-05).
+  pieceIndex?: number;
+};
+
+// TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
+// material — different sizes consume different amounts of fabric.
+export type common_TechCardBomSizeConsumption = {
+  sizeId: number | undefined;
+  consumption: googletype_Decimal | undefined;
+};
+
+export type common_ColorwayTagInsert = {
+  tag: string | undefined;
 };
 
 export type common_ColorwayPriceInsert = {
@@ -495,27 +526,103 @@ export type common_ColorwayPriceInsert = {
   price: googletype_Decimal | undefined;
 };
 
-export type common_SizeWithMeasurementInsert = {
-  productSize: common_VariantInsert | undefined;
-  measurements: common_ProductMeasurementInsert[] | undefined;
+export type common_ColorwayInsertTranslation = {
+  languageId: number | undefined;
+  name: string | undefined;
+  description: string | undefined;
 };
 
-export type common_VariantInsert = {
-  quantity: googletype_Decimal | undefined;
-  sizeId: number | undefined;
+export type CreateColorwayResponse = {
+  colorwayId: number | undefined;
 };
 
-export type common_ProductMeasurementInsert = {
-  measurementNameId: number | undefined;
-  measurementValue: googletype_Decimal | undefined;
+export type UpdateColorwayRequest = {
+  colorwayId: number | undefined;
+  expectedColorwayVersion: number | undefined;
+  merchandising: common_ColorwayMerchandisingInsert | undefined;
+  development: common_ColorwayDevelopmentInsert | undefined;
+  mediaIds: number[] | undefined;
+  tags: common_ColorwayTagInsert[] | undefined;
+  prices: common_ColorwayPriceInsert[] | undefined;
+  updateMask: wellKnownFieldMask | undefined;
+  thumbnailMediaId: number | undefined;
+  secondaryThumbnailMediaId: number | undefined;
+  costPrice: googletype_Decimal | undefined;
+  countryCode: string | undefined;
+  translations: common_ColorwayInsertTranslation[] | undefined;
 };
 
-export type common_ColorwayTagInsert = {
-  tag: string | undefined;
+// In JSON, a field mask is encoded as a single string where paths are
+// separated by a comma. Fields name in each path are converted
+// to/from lower-camel naming conventions.
+// As an example, consider the following message declarations:
+//
+//     message Profile {
+//       User user = 1;
+//       Photo photo = 2;
+//     }
+//     message User {
+//       string display_name = 1;
+//       string address = 2;
+//     }
+//
+// In proto a field mask for `Profile` may look as such:
+//
+//     mask {
+//       paths: "user.display_name"
+//       paths: "photo"
+//     }
+//
+// In JSON, the same mask is represented as below:
+//
+//     {
+//       mask: "user.displayName,photo"
+//     }
+type wellKnownFieldMask = string;
+
+export type UpdateColorwayResponse = {
+  lockVersion: number | undefined;
 };
 
-export type UpsertColorwayResponse = {
-  id: number | undefined;
+// StylePatch is the narrow set of catalogue-style facts UpdateStyle owns (R4/§14.7-8). It deliberately
+// does NOT reuse the heavy TechCardInsert, so a style-catalogue edit can never full-replace the PLM
+// children (BOM/POM/ops). category_id stays a PLM/UpdateTechCard fact; canonical style translations
+// await a dedicated style_translation table (deferred).
+export type StylePatch = {
+  brand: string | undefined;
+  season: common_SeasonEnum | undefined;
+  collection: string | undefined;
+  targetGender: common_GenderEnum | undefined;
+  fit: string | undefined;
+  composition: string | undefined;
+  careInstructions: string | undefined;
+  modelWearsHeightCm: number | undefined;
+  modelWearsSizeId: number | undefined;
+  topCategoryId: number | undefined;
+  subCategoryId: number | undefined;
+  typeId: number | undefined;
+};
+
+export type common_SeasonEnum =
+  | "SEASON_ENUM_UNKNOWN"
+  | "SEASON_ENUM_SS"
+  | "SEASON_ENUM_FW"
+  | "SEASON_ENUM_PF"
+  | "SEASON_ENUM_RC";
+export type common_GenderEnum =
+  | "GENDER_ENUM_UNKNOWN"
+  | "GENDER_ENUM_MALE"
+  | "GENDER_ENUM_FEMALE"
+  | "GENDER_ENUM_UNISEX";
+export type UpdateStyleRequest = {
+  styleId: number | undefined;
+  patch: StylePatch | undefined;
+  expectedLockVersion: number | undefined;
+  updateMask: wellKnownFieldMask | undefined;
+};
+
+export type UpdateStyleResponse = {
+  lockVersion: number | undefined;
 };
 
 export type GetColorwaysPagedRequest = {
@@ -524,7 +631,7 @@ export type GetColorwaysPagedRequest = {
   sortFactors: common_SortFactor[] | undefined;
   orderFactor: common_OrderFactor | undefined;
   filterConditions: common_FilterConditions | undefined;
-  showHidden: boolean | undefined;
+  statuses: common_ColorwayLifecycleStatus[] | undefined;
 };
 
 export type common_SortFactor =
@@ -551,8 +658,18 @@ export type common_FilterConditions = {
   colorCodes: string[] | undefined;
 };
 
+// ColorwayLifecycleStatus is the stored lifecycle of a colourway (R6). Numbers are fixed and match the
+// DB tinyint + entity.ColorwayStatus. UNKNOWN is rejected on write; an unknown read value fails closed
+// (the colourway is not shown). Only ACTIVE is exposed publicly.
+export type common_ColorwayLifecycleStatus =
+  | "COLORWAY_LIFECYCLE_STATUS_UNKNOWN"
+  | "COLORWAY_LIFECYCLE_STATUS_DRAFT"
+  | "COLORWAY_LIFECYCLE_STATUS_ACTIVE"
+  | "COLORWAY_LIFECYCLE_STATUS_HIDDEN"
+  | "COLORWAY_LIFECYCLE_STATUS_ARCHIVED";
 export type GetColorwaysPagedResponse = {
-  products: common_Colorway[] | undefined;
+  colorways: common_Colorway[] | undefined;
+  total: number | undefined;
 };
 
 export type common_Colorway = {
@@ -574,14 +691,37 @@ export type common_Colorway = {
 };
 
 export type common_ColorwayDisplay = {
-  productBody: common_ColorwayBody | undefined;
   thumbnail: common_MediaFull | undefined;
   secondaryThumbnail: common_MediaFull | undefined;
+  merchandising: common_ColorwayMerchandising | undefined;
+  translations: common_ColorwayInsertTranslation[] | undefined;
 };
 
-export type common_ColorwayBody = {
-  productBodyInsert: common_ColorwayBodyInsert | undefined;
-  translations: common_ColorwayInsertTranslation[] | undefined;
+// ColorwayMerchandising is the admin/internal READ projection of a colourway's display fields: the
+// colourway-owned merchandising PLUS the style-resolved garment facts (output-only), so the admin
+// detail view keeps rendering brand/season/collection/etc even though they are now written on the
+// Style. Never reachable from FrontendService (the storefront uses StorefrontColorway, R3).
+export type common_ColorwayMerchandising = {
+  preorder: wellKnownTimestamp | undefined;
+  brand: string | undefined;
+  colorHexOverride?: string;
+  countryOfOrigin: string | undefined;
+  salePercentage: googletype_Decimal | undefined;
+  topCategoryId: number | undefined;
+  subCategoryId: number | undefined;
+  typeId: number | undefined;
+  modelWearsHeightCm: number | undefined;
+  modelWearsSizeId: number | undefined;
+  careInstructions: string | undefined;
+  composition: string | undefined;
+  targetGender: common_GenderEnum | undefined;
+  season: common_SeasonEnum | undefined;
+  collection: string | undefined;
+  fit: string | undefined;
+  minTier: number | undefined;
+  colorCode: string | undefined;
+  dictionaryColor: common_Color | undefined;
+  countryCode: string | undefined;
 };
 
 export type common_ColorwayPrice = {
@@ -589,21 +729,12 @@ export type common_ColorwayPrice = {
   price: googletype_Decimal | undefined;
 };
 
-// ColorwayLifecycleStatus is the stored lifecycle of a colourway (R6). Numbers are fixed and match the
-// DB tinyint + entity.ColorwayStatus. UNKNOWN is rejected on write; an unknown read value fails closed
-// (the colourway is not shown). Only ACTIVE is exposed publicly.
-export type common_ColorwayLifecycleStatus =
-  | "COLORWAY_LIFECYCLE_STATUS_UNKNOWN"
-  | "COLORWAY_LIFECYCLE_STATUS_DRAFT"
-  | "COLORWAY_LIFECYCLE_STATUS_ACTIVE"
-  | "COLORWAY_LIFECYCLE_STATUS_HIDDEN"
-  | "COLORWAY_LIFECYCLE_STATUS_ARCHIVED";
 export type GetColorwayByIDRequest = {
-  id: number | undefined;
+  colorwayId: number | undefined;
 };
 
 export type GetColorwayByIDResponse = {
-  product: common_ColorwayFull | undefined;
+  colorway: common_ColorwayFull | undefined;
   // cost_info carries the confidential COGS/provenance fields. Admin-only — this lives on the
   // admin GetColorwayByID response, never on the shared ColorwayFull, so it cannot leak to the
   // storefront read path.
@@ -643,25 +774,31 @@ export type common_ColorwayTag = {
 // when absent.
 export type ColorwayCostInfo = {
   costPrice: googletype_Decimal | undefined;
-  costPriceSource: string | undefined;
-  costPriceTechCardId: number | undefined;
+  costPriceSource: common_ColorwayCostSource | undefined;
+  costSourceTechCardId: number | undefined;
   costPriceUpdatedAt: wellKnownTimestamp | undefined;
   primaryTechCardId: number | undefined;
 };
 
-export type SyncColorwayCostFromStyleRequest = {
-  productId: number | undefined;
-  // tech_card_id optionally repoints the product's primary card before seeding; 0 = use the
-  // product's existing primary card.
-  techCardId: number | undefined;
+// ColorwayCostSource records where a colourway's COGS came from (R4), separating cost provenance from
+// the owning style relation.
+export type common_ColorwayCostSource =
+  | "COLORWAY_COST_SOURCE_UNKNOWN"
+  | "COLORWAY_COST_SOURCE_MANUAL"
+  | "COLORWAY_COST_SOURCE_STYLE"
+  | "COLORWAY_COST_SOURCE_PRODUCTION_RUN";
+export type SyncColorwayCostFromOwningStyleRequest = {
+  colorwayId: number | undefined;
+  expectedVersion: number | undefined;
 };
 
-export type SyncColorwayCostFromStyleResponse = {
+export type SyncColorwayCostFromOwningStyleResponse = {
   // the cost_price written, in base currency.
   costPrice: googletype_Decimal | undefined;
   currency: string | undefined;
-  // the tech card the cost was sourced from.
+  // the tech card the cost was sourced from (the owning style's primary card).
   techCardId: number | undefined;
+  source: common_ColorwayCostSource | undefined;
 };
 
 // Lifecycle transition requests (R6). expected_version echoes tech_card.lock_version for future
@@ -696,12 +833,11 @@ export type TransitionColorwayStatusResponse = {
 
 export type UpdateVariantStockRequest = {
   mode: common_StockAdjustmentMode | undefined;
-  productId: number | undefined;
-  sizeId: number | undefined;
   quantity: number | undefined;
   direction: common_StockAdjustmentDirection | undefined;
   reason: common_StockChangeReason | undefined;
   comment?: string;
+  variantId: number | undefined;
 };
 
 export type common_StockAdjustmentMode =
@@ -735,6 +871,108 @@ export type common_StockChangeReason =
 export type UpdateVariantStockResponse = {
 };
 
+// Variant CRUD (R2). A variant is created at zero stock, its size is immutable, and it is archived
+// (never deleted) so the frozen order/stock references stay valid. expected_*_version echoes the
+// shared tech_card.lock_version for future optimistic-lock wiring; concurrency today is enforced by
+// the store's existence + status guards (a concurrent change is rejected, never silently lost).
+export type CreateVariantRequest = {
+  colorwayId: number | undefined;
+  sizeId: number | undefined;
+  expectedColorwayVersion: number | undefined;
+};
+
+export type CreateVariantResponse = {
+  variant: common_Variant | undefined;
+};
+
+export type UpdateVariantRequest = {
+  variantId: number | undefined;
+  expectedVersion: number | undefined;
+  patch: VariantPatch | undefined;
+  updateMask: wellKnownFieldMask | undefined;
+};
+
+// VariantPatch carries the only mutable variant field: its lifecycle status (archive-not-delete).
+export type VariantPatch = {
+  status: common_VariantLifecycleStatus | undefined;
+};
+
+export type UpdateVariantResponse = {
+  variant: common_Variant | undefined;
+};
+
+export type ArchiveVariantRequest = {
+  variantId: number | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveVariantResponse = {
+};
+
+// Style size chart (R5, full-replace). The chart is style-owned (tech_card_size_measurement) and shares
+// the style's tech_card.lock_version; there is no separate chart version.
+export type GetStyleSizeChartRequest = {
+  styleId: number | undefined;
+};
+
+export type GetStyleSizeChartResponse = {
+  chart: common_StyleSizeChart | undefined;
+};
+
+export type common_StyleSizeChart = {
+  styleId: number | undefined;
+  lockVersion: number | undefined;
+  cells: common_StyleSizeChartCell[] | undefined;
+};
+
+// StyleSizeChart is the style-owned size chart (R5). Written full-replace under the shared
+// tech_card.lock_version; there is no separate chart version.
+export type common_StyleSizeChartCell = {
+  sizeId: number | undefined;
+  measurementNameId: number | undefined;
+  value: googletype_Decimal | undefined;
+};
+
+export type UpdateStyleSizeChartRequest = {
+  styleId: number | undefined;
+  expectedLockVersion: number | undefined;
+  cells: common_StyleSizeChartCell[] | undefined;
+};
+
+export type UpdateStyleSizeChartResponse = {
+  chart: common_StyleSizeChart | undefined;
+};
+
+// RelinkDraftColorway (R4): move a DRAFT colourway onto target_style_id. Both expected versions echo the
+// respective styles' shared tech_card.lock_version (stale -> ABORTED).
+export type RelinkDraftColorwayRequest = {
+  colorwayId: number | undefined;
+  targetStyleId: number | undefined;
+  expectedColorwayVersion: number | undefined;
+  expectedTargetStyleVersion: number | undefined;
+};
+
+export type RelinkDraftColorwayResponse = {
+};
+
+export type CloneStyleForSeasonRequest = {
+  sourceStyleId: number | undefined;
+  skuSeason: common_SkuSeason | undefined;
+  expectedSourceVersion: number | undefined;
+};
+
+// SkuSeason is the normalized style-owned season used in every SKU. The pair is atomic: callers
+// either omit the whole message (early draft/idea) or provide both a known code and a 2000..2099
+// year. Free-text season labels are not part of the contract.
+export type common_SkuSeason = {
+  code: common_SeasonEnum | undefined;
+  year: number | undefined;
+};
+
+export type CloneStyleForSeasonResponse = {
+  newStyleId: number | undefined;
+};
+
 // ColorwayCustoms is a product's international-shipping customs data. hs_code and
 // customs_description are the customs-only fields set by SetColorwayCustoms. country_of_origin is the
 // existing core product field (free-text manufacture country) returned read-only for display and
@@ -746,7 +984,7 @@ export type ColorwayCustoms = {
 };
 
 export type GetColorwayCustomsRequest = {
-  productId: number | undefined;
+  colorwayId: number | undefined;
 };
 
 export type GetColorwayCustomsResponse = {
@@ -754,17 +992,149 @@ export type GetColorwayCustomsResponse = {
 };
 
 export type SetColorwayCustomsRequest = {
-  productId: number | undefined;
+  colorwayId: number | undefined;
   customs: ColorwayCustoms | undefined;
 };
 
 export type SetColorwayCustomsResponse = {
 };
 
+export type ListColorsRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListColorsResponse = {
+  colors: common_Color[] | undefined;
+};
+
+export type CreateColorRequest = {
+  code: string | undefined;
+  name: string | undefined;
+  hex: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type CreateColorResponse = {
+  color: common_Color | undefined;
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type UpdateColorRequest = {
+  code: string | undefined;
+  name: string | undefined;
+  hex: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type UpdateColorResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ArchiveColorRequest = {
+  code: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveColorResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ListCollectionsRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListCollectionsResponse = {
+  collections: common_Collection[] | undefined;
+};
+
+export type CreateCollectionRequest = {
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type CreateCollectionResponse = {
+  collection: common_Collection | undefined;
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type UpdateCollectionRequest = {
+  id: number | undefined;
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type UpdateCollectionResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ArchiveCollectionRequest = {
+  id: number | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveCollectionResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ListTagsRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListTagsResponse = {
+  tags: common_Tag[] | undefined;
+};
+
+export type CreateTagRequest = {
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type CreateTagResponse = {
+  tag: common_Tag | undefined;
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type UpdateTagRequest = {
+  id: number | undefined;
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type UpdateTagResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ArchiveTagRequest = {
+  id: number | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveTagResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ListCountriesRequest = {
+  activeOnly: boolean | undefined;
+};
+
+export type ListCountriesResponse = {
+  countries: common_Country[] | undefined;
+};
+
+export type SetCountryActiveRequest = {
+  code: string | undefined;
+  active: boolean | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type SetCountryActiveResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
 export type ListStockChangeHistoryRequest = {
   dateFrom: wellKnownTimestamp | undefined;
   dateTo: wellKnownTimestamp | undefined;
-  productId: number | undefined;
+  colorwayId: number | undefined;
   sizeId?: number;
   source: common_StockChangeSource | undefined;
   limit: number | undefined;
@@ -808,7 +1178,7 @@ export type common_StockChange = {
 export type ListStockChangesRequest = {
   from: wellKnownTimestamp | undefined;
   to: wellKnownTimestamp | undefined;
-  productId?: number;
+  colorwayId?: number;
   source: common_StockChangeSource | undefined;
   limit: number | undefined;
   offset: number | undefined;
@@ -841,7 +1211,7 @@ export type ListStockChangesResponse = {
 };
 
 export type DeleteProductMediaRequest = {
-  productId: number | undefined;
+  colorwayId: number | undefined;
   mediaId: number | undefined;
 };
 
@@ -948,16 +1318,19 @@ export type common_OrderItem = {
   topCategoryId: number | undefined;
   subCategoryId: number | undefined;
   typeId: number | undefined;
-  sku: string | undefined;
+  // R2/p021: the frozen variant SKU of the sold line (immutable snapshot; no live fallback). Renamed
+  // from `sku`.
+  variantSkuSnapshot: string | undefined;
   preorder: wellKnownTimestamp | undefined;
   orderItem: common_OrderItemInsert | undefined;
   translations: common_ColorwayInsertTranslation[] | undefined;
+  baseSkuSnapshot: string | undefined;
+  sizeNameSnapshot: string | undefined;
 };
 
 export type common_OrderItemInsert = {
-  productId: number | undefined;
   quantity: number | undefined;
-  sizeId: number | undefined;
+  variantSku: string | undefined;
 };
 
 // Payment represents the payment table
@@ -2412,12 +2785,12 @@ export type CreateCustomOrderRequest = {
   shipmentCost: googletype_Decimal | undefined;
 };
 
-// CustomOrderItemInsert allows custom pricing per item (admin-only).
+// CustomOrderItemInsert allows custom pricing per item (admin-only). Admin addresses the variant by its
+// internal id (R2).
 export type common_CustomOrderItemInsert = {
-  productId: number | undefined;
   quantity: number | undefined;
-  sizeId: number | undefined;
   customPrice: googletype_Decimal | undefined;
+  variantId: number | undefined;
 };
 
 export type CreateCustomOrderResponse = {
@@ -2760,7 +3133,7 @@ export type common_ArchiveMediaWithCaptionInsert = {
 };
 
 export type common_ArchiveProductInsert = {
-  productId: number | undefined;
+  colorwayId: number | undefined;
   translations: common_ArchiveItemTranslation[] | undefined;
 };
 
@@ -2771,7 +3144,7 @@ export type common_ArchiveProductsTagInsert = {
 };
 
 export type common_ArchiveProductsManualInsert = {
-  productIds: number[] | undefined;
+  colorwayIds: number[] | undefined;
   translations: common_ArchiveItemTranslation[] | undefined;
 };
 
@@ -4810,14 +5183,6 @@ export type common_TechCardPurpose =
   | "TECH_CARD_PURPOSE_UNKNOWN"
   | "TECH_CARD_PURPOSE_SELLABLE"
   | "TECH_CARD_PURPOSE_AUXILIARY";
-// SkuSeason is the normalized style-owned season used in every SKU. The pair is atomic: callers
-// either omit the whole message (early draft/idea) or provide both a known code and a 2000..2099
-// year. Free-text season labels are not part of the contract.
-export type common_SkuSeason = {
-  code: common_SeasonEnum | undefined;
-  year: number | undefined;
-};
-
 export type CreateTechCardResponse = {
   id: number | undefined;
 };
@@ -5702,11 +6067,18 @@ export interface AdminService {
   DeleteFromBucket(request: DeleteFromBucketRequest): Promise<DeleteFromBucketResponse>;
   // ListObjectsPaged lists all objects in the base folder.
   ListObjectsPaged(request: ListObjectsPagedRequest): Promise<ListObjectsPagedResponse>;
-  // Adds a new product or updates an existing one.
-  UpsertColorway(request: UpsertColorwayRequest): Promise<UpsertColorwayResponse>;
-  // Retrieves a paginated list of products.
+  // CreateColorway creates a new DRAFT colourway attached to an existing style (R2/R4 write
+  // decomposition; replaces the coupled UpsertColorway). It writes only colourway-owned fields — no
+  // style facts (UpdateStyle), no variants (CreateVariant), no size chart (UpdateStyleSizeChart). The
+  // colourway starts DRAFT and is made live through PublishColorway.
+  CreateColorway(request: CreateColorwayRequest): Promise<CreateColorwayResponse>;
+  // UpdateColorway patches a colourway's own merchandising fields under an optimistic lock
+  // (expected_colorway_version = the shared tech_card.lock_version). It never touches style facts,
+  // variants, stock or the size chart (R2/R4).
+  UpdateColorway(request: UpdateColorwayRequest): Promise<UpdateColorwayResponse>;
+  // Retrieves a paginated list of colourways.
   GetColorwaysPaged(request: GetColorwaysPagedRequest): Promise<GetColorwaysPagedResponse>;
-  // Gets a product by its ID.
+  // Gets a colourway by its id.
   GetColorwayByID(request: GetColorwayByIDRequest): Promise<GetColorwayByIDResponse>;
   // ArchiveColorwayByID retires a colourway (archive-not-delete, R6/R9): ACTIVE|HIDDEN -> ARCHIVED
   // (terminal). Was DeleteColorwayByID.
@@ -5721,19 +6093,66 @@ export interface AdminService {
   TransitionColorwayStatus(request: TransitionColorwayStatusRequest): Promise<TransitionColorwayStatusResponse>;
   // Updates the stock for a specific product size.
   UpdateVariantStock(request: UpdateVariantStockRequest): Promise<UpdateVariantStockResponse>;
+  // CreateVariant adds a new variant (size) to a colourway at zero stock (R2). The size is immutable;
+  // the variant SKU is minted from the colourway's base. Fails if the size already exists or the
+  // colourway is archived.
+  CreateVariant(request: CreateVariantRequest): Promise<CreateVariantResponse>;
+  // UpdateVariant patches a variant's mutable state (R2). size_id and the variant SKU are immutable;
+  // only the lifecycle status is writable (archive-not-delete).
+  UpdateVariant(request: UpdateVariantRequest): Promise<UpdateVariantResponse>;
+  // ArchiveVariant retires a variant (ACTIVE -> ARCHIVED, R2): it drops off the storefront and rejects
+  // stock writes, but its id stays valid for the frozen order/stock references.
+  ArchiveVariant(request: ArchiveVariantRequest): Promise<ArchiveVariantResponse>;
+  // UpdateStyle is the SOLE writer of a style's catalogue facts (brand, sku_season, collection,
+  // target_gender, fit, composition, care instructions, model-wears, categories) — R4/§14.7. It is
+  // optimistically locked on expected_lock_version (stale -> ABORTED). Changing a SKU fact (season)
+  // re-mints every unfrozen sibling colourway in one tx; if ANY sibling is SKU-frozen (has order/label
+  // history) the change is refused (FAILED_PRECONDITION) — use CloneStyleForSeason instead. PLM facts
+  // (BOM/POM/ops/lifecycle) stay on UpdateTechCard; no fact is written by both.
+  UpdateStyle(request: UpdateStyleRequest): Promise<UpdateStyleResponse>;
+  // GetStyleSizeChart returns a style's full size chart plus the shared lock_version (R5). The admin
+  // UI loads the whole chart before editing, because UpdateStyleSizeChart is a full-replace.
+  GetStyleSizeChart(request: GetStyleSizeChartRequest): Promise<GetStyleSizeChartResponse>;
+  // UpdateStyleSizeChart replaces a style's ENTIRE size chart in one versioned request (R5). A colourway
+  // save never touches the chart; the chart is style-owned and shared by every colourway of the style.
+  UpdateStyleSizeChart(request: UpdateStyleSizeChartRequest): Promise<UpdateStyleSizeChartResponse>;
+  // CloneStyleForSeason deep-clones a style (tech card header + ALL children) under a new sku_season
+  // (R4 official path for a season change that would otherwise re-mint frozen siblings). The clone
+  // starts as a fresh DRAFT tech card with no colourways; move drafts onto it with RelinkDraftColorway
+  // or create new ones. Optimistically guarded on the source's expected_source_version.
+  CloneStyleForSeason(request: CloneStyleForSeasonRequest): Promise<CloneStyleForSeasonResponse>;
+  // RelinkDraftColorway moves a DRAFT colourway onto a different style (R4 official workaround for the
+  // frozen-sibling problem). Only a DRAFT may be relinked; both sides are optimistically locked and the
+  // colourway's SKU is re-minted from the target style's facts.
+  RelinkDraftColorway(request: RelinkDraftColorwayRequest): Promise<RelinkDraftColorwayResponse>;
   // GetColorwayCustoms returns a product's international-shipping customs data (HS code, origin,
   // declared description).
   GetColorwayCustoms(request: GetColorwayCustomsRequest): Promise<GetColorwayCustomsResponse>;
-  // SetColorwayCustoms sets a product's customs data used to build international shipping labels.
+  // SetColorwayCustoms sets a colourway's customs data used to build international shipping labels.
   SetColorwayCustoms(request: SetColorwayCustomsRequest): Promise<SetColorwayCustomsResponse>;
-  // Forces a product's confidential cost_price to be (re)seeded from a tech card, overriding
-  // any manual value. If tech_card_id is set it also becomes the product's primary card;
-  // otherwise the product's existing primary card is used.
-  SyncColorwayCostFromStyle(request: SyncColorwayCostFromStyleRequest): Promise<SyncColorwayCostFromStyleResponse>;
+  // SyncColorwayCostFromOwningStyle (re)seeds a colourway's confidential cost_price from its owning
+  // style's primary card, overriding any manual value. R4/p019: it derives the style from the owner
+  // relation and never repoints it — cost provenance is separated from ownership. Was
+  // SyncColorwayCostFromStyle.
+  SyncColorwayCostFromOwningStyle(request: SyncColorwayCostFromOwningStyleRequest): Promise<SyncColorwayCostFromOwningStyleResponse>;
   // Lists stock change history with optional filters.
   ListStockChangeHistory(request: ListStockChangeHistoryRequest): Promise<ListStockChangeHistoryResponse>;
   // Lists stock changes with simplified format for reporting.
   ListStockChanges(request: ListStockChangesRequest): Promise<ListStockChangesResponse>;
+  ListColors(request: ListColorsRequest): Promise<ListColorsResponse>;
+  CreateColor(request: CreateColorRequest): Promise<CreateColorResponse>;
+  UpdateColor(request: UpdateColorRequest): Promise<UpdateColorResponse>;
+  ArchiveColor(request: ArchiveColorRequest): Promise<ArchiveColorResponse>;
+  ListCollections(request: ListCollectionsRequest): Promise<ListCollectionsResponse>;
+  CreateCollection(request: CreateCollectionRequest): Promise<CreateCollectionResponse>;
+  UpdateCollection(request: UpdateCollectionRequest): Promise<UpdateCollectionResponse>;
+  ArchiveCollection(request: ArchiveCollectionRequest): Promise<ArchiveCollectionResponse>;
+  ListTags(request: ListTagsRequest): Promise<ListTagsResponse>;
+  CreateTag(request: CreateTagRequest): Promise<CreateTagResponse>;
+  UpdateTag(request: UpdateTagRequest): Promise<UpdateTagResponse>;
+  ArchiveTag(request: ArchiveTagRequest): Promise<ArchiveTagResponse>;
+  ListCountries(request: ListCountriesRequest): Promise<ListCountriesResponse>;
+  SetCountryActive(request: SetCountryActiveRequest): Promise<SetCountryActiveResponse>;
   // Adds a new promotional code
   AddPromo(request: AddPromoRequest): Promise<AddPromoResponse>;
   // Lists all promotional codes
@@ -6213,8 +6632,8 @@ export function createAdminServiceClient(
         method: "ListObjectsPaged",
       }) as Promise<ListObjectsPagedResponse>;
     },
-    UpsertColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/product/upsert`; // eslint-disable-line quotes
+    CreateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/colorways`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
@@ -6227,11 +6646,31 @@ export function createAdminServiceClient(
         body,
       }, {
         service: "AdminService",
-        method: "UpsertColorway",
-      }) as Promise<UpsertColorwayResponse>;
+        method: "CreateColorway",
+      }) as Promise<CreateColorwayResponse>;
+    },
+    UpdateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateColorway",
+      }) as Promise<UpdateColorwayResponse>;
     },
     GetColorwaysPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/products/paged`; // eslint-disable-line quotes
+      const path = `api/admin/colorways/paged`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
@@ -6311,8 +6750,10 @@ export function createAdminServiceClient(
           queryParams.push(`filterConditions.colorCodes=${encodeURIComponent(x.toString())}`)
         })
       }
-      if (request.showHidden) {
-        queryParams.push(`showHidden=${encodeURIComponent(request.showHidden.toString())}`)
+      if (request.statuses) {
+        request.statuses.forEach((x) => {
+          queryParams.push(`statuses=${encodeURIComponent(x.toString())}`)
+        })
       }
       let uri = path;
       if (queryParams.length > 0) {
@@ -6328,10 +6769,10 @@ export function createAdminServiceClient(
       }) as Promise<GetColorwaysPagedResponse>;
     },
     GetColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      if (!request.id) {
-        throw new Error("missing required field request.id");
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
       }
-      const path = `api/admin/product/${request.id}`; // eslint-disable-line quotes
+      const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
@@ -6424,11 +6865,171 @@ export function createAdminServiceClient(
         method: "UpdateVariantStock",
       }) as Promise<UpdateVariantStockResponse>;
     },
-    GetColorwayCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      if (!request.productId) {
-        throw new Error("missing required field request.product_id");
+    CreateVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
       }
-      const path = `api/admin/product/${request.productId}/customs`; // eslint-disable-line quotes
+      const path = `api/admin/colorways/${request.colorwayId}/variants`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateVariant",
+      }) as Promise<CreateVariantResponse>;
+    },
+    UpdateVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.variantId) {
+        throw new Error("missing required field request.variant_id");
+      }
+      const path = `api/admin/variants/${request.variantId}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateVariant",
+      }) as Promise<UpdateVariantResponse>;
+    },
+    ArchiveVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.variantId) {
+        throw new Error("missing required field request.variant_id");
+      }
+      const path = `api/admin/variants/${request.variantId}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveVariant",
+      }) as Promise<ArchiveVariantResponse>;
+    },
+    UpdateStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.styleId) {
+        throw new Error("missing required field request.style_id");
+      }
+      const path = `api/admin/styles/${request.styleId}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateStyle",
+      }) as Promise<UpdateStyleResponse>;
+    },
+    GetStyleSizeChart(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.styleId) {
+        throw new Error("missing required field request.style_id");
+      }
+      const path = `api/admin/styles/${request.styleId}/size-chart`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStyleSizeChart",
+      }) as Promise<GetStyleSizeChartResponse>;
+    },
+    UpdateStyleSizeChart(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.styleId) {
+        throw new Error("missing required field request.style_id");
+      }
+      const path = `api/admin/styles/${request.styleId}/size-chart`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateStyleSizeChart",
+      }) as Promise<UpdateStyleSizeChartResponse>;
+    },
+    CloneStyleForSeason(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.sourceStyleId) {
+        throw new Error("missing required field request.source_style_id");
+      }
+      const path = `api/admin/styles/${request.sourceStyleId}/clone-for-season`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CloneStyleForSeason",
+      }) as Promise<CloneStyleForSeasonResponse>;
+    },
+    RelinkDraftColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/relink`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RelinkDraftColorway",
+      }) as Promise<RelinkDraftColorwayResponse>;
+    },
+    GetColorwayCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/customs`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
@@ -6445,7 +7046,7 @@ export function createAdminServiceClient(
       }) as Promise<GetColorwayCustomsResponse>;
     },
     SetColorwayCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/product/customs`; // eslint-disable-line quotes
+      const path = `api/admin/colorways/customs`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
@@ -6461,8 +7062,11 @@ export function createAdminServiceClient(
         method: "SetColorwayCustoms",
       }) as Promise<SetColorwayCustomsResponse>;
     },
-    SyncColorwayCostFromStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/product/cost/sync-from-tech-card`; // eslint-disable-line quotes
+    SyncColorwayCostFromOwningStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/cost/sync`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
@@ -6475,8 +7079,8 @@ export function createAdminServiceClient(
         body,
       }, {
         service: "AdminService",
-        method: "SyncColorwayCostFromStyle",
-      }) as Promise<SyncColorwayCostFromStyleResponse>;
+        method: "SyncColorwayCostFromOwningStyle",
+      }) as Promise<SyncColorwayCostFromOwningStyleResponse>;
     },
     ListStockChangeHistory(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/stock-change-history`; // eslint-disable-line quotes
@@ -6488,8 +7092,8 @@ export function createAdminServiceClient(
       if (request.dateTo) {
         queryParams.push(`dateTo=${encodeURIComponent(request.dateTo.toString())}`)
       }
-      if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      if (request.colorwayId) {
+        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`)
       }
       if (request.sizeId) {
         queryParams.push(`sizeId=${encodeURIComponent(request.sizeId.toString())}`)
@@ -6529,8 +7133,8 @@ export function createAdminServiceClient(
       if (request.to) {
         queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
-      if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      if (request.colorwayId) {
+        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`)
       }
       if (request.source) {
         queryParams.push(`source=${encodeURIComponent(request.source.toString())}`)
@@ -6562,6 +7166,277 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListStockChanges",
       }) as Promise<ListStockChangesResponse>;
+    },
+    ListColors(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/colors`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListColors",
+      }) as Promise<ListColorsResponse>;
+    },
+    CreateColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/colors`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateColor",
+      }) as Promise<CreateColorResponse>;
+    },
+    UpdateColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/colors/${request.code}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateColor",
+      }) as Promise<UpdateColorResponse>;
+    },
+    ArchiveColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/colors/${request.code}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveColor",
+      }) as Promise<ArchiveColorResponse>;
+    },
+    ListCollections(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/collections`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCollections",
+      }) as Promise<ListCollectionsResponse>;
+    },
+    CreateCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/collections`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateCollection",
+      }) as Promise<CreateCollectionResponse>;
+    },
+    UpdateCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/dictionaries/collections/${request.id}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateCollection",
+      }) as Promise<UpdateCollectionResponse>;
+    },
+    ArchiveCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/dictionaries/collections/${request.id}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveCollection",
+      }) as Promise<ArchiveCollectionResponse>;
+    },
+    ListTags(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/tags`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTags",
+      }) as Promise<ListTagsResponse>;
+    },
+    CreateTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/tags`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateTag",
+      }) as Promise<CreateTagResponse>;
+    },
+    UpdateTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/dictionaries/tags/${request.id}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTag",
+      }) as Promise<UpdateTagResponse>;
+    },
+    ArchiveTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/dictionaries/tags/${request.id}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveTag",
+      }) as Promise<ArchiveTagResponse>;
+    },
+    ListCountries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/countries`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.activeOnly) {
+        queryParams.push(`activeOnly=${encodeURIComponent(request.activeOnly.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCountries",
+      }) as Promise<ListCountriesResponse>;
+    },
+    SetCountryActive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/countries/${request.code}/active`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetCountryActive",
+      }) as Promise<SetCountryActiveResponse>;
     },
     AddPromo(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/promo/add`; // eslint-disable-line quotes
