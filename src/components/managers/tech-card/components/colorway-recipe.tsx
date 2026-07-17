@@ -3,12 +3,18 @@ import {
   common_TechCard,
   common_TechCardColorwayUsage,
 } from 'api/proto-http/admin';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
-import { recipeSaveErrorMessage, useUpdateColorwayRecipe } from './useColorwayRecipe';
+import {
+  createColorwayErrorMessage,
+  recipeSaveErrorMessage,
+  useCreateColorway,
+  useUpdateColorwayRecipe,
+} from './useColorwayRecipe';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 
@@ -88,6 +94,16 @@ function ColorwayRecipeEditor({
 }) {
   const { showMessage } = useSnackBarStore();
   const save = useUpdateColorwayRecipe(techCardId);
+  const { dictionary } = useDictionary();
+  // #34: a usage row's color/pantone is an OPTIONAL override (e.g. the same fabric dyed differently
+  // for this colourway, or contrast hardware) — not a duplicate of the colourway's own colour. Resolve
+  // the colourway's dictionary colour once so every row can placeholder/hint against it instead of
+  // forcing the operator to retype it on every material.
+  const colorwayColor = useMemo(
+    () => (dictionary?.colors ?? []).find((c) => c.code === colorway.colorCode),
+    [dictionary?.colors, colorway.colorCode],
+  );
+  const colorwayColorLabel = colorwayColor?.name?.trim() || colorway.colorCode?.trim() || '';
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   // CRITICAL (full-replace): initialise from the LIVE read (colorway.usages), never from empty. Re-sync
@@ -166,6 +182,20 @@ function ColorwayRecipeEditor({
 
       {open && (
         <div className='flex flex-col gap-3 border-t border-textInactiveColor p-3'>
+          <Text variant='inactive' size='small'>
+            Colour / pantone below are optional per-material overrides — leave them empty to use
+            this colourway’s own colour
+            {colorwayColorLabel ? ` (${colorwayColorLabel})` : ''}
+            {colorwayColor?.hex ? (
+              <span
+                className='ml-1.5 inline-block h-3 w-3 shrink-0 translate-y-[1px] border border-textInactiveColor align-middle'
+                style={{ backgroundColor: colorwayColor.hex }}
+                title={colorwayColor.hex}
+              />
+            ) : null}
+            . Set them only when this article is dyed differently for this colourway or is a
+            contrast trim/hardware.
+          </Text>
           {usages.length === 0 ? (
             <Text variant='inactive' size='small'>
               no materials in this colourway’s recipe yet
@@ -222,19 +252,21 @@ function ColorwayRecipeEditor({
                 </div>
                 <div className='grid grid-cols-1 gap-2 sm:grid-cols-4'>
                   <label className='flex flex-col gap-1'>
-                    <Text size='small'>colour (here)</Text>
+                    <Text size='small'>colour (override)</Text>
                     <input
                       className={cell}
                       disabled={!canEdit}
+                      placeholder={colorwayColorLabel || 'colourway colour'}
                       value={u.color}
                       onChange={(e) => setRow(i, { color: e.target.value })}
                     />
                   </label>
                   <label className='flex flex-col gap-1'>
-                    <Text size='small'>pantone</Text>
+                    <Text size='small'>pantone (override)</Text>
                     <input
                       className={cell}
                       disabled={!canEdit}
+                      placeholder='colourway pantone'
                       value={u.pantone}
                       onChange={(e) => setRow(i, { pantone: e.target.value })}
                     />
@@ -303,6 +335,106 @@ function ColorwayRecipeEditor({
   );
 }
 
+// #35: inline "create colourway" — until now the recipe editor could only edit EXISTING colourways
+// (techCard.colorways); making a new one meant leaving for the product manager and coming back
+// (ping-pong). This spins up a minimal DRAFT (colour only, via CreateColorway) without leaving the
+// tech card; onCreated (the caller's query invalidation) refreshes techCard.colorways so the new
+// colourway's recipe editor appears in the list immediately.
+function CreateColorwayInline({
+  techCardId,
+  usedCodes,
+  canEdit,
+}: {
+  techCardId: number;
+  usedCodes: Set<string>;
+  canEdit: boolean;
+}) {
+  const { dictionary } = useDictionary();
+  const { showMessage } = useSnackBarStore();
+  const create = useCreateColorway(techCardId);
+  const [open, setOpen] = useState(false);
+  const [colorCode, setColorCode] = useState('');
+
+  if (!canEdit) return null;
+
+  const availableColors = (dictionary?.colors ?? []).filter((c) => !c.archived && c.code);
+
+  const close = () => {
+    setOpen(false);
+    setColorCode('');
+  };
+
+  const submit = () => {
+    if (!colorCode) {
+      showMessage('Pick a colour', 'error');
+      return;
+    }
+    create.mutate(colorCode, {
+      onSuccess: () => {
+        showMessage('Draft colourway created', 'success');
+        close();
+      },
+      onError: (e) => showMessage(createColorwayErrorMessage(e), 'error'),
+    });
+  };
+
+  if (!open) {
+    return (
+      <Button type='button' variant='secondary' className='uppercase' onClick={() => setOpen(true)}>
+        + create colourway
+      </Button>
+    );
+  }
+
+  return (
+    <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+      <Text variant='uppercase' size='small'>
+        new colourway
+      </Text>
+      {availableColors.length === 0 ? (
+        <Text variant='inactive' size='small'>
+          no colours in the dictionary yet — add them under settings › colors
+        </Text>
+      ) : (
+        <div className='flex flex-wrap items-end gap-2'>
+          <label className='flex flex-col gap-1'>
+            <Text size='small'>colour</Text>
+            <select
+              className={cell}
+              value={colorCode}
+              onChange={(e) => setColorCode(e.target.value)}
+            >
+              <option value=''>— select colour —</option>
+              {availableColors.map((c) => (
+                <option key={c.code} value={c.code} disabled={usedCodes.has(c.code ?? '')}>
+                  {c.code} · {c.name}
+                  {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button
+            type='button'
+            variant='main'
+            disabled={create.isPending || !colorCode}
+            loading={create.isPending}
+            onClick={submit}
+          >
+            create
+          </Button>
+          <Button type='button' variant='secondary' onClick={close}>
+            cancel
+          </Button>
+        </div>
+      )}
+      <Text variant='inactive' size='small'>
+        Creates a DRAFT colourway (colour only) so its recipe can be edited below — add media,
+        price and the rest from the product manager afterwards.
+      </Text>
+    </div>
+  );
+}
+
 // Colourway recipes (H1/§2.3): the constructor view of each colourway's material recipe, now that the
 // read-path surfaces usages. Edited per colourway and saved via UpdateColorwayRecipe (full-replace).
 export function ColorwayRecipes({
@@ -317,13 +449,20 @@ export function ColorwayRecipes({
   const colorways = techCard?.colorways ?? [];
   const bomItems = (techCard?.techCard?.bomItems ?? []).filter((b) => !!b.lineKey);
   const lockVersion = techCard?.lockVersion ?? 0;
+  const usedCodes = useMemo(
+    () => new Set(colorways.map((c) => c.colorCode ?? '').filter(Boolean)),
+    [colorways],
+  );
 
   if (colorways.length === 0) {
     return (
-      <Text variant='inactive' size='small'>
-        no colourways yet — a colourway is a product; create it in the product manager, then its
-        material recipe is edited here.
-      </Text>
+      <div className='flex flex-col gap-3'>
+        <Text variant='inactive' size='small'>
+          no colourways yet — a colourway is a product. Create a draft below, or from the product
+          manager, then its material recipe is edited here.
+        </Text>
+        <CreateColorwayInline techCardId={techCardId} usedCodes={usedCodes} canEdit={canEdit} />
+      </div>
     );
   }
 
@@ -343,6 +482,7 @@ export function ColorwayRecipes({
           canEdit={canEdit}
         />
       ))}
+      <CreateColorwayInline techCardId={techCardId} usedCodes={usedCodes} canEdit={canEdit} />
     </div>
   );
 }

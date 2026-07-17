@@ -74,6 +74,12 @@ export const fittingSchema = z
   .refine((data) => !!data.techCardId, {
     message: 'Укажите тех карту (примерка делается по её сэмплу)',
     path: ['techCardId'],
+  })
+  // A fitting measures a SAMPLE — there is nothing to try on without one, so both the tech card and
+  // the sample are required (the sample is picked once a tech card is chosen).
+  .refine((data) => !!data.sampleId, {
+    message: 'Выберите сэмпл — примерка делается на конкретном сэмпле',
+    path: ['sampleId'],
   });
 
 export type FittingFormData = z.input<typeof fittingSchema>;
