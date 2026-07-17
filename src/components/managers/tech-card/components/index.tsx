@@ -50,6 +50,7 @@ import { RevisionsField } from './revisions-field';
 import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
 import { StyleNumberField } from './style-number-field';
+import { RolesField } from './roles-field';
 import { SizeQuantitiesField } from './size-quantities-field';
 import { SketchTab } from './sketch-tab';
 import {
@@ -546,6 +547,16 @@ export function TechCardForm({
                 />
               </Section>
             </div>
+
+            {isEditMode && numId && (
+              <Section title='responsible roles'>
+                <Text variant='inactive' size='small'>
+                  who is on this card (Q5) — admin accounts, saved immediately, not part of the
+                  card’s draft.
+                </Text>
+                <RolesField techCardId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
+              </Section>
+            )}
 
             <Section title='category & base model'>
               <HeaderMetaFields />
