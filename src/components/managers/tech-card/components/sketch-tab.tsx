@@ -49,13 +49,19 @@ type FormCallout = {
 // Sketch annotation: click the active view to add a numbered callout there; drag a
 // marker to move it (stores normalised pos_x/pos_y 0..1). One field array owns both the
 // canvas markers and the text rows so positions stay in sync.
-function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull> }) {
+function CalloutsEditor({
+  mediaById,
+  view = 'technical',
+}: {
+  mediaById: Map<number, common_MediaFull>;
+  view?: 'technical' | 'moodboard';
+}) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'callouts' });
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
-  // Callouts pin onto ANY card media — technical sketches OR moodboard references (B-1). This lets a
-  // callout annotate a reference image at the idea stage, before any technical sketch exists. Combine
-  // both lists; each candidate keeps its source + per-list index for labelling.
+  // Callouts pin onto card media — technical sketches OR moodboard references. Since sketch and
+  // moodboard are now separate tabs, each tab's editor only offers/lists its OWN media's callouts
+  // (a moodboard-pinned callout must not clutter the technical sketch view, and vice-versa).
   const technicalMedia = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
     mediaId: number;
     kind?: string;
@@ -65,11 +71,11 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
     kind?: string;
   }>;
   const media = useMemo(
-    () => [
-      ...technicalMedia.map((m, i) => ({ ...m, source: 'technical' as const, localIndex: i })),
-      ...moodboardMedia.map((m, i) => ({ ...m, source: 'moodboard' as const, localIndex: i })),
-    ],
-    [technicalMedia, moodboardMedia],
+    () =>
+      view === 'moodboard'
+        ? moodboardMedia.map((m, i) => ({ ...m, source: 'moodboard' as const, localIndex: i }))
+        : technicalMedia.map((m, i) => ({ ...m, source: 'technical' as const, localIndex: i })),
+    [technicalMedia, moodboardMedia, view],
   );
   const viewLabel = (m: { source: 'technical' | 'moodboard'; kind?: string }) =>
     `${m.source === 'moodboard' ? 'mood · ' : ''}${
@@ -80,6 +86,16 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
     const f = mediaById.get(m.mediaId);
     return !!(f?.media?.fullSize?.mediaUrl || f?.media?.thumbnail?.mediaUrl);
   });
+  // A callout belongs to THIS editor (tab) when it is pinned to one of this view's images; an
+  // unpinned callout defaults to the technical editor so it is never hidden from both.
+  const viewMediaIds = useMemo(() => new Set(media.map((m) => m.mediaId)), [media]);
+  const inView = (index: number) => {
+    const mid = callouts[index]?.mediaId;
+    return mid ? viewMediaIds.has(mid) : view === 'technical';
+  };
+  const visibleFields = fields
+    .map((f, index) => ({ f, index }))
+    .filter(({ index }) => inView(index));
   const [viewId, setViewId] = useState<number | null>(null);
   const activeViewId = viewId ?? views[0]?.mediaId ?? null;
   const full = activeViewId != null ? mediaById.get(activeViewId) : undefined;
@@ -222,12 +238,12 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
       )}
 
       <div className='space-y-3 border-t border-textInactiveColor pt-3'>
-        {fields.length === 0 ? (
+        {visibleFields.length === 0 ? (
           <Text variant='inactive' size='small'>
             no callouts
           </Text>
         ) : (
-          fields.map((f, index) => (
+          visibleFields.map(({ f, index }) => (
             <div key={f.id} className='space-y-2 border border-textInactiveColor p-3'>
               <div className='flex items-center justify-between'>
                 <Text variant='uppercase' size='small'>
@@ -325,9 +341,12 @@ export function SketchTab({
 
   if (view === 'moodboard') {
     return (
-      <div className='flex flex-col gap-6'>
-        <Section title='moodboard (mood / reference / swatches)'>
+      <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+        <Section title='moodboard (mood / reference / swatches)' className='w-full lg:w-1/2'>
           <MediaField name='moodboardMedia' mediaById={mediaById} onPickedMedia={onPicked} />
+        </Section>
+        <Section title='moodboard callouts' className='w-full lg:w-1/2'>
+          <CalloutsEditor mediaById={mediaById} view='moodboard' />
         </Section>
       </div>
     );
@@ -340,7 +359,7 @@ export function SketchTab({
           <MediaField name='technicalMedia' mediaById={mediaById} onPickedMedia={onPicked} />
         </Section>
         <Section title='callouts' className='w-full lg:w-1/2'>
-          <CalloutsEditor mediaById={mediaById} />
+          <CalloutsEditor mediaById={mediaById} view='technical' />
         </Section>
       </div>
     </div>
