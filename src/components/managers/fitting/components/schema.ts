@@ -121,6 +121,22 @@ function dateInputToTimestamp(value?: string): string {
   return date.toISOString();
 }
 
+// outcomeToVerdict derives the wire verdict from the structured round outcome (they encoded the same
+// decision; the UI now asks only outcome). undecided→pending, approved→approved, new round→needs
+// rework, dropped→rejected.
+function outcomeToVerdict(outcome?: string): common_FittingVerdict {
+  switch (outcome) {
+    case 'approved':
+      return 'FITTING_VERDICT_APPROVED';
+    case 'new_round':
+      return 'FITTING_VERDICT_NEEDS_REWORK';
+    case 'dropped':
+      return 'FITTING_VERDICT_REJECTED';
+    default:
+      return 'FITTING_VERDICT_PENDING';
+  }
+}
+
 export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
   const insert = fitting.fitting;
   return {
@@ -193,7 +209,9 @@ export function mapFormToFittingInsert(
     fittingDate: dateInputToTimestamp(data.fittingDate),
     comment: data.comment?.trim() || '',
     status: (data.status || 'FITTING_STATUS_UNKNOWN') as common_FittingStatus,
-    verdict: (data.verdict || 'FITTING_VERDICT_UNKNOWN') as common_FittingVerdict,
+    // verdict is no longer a separate field — it was the same decision as `outcome` asked twice and
+    // could contradict. It is derived from the structured outcome so the wire contract still carries it.
+    verdict: outcomeToVerdict(data.outcome),
     recordedBy: data.recordedBy?.trim() || '',
     sizes: (data.sizes ?? []).map((s) => ({
       sizeId: s.sizeId,

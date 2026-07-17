@@ -10,7 +10,7 @@ import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { useDeleteFitting, useInfiniteFittings } from './useFittingQuery';
 import { useModelsByIds } from './useResolvers';
-import { formatFittingDate, statusLabel, verdictLabel } from './utils';
+import { formatFittingDate, statusLabel } from './utils';
 
 const LIMIT = 24;
 
@@ -103,8 +103,7 @@ export function FittingCardList() {
                     {modelName(insert?.modelId)} · {formatFittingDate(insert?.fittingDate)}
                   </Text>
                   <Text variant='inactive' size='small'>
-                    {statusLabel(insert?.status)} · {verdictLabel(insert?.verdict)} ·{' '}
-                    {fitting.media?.length ?? 0} photo(s)
+                    {statusLabel(insert?.status)} · {fitting.media?.length ?? 0} photo(s)
                     {insert?.roundNumber ? ` · round ${insert.roundNumber}` : ''}
                     {insert?.outcome ? ` · ${insert.outcome.replace('_', ' ')}` : ''}
                     {insert?.changeRequests?.length
