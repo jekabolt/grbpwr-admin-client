@@ -88,32 +88,38 @@ export function SampleSubstitutions({
   };
 
   return (
-    <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-2'>
+    <div className='flex flex-col gap-2'>
       <Text variant='uppercase' size='small'>
-        substitutions (dev deviations from the spec BOM)
+        substitutions — deviations from the spec BOM
+        {substitutions.length ? ` (${substitutions.length})` : ''}
       </Text>
       <Text variant='inactive' size='small'>
-        Documentation only — never counted as COGS (Q2). The real spend stays in the stock ledger.
+        Read-only overview of what changed from the plan, plus editable entries below. Documentation
+        only — never counted as COGS (Q2); the real spend stays in the stock ledger.
       </Text>
 
       {substitutions.length === 0 ? (
         <Text variant='inactive' size='small'>
-          no substitutions
+          no substitutions — this sample was sewn exactly to the spec BOM
         </Text>
       ) : (
         <div className='flex flex-col gap-1'>
           {substitutions.map((s) => (
             <div
               key={s.id}
-              className='flex flex-wrap items-center justify-between gap-2 border border-textInactiveColor p-2'
+              className='flex flex-wrap items-start justify-between gap-2 border border-textInactiveColor p-2'
             >
-              <div className='flex flex-col'>
+              <div className='flex flex-col gap-0.5'>
+                <Text size='small' className='font-semibold uppercase'>
+                  {bomName(s.bomItemId)}
+                </Text>
                 <Text size='small'>
-                  {bomName(s.bomItemId)} · {materialName(s.originalMaterialId)} →{' '}
+                  {materialName(s.originalMaterialId)}
+                  <span className='px-1 text-textInactiveColor'>→</span>
                   {materialName(s.substitutedMaterialId)}
                 </Text>
                 <Text variant='inactive' size='small'>
-                  {s.reason || 'no reason'}
+                  {s.reason || 'no reason given'}
                   {s.plannedQty?.value ? ` · plan ${decimalToInput(s.plannedQty)}` : ''}
                   {s.actualQty?.value ? ` · actual ${decimalToInput(s.actualQty)}` : ''}
                 </Text>

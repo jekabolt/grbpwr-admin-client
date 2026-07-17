@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_SampleInsert, common_SampleSubstitutionInsert } from 'api/proto-http/admin';
+import {
+  common_Fitting,
+  common_SampleInsert,
+  common_SampleSubstitutionInsert,
+} from 'api/proto-http/admin';
+import { useTechCardFittings } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useMemo } from 'react';
 
 // Samples (сэмплы) of a tech card (new-flow NF-04). A sample is one sewn prototype; its `number`
 // is server-assigned (MAX+1 per card) and its composed cost is filled only by GetSample.
@@ -24,6 +30,26 @@ export function useSamples(techCardId?: number) {
       }),
     enabled: !!techCardId,
   });
+}
+
+// Fittings that tried each sample on, grouped by sample_id (NF-04: a sample:fittings 1:N link).
+// Built from the card's already-cached fitting list (one request, shared with TechCardFittings —
+// this adds no extra fetch), so the card board's "N fittings · last verdict" chip and the open
+// sample's fittings panel always read the exact same grouping.
+export function useSampleFittings(techCardId?: number) {
+  const { data, isLoading } = useTechCardFittings(techCardId);
+  const bySample = useMemo(() => {
+    const m = new Map<number, common_Fitting[]>();
+    for (const f of data ?? []) {
+      const sampleId = f.fitting?.sampleId;
+      if (!sampleId) continue;
+      const existing = m.get(sampleId);
+      if (existing) existing.push(f);
+      else m.set(sampleId, [f]);
+    }
+    return m;
+  }, [data]);
+  return { bySample, isLoading };
 }
 
 // One sample with its composed cost (materials issued + manual dev-expenses). costing:read strips
