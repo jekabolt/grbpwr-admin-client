@@ -8,9 +8,8 @@ import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
-import { FittingProductFilter } from './fitting-product-filter';
 import { useDeleteFitting, useInfiniteFittings } from './useFittingQuery';
-import { useModelsByIds, useProductsByIds } from './useResolvers';
+import { useModelsByIds } from './useResolvers';
 import { formatFittingDate, statusLabel, verdictLabel } from './utils';
 
 const LIMIT = 24;
@@ -21,9 +20,10 @@ export function FittingCardList() {
   const deleteFitting = useDeleteFitting();
   const canEdit = usePermissions().canWrite(SECTION.fittings);
 
-  const [productId, setProductId] = useState(0);
+  // A fitting tries a SAMPLE of a tech card — it is not anchored to a catalogue product, so this list
+  // is no longer filtered/labelled by product (that "select product" made no sense here).
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteFittings(
-    { productId },
+    {},
     LIMIT,
   );
   const { ref, inView } = useInView({ rootMargin: '200px' });
@@ -38,13 +38,7 @@ export function FittingCardList() {
   const fittings = data?.pages.flatMap((page) => page.fittings) ?? [];
   const total = data?.pages[0]?.total ?? fittings.length;
 
-  const productMap = useProductsByIds(fittings.map((f) => f.fitting?.productId ?? 0));
   const modelMap = useModelsByIds(fittings.map((f) => f.fitting?.modelId ?? 0));
-
-  const productName = (id?: number) =>
-    id ? productMap.get(id)?.display?.translations?.[0]?.name ?? `#${id}` : '—';
-  const productThumb = (id?: number) =>
-    (id && productMap.get(id)?.display?.thumbnail?.media?.thumbnail?.mediaUrl) || '';
   const modelName = (id?: number) => (id ? modelMap.get(id)?.model?.name || `#${id}` : '—');
 
   function confirmDelete() {
@@ -60,7 +54,9 @@ export function FittingCardList() {
   return (
     <div className='flex flex-col gap-4'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
-        <FittingProductFilter productId={productId} onChange={setProductId} />
+        <Text variant='uppercase' size='small'>
+          примерки
+        </Text>
         <Text variant='inactive' size='small'>
           {fittings.length} of {total}
         </Text>
@@ -93,18 +89,15 @@ export function FittingCardList() {
                 className='group relative flex cursor-pointer flex-col overflow-hidden border border-textInactiveColor transition-colors hover:bg-highlightColor/5'
               >
                 <Media
-                  src={productThumb(insert?.productId)}
-                  alt={productName(insert?.productId)}
+                  src={fitting.media?.[0]?.media?.thumbnail?.mediaUrl || ''}
+                  alt={`fitting #${id}`}
                   aspectRatio='3/4'
                   fit='cover'
                 />
                 <div className='flex flex-col gap-1 p-2'>
                   <Text>
-                    {insert?.productId
-                      ? productName(insert.productId)
-                      : insert?.techCardId
-                        ? `тех карта #${insert.techCardId}`
-                        : '—'}
+                    {insert?.techCardId ? `тех карта #${insert.techCardId}` : '—'}
+                    {insert?.sampleId ? ` · сэмпл #${insert.sampleId}` : ''}
                   </Text>
                   <Text variant='inactive' size='small'>
                     {modelName(insert?.modelId)} · {formatFittingDate(insert?.fittingDate)}

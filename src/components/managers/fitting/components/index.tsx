@@ -209,7 +209,7 @@ export function FittingForm({
             {!!selectedTechCardId && (
               <div className='space-y-1'>
                 <Text variant='uppercase' size='small'>
-                  sample (tried on)
+                  sample (tried on) *
                 </Text>
                 <SamplePicker
                   techCardId={selectedTechCardId}
@@ -219,7 +219,7 @@ export function FittingForm({
                   }
                 />
                 <Text variant='inactive' size='small'>
-                  какой именно сэмпл примеряли — примерка привязывается к нему
+                  примерка делается на конкретном сэмпле — обязательно
                 </Text>
               </div>
             )}

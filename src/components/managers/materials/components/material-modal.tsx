@@ -352,8 +352,12 @@ export function MaterialModal({
       confirmLabel={save.isPending ? 'saving…' : 'save'}
       confirmDisabled={save.isPending}
     >
-      <div className='grid min-w-[min(92vw,34rem)] grid-cols-2 gap-2'>
-        <label className='col-span-2 flex flex-col gap-1'>
+      {/* #32: fills the popover's own width instead of forcing min-w-92vw — that fought the fixed
+          Content's inset-x-2.5 + p-2.5 on a narrow phone and could clip the form sideways. Single
+          column below sm: (cramped 2-up inputs are the real "clipped on mobile" complaint), two
+          columns from sm: up, capped at 34rem on desktop like before. */}
+      <div className='grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[34rem]'>
+        <label className='sm:col-span-2 flex flex-col gap-1'>
           <Text size='small'>name</Text>
           <input className={cell} value={d.name} onChange={(e) => set({ name: e.target.value })} />
         </label>
@@ -402,7 +406,7 @@ export function MaterialModal({
             onChange={(e) => set({ supplier: e.target.value })}
           />
         </label>
-        <label className='col-span-2 flex flex-col gap-1'>
+        <label className='sm:col-span-2 flex flex-col gap-1'>
           <Text size='small'>supplier ref</Text>
           <input
             className={cell}
@@ -411,7 +415,7 @@ export function MaterialModal({
           />
         </label>
 
-        <div className='col-span-2 mt-1 border-t border-textInactiveColor pt-2'>
+        <div className='sm:col-span-2 mt-1 border-t border-textInactiveColor pt-2'>
           <Text variant='uppercase' size='small'>
             attributes
           </Text>
@@ -588,7 +592,7 @@ export function MaterialModal({
         )}
 
         {d.materialClass === 'MATERIAL_CLASS_OTHER' && (
-          <label className='col-span-2 flex flex-col gap-1'>
+          <label className='sm:col-span-2 flex flex-col gap-1'>
             <Text size='small'>other attributes (JSON)</Text>
             <textarea
               className={cell}
@@ -600,7 +604,7 @@ export function MaterialModal({
           </label>
         )}
 
-        <div className='col-span-2 mt-1 border-t border-textInactiveColor pt-2'>
+        <div className='sm:col-span-2 mt-1 border-t border-textInactiveColor pt-2'>
           <Text variant='uppercase' size='small'>
             warehouse
           </Text>
@@ -640,7 +644,7 @@ export function MaterialModal({
             onChange={(e) => set({ pantone: e.target.value })}
           />
         </label>
-        <label className='col-span-2 flex flex-col gap-1'>
+        <label className='sm:col-span-2 flex flex-col gap-1'>
           <Text size='small'>notes</Text>
           <input
             className={cell}
