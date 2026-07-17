@@ -297,7 +297,16 @@ function CalloutsEditor({ mediaById }: { mediaById: Map<number, common_MediaFull
 // Sketch sheet — owns the resolved-media map shared by both sketch grids (moodboard +
 // technical) and the callout canvas (so a freshly-picked sketch can be annotated without a
 // save/reload). Media ids are unique across the two lists, so one shared map serves both.
-export function SketchTab({ techCard }: { techCard?: common_TechCard }) {
+// view splits the two independent media lists across two constructor tabs (they are separate lists on
+// the wire — technicalMedia vs moodboardMedia — and read as distinct steps): 'sketch' shows the
+// technical sketch + callouts, 'moodboard' shows the mood/reference/swatch board.
+export function SketchTab({
+  techCard,
+  view = 'sketch',
+}: {
+  techCard?: common_TechCard;
+  view?: 'sketch' | 'moodboard';
+}) {
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
 
   const mediaById = useMemo(() => {
@@ -314,6 +323,16 @@ export function SketchTab({ techCard }: { techCard?: common_TechCard }) {
 
   const onPicked = (items: common_MediaFull[]) => setPicked((prev) => [...prev, ...items]);
 
+  if (view === 'moodboard') {
+    return (
+      <div className='flex flex-col gap-6'>
+        <Section title='moodboard (mood / reference / swatches)'>
+          <MediaField name='moodboardMedia' mediaById={mediaById} onPickedMedia={onPicked} />
+        </Section>
+      </div>
+    );
+  }
+
   return (
     <div className='flex flex-col gap-6'>
       <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
@@ -324,9 +343,6 @@ export function SketchTab({ techCard }: { techCard?: common_TechCard }) {
           <CalloutsEditor mediaById={mediaById} />
         </Section>
       </div>
-      <Section title='moodboard (mood / reference / swatches)'>
-        <MediaField name='moodboardMedia' mediaById={mediaById} onPickedMedia={onPicked} />
-      </Section>
     </div>
   );
 }
