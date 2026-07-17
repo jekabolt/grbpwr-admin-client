@@ -38,7 +38,9 @@ import { CostingField } from './costing-field';
 import { DetailsEditor } from './details-editor';
 import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
+import { AssemblyField } from './assembly-field';
 import { LabelsField } from './labels-field';
+import { PackagingRecipeField } from './packaging-recipe-field';
 import { LifecycleStrip } from './lifecycle-strip';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
@@ -739,16 +741,33 @@ export function TechCardForm({
           </div>
 
           {/* LABELS & PACKAGING */}
-          <div
-            hidden={activeTab !== 'labels'}
-            className='flex flex-col gap-6 lg:flex-row lg:items-start'
-          >
-            <Section title='labels' className='w-full lg:w-1/2'>
-              <LabelsField onMissingComposition={goToBomComposition} />
-            </Section>
-            <Section title='packaging' className='w-full lg:w-1/2'>
-              <PackagingField />
-            </Section>
+          <div hidden={activeTab !== 'labels'} className='flex flex-col gap-6'>
+            <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+              <Section title='labels' className='w-full lg:w-1/2'>
+                <LabelsField onMissingComposition={goToBomComposition} />
+              </Section>
+              <Section title='packaging' className='w-full lg:w-1/2'>
+                <PackagingField />
+              </Section>
+            </div>
+            {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs (edit-mode). */}
+            {isEditMode && numId && (
+              <>
+                <Section title='assembly — on-garment items (labels / tags)'>
+                  <AssemblyField
+                    styleId={numId}
+                    sizeIds={(sizeIdsW as number[] | undefined) ?? []}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                  />
+                </Section>
+                <Section title='packaging recipe (materials per order / item)'>
+                  <PackagingRecipeField
+                    techCardId={numId}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                  />
+                </Section>
+              </>
+            )}
           </div>
 
           {/* COSTING — mounted only with costing:read (field-shaped) */}
