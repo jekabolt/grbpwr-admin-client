@@ -1,13 +1,11 @@
 import { genderOptions, SEASON_OPTIONS } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
-import { useFormContext } from 'react-hook-form';
 import CountryList from 'react-select-country-list';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import Text from 'ui/components/text';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
-import { getFilteredSizes } from '../utility/sizes';
 import { Care } from './care/care';
 import { CategoryFields } from './category-fields';
 import { ColorFields } from './color-fields';
@@ -23,18 +21,15 @@ interface Country {
   label: string;
 }
 
-export function BodyFields({ editMode }: { editMode: boolean }) {
+export function BodyFields({
+  editMode,
+  isAddingProduct,
+}: {
+  editMode: boolean;
+  isAddingProduct?: boolean;
+}) {
   const { dictionary } = useDictionary();
-  const { getValues, watch } = useFormContext();
   const countries = useMemo(() => CountryList().getData() as Country[], []);
-
-  watch('product.productBodyInsert.topCategoryId');
-
-  const topCategoryRaw = getValues('product.productBodyInsert.topCategoryId');
-  const topCategoryId =
-    typeof topCategoryRaw === 'string' ? parseInt(topCategoryRaw) : topCategoryRaw || 0;
-
-  const filteredSizes = getFilteredSizes(dictionary, topCategoryId || 0);
 
   // R9: collection options from the controlled dictionary (archived hidden). Free-text value kept
   // for the intermediate contract; final bump switches to collection_id on the Style.
@@ -106,21 +101,16 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
         />
         <PriceFields editMode={editMode} />
         <SalePreorderFields editMode={editMode} />
-        <InputField
-          name='product.productBodyInsert.modelWearsHeightCm'
-          label='model wears height'
-          readOnly={!editMode}
-        />
-        <SelectField
-          fullWidth
-          name='product.productBodyInsert.modelWearsSizeId'
-          label='model wears size'
-          items={filteredSizes.map((size) => ({
-            label: size.name || '',
-            value: size.id?.toString() || '',
-          }))}
-          readOnly={!editMode}
-        />
+        {/* Model-wears height/size moved to the "model presentation" section (<StyleSection/>), next
+            to the button that actually saves them (UpdateStyle) — keeping them here made it read as
+            though the main colourway Save persisted them, which it never did. That section needs an
+            existing colourway to attach the save to, so it isn't shown until the draft is created;
+            surface a pointer here in the meantime rather than an input that silently goes nowhere. */}
+        {isAddingProduct && (
+          <Text variant='inactive' size='small'>
+            model wears height/size are set after the draft is created, under “model presentation”.
+          </Text>
+        )}
         <Care editMode={false} />
         <Composition editMode={false} />
         <TierAccessFields editMode={editMode} />
