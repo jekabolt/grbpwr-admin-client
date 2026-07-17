@@ -71,7 +71,7 @@ export function MediaManager({
     handlePreviewUpload,
   } = usePreviewMedia();
 
-  const { filteredMedia, type, order, setType, setOrder } = useFilter(
+  const { filteredMedia, type, order, search, setType, setOrder, setSearch } = useFilter(
     media,
     aspectRatio,
     videoSizes,
@@ -132,7 +132,14 @@ export function MediaManager({
           </div>
           <div className='flex flex-wrap items-center gap-2'>
             {showFilters && (
-              <Filter type={type} order={order} setType={setType} setOrder={setOrder} />
+              <Filter
+                type={type}
+                order={order}
+                search={search}
+                setType={setType}
+                setOrder={setOrder}
+                setSearch={setSearch}
+              />
             )}
             {pendingPlate}
             <input
@@ -155,7 +162,14 @@ export function MediaManager({
           <div className='flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-end'>
             {pendingPlate}
             {showFilters && (
-              <Filter type={type} order={order} setType={setType} setOrder={setOrder} />
+              <Filter
+                type={type}
+                order={order}
+                search={search}
+                setType={setType}
+                setOrder={setOrder}
+                setSearch={setSearch}
+              />
             )}
           </div>
         )

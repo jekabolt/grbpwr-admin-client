@@ -39,10 +39,10 @@ export function Tags({
         .filter(Boolean),
     [dictionary?.tags],
   );
-  const [localTags, setLocalTags] = useState<string[]>(() => {
-    const storedTags = localStorage.getItem('productTags');
-    return storedTags ? JSON.parse(storedTags) : [];
-  });
+  // In-memory only, scoped to THIS add-product session. The old global localStorage['productTags']
+  // key leaked an abandoned draft's tags onto the next, unrelated new product; dictionary tags
+  // already provide cross-session suggestions.
+  const [localTags, setLocalTags] = useState<string[]>([]);
   const [copiedTags, setCopiedTags] = useState<string[]>([]);
   const [editedTags, setEditedTags] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -86,7 +86,6 @@ export function Tags({
     if (trimmedTag === '' || localTags.includes(trimmedTag)) return;
     const newTags = [...localTags, trimmedTag];
     if (isAddingProduct) {
-      localStorage.setItem('productTags', JSON.stringify(newTags));
       setLocalTags(newTags);
     }
     if (isCopyMode) {
@@ -109,7 +108,6 @@ export function Tags({
     let updatedTags = [];
     if (isAddingProduct) {
       const newTags = localTags.filter((t) => t !== tagToDelete);
-      localStorage.setItem('productTags', JSON.stringify(newTags));
       setLocalTags(newTags);
       updatedTags = newTags;
     }

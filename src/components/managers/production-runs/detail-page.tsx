@@ -1,9 +1,15 @@
-import { common_ProductionRun, common_ProductionRunActuals } from 'api/proto-http/admin';
+import {
+  common_ProductionRun,
+  common_ProductionRunActuals,
+  common_ProductionRunStatus,
+  googletype_Decimal,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -14,10 +20,10 @@ import { decimalToInput } from 'utils/decimal';
 import { AuxRunPlan } from './components/aux-run-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MaterialPlan } from './components/material-plan';
+import { isRunLocked, isRunReceivable, runStatusLabel, runStatusTone } from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import { RunCosts } from './components/run-costs';
-import { isRunLocked, isRunReceivable, runStatusLabel } from './components/options';
 import {
   deleteRunErrorMessage,
   useDeleteProductionRun,
@@ -31,6 +37,7 @@ export function ProductionRunDetail() {
   const { showMessage } = useSnackBarStore();
   const { canWrite, canReadCosting } = usePermissions();
   const canEdit = canWrite(SECTION.production);
+  const { dictionary } = useDictionary();
 
   const { data, isLoading, isError } = useProductionRun(runId, runId > 0);
   const del = useDeleteProductionRun();
@@ -52,6 +59,22 @@ export function ProductionRunDetail() {
     [materialsData, outputMaterialId],
   );
 
+  // The run's colourways (products), for real names/codes in the per-colourway cost table below —
+  // R1: a colourway is a product; techCardId === styleId. useTechCard already reads the live
+  // AdminColorwayRef[], the same source lines-grid.tsx uses; name resolves from dictionary.colors.
+  const colorways: ColorwayLabelRef[] = useMemo(
+    () =>
+      (techCard?.colorways ?? []).map((cw) => {
+        const dc = dictionary?.colors?.find((c) => c.code === cw.colorCode);
+        return {
+          productId: cw.colorwayId ?? 0,
+          code: cw.colorCode ?? '',
+          name: dc?.name ?? cw.colorCode ?? '',
+        };
+      }),
+    [techCard?.colorways, dictionary?.colors],
+  );
+
   const [editOpen, setEditOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -65,6 +88,34 @@ export function ProductionRunDetail() {
     : (ins?.lines ?? []).filter((l) => (l.plannedQty ?? 0) > 0 && !l.productId).length;
   // An aux run can't be received until the card names an output material (FailedPrecondition).
   const auxNoMaterial = isAux && !outputMaterialId;
+
+  // Plan vs fact quantities, summed straight from the run's own lines rather than the
+  // costing-gated `actuals` — "how many did we make" isn't money, so it should be visible to
+  // anyone who can open the run, same as the lines grid itself further down the page.
+  const lines = ins?.lines ?? [];
+  const plannedQtyTotal = lines.reduce((s, l) => s + (l.plannedQty ?? 0), 0);
+  const hasReceivedAny = lines.some((l) => l.receivedQty != null);
+  const receivedQtyTotal = lines.reduce((s, l) => s + (l.receivedQty ?? 0), 0);
+  const defectQtyTotal = lines.reduce((s, l) => s + (l.defectQty ?? 0), 0);
+  const defectPct = receivedQtyTotal > 0 ? (defectQtyTotal / receivedQtyTotal) * 100 : 0;
+
+  // A one-line answer to "what IS this run", for the header: an auxiliary run banks a material
+  // into the warehouse; a normal run is a set of colour-models that become sellable products.
+  const colourModelCount =
+    new Set(lines.map((l) => l.productId ?? 0).filter((pid) => pid > 0)).size ||
+    (techCard?.colorways?.length ?? 0);
+  const runTypeLabel = isAux
+    ? 'auxiliary run · produces a material for warehouse stock, not a sellable product'
+    : colourModelCount > 0
+      ? `produces ${colourModelCount} colour-model${colourModelCount === 1 ? '' : 's'} as sellable product${colourModelCount === 1 ? '' : 's'}`
+      : 'no colour-models planned yet';
+
+  const guidance = nextStepGuidance({
+    status: ins?.status,
+    auxNoMaterial,
+    unassignedPlanned,
+    techCardId: ins?.techCardId,
+  });
 
   const confirmDelete = () =>
     del.mutate(runId, {
@@ -92,18 +143,29 @@ export function ProductionRunDetail() {
         ← production runs
       </Link>
 
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
-        <div className='flex flex-col'>
-          <Text variant='uppercase' size='large'>
-            PR-{run.id}
-          </Text>
+      {/* Identity — what this run is, at a glance: id + lifecycle status, its tech card, and a
+          one-line description of what it produces. Actions live beside it, not buried below. */}
+      <div className='-mx-2.5 flex flex-wrap items-start justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+        <div className='flex flex-col gap-1.5'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text variant='uppercase' size='large'>
+              PR-{run.id}
+            </Text>
+            <span
+              className={`inline-block border px-1.5 py-0.5 text-textBaseSize uppercase ${runStatusTone(ins?.status)}`}
+            >
+              {runStatusLabel(ins?.status)}
+            </span>
+          </div>
           <Text variant='inactive' size='small'>
             <Link to={`${ROUTES.techCards}/${ins?.techCardId}`} className='underline'>
               TC-{ins?.techCardId}
               {tcName ? ` · ${tcName}` : ''}
             </Link>
-            {ins?.releaseId ? ` · rel ${ins.releaseId}` : ''} · {runStatusLabel(ins?.status)}
+            {ins?.releaseId ? ` · rel ${ins.releaseId}` : ''}
+            {ins?.startedAt ? ` · started ${ins.startedAt.slice(0, 10)}` : ''}
           </Text>
+          <Text size='small'>{runTypeLabel}</Text>
         </div>
         {canEdit && (
           <div className='flex items-center gap-2'>
@@ -149,39 +211,101 @@ export function ProductionRunDetail() {
         )}
       </div>
 
-      {canReadCosting ? <PlanFactBlock run={run} actuals={actuals} /> : null}
+      {/* What to do next — the single sentence the rest of the page exists to support. Visible
+          text, not a hover-only tooltip, so a blocked receive is obvious before it's clicked. */}
+      {guidance ? (
+        <div className={`border p-3 ${GUIDANCE_BOX[guidance.tone]}`}>
+          <Text size='small' className={GUIDANCE_TEXT[guidance.tone]}>
+            {guidance.text}
+            {guidance.href ? (
+              <>
+                {' '}
+                <Link to={guidance.href} className='underline'>
+                  {guidance.linkLabel}
+                </Link>
+              </>
+            ) : null}
+          </Text>
+        </div>
+      ) : null}
+
+      {/* Quantity is not money — shown to anyone who can open the run, matching the lines grid
+          below (which is likewise never costing-gated). */}
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-3'>
+        <StatTile label='planned qty' value={String(plannedQtyTotal)} />
+        <StatTile
+          label='received qty'
+          value={hasReceivedAny ? String(receivedQtyTotal) : '—'}
+          sub={
+            hasReceivedAny && plannedQtyTotal > 0
+              ? `${Math.round((receivedQtyTotal / plannedQtyTotal) * 100)}% of plan`
+              : undefined
+          }
+        />
+        <StatTile
+          label='defect'
+          value={hasReceivedAny ? String(defectQtyTotal) : '—'}
+          sub={
+            hasReceivedAny && defectQtyTotal > 0
+              ? `${defectPct.toFixed(1)}% of received`
+              : undefined
+          }
+          subClassName={defectQtyTotal > 0 ? 'text-warning' : undefined}
+        />
+      </div>
+
+      {canReadCosting ? <CostSummary run={run} actuals={actuals} /> : null}
 
       {canReadCosting &&
       actuals &&
       ((actuals.byColorway?.length ?? 0) > 0 || actuals.unattributedMaterialsBase?.value) ? (
-        // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always
-        // empty; per-colourway labels fall back to `#<id>`. Source real data from
-        // GetColorwaysPaged by style / AdminColorwayRef instead.
-        <ColorwayCostBlock actuals={actuals} colorways={[]} />
+        <ColorwayCostBlock actuals={actuals} colorways={colorways} />
       ) : null}
 
-      {isAux ? (
-        <AuxRunPlan
-          run={run}
-          canEdit={canEdit}
-          locked={locked}
-          outputMaterialId={outputMaterialId}
-          outputMaterial={outputMaterial}
-        />
-      ) : (
-        <LinesGrid run={run} canEdit={canEdit} locked={locked} />
-      )}
+      {/* The run's own three-step workflow: plan quantities, cover the materials they need, then
+          log what it actually cost. Numbered so "what do I do next" has one obvious answer. */}
+      <Section
+        step={1}
+        title='what to produce'
+        hint='Plan how many of each colour-model × size this run makes.'
+      >
+        {isAux ? (
+          <AuxRunPlan
+            run={run}
+            canEdit={canEdit}
+            locked={locked}
+            outputMaterialId={outputMaterialId}
+            outputMaterial={outputMaterial}
+          />
+        ) : (
+          <LinesGrid run={run} canEdit={canEdit} locked={locked} />
+        )}
+      </Section>
 
-      <MaterialPlan run={run} canEdit={canEdit} />
+      <Section
+        step={2}
+        title='materials needed'
+        hint="Estimated requirement against warehouse stock, from the tech card's material norms."
+      >
+        <MaterialPlan run={run} canEdit={canEdit} />
+      </Section>
 
-      <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} />
+      {canReadCosting ? (
+        <Section step={3} title='actual costs' hint='Log the real costs incurred once known.'>
+          <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} />
+        </Section>
+      ) : null}
 
-      <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-4'>
-        <Text variant='uppercase' size='small'>
+      {/* Audit trail, not a planning step — collapsed by default (memory: collapse rarely-used
+          content behind <details>), same pattern as the tech card's packaging spec / provenance. */}
+      <details className='border border-textInactiveColor'>
+        <summary className='cursor-pointer select-none px-3 py-2 text-textBaseSize uppercase hover:bg-highlightColor/5'>
           material movements
-        </Text>
-        <MovementsList filter={{ productionRunId: run.id }} />
-      </div>
+        </summary>
+        <div className='border-t border-textInactiveColor p-3'>
+          <MovementsList filter={{ productionRunId: run.id }} />
+        </div>
+      </details>
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal
@@ -199,60 +323,244 @@ export function ProductionRunDetail() {
         title={`delete PR-${run.id}?`}
         confirmLabel='delete'
       >
-        <Text size='small'>Удалить план партии? Действие необратимо.</Text>
+        <Text size='small'>Delete this production run? This action is irreversible.</Text>
       </ConfirmationModal>
     </div>
   );
 }
 
-function PlanFactBlock({
+// Status- (and blocker-) driven guidance banner. Folds the receive button's hover-only `title`
+// blockers (auxNoMaterial / unassignedPlanned — previously invisible until you happened to hover
+// a button) and the run's lifecycle into the one sentence a confused operator actually needs.
+type GuidanceTone = 'neutral' | 'warning' | 'success' | 'error';
+type Guidance = { tone: GuidanceTone; text: string; href?: string; linkLabel?: string };
+
+const GUIDANCE_BOX: Record<GuidanceTone, string> = {
+  neutral: 'border-textInactiveColor',
+  warning: 'border-warning bg-warning/10',
+  success: 'border-success bg-success/10',
+  error: 'border-error bg-error/10',
+};
+const GUIDANCE_TEXT: Record<GuidanceTone, string> = {
+  neutral: '',
+  warning: 'text-warning',
+  success: 'text-success',
+  error: 'text-error',
+};
+
+function nextStepGuidance({
+  status,
+  auxNoMaterial,
+  unassignedPlanned,
+  techCardId,
+}: {
+  status?: common_ProductionRunStatus;
+  auxNoMaterial: boolean;
+  unassignedPlanned: number;
+  techCardId?: number;
+}): Guidance | null {
+  if (status === 'PRODUCTION_RUN_STATUS_CANCELLED') {
+    return { tone: 'error', text: 'Cancelled — this run will not be received.' };
+  }
+  if (status === 'PRODUCTION_RUN_STATUS_CLOSED') {
+    return { tone: 'neutral', text: 'Closed — this is the final record of this run.' };
+  }
+  if (status === 'PRODUCTION_RUN_STATUS_RECEIVED') {
+    return {
+      tone: 'success',
+      text: 'Received — stock has been posted. Quantities are now locked; costs and materials can still be adjusted.',
+    };
+  }
+  if (auxNoMaterial) {
+    return {
+      tone: 'warning',
+      text: 'This auxiliary run has no output material set on its tech card — set one before it can be received.',
+      href: `${ROUTES.techCards}/${techCardId}`,
+      linkLabel: 'open tech card ↗',
+    };
+  }
+  if (unassignedPlanned > 0) {
+    return {
+      tone: 'warning',
+      text: `${unassignedPlanned} line(s) in step 1 below have no product yet — publish them as products or set their received quantity to 0 before receiving.`,
+    };
+  }
+  if (status === 'PRODUCTION_RUN_STATUS_IN_PROGRESS') {
+    return {
+      tone: 'neutral',
+      text: 'In progress — receive it once the goods arrive at the warehouse.',
+    };
+  }
+  // PLANNED, or status unset on a brand-new run.
+  return {
+    tone: 'neutral',
+    text: 'Planned — fill in quantities below, then receive once the goods arrive.',
+  };
+}
+
+// One number, scannable — label / value / an optional coloured note. Mirrors the KPI-tile idiom
+// used on the analytics dashboard (PersistentKpiBar) so a run's headline numbers read the same way
+// as the rest of the admin.
+function StatTile({
+  label,
+  value,
+  sub,
+  subClassName,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  subClassName?: string;
+}) {
+  return (
+    <div className='flex min-w-0 flex-col gap-1 border border-textInactiveColor p-3'>
+      <Text variant='uppercase' size='small' className='text-textInactiveColor'>
+        {label}
+      </Text>
+      <Text size='large' className='font-bold'>
+        {value}
+      </Text>
+      {sub ? (
+        <Text variant='uppercase' size='small' className={subClassName}>
+          {sub}
+        </Text>
+      ) : null}
+    </div>
+  );
+}
+
+// A numbered card around one step of the run's workflow: a title, a one-line "why", then the
+// existing editor (LinesGrid / AuxRunPlan / MaterialPlan / RunCosts) unchanged inside.
+function Section({
+  step,
+  title,
+  hint,
+  children,
+}: {
+  step?: number;
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className='border border-textInactiveColor'>
+      <div className='flex flex-wrap items-baseline gap-x-2 border-b border-textInactiveColor bg-bgColor px-3 py-2'>
+        {step ? (
+          <Text variant='uppercase' size='small' className='text-textInactiveColor'>
+            step {step}
+          </Text>
+        ) : null}
+        <Text variant='uppercase' size='small'>
+          {title}
+        </Text>
+      </div>
+      <div className='flex flex-col gap-2 p-3'>
+        {hint ? (
+          <Text variant='inactive' size='small'>
+            {hint}
+          </Text>
+        ) : null}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Cost variance is actual − plan: spending MORE than planned is bad (red), LESS is good (green) —
+// the inverse of a revenue/KPI delta, where up is good. Kept as one helper so both cost tiles
+// (unit and total) agree on the sign convention.
+function varianceTone(d?: googletype_Decimal): string | undefined {
+  const n = Number(d?.value);
+  if (!d?.value || !Number.isFinite(n) || n === 0) return undefined;
+  return n > 0 ? 'text-error' : 'text-success';
+}
+function varianceSub(d?: googletype_Decimal): string | undefined {
+  const n = Number(d?.value);
+  if (!d?.value || !Number.isFinite(n) || n === 0) return undefined;
+  return `Δ ${n > 0 ? '+' : ''}${decimalToInput(d)}`;
+}
+
+// Plan-vs-actual cost, in tiles: unit cost (feeds cost_price) AND total cost (the actual budget
+// question an owner asks first) — total was computed by the backend already (actuals.plannedTotalBase
+// / actualTotalBase / totalVariance) but had no reader anywhere in this module until now. Hidden
+// entirely without costing:read, same as RunCosts below (money is confidential; quantity is not).
+function CostSummary({
   run,
   actuals,
 }: {
   run: common_ProductionRun;
   actuals?: common_ProductionRunActuals;
 }) {
-  const planned = run?.plannedUnitCost;
+  const cur = actuals?.baseCurrency || run.plannedCurrency || '';
+  const warnings: string[] = [];
+  if (actuals?.mixedMaterialsSources) {
+    warnings.push('a manual materials cost AND stock issues both exist — check for a double count');
+  }
+  if (actuals?.hasUncostedIssues) {
+    warnings.push('some stock issues had no average cost — materials from stock is understated');
+  }
+  if (actuals && actuals.hasBase === false) {
+    warnings.push(
+      'some cost article could not be folded to the base currency — totals are partial',
+    );
+  }
+
   return (
-    <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
-      <div className='flex flex-wrap gap-x-6 gap-y-1'>
-        <Text size='small'>
-          plan / unit: {planned?.value ? decimalToInput(planned) : '—'} {run?.plannedCurrency || ''}
-        </Text>
-        <Text size='small'>
-          fact / unit:{' '}
-          {actuals?.actualUnitCost?.value
-            ? `${decimalToInput(actuals.actualUnitCost)} ${actuals.baseCurrency || ''}`
-            : '— until received'}
-          {actuals?.unitCostVariance?.value
-            ? ` (Δ ${decimalToInput(actuals.unitCostVariance)})`
-            : ''}
-        </Text>
-        <Text size='small'>
-          qty: план {actuals?.plannedQtyTotal ?? 0} / факт {actuals?.receivedQtyTotal ?? 0}
-          {actuals?.defectQtyTotal ? ` · брак ${actuals.defectQtyTotal}` : ''}
-        </Text>
+    <div className='flex flex-col gap-3'>
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+        <StatTile
+          label='unit cost · plan'
+          value={
+            run.plannedUnitCost?.value
+              ? `${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''}`
+              : '—'
+          }
+        />
+        <StatTile
+          label='unit cost · actual'
+          value={
+            actuals?.actualUnitCost?.value
+              ? `${decimalToInput(actuals.actualUnitCost)} ${cur}`
+              : '— until received'
+          }
+          sub={varianceSub(actuals?.unitCostVariance)}
+          subClassName={varianceTone(actuals?.unitCostVariance)}
+        />
+        <StatTile
+          label='total cost · plan'
+          value={
+            actuals?.plannedTotalBase?.value
+              ? `${decimalToInput(actuals.plannedTotalBase)} ${cur}`
+              : '—'
+          }
+        />
+        <StatTile
+          label='total cost · actual'
+          value={
+            actuals?.actualTotalBase?.value
+              ? `${decimalToInput(actuals.actualTotalBase)} ${cur}`
+              : '— until received'
+          }
+          sub={varianceSub(actuals?.totalVariance)}
+          subClassName={varianceTone(actuals?.totalVariance)}
+        />
       </div>
+
       {actuals?.materialsFromStockBase?.value ? (
         <Text variant='inactive' size='small'>
-          materials from stock: {decimalToInput(actuals.materialsFromStockBase)}{' '}
-          {actuals.baseCurrency || ''}
+          includes {decimalToInput(actuals.materialsFromStockBase)} {cur} of materials issued from
+          stock
         </Text>
       ) : null}
-      {actuals?.mixedMaterialsSources ? (
-        <Text size='small'>
-          ! a manual materials cost AND stock issues both exist — check for a double count
-        </Text>
-      ) : null}
-      {actuals?.hasUncostedIssues ? (
-        <Text size='small'>
-          ! some stock issues had no average cost — materials from stock understated
-        </Text>
-      ) : null}
-      {actuals && actuals.hasBase === false ? (
-        <Text size='small'>
-          ! some cost article could not be folded to base — totals are partial
-        </Text>
+
+      {warnings.length > 0 ? (
+        <div className='flex flex-col gap-1 border border-warning bg-warning/10 p-2'>
+          {warnings.map((w, i) => (
+            <Text key={i} size='small' className='text-warning'>
+              ! {w}
+            </Text>
+          ))}
+        </div>
       ) : null}
     </div>
   );
@@ -262,10 +570,8 @@ function PlanFactBlock({
 // for. Only materials-from-stock is split — manual cost articles stay run-level — and issues booked
 // without a colourway fall into "unattributed". Read-only; costing-gated by the caller.
 const cwCell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
-// TODO(final-bump): common_TechCardColorway was removed (R1 merge — a colourway is now a
-// product). This local shape keeps the label lookup below type-checking against an
-// always-empty caller; source real colourway data from GetColorwaysPaged by style /
-// AdminColorwayRef instead.
+// Colourway identity for the label lookup below (R1: a colourway is a product) — sourced from the
+// run's tech card (techCard?.colorways) by the caller, the same as lines-grid.tsx.
 type ColorwayLabelRef = { productId?: number; code?: string; name?: string };
 function ColorwayCostBlock({
   actuals,

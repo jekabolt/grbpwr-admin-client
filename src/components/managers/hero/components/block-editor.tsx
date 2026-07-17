@@ -708,6 +708,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                 uid={uid}
                 api={featuredProducts}
                 formPath={`entities.${index}.split.productIds`}
+                activeOnly
               />
             </div>
           </div>
@@ -728,6 +729,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
                 api={featuredProducts}
                 formPath={`entities.${index}.productSpotlight.productId`}
                 single
+                activeOnly
               />
             </div>
             <MediaPairField

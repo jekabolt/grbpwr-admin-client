@@ -15,15 +15,21 @@ import {
 export function ProductCustomsSection({
   productId,
   canWrite,
+  isLive = false,
 }: {
   productId: number;
   canWrite: boolean;
+  // Whether the colourway is live on the storefront — an incomplete-customs warning is escalated for
+  // a live product (its international labels will actually be rejected).
+  isLive?: boolean;
 }) {
   const { data, isLoading, isError, refetch } = useProductCustoms(productId);
   const save = useSetProductCustoms(productId);
 
   const [form, setForm] = useState<CustomsForm>(emptyCustoms);
   const [baseline, setBaseline] = useState<CustomsForm | null>(null);
+
+  const missingRequired = !form.hsCode.trim() || !form.countryOfOrigin.trim();
 
   // Seed once — a background refetch must not clobber in-progress edits.
   useEffect(() => {
@@ -72,28 +78,45 @@ export function ProductCustomsSection({
         origin the carrier rejects the customs declaration.
       </Text>
 
+      {missingRequired && (
+        <div
+          role='alert'
+          className={`border px-2 py-1 ${
+            isLive ? 'border-error text-error' : 'border-textInactiveColor'
+          }`}
+        >
+          <Text size='small' variant={isLive ? 'error' : 'inactive'} component='span'>
+            {isLive
+              ? 'This colourway is LIVE but customs is incomplete — international shipping labels will be rejected. Add the HS code and country of origin.'
+              : 'Customs is incomplete — an HS code and country of origin are required before this ships internationally.'}
+          </Text>
+        </div>
+      )}
+
       <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
         <label className='flex flex-col gap-1'>
           <Text variant='label' size='small' component='span'>
-            HS code
+            HS code · required
           </Text>
           <Input
             name='customs-hs-code'
             placeholder='e.g. 6109100010'
             disabled={!canWrite}
+            aria-required
             value={form.hsCode}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('hsCode', e.target.value)}
           />
         </label>
         <label className='flex flex-col gap-1'>
           <Text variant='label' size='small' component='span'>
-            country of origin (ISO-2)
+            country of origin (ISO-2) · required
           </Text>
           <Input
             name='customs-country'
             placeholder='e.g. IT'
             maxLength={2}
             disabled={!canWrite}
+            aria-required
             value={form.countryOfOrigin}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
               set(

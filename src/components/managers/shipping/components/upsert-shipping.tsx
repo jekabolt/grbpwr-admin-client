@@ -94,7 +94,7 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
         <form>
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-10 h-full'>
             <div className='flex flex-col gap-6'>
-              <InputField name='carrier' label='Carrier' />
+              <InputField name='carrier' label='Carrier *' />
               <TextareaField name='description' label='Description' />
               <div className='flex gap-4 flex-col'>
                 <Text variant='uppercase' className='leading-none'>

@@ -1,4 +1,4 @@
-import { common_MaterialStockRow } from 'api/proto-http/admin';
+import { common_Material, common_MaterialStockRow } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { techCardBomSectionOptions } from 'constants/filter';
@@ -8,6 +8,7 @@ import { Button } from 'ui/components/button';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
+import { MaterialModal } from './material-modal';
 import {
   AdjustStockModal,
   IssueStockModal,
@@ -19,6 +20,47 @@ import { useMaterialStock } from './useWarehouse';
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 const sectionLabel = (v?: string) =>
   techCardBomSectionOptions.find((o) => o.value === v)?.label ?? '—';
+
+// #17: click-to-sort table headers. Numeric columns sort by their decimal value; text columns
+// case-insensitively. A missing decimal sorts to the bottom of an ascending list.
+type SortKey = 'code' | 'name' | 'section' | 'onHand' | 'min' | 'avgCost' | 'value';
+const num = (d?: { value?: string }) => {
+  const n = Number(d?.value);
+  return Number.isFinite(n) ? n : -Infinity;
+};
+
+function SortTh({
+  label,
+  k,
+  active,
+  dir,
+  onSort,
+  align = 'left',
+}: {
+  label: string;
+  k: SortKey;
+  active: boolean;
+  dir: 'asc' | 'desc';
+  onSort: (k: SortKey) => void;
+  align?: 'left' | 'right';
+}) {
+  return (
+    <th className={`${cell} uppercase ${align === 'right' ? 'text-right' : 'text-left'}`}>
+      <button
+        type='button'
+        onClick={() => onSort(k)}
+        className={`flex w-full items-center gap-1 uppercase ${
+          align === 'right' ? 'justify-end' : 'justify-start'
+        }`}
+      >
+        {label}
+        <span className='text-textInactiveColor'>
+          {active ? (dir === 'asc' ? '▲' : '▼') : '↕'}
+        </span>
+      </button>
+    </th>
+  );
+}
 
 // Read/write the stock filters through the URL so a filtered view is shareable (R-1).
 function useStockFilters() {
@@ -66,6 +108,55 @@ export function StockTab() {
     belowMinOnly: f.belowMin,
   });
   const rows = useMemo(() => data?.rows ?? [], [data]);
+
+  // #17: client-side column sort. null = server order (default).
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortedRows = useMemo(() => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const val = (r: common_MaterialStockRow): string | number => {
+      switch (sortKey) {
+        case 'code':
+          return (r.material?.code ?? '').toLowerCase();
+        case 'name':
+          return (r.material?.name ?? '').toLowerCase();
+        case 'section':
+          return sectionLabel(r.material?.section).toLowerCase();
+        case 'onHand':
+          return num(r.onHand);
+        case 'min':
+          return num(r.minStock);
+        case 'avgCost':
+          return num(r.avgUnitCostBase);
+        case 'value':
+          return num(r.stockValueBase);
+      }
+    };
+    return [...rows].sort((a, b) => {
+      const va = val(a);
+      const vb = val(b);
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      return String(va).localeCompare(String(vb)) * dir;
+    });
+  }, [rows, sortKey, sortDir]);
+
+  // #12: edit the material behind a stock row (esp. a below-min row whose min threshold or catalog
+  // data is the thing to fix) without hopping to the Catalog tab.
+  const [editing, setEditing] = useState<common_Material | undefined>();
+  const [editOpen, setEditOpen] = useState(false);
+  const openEdit = (m?: common_Material) => {
+    if (!m) return;
+    setEditing(m);
+    setEditOpen(true);
+  };
 
   // Movement modals share one target; which modal is open is a small enum.
   const [target, setTarget] = useState<MovementTarget | undefined>();
@@ -164,22 +255,68 @@ export function StockTab() {
           <table className='w-full border-collapse'>
             <thead>
               <tr>
-                <th className={`${cell} text-left uppercase`}>code</th>
-                <th className={`${cell} text-left uppercase`}>name</th>
-                <th className={`${cell} text-left uppercase`}>section</th>
-                <th className={`${cell} text-right uppercase`}>on hand</th>
-                <th className={`${cell} text-right uppercase`}>min</th>
+                <SortTh
+                  label='code'
+                  k='code'
+                  active={sortKey === 'code'}
+                  dir={sortDir}
+                  onSort={toggleSort}
+                />
+                <SortTh
+                  label='name'
+                  k='name'
+                  active={sortKey === 'name'}
+                  dir={sortDir}
+                  onSort={toggleSort}
+                />
+                <SortTh
+                  label='section'
+                  k='section'
+                  active={sortKey === 'section'}
+                  dir={sortDir}
+                  onSort={toggleSort}
+                />
+                <SortTh
+                  label='on hand'
+                  k='onHand'
+                  active={sortKey === 'onHand'}
+                  dir={sortDir}
+                  onSort={toggleSort}
+                  align='right'
+                />
+                <SortTh
+                  label='min'
+                  k='min'
+                  active={sortKey === 'min'}
+                  dir={sortDir}
+                  onSort={toggleSort}
+                  align='right'
+                />
                 {canReadCosting ? (
                   <>
-                    <th className={`${cell} text-right uppercase`}>avg cost</th>
-                    <th className={`${cell} text-right uppercase`}>value</th>
+                    <SortTh
+                      label='avg cost'
+                      k='avgCost'
+                      active={sortKey === 'avgCost'}
+                      dir={sortDir}
+                      onSort={toggleSort}
+                      align='right'
+                    />
+                    <SortTh
+                      label='value'
+                      k='value'
+                      active={sortKey === 'value'}
+                      dir={sortDir}
+                      onSort={toggleSort}
+                      align='right'
+                    />
                   </>
                 ) : null}
                 <th className={`${cell} text-left uppercase`}>actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {sortedRows.map((r) => {
                 const m = r.material;
                 const id = m?.id ? Number(m.id) : 0;
                 const below = r.belowMinStock;
@@ -243,6 +380,14 @@ export function StockTab() {
                                 type='button'
                                 variant='secondary'
                                 className='uppercase'
+                                onClick={() => openEdit(m)}
+                              >
+                                edit material
+                              </Button>
+                              <Button
+                                type='button'
+                                variant='secondary'
+                                className='uppercase'
                                 onClick={() => goToMovements(id)}
                               >
                                 movements →
@@ -295,6 +440,8 @@ export function StockTab() {
           />
         </>
       ) : null}
+
+      <MaterialModal open={editOpen} onOpenChange={setEditOpen} material={editing} />
     </div>
   );
 }

@@ -213,12 +213,20 @@ export function FittingForm({
     }
   }
 
+  // The schema's .refine()s (tech card / sample required) previously failed dead silent — clicking
+  // "add" with nothing picked ran validation, rejected the submit, and gave zero feedback (no toast,
+  // no red text). onInvalid fires whenever handleSubmit's own validation blocks the call, so a snackbar
+  // always fires on a blocked submit; the field-level messages are additionally rendered inline below.
+  function onInvalid() {
+    showMessage('Fix the highlighted fields before saving', 'error');
+  }
+  const submit = form.handleSubmit(handleSubmit, onInvalid);
+  const techCardError = form.formState.errors.techCardId?.message;
+  const sampleError = form.formState.errors.sampleId?.message;
+
   return (
     <Form {...form}>
-      <form
-        className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
-        onSubmit={form.handleSubmit(handleSubmit)}
-      >
+      <form className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6' onSubmit={submit}>
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
             {/* Back respects ?returnTo= so bailing from the sample-panel loop lands back in
@@ -259,6 +267,11 @@ export function FittingForm({
                 tech card (style) *
               </Text>
               <TechCardField />
+              {techCardError && (
+                <Text size='small' className='text-error'>
+                  {String(techCardError)}
+                </Text>
+              )}
               <Text variant='inactive' size='small'>
                 примерка делается по тех карте и её сэмплу (а не по продукту)
               </Text>
@@ -276,6 +289,11 @@ export function FittingForm({
                     form.setValue('sampleId', sampleId, { shouldDirty: true })
                   }
                 />
+                {sampleError && (
+                  <Text size='small' className='text-error'>
+                    {String(sampleError)}
+                  </Text>
+                )}
                 <Text variant='inactive' size='small'>
                   примерка делается на конкретном сэмпле — обязательно
                 </Text>
@@ -355,7 +373,7 @@ export function FittingForm({
               className='uppercase cursor-pointer'
               disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
               loading={form.formState.isSubmitting}
-              onClick={() => form.handleSubmit(handleSubmit)()}
+              onClick={() => submit()}
             >
               {isEditMode ? 'save' : 'add'}
             </Button>

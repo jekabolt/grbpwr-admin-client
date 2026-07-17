@@ -1,5 +1,6 @@
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
+import { useFormContext } from 'react-hook-form';
 import FieldsGroupContainer from 'ui/components/fields-group';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
@@ -7,6 +8,7 @@ import { getUniqueCountries } from '../utility/constant';
 
 export function ShippingFieldsGroup({ prefix }: { prefix: string }) {
   const { dictionary } = useDictionary();
+  const { watch, setValue } = useFormContext();
   const countryItems = useMemo(
     () => getUniqueCountries().map((c) => ({ value: c.countryCode, label: c.name })),
     [],
@@ -22,6 +24,20 @@ export function ShippingFieldsGroup({ prefix }: { prefix: string }) {
         })),
     [dictionary?.shipmentCarriers],
   );
+
+  // The dictionary already carries a priced rate per carrier — auto-fill the cost whenever the
+  // carrier changes (including the initial default selection) instead of making the operator
+  // recall/type it from memory. The field stays a normal, editable InputField below so real
+  // overrides are still possible.
+  const shipmentCarrierId = watch('shipmentCarrierId');
+  useEffect(() => {
+    if (!shipmentCarrierId) return;
+    const carrier = dictionary?.shipmentCarriers?.find((c) => c.id === shipmentCarrierId);
+    const price = carrier?.prices?.find((p) => p.currency === dictionary?.baseCurrency);
+    if (price?.price?.value != null) {
+      setValue('shipmentCost.value', price.price.value);
+    }
+  }, [shipmentCarrierId, dictionary?.shipmentCarriers, dictionary?.baseCurrency, setValue]);
 
   return (
     <FieldsGroupContainer stage='2/3' isOpen title='shipping address/delivery method'>

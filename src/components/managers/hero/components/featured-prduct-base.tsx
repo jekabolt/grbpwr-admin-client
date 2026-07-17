@@ -98,6 +98,10 @@ export function FeaturedProductBase({
             selectedProductIds={(product[uid] || []).map((x) => x.id!)}
             onSave={(selectedProduct) => handleSaveNewSelection?.(selectedProduct, index, uid)}
             onOpenRequest={() => handleOpenProductSelection?.(uid)}
+            // H1: featured products are homepage-facing — only ACTIVE colourways can
+            // be picked, so a draft/hidden product can never be featured while
+            // looking live.
+            statuses={['COLORWAY_LIFECYCLE_STATUS_ACTIVE']}
           />
         </>
       )}

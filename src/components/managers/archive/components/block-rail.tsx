@@ -13,6 +13,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { common_Colorway } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -31,7 +32,15 @@ function defaultCopy(translations: any[] | undefined, key: 'caption' | 'text'): 
 
 // A tiny thumbnail url + one-line summary per block, so rows are distinguishable
 // at a glance instead of only showing the type label.
-function itemPreview(item: any): { thumb?: string; summary?: string } {
+// A9: PRODUCT/PRODUCTS_MANUAL now resolve a real thumbnail from the resolved
+// product cache (keyed by block uid, same cache the picker/preview use) instead of
+// always falling through to the generic dashed placeholder. PRODUCTS_TAG isn't
+// resolved here (that would mean a live lookup per rail row for every tag block);
+// its live match preview lives in the block editor itself (A4).
+function itemPreview(
+  item: any,
+  products: Record<string, common_Colorway[]>,
+): { thumb?: string; summary?: string } {
   switch (item?.type) {
     case 'ARCHIVE_ITEM_TYPE_MAIN_MEDIA':
       return { thumb: item.mediaUrl || undefined, summary: 'main media' };
@@ -49,13 +58,17 @@ function itemPreview(item: any): { thumb?: string; summary?: string } {
     case 'ARCHIVE_ITEM_TYPE_EMBED':
       return { summary: item.embedUrl || defaultCopy(item.translations, 'caption') };
     case 'ARCHIVE_ITEM_TYPE_PRODUCT':
-      return { summary: defaultCopy(item.translations, 'caption') || 'product' };
+      return {
+        thumb: products[item._uid]?.[0]?.display?.thumbnail?.media?.thumbnail?.mediaUrl,
+        summary: defaultCopy(item.translations, 'caption') || 'product',
+      };
     case 'ARCHIVE_ITEM_TYPE_PRODUCTS_TAG':
       return {
         summary: item.tag ? `#${item.tag}` : defaultCopy(item.translations, 'caption'),
       };
     case 'ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL':
       return {
+        thumb: products[item._uid]?.[0]?.display?.thumbnail?.media?.thumbnail?.mediaUrl,
         summary: item.productIds?.length
           ? `${item.productIds.length} product${item.productIds.length === 1 ? '' : 's'}`
           : defaultCopy(item.translations, 'caption'),
@@ -73,6 +86,8 @@ interface BlockRailProps {
   onSelectBlock: (uid: string) => void;
   selectedUid: string | null;
   onAddClick: () => void;
+  /** Resolved product cache keyed by block uid, for PRODUCT/PRODUCTS_MANUAL thumbnails. */
+  products?: Record<string, common_Colorway[]>;
 }
 
 /**
@@ -88,6 +103,7 @@ export const BlockRail: FC<BlockRailProps> = ({
   onSelectBlock,
   selectedUid,
   onAddClick,
+  products = {},
 }) => {
   const {
     control,
@@ -169,7 +185,7 @@ export const BlockRail: FC<BlockRailProps> = ({
               const isDeleted = deletedIndices.has(uid);
               const isSelected = selectedUid === uid;
               const hasError = !!itemErrors?.[index];
-              const preview = itemPreview(item);
+              const preview = itemPreview(item, products);
 
               return (
                 <SortableEntity key={uid} uid={uid} disabled={isDeleted}>

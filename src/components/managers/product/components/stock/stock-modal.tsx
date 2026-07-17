@@ -5,11 +5,15 @@ import Text from 'ui/components/text';
 interface Props {
   children: React.ReactNode;
   title: string;
+  // Optional controlled open state — lets the form auto-close the modal on a successful save
+  // instead of leaving a silently-blanked form behind.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function StockModal({ children, title }: Props) {
+export function StockModal({ children, title, open, onOpenChange }: Props) {
   return (
-    <DialogPrimitives.Root>
+    <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Trigger asChild>
         <Button variant='main' size='lg'>
           {title}

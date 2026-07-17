@@ -9,6 +9,7 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { ProductFormData } from '../utility/schema';
 import { getFilteredSizes } from '../utility/sizes';
+import { TechCardLink } from './read-only-field';
 import { buildStylePatch, MODEL_WEARS_UPDATE_MASK } from './utils';
 
 // UpdateStyle is the SOLE writer of a style's catalogue facts. Most of them (brand, season,
@@ -88,9 +89,7 @@ export function StyleSection({
         <Text variant='uppercase' size='large'>
           model presentation
         </Text>
-        <Text variant='inactive' size='small'>
-          style #{styleId}
-        </Text>
+        <TechCardLink styleId={styleId} label={`style #${styleId}`} />
       </div>
       <Text variant='inactive' size='small'>
         Model-wears height and size describe this colourway’s photo shoot. They save with the “save

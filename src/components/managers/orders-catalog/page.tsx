@@ -3,7 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { statusOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Selector from 'ui/components/selector';
@@ -13,14 +13,19 @@ import { StockChangesReport } from './components/StockChangesReport';
 import { useInfiniteOrders } from './components/useOrdersQuery';
 
 export function OrdersCatalog() {
+  // Support-ticket "Order Ref" links land here as /orders?ref=<id-or-uuid> (parsed the same way
+  // as the manual search box, via parseOrderSearch in useOrdersQuery) — pick it up once on mount
+  // so the referenced order is filtered into view immediately, with no extra debounce delay.
+  const [searchParams] = useSearchParams();
+  const initialRef = searchParams.get('ref') ?? '';
   const [orderFactor, setOrderFactor] = useState<'ORDER_FACTOR_ASC' | 'ORDER_FACTOR_DESC'>(
     'ORDER_FACTOR_DESC',
   );
   const [status, setStatus] = useState<common_OrderStatusEnum | ''>('');
-  const [orderSearch, setOrderSearch] = useState<string>('');
+  const [orderSearch, setOrderSearch] = useState<string>(initialRef);
   const [email, setEmail] = useState<string>('');
   const [debouncedEmail, setDebouncedEmail] = useState<string>('');
-  const [debouncedOrderSearch, setDebouncedOrderSearch] = useState<string>('');
+  const [debouncedOrderSearch, setDebouncedOrderSearch] = useState<string>(initialRef);
   const [showReport, setShowReport] = useState(false);
   const { canWrite } = usePermissions();
 

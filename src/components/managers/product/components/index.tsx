@@ -12,7 +12,7 @@ import { generatePath, Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
-import { defaultData, ProductFormData, productSchema } from '../utility/schema';
+import { defaultData, draftProductSchema, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
 import { ProductCostSection } from './cost-section';
 import { LifecycleControls, StatusBadge } from './lifecycle-controls';
@@ -55,8 +55,15 @@ export function ProductForm({
   const initialValues =
     product && (!isAddingProduct || isCopyMode) ? mapProductFullToFormData(product) : defaultData;
 
+  // #65: a DRAFT colourway (and every create) validates with the lenient schema — partial prices, no
+  // media/translation/size completeness gate — so it can be created and completed incrementally.
+  // Publish (server-side) is the real completeness check. An ACTIVE/HIDDEN colourway keeps the strict
+  // schema so a live product can't be saved back into an incomplete state.
+  const isDraftColorway = product?.colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_DRAFT';
+  const activeSchema = isAddingProduct || isDraftColorway ? draftProductSchema : productSchema;
+
   const form = useForm<ProductFormData>({
-    resolver: zodResolver(productSchema),
+    resolver: zodResolver(activeSchema),
     defaultValues: initialValues,
     mode: 'onTouched',
   });
@@ -176,6 +183,22 @@ export function ProductForm({
 
   const submitForm = () => form.handleSubmit(handleSubmit, handleFormError)();
 
+  const sectionNavItems = [
+    { id: 'sec-media', label: 'media', show: true },
+    { id: 'sec-details', label: 'details', show: true },
+    {
+      id: 'sec-model',
+      label: 'model',
+      show: !isAddingProduct && product?.colorway?.styleId != null,
+    },
+    { id: 'sec-cost', label: 'cost', show: canReadCosting || canWriteCosting },
+    { id: 'sec-sizes', label: 'sizes & stock', show: true },
+    { id: 'sec-fittings', label: 'fittings', show: !!productId && !isCopyMode },
+    { id: 'sec-customs', label: 'customs', show: !!productId && !isCopyMode },
+  ]
+    .filter((i) => i.show)
+    .map(({ id, label }) => ({ id, label }));
+
   return (
     <Form {...form}>
       <form
@@ -212,8 +235,10 @@ export function ProductForm({
           />
         )}
 
+        <SectionNav items={sectionNavItems} />
+
         <div className='flex flex-col lg:flex-row lg:items-start gap-6'>
-          <Section title='media' className='w-full lg:w-1/2'>
+          <Section title='media' id='sec-media' className='w-full lg:w-1/2'>
             <div className='flex flex-row gap-5'>
               <Thumbnail
                 product={product}
@@ -236,9 +261,13 @@ export function ProductForm({
             />
           </Section>
 
-          <Section title='details' className='w-full lg:w-1/2'>
+          <Section title='details' id='sec-details' className='w-full lg:w-1/2'>
             {isAddingProduct && <StylePicker name='styleId' disabled={!editMode} />}
-            <BodyFields editMode={editMode} isAddingProduct={isAddingProduct} />
+            <BodyFields
+              editMode={editMode}
+              isAddingProduct={isAddingProduct}
+              styleId={product?.colorway?.styleId}
+            />
             <Tags
               isAddingProduct={isAddingProduct}
               isEditMode={isEditMode}
@@ -256,17 +285,19 @@ export function ProductForm({
             <StyleSection/> derives its own canEdit from the editMode prop instead. Never shown in
             add-mode: there is no created colourway yet for this section's own Save to attach to. */}
         {!isAddingProduct && product?.colorway?.styleId != null && (
-          <StyleSection
-            styleId={product.colorway.styleId}
-            lockVersion={product.colorway.lockVersion}
-            canWrite={canWrite(SECTION.products)}
-            editMode={editMode}
-            onChanged={onStockUpdated}
-          />
+          <div id='sec-model' className='scroll-mt-20'>
+            <StyleSection
+              styleId={product.colorway.styleId}
+              lockVersion={product.colorway.lockVersion}
+              canWrite={canWrite(SECTION.products)}
+              editMode={editMode}
+              onChanged={onStockUpdated}
+            />
+          </div>
         )}
 
         {(canReadCosting || canWriteCosting) && (
-          <Section title='cost'>
+          <Section title='cost' id='sec-cost'>
             <ProductCostSection
               editMode={editMode}
               costInfo={costInfo}
@@ -278,7 +309,7 @@ export function ProductForm({
           </Section>
         )}
 
-        <Section title='sizes & stock'>
+        <Section title='sizes & stock' id='sec-sizes'>
           <SizeMeasurements
             editMode={editMode}
             productId={productId ? Number(productId) : undefined}
@@ -290,16 +321,17 @@ export function ProductForm({
         </Section>
 
         {productId && !isCopyMode && (
-          <Section title='fittings'>
+          <Section title='fittings' id='sec-fittings'>
             <FittingsReadonlyList productId={Number(productId)} />
           </Section>
         )}
 
         {productId && !isCopyMode && (
-          <Section title='customs'>
+          <Section title='customs' id='sec-customs'>
             <ProductCustomsSection
               productId={Number(productId)}
               canWrite={canWrite(SECTION.products)}
+              isLive={product?.colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE'}
             />
           </Section>
         )}
@@ -356,18 +388,47 @@ export function ProductForm({
 function Section({
   title,
   className,
+  id,
   children,
 }: {
   title: string;
   className?: string;
+  id?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className={`space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}>
+    <section
+      id={id}
+      className={`scroll-mt-20 space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}
+    >
       <Text variant='uppercase' size='large'>
         {title}
       </Text>
       {children}
     </section>
+  );
+}
+
+// Sticky in-page nav for the long product editor — jumps to each independently-saving section
+// (P3 #16). Only lists the sections actually rendered for this colourway.
+function SectionNav({ items }: { items: { id: string; label: string }[] }) {
+  if (items.length < 2) return null;
+  const jump = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return (
+    <nav className='sticky top-0 z-30 -mx-2 flex flex-wrap gap-2 border-b border-textInactiveColor bg-bgColor px-2 py-2 lg:-mx-6 lg:px-6 print:hidden'>
+      {items.map((it) => (
+        <Button
+          key={it.id}
+          type='button'
+          size='sm'
+          variant='secondary'
+          className='uppercase'
+          onClick={() => jump(it.id)}
+        >
+          {it.label}
+        </Button>
+      ))}
+    </nav>
   );
 }

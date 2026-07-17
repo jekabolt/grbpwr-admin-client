@@ -1,16 +1,28 @@
 import { adminService } from 'api/api';
-import { common_Colorway } from 'api/proto-http/admin';
+import { common_Colorway, common_ColorwayLifecycleStatus } from 'api/proto-http/admin';
 import { BASE_PATH } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../../../../ui/components/button';
+import Input from '../../../../ui/components/input';
 import Media from '../../../../ui/components/media';
 import Text from '../../../../ui/components/text';
 import { HeroModal } from './hero-modal';
 
 const HIDDEN_ON_MOBILE_STYLE = 'hidden lg:table-cell';
+
+// Real lifecycle label, so a DRAFT/HIDDEN colourway never reads as indistinguishable
+// from a live one (H1: this table used to show a binary hidden/shown that called
+// anything-not-HIDDEN "shown", including never-published drafts).
+export const COLORWAY_STATUS_LABEL: Record<string, string> = {
+  COLORWAY_LIFECYCLE_STATUS_UNKNOWN: 'unknown',
+  COLORWAY_LIFECYCLE_STATUS_DRAFT: 'draft',
+  COLORWAY_LIFECYCLE_STATUS_ACTIVE: 'active',
+  COLORWAY_LIFECYCLE_STATUS_HIDDEN: 'hidden',
+  COLORWAY_LIFECYCLE_STATUS_ARCHIVED: 'archived',
+};
 
 type ColumnDef = {
   label: string;
@@ -26,6 +38,15 @@ interface ProductsPickerData {
   onOpenRequest?: () => void;
   /** Single-select mode: radio picker, choosing one replaces any prior pick. */
   single?: boolean;
+  /**
+   * Restrict fetched colourways to these lifecycle statuses (default: all but
+   * ARCHIVED are fetchable, matching the historic behavior — used by pickers that
+   * legitimately reference non-live products, e.g. archive/timeline blocks).
+   * Homepage-facing pickers (hero featured products, split, spotlight, explore
+   * links) pass `['COLORWAY_LIFECYCLE_STATUS_ACTIVE']` so a draft can never be
+   * featured while looking live.
+   */
+  statuses?: common_ColorwayLifecycleStatus[];
 }
 
 export const ProductPickerModal: FC<ProductsPickerData> = ({
@@ -35,24 +56,31 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
   onSave,
   onOpenRequest,
   single = false,
+  statuses,
 }) => {
   const calculateOffset = (page: number, limit: number) => (page - 1) * limit;
 
   const [allProducts, setAllProducts] = useState<common_Colorway[]>([]);
   const [selectedProducts, setSelectedProducts] = useState<common_Colorway[]>([]);
+  const [search, setSearch] = useState('');
   const { dictionary } = useDictionary();
   const categories = dictionary?.categories || [];
 
   const [currentPage, setCurrentPage] = useState(1);
   const newLimit = 50;
   const offset = calculateOffset(currentPage, newLimit);
+  // Stable primitive key for the (possibly-fresh-array-literal) statuses prop, so
+  // it can safely drive effect deps without refetch-looping on every render.
+  const statusesKey = (statuses || []).join(',');
 
   useEffect(() => {
     if (open) {
       setAllProducts([]);
       setCurrentPage(1);
+      setSearch('');
     }
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, statusesKey]);
 
   useEffect(() => {
     if (open) {
@@ -63,7 +91,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
           sortFactors: ['SORT_FACTOR_CREATED_AT'],
           orderFactor: 'ORDER_FACTOR_DESC',
           filterConditions: undefined,
-          statuses: undefined,
+          statuses,
         });
         if (Array.isArray(response.colorways)) {
           setAllProducts((prevProducts) => {
@@ -80,7 +108,21 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       };
       fetchProducts();
     }
-  }, [open, currentPage, newLimit, offset]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentPage, newLimit, offset, statusesKey]);
+
+  // Client-side narrow-down over the loaded pages (the backend has no name/SKU
+  // text-search filter) — H7: pickers were "Load more"-only with no way to find a
+  // specific product in a large catalog.
+  const filteredProducts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return allProducts;
+    return allProducts.filter((product) => {
+      const name = (product.display?.translations?.[0]?.name || '').toLowerCase();
+      const idStr = String(product.id ?? '');
+      return name.includes(q) || idStr.includes(q);
+    });
+  }, [allProducts, search]);
 
   useEffect(() => {
     const newSelectedProducts = allProducts.filter((product) =>
@@ -159,12 +201,9 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         accessor: (product: common_Colorway) => product.display?.translations?.[0]?.name,
       },
       {
-        label: 'IS HIDDEN',
-        className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: (product: common_Colorway) => {
-          const hidden = product.status === 'COLORWAY_LIFECYCLE_STATUS_HIDDEN';
-          return hidden ? 'Yes' : 'No';
-        },
+        label: 'STATUS',
+        accessor: (product: common_Colorway) =>
+          COLORWAY_STATUS_LABEL[product.status || ''] || 'unknown',
       },
       {
         label: 'PRICE',
@@ -206,6 +245,15 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
       }}
     >
       <div className='w-full'>
+        <div className='mb-2 flex justify-end'>
+          <Input
+            type='text'
+            value={search}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+            placeholder='search by name or id…'
+            className='w-full max-w-xs border px-2 py-1.5 lg:w-64'
+          />
+        </div>
         <div className='overflow-auto w-full max-h-[min(70vh,500px)]'>
           <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
             <thead className='bg-textInactiveColor h-10'>
@@ -226,18 +274,23 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
               </tr>
             </thead>
             <tbody>
-              {allProducts.length === 0 ? (
+              {filteredProducts.length === 0 ? (
                 <tr>
                   <td colSpan={COLUMNS.length} className='text-center py-8'>
-                    <Text variant='uppercase'>no products found</Text>
+                    <Text variant='uppercase'>
+                      {allProducts.length === 0
+                        ? 'no products found'
+                        : 'no products match your search'}
+                    </Text>
                   </td>
                 </tr>
               ) : (
-                allProducts.map((product) => (
+                filteredProducts.map((product) => (
                   <tr key={product.id} className='border-b border-text last:border-b-0 lg:w-24'>
                     {COLUMNS.map((col) => {
                       const isThumbnail = col.label === 'THUMBNAIL';
                       const isSelect = col.label === 'SELECT';
+                      const isStatus = col.label === 'STATUS';
                       const cellContent = col.accessor(product);
                       return (
                         <td
@@ -247,7 +300,21 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
                             col.className,
                           )}
                         >
-                          {isThumbnail || isSelect ? cellContent : <Text>{cellContent}</Text>}
+                          {isThumbnail || isSelect ? (
+                            cellContent
+                          ) : isStatus ? (
+                            <Text
+                              variant={
+                                product.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE'
+                                  ? 'default'
+                                  : 'error'
+                              }
+                            >
+                              {cellContent}
+                            </Text>
+                          ) : (
+                            <Text>{cellContent}</Text>
+                          )}
                         </td>
                       );
                     })}

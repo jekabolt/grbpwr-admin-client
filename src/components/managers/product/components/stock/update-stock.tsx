@@ -22,6 +22,8 @@ export function UpdateStock({
   onStockUpdated?: () => void;
 }) {
   const {
+    open,
+    onOpenChange,
     form,
     mode,
     direction,
@@ -34,7 +36,7 @@ export function UpdateStock({
   } = useUpdateStock({ variants, onStockUpdated });
 
   return (
-    <StockModal title='update stock'>
+    <StockModal title='update stock' open={open} onOpenChange={onOpenChange}>
       <Form {...form}>
         <form
           onSubmit={form.handleSubmit(onSubmit)}
@@ -50,7 +52,9 @@ export function UpdateStock({
                     name='mode'
                     label={o.label}
                     checked={mode === o.value}
-                    onCheckedChange={() => form.setValue('mode', o.value as UpdateStockData['mode'])}
+                    onCheckedChange={() =>
+                      form.setValue('mode', o.value as UpdateStockData['mode'])
+                    }
                   />
                 ))}
               </div>

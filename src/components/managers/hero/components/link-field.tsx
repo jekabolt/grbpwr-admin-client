@@ -12,13 +12,14 @@ import {
   StorefrontLinkType,
 } from 'lib/storefront-links';
 import { cn } from 'lib/utility';
-import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
+import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Media from 'ui/components/media';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
-import { useArchives } from '../../archives/components/useArchiveQuery';
+import { useInfiniteArchives } from '../../archives/components/useArchiveQuery';
 import { ProductPickerModal } from './productPickerModal';
 import { TagPicker } from './tag-picker';
 
@@ -175,6 +176,9 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
               setPickedProduct(p || null);
               setProductModalOpen(false);
             }}
+            // This link is a homepage CTA target — restrict to ACTIVE so it can't
+            // point at an unpublished draft (H1).
+            statuses={['COLORWAY_LIFECYCLE_STATUS_ACTIVE']}
           />
         </div>
       )}
@@ -186,7 +190,13 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
   );
 }
 
-/** Visual archive picker (thumbnail grid) → serialized into the archive URL. */
+/**
+ * Visual archive picker (thumbnail grid) → serialized into the archive URL.
+ * H13: used to load a single fixed 50-row page via useArchives with no load-more
+ * (unlike nav-featured's own ArchivePicker) — past 50 archives, older entries were
+ * unreachable here. H7: also had no search. Now paginates via useInfiniteArchives
+ * and filters the loaded set by heading/tag as you type.
+ */
 function ArchiveBody({
   link,
   onChange,
@@ -194,21 +204,39 @@ function ArchiveBody({
   link: { slug: string };
   onChange: (l: StorefrontLink) => void;
 }) {
-  const { data: archives = [], isLoading } = useArchives();
-  const list = (archives || []).filter((a) => a.slug);
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteArchives();
+  const archives = useMemo(() => data?.pages.flatMap((p) => p.archives) ?? [], [data?.pages]);
+  const [search, setSearch] = useState('');
+  const list = useMemo(() => {
+    const withSlug = archives.filter((a) => a.slug);
+    const q = search.trim().toLowerCase();
+    if (!q) return withSlug;
+    return withSlug.filter((a) => {
+      const heading = (a.translations?.find((t) => t.heading)?.heading || '').toLowerCase();
+      const tag = (a.tag || '').toLowerCase();
+      return heading.includes(q) || tag.includes(q);
+    });
+  }, [archives, search]);
 
   return (
     <div className='space-y-2'>
       <Text component='label' size='small' variant='label'>
         archive
       </Text>
+      <Input
+        type='text'
+        value={search}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+        placeholder='search by heading or tag…'
+        className='border px-2 py-1.5'
+      />
       {isLoading ? (
         <Text variant='label' size='small'>
           loading…
         </Text>
       ) : list.length === 0 ? (
         <Text variant='label' size='small'>
-          no archives found.
+          {archives.length === 0 ? 'no archives found.' : 'no archives match your search.'}
         </Text>
       ) : (
         <div className='grid max-h-72 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3'>
@@ -244,6 +272,20 @@ function ArchiveBody({
               </button>
             );
           })}
+        </div>
+      )}
+      {!search && hasNextPage && (
+        <div className='flex justify-center'>
+          <Button
+            type='button'
+            size='lg'
+            variant='simple'
+            className='uppercase'
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? 'loading…' : 'load more'}
+          </Button>
         </div>
       )}
     </div>

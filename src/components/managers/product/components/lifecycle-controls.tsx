@@ -103,6 +103,11 @@ export function LifecycleControls({
       'Colorway archived',
     ).catch(() => {});
 
+  // #60: archiving is reversible. Restore brings a retired colourway back as HIDDEN (kept off the
+  // storefront until it's explicitly unhidden/published).
+  const restore = () =>
+    transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway restored — now hidden');
+
   return (
     <div className='flex flex-col gap-2 border border-textInactiveColor px-3 py-2'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
@@ -164,7 +169,26 @@ export function LifecycleControls({
             )}
           </div>
         )}
+        {/* #60: an archived colourway can be restored (→ hidden) instead of being permanently stuck. */}
+        {canWrite && isArchived && (
+          <Button
+            type='button'
+            variant='main'
+            size='lg'
+            className='uppercase'
+            disabled={busy}
+            onClick={restore}
+          >
+            restore
+          </Button>
+        )}
       </div>
+
+      {isArchived && (
+        <Text variant='inactive' size='small'>
+          archived — removed from the storefront. restore brings it back as hidden.
+        </Text>
+      )}
 
       {isDraft && (
         <Text variant='inactive' size='small'>
@@ -199,8 +223,8 @@ export function LifecycleControls({
         onCancel={() => setConfirmArchive(false)}
       >
         <Text variant='uppercase' className='font-bold'>
-          archive this colourway? this is terminal — it will be removed from the storefront and
-          cannot be un-archived.
+          archive this colourway? it will be removed from the storefront. you can restore it later
+          (it comes back hidden).
         </Text>
       </ConfirmationModal>
     </div>

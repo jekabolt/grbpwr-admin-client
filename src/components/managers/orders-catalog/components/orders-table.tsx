@@ -3,6 +3,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
 import { useInfiniteOrders } from './useOrdersQuery';
 import { formatDateShort, getOrderStatusName, getStatusColor } from './utility';
@@ -69,7 +70,13 @@ export function OrdersTable({ orders, orderFactor, isLoading, onToggleSort }: Or
                   onClick={() => handleRowClick(o)}
                 >
                   <td className='sticky left-0 z-10 border border-textInactiveColor bg-bgColor px-2 text-center group-hover:bg-highlightColor/20'>
-                    <Text>{o.uuid}</Text>
+                    <Text>#{o.id ?? ''}</Text>
+                    {/* common_Order (api/proto-http/admin) carries no buyer email/name — rows
+                        can't show a buyer identity until the backend projects one onto
+                        ListOrders. uuid is kept as a secondary copy-only value. */}
+                    <div onClick={(e) => e.stopPropagation()} className='flex justify-center'>
+                      <CopyToClipboard text={o.uuid || ''} cutText />
+                    </div>
                   </td>
                   <td className='border border-textInactiveColor px-2 text-center'>
                     <span className={cn('inline-block px-1.5 py-0.5', getStatusColor(statusName))}>

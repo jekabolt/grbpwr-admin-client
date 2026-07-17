@@ -3,8 +3,11 @@ import { common_Variant } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
+import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
+import { permittedSizeSystems } from 'utils/size-systems';
 import { formatSizeName } from '../utility/sizes';
 
 // R2: variants are first-class now (Create/Archive; archive-not-delete). A colourway's sellable sizes
@@ -25,21 +28,46 @@ export function VariantsPanel({
   const { showMessage } = useSnackBarStore();
   const [busy, setBusy] = useState(false);
   const [sizeToAdd, setSizeToAdd] = useState<string>('');
+  const [pendingArchive, setPendingArchive] = useState<common_Variant | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+
+  // Style category (the colourway's own topCategory/subCategory/type ids, read from the form) — used
+  // to restrict the "add variant" size list to sizes valid for this garment (M7). A bomber must never
+  // offer shoe sizes.
+  const topCategoryId = useWatch({ name: 'product.productBodyInsert.topCategoryId' }) as
+    | string
+    | undefined;
+  const subCategoryId = useWatch({ name: 'product.productBodyInsert.subCategoryId' }) as
+    | string
+    | undefined;
+  const typeId = useWatch({ name: 'product.productBodyInsert.typeId' }) as string | undefined;
+  const categoryId =
+    parseInt(typeId || '') || parseInt(subCategoryId || '') || parseInt(topCategoryId || '') || 0;
+
+  const allowedSizeSystems = useMemo(
+    () => permittedSizeSystems(dictionary?.categories, dictionary?.categorySizeSystems, categoryId),
+    [dictionary?.categories, dictionary?.categorySizeSystems, categoryId],
+  );
 
   const sizeName = (sizeId?: number) => {
     const raw = dictionary?.sizes?.find((s) => s.id === sizeId)?.name ?? String(sizeId ?? '');
     return formatSizeName(raw) || raw;
   };
 
-  const activeVariants = variants.filter(
-    (v) => v.status !== 'VARIANT_LIFECYCLE_STATUS_ARCHIVED',
-  );
+  const activeVariants = variants.filter((v) => v.status !== 'VARIANT_LIFECYCLE_STATUS_ARCHIVED');
+  const archivedVariants = variants.filter((v) => v.status === 'VARIANT_LIFECYCLE_STATUS_ARCHIVED');
 
-  // Sizes not already attached as a variant — candidates for CreateVariant.
+  // Sizes not already attached as a variant AND permitted by the style's category (S10/WS5).
+  // permittedSizeSystems returns undefined when the category maps to nothing — then show all sizes.
   const availableSizes = useMemo(() => {
     const taken = new Set(variants.map((v) => v.sizeId));
-    return (dictionary?.sizes ?? []).filter((s) => s.id != null && !taken.has(s.id));
-  }, [dictionary?.sizes, variants]);
+    const allow = allowedSizeSystems?.length ? new Set(allowedSizeSystems) : undefined;
+    return (dictionary?.sizes ?? []).filter((s) => {
+      if (s.id == null || taken.has(s.id)) return false;
+      if (!allow) return true;
+      return allow.has(s.skuSystem ?? 'SIZE_SKU_SYSTEM_UNKNOWN');
+    });
+  }, [dictionary?.sizes, variants, allowedSizeSystems]);
 
   async function addVariant() {
     const sizeId = sizeToAdd ? parseInt(sizeToAdd, 10) : NaN;
@@ -49,7 +77,11 @@ export function VariantsPanel({
     }
     setBusy(true);
     try {
-      await adminService.CreateVariant({ colorwayId, sizeId, expectedColorwayVersion: lockVersion });
+      await adminService.CreateVariant({
+        colorwayId,
+        sizeId,
+        expectedColorwayVersion: lockVersion,
+      });
       showMessage('Variant added', 'success');
       setSizeToAdd('');
       onChanged?.();
@@ -90,10 +122,56 @@ export function VariantsPanel({
     }
   }
 
+  // Restore = flip the variant's lifecycle back to ACTIVE (no dedicated Unarchive RPC; UpdateVariant's
+  // only mutable field is status).
+  async function restoreVariant(v: common_Variant) {
+    if (v.variantId == null) return;
+    setBusy(true);
+    try {
+      await adminService.UpdateVariant({
+        variantId: v.variantId,
+        expectedVersion: v.lockVersion,
+        patch: { status: 'VARIANT_LIFECYCLE_STATUS_ACTIVE' },
+        updateMask: 'status',
+      });
+      showMessage('Variant restored', 'success');
+      onChanged?.();
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      showMessage(
+        err?.status === 409
+          ? 'This variant changed since you loaded it — reload and retry.'
+          : err instanceof Error
+            ? err.message
+            : 'Failed to restore variant',
+        'error',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className='space-y-2 border-t border-textInactiveColor pt-3'>
-      <Text variant='uppercase' size='small'>
-        variants
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <Text variant='uppercase' size='small'>
+          variants
+        </Text>
+        {archivedVariants.length > 0 && (
+          <Button
+            type='button'
+            size='sm'
+            variant='secondary'
+            className='uppercase'
+            onClick={() => setShowArchived((s) => !s)}
+          >
+            {showArchived ? 'hide archived' : `show archived (${archivedVariants.length})`}
+          </Button>
+        )}
+      </div>
+      <Text variant='inactive' size='small'>
+        Variants are this colourway’s sellable sizes — each has its own SKU and stock. Add a size to
+        make it sellable; archiving a size hides it from the storefront (it can be restored).
       </Text>
       {activeVariants.length === 0 ? (
         <Text variant='inactive' size='small'>
@@ -118,7 +196,7 @@ export function VariantsPanel({
                 variant='secondary'
                 className='uppercase'
                 disabled={busy}
-                onClick={() => archiveVariant(v)}
+                onClick={() => setPendingArchive(v)}
               >
                 archive
               </Button>
@@ -126,6 +204,35 @@ export function VariantsPanel({
           ))}
         </div>
       )}
+
+      {showArchived && archivedVariants.length > 0 && (
+        <div className='flex flex-wrap gap-2 border-t border-textInactiveColor pt-2'>
+          {archivedVariants.map((v) => (
+            <span
+              key={v.variantId}
+              className='flex items-center gap-2 border border-dashed border-textInactiveColor px-2 py-1 opacity-70'
+            >
+              <Text size='small' variant='uppercase'>
+                {sizeName(v.sizeId)}
+              </Text>
+              <Text variant='inactive' size='small'>
+                archived
+              </Text>
+              <Button
+                type='button'
+                size='sm'
+                variant='main'
+                className='uppercase'
+                disabled={busy}
+                onClick={() => restoreVariant(v)}
+              >
+                restore
+              </Button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className='flex items-center gap-2'>
         <select
           value={sizeToAdd}
@@ -133,7 +240,9 @@ export function VariantsPanel({
           disabled={busy || availableSizes.length === 0}
           className='border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize'
         >
-          <option value=''>add size…</option>
+          <option value=''>
+            {availableSizes.length === 0 ? 'no sizes available' : 'add size…'}
+          </option>
           {availableSizes.map((s) => (
             <option key={s.id} value={String(s.id)}>
               {formatSizeName(s.name) || s.name}
@@ -151,6 +260,24 @@ export function VariantsPanel({
           add variant
         </Button>
       </div>
+
+      <ConfirmationModal
+        open={pendingArchive != null}
+        onOpenChange={(o) => {
+          if (!o) setPendingArchive(null);
+        }}
+        onConfirm={() => {
+          const v = pendingArchive;
+          setPendingArchive(null);
+          if (v) archiveVariant(v);
+        }}
+        onCancel={() => setPendingArchive(null)}
+      >
+        <Text variant='uppercase' className='font-bold'>
+          archive size {pendingArchive ? sizeName(pendingArchive.sizeId) : ''}? it will stop being
+          sellable — you can restore it later.
+        </Text>
+      </ConfirmationModal>
     </div>
   );
 }

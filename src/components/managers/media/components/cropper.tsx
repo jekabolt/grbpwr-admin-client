@@ -2,7 +2,7 @@ import { ASPECT_RATIOS } from 'constants/constants';
 import getCroppedImg from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import { Area } from 'react-easy-crop';
 import { PixelCrop } from 'react-image-crop';
 import { Button } from 'ui/components/button';
@@ -10,12 +10,23 @@ import Text from 'ui/components/text';
 import { CustomCrop } from './custom-crop';
 import { PresetCrop } from './preset-crop';
 
+// Ratios are compared with a small tolerance rather than strict equality: ASPECT_RATIOS rounds
+// 16:9 to 1.7778, but a caller-supplied ratio computes it as the repeating 16/9 = 1.77778… —
+// exact equality would wrongly treat that as "no matching preset".
+const RATIO_EPSILON = 0.005;
+
 interface CropperInterface {
   selectedFile: string | undefined;
   saveCroppedImage: (croppedImage: string) => void;
   onCancel: () => void;
   /** Preset crop ratio (e.g. the target slot's ratio). */
   initialAspect?: number;
+  /**
+   * When true, initialAspect is a REQUIRED ratio (the caller's slot enforces it downstream, e.g.
+   * an object-cover box) rather than just a convenient default — the ratio buttons are restricted
+   * to that one ratio so the operator can't produce a crop that gets silently re-cropped later.
+   */
+  lockAspect?: boolean;
   /** When provided, shows a "use without crop" action that assigns the image as-is. */
   onUseOriginal?: () => void;
   /** Disables actions (e.g. while uploading). */
@@ -27,6 +38,7 @@ export const MediaCropper: FC<CropperInterface> = ({
   saveCroppedImage,
   onCancel,
   initialAspect,
+  lockAspect = false,
   onUseOriginal,
   busy = false,
 }) => {
@@ -98,6 +110,17 @@ export const MediaCropper: FC<CropperInterface> = ({
     setCustomCropData(null);
   };
 
+  // Locked: offer only the required ratio (no Custom, no other presets) instead of the full
+  // grid — freely picking a different ratio here would just get silently re-cropped by the
+  // caller's fixed-ratio slot downstream (task 4 / M7).
+  const visibleRatios = useMemo(() => {
+    if (!lockAspect) return ASPECT_RATIOS;
+    const match = ASPECT_RATIOS.find(
+      (r) => r.value !== undefined && Math.abs(r.value - defaultAspect) < RATIO_EPSILON,
+    );
+    return [match ?? { label: defaultAspect.toFixed(2), value: defaultAspect, color: '#000000' }];
+  }, [lockAspect, defaultAspect]);
+
   if (!selectedFile) return null;
 
   const saveDisabled =
@@ -134,11 +157,17 @@ export const MediaCropper: FC<CropperInterface> = ({
 
         <div className='flex flex-col gap-2 lg:w-40 lg:shrink-0'>
           <Text variant='inactive' size='small'>
-            aspect ratio
+            {lockAspect ? 'ratio (required)' : 'aspect ratio'}
           </Text>
           <div className='grid grid-cols-3 gap-2 lg:grid-cols-2'>
-            {ASPECT_RATIOS.map((ratio) => {
-              const selected = aspect === ratio.value;
+            {visibleRatios.map((ratio) => {
+              // Exact match covers Custom (undefined === undefined); epsilon covers e.g. 16:9,
+              // where this table's rounded 1.7778 never exactly equals the computed 16/9.
+              const selected =
+                aspect === ratio.value ||
+                (aspect !== undefined &&
+                  ratio.value !== undefined &&
+                  Math.abs(aspect - ratio.value) < RATIO_EPSILON);
               return (
                 <Button
                   key={ratio.label}
