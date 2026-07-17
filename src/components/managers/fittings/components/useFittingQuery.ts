@@ -75,7 +75,7 @@ export function useUpdateFitting() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, fitting }: { id: number; fitting: common_FittingInsert }) =>
-      adminService.UpdateFitting({ id, fitting }),
+      adminService.UpdateFitting({ id, fitting, expectedLockVersion: 0 }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: fittingKeys.lists() });
       queryClient.invalidateQueries({ queryKey: fittingKeys.detail(variables.id) });

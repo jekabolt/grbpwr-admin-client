@@ -112,6 +112,9 @@ export function MaterialModal({
         fabricWeightGsm: inputToDecimal(d.fabricWeightGsm),
         archived: material?.archived ?? false,
         latestPrice: undefined,
+        materialClass: material?.materialClass ?? 'MATERIAL_CLASS_OTHER',
+        otherAttrs: material?.otherAttrs ?? '',
+        lockVersion: material?.lockVersion ?? 0,
         // Warehouse-catalog fields (new-flow NF-02).
         code: d.code.trim(),
         color: d.color.trim(),

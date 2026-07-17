@@ -43,7 +43,7 @@ export function useSaveSample() {
   return useMutation({
     mutationFn: async ({ id, sample }: { id: number; sample: common_SampleInsert }) => {
       if (id) {
-        await adminService.UpdateSample({ id, sample });
+        await adminService.UpdateSample({ id, sample, expectedLockVersion: 0 });
         return id;
       }
       const res = await adminService.AddSample({ sample });

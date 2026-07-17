@@ -302,6 +302,9 @@ function SampleEditor({
           mediaIds: d.mediaIds,
           patternUrl: d.patternUrl.trim(),
           patternNote: d.patternNote.trim(),
+          roundNumber: sample?.sample?.roundNumber ?? 0,
+          specReleaseId: sample?.sample?.specReleaseId ?? 0,
+          previousSampleId: sample?.sample?.previousSampleId ?? 0,
         },
       });
       setDirty(false);

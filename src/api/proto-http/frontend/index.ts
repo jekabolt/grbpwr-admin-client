@@ -584,6 +584,7 @@ export type common_Dictionary = {
   tags: common_Tag[] | undefined;
   skuContractVersion: string | undefined;
   revisions: common_DictionaryRevision[] | undefined;
+  categorySizeSystems: common_CategorySizeSystem[] | undefined;
 };
 
 // Category represents a hierarchical category structure
@@ -729,6 +730,19 @@ export type common_DictionaryRevision = {
   namespace: string | undefined;
   revision: number | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+};
+
+// CategorySizeSystem maps a category-tree node to a permitted SizeSkuSystem (S10/WS5, migration
+// 0175). A row targets EITHER category_id (a broad category/sub-category node) OR type_id (a specific
+// leaf type) -- never both set; 0 means unset. The admin size picker resolves a style's category
+// chain against this table (most specific match wins: type_id, then category_id) to filter which
+// size systems/sizes it offers; CreateVariant and the style's size-range write (UpdateTechCard)
+// enforce the same rule server-side.
+export type common_CategorySizeSystem = {
+  id: number | undefined;
+  categoryId: number | undefined;
+  typeId: number | undefined;
+  skuSystem: common_SizeSkuSystem | undefined;
 };
 
 export type GetColorwayRequest = {
@@ -1482,10 +1496,13 @@ export interface FrontendService {
   UnsubscribeNewsletter(request: UnsubscribeNewsletterRequest): Promise<UnsubscribeNewsletterResponse>;
   // NotifyMe adds an email to the waitlist for a specific product/size when out of stock
   NotifyMe(request: NotifyMeRequest): Promise<NotifyMeResponse>;
-  // GetArchivesPaged retrieves paged archives.
-  GetArchivesPaged(request: GetArchivesPagedRequest): Promise<GetArchivesPagedResponse>;
   // GetArchive retrieves an archive by its stable public code (the /timeline URL tail).
   GetArchive(request: GetArchiveRequest): Promise<GetArchiveResponse>;
+  // GetArchivesPaged retrieves paged archives. NOTE on ordering: grpc-gateway's mux prepends
+  // handlers, so the LAST-declared route for a method wins. The literal `/archive/paged` GET must be
+  // declared AFTER the `/archive/{code}` GET — otherwise {code} captures "paged" (beta smoke caught
+  // exactly that shadowing).
+  GetArchivesPaged(request: GetArchivesPagedRequest): Promise<GetArchivesPagedResponse>;
   // Submit a support ticket
   SubmitSupportTicket(request: SubmitSupportTicketRequest): Promise<SubmitSupportTicketResponse>;
   // Submit reviews for a delivered order (order-level + per-item, requires delivered order + buyer email)
@@ -1843,32 +1860,6 @@ export function createFrontendServiceClient(
         method: "NotifyMe",
       }) as Promise<NotifyMeResponse>;
     },
-    GetArchivesPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/frontend/archive/paged`; // eslint-disable-line quotes
-      const body = null;
-      const queryParams: string[] = [];
-      if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
-      }
-      if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
-      }
-      if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
-      }
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "GET",
-        body,
-      }, {
-        service: "FrontendService",
-        method: "GetArchivesPaged",
-      }) as Promise<GetArchivesPagedResponse>;
-    },
     GetArchive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
         throw new Error("missing required field request.code");
@@ -1897,6 +1888,32 @@ export function createFrontendServiceClient(
         service: "FrontendService",
         method: "GetArchive",
       }) as Promise<GetArchiveResponse>;
+    },
+    GetArchivesPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/frontend/archive/paged`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "FrontendService",
+        method: "GetArchivesPaged",
+      }) as Promise<GetArchivesPagedResponse>;
     },
     SubmitSupportTicket(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/frontend/support/ticket`; // eslint-disable-line quotes

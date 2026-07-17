@@ -20,6 +20,7 @@ import {
   techCardStageOptions,
 } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
+import { applyServerFieldErrors } from 'utils/field-errors';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
@@ -272,7 +273,20 @@ export function TechCardForm({
       }
     } catch (error) {
       if ((error as { status?: number })?.status === 409) setConflict(true);
-      showMessage(techCardErrorMessage(error, 'Failed to submit tech card'), 'error');
+      // Pin server field-violations (google.rpc.BadRequest) onto the exact inputs, then surface the
+      // owning tab so the error dot + focus land where the user can act (Q1/S24).
+      const { applied, unmapped } = applyServerFieldErrors(error, form.setError, {
+        stripPrefixes: ['tech_card'],
+      });
+      if (applied.length > 0) {
+        const root = applied[0].split('.')[0];
+        setActiveTab(ERROR_TAB[root] ?? 'header');
+      }
+      const base = techCardErrorMessage(error, 'Failed to submit tech card');
+      showMessage(
+        unmapped.length ? `${base} — ${unmapped.map((u) => u.description).join('; ')}` : base,
+        'error',
+      );
       console.error('Failed to submit tech card', error);
     }
   }
@@ -505,10 +519,6 @@ export function TechCardForm({
                 <InputField name='brand' label='brand' />
                 <SeasonField />
                 <InputField name='collection' label='collection' />
-                <InputField name='version' label='version' />
-                <InputField name='designer' label='designer' />
-                <InputField name='constructorName' label='constructor' />
-                <InputField name='technologist' label='technologist' />
                 <InputField name='status' label='status (freeform note)' />
               </Section>
 
@@ -537,7 +547,6 @@ export function TechCardForm({
                   label='measurement unit'
                   items={techCardMeasurementUnitOptions}
                 />
-                <InputField name='approvedBy' label='approved by' />
               </Section>
             </div>
 
@@ -709,8 +718,8 @@ export function TechCardForm({
                 </Text>
               )}
             </Section>
-            <Section title='revision log'>
-              <RevisionsField />
+            <Section title='revision log (auto-journal)'>
+              <RevisionsField revisions={techCard?.revisions} />
             </Section>
             <Section title='releases'>
               {isEditMode && numId ? (

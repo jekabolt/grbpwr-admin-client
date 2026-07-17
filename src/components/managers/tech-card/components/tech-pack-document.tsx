@@ -142,9 +142,16 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
 
   if (!tc) return null;
 
-  // `constructor` is an Object.prototype key — when the backend omits it, tc.constructor is
-  // the Object constructor function, not a string. Guard so React never renders a function.
-  const patternMaker = typeof tc.constructor === 'string' ? tc.constructor : '';
+  // Responsible people come from the role-assignment table now (Q5), not free-text header fields.
+  const roleNames = (role: string) =>
+    (techCard.roleAssignments ?? [])
+      .filter((a) => a.role === role)
+      .map((a) => a.adminUsername || `#${a.adminId}`)
+      .join(', ') || '—';
+  const designer = roleNames('TECH_CARD_ROLE_DESIGNER');
+  const patternMaker = roleNames('TECH_CARD_ROLE_PATTERN_MAKER');
+  const technologist = roleNames('TECH_CARD_ROLE_TECHNOLOGIST');
+  const approver = roleNames('TECH_CARD_ROLE_APPROVER');
   const sizeName = (id?: number) => (id ? sizeById.get(id) ?? `#${id}` : '—');
   const unitAbbr = tc.measurementUnit === 'TECH_CARD_MEASUREMENT_UNIT_MM' ? 'mm' : 'cm';
   const sizeIds = tc.sizeIds ?? [];
@@ -179,9 +186,7 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
           <div className='text-right text-[11px] leading-tight'>
             <div className='font-semibold uppercase'>{stageLabel(tc.stage)}</div>
             <div>{approvalStateLabel(tc.approvalState)}</div>
-            <div className='text-labelColor'>
-              v{tc.version || '—'} · {formatTechCardDate(techCard.updatedAt)}
-            </div>
+            <div className='text-labelColor'>{formatTechCardDate(techCard.updatedAt)}</div>
           </div>
         </div>
       </header>
@@ -196,10 +201,10 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
           <KV k='size range' v={sizeIds.map(sizeName).join(', ')} />
         </div>
         <div>
-          <KV k='designer' v={tc.designer} />
+          <KV k='designer' v={designer} />
           <KV k='pattern maker' v={patternMaker} />
-          <KV k='technologist' v={tc.technologist} />
-          <KV k='approved by' v={tc.approvedBy} />
+          <KV k='technologist' v={technologist} />
+          <KV k='approved by' v={approver} />
         </div>
       </div>
 
@@ -791,13 +796,13 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
         </Sheet>
       )}
 
-      {/* REVISIONS */}
-      {has(tc.revisions) && (
+      {/* REVISIONS — server-stamped auto-journal (Q1), read-only. */}
+      {has(techCard.revisions) && (
         <Sheet title='revision log'>
           <table className='w-full border-collapse text-[10px]'>
             <thead>
               <tr>
-                <th className={TH}>version</th>
+                <th className={TH}>action</th>
                 <th className={TH}>date</th>
                 <th className={TH}>author</th>
                 <th className={TH}>section</th>
@@ -805,12 +810,12 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               </tr>
             </thead>
             <tbody>
-              {(tc.revisions ?? []).map((r, i) => (
+              {(techCard.revisions ?? []).map((r, i) => (
                 <tr key={i} className='break-inside-avoid'>
-                  <td className={TD}>{r.version || '—'}</td>
-                  <td className={TD}>{formatTechCardDate(r.revisionDate)}</td>
+                  <td className={TD}>{(r.action || 'updated').replace(/_/g, ' ')}</td>
+                  <td className={TD}>{formatTechCardDate(r.createdAt || r.revisionDate)}</td>
                   <td className={TD}>{r.author || '—'}</td>
-                  <td className={TD}>{r.section || '—'}</td>
+                  <td className={TD}>{(r.section || '—').replace(/_/g, ' ')}</td>
                   <td className={TD}>{r.changeNote || '—'}</td>
                 </tr>
               ))}

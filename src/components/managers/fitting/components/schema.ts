@@ -217,6 +217,13 @@ export function mapFormToFittingInsert(
         note: cr.note?.trim() || '',
         calloutNumber: cr.calloutNumber || 0,
         resolved: cr.resolved ?? false,
+        zone: '',
+        pieceId: 0,
+        status: '',
+        carriedFromId: 0,
+        createdBy: '',
+        fittingId: 0,
+        roundNumber: 0,
       })),
   };
 }
