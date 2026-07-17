@@ -780,6 +780,12 @@ export type GetColorwayByIDResponse = {
   // admin GetColorwayByID response, never on the shared ColorwayFull, so it cannot leak to the
   // storefront read path.
   costInfo: ColorwayCostInfo | undefined;
+  // usages is this colourway's material recipe (H1 fix: the recipe is colourway-owned — S2/S3,
+  // 01-DOMAIN-MODEL §2.3 — so GetColorwayByID is the minimum surface that must return it; a
+  // full-replace UpdateColorwayRecipe is unsafe to edit-partially without a matching read). Lives
+  // here rather than on the shared common.ColorwayFull so it never reaches the storefront read
+  // path (admin.proto only). Money fields are stripped without costing:read.
+  usages: common_TechCardColorwayUsage[] | undefined;
 };
 
 export type common_ColorwayFull = {
@@ -5648,6 +5654,10 @@ export type common_TechCard = {
   // OUTPUT-ONLY derived colourways of this style (R1/§3.3): a style's colourways are its products.
   // Not writable through the style — created/relinked via the Colorway RPCs.
   colorways: common_AdminColorwayRef[] | undefined;
+  // composition_entries is the style's structured fibre composition (S17/M1 fix), resolved from
+  // style_composition; empty when the style has no structural composition data yet. Read-only,
+  // admin/constructor view — the storefront's equivalent is StorefrontColorwayDisplay.composition_entries.
+  compositionEntries: common_CompositionEntry[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -5677,6 +5687,25 @@ export type common_AdminColorwayRef = {
   baseSku: string | undefined;
   colorCode: string | undefined;
   status: common_ColorwayLifecycleStatus | undefined;
+  // usages is this colourway's material recipe (H1 fix, WS3/S2-S3): the constructor view of a
+  // style now shows each colourway's recipe alongside its identity, instead of the recipe being
+  // write-only (UpdateColorwayRecipe persisted usages that no read path ever surfaced). Money
+  // fields (line_total/size_run_total) are stripped for an account without costing:read, same as
+  // the rest of the tech-card read (stripTechCardCosting).
+  usages: common_TechCardColorwayUsage[] | undefined;
+};
+
+// CompositionEntry is one fibre share of a style's structured composition (S17), resolved with its
+// dictionary display name. M1 fix: the typed replacement for overloading the free-text `composition`
+// field with an encoded array of these once style_composition gains rows — that overload is removed;
+// `composition` on the wire is legacy plain text ONLY, always, and composition_entries (StorefrontColorwayDisplay,
+// TechCard) is the structured projection, populated from style_composition, empty when the style has
+// none yet. percent mirrors style_composition.percent (DECIMAL(5,2)): a decimal, not int32, because an
+// equal-split derivation (S17, DeriveStyleComposition) can produce fractional shares (e.g. 33.33).
+export type common_CompositionEntry = {
+  fiberCode: string | undefined;
+  name: string | undefined;
+  percent: googletype_Decimal | undefined;
 };
 
 export type UpdateTechCardRequest = {

@@ -784,6 +784,24 @@ export type StorefrontColorwayDisplay = {
   modelWearsSizeCode: string | undefined;
   categoryLabels: string[] | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // composition_entries is the structured fibre composition (S17/M1 fix), populated from
+  // style_composition; empty when the style has no structural composition data yet. Additive,
+  // typed replacement for the JSON-in-composition-string overload that was proposed and reverted —
+  // composition (above) stays legacy plain text always, never version- or data-gated JSON.
+  compositionEntries: common_CompositionEntry[] | undefined;
+};
+
+// CompositionEntry is one fibre share of a style's structured composition (S17), resolved with its
+// dictionary display name. M1 fix: the typed replacement for overloading the free-text `composition`
+// field with an encoded array of these once style_composition gains rows — that overload is removed;
+// `composition` on the wire is legacy plain text ONLY, always, and composition_entries (StorefrontColorwayDisplay,
+// TechCard) is the structured projection, populated from style_composition, empty when the style has
+// none yet. percent mirrors style_composition.percent (DECIMAL(5,2)): a decimal, not int32, because an
+// equal-split derivation (S17, DeriveStyleComposition) can produce fractional shares (e.g. 33.33).
+export type common_CompositionEntry = {
+  fiberCode: string | undefined;
+  name: string | undefined;
+  percent: googletype_Decimal | undefined;
 };
 
 export type StorefrontVariant = {
