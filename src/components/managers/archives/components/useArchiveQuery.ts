@@ -7,7 +7,7 @@ export const archiveKeys = {
   lists: () => [...archiveKeys.all, 'list'] as const,
   list: (filters: { limit: number; offset: number }) => [...archiveKeys.lists(), filters] as const,
   details: () => [...archiveKeys.all, 'detail'] as const,
-  detail: (id: number) => [...archiveKeys.details(), id] as const,
+  detail: (key: string | number) => [...archiveKeys.details(), key] as const,
 };
 
 export function useArchives(limit: number = 50, offset: number = 0) {
@@ -25,24 +25,25 @@ export function useArchives(limit: number = 50, offset: number = 0) {
   });
 }
 
-export function useArchiveDetails(
-  id: number | undefined,
-  archiveData?: { heading?: string; tag?: string },
-) {
+// Route-E: the timeline detail URL is /timeline/{pretty}-{code}; `tail` is the segment after the
+// last '-'. It is the public archive `code`. During the coordinated URL cutover, rows migrated
+// before the code backfill have no code yet, so a purely numeric tail is the internal archive id and
+// we resolve it through the retained legacy id lookup. TODO(final-bump): drop the numeric-id branch
+// once every archive has a code.
+export function useArchiveDetails(tail: string | undefined) {
+  const isLegacyId = !!tail && /^\d+$/.test(tail);
   return useQuery({
-    queryKey: archiveKeys.detail(id!),
+    queryKey: archiveKeys.detail(tail ?? ''),
     queryFn: async () => {
       const response = await frontendService.GetArchive({
-        id: id!,
-        heading: archiveData?.heading || 'string',
-        tag: archiveData?.tag || 'string',
-        // TODO(final-bump/route-E): resolve by the public `code` (tail of /timeline/{pretty}-{code}).
-        // The backend keeps the legacy id/heading/tag lookup during the coordinated URL cutover.
-        code: undefined,
+        id: isLegacyId ? Number(tail) : undefined,
+        heading: undefined,
+        tag: undefined,
+        code: isLegacyId ? undefined : tail,
       });
       return response.archive;
     },
-    enabled: !!id,
+    enabled: !!tail,
     staleTime: 5 * 60 * 1000,
   });
 }

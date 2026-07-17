@@ -62,7 +62,7 @@ export enum ROUTES {
   getPromo = '/get-promo',
   addArchive = '/add-archive',
   archives = '/archives',
-  singleArchive = '/timeline/:heading/:tag/:id',
+  singleArchive = '/timeline/:handle',
   settings = '/settings',
   orders = '/orders',
   orderDetails = '/orders/:uuid',

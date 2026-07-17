@@ -1,6 +1,7 @@
 import { common_ArchiveList } from 'api/proto-http/frontend';
+import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useNavigate } from 'react-router-dom';
+import { generatePath, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
@@ -15,8 +16,21 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
   const deleteArchiveMutation = useDeleteArchive();
   const { showMessage } = useSnackBarStore();
 
-  const handleArchiveClick = (slug: string) => {
-    navigate(slug, { replace: true });
+  // Route-E: navigate to /timeline/{pretty}-{code}. `pretty` is a slug of the heading/tag; the tail
+  // is the public code (or the internal id for rows not yet code-backfilled during the cutover).
+  const buildHandle = () => {
+    const pretty =
+      (archive.translations?.[0]?.heading || archive.tag || 'archive')
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'archive';
+    const tail = archive.code || (archive.id != null ? String(archive.id) : '');
+    return `${pretty}-${tail}`;
+  };
+
+  const handleArchiveClick = () => {
+    navigate(generatePath(ROUTES.singleArchive, { handle: buildHandle() }), { replace: true });
   };
 
   const handleDeleteArchive = async (e: React.MouseEvent, archiveId: number) => {
@@ -33,7 +47,7 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
   };
   return (
     <div
-      onClick={() => handleArchiveClick(archive.slug || '')}
+      onClick={handleArchiveClick}
       className='group relative flex cursor-pointer flex-col overflow-hidden border border-textInactiveColor transition-colors hover:bg-highlightColor/5'
     >
       <div className='aspect-[4/5] w-full overflow-hidden border-b border-textInactiveColor bg-bgColor'>

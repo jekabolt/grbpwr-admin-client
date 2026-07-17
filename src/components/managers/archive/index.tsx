@@ -6,11 +6,13 @@ import Text from 'ui/components/text';
 import { ArchiveForm } from './components';
 
 export function Archive() {
-  const { heading, tag, id } = useParams<{ heading: string; tag: string; id: string }>();
-  const isEditMode = !!id && !!heading && !!tag;
-  const isAddingArchive = !id;
-  const numId = id ? parseInt(id, 10) : undefined;
-  const { data, isLoading, isError, refetch } = useArchiveDetails(numId, { heading, tag });
+  // Route-E: /timeline/{pretty}-{code}. The tail after the last '-' is the public code (or the
+  // internal id for not-yet-migrated rows during the cutover — see useArchiveDetails).
+  const { handle } = useParams<{ handle: string }>();
+  const isEditMode = !!handle;
+  const isAddingArchive = !handle;
+  const tail = handle ? handle.split('-').pop() : undefined;
+  const { data, isLoading, isError, refetch } = useArchiveDetails(tail);
 
   if (isEditMode && isLoading) {
     return (
@@ -42,6 +44,13 @@ export function Archive() {
   }
 
   return (
-    <ArchiveForm isEditMode={isEditMode} isAddingArchive={isAddingArchive} id={id} archive={data} />
+    <ArchiveForm
+      isEditMode={isEditMode}
+      isAddingArchive={isAddingArchive}
+      // Admin writes still key on the internal id (R3): resolve it from the fetched archive rather
+      // than the URL, which now carries the public code.
+      id={data?.archiveList?.id != null ? String(data.archiveList.id) : undefined}
+      archive={data}
+    />
   );
 }
