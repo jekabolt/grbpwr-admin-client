@@ -239,6 +239,9 @@ export function SizeMeasurements({
               const idx = sizeData?.index ?? -1;
               const qty = values.sizeMeasurements?.[idx]?.productSize?.quantity?.value;
               const isOutOfStock = !qty || qty === '0';
+              // filteredSizes is a reduced {id,name} shape; the SKU-ordinal / size-system live on the
+              // full dictionary size, so resolve it by id (R7, read-only metadata).
+              const sizeMeta = dictionary?.sizes?.find((s) => s.id === size.id);
 
               return (
                 <tr key={size.id} className='border-b border-text last:border-b-0'>
@@ -249,6 +252,16 @@ export function SizeMeasurements({
                     >
                       {formatSizeName(size.name)}
                     </Text>
+                    {/* R7: read-only SKU-ordinal / size-system metadata from the size dictionary —
+                        the ordinal is the size segment baked into every variant SKU. */}
+                    {(sizeMeta?.skuOrd != null || sizeMeta?.skuSystem) && (
+                      <Text variant='inactive' size='small' className='block'>
+                        {sizeMeta?.skuOrd != null ? `ord ${sizeMeta.skuOrd}` : ''}
+                        {sizeMeta?.skuSystem
+                          ? ` · ${sizeMeta.skuSystem.replace('SIZE_SKU_SYSTEM_', '').toLowerCase()}`
+                          : ''}
+                      </Text>
+                    )}
                   </td>
                   <td className={cn(qtyCellClass, 'bg-inactive w-12 lg:w-26')}>
                     <Input
