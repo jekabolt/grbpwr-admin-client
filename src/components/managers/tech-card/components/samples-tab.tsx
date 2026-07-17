@@ -21,11 +21,15 @@ import {
 } from './sample-options';
 import {
   deleteSampleErrorMessage,
+  saveSampleErrorMessage,
   useDeleteSample,
   useSample,
   useSamples,
   useSaveSample,
+  useTechCardReleases,
 } from './useSamples';
+import { SamplePicker } from './sample-picker';
+import { SampleSubstitutions } from './sample-substitutions';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const th =
@@ -186,6 +190,10 @@ type Draft = {
   mediaIds: number[];
   patternUrl: string;
   patternNote: string;
+  // Round spine (Q7/§2.7): where this sample sits in the development chain.
+  roundNumber: number;
+  specReleaseId: number;
+  previousSampleId: number;
 };
 
 function draftFrom(s?: common_Sample): Draft {
@@ -202,6 +210,9 @@ function draftFrom(s?: common_Sample): Draft {
     mediaIds: i?.mediaIds ?? [],
     patternUrl: i?.patternUrl ?? '',
     patternNote: i?.patternNote ?? '',
+    roundNumber: i?.roundNumber ?? 0,
+    specReleaseId: i?.specReleaseId ?? 0,
+    previousSampleId: i?.previousSampleId ?? 0,
   };
 }
 
@@ -240,6 +251,9 @@ function SampleEditor({
   // GetSample resolves the composed cost (never present on list rows).
   const { data: full } = useSample(sample?.id ?? 0, isEdit && canReadCosting);
   const cost = full?.sample?.cost;
+  // Named releases (Rev.N) of this card — the spec snapshot this sample was sewn against (§2.7).
+  const { data: releasesData } = useTechCardReleases(techCardId);
+  const releases = releasesData?.releases ?? [];
 
   const [d, setD] = useState<Draft>(draftFrom(sample));
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -289,6 +303,8 @@ function SampleEditor({
     try {
       const savedId = await save.mutateAsync({
         id: sample?.id ?? 0,
+        // S25: echo the lock_version the editor loaded — a stale value is rejected (409).
+        expectedLockVersion: sample?.lockVersion ?? 0,
         sample: {
           techCardId,
           purpose: d.purpose,
@@ -302,9 +318,9 @@ function SampleEditor({
           mediaIds: d.mediaIds,
           patternUrl: d.patternUrl.trim(),
           patternNote: d.patternNote.trim(),
-          roundNumber: sample?.sample?.roundNumber ?? 0,
-          specReleaseId: sample?.sample?.specReleaseId ?? 0,
-          previousSampleId: sample?.sample?.previousSampleId ?? 0,
+          roundNumber: d.roundNumber || 0,
+          specReleaseId: d.specReleaseId || 0,
+          previousSampleId: d.previousSampleId || 0,
         },
       });
       setDirty(false);
@@ -314,7 +330,7 @@ function SampleEditor({
         else onClose();
       }
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save sample', 'error');
+      showMessage(saveSampleErrorMessage(e), 'error');
     }
   };
 
@@ -434,6 +450,51 @@ function SampleEditor({
         </label>
       </div>
 
+      {/* Round spine (Q7/§2.7): this sample's place in the iteration chain. */}
+      <div className='grid grid-cols-1 gap-2 border-t border-textInactiveColor pt-2 sm:grid-cols-3'>
+        <label className='flex flex-col gap-1'>
+          <Text size='small'>round # (0 = auto)</Text>
+          <input
+            className={cell}
+            type='number'
+            min='0'
+            disabled={!canEdit}
+            value={d.roundNumber || 0}
+            onChange={(e) => set({ roundNumber: Number(e.target.value) || 0 })}
+          />
+        </label>
+        <label className='flex flex-col gap-1'>
+          <Text size='small'>spec release (Rev.N)</Text>
+          <select
+            className={cell}
+            disabled={!canEdit}
+            value={d.specReleaseId || 0}
+            onChange={(e) => set({ specReleaseId: Number(e.target.value) || 0 })}
+          >
+            <option value={0}>— none (live spec) —</option>
+            {/* keep a saved release selectable even if the list hasn't loaded it */}
+            {d.specReleaseId > 0 && !releases.some((r) => r.id === d.specReleaseId) ? (
+              <option value={d.specReleaseId}>release #{d.specReleaseId}</option>
+            ) : null}
+            {releases.map((r) => (
+              <option key={r.id} value={r.id}>
+                Rev.{r.releaseNumber ?? '—'}
+                {r.version ? ` · ${r.version}` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className='flex flex-col gap-1'>
+          <Text size='small'>previous sample</Text>
+          <SamplePicker
+            techCardId={techCardId}
+            value={d.previousSampleId || 0}
+            disabled={!canEdit}
+            onChange={(id) => set({ previousSampleId: id === sample?.id ? 0 : id })}
+          />
+        </label>
+      </div>
+
       <label className='flex flex-col gap-1'>
         <Text size='small'>notes</Text>
         <input
@@ -499,6 +560,7 @@ function SampleEditor({
       {/* Movement / fitting / dev-expense sub-panels need a saved sample id (W3.3 / W3.5). */}
       {isEdit && sample?.id ? (
         <>
+          <SampleSubstitutions sampleId={sample.id} techCard={techCard} canEdit={canEdit} />
           <SampleMovements sampleId={sample.id} />
           {canReadCosting ? (
             <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-2'>

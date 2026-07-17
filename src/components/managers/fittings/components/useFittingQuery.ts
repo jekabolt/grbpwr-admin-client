@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_FittingInsert } from 'api/proto-http/admin';
+import { common_FittingChangeRequestInsert, common_FittingInsert } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 
 export type FittingFilter = {
@@ -74,8 +74,15 @@ export function useCreateFitting() {
 export function useUpdateFitting() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, fitting }: { id: number; fitting: common_FittingInsert }) =>
-      adminService.UpdateFitting({ id, fitting, expectedLockVersion: 0 }),
+    mutationFn: ({
+      id,
+      fitting,
+      expectedLockVersion,
+    }: {
+      id: number;
+      fitting: common_FittingInsert;
+      expectedLockVersion: number;
+    }) => adminService.UpdateFitting({ id, fitting, expectedLockVersion }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: fittingKeys.lists() });
       queryClient.invalidateQueries({ queryKey: fittingKeys.detail(variables.id) });
@@ -85,6 +92,75 @@ export function useUpdateFitting() {
         });
       }
     },
+  });
+}
+
+// A stale optimistic-lock (Aborted → 409) reads clearly.
+export function fittingSaveErrorMessage(e: unknown): string {
+  const status = (e as { status?: number } | undefined)?.status;
+  if (status === 409)
+    return 'This fitting was changed by someone else — reload and re-apply your edits.';
+  return e instanceof Error ? e.message : 'Failed to save fitting';
+}
+
+// Dedicated change-request CRUD (S26/§2.7): managed individually so ids are STABLE (carried_from_id
+// and the carry-over/resolve flow depend on it). Invalidates the owning fitting's detail so the
+// form's echoed change-request set stays fresh, and the carry-over list across the style.
+const crKeys = {
+  open: (techCardId: number, beforeRound: number) =>
+    ['openChangeRequests', techCardId, beforeRound] as const,
+};
+
+export function useAddFittingChangeRequest(fittingId: number, techCardId?: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (changeRequest: common_FittingChangeRequestInsert) =>
+      adminService.AddFittingChangeRequest({ changeRequest }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: fittingKeys.detail(fittingId) });
+      if (techCardId) qc.invalidateQueries({ queryKey: ['openChangeRequests', techCardId] });
+    },
+  });
+}
+
+export function useUpdateFittingChangeRequest(fittingId: number, techCardId?: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      changeRequest,
+    }: {
+      id: number;
+      changeRequest: common_FittingChangeRequestInsert;
+    }) => adminService.UpdateFittingChangeRequest({ id, changeRequest }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: fittingKeys.detail(fittingId) });
+      if (techCardId) qc.invalidateQueries({ queryKey: ['openChangeRequests', techCardId] });
+    },
+  });
+}
+
+export function useDeleteFittingChangeRequest(fittingId: number, techCardId?: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => adminService.DeleteFittingChangeRequest({ id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: fittingKeys.detail(fittingId) });
+      if (techCardId) qc.invalidateQueries({ queryKey: ['openChangeRequests', techCardId] });
+    },
+  });
+}
+
+// Carry-over view: OPEN structured remarks from a style's earlier rounds (before this round).
+export function useOpenFittingChangeRequests(techCardId?: number, beforeRound = 0, enabled = true) {
+  return useQuery({
+    queryKey: crKeys.open(techCardId ?? 0, beforeRound),
+    queryFn: () =>
+      adminService.ListOpenFittingChangeRequests({
+        techCardId: techCardId ?? 0,
+        beforeRound,
+      }),
+    enabled: enabled && !!techCardId,
   });
 }
 
