@@ -25,7 +25,7 @@ export function ProductItem({
   // R6: dim/badge anything not live on the storefront (draft/hidden/archived), driven by the stored
   // lifecycle status rather than the vestigial `hidden` flag.
   const isActive = product.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE';
-  const description = `[${product.id}] ${product.display?.productBody?.productBodyInsert?.brand} ${product.display?.productBody?.translations?.[0]?.name}`;
+  const description = `[${product.id}] ${product.display?.merchandising?.brand} ${product.display?.translations?.[0]?.name}`;
   const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const navigate = useNavigate();

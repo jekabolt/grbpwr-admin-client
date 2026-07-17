@@ -77,7 +77,9 @@ export const REASON_OPTIONS: { label: string; value: string }[] = stockChangeRea
 export const updateStockSchema = z
   .object({
     mode: z.enum(stockAdjustmentModes),
-    sizeId: z.number().min(1, 'Size is required'),
+    // R2: stock is keyed by variant now (UpdateVariantStock takes variant_id). The dropdown still
+    // reads "size" to the operator, but the selected value is the variant id.
+    variantId: z.number().min(1, 'Size is required'),
     quantity: z.number().refine((n) => !Number.isNaN(n), 'Quantity must be a valid number'),
     direction: z.enum(stockAdjustmentDirections).optional(),
     reason: z.enum(stockChangeReasons),
@@ -181,7 +183,7 @@ export const updateStockSchema = z
 
 export const defaultData: DefaultValues<z.infer<typeof updateStockSchema>> = {
   mode: 'STOCK_ADJUSTMENT_MODE_SET',
-  sizeId: undefined,
+  variantId: undefined,
   quantity: undefined,
   direction: undefined,
   reason: undefined,

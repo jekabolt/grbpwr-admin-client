@@ -28,9 +28,9 @@ export function Tags({
   const values = watch();
   const [tag, setTag] = useState('');
 
-  // R9: dictionary-backed tag suggestions (controlled Tag list; archived hidden). The write path is
-  // still free-text `tag` in the intermediate contract, so clicking a suggestion just seeds the value.
-  // TODO(final-bump): send tag_id (FK) instead of free text once ColorwayTagInsert.tag_id lands.
+  // R9: dictionary-backed tag suggestions (controlled Tag list; archived hidden). The final contract
+  // keeps ColorwayTagInsert as free-text `tag` (no tag_id FK), so clicking a suggestion seeds the
+  // value and the dictionary is purely for autocomplete/consistency.
   const dictTagOptions = useMemo(
     () =>
       (dictionary?.tags ?? [])

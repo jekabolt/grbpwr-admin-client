@@ -58,7 +58,7 @@ export function InfinityScroll({ firstItems, initialLoading = false, onCountChan
         ...getProductPagedParans(params),
       });
 
-      const newProducts = response.products || [];
+      const newProducts = response.colorways || [];
 
       if (!newProducts.length || newProducts.length < limit) {
         hasMoreRef.current = false;

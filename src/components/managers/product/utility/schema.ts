@@ -87,6 +87,10 @@ const allPricesFilledRefine = (arr: { price?: { value?: string } }[]) =>
 
 export const baseProductSchema = z
   .object({
+    // R2/R4: a colourway attaches to an existing style (there is no CreateStyle RPC — a style is a
+    // tech card). On create, this is the target style id; on edit it mirrors the loaded colourway's
+    // style_id (read-only). Copy prefills it from the source colourway.
+    styleId: z.string().optional(),
     product: z.object({
       productBodyInsert: productBodySchema,
       thumbnailMediaId: z.number().min(1, 'Thumbnail must be selected'),
@@ -174,6 +178,7 @@ export const baseProductSchema = z
 export const productSchema = baseProductSchema;
 
 export const defaultData = {
+  styleId: '',
   product: {
     productBodyInsert: {
       preorder: '0001-01-01T00:00:00Z',

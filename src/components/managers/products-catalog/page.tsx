@@ -50,7 +50,7 @@ export default function ProductsCatalog() {
           offset: 0,
           ...getProductPagedParans({ ...params, currency: baseCurrency }),
         });
-        setProducts(response.products || []);
+        setProducts(response.colorways || []);
       } finally {
         setIsFetching(false);
       }

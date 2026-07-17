@@ -22,8 +22,8 @@ export const Product: FC = () => {
         showMessage('Invalid product ID', 'error');
         return;
       }
-      const response = await adminService.GetColorwayByID({ id: productId });
-      setProduct(response.product);
+      const response = await adminService.GetColorwayByID({ colorwayId: productId });
+      setProduct(response.colorway);
       setCostInfo(response.costInfo);
     }
   };

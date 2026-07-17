@@ -58,9 +58,9 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
 
       <div className='space-y-3'>
         <InputField name='product.productBodyInsert.brand' label='brand' readOnly={!editMode} />
-        {/* R9: collection is a controlled dictionary now; the picker is fed from DictionaryProvider.
-            TODO(final-bump): the write path moves from free-text `collection` to `collection_id` on
-            the owning Style (UpdateStyle). */}
+        {/* R4/R9: collection is a style fact written via UpdateStyle (StylePatch.collection, still
+            free-text); the picker is fed from the controlled dictionary in DictionaryProvider. Saved
+            by the Style section, not the colourway save. */}
         <SelectField
           fullWidth
           name='product.productBodyInsert.collection'
@@ -68,8 +68,8 @@ export function BodyFields({ editMode }: { editMode: boolean }) {
           items={collectionItems}
           readOnly={!editMode}
         />
-        {/* TODO(final-bump): season becomes a typed SkuSeason {code, year} on the owning Style
-            (UpdateStyle); the intermediate colourway contract still carries the legacy SeasonEnum. */}
+        {/* R4: season is a style fact (StylePatch.season, SeasonEnum) written via UpdateStyle by the
+            Style section. The sku_season year lives on the tech card / CloneStyleForSeason. */}
         <SelectField
           name='product.productBodyInsert.season'
           label='season'

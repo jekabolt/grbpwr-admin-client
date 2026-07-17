@@ -1,10 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
-import {
-  common_ColorwayFull,
-  common_SizeWithMeasurementInsert,
-  ColorwayCostInfo,
-} from 'api/proto-http/admin';
+import { common_ColorwayFull, ColorwayCostInfo } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
 import { ProductCustomsSection } from './customs/customs-section';
@@ -12,8 +8,9 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { generatePath, Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import InputField from 'ui/form/fields/input-field';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { defaultData, ProductFormData, productSchema } from '../utility/schema';
@@ -22,9 +19,10 @@ import { ProductCostSection } from './cost-section';
 import { LifecycleControls, StatusBadge } from './lifecycle-controls';
 import { MediaAds } from './media-ads';
 import { SizeMeasurements } from './size-measurements';
+import { StyleSection } from './style-section';
 import { Tags } from './tags';
 import { Thumbnail } from './thumbnail';
-import { createProductPayload, mapProductDataToForm, mapProductFullToFormData } from './utils';
+import { buildColorwayUpdateMask, buildColorwayWrite, mapProductFullToFormData } from './utils';
 
 type Props = {
   isEditMode: boolean;
@@ -74,48 +72,62 @@ export function ProductForm({
     }
   }, [product]);
 
-  const filterEmptySizes = (sizes: ProductFormData['sizeMeasurements']) =>
-    sizes
-      ?.filter((size) => {
-        const hasValidQuantity =
-          size.productSize?.quantity?.value && size.productSize.quantity.value !== '0';
-        const hasValidMeasurements = size.measurements?.some(
-          (m) => m.measurementValue?.value && m.measurementValue.value !== '0',
-        );
-        return hasValidQuantity || hasValidMeasurements;
-      })
-      .map((size) => ({
-        ...size,
-        measurements: size.measurements || [],
-      })) as common_SizeWithMeasurementInsert[];
-
+  // R2/R4 write decomposition: this form owns only the colourway (merch/media/prices/tags/
+  // translations/cost). Style facts save through <StyleSection/> (UpdateStyle) and the size chart /
+  // stock / variants through <SizeMeasurements/>, each under its own optimistic lock.
   async function handleSubmit(data: ProductFormData) {
-    const processedData = mapProductDataToForm(data);
-    const filteredData = {
-      ...processedData,
-      sizeMeasurements: filterEmptySizes(data.sizeMeasurements),
-    };
-
-    const payload = createProductPayload(filteredData, productId, isCopyMode);
-
+    const common = buildColorwayWrite(data);
     try {
-      await adminService.UpsertColorway(payload);
+      if (isAddingProduct) {
+        // A colourway attaches to an existing style — there is no CreateStyle RPC (a style is a tech
+        // card). Copy mode prefills styleId from the source; a from-scratch add needs it entered.
+        const styleId = data.styleId ? parseInt(data.styleId, 10) : NaN;
+        if (!styleId || Number.isNaN(styleId)) {
+          showMessage('Enter the style (tech card) id to attach this colourway to', 'error');
+          return;
+        }
+        const res = await adminService.CreateColorway({ styleId, ...common });
+        setIsFormChanged(false);
+        form.reset(data, { keepValues: true });
+        showMessage('Draft colourway created', 'success');
+        if (isCopyMode) {
+          navigate(ROUTES.product, { replace: true });
+        } else if (res.colorwayId) {
+          // Open the fresh DRAFT so the operator can add variants, the size chart, then publish.
+          navigate(generatePath(ROUTES.singleProduct, { id: String(res.colorwayId) }));
+        } else {
+          setMediaClearKey((k) => k + 1);
+        }
+        return;
+      }
+
+      const colorwayId = product?.colorway?.id;
+      if (colorwayId == null) {
+        showMessage('Missing colourway id', 'error');
+        return;
+      }
+      await adminService.UpdateColorway({
+        colorwayId,
+        expectedColorwayVersion: product?.colorway?.lockVersion,
+        updateMask: buildColorwayUpdateMask(data),
+        ...common,
+      });
       setIsFormChanged(false);
       form.reset(data, { keepValues: true });
-      showMessage(isAddingProduct ? 'Product created' : 'Product updated', 'success');
-
-      if (isAddingProduct && !isCopyMode) {
-        setMediaClearKey((k) => k + 1);
-      } else if (isCopyMode) {
-        navigate(ROUTES.product, { replace: true });
-      } else {
-        // Existing product saved — drop back to read-only view.
-        onEditModeChange(false);
-      }
+      showMessage('Colourway updated', 'success');
+      onEditModeChange(false);
+      onStockUpdated?.();
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to save product';
+      const err = e as Error & { status?: number };
+      // gRPC ABORTED (stale optimistic lock) surfaces as HTTP 409 through the gateway.
+      const message =
+        err?.status === 409
+          ? 'This colourway changed since you loaded it — reload and retry.'
+          : err instanceof Error
+            ? err.message
+            : 'Failed to save colourway';
       showMessage(message, 'error');
-      console.error('UpsertColorway error', e);
+      console.error('Colorway save error', e);
     }
   }
 
@@ -143,14 +155,14 @@ export function ProductForm({
     showMessage(message, 'error');
   };
 
-  const productDisplayBody = product?.colorway?.display?.productBody;
+  const display = product?.colorway?.display;
   const headerTitle = isAddingProduct
     ? isCopyMode
       ? 'copy product'
       : 'new product'
-    : `[${product?.colorway?.id ?? productId ?? ''}] ${
-        productDisplayBody?.productBodyInsert?.brand ?? ''
-      } ${productDisplayBody?.translations?.[0]?.name ?? ''}`.trim();
+    : `[${product?.colorway?.id ?? productId ?? ''}] ${display?.merchandising?.brand ?? ''} ${
+        display?.translations?.[0]?.name ?? ''
+      }`.trim();
 
   const handleCancel = () => {
     if (isAddingProduct) {
@@ -225,6 +237,23 @@ export function ProductForm({
           </Section>
 
           <Section title='details' className='w-full lg:w-1/2'>
+            {isAddingProduct && (
+              <div className='flex flex-col gap-1'>
+                <InputField
+                  name='styleId'
+                  label='attach to style (tech card) id'
+                  type='number'
+                  min='1'
+                  placeholder='style id'
+                  readOnly={!editMode}
+                />
+                <Text variant='inactive' size='small'>
+                  A colourway belongs to a style. Enter the tech-card id to attach it to (copy prefills
+                  the source’s style). Variants, size chart and publishing come after creating the
+                  draft.
+                </Text>
+              </div>
+            )}
             <BodyFields editMode={editMode} />
             <Tags
               isAddingProduct={isAddingProduct}
@@ -235,12 +264,26 @@ export function ProductForm({
           </Section>
         </div>
 
+        {/* R4: style facts (brand, season, collection, gender, fit, categories, composition, care,
+            model-wears) are shared by every colourway of the style and save through UpdateStyle under
+            their own optimistic lock — isolated here so a blocked season change (frozen siblings) does
+            not fail the colourway save. */}
+        {editMode && !isAddingProduct && product?.colorway?.styleId != null && (
+          <StyleSection
+            styleId={product.colorway.styleId}
+            lockVersion={product.colorway.lockVersion}
+            canWrite={canWrite(SECTION.products)}
+            onChanged={onStockUpdated}
+          />
+        )}
+
         {(canReadCosting || canWriteCosting) && (
           <Section title='cost'>
             <ProductCostSection
               editMode={editMode}
               costInfo={costInfo}
               productId={productId}
+              lockVersion={product?.colorway?.lockVersion}
               isAddingProduct={isAddingProduct}
               onCostSynced={onStockUpdated}
             />
@@ -251,6 +294,9 @@ export function ProductForm({
           <SizeMeasurements
             editMode={editMode}
             productId={productId ? Number(productId) : undefined}
+            styleId={product?.colorway?.styleId}
+            lockVersion={product?.colorway?.lockVersion}
+            variants={product?.variants}
             onStockUpdated={onStockUpdated}
           />
         </Section>

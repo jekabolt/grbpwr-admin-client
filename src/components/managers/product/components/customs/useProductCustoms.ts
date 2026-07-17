@@ -3,10 +3,9 @@ import { adminService } from 'api/api';
 import type { ColorwayCustoms } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 
-// Product customs data (proto beefb0e) — an independent panel with its own
-// Get/SetProductCustoms RPCs, separate from the main UpsertColorway form. Needed to
-// build international (non-EU) shipping labels: the backend rejects an international
-// label without an HS code + country of origin.
+// Colourway customs data — an independent panel with its own Get/SetColorwayCustoms RPCs, separate
+// from the main colourway save. Needed to build international (non-EU) shipping labels: the backend
+// rejects an international label without an HS code + country of origin.
 
 export interface CustomsForm {
   hsCode: string;
@@ -26,7 +25,7 @@ export function useProductCustoms(productId: number) {
   return useQuery({
     queryKey: customsKey(productId),
     queryFn: () =>
-      adminService.GetColorwayCustoms({ productId }).then<CustomsForm>((r) => ({
+      adminService.GetColorwayCustoms({ colorwayId: productId }).then<CustomsForm>((r) => ({
         hsCode: r.customs?.hsCode ?? '',
         countryOfOrigin: r.customs?.countryOfOrigin ?? '',
         customsDescription: r.customs?.customsDescription ?? '',
@@ -46,7 +45,7 @@ export function useSetProductCustoms(productId: number) {
         countryOfOrigin: form.countryOfOrigin.trim().toUpperCase(),
         customsDescription: form.customsDescription.trim(),
       };
-      return adminService.SetColorwayCustoms({ productId, customs });
+      return adminService.SetColorwayCustoms({ colorwayId: productId, customs });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customsKey(productId) });

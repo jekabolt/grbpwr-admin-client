@@ -95,7 +95,7 @@ export function getProductPagedParans({
   seasons?: string | null;
 }): Pick<
   GetColorwaysPagedRequest,
-  'sortFactors' | 'orderFactor' | 'filterConditions' | 'showHidden'
+  'sortFactors' | 'orderFactor' | 'filterConditions' | 'statuses'
 > {
   const sortFactor = normalizeSort(sort);
   const orderFactor = normalizeOrder(order);
@@ -122,6 +122,9 @@ export function getProductPagedParans({
       currency: currency ? currency : undefined,
       seasons: undefined,
     },
-    showHidden: hidden === 'false' ? false : true,
+    // R6/§14.6: show_hidden is replaced by an explicit lifecycle-status filter. An empty `statuses`
+    // is the default admin set (everything but ARCHIVED, so DRAFT/ACTIVE/HIDDEN show); the
+    // "hide hidden" toggle narrows it to ACTIVE only.
+    statuses: hidden === 'false' ? ['COLORWAY_LIFECYCLE_STATUS_ACTIVE'] : undefined,
   };
 }

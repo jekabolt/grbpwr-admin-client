@@ -14,7 +14,11 @@ export function formatSizeName(name: string): string {
 type FilterItem = common_Size | common_Collection;
 
 function getItemId(item: FilterItem): string {
-  return 'id' in item ? String(item.id) : item.name || '';
+  // common_Size and common_Collection both carry `id` now, so it can no longer discriminate the
+  // union (an `'id' in item` check narrows the else-branch to `never`). `code` is unique to
+  // common_Collection, so key off that instead — same Size-uses-id / Collection-uses-name mapping
+  // as before.
+  return 'code' in item ? item.name || '' : String(item.id);
 }
 
 function getItemName(item: FilterItem): string {
