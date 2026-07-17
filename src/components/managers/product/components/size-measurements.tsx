@@ -1,7 +1,11 @@
+import { adminService } from 'api/api';
+import { common_Variant } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
@@ -14,6 +18,8 @@ import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle'
 import { StockHistory } from './stock/stock-history';
 import { UpdateStock } from './stock/update-stock';
 import { ToggleSizeNames } from './toggle-sizenames';
+import { buildChartCells } from './utils';
+import { VariantsPanel } from './variants-panel';
 
 const cellClass = 'text-center border-r border-textInactiveColor';
 const qtyCellClass = 'text-center border-r-2 border-textInactiveColor';
@@ -23,15 +29,25 @@ const lastCellClass = 'text-center w-20 lg:w-auto';
 export function SizeMeasurements({
   editMode = false,
   productId,
+  styleId,
+  lockVersion,
+  variants,
   onStockUpdated,
 }: {
   editMode?: boolean;
   productId?: number;
+  // R5: the size chart is style-owned (UpdateStyleSizeChart, full-replace); R2: stock/variants are
+  // colourway-owned. All three share the tech_card.lock_version.
+  styleId?: number;
+  lockVersion?: number;
+  variants?: common_Variant[];
   onStockUpdated?: () => void;
 } = {}) {
   const { dictionary } = useDictionary();
-  const { watch, setValue } = useFormContext<ProductFormData>();
+  const { showMessage } = useSnackBarStore();
+  const { watch, setValue, getValues } = useFormContext<ProductFormData>();
   const values = watch();
+  const [savingChart, setSavingChart] = useState(false);
   const { requireConfirmation, confirmationModal } = useEditConfirmation(editMode);
   const { measurementsNames, handleToggleChange } = useSizeMeasurementsToggle();
   const { measurements, selectedSubCategoryName, selectedTypeName } = useMeasurements(
@@ -93,6 +109,87 @@ export function SizeMeasurements({
     });
     return { totalUnits: units, sizesInStock: inStock };
   }, [values.sizeMeasurements]);
+
+  // Stock is per-variant now (UpdateVariantStock takes variant_id). Map the colourway's variants to
+  // the modal's option list; the label is the size name, the value the variant id.
+  const variantsForStock = useMemo(
+    () =>
+      (variants ?? [])
+        .filter((v) => v.status !== 'VARIANT_LIFECYCLE_STATUS_ARCHIVED' && v.variantId != null)
+        .map((v) => {
+          const raw =
+            dictionary?.sizes?.find((s) => s.id === v.sizeId)?.name ?? String(v.sizeId ?? '');
+          return { variantId: v.variantId, name: formatSizeName(raw) || raw };
+        }),
+    [variants, dictionary?.sizes],
+  );
+
+  // R5: the chart is style-owned and loaded whole (UpdateStyleSizeChart is a full-replace). Merge the
+  // resolved chart cells into the form so editing starts from the current chart. A draft style may not
+  // have a chart yet — a miss just leaves the measurements empty.
+  useEffect(() => {
+    if (!styleId) return;
+    let cancelled = false;
+    adminService
+      .GetStyleSizeChart({ styleId })
+      .then((res) => {
+        if (cancelled) return;
+        const bySize = new Map<
+          number,
+          { measurementNameId: number; measurementValue: { value: string } }[]
+        >();
+        for (const c of res.chart?.cells ?? []) {
+          if (c.sizeId == null) continue;
+          const arr = bySize.get(c.sizeId) ?? [];
+          arr.push({
+            measurementNameId: c.measurementNameId ?? 0,
+            measurementValue: { value: c.value?.value ?? '' },
+          });
+          bySize.set(c.sizeId, arr);
+        }
+        if (bySize.size === 0) return;
+        const merged = [...(getValues('sizeMeasurements') ?? [])];
+        bySize.forEach((measurements, sizeId) => {
+          const idx = merged.findIndex((sm) => sm.productSize?.sizeId === sizeId);
+          if (idx >= 0) merged[idx] = { ...merged[idx], measurements };
+          else merged.push({ productSize: { sizeId, quantity: { value: '0' } }, measurements });
+        });
+        setValue('sizeMeasurements', merged);
+      })
+      .catch(() => {
+        /* no chart yet (draft) — leave measurements empty */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [styleId]);
+
+  async function saveChart() {
+    if (!styleId) return;
+    setSavingChart(true);
+    try {
+      await adminService.UpdateStyleSizeChart({
+        styleId,
+        expectedLockVersion: lockVersion,
+        cells: buildChartCells(getValues('sizeMeasurements')),
+      });
+      showMessage('Size chart saved', 'success');
+      onStockUpdated?.();
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      showMessage(
+        err?.status === 409
+          ? 'This style changed since you loaded it — reload and retry.'
+          : err instanceof Error
+            ? err.message
+            : 'Failed to save size chart',
+        'error',
+      );
+    } finally {
+      setSavingChart(false);
+    }
+  }
 
   const handleSizeChange = async (
     event: React.ChangeEvent<HTMLInputElement>,
@@ -203,17 +300,36 @@ export function SizeMeasurements({
             {productId != null && ' · stock is read-only here — use “update stock”'}
           </Text>
         </div>
-        {productId != null && (
-          <div className='flex gap-2'>
-            <StockHistory productId={productId} sizes={productSizesForStock} />
-            <UpdateStock
-              productId={productId}
-              sizes={productSizesForStock}
-              onStockUpdated={onStockUpdated}
-            />
-          </div>
-        )}
+        <div className='flex flex-wrap gap-2'>
+          {editMode && styleId != null && (
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              disabled={savingChart}
+              onClick={saveChart}
+            >
+              {savingChart ? 'saving…' : 'save size chart'}
+            </Button>
+          )}
+          {productId != null && (
+            <>
+              <StockHistory productId={productId} sizes={productSizesForStock} />
+              <UpdateStock variants={variantsForStock} onStockUpdated={onStockUpdated} />
+            </>
+          )}
+        </div>
       </div>
+
+      {editMode && productId != null && (
+        <VariantsPanel
+          colorwayId={productId}
+          lockVersion={lockVersion}
+          variants={variants}
+          onChanged={onStockUpdated}
+        />
+      )}
       <div className='overflow-x-auto'>
         <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor'>
@@ -239,6 +355,9 @@ export function SizeMeasurements({
               const idx = sizeData?.index ?? -1;
               const qty = values.sizeMeasurements?.[idx]?.productSize?.quantity?.value;
               const isOutOfStock = !qty || qty === '0';
+              // filteredSizes is a reduced {id,name} shape; the SKU-ordinal / size-system live on the
+              // full dictionary size, so resolve it by id (R7, read-only metadata).
+              const sizeMeta = dictionary?.sizes?.find((s) => s.id === size.id);
 
               return (
                 <tr key={size.id} className='border-b border-text last:border-b-0'>
@@ -249,6 +368,16 @@ export function SizeMeasurements({
                     >
                       {formatSizeName(size.name)}
                     </Text>
+                    {/* R7: read-only SKU-ordinal / size-system metadata from the size dictionary —
+                        the ordinal is the size segment baked into every variant SKU. */}
+                    {(sizeMeta?.skuOrd != null || sizeMeta?.skuSystem) && (
+                      <Text variant='inactive' size='small' className='block'>
+                        {sizeMeta?.skuOrd != null ? `ord ${sizeMeta.skuOrd}` : ''}
+                        {sizeMeta?.skuSystem
+                          ? ` · ${sizeMeta.skuSystem.replace('SIZE_SKU_SYSTEM_', '').toLowerCase()}`
+                          : ''}
+                      </Text>
+                    )}
                   </td>
                   <td className={cn(qtyCellClass, 'bg-inactive w-12 lg:w-26')}>
                     <Input

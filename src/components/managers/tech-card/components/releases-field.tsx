@@ -121,8 +121,10 @@ function ReleaseDetail({
                 {snap.styleNumber || '—'} · {snap.name || '—'} · stage {snap.stage || '—'}
               </Text>
               <Text variant='inactive' size='small'>
-                {(snap.bomItems ?? []).length} BOM lines · {(snap.colorways ?? []).length} colourways ·{' '}
-                {(snap.sizeIds ?? []).length} sizes
+                {/* TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) —
+                    always 0 here now; source the style's colourway count separately. */}
+                {(snap.bomItems ?? []).length} BOM lines ·{' '}
+                {([] as unknown[]).length} colourways · {(snap.sizeIds ?? []).length} sizes
               </Text>
               {canReadCosting && snap.costing?.unitCost?.value && (
                 <Text variant='inactive' size='small'>

@@ -1,4 +1,4 @@
-import { common_Dictionary, common_GenderEnum, common_ProductNew } from 'api/proto-http/admin';
+import { common_Dictionary, common_GenderEnum } from 'api/proto-http/admin';
 import { sortItems } from 'lib/features/filter-size-measurements';
 
 interface FilterSizesOptions {
@@ -53,15 +53,6 @@ export function getFilteredSizes(
     return size.id && size.id >= 1 && size.id <= 8;
   });
 }
-
-export const getNonEmptySizeMeasurements = (values: common_ProductNew) => {
-  return values.sizeMeasurements?.filter(
-    (sizeMeasurement) =>
-      sizeMeasurement &&
-      sizeMeasurement.productSize &&
-      sizeMeasurement.productSize.quantity !== null,
-  );
-};
 
 /**
  * Formats size name from "xs_44ta_m" to "xs [44]"

@@ -1,6 +1,6 @@
 import { useQueries } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_Model, common_Product } from 'api/proto-http/admin';
+import { common_Model, common_Colorway } from 'api/proto-http/admin';
 import { modelKeys } from 'components/managers/models/components/useModelQuery';
 
 // There is no batch get-by-ids endpoint, so we resolve names per id. React Query
@@ -11,11 +11,14 @@ export function useProductsByIds(ids: number[]) {
   const results = useQueries({
     queries: unique.map((id) => ({
       queryKey: ['products', 'detail', id],
-      queryFn: async () => (await adminService.GetProductByID({ id })).product?.product ?? null,
+      queryFn: async () => {
+        const res = await adminService.GetColorwayByID({ colorwayId: id });
+        return res.colorway?.colorway ?? null;
+      },
       staleTime: 5 * 60 * 1000,
     })),
   });
-  const map = new Map<number, common_Product>();
+  const map = new Map<number, common_Colorway>();
   unique.forEach((id, i) => {
     const product = results[i]?.data;
     if (product) map.set(id, product);

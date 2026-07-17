@@ -1,20 +1,26 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { adminService, frontendService } from 'api/api';
+import { adminService } from 'api/api';
 import { common_ArchiveInsert } from 'api/proto-http/admin';
+
+// R3: the admin archive surface keys on internal numeric ids. GetArchivesPaged is the ADMIN list
+// (carries id + code, unlike the storefront projection), so the timeline list, hero picker and
+// card-delete all read real ids; the edit page resolves code -> id through it (see useArchiveDetails).
+// A curated brand timeline is small, so one generous page covers the code->id lookup.
+const ARCHIVE_LOOKUP_LIMIT = 1000;
 
 export const archiveKeys = {
   all: ['archives'] as const,
   lists: () => [...archiveKeys.all, 'list'] as const,
   list: (filters: { limit: number; offset: number }) => [...archiveKeys.lists(), filters] as const,
   details: () => [...archiveKeys.all, 'detail'] as const,
-  detail: (id: number) => [...archiveKeys.details(), id] as const,
+  detail: (key: string | number) => [...archiveKeys.details(), key] as const,
 };
 
 export function useArchives(limit: number = 50, offset: number = 0) {
   return useQuery({
     queryKey: archiveKeys.list({ limit, offset }),
     queryFn: async () => {
-      const response = await frontendService.GetArchivesPaged({
+      const response = await adminService.GetArchivesPaged({
         limit,
         offset,
         orderFactor: 'ORDER_FACTOR_DESC',
@@ -25,21 +31,26 @@ export function useArchives(limit: number = 50, offset: number = 0) {
   });
 }
 
-export function useArchiveDetails(
-  id: number | undefined,
-  archiveData?: { heading?: string; tag?: string },
-) {
+// Route-E: the timeline detail URL is /timeline/{pretty}-{code}; `tail` is the segment after the last
+// '-' — the archive's stable public `code`. The admin detail (GetArchiveByID) keys on the internal
+// numeric id, so we resolve code -> id through the admin list (which carries both) and then load the
+// full admin archive by id. The result is a plain common_ArchiveFull whose archiveList.id drives the
+// UpdateArchive write.
+export function useArchiveDetails(tail: string | undefined) {
   return useQuery({
-    queryKey: archiveKeys.detail(id!),
+    queryKey: archiveKeys.detail(tail ?? ''),
     queryFn: async () => {
-      const response = await frontendService.GetArchive({
-        id: id!,
-        heading: archiveData?.heading || 'string',
-        tag: archiveData?.tag || 'string',
+      const list = await adminService.GetArchivesPaged({
+        limit: ARCHIVE_LOOKUP_LIMIT,
+        offset: 0,
+        orderFactor: 'ORDER_FACTOR_DESC',
       });
+      const match = list.archives?.find((a) => a.code === tail);
+      if (match?.id == null) return undefined;
+      const response = await adminService.GetArchiveByID({ id: match.id });
       return response.archive;
     },
-    enabled: !!id,
+    enabled: !!tail,
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -82,7 +93,7 @@ export function useInfiniteArchives(limit: number = 50) {
   return useInfiniteQuery({
     queryKey: [...archiveKeys.lists(), 'infinite'],
     queryFn: async ({ pageParam }: { pageParam: number }) => {
-      const response = await frontendService.GetArchivesPaged({
+      const response = await adminService.GetArchivesPaged({
         limit,
         offset: pageParam,
         orderFactor: 'ORDER_FACTOR_DESC',

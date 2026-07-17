@@ -1,4 +1,5 @@
 import { Cross2Icon } from '@radix-ui/react-icons';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -23,8 +24,21 @@ export function Tags({
     setValue,
     formState: { errors },
   } = useFormContext<ProductFormData>();
+  const { dictionary } = useDictionary();
   const values = watch();
   const [tag, setTag] = useState('');
+
+  // R9: dictionary-backed tag suggestions (controlled Tag list; archived hidden). The final contract
+  // keeps ColorwayTagInsert as free-text `tag` (no tag_id FK), so clicking a suggestion seeds the
+  // value and the dictionary is purely for autocomplete/consistency.
+  const dictTagOptions = useMemo(
+    () =>
+      (dictionary?.tags ?? [])
+        .filter((t) => !t.archived)
+        .map((t) => t.name || t.code || '')
+        .filter(Boolean),
+    [dictionary?.tags],
+  );
   const [localTags, setLocalTags] = useState<string[]>(() => {
     const storedTags = localStorage.getItem('productTags');
     return storedTags ? JSON.parse(storedTags) : [];
@@ -67,24 +81,27 @@ export function Tags({
     }
   }, [isEditMode]);
 
+  const addTagValue = (raw: string) => {
+    const trimmedTag = raw.trim();
+    if (trimmedTag === '' || localTags.includes(trimmedTag)) return;
+    const newTags = [...localTags, trimmedTag];
+    if (isAddingProduct) {
+      localStorage.setItem('productTags', JSON.stringify(newTags));
+      setLocalTags(newTags);
+    }
+    if (isCopyMode) {
+      setCopiedTags((prevCopiedTags) => [...prevCopiedTags, trimmedTag]);
+    }
+    if (isEditMode) {
+      setEditedTags((prevTags) => [...prevTags, trimmedTag]);
+    }
+    setSelectedTags((prev) => (prev.includes(trimmedTag) ? prev : [...prev, trimmedTag]));
+  };
+
   const handleAddTag = (e: React.MouseEvent) => {
     e.preventDefault();
-    const trimmedTag = tag.trim();
-    if (trimmedTag !== '' && !localTags.includes(trimmedTag)) {
-      const newTags = [...localTags, trimmedTag];
-      if (isAddingProduct) {
-        localStorage.setItem('productTags', JSON.stringify(newTags));
-        setLocalTags(newTags);
-      }
-      if (isCopyMode) {
-        setCopiedTags((prevCopiedTags) => [...prevCopiedTags, trimmedTag]);
-      }
-      if (isEditMode) {
-        setEditedTags((prevTags) => [...prevTags, trimmedTag]);
-      }
-      setSelectedTags((prev) => (prev.includes(trimmedTag) ? prev : [...prev, trimmedTag]));
-      setTag('');
-    }
+    addTagValue(tag);
+    setTag('');
   };
 
   const handleDeleteTag = (tagToDelete: string, e: React.MouseEvent) => {
@@ -174,6 +191,27 @@ export function Tags({
           >
             save
           </Button>
+        </div>
+      )}
+      {editMode && dictTagOptions.length > 0 && (
+        <div className='flex flex-col gap-1'>
+          <Text variant='inactive' size='small'>
+            dictionary tags
+          </Text>
+          <div className='flex flex-wrap gap-1'>
+            {dictTagOptions.map((name) => (
+              <Button
+                key={name}
+                type='button'
+                size='sm'
+                variant='secondary'
+                className='lowercase'
+                onClick={() => addTagValue(name)}
+              >
+                + {name}
+              </Button>
+            ))}
+          </div>
         </div>
       )}
       {!isEditMode && !isAddingProduct && <Text variant='uppercase'>list of tags</Text>}

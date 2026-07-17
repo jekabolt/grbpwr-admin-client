@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { DEFAULT_PRODUCT_LIMIT } from 'constants/filter';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
@@ -10,14 +10,14 @@ import { ProductGrid } from './product-grid';
 import { getProductPagedParans } from './utility';
 
 interface Props {
-  firstItems: common_Product[];
+  firstItems: common_Colorway[];
   initialLoading?: boolean;
   onCountChange?: (count: number, hasMore: boolean) => void;
 }
 
 export function InfinityScroll({ firstItems, initialLoading = false, onCountChange }: Props) {
   const [searchParams] = useSearchParams();
-  const [items, setItems] = useState<common_Product[]>(firstItems);
+  const [items, setItems] = useState<common_Colorway[]>(firstItems);
   const [isLoading, setIsLoading] = useState(false);
   const { showMessage } = useSnackBarStore();
   const { ref, inView } = useInView();
@@ -52,13 +52,13 @@ export function InfinityScroll({ firstItems, initialLoading = false, onCountChan
     try {
       const offset = (pageRef.current - 1) * limit;
 
-      const response = await adminService.GetProductsPaged({
+      const response = await adminService.GetColorwaysPaged({
         limit,
         offset,
         ...getProductPagedParans(params),
       });
 
-      const newProducts = response.products || [];
+      const newProducts = response.colorways || [];
 
       if (!newProducts.length || newProducts.length < limit) {
         hasMoreRef.current = false;

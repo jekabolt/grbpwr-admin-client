@@ -44,6 +44,9 @@ const Promo = lazy(() => import('components/managers/promo').then((m) => ({ defa
 const Settings = lazy(() =>
   import('components/managers/settings').then((m) => ({ default: m.Settings })),
 );
+const Dictionaries = lazy(() =>
+  import('components/managers/dictionaries/page').then((m) => ({ default: m.Dictionaries })),
+);
 const Members = lazy(() =>
   import('components/managers/membership/members/page').then((m) => ({ default: m.Members })),
 );
@@ -218,6 +221,7 @@ root.render(
                   <Route path={ROUTES.hero} element={<Hero />} />
                   <Route path={ROUTES.promo} element={<Promo />} />
                   <Route path={ROUTES.settings} element={<Settings />} />
+                  <Route path={ROUTES.dictionaries} element={<Dictionaries />} />
                   <Route path={ROUTES.shipping} element={<Shipping />} />
                   <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
                   <Route path={ROUTES.customOrders} element={<CustomOrders />} />

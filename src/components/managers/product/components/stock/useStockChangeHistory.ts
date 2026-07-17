@@ -50,7 +50,7 @@ export function useStockChangeHistory(
     queryFn: async ({ pageParam }: { pageParam: number }) => {
       try {
         const response = await adminService.ListStockChangeHistory({
-          productId,
+          colorwayId: productId,
           sizeId,
           source: source === 'STOCK_CHANGE_SOURCE_UNSPECIFIED' ? undefined : source,
           limit,

@@ -9,18 +9,16 @@ import { StockModal } from './stock-modal';
 import { UpdateStockData } from './update-stock-schema';
 import { useUpdateStock } from './useUpdateStock';
 
-interface SizeOption {
-  id?: number;
+interface VariantOption {
+  variantId?: number;
   name?: string;
 }
 
 export function UpdateStock({
-  productId,
-  sizes = [],
+  variants = [],
   onStockUpdated,
 }: {
-  productId?: number;
-  sizes?: SizeOption[];
+  variants?: VariantOption[];
   onStockUpdated?: () => void;
 }) {
   const {
@@ -33,7 +31,7 @@ export function UpdateStock({
     directionOptions,
     commentPlaceholder,
     onSubmit,
-  } = useUpdateStock({ productId, sizes, onStockUpdated });
+  } = useUpdateStock({ variants, onStockUpdated });
 
   return (
     <StockModal title='update stock'>
@@ -75,7 +73,7 @@ export function UpdateStock({
                 </div>
               </div>
             )}
-            <SelectField name='sizeId' label='size' items={sizeItems} valueAsNumber />
+            <SelectField name='variantId' label='size' items={sizeItems} valueAsNumber />
             <InputField
               name='quantity'
               label='quantity'

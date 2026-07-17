@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { ProductCostInfo } from 'api/proto-http/admin';
+import { ColorwayCostInfo } from 'api/proto-http/admin';
 import { generatePath, Link } from 'react-router-dom';
 import { useFormContext } from 'react-hook-form';
 import { useState } from 'react';
@@ -19,12 +19,15 @@ export function ProductCostSection({
   editMode,
   costInfo,
   productId,
+  lockVersion,
   isAddingProduct,
   onCostSynced,
 }: {
   editMode: boolean;
-  costInfo?: ProductCostInfo;
+  costInfo?: ColorwayCostInfo;
   productId?: string;
+  // Shared tech_card.lock_version of the colourway — the optimistic-lock token the cost sync echoes.
+  lockVersion?: number;
   isAddingProduct: boolean;
   onCostSynced?: () => void;
 }) {
@@ -38,7 +41,12 @@ export function ProductCostSection({
 
   const eur = currencySymbols['EUR'] ?? 'EUR';
   const source = costInfo?.costPriceSource;
-  const sourceTcId = costInfo?.costPriceTechCardId;
+  const sourceTcId = costInfo?.costSourceTechCardId;
+  // R4: cost provenance is an enum now. STYLE/PRODUCTION_RUN are the derived sources (linked to a tech
+  // card); MANUAL is an operator-entered cost.
+  const isDerived =
+    source === 'COLORWAY_COST_SOURCE_STYLE' || source === 'COLORWAY_COST_SOURCE_PRODUCTION_RUN';
+  const isManual = source === 'COLORWAY_COST_SOURCE_MANUAL';
   const primaryTcId = costInfo?.primaryTechCardId ?? 0;
   const updatedAt = costInfo?.costPriceUpdatedAt;
   const hasProvenance = Boolean(source || costInfo?.costPrice?.value);
@@ -48,9 +56,10 @@ export function ProductCostSection({
     if (!productId) return;
     setSyncing(true);
     try {
-      const res = await adminService.SyncProductCostFromTechCard({
-        productId: Number(productId),
-        techCardId: 0, // use the product's existing primary card
+      const res = await adminService.SyncColorwayCostFromOwningStyle({
+        colorwayId: Number(productId),
+        // Echo the shared tech_card.lock_version; 0 falls back to an unconditional sync.
+        expectedVersion: lockVersion ?? 0,
       });
       if (res.costPrice?.value) setValue('product.costPrice', res.costPrice.value);
       showMessage(
@@ -103,7 +112,7 @@ export function ProductCostSection({
           <Text variant='inactive' size='small'>
             source
           </Text>
-          {source === 'tech_card' ? (
+          {isDerived ? (
             <Text size='small'>
               from tech card{' '}
               {sourceTcId ? (
@@ -115,7 +124,7 @@ export function ProductCostSection({
                 </Link>
               ) : null}
             </Text>
-          ) : source === 'manual' ? (
+          ) : isManual ? (
             <Text size='small'>set manually</Text>
           ) : (
             <Text size='small'>—</Text>

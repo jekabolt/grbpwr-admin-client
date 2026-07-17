@@ -62,8 +62,9 @@ export enum ROUTES {
   getPromo = '/get-promo',
   addArchive = '/add-archive',
   archives = '/archives',
-  singleArchive = '/timeline/:heading/:tag/:id',
+  singleArchive = '/timeline/:handle',
   settings = '/settings',
+  dictionaries = '/dictionaries',
   orders = '/orders',
   orderDetails = '/orders/:uuid',
   orderInvoice = '/orders/:uuid/invoice',
@@ -150,6 +151,7 @@ export const ADMIN_GROUP: NavGroup = {
   label: 'admin',
   items: [
     { label: 'settings', route: ROUTES.settings, section: SECTION.settings },
+    { label: 'dictionaries', route: ROUTES.dictionaries, section: SECTION.settings },
     { label: 'shipping', route: ROUTES.shipping, section: SECTION.shipping },
     { label: 'accounts', route: ROUTES.accounts, section: SECTION.accounts },
   ],

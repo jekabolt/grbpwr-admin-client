@@ -14,18 +14,16 @@ import {
 } from './update-stock-schema';
 import { stockChangeHistoryKeys } from './useStockChangeHistory';
 
-interface SizeOption {
-  id?: number;
+interface VariantOption {
+  variantId?: number;
   name?: string;
 }
 
 export function useUpdateStock({
-  productId,
-  sizes = [],
+  variants = [],
   onStockUpdated,
 }: {
-  productId?: number;
-  sizes?: SizeOption[];
+  variants?: VariantOption[];
   onStockUpdated?: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -63,21 +61,20 @@ export function useUpdateStock({
   }, [mode, reason]);
 
   async function onSubmit(data: UpdateStockData) {
-    if (!productId) {
-      showMessage('Product ID is required', 'error');
+    if (!data.variantId) {
+      showMessage('Select a size/variant', 'error');
       return;
     }
-    const payload: Parameters<typeof adminService.UpdateProductSizeStock>[0] = {
-      productId,
+    const payload: Parameters<typeof adminService.UpdateVariantStock>[0] = {
+      variantId: data.variantId,
       mode: data.mode,
-      sizeId: data.sizeId,
       quantity: data.quantity,
       reason: data.reason,
       comment: data.comment,
       direction: data.mode === 'STOCK_ADJUSTMENT_MODE_ADJUST' ? data.direction : undefined,
     };
     try {
-      await adminService.UpdateProductSizeStock(payload);
+      await adminService.UpdateVariantStock(payload);
       showMessage('Stock updated successfully', 'success');
       form.reset();
       queryClient.invalidateQueries({ queryKey: stockChangeHistoryKeys.all });
@@ -89,9 +86,9 @@ export function useUpdateStock({
     }
   }
 
-  const sizeItems = sizes
-    .filter((s) => s.id != null)
-    .map((s) => ({ value: String(s.id), label: s.name ?? String(s.id) }));
+  const sizeItems = variants
+    .filter((v) => v.variantId != null)
+    .map((v) => ({ value: String(v.variantId), label: v.name ?? String(v.variantId) }));
 
   function getReasonOptionsForMode(
     mode: UpdateStockData['mode'],

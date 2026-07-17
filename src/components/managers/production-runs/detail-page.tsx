@@ -1,8 +1,4 @@
-import {
-  common_ProductionRun,
-  common_ProductionRunActuals,
-  common_TechCardColorway,
-} from 'api/proto-http/admin';
+import { common_ProductionRun, common_ProductionRunActuals } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
@@ -49,7 +45,7 @@ export function ProductionRunDetail() {
   // NF-07 / B-3: an auxiliary card produces a MATERIAL, not products. Its run is a single
   // product-less quantity received into output_material_id, so it swaps the colour-model grid for
   // a plain quantity plan and the receive posts into the material warehouse.
-  const isAux = techCard?.techCard?.purpose === 'auxiliary';
+  const isAux = techCard?.techCard?.purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
   const outputMaterialId = techCard?.techCard?.outputMaterialId ?? 0;
   const { data: materialsData } = useMaterials('', true, isAux);
   const outputMaterial = useMemo(
@@ -159,7 +155,10 @@ export function ProductionRunDetail() {
       {canReadCosting &&
       actuals &&
       ((actuals.byColorway?.length ?? 0) > 0 || actuals.unattributedMaterialsBase?.value) ? (
-        <ColorwayCostBlock actuals={actuals} colorways={techCard?.techCard?.colorways ?? []} />
+        // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always
+        // empty; per-colourway labels fall back to `#<id>`. Source real data from
+        // GetColorwaysPaged by style / AdminColorwayRef instead.
+        <ColorwayCostBlock actuals={actuals} colorways={[]} />
       ) : null}
 
       {isAux ? (
@@ -266,12 +265,17 @@ function PlanFactBlock({
 // for. Only materials-from-stock is split — manual cost articles stay run-level — and issues booked
 // without a colourway fall into "unattributed". Read-only; costing-gated by the caller.
 const cwCell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+// TODO(final-bump): common_TechCardColorway was removed (R1 merge — a colourway is now a
+// product). This local shape keeps the label lookup below type-checking against an
+// always-empty caller; source real colourway data from GetColorwaysPaged by style /
+// AdminColorwayRef instead.
+type ColorwayLabelRef = { productId?: number; code?: string; name?: string };
 function ColorwayCostBlock({
   actuals,
   colorways,
 }: {
   actuals: common_ProductionRunActuals;
-  colorways: common_TechCardColorway[];
+  colorways: ColorwayLabelRef[];
 }) {
   const cur = actuals.baseCurrency || '';
   const label = (productId?: number) => {

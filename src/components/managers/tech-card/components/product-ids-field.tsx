@@ -1,4 +1,4 @@
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { ProductPicker } from 'components/managers/custom-orders/components/prodcut-picker';
 import { useProductCatalog } from 'components/managers/fittings/components/useProductCatalog';
 import { useProductsByIds } from 'components/managers/fittings/components/useResolvers';
@@ -8,10 +8,8 @@ import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { TechCardFormData } from './schema';
 
-function productName(product?: common_Product): string {
-  return (
-    product?.productDisplay?.productBody?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`
-  );
+function productName(product?: common_Colorway): string {
+  return product?.display?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`;
 }
 
 // Catalog products linked to this tech card (FK product ids). Multi-select via the
@@ -26,9 +24,9 @@ export function ProductIdsField() {
 
   const selectedProducts = productIds
     .map((id) => productMap.get(id) ?? products.find((p) => p.id === id))
-    .filter((p): p is common_Product => !!p);
+    .filter((p): p is common_Colorway => !!p);
 
-  const handleSave = (picked: common_Product[]) => {
+  const handleSave = (picked: common_Colorway[]) => {
     const ids = picked.map((p) => p.id).filter((id): id is number => id != null);
     setValue('productIds', ids, { shouldDirty: true });
   };
@@ -64,7 +62,7 @@ export function ProductIdsField() {
               <div key={id} className='flex items-center gap-3 border border-textInactiveColor p-2'>
                 <div className='w-12 shrink-0'>
                   <Media
-                    src={product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+                    src={product?.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
                     alt='thumbnail'
                     aspectRatio='1/1'
                     fit='contain'

@@ -43,14 +43,15 @@ const productBodySchema = z.object({
   topCategoryId: z.string().min(1, 'Category is required'),
   subCategoryId: z.string().optional(),
   typeId: z.string().optional(),
-  color: z.string().min(1, 'Color is required'),
-  colorHex: z.string().min(1, 'Color hex is required'),
+  // R1/R9: color identity is the dictionary color_code (FK Dictionary.colors); the free-text
+  // color/color_hex were replaced. color_hex_override is an optional per-colourway shade override.
+  colorCode: z.string().min(1, 'Color is required'),
+  colorHexOverride: z.string().optional(),
   countryOfOrigin: z.string().min(1, 'Country is required'),
   salePercentage: z.object({
     value: z.string().regex(/^\d*\.?\d{0,2}$/, 'Sale percentage must be a valid number'),
   }),
   collection: z.string().min(1, 'Collection is required'),
-  version: z.string().min(1, 'Version is required'),
   careInstructions: z.string().min(1, 'Care instructions is required'),
   composition: z.string().min(1, 'Composition is required'),
   preorder: z.string().optional(),
@@ -86,6 +87,10 @@ const allPricesFilledRefine = (arr: { price?: { value?: string } }[]) =>
 
 export const baseProductSchema = z
   .object({
+    // R2/R4: a colourway attaches to an existing style (there is no CreateStyle RPC — a style is a
+    // tech card). On create, this is the target style id; on edit it mirrors the loaded colourway's
+    // style_id (read-only). Copy prefills it from the source colourway.
+    styleId: z.string().optional(),
     product: z.object({
       productBodyInsert: productBodySchema,
       thumbnailMediaId: z.number().min(1, 'Thumbnail must be selected'),
@@ -173,14 +178,15 @@ export const baseProductSchema = z
 export const productSchema = baseProductSchema;
 
 export const defaultData = {
+  styleId: '',
   product: {
     productBodyInsert: {
       preorder: '0001-01-01T00:00:00Z',
       brand: '',
       careInstructions: '',
       composition: '',
-      color: '',
-      colorHex: '',
+      colorCode: '',
+      colorHexOverride: '',
       countryOfOrigin: '',
       salePercentage: { value: '0' },
       topCategoryId: '',
@@ -191,7 +197,6 @@ export const defaultData = {
       targetGender: '' as common_GenderEnum,
       modelWearsHeightCm: undefined,
       modelWearsSizeId: undefined,
-      version: '',
       collection: '',
       fit: '',
       season: '' as common_SeasonEnum,

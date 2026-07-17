@@ -55,7 +55,10 @@ export function SamplesTab({
   const sizeName = (sizeId?: number) =>
     sizeId ? String(findInDictionary(dictionary, sizeId, 'size') || sizeId) : '—';
 
-  const colorways = techCard?.techCard?.colorways ?? [];
+  // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always empty;
+  // colourway name lookups fall back to `#<id>`. Source real data from GetColorwaysPaged by
+  // style / AdminColorwayRef instead.
+  const colorways = [] as { productId?: number; code?: string; name?: string; id?: number }[];
   const colorwayName = (id?: number) =>
     id ? colorwayLabel(colorways.find((c) => c.id === id)) : '—';
 
@@ -262,7 +265,10 @@ function SampleEditor({
   // B-10: colourways carry a stable, output-only id (re-pointed by identity when the card is
   // full-replaced on save). Reading them off the live `techCard` query means the picker always
   // offers fresh ids — the exact ones to link a sample to right now.
-  const colorways = techCard?.techCard?.colorways ?? [];
+  // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always empty;
+  // the picker falls back to a bare "колорвей #<id>" option. Source real data from
+  // GetColorwaysPaged by style / AdminColorwayRef instead.
+  const colorways = [] as { productId?: number; code?: string; name?: string; id?: number }[];
 
   const mediaLinks = d.mediaIds
     .map((id) => mediaById.get(id))

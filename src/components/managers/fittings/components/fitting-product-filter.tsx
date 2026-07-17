@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { ProductPicker } from 'components/managers/custom-orders/components/prodcut-picker';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -17,7 +17,7 @@ export function FittingProductFilter({
   onChange: (id: number) => void;
 }) {
   const { products, hasMore, loadMore } = useProductCatalog();
-  const [selected, setSelected] = useState<common_Product | undefined>();
+  const [selected, setSelected] = useState<common_Colorway | undefined>();
 
   useEffect(() => {
     if (!productId) {
@@ -31,9 +31,9 @@ export function FittingProductFilter({
     }
     let active = true;
     adminService
-      .GetProductByID({ id: productId })
+      .GetColorwayByID({ colorwayId: productId })
       .then((res) => {
-        if (active) setSelected(res.product?.product);
+        if (active) setSelected(res.colorway?.colorway);
       })
       .catch(() => {});
     return () => {
@@ -50,14 +50,14 @@ export function FittingProductFilter({
         <div className='flex items-center gap-2 border border-textInactiveColor p-1'>
           <span className='w-8 shrink-0'>
             <Media
-              src={selected.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+              src={selected.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
               alt=''
               aspectRatio='1/1'
               fit='contain'
             />
           </span>
           <Text size='small'>
-            {selected.productDisplay?.productBody?.translations?.[0]?.name ?? `#${selected.id}`}
+            {selected.display?.translations?.[0]?.name ?? `#${selected.id}`}
           </Text>
         </div>
       )}

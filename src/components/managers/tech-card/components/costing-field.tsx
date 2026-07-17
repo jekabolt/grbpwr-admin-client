@@ -34,7 +34,10 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
 
   const rollup = techCard?.techCard?.costing;
   const colorwayCosts = rollup?.colorwayCosts ?? [];
-  const storedColorways = techCard?.techCard?.colorways ?? [];
+  // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always empty;
+  // the label below falls back to `колорвей #<id>`. Source real data from GetColorwaysPaged
+  // by style / AdminColorwayRef instead.
+  const storedColorways = [] as { productId?: number; code?: string; name?: string; id?: number }[];
   const colorwayLabel = (index?: number) => {
     const c = index != null ? storedColorways[index] : undefined;
     return c?.name || c?.code || `колорвей #${(index ?? 0) + 1}`;
@@ -93,8 +96,9 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                 {colorwayCosts.map((cc, i) => (
                   <div key={i} className='border border-textInactiveColor p-2'>
                     <Text size='small' className='block'>
-                      {colorwayLabel(cc.colorwayIndex)}
-                      {cc.colorwayIndex === 0 ? ' (основной)' : ''}
+                      {/* TODO(final-bump): proto field renamed colorwayIndex -> colorwayId. */}
+                      {colorwayLabel(cc.colorwayId)}
+                      {cc.colorwayId === 0 ? ' (основной)' : ''}
                     </Text>
                     {(cc.materialsTotal ?? []).map((line, li) => (
                       <Text key={li} variant='inactive' size='small'>

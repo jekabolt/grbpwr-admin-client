@@ -2,7 +2,7 @@ import {
   common_GenderEnum,
   common_OrderFactor,
   common_SortFactor,
-  GetProductsPagedRequest,
+  GetColorwaysPagedRequest,
 } from 'api/proto-http/admin';
 
 import { GENDER_MAP, ORDER_MAP, SORT_MAP_URL } from 'constants/constants';
@@ -94,8 +94,8 @@ export function getProductPagedParans({
   currency?: string | null;
   seasons?: string | null;
 }): Pick<
-  GetProductsPagedRequest,
-  'sortFactors' | 'orderFactor' | 'filterConditions' | 'showHidden'
+  GetColorwaysPagedRequest,
+  'sortFactors' | 'orderFactor' | 'filterConditions' | 'statuses'
 > {
   const sortFactor = normalizeSort(sort);
   const orderFactor = normalizeOrder(order);
@@ -108,7 +108,8 @@ export function getProductPagedParans({
       from: from ? from : undefined, //done
       to: to ? to : undefined, //done
       gender: isGenderFilter(genderEnum) ? [genderEnum] : undefined,
-      color: color && color !== 'all' ? color : undefined,
+      // R1/R9: catalog filters by dictionary color_code(s) now, not free-text color.
+      colorCodes: color && color !== 'all' ? [color] : undefined,
       topCategoryIds: topCategory ? topCategory.split(',').map((id) => parseInt(id)) : undefined, //done
       excludeTopCategoryIds: undefined,
       subCategoryIds: subCategory ? subCategory.split(',').map((id) => parseInt(id)) : undefined, //done
@@ -121,6 +122,9 @@ export function getProductPagedParans({
       currency: currency ? currency : undefined,
       seasons: undefined,
     },
-    showHidden: hidden === 'false' ? false : true,
+    // R6/§14.6: show_hidden is replaced by an explicit lifecycle-status filter. An empty `statuses`
+    // is the default admin set (everything but ARCHIVED, so DRAFT/ACTIVE/HIDDEN show); the
+    // "hide hidden" toggle narrows it to ACTIVE only.
+    statuses: hidden === 'false' ? ['COLORWAY_LIFECYCLE_STATUS_ACTIVE'] : undefined,
   };
 }

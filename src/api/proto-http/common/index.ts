@@ -9,7 +9,7 @@ export type Language = {
   isActive: boolean | undefined;
 };
 
-export type ProductInsertTranslation = {
+export type ColorwayInsertTranslation = {
   languageId: number | undefined;
   name: string | undefined;
   description: string | undefined;
@@ -110,6 +110,12 @@ export type MediaInfo = {
   height: number | undefined;
 };
 
+export type SizeSkuSystem =
+  | "SIZE_SKU_SYSTEM_UNKNOWN"
+  | "SIZE_SKU_SYSTEM_APPAREL"
+  | "SIZE_SKU_SYSTEM_SHOE"
+  | "SIZE_SKU_SYSTEM_COMPOSITE_TA"
+  | "SIZE_SKU_SYSTEM_COMPOSITE_BO";
 export type GenderEnum =
   | "GENDER_ENUM_UNKNOWN"
   | "GENDER_ENUM_MALE"
@@ -121,6 +127,27 @@ export type SeasonEnum =
   | "SEASON_ENUM_FW"
   | "SEASON_ENUM_PF"
   | "SEASON_ENUM_RC";
+// ColorwayLifecycleStatus is the stored lifecycle of a colourway (R6). Numbers are fixed and match the
+// DB tinyint + entity.ColorwayStatus. UNKNOWN is rejected on write; an unknown read value fails closed
+// (the colourway is not shown). Only ACTIVE is exposed publicly.
+export type ColorwayLifecycleStatus =
+  | "COLORWAY_LIFECYCLE_STATUS_UNKNOWN"
+  | "COLORWAY_LIFECYCLE_STATUS_DRAFT"
+  | "COLORWAY_LIFECYCLE_STATUS_ACTIVE"
+  | "COLORWAY_LIFECYCLE_STATUS_HIDDEN"
+  | "COLORWAY_LIFECYCLE_STATUS_ARCHIVED";
+// VariantLifecycleStatus is the stored lifecycle of a variant (R2). Variants archive, never delete.
+export type VariantLifecycleStatus =
+  | "VARIANT_LIFECYCLE_STATUS_UNKNOWN"
+  | "VARIANT_LIFECYCLE_STATUS_ACTIVE"
+  | "VARIANT_LIFECYCLE_STATUS_ARCHIVED";
+// ColorwayCostSource records where a colourway's COGS came from (R4), separating cost provenance from
+// the owning style relation.
+export type ColorwayCostSource =
+  | "COLORWAY_COST_SOURCE_UNKNOWN"
+  | "COLORWAY_COST_SOURCE_MANUAL"
+  | "COLORWAY_COST_SOURCE_STYLE"
+  | "COLORWAY_COST_SOURCE_PRODUCTION_RUN";
 export type StockChangeSource =
   | "STOCK_CHANGE_SOURCE_UNSPECIFIED"
   | "STOCK_CHANGE_SOURCE_ADMIN_NEW_PRODUCT"
@@ -174,6 +201,18 @@ export type Size = {
   name: string | undefined;
   countMen: number | undefined;
   countWomen: number | undefined;
+  skuOrd: number | undefined;
+  skuSystem: SizeSkuSystem | undefined;
+};
+
+// Color is a controlled colour-dictionary entry. code is exactly 3 chars and unique; it feeds the
+// colour segment of the SKU and is referenced by product.color_code.
+export type Color = {
+  id: number | undefined;
+  code: string | undefined;
+  name: string | undefined;
+  hex: string | undefined;
+  archived: boolean | undefined;
 };
 
 export type MeasurementName = {
@@ -181,32 +220,46 @@ export type MeasurementName = {
   name: string | undefined;
 };
 
-export type ProductNew = {
-  product: ProductInsert | undefined;
-  sizeMeasurements: SizeWithMeasurementInsert[] | undefined;
-  mediaIds: number[] | undefined;
-  tags: ProductTagInsert[] | undefined;
-  prices: ProductPriceInsert[] | undefined;
+export type ColorwayFull = {
+  colorway: Colorway | undefined;
+  variants: Variant[] | undefined;
+  media: MediaFull[] | undefined;
+  tags: ColorwayTag[] | undefined;
 };
 
-export type ProductInsert = {
-  productBodyInsert: ProductBodyInsert | undefined;
-  thumbnailMediaId: number | undefined;
-  translations: ProductInsertTranslation[] | undefined;
-  secondaryThumbnailMediaId: number | undefined;
-  prices: ProductPriceInsert[] | undefined;
-  // cost_price is the confidential per-unit cost of goods (COGS) in base currency (EUR),
-  // used for margin analytics. Omit/empty to leave the stored value unchanged on update.
-  // Deliberately on ProductInsert (write-only) and NOT on ProductBodyInsert, so it is
-  // never serialized on the storefront product read path.
-  costPrice: googletype_Decimal | undefined;
+export type Colorway = {
+  id: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  slug: string | undefined;
+  baseSku: string | undefined;
+  display: ColorwayDisplay | undefined;
+  prices: ColorwayPrice[] | undefined;
+  soldOut: boolean | undefined;
+  // status is the colourway's stored lifecycle (R6). Type change string→enum on the same wire number
+  // (non-identity, big-bang regen). Only ACTIVE is exposed publicly; an UNKNOWN read fails closed.
+  status: ColorwayLifecycleStatus | undefined;
+  styleId: number | undefined;
+  lockVersion: number | undefined;
+  colorCode: string | undefined;
+  publishedAt: wellKnownTimestamp | undefined;
 };
 
-export type ProductBodyInsert = {
+export type ColorwayDisplay = {
+  thumbnail: MediaFull | undefined;
+  secondaryThumbnail: MediaFull | undefined;
+  merchandising: ColorwayMerchandising | undefined;
+  translations: ColorwayInsertTranslation[] | undefined;
+};
+
+// ColorwayMerchandising is the admin/internal READ projection of a colourway's display fields: the
+// colourway-owned merchandising PLUS the style-resolved garment facts (output-only), so the admin
+// detail view keeps rendering brand/season/collection/etc even though they are now written on the
+// Style. Never reachable from FrontendService (the storefront uses StorefrontColorway, R3).
+export type ColorwayMerchandising = {
   preorder: wellKnownTimestamp | undefined;
   brand: string | undefined;
-  color: string | undefined;
-  colorHex: string | undefined;
+  colorHexOverride?: string;
   countryOfOrigin: string | undefined;
   salePercentage: googletype_Decimal | undefined;
   topCategoryId: number | undefined;
@@ -216,14 +269,14 @@ export type ProductBodyInsert = {
   modelWearsSizeId: number | undefined;
   careInstructions: string | undefined;
   composition: string | undefined;
-  hidden: boolean | undefined;
   targetGender: GenderEnum | undefined;
   season: SeasonEnum | undefined;
-  version: string | undefined;
   collection: string | undefined;
   fit: string | undefined;
-  // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
   minTier: number | undefined;
+  colorCode: string | undefined;
+  dictionaryColor: Color | undefined;
+  countryCode: string | undefined;
 };
 
 // A representation of a decimal value, such as 2.5. Clients may convert values
@@ -280,100 +333,59 @@ export type googletype_Decimal = {
   value: string | undefined;
 };
 
-export type ProductPriceInsert = {
+export type ColorwayPrice = {
   currency: string | undefined;
   price: googletype_Decimal | undefined;
 };
 
-export type SizeWithMeasurementInsert = {
-  productSize: ProductSizeInsert | undefined;
-  measurements: ProductMeasurementInsert[] | undefined;
-};
-
-export type ProductSizeInsert = {
+export type Variant = {
+  variantId: number | undefined;
   quantity: googletype_Decimal | undefined;
+  colorwayId: number | undefined;
   sizeId: number | undefined;
+  variantSku: string | undefined;
+  status: VariantLifecycleStatus | undefined;
+  lockVersion: number | undefined;
 };
 
-export type ProductMeasurementInsert = {
-  measurementNameId: number | undefined;
-  measurementValue: googletype_Decimal | undefined;
+export type ColorwayTag = {
+  id: number | undefined;
+  colorwayId: number | undefined;
+  tagInsert: ColorwayTagInsert | undefined;
 };
 
-export type ProductTagInsert = {
+export type ColorwayTagInsert = {
   tag: string | undefined;
 };
 
-export type ProductFull = {
-  product: Product | undefined;
-  sizes: ProductSize[] | undefined;
-  measurements: ProductMeasurement[] | undefined;
-  media: MediaFull[] | undefined;
-  tags: ProductTag[] | undefined;
+// ColorwayMerchandisingInsert (R8: renamed from ColorwayBodyInsert) carries the colourway-owned
+// merchandising fields ONLY. The garment/style facts (brand, season, collection, target_gender, fit,
+// composition, care instructions, model-wears, categories) are owned by the Style and written via
+// UpdateStyle (R4/§14.7) — they are reserved here. The free-text country_of_origin is replaced by the
+// ISO country_code (R9).
+export type ColorwayMerchandisingInsert = {
+  preorder: wellKnownTimestamp | undefined;
+  // Optional per-colorway shade override. When absent, clients use dictionary_color.hex.
+  colorHexOverride?: string;
+  salePercentage: googletype_Decimal | undefined;
+  // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
+  minTier: number | undefined;
+  // REQUIRED canonical FK to Dictionary.colors; the sole color/SKU identity on writes.
+  colorCode: string | undefined;
+  // OUTPUT-ONLY resolved dictionary entry. Ignored on write.
+  dictionaryColor: Color | undefined;
+  // country_code is the ISO 3166-1 alpha-2 manufacture country (R9; FK Country dict). Colourway-owned.
+  countryCode: string | undefined;
 };
 
-export type Product = {
-  id: number | undefined;
-  createdAt: wellKnownTimestamp | undefined;
-  updatedAt: wellKnownTimestamp | undefined;
-  slug: string | undefined;
-  sku: string | undefined;
-  productDisplay: ProductDisplay | undefined;
-  prices: ProductPrice[] | undefined;
-  soldOut: boolean | undefined;
-};
-
-export type ProductDisplay = {
-  productBody: ProductBody | undefined;
-  thumbnail: MediaFull | undefined;
-  secondaryThumbnail: MediaFull | undefined;
-};
-
-export type ProductBody = {
-  productBodyInsert: ProductBodyInsert | undefined;
-  translations: ProductInsertTranslation[] | undefined;
-};
-
-export type ProductPrice = {
+export type ColorwayPriceInsert = {
   currency: string | undefined;
   price: googletype_Decimal | undefined;
-};
-
-export type ProductSize = {
-  id: number | undefined;
-  quantity: googletype_Decimal | undefined;
-  productId: number | undefined;
-  sizeId: number | undefined;
-};
-
-export type ProductMeasurement = {
-  id: number | undefined;
-  productId: number | undefined;
-  productSizeId: number | undefined;
-  measurementNameId: number | undefined;
-  measurementValue: googletype_Decimal | undefined;
-};
-
-export type ProductTag = {
-  id: number | undefined;
-  productId: number | undefined;
-  productTagInsert: ProductTagInsert | undefined;
-};
-
-export type ProductMeasurementUpdate = {
-  sizeId: number | undefined;
-  measurementNameId: number | undefined;
-  measurementValue: googletype_Decimal | undefined;
-};
-
-export type SizeWithMeasurement = {
-  productSize: ProductSize | undefined;
-  measurements: ProductMeasurement[] | undefined;
 };
 
 export type StockChange = {
   id: number | undefined;
-  productId: number | undefined;
+  colorwayId: number | undefined;
   sizeId: number | undefined;
   quantityDelta: googletype_Decimal | undefined;
   quantityBefore: googletype_Decimal | undefined;
@@ -386,6 +398,8 @@ export type StockChange = {
   referenceId: string | undefined;
   reason?: StockChangeReason;
   comment?: string;
+  variantId: number | undefined;
+  variantSku: string | undefined;
 };
 
 // ArchiveItemType discriminates a timeline body block. The archive body is an
@@ -418,6 +432,9 @@ export type ArchiveList = {
   slug: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   thumbnail: MediaFull | undefined;
+  // code is the stable, immutable public identifier used in the /timeline URL tail
+  // and by GetArchive to resolve the archive (id is no longer the public key).
+  code: string | undefined;
 };
 
 // MAIN_MEDIA: a single hero-scale media (image or video). aspect_ratio applies
@@ -454,20 +471,20 @@ export type ArchiveMediaWithCaptionFull = {
 
 // PRODUCT: a single product. Optional caption in translations.caption.
 export type ArchiveProductFull = {
-  product: Product | undefined;
+  product: Colorway | undefined;
   translations: ArchiveItemTranslation[] | undefined;
 };
 
 // PRODUCTS_TAG: products resolved by tag. Optional caption in translations.caption.
 export type ArchiveProductsTagFull = {
   tag: string | undefined;
-  products: Product[] | undefined;
+  products: Colorway[] | undefined;
   translations: ArchiveItemTranslation[] | undefined;
 };
 
 // PRODUCTS_MANUAL: hand-picked, ordered products. Optional caption.
 export type ArchiveProductsManualFull = {
-  products: Product[] | undefined;
+  products: Colorway[] | undefined;
   translations: ArchiveItemTranslation[] | undefined;
 };
 
@@ -512,7 +529,7 @@ export type ArchiveMediaWithCaptionInsert = {
 };
 
 export type ArchiveProductInsert = {
-  productId: number | undefined;
+  colorwayId: number | undefined;
   translations: ArchiveItemTranslation[] | undefined;
 };
 
@@ -523,7 +540,7 @@ export type ArchiveProductsTagInsert = {
 };
 
 export type ArchiveProductsManualInsert = {
-  productIds: number[] | undefined;
+  colorwayIds: number[] | undefined;
   translations: ArchiveItemTranslation[] | undefined;
 };
 
@@ -595,7 +612,6 @@ export type FilterConditions = {
   currency: string | undefined;
   onSale: boolean | undefined;
   gender: GenderEnum[] | undefined;
-  color: string | undefined;
   topCategoryIds: number[] | undefined;
   subCategoryIds: number[] | undefined;
   typeIds: number[] | undefined;
@@ -605,6 +621,7 @@ export type FilterConditions = {
   collections: string[] | undefined;
   seasons: SeasonEnum[] | undefined;
   excludeTopCategoryIds: number[] | undefined;
+  colorCodes: string[] | undefined;
 };
 
 export type PaymentMethodNameEnum =
@@ -783,9 +800,8 @@ export type OrderNew = {
 };
 
 export type OrderItemInsert = {
-  productId: number | undefined;
   quantity: number | undefined;
-  sizeId: number | undefined;
+  variantSku: string | undefined;
 };
 
 export type OrderFull = {
@@ -830,10 +846,14 @@ export type OrderItem = {
   topCategoryId: number | undefined;
   subCategoryId: number | undefined;
   typeId: number | undefined;
-  sku: string | undefined;
+  // R2/p021: the frozen variant SKU of the sold line (immutable snapshot; no live fallback). Renamed
+  // from `sku`.
+  variantSkuSnapshot: string | undefined;
   preorder: wellKnownTimestamp | undefined;
   orderItem: OrderItemInsert | undefined;
-  translations: ProductInsertTranslation[] | undefined;
+  translations: ColorwayInsertTranslation[] | undefined;
+  baseSkuSnapshot: string | undefined;
+  sizeNameSnapshot: string | undefined;
 };
 
 export type OrderStatusHistory = {
@@ -872,21 +892,20 @@ export type OrderItemReview = {
   createdAt: wellKnownTimestamp | undefined;
 };
 
-// CustomOrderItemInsert allows custom pricing per item (admin-only).
+// CustomOrderItemInsert allows custom pricing per item (admin-only). Admin addresses the variant by its
+// internal id (R2).
 export type CustomOrderItemInsert = {
-  productId: number | undefined;
   quantity: number | undefined;
-  sizeId: number | undefined;
   customPrice: googletype_Decimal | undefined;
+  variantId: number | undefined;
 };
 
 // OrderItemAdjustment describes a change made during order item validation.
 export type OrderItemAdjustment = {
-  productId: number | undefined;
-  sizeId: number | undefined;
   requestedQuantity: googletype_Decimal | undefined;
   adjustedQuantity: googletype_Decimal | undefined;
   reason: OrderItemAdjustmentReasonEnum | undefined;
+  variantSkuSnapshot: string | undefined;
 };
 
 export type OrderStatus = {
@@ -928,12 +947,44 @@ export type Dictionary = {
   // Hero section background color for the storefront (CSS). Empty if unset.
   backgroundHeroColor: string | undefined;
   productTags: string[] | undefined;
+  colors: Color[] | undefined;
+  countries: Country[] | undefined;
+  tags: Tag[] | undefined;
+  skuContractVersion: string | undefined;
+  revisions: DictionaryRevision[] | undefined;
 };
 
 export type Collection = {
   name: string | undefined;
   countMen: number | undefined;
   countWomen: number | undefined;
+  code: string | undefined;
+  archived: boolean | undefined;
+  id: number | undefined;
+};
+
+// Country is an ISO 3166-1 alpha-2 controlled dictionary (R9). Arbitrary creation is forbidden — the
+// full ISO list is seeded and only activation toggles.
+export type Country = {
+  code: string | undefined;
+  name: string | undefined;
+  active: boolean | undefined;
+};
+
+// Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
+// admin-only.
+export type Tag = {
+  code: string | undefined;
+  name: string | undefined;
+  archived: boolean | undefined;
+  id: number | undefined;
+};
+
+// DictionaryRevision is a per-namespace revision snapshot used for cross-instance cache invalidation (R9).
+export type DictionaryRevision = {
+  namespace: string | undefined;
+  revision: number | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
 };
 
 export type Genders = {
@@ -1196,7 +1247,7 @@ export type HeroMainWithTranslations = {
 };
 
 export type HeroFeaturedProductsWithTranslations = {
-  products: Product[] | undefined;
+  products: Colorway[] | undefined;
   exploreLink: string | undefined;
   translations: HeroCopyTranslation[] | undefined;
 };
@@ -1229,7 +1280,7 @@ export type HeroDropWithTranslations = {
 };
 
 export type HeroLastChanceWithTranslations = {
-  products: Product[] | undefined;
+  products: Colorway[] | undefined;
   exploreLink: string | undefined;
   translations: HeroCopyTranslation[] | undefined;
 };
@@ -1241,7 +1292,7 @@ export type HeroMarqueeWithTranslations = {
 };
 
 export type HeroNewArrivalsWithTranslations = {
-  products: Product[] | undefined;
+  products: Colorway[] | undefined;
   exploreLink: string | undefined;
   translations: HeroCopyTranslation[] | undefined;
 };
@@ -1258,7 +1309,7 @@ export type HeroMosaicWithTranslations = {
 
 export type HeroSplitWithTranslations = {
   media: HeroSingleWithTranslations | undefined;
-  products: Product[] | undefined;
+  products: Colorway[] | undefined;
   mediaLeft: boolean | undefined;
 };
 
@@ -1273,7 +1324,7 @@ export type HeroVideoWithTranslations = {
 };
 
 export type HeroProductSpotlightWithTranslations = {
-  product: Product | undefined;
+  product: Colorway | undefined;
   media: HeroMediaFull | undefined;
   exploreLink: string | undefined;
   translations: HeroCopyTranslation[] | undefined;
@@ -1527,6 +1578,12 @@ export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_SUBMITTED"
   | "TECH_CARD_LAB_DIP_STATUS_APPROVED"
   | "TECH_CARD_LAB_DIP_STATUS_REJECTED";
+// TechCardPurpose is the numeric enum form of a style's purpose (R6). Replaces the free-text
+// `purpose` field; UNKNOWN is rejected on write.
+export type TechCardPurpose =
+  | "TECH_CARD_PURPOSE_UNKNOWN"
+  | "TECH_CARD_PURPOSE_SELLABLE"
+  | "TECH_CARD_PURPOSE_AUXILIARY";
 // TechCardFabricDirection is the cutting layout a fabric requires.
 export type TechCardFabricDirection =
   | "TECH_CARD_FABRIC_DIRECTION_UNKNOWN"
@@ -1582,7 +1639,7 @@ export type TechCardIssueStatus =
   | "TECH_CARD_ISSUE_STATUS_RESOLVED"
   | "TECH_CARD_ISSUE_STATUS_WONTFIX";
 // TechCardInsert is the writable payload for a tech card. Nested lists are full
-// replacements on update (like ProductNew).
+// replacements on update (like ColorwayNew).
 // TechCardSignoffSection is the sheet a sign-off covers.
 export type TechCardSignoffSection =
   | "TECH_CARD_SIGNOFF_SECTION_UNKNOWN"
@@ -1635,32 +1692,27 @@ export type TechCardRevision = {
   changeNote: string | undefined;
 };
 
-// TechCardColorway is a development colourway (Sheet «Колористика» columns). It is
-// distinct from tech_card_product (published catalog SKUs); product_id optionally
-// links the published SKU that realises this colourway.
-export type TechCardColorway = {
-  code: string | undefined;
+// ColorwayDevelopmentInsert carries the PLM / lab-dip development fields that moved onto the colourway
+// (product) in the R1 merge: ex tech_card_colorway.code/name/hex/comment become dev_code/name/dev_hex/
+// comment. Lives in techcard.proto to reach TechCardLabDipStatus and the usage recipe without a circular
+// import (product.proto cannot import techcard.proto). NOTE: `usages` (the material recipe) is keyed by
+// an explicit colorway_id = product.id (R1/§14.3); the positional colorway_index model is gone.
+export type ColorwayDevelopmentInsert = {
+  devCode: string | undefined;
   name: string | undefined;
   labDipStatus: TechCardLabDipStatus | undefined;
-  productId: number | undefined;
   comment: string | undefined;
   pantone: string | undefined;
   pantoneSystem: string | undefined;
-  hex: string | undefined;
+  devHex: string | undefined;
   swatchMediaId: number | undefined;
   labDipRound: number | undefined;
   labDipSubmittedAt: wellKnownTimestamp | undefined;
   labDipDecidedAt: wellKnownTimestamp | undefined;
   labDipDecidedBy: string | undefined;
   labDipRejectReason: string | undefined;
-  // the colour's material recipe: which catalog article (bom_item_index) goes on which
-  // garment part, in what colour, at what consumption. Per-colourway divergence lives here.
   usages: TechCardColorwayUsage[] | undefined;
-  // OUTPUT-ONLY stable row id (B-10): set on Get/List so a sample can be linked to a colourway
-  // (Sample.colorway_id). Ignored on write — a card save full-replaces colourways with fresh ids
-  // (the server re-points existing sample links by colourway identity, case-folded code+name), so
-  // re-read the card and use a fresh id right before linking a sample.
-  id: number | undefined;
+  displayOrder: number | undefined;
 };
 
 // TechCardColorwayUsage is one material use inside a colourway: which catalog article
@@ -1674,7 +1726,7 @@ export type TechCardColorwayUsage = {
   placement: string | undefined;
   // matched (trim+lower) against TechCardOperation.placement
   color: string | undefined;
-  // independent of TechCardColorway.pantone (the swatch colour)
+  // independent of the colourway swatch pantone (ColorwayDevelopmentInsert.pantone)
   pantone: string | undefined;
   consumption: googletype_Decimal | undefined;
   quantity: googletype_Decimal | undefined;
@@ -1691,6 +1743,34 @@ export type TechCardColorwayUsage = {
 export type TechCardBomSizeConsumption = {
   sizeId: number | undefined;
   consumption: googletype_Decimal | undefined;
+};
+
+export type ColorwayDevelopment = {
+  development: ColorwayDevelopmentInsert | undefined;
+  dictionaryColor: Color | undefined;
+};
+
+// StyleSizeChart is the style-owned size chart (R5). Written full-replace under the shared
+// tech_card.lock_version; there is no separate chart version.
+export type StyleSizeChartCell = {
+  sizeId: number | undefined;
+  measurementNameId: number | undefined;
+  value: googletype_Decimal | undefined;
+};
+
+export type StyleSizeChart = {
+  styleId: number | undefined;
+  lockVersion: number | undefined;
+  cells: StyleSizeChartCell[] | undefined;
+};
+
+// AdminColorwayRef is a derived, output-only reference to a colourway from its style (R1: GetStyle may
+// return its colourways, but they are not writable through the style).
+export type AdminColorwayRef = {
+  colorwayId: number | undefined;
+  baseSku: string | undefined;
+  colorCode: string | undefined;
+  status: ColorwayLifecycleStatus | undefined;
 };
 
 // TechCardDetail is one aspect of the construction description (Sheet «Титул», lower block)
@@ -1927,7 +2007,7 @@ export type TechCardCostLine = {
 // articles (CMT/hardware/…) are shared across colourways, so unit_cost folds them in. All
 // figures are per GARMENT except order_cost (whole run). No FX conversion.
 export type TechCardColorwayCost = {
-  colorwayIndex: number | undefined;
+  colorwayId: number | undefined;
   materialsTotal: TechCardCostLine[] | undefined;
   materialsPerUnit: googletype_Decimal | undefined;
   unitCost: googletype_Decimal | undefined;
@@ -1985,11 +2065,11 @@ export type TechCardSignoff = {
 };
 
 // TechCardPieceColorwayMaterial maps ONE cut-piece to its fabric (and optional fusing) for ONE
-// colourway. colorway_index is positional into TechCardInsert.colorways (full-replace recreates
-// colourway ids, so the link is by position — mirrors bom_item_index / operation refs). The BOM
-// refs are positional into TechCardInsert.bom_items.
+// colourway. The colourway is addressed by an explicit colorway_id = product.id (R1/§14.3); the old
+// positional colorway_index into TechCardInsert.colorways is gone (colourways are no longer style
+// children). The BOM refs remain positional into TechCardInsert.bom_items.
 export type TechCardPieceColorwayMaterial = {
-  colorwayIndex: number | undefined;
+  colorwayId: number | undefined;
   bomItemIndex?: number;
   fusingBomItemIndex?: number;
   note: string | undefined;
@@ -2009,6 +2089,14 @@ export type TechCardPiece = {
   materials: TechCardPieceColorwayMaterial[] | undefined;
 };
 
+// SkuSeason is the normalized style-owned season used in every SKU. The pair is atomic: callers
+// either omit the whole message (early draft/idea) or provide both a known code and a 2000..2099
+// year. Free-text season labels are not part of the contract.
+export type SkuSeason = {
+  code: SeasonEnum | undefined;
+  year: number | undefined;
+};
+
 export type TechCardInsert = {
   // identification (Sheet «Титул»)
   // Артикул. Required from the PROTO stage onward; OPTIONAL (empty) while stage == IDEA — an idea
@@ -2017,7 +2105,6 @@ export type TechCardInsert = {
   styleNumber: string | undefined;
   name: string | undefined;
   brand: string | undefined;
-  season: string | undefined;
   collection: string | undefined;
   categoryId: number | undefined;
   targetGender: GenderEnum | undefined;
@@ -2039,7 +2126,6 @@ export type TechCardInsert = {
   notes: string | undefined;
   // children (full-replace on update)
   sizeIds: number[] | undefined;
-  productIds: number[] | undefined;
   // Sketch media split into two INDEPENDENT lists (replaces the single `media = 32`):
   // moodboard_media — mood / inspiration / reference / fabric-swatch photos (design intent)
   // technical_media — flat sketches used in construction (front / back / detail / lining / preview)
@@ -2051,17 +2137,16 @@ export type TechCardInsert = {
   technicalMedia: TechCardMediaItem[] | undefined;
   callouts: TechCardCallout[] | undefined;
   revisions: TechCardRevision[] | undefined;
-  // materials (Phase 2): bill of materials (article catalog) and colourways (recipes).
-  // CONTRACT (nf05-01): downstream references into bom_items and colorways are POSITIONAL, by index,
-  // and every write is a full replace (there are no stable ids to reference across a save). So when a
-  // BOM line or colourway is removed or reordered, the client MUST renumber all downstream indices in
-  // the SAME payload — colorway usages' bom_item_index, operations' bom_item_index, and pieces'
-  // colorway_index / bom_item_index / fusing_bom_item_index. An index left pointing at a shifted row
-  // silently maps a detail to the wrong material/colourway (data that goes to the factory); an
-  // out-of-range index is rejected, but an in-range-but-wrong one is not. The server range-checks but
-  // cannot detect a wrong-but-valid index.
+  // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
+  // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
+  // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.
+  // CONTRACT (nf05-01): downstream references into bom_items are POSITIONAL, by index, and every
+  // write is a full replace (bom_items have no stable ids across a save). So when a BOM line is
+  // removed or reordered, the client MUST renumber all downstream bom_item_index / fusing_bom_item_index
+  // in the SAME payload (operations, pieces). An out-of-range index is rejected; an in-range-but-wrong
+  // one is not — the server range-checks but cannot detect a wrong-but-valid index. Pieces address
+  // their colourway by explicit colorway_id (not a positional index).
   bomItems: TechCardBomItem[] | undefined;
-  colorways: TechCardColorway[] | undefined;
   // production (Phase 3): construction, operations, labels, packaging, costing.
   construction: TechCardConstruction | undefined;
   operations: TechCardOperation[] | undefined;
@@ -2082,8 +2167,9 @@ export type TechCardInsert = {
   // NF-07 auxiliary items. purpose is "sellable" (default/empty) or "auxiliary"; an auxiliary card
   // produces a packaging material rather than a product, so it may not link products and its run
   // output receipts into output_material_id (required before the first run; 0 = unset).
-  purpose: string | undefined;
+  purpose: TechCardPurpose | undefined;
   outputMaterialId: number | undefined;
+  skuSeason: SkuSeason | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -2096,6 +2182,9 @@ export type TechCard = {
   // Resolved sketch media (MediaFull), split to mirror the writable lists.
   resolvedMoodboardMedia: TechCardMediaFull[] | undefined;
   resolvedTechnicalMedia: TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY derived colourways of this style (R1/§3.3): a style's colourways are its products.
+  // Not writable through the style — created/relinked via the Colorway RPCs.
+  colorways: AdminColorwayRef[] | undefined;
 };
 
 // TechCardListItem is a lightweight tech-card header for list views.
@@ -2107,7 +2196,6 @@ export type TechCardListItem = {
   stage: TechCardStage | undefined;
   status: string | undefined;
   targetGender: GenderEnum | undefined;
-  season: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   approvalState: TechCardApprovalState | undefined;
@@ -2118,7 +2206,8 @@ export type TechCardListItem = {
   previewUrl: string | undefined;
   // Card purpose: "sellable" (default) or "auxiliary" (NF-07). Lets a board/list badge auxiliary
   // cards (dust bags, shoppers…) without an N+1 GetTechCard, mirroring TechCard.purpose.
-  purpose: string | undefined;
+  purpose: TechCardPurpose | undefined;
+  skuSeason: SkuSeason | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is

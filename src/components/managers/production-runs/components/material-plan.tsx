@@ -45,9 +45,12 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
   // (gap-07 v2 C) — only the published ones, since attribution keys on product_id.
   const techCardId = run.run?.techCardId ?? 0;
   const { data: techCard } = useTechCard(techCardId ? techCardId : undefined);
+  // TODO(final-bump): TechCardInsert no longer carries colorways (R1 merge) — always empty;
+  // the issue-target picker offers no colourway attribution until this sources real data
+  // from GetColorwaysPaged by style / AdminColorwayRef instead.
   const colorways = useMemo(
     () =>
-      (techCard?.techCard?.colorways ?? [])
+      ([] as { productId?: number; code?: string; name?: string; id?: number }[])
         .filter((c) => (c.productId ?? 0) > 0)
         .map((c) => ({
           productId: c.productId ?? 0,

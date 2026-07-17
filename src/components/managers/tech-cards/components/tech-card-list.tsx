@@ -176,7 +176,13 @@ export function TechCardList() {
                       <Text variant='inactive'>{tc.brand || '—'}</Text>
                     </td>
                     <td className='px-2 py-2'>
-                      <Text variant='inactive'>{tc.season || '—'}</Text>
+                      <Text variant='inactive'>
+                        {tc.skuSeason?.code
+                          ? `${tc.skuSeason.code.replace('SEASON_ENUM_', '')}${
+                              tc.skuSeason.year ? ` ${tc.skuSeason.year}` : ''
+                            }`
+                          : '—'}
+                      </Text>
                     </td>
                     <td className='px-2 py-2'>
                       <Text variant='inactive'>{stageLabel(tc.stage)}</Text>

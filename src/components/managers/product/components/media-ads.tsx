@@ -1,11 +1,11 @@
-import { common_MediaFull, common_ProductFull } from 'api/proto-http/admin';
+import { common_MediaFull, common_ColorwayFull } from 'api/proto-http/admin';
 import { MediaGallerySelector } from 'components/managers/media/components/media-gallery-selector';
 import { useEffect, useState } from 'react';
 import { Control, useController } from 'react-hook-form';
 import { ProductFormData } from '../utility/schema';
 
 type Props = {
-  product?: common_ProductFull;
+  product?: common_ColorwayFull;
   control: Control<ProductFormData>;
   clearKey?: number;
   editMode?: boolean;

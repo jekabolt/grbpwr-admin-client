@@ -1,4 +1,4 @@
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { FC, useCallback, useEffect, useState } from 'react';
@@ -10,14 +10,14 @@ import Text from 'ui/components/text';
 import { HeroSchema } from './schema';
 
 interface HeroProductTableData {
-  products: common_Product[];
+  products: common_Colorway[];
   isFeaturedProducts?: boolean;
 }
 
 export const HeroProductTable: FC<
   HeroProductTableData & {
     id: number;
-    onReorder?: (newOrder: common_Product[]) => void;
+    onReorder?: (newOrder: common_Colorway[]) => void;
   }
 > = ({ products, id, onReorder, isFeaturedProducts }) => {
   const { setValue } = useFormContext<HeroSchema>();
@@ -134,9 +134,9 @@ export const HeroProductTable: FC<
                 </button>
               </td>
               <td className='border border-text lg:w-16'>
-                {product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl && (
+                {product.display?.thumbnail?.media?.thumbnail?.mediaUrl && (
                   <MediaComponent
-                    src={product.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl}
+                    src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl}
                     alt='Thumbnail'
                     type='image'
                     className='w-[100px] h-auto object-contain'
@@ -144,29 +144,21 @@ export const HeroProductTable: FC<
                 )}
               </td>
               <td className='border border-text p-2'>
-                <Text>{product.productDisplay?.productBody?.translations?.[0].name}</Text>
+                <Text>{product.display?.translations?.[0]?.name}</Text>
               </td>
               <td className='border border-text p-2'>
                 <Text>
-                  {product.productDisplay?.productBody?.productBodyInsert?.hidden
-                    ? 'hidden'
-                    : 'shown'}
+                  {product.status === 'COLORWAY_LIFECYCLE_STATUS_HIDDEN' ? 'hidden' : 'shown'}
                 </Text>
               </td>
               <td className='border border-text p-2'>
                 <Text>{`${product.prices?.[1].price?.value} ${product.prices?.[1].currency}`}</Text>
               </td>
               <td className='border border-text p-2'>
-                <Text>
-                  {`${product.productDisplay?.productBody?.productBodyInsert?.salePercentage?.value} %`}
-                </Text>
+                <Text>{`${product.display?.merchandising?.salePercentage?.value} %`}</Text>
               </td>
               <td className='border border-text p-2'>
-                <Text>
-                  {getCategoryName(
-                    product.productDisplay?.productBody?.productBodyInsert?.topCategoryId,
-                  )}
-                </Text>
+                <Text>{getCategoryName(product.display?.merchandising?.topCategoryId)}</Text>
               </td>
               {isFeaturedProducts && (
                 <td className='border border-text'>
