@@ -63,6 +63,7 @@ import {
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { TechCardFittings } from './tech-card-fittings';
+import { useTechCardDraft } from './useTechCardDraft';
 
 const TABS = [
   { id: 'header', label: 'header' },
@@ -231,6 +232,38 @@ export function TechCardForm({
   const isAux = purpose === 'auxiliary';
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
 
+  // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
+  // the product manager) or a hard refresh no longer loses unsaved edits — restore on return.
+  const draftKey = isEditMode ? `edit.${numId ?? id ?? '0'}` : 'new';
+  const draft = useTechCardDraft(form, draftKey, canWrite(SECTION.techCards) && !frozen);
+
+  // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.
+  const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+  const moodboardMedia = useWatch({ control: form.control, name: 'moodboardMedia' });
+  const technicalMedia = useWatch({ control: form.control, name: 'technicalMedia' });
+  const sizeIdsW = useWatch({ control: form.control, name: 'sizeIds' });
+  const bomItemsW = useWatch({ control: form.control, name: 'bomItems' });
+  const piecesW = useWatch({ control: form.control, name: 'pieces' });
+  const operationsW = useWatch({ control: form.control, name: 'operations' });
+  const labelsW = useWatch({ control: form.control, name: 'labels' });
+  const signoffsW = useWatch({ control: form.control, name: 'signoffs' });
+  // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
+  const sectionFilled: Partial<Record<TabId, boolean>> = {
+    header: !!name?.trim() && (stage === 'TECH_CARD_STAGE_IDEA' || !!styleNumber?.trim()),
+    sketch: len(moodboardMedia) + len(technicalMedia) > 0,
+    patterns: len(sizeIdsW) > 0,
+    bom: len(bomItemsW) > 0,
+    colorways: colorways.length > 0,
+    pieces: len(piecesW) > 0,
+    construction: len(operationsW) > 0,
+    labels: len(labelsW) > 0,
+    signoff: len(signoffsW) > 0,
+  };
+  const isFilled = (t: TabId) => sectionFilled[t] === true;
+  const coreSections: TabId[] = ['header', 'sketch', 'bom', 'colorways', 'construction'];
+  const filledCore = coreSections.filter(isFilled).length;
+  const progressPct = Math.round((filledCore / coreSections.length) * 100);
+
   const errorTabs = new Set(
     Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header'),
   );
@@ -267,10 +300,12 @@ export function TechCardForm({
           expectedLockVersion: techCard?.lockVersion ?? 0,
         });
         showMessage('tech card updated', 'success');
+        draft.clear();
         form.reset(data);
       } else {
         await createTechCard.mutateAsync(techCardInsert);
         showMessage('tech card created', 'success');
+        draft.clear();
         navigate(ROUTES.techCards);
       }
     } catch (error) {
@@ -444,7 +479,17 @@ export function TechCardForm({
                           {openIssues}
                         </span>
                       )}
-                      {hasError && <span className='size-1.5 rounded-full bg-error' aria-hidden />}
+                      {hasError ? (
+                        <span className='size-1.5 rounded-full bg-error' aria-hidden />
+                      ) : (
+                        isFilled(tab.id) && (
+                          <span
+                            className='size-1.5 rounded-full bg-textColor/50'
+                            aria-hidden
+                            title='has content'
+                          />
+                        )
+                      )}
                     </button>
                   );
                 })}
@@ -452,6 +497,19 @@ export function TechCardForm({
             );
           })}
         </nav>
+
+        {/* section-completion progress (Q9): at-a-glance «сколько заполнено» over the core spec */}
+        <div className='flex items-center gap-2 border-b border-textInactiveColor px-2.5 py-1'>
+          <div className='h-1 flex-1 bg-textInactiveColor/30'>
+            <div
+              className='h-full bg-textColor transition-all'
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+          <Text variant='inactive' size='small' className='whitespace-nowrap'>
+            {filledCore}/{coreSections.length} core sections
+          </Text>
+        </div>
       </div>
 
       {isEditMode && numId ? (
@@ -489,6 +547,38 @@ export function TechCardForm({
           >
             reload
           </Button>
+        </div>
+      )}
+
+      {draft.pending && (
+        <div className='mt-3 flex flex-wrap items-center justify-between gap-3 border border-warning bg-highlightColor/10 p-3'>
+          <Text size='small'>
+            Найден несохранённый черновик
+            {draft.pending.savedAt
+              ? ` от ${new Date(draft.pending.savedAt).toLocaleString()}`
+              : ''}{' '}
+            — восстановить его или отбросить?
+          </Text>
+          <div className='flex gap-2'>
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              className='uppercase'
+              onClick={draft.restore}
+            >
+              restore
+            </Button>
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={draft.clear}
+            >
+              discard
+            </Button>
+          </div>
         </div>
       )}
 
@@ -729,12 +819,40 @@ export function TechCardForm({
             <Section title='revision log (auto-journal)'>
               <RevisionsField revisions={techCard?.revisions} />
             </Section>
-            <Section title='releases'>
+            <Section title='releases (Rev.N)'>
               {isEditMode && numId ? (
-                <ReleasesField techCardId={numId} />
+                <div className='flex flex-col gap-3'>
+                  {canWrite(SECTION.techCards) && !frozen && (
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <Button
+                        type='button'
+                        variant='main'
+                        size='lg'
+                        className='uppercase'
+                        disabled={!canRelease || saving}
+                        loading={saving}
+                        title={
+                          canRelease
+                            ? 'freeze the current spec as a new immutable Rev.N release'
+                            : isIdea
+                              ? 'advance the stage before releasing'
+                              : 'approve every colourway lab-dip before release'
+                        }
+                        onClick={() => submitWithApproval(RELEASED)}
+                      >
+                        create release
+                      </Button>
+                      <Text variant='inactive' size='small'>
+                        freezes the current spec as the next immutable Rev.N snapshot the factory
+                        reads
+                      </Text>
+                    </div>
+                  )}
+                  <ReleasesField techCardId={numId} />
+                </div>
               ) : (
                 <Text variant='inactive' size='small'>
-                  a frozen snapshot is created when the card is saved as “released”
+                  a frozen Rev.N snapshot is created when the card is saved as “released”
                 </Text>
               )}
             </Section>
