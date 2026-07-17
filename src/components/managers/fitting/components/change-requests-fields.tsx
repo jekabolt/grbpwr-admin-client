@@ -21,6 +21,16 @@ const statusOptions = [
   { value: 'open', label: 'open' },
   { value: 'resolved', label: 'resolved' },
 ];
+// target is the change CATEGORY (backend allow-list) — NOT a free "sleeve/collar" field (that
+// location role is now zone + piece, A2). Kept as a constrained select to stay aligned with the server.
+const targetOptions = [
+  { value: '', label: '— category —' },
+  { value: 'pattern', label: 'pattern' },
+  { value: 'construction', label: 'construction' },
+  { value: 'material', label: 'material' },
+  { value: 'grading', label: 'grading' },
+  { value: 'other', label: 'other' },
+];
 
 type PieceOption = { value: number; label: string };
 type CRValue = {
@@ -59,14 +69,19 @@ function CRFields({
     <div className='flex flex-col gap-2'>
       <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
         <label className='flex flex-col gap-1'>
-          <Text size='small'>target (category)</Text>
-          <input
+          <Text size='small'>category</Text>
+          <select
             className={cell}
             disabled={disabled}
-            placeholder='length, ease, seam…'
             value={value.target ?? ''}
             onChange={(e) => onChange({ target: e.target.value })}
-          />
+          >
+            {targetOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </label>
         <label className='flex flex-col gap-1'>
           <Text size='small'>zone</Text>
