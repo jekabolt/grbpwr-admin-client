@@ -19,6 +19,7 @@ import {
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
   common_TechCardStage,
+  common_StyleNumberSource,
   googletype_Decimal,
 } from 'api/proto-http/admin';
 // TODO(final-bump): TechCardLabDipStatus is no longer re-exported from 'api/proto-http/admin'
@@ -27,6 +28,7 @@ import { TechCardLabDipStatus as common_TechCardLabDipStatus } from 'api/proto-h
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { isUlid, ulid } from 'utils/ulid';
+import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { z } from 'zod';
 
 // Tech-card form. Covers the full TechCardInsert: header ("Титул"), sketch media
@@ -339,6 +341,9 @@ const techCardObject = z.object({
   // an article number; a conditional refine below still requires it past IDEA, and an empty IDEA
   // number is auto-filled with a draft on save (B-2, backend still requires the field).
   styleNumber: z.string().optional().default(''),
+  // How style_number was set (Q1): GENERATED = came from SuggestStyleNumber; MANUAL = hand-typed
+  // override (passes the strict server validator). Drives the format hint + override affordance.
+  styleNumberSource: z.string().optional().default('STYLE_NUMBER_SOURCE_GENERATED'),
   name: z.string().min(1, 'Name is required'),
   brand: z.string().optional().default(''),
   season: z.string().optional().default(''),
@@ -401,6 +406,7 @@ export type TechCardFormData = z.input<typeof techCardObject>;
 
 export const techCardDefaultData: TechCardFormData = {
   styleNumber: '',
+  styleNumberSource: 'STYLE_NUMBER_SOURCE_GENERATED',
   name: '',
   brand: '',
   season: '',
@@ -535,11 +541,14 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
   const insert = techCard.techCard;
   return {
     styleNumber: insert?.styleNumber || '',
+    styleNumberSource:
+      insert?.styleNumberSource && insert.styleNumberSource !== 'STYLE_NUMBER_SOURCE_UNKNOWN'
+        ? insert.styleNumberSource
+        : 'STYLE_NUMBER_SOURCE_GENERATED',
     name: insert?.name || '',
     brand: insert?.brand || '',
-    // TODO(final-bump): season is no longer on TechCardInsert (moved to skuSeason on the
-    // style write path, not yet surfaced in this form).
-    season: '',
+    // season is the structured SkuSeason on the wire (Q1); show it as the form's label.
+    season: skuToSeasonLabel(insert?.skuSeason),
     collection: insert?.collection || '',
     status: insert?.status || '',
     categoryId: insert?.categoryId || 0,
@@ -876,6 +885,11 @@ export function mapFormToTechCardInsert(
   return {
     ...original,
     styleNumber,
+    // Empty override collapses to GENERATED so an idea/blank number never persists as a MANUAL
+    // claim; a real hand-typed value keeps whatever source the field set.
+    styleNumberSource: (styleNumber
+      ? data.styleNumberSource || 'STYLE_NUMBER_SOURCE_GENERATED'
+      : 'STYLE_NUMBER_SOURCE_GENERATED') as common_StyleNumberSource,
     name: data.name.trim(),
     brand: data.brand?.trim() || '',
     // TODO(final-bump): season/productIds/colorways moved off the style write path (R1
@@ -1051,9 +1065,8 @@ export function mapFormToTechCardInsert(
     })),
     // revisions removed from the write payload (Q1): the auto-journal is server-appended and
     // read-only (common_TechCard.revisions), never client-supplied.
-    // TODO(final-bump): skuSeason replaces the removed free-text `season` as the style's
-    // season identity, but isn't yet surfaced in this form — leave unset for now.
-    skuSeason: undefined,
+    // Season identity (Q1): parse the form label back into the structured SkuSeason.
+    skuSeason: parseSeasonToSku(data.season),
     // Cast: TechCardInsert keys are required-but-nullable; we set every section above and
     // echo any still-unhandled proto field from `original`. Untouched keys are omitted on
     // create (absent == empty on the wire), which the structural type can't express.

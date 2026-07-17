@@ -49,6 +49,7 @@ import { ReleasesField } from './releases-field';
 import { RevisionsField } from './revisions-field';
 import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
+import { StyleNumberField } from './style-number-field';
 import { SizeQuantitiesField } from './size-quantities-field';
 import { SketchTab } from './sketch-tab';
 import {
@@ -504,11 +505,7 @@ export function TechCardForm({
           <div hidden={activeTab !== 'header'} className='flex flex-col gap-6'>
             <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
               <Section title='identification' className='w-full lg:w-1/2'>
-                <InputField
-                  name='styleNumber'
-                  label={isIdea ? 'style number' : 'style number *'}
-                  placeholder={isIdea ? 'optional — set before PROTO' : 'артикул'}
-                />
+                <StyleNumberField isIdea={isIdea} />
                 {isIdea && (
                   <Text variant='inactive' size='small'>
                     optional while this is an idea — a real style number is required before the card
