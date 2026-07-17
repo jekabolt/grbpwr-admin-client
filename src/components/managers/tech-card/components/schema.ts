@@ -362,6 +362,11 @@ const techCardObject = z.object({
   baseSampleSizeId: z.number().optional().default(0),
   // classification
   targetGender: z.string().optional().default(UNSET_GENDER),
+  // Style catalogue facts written via UpdateStyle (not the tech-card write): edited on the tech card,
+  // read-only on the colourway card. composition is the legacy free-text string (M1), never JSON.
+  fit: z.string().optional().default(''),
+  composition: z.string().optional().default(''),
+  careInstructions: z.string().optional().default(''),
   stage: z.string().optional().default(DEFAULT_STAGE),
   approvalState: z.string().optional().default(DEFAULT_APPROVAL_STATE),
   measurementUnit: z.string().optional().default(DEFAULT_MEASUREMENT_UNIT),
@@ -420,6 +425,9 @@ export const techCardDefaultData: TechCardFormData = {
   baseModelId: 0,
   baseSampleSizeId: 0,
   targetGender: UNSET_GENDER,
+  fit: '',
+  composition: '',
+  careInstructions: '',
   stage: DEFAULT_STAGE,
   approvalState: DEFAULT_APPROVAL_STATE,
   measurementUnit: DEFAULT_MEASUREMENT_UNIT,
@@ -603,6 +611,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     baseModelId: insert?.baseModelId || 0,
     baseSampleSizeId: insert?.baseSampleSizeId || 0,
     targetGender: insert?.targetGender || UNSET_GENDER,
+    // Read-only projections on the TechCard read (written via UpdateStyle) — top-level, not on insert.
+    fit: techCard.fit || '',
+    composition: techCard.composition || '',
+    careInstructions: techCard.careInstructions || '',
     stage: stageOrDefault(insert?.stage),
     approvalState: approvalStateOrDefault(insert?.approvalState),
     measurementUnit: measurementUnitOrDefault(insert?.measurementUnit),

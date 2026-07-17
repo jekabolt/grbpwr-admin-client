@@ -5,14 +5,13 @@ import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { ProductFormData } from '../utility/schema';
-import { buildStylePatch, STYLE_UPDATE_MASK } from './utils';
+import { buildStylePatch, MODEL_WEARS_UPDATE_MASK } from './utils';
 
-// R4: UpdateStyle is the SOLE writer of a style's catalogue facts (brand, season, collection, gender,
-// fit, composition, care, model-wears, categories). Those fields are edited in <BodyFields/> above;
-// this section owns their SAVE, separately from the colourway save, because:
-//   - style facts are shared by every colourway of the style, and
-//   - changing a SKU fact (season) is refused with FAILED_PRECONDITION when any sibling colourway is
-//     SKU-frozen (has order/label history) — that must not fail the colourway save.
+// UpdateStyle is the SOLE writer of a style's catalogue facts. Most of them (brand, season,
+// collection, gender, fit, composition, care, categories) are now edited on the tech card and shown
+// read-only in <BodyFields/> above; the colourway card keeps only model-wears (the per-colourway
+// photo-shoot note), which this section saves. The field mask limits the write to model-wears, so
+// saving here never touches a fact owned by the tech card.
 export function StyleSection({
   styleId,
   lockVersion,
@@ -35,9 +34,9 @@ export function StyleSection({
         styleId,
         patch: buildStylePatch(getValues()),
         expectedLockVersion: lockVersion,
-        updateMask: STYLE_UPDATE_MASK,
+        updateMask: MODEL_WEARS_UPDATE_MASK,
       });
-      showMessage('Style facts updated', 'success');
+      showMessage('Model-wears updated', 'success');
       onChanged?.();
     } catch (e) {
       const err = e as Error & { status?: number };
@@ -60,17 +59,16 @@ export function StyleSection({
     <section className='space-y-3 border border-textInactiveColor p-4'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <Text variant='uppercase' size='large'>
-          style facts · shared
+          model presentation
         </Text>
         <Text variant='inactive' size='small'>
           style #{styleId}
         </Text>
       </div>
       <Text variant='inactive' size='small'>
-        Brand, season, collection, gender, fit, categories, composition, care and model-wears are
-        style-level facts shared by every colourway of this style. Edit them in the details above and
-        save them here. A season change is blocked if any sibling colourway is already SKU-frozen —
-        clone the style for the new season instead.
+        Model-wears height and size describe this colourway’s photo shoot and save here. The other
+        style facts (brand, season, collection, gender, fit, category, composition, care) are shared
+        across all colourways and are edited on the tech card.
       </Text>
       {canWrite && (
         <Button
@@ -81,7 +79,7 @@ export function StyleSection({
           disabled={saving}
           onClick={saveStyle}
         >
-          {saving ? 'saving…' : 'save style facts'}
+          {saving ? 'saving…' : 'save model-wears'}
         </Button>
       )}
     </section>

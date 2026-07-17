@@ -68,6 +68,7 @@ import {
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
+import { StyleFactsField } from './style-facts-field';
 import { TechCardFittings } from './tech-card-fittings';
 import { useTechCardDraft } from './useTechCardDraft';
 
@@ -656,6 +657,10 @@ export function TechCardForm({
 
             <Section title='category & base model'>
               <HeaderMetaFields />
+            </Section>
+
+            <Section title='style facts — fit / composition / care (shared by all colourways)'>
+              <StyleFactsField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
             </Section>
 
             <Section title='construction description'>
