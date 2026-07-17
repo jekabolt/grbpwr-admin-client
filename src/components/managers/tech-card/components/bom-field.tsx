@@ -7,6 +7,7 @@ import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import ComboField from 'ui/form/fields/combo-field';
 import CurrencySelect from 'ui/form/fields/currency-select';
@@ -41,11 +42,39 @@ const emptyBomItem = {
   lineKey: '', // minted on append (see BomField) so downstream refs are stable from creation
 };
 
+// Fabric width/weight read from the typed CTI attrs, falling back to the legacy flat fields —
+// shared by the link-time snapshot (MaterialLinkField) and the linked-line read-only mirror
+// (BomItemRow) so the two never drift apart.
+function materialFabricWidth(m?: common_Material): string | undefined {
+  return m?.fabricAttrs?.widthCm?.value || m?.fabricWidth?.value;
+}
+function materialFabricWeight(m?: common_Material): string | undefined {
+  return m?.fabricAttrs?.weightGsm?.value || m?.fabricWeightGsm?.value;
+}
+
+// Read-only presentation for an identity field mirrored from the linked catalog material (S23):
+// shown instead of the editable input while a BOM line is linked, so the line can no longer
+// diverge from the catalog by hand-editing. Styled like the Input it replaces; the value is
+// passed in explicitly (the live catalog lookup, falling back to the line's own stored value)
+// rather than bound to the form field.
+function ReadOnlyMirrorField({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className='space-y-2'>
+      <Text size='small' variant='label'>
+        {label}
+      </Text>
+      <Input value={value ?? ''} placeholder='—' disabled className='text-textInactiveColor' />
+    </div>
+  );
+}
+
 // Optionally link this BOM line to a catalog Material. Picking one snapshots the catalog's
 // meta (name/section/supplier/composition/spec/unit/fabric + latest price) onto the line, so
 // the line stays self-contained even after the catalog changes. `materialId` records the link.
 // A "+ create" button makes a new material inline (Q9a) — no round-trip to /materials, and it is
-// auto-selected on the line once created.
+// auto-selected on the line once created. Once linked, the identity fields render read-only
+// (BomItemRow, S23) — "unlink" (equivalent to re-picking "— not linked —") hands the line back
+// for free-text editing.
 function MaterialLinkField({ index }: { index: number }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const materialId = useWatch({ control, name: `bomItems.${index}.materialId` }) as
@@ -72,8 +101,8 @@ function MaterialLinkField({ index }: { index: number }) {
     put('composition', m.composition);
     put('spec', m.spec);
     put('unit', m.unit);
-    put('fabricWidth', m.fabricAttrs?.widthCm?.value || m.fabricWidth?.value);
-    put('fabricWeightGsm', m.fabricAttrs?.weightGsm?.value || m.fabricWeightGsm?.value);
+    put('fabricWidth', materialFabricWidth(m));
+    put('fabricWeightGsm', materialFabricWeight(m));
     // latest_price is costing-gated (absent without access) — seed price only when present.
     put('unitPrice', m.latestPrice?.price?.value);
     put('currency', m.latestPrice?.currency);
@@ -113,10 +142,21 @@ function MaterialLinkField({ index }: { index: number }) {
         >
           + create
         </Button>
+        {materialId ? (
+          <Button
+            type='button'
+            variant='secondary'
+            className='shrink-0 whitespace-nowrap uppercase'
+            onClick={() => pick('0')}
+          >
+            unlink
+          </Button>
+        ) : null}
       </div>
       {materialId ? (
         <Text size='small' variant='inactive'>
-          Поля ниже — снимок из справочника; их можно править для этого стиля.
+          Поля ниже — снимок из справочника; пока материал привязан, их нельзя редактировать. Чтобы
+          изменить — отвяжите материал.
         </Text>
       ) : null}
       {/* Inline create — prefill the section from this BOM line; auto-select on create. */}
@@ -142,6 +182,27 @@ function BomItemRow({
   onRemove: () => void;
   highlight?: boolean;
 }) {
+  const { control, getValues } = useFormContext<TechCardFormData>();
+  // materialId > 0 = this line is linked to a catalog Material: the identity fields below render
+  // as a read-only mirror instead of editable inputs (S23) so hand-edits can no longer diverge
+  // from the catalog. The overlay that stays editable either way is section/unit/unitPrice/
+  // currency/wastagePercent/fabricDirection/comment/color.
+  const materialId =
+    (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
+  const linked = materialId > 0;
+  const { data } = useMaterials('', false);
+  const linkedMaterial = linked
+    ? (data?.materials ?? []).find((m) => m.id === materialId)
+    : undefined;
+
+  // Prefer the live catalog value; fall back to whatever this line already holds (the linked
+  // material is archived/deleted, or the catalog list hasn't loaded yet) so the mirror never
+  // flashes blank while linked.
+  const mirror = (catalogValue: string | undefined, field: string): string | undefined =>
+    catalogValue?.trim()
+      ? catalogValue
+      : (getValues(`bomItems.${index}.${field}` as never) as string);
+
   return (
     <div className='space-y-3 border border-textInactiveColor p-3'>
       <div className='flex items-center justify-between'>
@@ -165,17 +226,42 @@ function BomItemRow({
           label='section *'
           items={techCardBomSectionOptions}
         />
-        <InputField name={`bomItems.${index}.name`} label='name *' />
+        {linked ? (
+          <ReadOnlyMirrorField label='name' value={mirror(linkedMaterial?.name, 'name')} />
+        ) : (
+          <InputField name={`bomItems.${index}.name`} label='name *' />
+        )}
         <ComboField
           name={`bomItems.${index}.unit`}
           label='unit'
           options={unitOptions}
           placeholder='м / pcs'
         />
-        <InputField name={`bomItems.${index}.supplier`} label='supplier' />
-        <InputField name={`bomItems.${index}.supplierRef`} label='supplier ref' />
+        {linked ? (
+          <ReadOnlyMirrorField
+            label='supplier'
+            value={mirror(linkedMaterial?.supplier, 'supplier')}
+          />
+        ) : (
+          <InputField name={`bomItems.${index}.supplier`} label='supplier' />
+        )}
+        {linked ? (
+          <ReadOnlyMirrorField
+            label='supplier ref'
+            value={mirror(linkedMaterial?.supplierRef, 'supplierRef')}
+          />
+        ) : (
+          <InputField name={`bomItems.${index}.supplierRef`} label='supplier ref' />
+        )}
         <InputField name={`bomItems.${index}.color`} label='base color (ref)' />
-        <InputField name={`bomItems.${index}.spec`} label='spec (width / weight)' />
+        {linked ? (
+          <ReadOnlyMirrorField
+            label='spec (width / weight)'
+            value={mirror(linkedMaterial?.spec, 'spec')}
+          />
+        ) : (
+          <InputField name={`bomItems.${index}.spec`} label='spec (width / weight)' />
+        )}
         <div
           id={`bom-composition-${index}`}
           className={cn(
@@ -183,7 +269,17 @@ function BomItemRow({
             highlight && 'animate-pulse p-1 ring-2 ring-warning',
           )}
         >
-          <CompositionPicker name={`bomItems.${index}.composition`} />
+          {linked ? (
+            // TODO(await-bump): render structured composition once the contract exposes typed
+            // composition_entries — for now this is the catalog's raw composition string,
+            // read-only while linked.
+            <ReadOnlyMirrorField
+              label='composition'
+              value={mirror(linkedMaterial?.composition, 'composition')}
+            />
+          ) : (
+            <CompositionPicker name={`bomItems.${index}.composition`} />
+          )}
         </div>
       </div>
 
@@ -199,8 +295,22 @@ function BomItemRow({
           fabric data (for the cutter)
         </Text>
         <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
-          <DecimalField name={`bomItems.${index}.fabricWidth`} label='width (cm)' />
-          <DecimalField name={`bomItems.${index}.fabricWeightGsm`} label='weight (g/m²)' />
+          {linked ? (
+            <ReadOnlyMirrorField
+              label='width (cm)'
+              value={mirror(materialFabricWidth(linkedMaterial), 'fabricWidth')}
+            />
+          ) : (
+            <DecimalField name={`bomItems.${index}.fabricWidth`} label='width (cm)' />
+          )}
+          {linked ? (
+            <ReadOnlyMirrorField
+              label='weight (g/m²)'
+              value={mirror(materialFabricWeight(linkedMaterial), 'fabricWeightGsm')}
+            />
+          ) : (
+            <DecimalField name={`bomItems.${index}.fabricWeightGsm`} label='weight (g/m²)' />
+          )}
           <SelectField
             name={`bomItems.${index}.fabricDirection`}
             label='direction'
