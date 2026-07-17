@@ -34,7 +34,9 @@ import TextareaField from 'ui/form/fields/textarea-field';
 import { BomField } from './bom-field';
 import { ColorwaysField } from './colorways-field';
 import { ConstructionTab } from './construction-tab';
+import { CostEstimateField } from './cost-estimate-field';
 import { CostingField } from './costing-field';
+import { CutListField } from './cut-list-field';
 import { DetailsEditor } from './details-editor';
 import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
@@ -730,9 +732,14 @@ export function TechCardForm({
             </Section>
           </div>
 
-          {/* PIECES — cut-piece details + fabric map (NF-05) */}
-          <div hidden={activeTab !== 'pieces'}>
+          {/* PIECES — cut-piece details + fabric map (NF-05) + production cut-list projection */}
+          <div hidden={activeTab !== 'pieces'} className='flex flex-col gap-6'>
             <PiecesTab />
+            {isEditMode && numId && (
+              <Section title='cut list (production projection — mirror ×2 folded)'>
+                <CutListField techCardId={numId} />
+              </Section>
+            )}
           </div>
 
           {/* CONSTRUCTION */}
@@ -772,7 +779,7 @@ export function TechCardForm({
 
           {/* COSTING — mounted only with costing:read (field-shaped) */}
           {canReadCosting && (
-            <div hidden={activeTab !== 'costing'}>
+            <div hidden={activeTab !== 'costing'} className='flex flex-col gap-6'>
               <Section title='costing'>
                 {isEditMode && numId && (
                   <div className='mb-3 flex justify-end'>
@@ -789,6 +796,11 @@ export function TechCardForm({
                 )}
                 <CostingField techCard={techCard} />
               </Section>
+              {isEditMode && numId && (
+                <Section title='cost estimate (per colourway — plan vs actual)'>
+                  <CostEstimateField techCardId={numId} techCard={techCard} />
+                </Section>
+              )}
             </div>
           )}
           {canReadCosting && isEditMode && numId ? (
