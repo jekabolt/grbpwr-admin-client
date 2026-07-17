@@ -15,9 +15,8 @@ import {
 
 // R9 — controlled dictionaries (colors / collections / tags / countries). This is the admin surface
 // for the versioned, archive-not-delete reference data. Lists come from DictionaryProvider (the read
-// models already ship); the create/archive/set-active actions call the adapter seam in
-// ./dictionary-adapters, whose real CRUD RPCs land with the final contract bump. Until then those
-// actions surface a clear "pending" message rather than silently doing nothing.
+// models); the create/archive/set-active actions call the real CRUD RPCs through the adapter seam in
+// ./dictionary-adapters.
 
 type TabKey = 'colors' | 'collections' | 'tags' | 'countries';
 
@@ -39,8 +38,9 @@ export const Dictionaries: FC = () => {
   const [busy, setBusy] = useState(false);
   const writable = canWrite(SECTION.settings);
 
-  // Run an adapter mutation; today these throw DictionaryMutationPending, which we surface plainly.
-  const run = async (fn: () => Promise<void>) => {
+  // Run an adapter mutation (returns the new dictionary revision, which we ignore here and just
+  // refetch the whole dictionary to reconcile).
+  const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     try {
       await fn();
@@ -89,8 +89,8 @@ export const Dictionaries: FC = () => {
       </div>
 
       <Text variant='inactive' size='small'>
-        controlled, versioned reference data — archive, never delete (FK RESTRICT). Editing lands
-        with the next contract bump; the lists below are live from the dictionary.
+        controlled, versioned reference data — archive, never delete (FK RESTRICT). Lists are live
+        from the dictionary; archive / activate act immediately.
       </Text>
 
       {loading && <Text variant='inactive'>loading…</Text>}
@@ -141,7 +141,7 @@ export const Dictionaries: FC = () => {
               <RowAction
                 disabled={!writable || busy || !!c.archived}
                 label='archive'
-                onClick={() => run(() => archiveCollection(c.code ?? ''))}
+                onClick={() => run(() => archiveCollection(c.id ?? 0))}
               />,
             ],
           }))}
@@ -161,7 +161,7 @@ export const Dictionaries: FC = () => {
               <RowAction
                 disabled={!writable || busy || !!t.archived}
                 label='archive'
-                onClick={() => run(() => archiveTag(t.code ?? ''))}
+                onClick={() => run(() => archiveTag(t.id ?? 0))}
               />,
             ],
           }))}
