@@ -67,7 +67,7 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
     <div className='space-y-6'>
       {!hasAnyProductData ? (
         <div className='border border-textInactiveColor p-8 text-center'>
-          <span className='text-textInactiveColor'>
+          <span className='text-labelColor'>
             No product performance data available for this period. Data appears when there are
             orders and product sales.
           </span>

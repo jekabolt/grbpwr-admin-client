@@ -73,7 +73,7 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
           </tbody>
         </table>
       </div>
-      <Text className='text-textBaseSize text-textInactiveColor'>
+      <Text className='text-textBaseSize text-labelColor'>
         {hasLift
           ? `Pairs bought together ${MIN_SUPPORT}+ times, ranked by lift. Lift = how much more often the pair sells together than their solo rates predict (>1× = a real bundle, not chance). Attach rate is the share of A's orders that also bought B.`
           : `Only pairs bought together ${MIN_SUPPORT}+ times.`}

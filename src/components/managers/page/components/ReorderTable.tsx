@@ -89,7 +89,7 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
                   <Text className='font-bold'>{formatNumber(row.quantity || 0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
-                  <Text className='text-textInactiveColor'>
+                  <Text className='text-labelColor'>
                     {formatNumber(row.reorderPoint || 0)}
                   </Text>
                 </td>
@@ -104,7 +104,7 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-textBaseSize text-textInactiveColor'>
+      <div className='mt-3 text-textBaseSize text-labelColor'>
         <Text>
           At or below their reorder point — restock before they sell out. Lowest cover first.
         </Text>

@@ -39,11 +39,11 @@ export const OrderValueBandsTable: FC<OrderValueBandsTableProps> = ({ bands, aov
   return (
     <div className='space-y-3'>
       <div className='flex flex-wrap items-baseline justify-between gap-2'>
-        <Text className='text-textBaseSize text-textInactiveColor'>
+        <Text className='text-textBaseSize text-labelColor'>
           <span className='inline-block h-2 w-3 align-middle bg-textColor/70' /> share of revenue ·{' '}
           <span className='inline-block h-2 w-3 align-middle bg-labelColor/40' /> share of orders
         </Text>
-        <Text className='text-textBaseSize text-textInactiveColor'>
+        <Text className='text-textBaseSize text-labelColor'>
           over {formatNumber(totalOrders)} orders
         </Text>
       </div>
@@ -67,11 +67,11 @@ export const OrderValueBandsTable: FC<OrderValueBandsTableProps> = ({ bands, aov
               <div className='flex items-baseline justify-between gap-3'>
                 <Text size='small' className={isTop ? 'font-bold' : undefined}>
                   {b.label}
-                  {isAov && <span className='ml-1 text-textInactiveColor'>◂ AOV</span>}
+                  {isAov && <span className='ml-1 text-labelColor'>◂ AOV</span>}
                 </Text>
                 <Text size='small' className={isTop ? 'font-bold' : undefined}>
                   {formatCurrency(parseDecimal(b.revenue))}
-                  <span className='text-textInactiveColor'>
+                  <span className='text-labelColor'>
                     {' · '}
                     {formatNumber(b.orders ?? 0)} orders · AOV{' '}
                     {formatCurrency(parseDecimal(b.avgOrderValue))}
@@ -87,7 +87,7 @@ export const OrderValueBandsTable: FC<OrderValueBandsTableProps> = ({ bands, aov
                 </div>
               </div>
               <div className='flex items-baseline justify-between gap-3'>
-                <span className='text-textInactiveColor text-textBaseSize'>
+                <span className='text-labelColor text-textBaseSize'>
                   rev {revShare.toFixed(0)}% · ord {ordShare.toFixed(0)}%
                 </span>
                 {flag && <span className='text-labelColor text-textBaseSize'>{flag}</span>}

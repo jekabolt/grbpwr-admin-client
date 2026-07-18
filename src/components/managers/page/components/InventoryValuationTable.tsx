@@ -10,12 +10,12 @@ interface InventoryValuationTableProps {
 
 const Stat: FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
   <div className='space-y-1'>
-    <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+    <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
       {label}
     </Text>
     <Text className='font-bold text-lg'>{value}</Text>
     {hint && (
-      <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+      <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
         {hint}
       </Text>
     )}

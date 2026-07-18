@@ -28,7 +28,7 @@ const AOV_LIFT_PP = 20;
 const NEW_COLOR = '#2323ff';
 
 const GridCell: FC<{ value: string; muted?: boolean }> = ({ value, muted }) => (
-  <td className={`p-2 text-right ${muted ? 'text-textInactiveColor' : ''}`}>{value}</td>
+  <td className={`p-2 text-right ${muted ? 'text-labelColor' : ''}`}>{value}</td>
 );
 
 export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => {
@@ -126,7 +126,7 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
         </div>
       </div>
       {(newShare < 12 || retShare < 12) && (
-        <Text className='text-textInactiveColor text-textBaseSize'>
+        <Text className='text-labelColor text-textBaseSize'>
           new {newShare.toFixed(0)}% · returning {retShare.toFixed(0)}%
         </Text>
       )}

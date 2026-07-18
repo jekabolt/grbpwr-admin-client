@@ -32,6 +32,11 @@
      semantics, never decoration. */
   --color-textColor: #000; /* black — ink */
   --color-bgColor: #fff; /* white — ground */
+  /* Second surface layer: the panel/tint one step off white for KPI cards, stat
+     grids and section headers. Referenced app-wide as bg-bgSecondary (often at
+     /20–/50 opacity), so it must read as a panel even at low opacity over white.
+     labelColor (#666) on this stays ~5:1 (AA). */
+  --color-bgSecondary: #ededed;
   /* The single border gray. Every outline in the app is this color. */
   --color-borderColor: #cccccc;
   --color-textInactiveColor: #cccccc; /* == borderColor; also disabled/placeholder ink */

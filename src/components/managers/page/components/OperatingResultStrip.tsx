@@ -31,7 +31,7 @@ export const OperatingResultStrip: FC<Ga4CoverageNoteProps> = ({ dashboard }) =>
           : ''}
       </Text>
       {(coverage ?? 100) < GA4_COVERAGE_HINT_FLOOR && (
-        <Text variant='inactive' size='small' className='mt-1 block'>
+        <Text variant='label' size='small' className='mt-1 block'>
           Attribution is leaky — real ROAS ≈ shown ÷ coverage. Consent banners / ad-blockers / bot
           filtering eat client-side tracking.
         </Text>

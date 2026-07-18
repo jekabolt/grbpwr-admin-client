@@ -81,7 +81,7 @@ export const DeadStockTable: FC<DeadStockTableProps> = ({ deadStock }) => {
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-labelColor space-y-1'>
         <Text>
           Inventory with no sales &gt;180 days — liquidate or write off. Sorted by € tied up.
         </Text>

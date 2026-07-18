@@ -173,7 +173,7 @@ export function ThisWeekTab({
           <Link
             to={productsHref}
             replace
-            className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+            className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
           >
             View all →
           </Link>
@@ -223,7 +223,7 @@ export function ThisWeekTab({
                     </td>
                     <td className='p-2 text-right'>
                       <Text
-                        className={product.grossMarginPct == null ? 'text-textInactiveColor' : ''}
+                        className={product.grossMarginPct == null ? 'text-labelColor' : ''}
                       >
                         {product.grossMarginPct == null
                           ? '—'
@@ -237,7 +237,7 @@ export function ThisWeekTab({
           </div>
         ) : (
           <div className='border border-textInactiveColor p-4 text-center'>
-            <Text className='text-textInactiveColor text-textBaseSize'>
+            <Text className='text-labelColor text-textBaseSize'>
               No product data for this period.
             </Text>
           </div>
@@ -250,7 +250,7 @@ export function ThisWeekTab({
           <Link
             to={trafficHref}
             replace
-            className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+            className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
           >
             View breakdown →
           </Link>
@@ -259,15 +259,15 @@ export function ThisWeekTab({
           {topTrafficSource ? (
             <div className='space-y-2'>
               <Text className='text-lg font-bold'>{topTrafficSource.name}</Text>
-              <Text className='text-textInactiveColor text-textBaseSize'>
+              <Text className='text-labelColor text-textBaseSize'>
                 {formatNumber(topTrafficSource.sessions)} sessions
               </Text>
-              <Text className='text-textInactiveColor text-textBaseSize italic mt-2'>
+              <Text className='text-labelColor text-textBaseSize italic mt-2'>
                 Excluding direct traffic
               </Text>
             </div>
           ) : (
-            <Text className='text-textInactiveColor text-textBaseSize'>
+            <Text className='text-labelColor text-textBaseSize'>
               No attributed traffic this period
             </Text>
           )}

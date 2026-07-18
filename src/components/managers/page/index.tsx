@@ -207,8 +207,8 @@ export function Analitic() {
               onClick={() => setActiveTab(tabId)}
               className={`whitespace-nowrap border-b-2 px-4 py-3 text-textBaseSize font-medium transition-colors ${
                 activeTab === tabId
-                  ? 'border-textInactiveColor text-textColor'
-                  : 'border-transparent text-textInactiveColor hover:text-textColor'
+                  ? 'border-textColor text-textColor'
+                  : 'border-transparent text-labelColor hover:text-textColor'
               }`}
             >
               {TAB_LABELS[tabId]}

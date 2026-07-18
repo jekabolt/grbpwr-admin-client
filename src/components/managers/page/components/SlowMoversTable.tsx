@@ -40,7 +40,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
           <button
             type='button'
             onClick={() => setShowNoSalesProducts((v) => !v)}
-            className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+            className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
           >
             {showNoSalesProducts
               ? 'Hide products with no sales'
@@ -49,7 +49,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
         )}
       </div>
       {topSlowMovers.length === 0 ? (
-        <p className='text-textBaseSize text-textInactiveColor'>
+        <p className='text-textBaseSize text-labelColor'>
           No slow movers in this merchandising view (all rows are products with no recorded sales).
           Turn on &quot;Show products with no sales&quot; to include them.
         </p>
@@ -119,7 +119,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
                       {row.hasCost && row.grossMarginPct != null ? (
                         <Text>{row.grossMarginPct.toFixed(0)}%</Text>
                       ) : (
-                        <Text variant='inactive'>N/A</Text>
+                        <Text variant='label'>N/A</Text>
                       )}
                     </td>
                     <td className='p-2 text-right'>
@@ -140,7 +140,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
           </table>
         </div>
       )}
-      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-labelColor space-y-1'>
         <Text>
           Products with low sales velocity — consider promotions or markdown. Margin is the room to
           discount before a unit stops paying for itself.

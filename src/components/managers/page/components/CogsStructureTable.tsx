@@ -37,7 +37,7 @@ export const CogsStructureTable: FC<CogsStructureTableProps> = ({ cogsStructure 
                 <Text size='small'>{COMPONENT_LABEL[r.component ?? ''] ?? r.component}</Text>
                 <Text size='small'>
                   {formatCurrency(parseDecimal(r.amount))}
-                  <span className='text-textInactiveColor'> · {pct.toFixed(0)}%</span>
+                  <span className='text-labelColor'> · {pct.toFixed(0)}%</span>
                 </Text>
               </div>
               <div className='h-2 w-full bg-bgSecondary/40'>
@@ -48,7 +48,7 @@ export const CogsStructureTable: FC<CogsStructureTableProps> = ({ cogsStructure 
         })}
       </div>
       {rows.some((r) => r.component === 'unattributed' && (r.pct ?? 0) > 20) && (
-        <Text variant='inactive' size='small' className='mt-3 block'>
+        <Text variant='label' size='small' className='mt-3 block'>
           A large unattributed share means costs aren’t broken down by component yet — add BOM /
           production-run cost lines to attribute them.
         </Text>

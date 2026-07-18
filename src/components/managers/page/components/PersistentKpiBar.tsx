@@ -22,6 +22,8 @@ interface KpiMetric {
   display: string;
   delta: Delta;
   note?: string | null;
+  /** Money anchor (net revenue, contribution) — rendered larger to lead the ribbon. */
+  emphasis?: boolean;
 }
 
 /** Absolute delta (value − compareValue), formatted per metric type. Null unless compare is on. */
@@ -69,6 +71,7 @@ function getKpiMetrics(
       label: 'Net revenue (ex-VAT)',
       display: formatCurrencyWhole(revenue.value),
       delta: buildDelta(compareEnabled, revenue.value, revenue.compareValue, formatCurrencyDelta),
+      emphasis: true,
     },
     {
       // The money that actually pays the team: revenue − COGS − shipping. Only meaningful over
@@ -84,6 +87,7 @@ function getKpiMetrics(
         !costed,
       ),
       note: canReadCosting ? coverageNote(costCoverage) : null,
+      emphasis: true,
     },
     {
       // Profit rate, not activity. Delta in percentage POINTS (change_absolute), not "rate of a rate".
@@ -107,9 +111,11 @@ function getKpiMetrics(
 }
 
 function KpiMetricCard({ metric }: { metric: KpiMetric }) {
+  // Flat/no-compare reads as neutral secondary ink, not full black (which would compete
+  // with the value); up/down carry the status green/red.
   const deltaColor =
     !metric.delta || metric.delta.dir === 'flat'
-      ? 'text-textColor'
+      ? 'text-labelColor'
       : metric.delta.dir === 'up'
         ? 'text-success'
         : 'text-error';
@@ -122,19 +128,23 @@ function KpiMetricCard({ metric }: { metric: KpiMetric }) {
         : '';
 
   return (
-    <div className='border border-textInactiveColor bg-bgSecondary/30 p-3 min-w-0 flex flex-col gap-1'>
-      <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+    <div className='flex min-w-0 flex-col gap-1 border border-textInactiveColor bg-bgSecondary/40 p-3'>
+      <Text variant='uppercase' className='text-[11px] tracking-wide text-labelColor'>
         {metric.label}
       </Text>
-      <Text className='font-bold text-lg'>{metric.display}</Text>
+      <Text
+        className={`font-bold tabular-nums leading-none ${metric.emphasis ? 'text-2xl' : 'text-lg'}`}
+      >
+        {metric.display}
+      </Text>
       {metric.delta && (
-        <Text variant='uppercase' className={`text-[10px] ${deltaColor}`}>
+        <Text variant='uppercase' className={`text-[11px] tabular-nums ${deltaColor}`}>
           {arrow}
           {metric.delta.text}
         </Text>
       )}
       {metric.note && (
-        <Text variant='uppercase' className='text-[10px] text-textInactiveColor'>
+        <Text variant='uppercase' className='text-[11px] text-labelColor'>
           {metric.note}
         </Text>
       )}
@@ -149,7 +159,7 @@ export const PersistentKpiBar: FC<PersistentKpiBarProps> = ({ metrics, compareEn
   if (kpiMetrics.length === 0) return null;
 
   return (
-    <div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
+    <div className='grid grid-cols-2 items-stretch gap-3 md:grid-cols-4'>
       {kpiMetrics.map((metric, idx) => (
         <KpiMetricCard key={idx} metric={metric} />
       ))}

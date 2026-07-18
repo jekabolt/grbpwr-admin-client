@@ -40,7 +40,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
             <button
               type='button'
               onClick={() => setIncludeNoSalesInPeriod((v) => !v)}
-              className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+              className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
             >
               {includeNoSalesInPeriod
                 ? 'Hide no-sales-in-period SKUs'
@@ -48,7 +48,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
             </button>
           )}
         </div>
-        <p className='text-textBaseSize text-textInactiveColor'>
+        <p className='text-textBaseSize text-labelColor'>
           No rows in this view — all at-risk SKUs have no sales in the period (infinite days on
           hand). Use &quot;Include no-sales-in-period&quot; to list them.
         </p>
@@ -66,7 +66,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
           <button
             type='button'
             onClick={() => setIncludeNoSalesInPeriod((v) => !v)}
-            className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+            className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
           >
             {includeNoSalesInPeriod
               ? 'Hide no-sales-in-period SKUs'
@@ -141,7 +141,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-labelColor space-y-1'>
         <Text>
           Items with &gt;60 days on hand. &gt;90 days highlighted (consider discount/bundling).
           Default view hides SKUs with no sales in the period (shown as &quot;No sales&quot; /

@@ -26,10 +26,10 @@ const Stage: FC<{
   muted?: boolean;
 }> = ({ label, value, sub, muted }) => (
   <div className='min-w-[9rem] flex-1 space-y-1'>
-    <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+    <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
       {label}
     </Text>
-    <Text className={`font-bold text-lg ${muted ? 'text-textInactiveColor' : ''}`}>{value}</Text>
+    <Text className={`font-bold text-lg ${muted ? 'text-labelColor' : ''}`}>{value}</Text>
     <Text className='text-labelColor text-textBaseSize'>{sub}</Text>
   </div>
 );
@@ -81,7 +81,7 @@ export const DeliveryPanel: FC<DeliveryPanelProps> = ({ delivery }) => {
   }
   if (etaCov > 0 && etaCov < ETA_COVERAGE_FLOOR_PCT) {
     notes.push(
-      <Text key='eta' className='text-textInactiveColor text-textBaseSize'>
+      <Text key='eta' className='text-labelColor text-textBaseSize'>
         Only {etaCov.toFixed(0)}% of delivered orders had an ETA set — set ETAs at ship time to make
         on-time meaningful.
       </Text>,
@@ -89,7 +89,7 @@ export const DeliveryPanel: FC<DeliveryPanelProps> = ({ delivery }) => {
   }
   if (delivery.caveat) {
     notes.push(
-      <Text key='caveat' className='text-textInactiveColor text-textBaseSize'>
+      <Text key='caveat' className='text-labelColor text-textBaseSize'>
         {delivery.caveat}
       </Text>,
     );

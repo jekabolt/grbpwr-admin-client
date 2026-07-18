@@ -44,16 +44,16 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
       <div className='space-y-1'>
         <Text
           variant='uppercase'
-          className='text-textBaseSize font-semibold text-textInactiveColor'
+          className='text-textBaseSize font-semibold text-labelColor'
         >
           Business health
         </Text>
         <Text className='text-textBaseSize text-textColor/90 leading-relaxed'>
-          <span className='text-textInactiveColor'>Current: </span>
+          <span className='text-labelColor'>Current: </span>
           {currentPeriodLabel}
           {comparePeriodLabel && (
             <>
-              <span className='text-textInactiveColor'> · Compared to: </span>
+              <span className='text-labelColor'> · Compared to: </span>
               {comparePeriodLabel}
             </>
           )}
@@ -66,7 +66,7 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
         >
           {STATUS_LABEL[status]}
         </span>
-        <Text className='text-textBaseSize text-textInactiveColor uppercase'>
+        <Text className='text-textBaseSize text-labelColor uppercase'>
           {alerts.length === 0
             ? 'Nothing needs action this period'
             : `${alerts.length} thing${alerts.length === 1 ? '' : 's'} to act on`}
@@ -77,7 +77,7 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
         <div className='space-y-2 border-t border-textInactiveColor/40 pt-3'>
           <Text
             variant='uppercase'
-            className='text-textBaseSize font-semibold text-textInactiveColor'
+            className='text-textBaseSize font-semibold text-labelColor'
           >
             Act now
           </Text>
@@ -86,7 +86,7 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
               <li key={`${a.title}-${i}`} className='text-textBaseSize leading-snug'>
                 <span className={`font-semibold ${ALERT_TITLE_CLASS[a.severity]}`}>{a.title}</span>
                 {a.detail && (
-                  <Text className='text-textInactiveColor text-textBaseSize mt-0.5 block'>
+                  <Text className='text-labelColor text-textBaseSize mt-0.5 block'>
                     {a.detail}
                   </Text>
                 )}

@@ -16,9 +16,9 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           Notify me intent
         </Text>
         <div className='py-8 text-center'>
-          <Text className='text-textInactiveColor'>No restock demand signals in this period</Text>
+          <Text className='text-labelColor'>No restock demand signals in this period</Text>
         </div>
-        <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
+        <div className='mt-3 text-textBaseSize text-labelColor space-y-1'>
           <Text>
             "Notify me" / back-in-stock intent signals — high demand items currently unavailable
           </Text>
@@ -99,7 +99,7 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-labelColor space-y-1'>
         <Text>
           "Notify me" / back-in-stock intent signals — high demand items currently unavailable
         </Text>

@@ -29,7 +29,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
       <Text variant='uppercase' className='font-bold mb-1 block'>
         Drop verdict
       </Text>
-      <Text className='text-textBaseSize text-textInactiveColor mb-4 block'>
+      <Text className='text-textBaseSize text-labelColor mb-4 block'>
         Per-release sell-through — the drop-brand KPI. Whole-drop totals, so the read is
         decision-grade even when a single day is only a handful of orders.
       </Text>
@@ -103,7 +103,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
                     {row.daysTo50pct != null ? (
                       <Text>{formatNumber(row.daysTo50pct)}d</Text>
                     ) : (
-                      <Text variant='inactive' title='Has not reached 50% sell-through yet'>
+                      <Text variant='label' title='Has not reached 50% sell-through yet'>
                         —
                       </Text>
                     )}
@@ -122,7 +122,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
                     {row.hasCost && row.grossMarginPct != null ? (
                       <Text>{row.grossMarginPct.toFixed(0)}%</Text>
                     ) : (
-                      <Text variant='inactive'>N/A</Text>
+                      <Text variant='label'>N/A</Text>
                     )}
                   </td>
                   <td className='p-2 text-right'>
@@ -136,7 +136,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-labelColor space-y-1'>
         <Text>
           Sell-through = units sold ÷ units bought. Days-to-50% is how fast the release cleared its
           first half; blank = not there yet. Strong ≥75% · OK ≥40% · Weak below.

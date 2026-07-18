@@ -40,7 +40,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
       <div className='space-y-2'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <h3 className='text-textBaseSize font-bold uppercase'>Repeat economics</h3>
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             {sampleSize > 0 ? `over ${formatNumber(sampleSize)} customers` : 'no customer data yet'}
           </Text>
         </div>
@@ -59,25 +59,25 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
           }`}
         >
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
               Repeat customer rate
             </Text>
             <Text className='font-bold text-lg'>{repeatRate.value.toFixed(0)}%</Text>
-            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
               share who ordered before
             </Text>
           </div>
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
               Orders per customer
             </Text>
             <Text className='font-bold text-lg'>{ordersPerCustomer.value.toFixed(1)}</Text>
-            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
               lifetime average
             </Text>
           </div>
           <div className='space-y-1'>
-            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
               Days between orders
             </Text>
             <Text className='font-bold text-lg'>
@@ -85,17 +85,17 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
                 ? formatAvgDaysBetweenOrders(daysBetweenOrders.value)
                 : '—'}
             </Text>
-            <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
               avg gap to next order
             </Text>
           </div>
           {showUniqueBuyers && (
             <div className='space-y-1'>
-              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+              <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
                 Unique buyers
               </Text>
               <Text className='font-bold text-lg'>{formatNumber(uniqueBuyers.value)}</Text>
-              <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+              <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
                 distinct emails this period
               </Text>
             </div>
@@ -114,7 +114,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
         </div>
         <ChannelRoasTable data={channelRoas} />
         <CampaignAttributionTable campaignAttribution={metricsResponse.campaignAttribution} />
-        <Text className='text-textInactiveColor text-textBaseSize leading-relaxed'>
+        <Text className='text-labelColor text-textBaseSize leading-relaxed'>
           Channel data is GA4-sourced and directional at boutique traffic — sampling, consent gaps,
           bots and last-click attribution make daily lines and micro-conversion rates unreliable, so
           only channel mix, spend/ROAS and DB revenue-by-country are shown.

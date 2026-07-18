@@ -79,7 +79,7 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
                   {r.techCardId ? (
                     <button
                       type='button'
-                      className='text-textBaseSize underline underline-offset-2 text-textInactiveColor hover:text-textColor'
+                      className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
                       onClick={() => setDetailOf(r.techCardId)}
                     >
                       economics
@@ -98,7 +98,7 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
         onOpenChange={(v) => !v && setDetailOf(undefined)}
       />
       {!anyCosted && (
-        <Text variant='inactive' size='small' className='mt-3 block'>
+        <Text variant='label' size='small' className='mt-3 block'>
           No styles have a unit cost yet — set costs on tech cards to unlock margin here.
         </Text>
       )}
