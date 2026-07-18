@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { TechPackDocument } from './components/tech-pack-document';
+import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPacking';
 
 // This page renders OUTSIDE the app Layout (see ProtectedBare in index.tsx), so the tech
 // pack is plain top-level content in normal flow. Printing then needs no isolation tricks
@@ -25,6 +26,12 @@ export function TechCardPrint() {
   const { id } = useParams<{ id: string }>();
   const numId = id ? parseInt(id, 10) : undefined;
   const { data: techCard, isLoading, isError } = useTechCard(numId);
+  // #71 root cause: the on-garment assembly bill (labels/tags) and the packaging recipe each
+  // live behind their own per-style RPC — GetTechCard alone (above) never returns them, so the
+  // printed pack had nothing to render for either section no matter what TechPackDocument did
+  // with the data. Fetch both here, alongside the tech card, and hand them down.
+  const { data: assemblyData } = useStyleAssembly(numId ?? 0);
+  const { data: packagingRecipeData } = usePackagingRecipe();
 
   return (
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
@@ -72,7 +79,11 @@ export function TechCardPrint() {
         </div>
       ) : (
         <div className='techpack-doc border border-textInactiveColor shadow-sm'>
-          <TechPackDocument techCard={techCard} />
+          <TechPackDocument
+            techCard={techCard}
+            assembly={assemblyData?.items ?? []}
+            packagingRecipe={packagingRecipeData?.items ?? []}
+          />
         </div>
       )}
     </div>

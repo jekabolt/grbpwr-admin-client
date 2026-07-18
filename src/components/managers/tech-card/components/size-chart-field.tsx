@@ -59,6 +59,10 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
   // cell values: sizeId -> measurementNameId -> string
   const [cells, setCells] = useState<Map<number, Map<number, string>>>(new Map());
   const [saving, setSaving] = useState(false);
+  // This grid lives outside react-hook-form and saves through its own RPC, so the card's shared
+  // isDirty / beforeunload guard (useTechCardDraft) never sees these edits. Track dirtiness here
+  // and run a self-contained unload guard so measurements can't be silently lost on refresh/close.
+  const [dirty, setDirty] = useState(false);
 
   const loadChart = useCallback(() => {
     if (!styleId) return;
@@ -73,9 +77,11 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
           next.set(c.sizeId, row);
         }
         setCells(next);
+        setDirty(false);
       })
       .catch(() => {
         /* no chart yet (draft) — leave the grid empty */
+        setDirty(false);
       });
   }, [styleId]);
 
@@ -83,7 +89,20 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
     loadChart();
   }, [loadChart]);
 
+  // Mirror useTechCardDraft's unload guard for this out-of-form grid: warn on refresh/tab close
+  // while measurements are unsaved. In-app navigation is covered by the visible "unsaved" badge.
+  useEffect(() => {
+    if (!dirty || !canEdit) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty, canEdit]);
+
   const setCell = (sizeId: number, nameId: number, value: string) => {
+    setDirty(true);
     setCells((prev) => {
       const next = new Map(prev);
       const row = new Map(next.get(sizeId) ?? []);
@@ -149,9 +168,16 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
 
   return (
     <div className='space-y-3'>
-      <Text variant='inactive' size='small'>
-        Measurements belong to the style — one chart shared by every colourway. Edit here.
-      </Text>
+      <div className='flex flex-wrap items-center gap-2'>
+        <Text variant='inactive' size='small'>
+          Measurements belong to the style — one chart shared by every colourway. Edit here.
+        </Text>
+        {dirty && (
+          <span className='border border-warning px-1.5 py-0.5 text-small uppercase text-warning'>
+            unsaved measurements
+          </span>
+        )}
+      </div>
       <div className='overflow-x-auto'>
         <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor'>
@@ -175,7 +201,10 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
                   </Text>
                 </td>
                 {measurements.map((m, i) => (
-                  <td key={m.id} className={i < measurements.length - 1 ? cellClass : lastCellClass}>
+                  <td
+                    key={m.id}
+                    className={i < measurements.length - 1 ? cellClass : lastCellClass}
+                  >
                     <Input
                       name={`size-chart-${sizeId}-${m.id}`}
                       value={cells.get(sizeId)?.get(m.id) ?? ''}
@@ -193,16 +222,23 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
         </table>
       </div>
       {canEdit && (
-        <Button
-          type='button'
-          variant='secondary'
-          size='lg'
-          className='uppercase'
-          disabled={saving}
-          onClick={save}
-        >
-          {saving ? 'saving…' : 'save size chart'}
-        </Button>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Button
+            type='button'
+            variant={dirty ? 'main' : 'secondary'}
+            size='lg'
+            className='uppercase'
+            disabled={saving}
+            onClick={save}
+          >
+            {saving ? 'saving…' : 'save size chart'}
+          </Button>
+          {dirty && (
+            <Text variant='inactive' size='small'>
+              unsaved — this grid saves separately from the card’s Save.
+            </Text>
+          )}
+        </div>
       )}
     </div>
   );

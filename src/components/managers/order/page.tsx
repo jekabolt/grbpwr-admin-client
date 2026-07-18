@@ -5,7 +5,7 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -87,8 +87,20 @@ export function OrderDetails() {
 
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
   const [isShipCostOpen, setIsShipCostOpen] = useState(false);
+  // Local reflection of the last successful SetShipmentActualCost call: that mutation
+  // doesn't refetch the order, so without this both the summary block and the modal's
+  // prefill would keep showing the pre-edit value until the page is reloaded. Cleared on
+  // order change so it can never leak from one uuid onto another.
+  const [shipmentCostOverride, setShipmentCostOverride] = useState<{
+    actualCost: string;
+    returnShippingCost?: string;
+  } | null>(null);
   const { canWrite, canReadCosting } = usePermissions();
   const canEditOrder = canWrite(SECTION.orders);
+
+  useEffect(() => {
+    setShipmentCostOverride(null);
+  }, [uuid]);
 
   const form = useForm<{ refundReason: string; notes: string }>({
     defaultValues: { refundReason: '', notes: '' },
@@ -99,8 +111,26 @@ export function OrderDetails() {
     refundOrder(payload);
   };
 
+  const handleShipmentCostSubmit = async (actualCost: string, returnShippingCost?: string) => {
+    const ok = await setShipmentActualCost(actualCost, returnShippingCost);
+    if (!ok) return;
+    setShipmentCostOverride((prev) => ({
+      actualCost,
+      // A blank return field means "unchanged", not "clear" — mirrors the write itself
+      // (useOrderDetails sends undefined, not an explicit value, when the field is blank).
+      returnShippingCost: returnShippingCost?.trim()
+        ? returnShippingCost.trim()
+        : prev?.returnShippingCost ?? orderDetails?.shipment?.returnShippingCost?.value,
+    }));
+  };
+
   const order = orderDetails?.order;
   const currency = order?.currency ?? '';
+  const actualShipmentCost =
+    shipmentCostOverride?.actualCost ?? orderDetails?.shipment?.actualCost?.value;
+  const returnShipmentCost =
+    shipmentCostOverride?.returnShippingCost ?? orderDetails?.shipment?.returnShippingCost?.value;
+  const hasShipmentCost = !!actualShipmentCost;
   const statusColor = getStatusColor(orderStatus);
   const orderPlaced = formatDateShort(order?.placed, true);
   const isRefunded = orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED';
@@ -173,9 +203,28 @@ export function OrderDetails() {
               <Section title='summary'>
                 <div className='space-y-1'>
                   <SummaryRow
-                    label='shipping cost'
-                    value={`${orderDetails?.shipment?.cost?.value ?? '-'} ${currency}`}
+                    label='customer paid'
+                    value={
+                      orderDetails?.shipment?.cost?.value
+                        ? `${orderDetails.shipment.cost.value} ${currency}`
+                        : '—'
+                    }
                   />
+                  {canReadCosting && (
+                    <div className='space-y-1 border-t border-textInactiveColor pt-2 print:hidden'>
+                      <Text variant='label' size='small' className='uppercase'>
+                        carrier cost (EUR)
+                      </Text>
+                      <SummaryRow
+                        label='actual carrier cost'
+                        value={actualShipmentCost ? `${actualShipmentCost} EUR` : '—'}
+                      />
+                      <SummaryRow
+                        label='return'
+                        value={returnShipmentCost ? `${returnShipmentCost} EUR` : '—'}
+                      />
+                    </div>
+                  )}
                   <div className='flex items-center justify-between gap-4 print:hidden'>
                     <Text variant='inactive'>promo</Text>
                     <PromoApplied orderDetails={orderDetails} />
@@ -259,7 +308,7 @@ export function OrderDetails() {
               className='uppercase'
               onClick={() => setIsShipCostOpen(true)}
             >
-              record shipping cost
+              {hasShipmentCost ? 'edit shipping cost' : 'record shipping cost'}
             </Button>
             {showDeliver && (
               <Button variant='main' size='lg' className='uppercase' onClick={markAsDelivered}>
@@ -279,7 +328,9 @@ export function OrderDetails() {
         <ShipmentCostModal
           open={isShipCostOpen}
           onOpenChange={setIsShipCostOpen}
-          onSubmit={setShipmentActualCost}
+          onSubmit={handleShipmentCostSubmit}
+          currentActualCost={actualShipmentCost}
+          currentReturnShippingCost={returnShipmentCost}
         />
 
         <RefundConfirmation

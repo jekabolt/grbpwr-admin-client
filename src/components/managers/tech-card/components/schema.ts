@@ -402,11 +402,26 @@ const techCardObject = z.object({
 
 // style_number is required past the IDEA stage; at IDEA it may be blank (the backend accepts it).
 export const techCardSchema = techCardObject.superRefine((data, ctx) => {
-  if (data.stage !== 'TECH_CARD_STAGE_IDEA' && !data.styleNumber?.trim()) {
+  const pastIdea = data.stage !== 'TECH_CARD_STAGE_IDEA';
+  if (pastIdea && !data.styleNumber?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'Style number is required',
       path: ['styleNumber'],
+    });
+  }
+  // #64: every BOM article must link a catalog material — it is essentially mandatory (a free-text
+  // line carries no price/spec/composition provenance). Enforced past IDEA so a concept draft isn't
+  // blocked; the error is pinned to the exact line so the BOM tab dot lands on it.
+  if (pastIdea) {
+    (data.bomItems ?? []).forEach((b, i) => {
+      if (!(b.materialId && b.materialId > 0)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Link a catalog material',
+          path: ['bomItems', i, 'materialId'],
+        });
+      }
     });
   }
 });

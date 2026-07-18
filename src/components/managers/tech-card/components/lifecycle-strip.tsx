@@ -2,7 +2,10 @@ import { common_Fitting, common_TechCardStage } from 'api/proto-http/admin';
 import { techCardApprovalStateOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
-import { useTechCardFittings } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  useTechCard,
+  useTechCardFittings,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useLocation, Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -13,6 +16,8 @@ import { useSamples } from './useSamples';
 // block / runs list, a data-derived "next:" hint, and quick actions for the next flow step. Counts
 // come from already-cheap, cached queries — the spine adds no heavy fetches.
 
+const LAB_DIP_APPROVED = 'TECH_CARD_LAB_DIP_STATUS_APPROVED';
+
 const SPINE_STAGES: { value: common_TechCardStage; label: string }[] = [
   { value: 'TECH_CARD_STAGE_IDEA', label: 'idea' },
   { value: 'TECH_CARD_STAGE_PROTO', label: 'proto' },
@@ -22,13 +27,48 @@ const SPINE_STAGES: { value: common_TechCardStage; label: string }[] = [
   { value: 'TECH_CARD_STAGE_PROD', label: 'prod' },
 ];
 
+// The quick actions that actually matter at each stage, primary first: early stages don't plan
+// production runs, late stages don't book fittings. The strip shows the ONE next step prominently
+// and de-emphasizes the rest, instead of parking all three buttons on every card (screen D clutter).
+type ActionKey = 'sample' | 'fitting' | 'run';
+const RELEASE_STAGES = new Set([
+  'TECH_CARD_STAGE_SMS',
+  'TECH_CARD_STAGE_PP',
+  'TECH_CARD_STAGE_PROD',
+]);
+
+function stageActions(stage: string, samplesCount: number): ActionKey[] {
+  switch (stage) {
+    case 'TECH_CARD_STAGE_IDEA':
+      return ['sample'];
+    case 'TECH_CARD_STAGE_PROTO':
+      return samplesCount === 0 ? ['sample', 'fitting'] : ['fitting', 'sample'];
+    case 'TECH_CARD_STAGE_FIT':
+      return ['fitting', 'sample'];
+    case 'TECH_CARD_STAGE_SMS':
+      return ['sample'];
+    case 'TECH_CARD_STAGE_PP':
+      return ['sample', 'run'];
+    case 'TECH_CARD_STAGE_PROD':
+      return ['run'];
+    default:
+      return ['sample'];
+  }
+}
+
 function nextHint(
   stage: string,
   samplesCount: number,
   fittings: common_Fitting[],
   runsCount: number,
   unresolved: number,
+  pendingLabDip: number,
 ): string {
+  // Lab-dip approval gates release; at a release-facing stage, clearing pending lab-dips IS the next
+  // step — otherwise the spine reads "done" while release is silently blocked (only visible in History).
+  if (pendingLabDip > 0 && RELEASE_STAGES.has(stage)) {
+    return `approve ${pendingLabDip} colourway lab-dip${pendingLabDip === 1 ? '' : 's'} to unblock release`;
+  }
   const latest = fittings[0]?.fitting;
   switch (stage) {
     case 'TECH_CARD_STAGE_IDEA':
@@ -93,6 +133,9 @@ export function LifecycleStrip({
   const { data: samplesData } = useSamples(techCardId);
   const { data: fittings } = useTechCardFittings(techCardId);
   const { data: runsData } = useProductionRuns(techCardId, '');
+  // Same cached read the rest of the constructor already loaded (R1: techCardId === styleId) — no
+  // extra fetch cost; used only for the colourway lab-dip counter below.
+  const { data: techCard } = useTechCard(techCardId || undefined);
 
   const samplesCount = samplesData?.samples?.length ?? 0;
   const fittingList = fittings ?? [];
@@ -102,10 +145,73 @@ export function LifecycleStrip({
     (n, f) => n + (f.fitting?.changeRequests ?? []).filter((cr) => !cr.resolved).length,
     0,
   );
+  // Lab-dip approval gates release, but the read-view colourway refs (AdminColorwayRef) don't yet
+  // carry labDipStatus — so this is 0 until the backend surfaces it. Wired now so the spine lights
+  // up the moment it does, and typed loosely to match that pending backend field. (BACKEND GAP.)
+  const colorwaysRef = (techCard?.colorways ?? []) as Array<{ labDipStatus?: string }>;
+  const pendingLabDip = colorwaysRef.filter(
+    (c) => c.labDipStatus && c.labDipStatus !== LAB_DIP_APPROVED,
+  ).length;
 
   const approvalLabel =
     techCardApprovalStateOptions.find((o) => o.value === approvalState)?.label ?? '—';
-  const hint = nextHint(stage, samplesCount, fittingList, runsCount, unresolved);
+  const hint = nextHint(stage, samplesCount, fittingList, runsCount, unresolved, pendingLabDip);
+  const actions = canEdit ? stageActions(stage, samplesCount) : [];
+
+  // Primary = the stage's next step: a solid, obvious button. Secondary = a muted underlined link,
+  // clearly subordinate — so the strip reads as "do this next" with the rest available but quiet.
+  const renderAction = (key: ActionKey, primary: boolean) => {
+    const variant = primary ? 'secondary' : 'underline';
+    const size = primary ? 'lg' : undefined;
+    const cls = primary ? 'uppercase' : 'uppercase text-textInactiveColor hover:text-textColor';
+    if (key === 'sample') {
+      return (
+        <Button
+          key='sample'
+          type='button'
+          variant={variant}
+          size={size}
+          className={cls}
+          onClick={onAddSample}
+        >
+          + sample
+        </Button>
+      );
+    }
+    if (key === 'fitting') {
+      return (
+        <Button key='fitting' asChild variant={variant} size={size} className={cls}>
+          <Link
+            to={`${ROUTES.addFitting}?techCardId=${techCardId}&returnTo=${encodeURIComponent(
+              returnTo,
+            )}`}
+          >
+            + fitting
+          </Link>
+        </Button>
+      );
+    }
+    if (planRunDisabled) {
+      return (
+        <Button
+          key='run'
+          type='button'
+          variant={variant}
+          size={size}
+          className={cls}
+          disabled
+          title={planRunDisabledReason}
+        >
+          plan run
+        </Button>
+      );
+    }
+    return (
+      <Button key='run' asChild variant={variant} size={size} className={cls}>
+        <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>plan run</Link>
+      </Button>
+    );
+  };
 
   const counter = 'text-textInactiveColor underline hover:text-textColor';
 
@@ -171,9 +277,21 @@ export function LifecycleStrip({
         <Text variant='inactive' size='small'>
           products {productCount}
         </Text>
+        {pendingLabDip > 0 && (
+          <>
+            <span className='text-textInactiveColor'>·</span>
+            <span
+              className='text-warning'
+              title='colourways awaiting lab-dip approval — gates release'
+            >
+              ⚠ {pendingLabDip} pending lab-dip
+            </span>
+          </>
+        )}
       </div>
 
-      {/* next-hint + quick actions — the next flow step is always one click from the hub. */}
+      {/* next-hint + contextual action — the ONE next step is prominent and stage-irrelevant
+          actions are hidden, instead of parking sample/fitting/run on every card (screen D clutter). */}
       <div className='flex flex-wrap items-center justify-between gap-2'>
         {hint ? (
           <Text variant='inactive' size='small'>
@@ -182,42 +300,10 @@ export function LifecycleStrip({
         ) : (
           <span />
         )}
-        {canEdit && (
+        {actions.length > 0 && (
           <div className='flex flex-wrap items-center gap-2'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={onAddSample}
-            >
-              + sample
-            </Button>
-            <Button asChild variant='secondary' size='lg' className='uppercase'>
-              <Link
-                to={`${ROUTES.addFitting}?techCardId=${techCardId}&returnTo=${encodeURIComponent(
-                  returnTo,
-                )}`}
-              >
-                + fitting
-              </Link>
-            </Button>
-            {planRunDisabled ? (
-              <Button
-                type='button'
-                variant='secondary'
-                size='lg'
-                className='uppercase'
-                disabled
-                title={planRunDisabledReason}
-              >
-                plan run
-              </Button>
-            ) : (
-              <Button asChild variant='secondary' size='lg' className='uppercase'>
-                <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>plan run</Link>
-              </Button>
-            )}
+            {renderAction(actions[0], true)}
+            {actions.slice(1).map((k) => renderAction(k, false))}
           </div>
         )}
       </div>

@@ -124,7 +124,7 @@ const ERROR_TAB: Record<string, TabId> = {
 
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 const DRAFT = 'TECH_CARD_APPROVAL_STATE_DRAFT';
-const LAB_DIP_APPROVED = 'TECH_CARD_LAB_DIP_STATUS_APPROVED';
+const SIGNOFF_APPROVED = 'TECH_CARD_SIGNOFF_STATE_APPROVED';
 
 function Section({
   title,
@@ -213,21 +213,43 @@ export function TechCardForm({
   const frozen = techCard?.techCard?.approvalState === RELEASED;
   const styleNumber = useWatch({ control: form.control, name: 'styleNumber' });
   const name = useWatch({ control: form.control, name: 'name' });
-  const colorways = (useWatch({ control: form.control, name: 'colorways' }) ?? []) as Array<{
-    labDipStatus?: string;
-  }>;
   const issues = (useWatch({ control: form.control, name: 'issues' }) ?? []) as Array<{
     status?: string;
   }>;
   const openIssues = issues.filter((i) => i.status === 'TECH_CARD_ISSUE_STATUS_OPEN').length;
+  const signoffs = (useWatch({ control: form.control, name: 'signoffs' }) ?? []) as Array<{
+    state?: string;
+  }>;
+  // Every present sign-off must be APPROVED (a REJECTED / PENDING row blocks release) and at least
+  // one must exist — so a card can no longer be released with zero sign-offs (M10).
+  const signoffsApproved =
+    signoffs.length > 0 && signoffs.every((s) => s.state === SIGNOFF_APPROVED);
 
   // Lifecycle spine inputs: current stage/approval drive the stepper + next-hint; linked-product
   // count feeds the counter row.
   const stage = (useWatch({ control: form.control, name: 'stage' }) ?? '') as string;
-  // Release freezes the card as the factory-facing spec — an IDEA draft (no real style number,
-  // no spec tabs filled; the lab-dip check is vacuously true over zero colourways) can't be one.
-  const canRelease =
-    stage !== 'TECH_CARD_STAGE_IDEA' && colorways.every((c) => c.labDipStatus === LAB_DIP_APPROVED);
+  const isIdea = stage === 'TECH_CARD_STAGE_IDEA';
+  // Release freezes the card as the factory-facing spec. Gate on real, readable state: not an IDEA
+  // draft, every sign-off section APPROVED (M10) and zero open issues (M10) — and surface WHY it's
+  // blocked in the button tooltip.
+  // BACKEND GAP (M8/M3): colourway lab-dip approval is intentionally NOT gated here — the tech-card
+  // read model (techCard.colorways → AdminColorwayRef) exposes no labDipStatus to read (the lab-dip
+  // fields live only on the write-only ColorwayDevelopmentInsert). The old check ran over the RHF
+  // `colorways` array, which is permanently [] (vacuously true); switching it to
+  // AdminColorwayRef.labDipStatus (always undefined) would permanently block release instead. Lab-dip
+  // gating is deferred until the backend surfaces lab-dip on the read path (see report).
+  const releaseBlockers: string[] = [];
+  if (isIdea) releaseBlockers.push('advance the stage (an IDEA draft can’t be released)');
+  if (!signoffsApproved)
+    releaseBlockers.push(
+      signoffs.length === 0
+        ? 'sign off every required section first'
+        : 'every sign-off section must be APPROVED',
+    );
+  if (openIssues > 0)
+    releaseBlockers.push(`resolve ${openIssues} open issue${openIssues > 1 ? 's' : ''}`);
+  const canRelease = releaseBlockers.length === 0;
+  const releaseBlockedReason = releaseBlockers.join('; ');
   const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
     '') as string;
   const productCount = (useWatch({ control: form.control, name: 'productIds' }) ?? []).length;
@@ -254,7 +276,6 @@ export function TechCardForm({
   const piecesW = useWatch({ control: form.control, name: 'pieces' });
   const operationsW = useWatch({ control: form.control, name: 'operations' });
   const labelsW = useWatch({ control: form.control, name: 'labels' });
-  const signoffsW = useWatch({ control: form.control, name: 'signoffs' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
   const sectionFilled: Partial<Record<TabId, boolean>> = {
     header: !!name?.trim() && (stage === 'TECH_CARD_STAGE_IDEA' || !!styleNumber?.trim()),
@@ -262,11 +283,13 @@ export function TechCardForm({
     moodboard: len(moodboardMedia) > 0,
     patterns: len(sizeIdsW) > 0,
     bom: len(bomItemsW) > 0,
-    colorways: colorways.length > 0,
+    // colourways are products, read from techCard.colorways (the RHF `colorways` array is always []).
+    colorways: (techCard?.colorways?.length ?? 0) > 0,
     pieces: len(piecesW) > 0,
     construction: len(operationsW) > 0,
     labels: len(labelsW) > 0,
-    signoff: len(signoffsW) > 0,
+    // "filled" = actually signed off, not merely present — 7 REJECTED rows must not read as done (M10).
+    signoff: signoffsApproved,
   };
   const isFilled = (t: TabId) => sectionFilled[t] === true;
   const coreSections: TabId[] = ['header', 'sketch', 'bom', 'colorways', 'construction'];
@@ -280,7 +303,6 @@ export function TechCardForm({
   // IDEA is a "light" card (screen E): only the concept-relevant tabs show; the rest reappear when
   // the stage advances, their echoed fields untouched. Not disabled — hidden. A tab carrying a
   // validation error stays visible even at IDEA, or the error dot would point at an invisible tab.
-  const isIdea = stage === 'TECH_CARD_STAGE_IDEA';
   const IDEA_TABS: TabId[] = ['header', 'sketch', 'moodboard', 'samples', 'history'];
   // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read (server nulls
   // the cost block / returns an empty journal; an empty tab would read as "zero cost"). Samples
@@ -423,13 +445,7 @@ export function TechCardForm({
                     variant='secondary'
                     size='lg'
                     className='uppercase'
-                    title={
-                      canRelease
-                        ? ''
-                        : isIdea
-                          ? 'An IDEA draft cannot be released — advance the stage first'
-                          : 'Approve every colourway lab-dip before release'
-                    }
+                    title={canRelease ? '' : `Can’t release — ${releaseBlockedReason}`}
                     disabled={!canRelease || saving}
                     onClick={() => submitWithApproval(RELEASED)}
                   >
@@ -770,7 +786,7 @@ export function TechCardForm({
 
           {/* PIECES — cut-piece details + fabric map (NF-05) + production cut-list projection */}
           <div hidden={activeTab !== 'pieces'} className='flex flex-col gap-6'>
-            <PiecesTab />
+            <PiecesTab techCard={techCard} />
             {isEditMode && numId && (
               <Section title='cut list (production projection — mirror ×2 folded)'>
                 <CutListField techCardId={numId} />
@@ -901,9 +917,7 @@ export function TechCardForm({
                         title={
                           canRelease
                             ? 'freeze the current spec as a new immutable Rev.N release'
-                            : isIdea
-                              ? 'advance the stage before releasing'
-                              : 'approve every colourway lab-dip before release'
+                            : `Can’t release — ${releaseBlockedReason}`
                         }
                         onClick={() => submitWithApproval(RELEASED)}
                       >

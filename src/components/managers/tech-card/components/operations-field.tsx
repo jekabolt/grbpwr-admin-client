@@ -191,6 +191,9 @@ function OperationRow({
           name={`operations.${index}.bomLineKey`}
           label='мат. напрямую'
           noneLabel='— материал —'
+          // #64: this field is for a direct off-part material (thread / fusing), per the hint below —
+          // scope the picker to those sections instead of listing every BOM article.
+          sections={['TECH_CARD_BOM_SECTION_THREAD', 'TECH_CARD_BOM_SECTION_INTERLINING']}
         />
         <SelectField
           name={`operations.${index}.calloutNumber`}
@@ -201,8 +204,8 @@ function OperationRow({
       </div>
 
       <Text variant='inactive' size='small'>
-        «часть» — где на изделии эта операция (справочно). «материал» — прямая ссылка на артикул
-        вне части (нитка, клеевая).
+        «часть» — где на изделии эта операция (справочно). «материал» — прямая ссылка на артикул вне
+        части (нитка, клеевая).
       </Text>
 
       {bomOutOfRange && (

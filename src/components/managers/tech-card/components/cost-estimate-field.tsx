@@ -168,13 +168,27 @@ function ArticlesList({
   );
 }
 
-function StatCell({ label, value, sub }: { label: string; value: string; sub?: string }) {
+export function StatCell({
+  label,
+  value,
+  sub,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  highlight?: boolean;
+}) {
   return (
-    <div className='flex flex-col gap-0.5 border border-textInactiveColor p-2'>
+    <div
+      className={`flex flex-col gap-0.5 border p-2 ${
+        highlight ? 'border-textColor' : 'border-textInactiveColor'
+      }`}
+    >
       <Text variant='inactive' size='small' className='uppercase'>
         {label}
       </Text>
-      <Text size='small' className='font-bold'>
+      <Text size={highlight ? 'large' : 'small'} className='font-bold'>
         {value}
       </Text>
       {sub && (
@@ -279,39 +293,37 @@ function ComparisonBlock({
 
 function EstimateBody({ estimate }: { estimate: StyleCostEstimate }) {
   const baseCurrency = estimate.baseCurrency || '';
+  const cur = baseCurrency || '';
+  // Progressive disclosure: the two dense tables (materials, cost articles) are the raw backing
+  // rows — one click away, not the first thing on screen (#72 "too much data, where to start").
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  const materials = estimate.materials ?? [];
+  const articles = estimate.articles ?? [];
+
   return (
     <div className='flex flex-col gap-4'>
+      {/* Summary-first: the "what does this cost" headline before any raw rows. */}
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+        <StatCell
+          label='unit cost'
+          value={`${decimalToInput(estimate.unitCostBase) || '—'} ${cur}`}
+          highlight
+        />
+        <StatCell
+          label='order cost'
+          value={`${decimalToInput(estimate.orderCostBase) || '—'} ${cur}`}
+          sub={`qty ${estimate.orderQty ?? 0}`}
+        />
+        <StatCell
+          label='materials / unit'
+          value={`${decimalToInput(estimate.materialsPerUnitBase) || '—'} ${cur}`}
+        />
+        <StatCell label='defect %' value={decimalToInput(estimate.defectPct) || '—'} />
+      </div>
+
       <Text variant='inactive' size='small'>
-        all amounts in {baseCurrency || 'the style base currency'}
+        all amounts in {baseCurrency || 'the style base currency'}, folded via costing FX rates.
       </Text>
-
-      <div className='flex flex-col gap-2'>
-        <Text variant='uppercase' size='small'>
-          materials
-        </Text>
-        <MaterialsTable materials={estimate.materials ?? []} baseCurrency={baseCurrency} />
-      </div>
-
-      <div className='flex flex-col gap-2'>
-        <Text variant='uppercase' size='small'>
-          cost articles
-        </Text>
-        <ArticlesList articles={estimate.articles ?? []} baseCurrency={baseCurrency} />
-      </div>
-
-      <div className='flex flex-col gap-1 border-t border-textInactiveColor pt-3'>
-        <Text size='small'>
-          materials / unit: {decimalToInput(estimate.materialsPerUnitBase) || '—'} {baseCurrency}
-        </Text>
-        <Text size='small'>defect %: {decimalToInput(estimate.defectPct) || '—'}</Text>
-        <Text size='small' className='font-bold'>
-          unit cost: {decimalToInput(estimate.unitCostBase) || '—'} {baseCurrency}
-        </Text>
-        <Text size='small'>order qty: {estimate.orderQty ?? 0}</Text>
-        <Text size='small'>
-          order cost: {decimalToInput(estimate.orderCostBase) || '—'} {baseCurrency}
-        </Text>
-      </div>
 
       {estimate.caveat && (
         <Text variant='inactive' size='small'>
@@ -319,7 +331,38 @@ function EstimateBody({ estimate }: { estimate: StyleCostEstimate }) {
         </Text>
       )}
 
+      {/* plan vs actual vs snapshot — the comparison this tab exists for. */}
       <ComparisonBlock comparison={estimate.comparison} baseCurrency={baseCurrency} />
+
+      <div className='flex flex-col gap-3 border-t border-textInactiveColor pt-3'>
+        <button
+          type='button'
+          onClick={() => setShowBreakdown((v) => !v)}
+          className='flex w-fit items-center gap-1 uppercase text-textInactiveColor hover:text-textColor'
+        >
+          <Text size='small'>
+            {showBreakdown ? '▾' : '▸'} cost breakdown ({materials.length} materials ·{' '}
+            {articles.length} articles)
+          </Text>
+        </button>
+        {showBreakdown && (
+          <>
+            <div className='flex flex-col gap-2'>
+              <Text variant='uppercase' size='small'>
+                materials
+              </Text>
+              <MaterialsTable materials={materials} baseCurrency={baseCurrency} />
+            </div>
+
+            <div className='flex flex-col gap-2'>
+              <Text variant='uppercase' size='small'>
+                cost articles
+              </Text>
+              <ArticlesList articles={articles} baseCurrency={baseCurrency} />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

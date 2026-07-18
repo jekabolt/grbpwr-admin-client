@@ -1,5 +1,6 @@
 import { common_Material, common_TechCardBomSection } from 'api/proto-http/admin';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
+import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
@@ -77,14 +78,11 @@ function ReadOnlyMirrorField({ label, value }: { label: string; value?: string }
 // for free-text editing.
 function MaterialLinkField({ index }: { index: number }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
-  const materialId = useWatch({ control, name: `bomItems.${index}.materialId` }) as
-    | number
-    | undefined;
+  const materialId =
+    (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as
     | common_TechCardBomSection
     | undefined;
-  const { data } = useMaterials('', false);
-  const materials = data?.materials ?? [];
   const [createOpen, setCreateOpen] = useState(false);
 
   // Snapshot a catalog material's meta onto this line (S23: the line stays self-contained). Fabric
@@ -108,32 +106,26 @@ function MaterialLinkField({ index }: { index: number }) {
     put('currency', m.latestPrice?.currency);
   };
 
-  const pick = (idStr: string) => {
-    const id = Number(idStr) || 0;
+  const pick = (id: number, m?: common_Material) => {
     setValue(`bomItems.${index}.materialId`, id, { shouldDirty: true });
-    const m = materials.find((x) => x.id === id);
-    if (m) snapshotFrom(m);
+    if (id && m) snapshotFrom(m);
   };
 
   return (
     <div className='space-y-1 lg:col-span-3'>
       <Text size='small' variant='label'>
-        catalog material (optional)
+        catalog material *
       </Text>
-      <div className='flex items-center gap-2'>
-        <select
-          className='w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize'
-          value={materialId || 0}
-          onChange={(e) => pick(e.target.value)}
-        >
-          <option value={0}>— not linked (free text) —</option>
-          {materials.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-              {m.supplier ? ` · ${m.supplier}` : ''}
-            </option>
-          ))}
-        </select>
+      <div className='flex items-start gap-2'>
+        <div className='min-w-0 flex-1'>
+          {/* #64: the shared searchable MaterialPicker, scoped to THIS line's BOM section — replaces
+              the old unfiltered, unsearchable native <select> of every catalog material. */}
+          <MaterialPicker
+            value={materialId}
+            section={rowSection ?? ''}
+            onChange={(id, m) => pick(id, m)}
+          />
+        </div>
         <Button
           type='button'
           variant='secondary'
@@ -147,7 +139,7 @@ function MaterialLinkField({ index }: { index: number }) {
             type='button'
             variant='secondary'
             className='shrink-0 whitespace-nowrap uppercase'
-            onClick={() => pick('0')}
+            onClick={() => pick(0)}
           >
             unlink
           </Button>
@@ -158,7 +150,11 @@ function MaterialLinkField({ index }: { index: number }) {
           Поля ниже — снимок из справочника; пока материал привязан, их нельзя редактировать. Чтобы
           изменить — отвяжите материал.
         </Text>
-      ) : null}
+      ) : (
+        <Text size='small' className='text-error'>
+          Привяжите артикул из справочника материалов (обязательно).
+        </Text>
+      )}
       {/* Inline create — prefill the section from this BOM line; auto-select on create. */}
       <MaterialModal
         open={createOpen}
@@ -173,15 +169,7 @@ function MaterialLinkField({ index }: { index: number }) {
 // One catalog article (Sheet «Спецификация»). The BOM is a pure material-article catalog:
 // identity + supplier + price + fabric data. Which article goes on which part, in what
 // colour and at what consumption is the colourway's recipe (colorways tab → usages).
-function BomItemRow({
-  index,
-  onRemove,
-  highlight,
-}: {
-  index: number;
-  onRemove: () => void;
-  highlight?: boolean;
-}) {
+function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }) {
   const { control, getValues } = useFormContext<TechCardFormData>();
   // materialId > 0 = this line is linked to a catalog Material: the material's own facts below render
   // as a read-only mirror instead of editable inputs (S23) so a hand-edit can no longer diverge from
@@ -207,21 +195,7 @@ function BomItemRow({
     techCardBomSectionOptions.find((o) => o.value === v)?.label ?? v ?? '';
 
   return (
-    <div className='space-y-3 border border-textInactiveColor p-3'>
-      <div className='flex items-center justify-between'>
-        <Text variant='uppercase' size='small'>
-          артикул {index + 1}
-        </Text>
-        <Button
-          type='button'
-          variant='secondary'
-          aria-label='remove BOM article'
-          onClick={onRemove}
-        >
-          ✕
-        </Button>
-      </div>
-
+    <div className='space-y-3'>
       <div className='grid grid-cols-1 gap-3 lg:grid-cols-3'>
         <MaterialLinkField index={index} />
         {linked ? (
@@ -356,6 +330,95 @@ function BomItemRow({
   );
 }
 
+// #33: one BOM article as a scannable TILE — a compact summary card (section badge · name ·
+// supplier / price / linked) that expands in place to the full editor. Owner's card/tile layout
+// preference; the old always-expanded stack was unusable with many materials. An expanded tile spans
+// the full grid width so the wide editor never gets crushed in a column.
+function BomTile({
+  index,
+  onRemove,
+  highlight,
+}: {
+  index: number;
+  onRemove: () => void;
+  highlight?: boolean;
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  const [open, setOpen] = useState(false);
+  const row = (useWatch({ control, name: `bomItems.${index}` }) ?? {}) as {
+    name?: string;
+    section?: string;
+    supplier?: string;
+    unitPrice?: string;
+    currency?: string;
+    materialId?: number;
+  };
+  // Open the tile when the labels tab deep-links here to fill a missing composition, so the pulsed
+  // field is actually visible (it lives inside the collapsed editor).
+  useEffect(() => {
+    if (highlight) setOpen(true);
+  }, [highlight]);
+
+  const sectionLabel =
+    techCardBomSectionOptions.find((o) => o.value === row.section)?.label ?? 'section?';
+  const linked = (row.materialId ?? 0) > 0;
+  const price = row.unitPrice?.trim();
+  const facts = [
+    row.supplier?.trim(),
+    price ? `${price}${row.currency?.trim() ? ` ${row.currency.trim()}` : ''}` : '',
+  ].filter(Boolean);
+
+  return (
+    <div
+      className={cn(
+        'border',
+        open && 'lg:col-span-2',
+        linked ? 'border-textInactiveColor' : 'border-error',
+      )}
+    >
+      <div className='flex items-start justify-between gap-2 p-3'>
+        <button
+          type='button'
+          onClick={() => setOpen((o) => !o)}
+          className='flex min-w-0 flex-1 items-center gap-3 text-left'
+          aria-expanded={open}
+        >
+          <span className='shrink-0 border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+            {sectionLabel}
+          </span>
+          <span className='min-w-0 flex-1'>
+            <Text className='truncate'>{row.name?.trim() || `артикул ${index + 1}`}</Text>
+            <Text
+              variant={linked ? 'inactive' : undefined}
+              size='small'
+              className={cn('truncate', !linked && 'text-error')}
+            >
+              {/* #64: an unlinked line is scannable on the collapsed tile — no need to expand to find it */}
+              {[...facts, linked ? '' : '! link a material'].filter(Boolean).join(' · ')}
+            </Text>
+          </span>
+          <Text variant='inactive' className='shrink-0'>
+            {open ? '▴' : '▾'}
+          </Text>
+        </button>
+        <Button
+          type='button'
+          variant='secondary'
+          aria-label='remove BOM article'
+          onClick={onRemove}
+        >
+          ✕
+        </Button>
+      </div>
+      {open && (
+        <div className='border-t border-textInactiveColor p-3'>
+          <BomItemRow index={index} highlight={highlight} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Bill of materials = catalog of all material articles used by this style. Recipe (which
 // article on which part, colour, consumption) lives per colourway on the colorways tab.
 export function BomField({ highlightComposition = 0 }: { highlightComposition?: number }) {
@@ -430,14 +493,16 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
           no BOM articles
         </Text>
       ) : (
-        fields.map((f, index) => (
-          <BomItemRow
-            key={f.id}
-            index={index}
-            onRemove={() => removeArticle(index)}
-            highlight={highlightActive && !bomWatch[index]?.composition?.trim()}
-          />
-        ))
+        <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+          {fields.map((f, index) => (
+            <BomTile
+              key={f.id}
+              index={index}
+              onRemove={() => removeArticle(index)}
+              highlight={highlightActive && !bomWatch[index]?.composition?.trim()}
+            />
+          ))}
+        </div>
       )}
 
       <Button

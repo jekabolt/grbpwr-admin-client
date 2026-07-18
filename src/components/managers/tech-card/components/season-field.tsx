@@ -8,13 +8,15 @@ import { FormLabel } from 'ui/form';
 
 type SeasonType = { code: string; label: string; short: boolean };
 
+// Every type here must fold to a real SeasonEnum in season-util's PREFIX_TO_ENUM, or the season
+// silently reverts to blank on reload (there is no HOLIDAY enum, so "Holiday" is intentionally
+// absent — see season-util.ts). SS/FW → SS/FW, Resort/Cruise → RC, Pre-Fall → PF.
 const SEASON_TYPES: SeasonType[] = [
   { code: 'SS', label: 'Spring / Summer', short: true },
   { code: 'FW', label: 'Fall / Winter', short: true },
   { code: 'Resort', label: 'Resort', short: false },
   { code: 'Pre-Fall', label: 'Pre-Fall', short: false },
   { code: 'Cruise', label: 'Cruise', short: false },
-  { code: 'Holiday', label: 'Holiday', short: false },
 ];
 
 // "SS25" for the short codes, "Resort 25" for the worded ones.
