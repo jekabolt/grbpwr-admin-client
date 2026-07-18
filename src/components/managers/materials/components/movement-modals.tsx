@@ -118,6 +118,9 @@ export function ReceiveStockModal({
   const [unitCost, setUnitCost] = useState('');
   const [currency, setCurrency] = useState('EUR');
   const [lot, setLot] = useState('');
+  // #48: "lot / roll" read as unexplained jargon ("не понимаю что это, для малого производства
+  // оверкил") — collapsed behind an opt-in toggle instead of an unconditional field.
+  const [showLot, setShowLot] = useState(false);
   const [supplierDoc, setSupplierDoc] = useState('');
   const [occurredAt, setOccurredAt] = useState(todayISO());
   const [comment, setComment] = useState('');
@@ -128,6 +131,7 @@ export function ReceiveStockModal({
     setUnitCost('');
     setCurrency('EUR');
     setLot('');
+    setShowLot(false);
     setSupplierDoc('');
     setOccurredAt(todayISO());
     setComment('');
@@ -202,18 +206,32 @@ export function ReceiveStockModal({
           Uncosted receipt — moving average unchanged.
         </Text>
       )}
-      <div className='grid grid-cols-2 gap-2'>
-        <Field label='lot / roll'>
-          <input className={cell} value={lot} onChange={(e) => setLot(e.target.value)} />
-        </Field>
-        <Field label='supplier doc'>
-          <input
-            className={cell}
-            value={supplierDoc}
-            onChange={(e) => setSupplierDoc(e.target.value)}
-          />
-        </Field>
-      </div>
+      <Field label='supplier doc'>
+        <input
+          className={cell}
+          value={supplierDoc}
+          onChange={(e) => setSupplierDoc(e.target.value)}
+        />
+      </Field>
+      {showLot ? (
+        <div className='flex flex-col gap-1'>
+          <Field label='lot / roll'>
+            <input className={cell} value={lot} onChange={(e) => setLot(e.target.value)} />
+          </Field>
+          <Text variant='inactive' size='small'>
+            Lots = incoming stock batches / receipts. Optional traceability — skip it for a small
+            run.
+          </Text>
+        </div>
+      ) : (
+        <button
+          type='button'
+          className='self-start text-small uppercase underline text-textInactiveColor'
+          onClick={() => setShowLot(true)}
+        >
+          + record lot / roll (optional)
+        </button>
+      )}
       <Field label='date'>
         <input
           className={cell}
@@ -426,21 +444,26 @@ export function IssueStockModal({
         />
       </Field>
       {lots.length > 0 ? (
-        <Field label='lot (optional)'>
-          <select
-            className={cell}
-            value={lotId || 0}
-            onChange={(e) => setLotId(Number(e.target.value) || 0)}
-          >
-            <option value={0}>— any / unspecified —</option>
-            {lots.map((l) => (
-              <option key={l.id} value={l.id ?? 0}>
-                {l.lotCode || `lot #${l.id}`} · rem {decimalToInput(l.remainingQty) || '0'}
-                {target.unit ? ` ${target.unit}` : ''}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <div className='flex flex-col gap-1'>
+          <Field label='lot (optional)'>
+            <select
+              className={cell}
+              value={lotId || 0}
+              onChange={(e) => setLotId(Number(e.target.value) || 0)}
+            >
+              <option value={0}>— any / unspecified —</option>
+              {lots.map((l) => (
+                <option key={l.id} value={l.id ?? 0}>
+                  {l.lotCode || `lot #${l.id}`} · rem {decimalToInput(l.remainingQty) || '0'}
+                  {target.unit ? ` ${target.unit}` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Text variant='inactive' size='small'>
+            Draw from one received batch for traceability — leave as "any" if you don't track lots.
+          </Text>
+        </div>
       ) : null}
       <Field label='comment'>
         <input className={cell} value={comment} onChange={(e) => setComment(e.target.value)} />

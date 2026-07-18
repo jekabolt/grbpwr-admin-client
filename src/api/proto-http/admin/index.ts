@@ -1313,6 +1313,15 @@ export type common_PromoCodeInsert = {
 export type AddPromoResponse = {
 };
 
+export type UpdatePromoCodeRequest = {
+  // The promo to update, identified by promo.code. The mutable fields are replaced in place; the
+  // row's id and any usage/creation data are preserved (no delete+recreate).
+  promo: common_PromoCodeInsert | undefined;
+};
+
+export type UpdatePromoCodeResponse = {
+};
+
 export type ListPromosRequest = {
   limit: number | undefined;
   offset: number | undefined;
@@ -1379,6 +1388,12 @@ export type common_Order = {
   refundReason: string | undefined;
   orderComment: string | undefined;
   refundedAmount: googletype_Decimal | undefined;
+  // Buyer identity for the order-list projection: populated by the paged ListOrders query (which
+  // already joins buyer), so the admin orders list shows who placed the order instead of a raw UUID.
+  // Empty on read paths that don't project the buyer — OrderFull carries a full Buyer message instead.
+  buyerEmail: string | undefined;
+  buyerFirstName: string | undefined;
+  buyerLastName: string | undefined;
 };
 
 export type common_OrderItem = {
@@ -5737,6 +5752,21 @@ export type common_AdminColorwayRef = {
   // fields (line_total/size_run_total) are stripped for an account without costing:read, same as
   // the rest of the tech-card read (stripTechCardCosting).
   usages: common_TechCardColorwayUsage[] | undefined;
+  // Lab-dip lifecycle mirrored from the colourway's development submessage (ColorwayDevelopmentInsert),
+  // so the tech-card colourways tab can READ the current lab-dip state inline instead of a second
+  // GetColorwayByID round-trip. These are written through the Colorway write path (UpdateColorway's
+  // development.*), never through the style; here they are output-only.
+  labDipStatus: common_TechCardLabDipStatus | undefined;
+  labDipRound: number | undefined;
+  labDipSubmittedAt: wellKnownTimestamp | undefined;
+  labDipDecidedAt: wellKnownTimestamp | undefined;
+  labDipDecidedBy: string | undefined;
+  labDipRejectReason: string | undefined;
+  // lock_version is the colourway's optimistic-lock token — its style's shared tech_card.lock_version
+  // (R2/R4). Echo it into UpdateColorwayRequest.expected_colorway_version; a stale value is rejected
+  // (ABORTED). Surfaced on the ref so a per-colourway lab-dip edit is optimistically locked straight
+  // from here, without the caller reaching up to the tech-card's top-level lock_version.
+  lockVersion: number | undefined;
 };
 
 // CompositionEntry is one fibre share of a style's structured composition (S17), resolved with its
@@ -6903,6 +6933,11 @@ export interface AdminService {
   SetCountryActive(request: SetCountryActiveRequest): Promise<SetCountryActiveResponse>;
   // Adds a new promotional code
   AddPromo(request: AddPromoRequest): Promise<AddPromoResponse>;
+  // Updates an existing promotional code in place — the mutable fields (free_shipping, discount,
+  // expiration, start, voucher and the `allowed` on/off toggle), identified by promo.code — without
+  // the delete+recreate that drops the row's identity and history. Re-enables a disabled code by
+  // sending allowed=true.
+  UpdatePromoCode(request: UpdatePromoCodeRequest): Promise<UpdatePromoCodeResponse>;
   // Lists all promotional codes
   ListPromos(request: ListPromosRequest): Promise<ListPromosResponse>;
   // Deletes a specific promotional code
@@ -8331,6 +8366,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AddPromo",
       }) as Promise<AddPromoResponse>;
+    },
+    UpdatePromoCode(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/promo/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdatePromoCode",
+      }) as Promise<UpdatePromoCodeResponse>;
     },
     ListPromos(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/promo/list`; // eslint-disable-line quotes

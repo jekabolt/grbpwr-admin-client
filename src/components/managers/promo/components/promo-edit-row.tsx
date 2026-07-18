@@ -18,8 +18,10 @@ type Props = {
  * H8: inline edit for an existing promo code (discount / dates / free shipping /
  * voucher / code itself), pre-filled by the caller. Previously the only way to fix
  * a typo'd discount or extend an expiration was deleting and recreating the code
- * by hand. Submits through usePromo's submitEdit, which recreates the code under
- * the hood (no UpdatePromoCode RPC exists) — see useUpdatePromo.
+ * by hand. Submits through usePromo's submitEdit, which now calls the atomic
+ * UpdatePromoCode RPC — see useUpdatePromo. Note: that RPC looks the row up by
+ * promo.code and only mutates the other fields, so changing the Code input itself
+ * isn't a supported rename — it looks up a row under the new code and finds none.
  */
 export function PromoEditRow({ form, onSubmit, onCancel, allowed }: Props) {
   return (
