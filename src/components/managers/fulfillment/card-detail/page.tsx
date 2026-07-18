@@ -16,11 +16,11 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
 import { FulfillmentAnnotation } from '../components/fulfillment-annotation';
-import { ShipModal } from '../components/ship-modal';
+import { ShipLabelModal } from '../components/ship-label-modal';
 import {
   useFulfillmentCard,
   useMarkFulfillmentDelivered,
-  useShipFulfillmentOrder,
+  useShippingLabelPrep,
 } from '../hooks/useFulfillment';
 import { columnFromStatusName, COLUMN_ACTION, COLUMN_LABEL, formatMoney } from '../utils/meta';
 
@@ -68,10 +68,18 @@ export function FulfillmentCardDetail() {
 
   const { data, isLoading, isError } = useFulfillmentCard(uuid ?? null);
 
-  const ship = useShipFulfillmentOrder();
   const deliver = useMarkFulfillmentDelivered();
   const [shipping, setShipping] = useState(false);
   const [delivering, setDelivering] = useState(false);
+
+  // Reprint/void access for an already-shipped order. Read-only; only fires once
+  // the order is shipped (a to-fulfill order has no label yet — the ship modal
+  // prepares it on demand). Shares the label cache with the modal.
+  const isShipped =
+    columnFromStatusName(getOrderStatusName(dictionary, data?.order?.order?.orderStatusId)) ===
+    'FULFILLMENT_COLUMN_SHIPPED';
+  const labelInfo = useShippingLabelPrep(uuid ?? null, isShipped);
+  const hasExistingLabel = !!labelInfo.data?.labelUrl;
 
   if (!canView) {
     return (
@@ -122,11 +130,6 @@ export function FulfillmentCardDetail() {
   const action = COLUMN_ACTION[column];
   const trackingCode = order.shipment?.trackingCode;
 
-  function confirmShip(trackingCode: string) {
-    if (!uuid) return;
-    ship.mutate({ orderUuid: uuid, trackingCode }, { onSuccess: () => setShipping(false) });
-  }
-
   function confirmDeliver() {
     if (!uuid || deliver.isPending) return;
     deliver.mutate(uuid, { onSuccess: () => setDelivering(false) });
@@ -169,14 +172,13 @@ export function FulfillmentCardDetail() {
               </Button>
             )}
             {canWrite && action === 'ship' && (
-              <Button
-                variant='main'
-                size='lg'
-                loading={ship.isPending}
-                disabled={ship.isPending}
-                onClick={() => setShipping(true)}
-              >
+              <Button variant='main' size='lg' onClick={() => setShipping(true)}>
                 ship
+              </Button>
+            )}
+            {canWrite && action === 'deliver' && hasExistingLabel && (
+              <Button variant='secondary' size='lg' onClick={() => setShipping(true)}>
+                shipping label
               </Button>
             )}
             {canWrite && action === 'deliver' && (
@@ -252,12 +254,11 @@ export function FulfillmentCardDetail() {
         </aside>
       </div>
 
-      <ShipModal
+      <ShipLabelModal
         open={shipping}
         onOpenChange={setShipping}
+        orderUuid={uuid ?? null}
         orderLabel={`#${o?.id ?? ''}`}
-        saving={ship.isPending}
-        onConfirm={confirmShip}
       />
 
       <ConfirmationModal

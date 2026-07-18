@@ -78,6 +78,14 @@ export function CarePicker({
     .map((s) => s.trim())
     .filter(Boolean);
 
+  // Legacy free-text care value (pre-ISO-code data) that parseSelected can't match to any known
+  // code: the modal would otherwise open looking empty, and the operator's first pick silently
+  // overwrites this text with no warning. Surface it as a note while it's still the stored value —
+  // it disappears on its own once a real pick is written (the value then parses again).
+  const trimmedValue = value.trim();
+  const legacyValue =
+    trimmedValue && Object.keys(parseSelected(value)).length === 0 ? trimmedValue : undefined;
+
   const write = (next: SelectedInstructions) =>
     setValue(name, Object.values(next).join(','), { shouldDirty: true, shouldValidate: true });
 
@@ -109,7 +117,7 @@ export function CarePicker({
         <div className='flex flex-1 flex-wrap items-center gap-1 py-1'>
           {codes.length === 0 ? (
             <Text variant='inactive' size='small'>
-              — не выбрано —
+              — none selected —
             </Text>
           ) : (
             codes.map((code) => {
@@ -142,7 +150,7 @@ export function CarePicker({
               onClick={openModal}
               className='px-2 py-1 text-textBaseSize uppercase'
             >
-              выбрать
+              select
             </Button>
           </div>
         )}
@@ -152,6 +160,7 @@ export function CarePicker({
         close={() => setOpen(false)}
         onSelectCareInstruction={onSelect}
         selectedInstructions={selected}
+        legacyValue={legacyValue}
       />
     </div>
   );

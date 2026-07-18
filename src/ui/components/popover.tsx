@@ -69,9 +69,11 @@ function PopoverContent({
         side='bottom'
         align='center'
         className={cn(
-          'relative z-20 w-full space-y-10 border border-textInactiveColor bg-bgColor px-2.5',
+          // flex column: an in-flow title bar that stays put + a single scroll region below it.
+          // (Was a position:fixed header that detached from the card and stretched full-viewport
+          // width — the "поехавшая вёрстка".)
+          'relative z-20 flex w-full flex-col border border-textInactiveColor bg-bgColor px-2.5 py-2.5',
           {
-            'space-y-16': gap === 'large',
             'border-none': variant === 'no-borders',
           },
           className,
@@ -81,19 +83,16 @@ function PopoverContent({
         {title && (
           <Popover.Close
             className={cn(
-              'fixed left-2 right-2 top-2.5 bg-bgColor',
-              'appearance-none border-0 outline-none focus:outline-none',
+              'flex shrink-0 appearance-none items-center justify-between border-0 bg-bgColor outline-none focus:outline-none',
+              gap === 'large' ? 'mb-16' : 'mb-10',
             )}
           >
-            <div className='flex items-center justify-between'>
-              <Text variant='uppercase'>{title}</Text>
-              <Text>[x]</Text>
-            </div>
+            <Text variant='uppercase'>{title}</Text>
+            <Text>[x]</Text>
           </Popover.Close>
         )}
-        <div className='relative max-h-[50vh] overflow-y-scroll'>
-          <div className='sticky top-0'>{children}</div>
-        </div>
+        {/* single scroll owner — children keep their own internal spacing */}
+        <div className='max-h-[50vh] min-h-0 overflow-y-auto'>{children}</div>
       </Popover.Content>
     </Popover.Portal>
   );

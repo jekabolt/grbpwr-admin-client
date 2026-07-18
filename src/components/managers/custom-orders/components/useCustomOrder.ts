@@ -1,13 +1,13 @@
 import { adminService } from 'api/api';
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { useCallback, useEffect, useState } from 'react';
 
 const LIMIT = 50;
 
 export function useCustomOrder() {
-  const [products, setProducts] = useState<common_Product[]>([]);
+  const [products, setProducts] = useState<common_Colorway[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedProducts, setSelectedProducts] = useState<common_Product[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<common_Colorway[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -17,22 +17,22 @@ export function useCustomOrder() {
     const fetchProducts = async () => {
       setIsLoading(true);
       try {
-        const response = await adminService.GetProductsPaged({
+        const response = await adminService.GetColorwaysPaged({
           limit: LIMIT,
           offset,
           sortFactors: ['SORT_FACTOR_CREATED_AT'],
           orderFactor: 'ORDER_FACTOR_DESC',
           filterConditions: undefined,
-          showHidden: true,
+          statuses: undefined,
         });
-        if (Array.isArray(response.products)) {
-          const newProducts = response.products || [];
+        if (Array.isArray(response.colorways)) {
+          const newProducts = response.colorways || [];
           if (newProducts.length < LIMIT) {
             setHasMore(false);
           }
           setProducts((prevProducts) => {
             const combinedProducts = [...prevProducts, ...newProducts];
-            const uniqueProducts = combinedProducts.reduce<common_Product[]>((acc, current) => {
+            const uniqueProducts = combinedProducts.reduce<common_Colorway[]>((acc, current) => {
               if (!acc.find((product) => product.id === current.id)) {
                 acc.push(current);
               }
@@ -60,7 +60,7 @@ export function useCustomOrder() {
     setSelectedProducts([]);
   }, []);
 
-  const handleSaveProducts = useCallback((products: common_Product[]) => {
+  const handleSaveProducts = useCallback((products: common_Colorway[]) => {
     setSelectedProducts(products);
   }, []);
 

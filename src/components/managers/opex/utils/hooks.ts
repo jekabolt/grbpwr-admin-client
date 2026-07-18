@@ -62,3 +62,14 @@ export function useArchiveOpexRecurring() {
     onSuccess: () => qc.invalidateQueries({ queryKey: opexKeys.all }),
   });
 }
+
+// Manual costing FX rates — the same rates the backend folds OPEX amounts to base with. The wizard
+// reads them only to preview the base-currency value and warn when a chosen currency has no rate
+// (the line would be booked "uncosted"). Cached broadly; only fetched while a form needs it.
+export function useCostingFxRates(enabled = true) {
+  return useQuery({
+    queryKey: ['costingFxRates'],
+    queryFn: () => adminService.GetCostingFxRates({}),
+    enabled,
+  });
+}

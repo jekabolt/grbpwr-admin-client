@@ -1,6 +1,8 @@
 import { common_SupportTicket } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { Filter } from './filter';
@@ -80,7 +82,19 @@ export function TicketsTable({
         {
           key: 'orderRef',
           label: 'Order Ref',
-          accessor: (t: common_SupportTicket) => t.supportTicketInsert?.orderReference,
+          accessor: (t: common_SupportTicket) => {
+            const ref = t.supportTicketInsert?.orderReference;
+            if (!ref) return '-';
+            return (
+              <Link
+                to={`${ROUTES.orders}?ref=${encodeURIComponent(ref)}`}
+                onClick={(e) => e.stopPropagation()}
+                className='underline underline-offset-2 hover:opacity-70'
+              >
+                {ref}
+              </Link>
+            );
+          },
         },
         {
           key: 'category',

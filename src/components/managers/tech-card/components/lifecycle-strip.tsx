@@ -8,10 +8,11 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { useSamples } from './useSamples';
 
-// Lifecycle spine (screen D / R-7 / R-8). A hub strip under the tech-card header: a stage stepper
-// (informs + jumps stage, never gates), a row of counters that link to the samples tab / fittings
-// block / runs list, a data-derived "next:" hint, and quick actions for the next flow step. Counts
-// come from already-cheap, cached queries — the spine adds no heavy fetches.
+// Lifecycle spine (screen D / R-7 / R-8). A hub strip under the tech-card header: a read-only stage
+// stepper (a progress display — stage/approval are edited in the header selects it used to
+// duplicate), a row of counters that link to the samples tab / fittings block / runs list, and the
+// stage's single next-step action (its rationale in the button tooltip). Counts come from
+// already-cheap, cached queries — the spine adds no heavy fetches.
 
 const SPINE_STAGES: { value: common_TechCardStage; label: string }[] = [
   { value: 'TECH_CARD_STAGE_IDEA', label: 'idea' },
@@ -21,6 +22,30 @@ const SPINE_STAGES: { value: common_TechCardStage; label: string }[] = [
   { value: 'TECH_CARD_STAGE_PP', label: 'pp' },
   { value: 'TECH_CARD_STAGE_PROD', label: 'prod' },
 ];
+
+// The quick actions that actually matter at each stage, primary first: early stages don't plan
+// production runs, late stages don't book fittings. The strip surfaces only the ONE next step,
+// instead of parking all three buttons on every card (screen D clutter).
+type ActionKey = 'sample' | 'fitting' | 'run';
+
+function stageActions(stage: string, samplesCount: number): ActionKey[] {
+  switch (stage) {
+    case 'TECH_CARD_STAGE_IDEA':
+      return ['sample'];
+    case 'TECH_CARD_STAGE_PROTO':
+      return samplesCount === 0 ? ['sample', 'fitting'] : ['fitting', 'sample'];
+    case 'TECH_CARD_STAGE_FIT':
+      return ['fitting', 'sample'];
+    case 'TECH_CARD_STAGE_SMS':
+      return ['sample'];
+    case 'TECH_CARD_STAGE_PP':
+      return ['sample', 'run'];
+    case 'TECH_CARD_STAGE_PROD':
+      return ['run'];
+    default:
+      return ['sample'];
+  }
+}
 
 function nextHint(
   stage: string,
@@ -61,12 +86,10 @@ export function LifecycleStrip({
   stage,
   approvalState,
   productCount,
-  frozen,
   canEdit,
   unsaved,
   planRunDisabled,
   planRunDisabledReason,
-  onStageChange,
   onGoSamples,
   onAddSample,
   onGoFittings,
@@ -75,14 +98,12 @@ export function LifecycleStrip({
   stage: string;
   approvalState: string;
   productCount: number;
-  frozen: boolean;
   canEdit: boolean;
-  // The stepper writes stage into the FORM — flag it so a clicked stage doesn't read as
-  // already persisted next to the server-derived counters.
+  // Stage is edited via the header select; the displayed stage can be an unsaved form value, so
+  // flag it — the stepper reads as "not yet persisted" next to the server-derived counters.
   unsaved?: boolean;
   planRunDisabled?: boolean;
   planRunDisabledReason?: string;
-  onStageChange: (stage: common_TechCardStage) => void;
   onGoSamples: () => void;
   onAddSample: () => void;
   onGoFittings: (unresolvedOnly: boolean) => void;
@@ -106,30 +127,92 @@ export function LifecycleStrip({
   const approvalLabel =
     techCardApprovalStateOptions.find((o) => o.value === approvalState)?.label ?? '—';
   const hint = nextHint(stage, samplesCount, fittingList, runsCount, unresolved);
+  const actions = canEdit ? stageActions(stage, samplesCount) : [];
+
+  // The stage's single next step — one solid primary button. Its rationale (the former inline
+  // "next: …" sentence) rides in the tooltip, so the strip stays quiet while the action is one click
+  // away. A disabled plan-run keeps its own reason in the tooltip instead.
+  const renderAction = (key: ActionKey, title?: string) => {
+    if (key === 'sample') {
+      return (
+        <Button
+          key='sample'
+          type='button'
+          variant='secondary'
+          size='lg'
+          className='uppercase'
+          title={title}
+          onClick={onAddSample}
+        >
+          + sample
+        </Button>
+      );
+    }
+    if (key === 'fitting') {
+      return (
+        <Button
+          key='fitting'
+          asChild
+          variant='secondary'
+          size='lg'
+          className='uppercase'
+          title={title}
+        >
+          <Link
+            to={`${ROUTES.addFitting}?techCardId=${techCardId}&returnTo=${encodeURIComponent(
+              returnTo,
+            )}`}
+          >
+            + fitting
+          </Link>
+        </Button>
+      );
+    }
+    if (planRunDisabled) {
+      return (
+        <Button
+          key='run'
+          type='button'
+          variant='secondary'
+          size='lg'
+          className='uppercase'
+          disabled
+          title={planRunDisabledReason}
+        >
+          plan run
+        </Button>
+      );
+    }
+    return (
+      <Button key='run' asChild variant='secondary' size='lg' className='uppercase' title={title}>
+        <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>plan run</Link>
+      </Button>
+    );
+  };
 
   const counter = 'text-textInactiveColor underline hover:text-textColor';
 
   return (
     <div className='-mx-2.5 flex flex-col gap-1.5 border-b border-textInactiveColor bg-bgColor px-2.5 py-2'>
-      {/* Stage stepper — current stage boxed, click = set stage (a duplicate of the header field). */}
+      {/* Stage stepper — a READ-ONLY progress display of where the card sits in its lifecycle.
+          Stage/approval are edited in the header selects (which write the form); this only reflects
+          them, so it no longer duplicates that control. */}
       <div className='flex flex-wrap items-center gap-1'>
         {SPINE_STAGES.map((s, i) => {
           const active = s.value === stage;
           return (
             <div key={s.value} className='flex items-center'>
               {i > 0 && <span className='mx-0.5 text-textInactiveColor'>─</span>}
-              <button
-                type='button'
-                disabled={!canEdit || frozen}
-                onClick={() => onStageChange(s.value)}
-                className={`border px-2 py-0.5 text-textBaseSize uppercase transition-colors ${
+              <span
+                aria-current={active ? 'step' : undefined}
+                className={`border px-2 py-0.5 text-textBaseSize uppercase ${
                   active
                     ? 'border-textColor text-textColor'
-                    : 'border-transparent text-textInactiveColor hover:text-textColor disabled:hover:text-textInactiveColor'
+                    : 'border-transparent text-textInactiveColor'
                 }`}
               >
                 {s.label}
-              </button>
+              </span>
             </div>
           );
         })}
@@ -173,54 +256,11 @@ export function LifecycleStrip({
         </Text>
       </div>
 
-      {/* next-hint + quick actions — the next flow step is always one click from the hub. */}
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        {hint ? (
-          <Text variant='inactive' size='small'>
-            next: {hint}
-          </Text>
-        ) : (
-          <span />
-        )}
-        {canEdit && (
-          <div className='flex flex-wrap items-center gap-2'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={onAddSample}
-            >
-              + sample
-            </Button>
-            <Button asChild variant='secondary' size='lg' className='uppercase'>
-              <Link
-                to={`${ROUTES.addFitting}?techCardId=${techCardId}&returnTo=${encodeURIComponent(
-                  returnTo,
-                )}`}
-              >
-                + fitting
-              </Link>
-            </Button>
-            {planRunDisabled ? (
-              <Button
-                type='button'
-                variant='secondary'
-                size='lg'
-                className='uppercase'
-                disabled
-                title={planRunDisabledReason}
-              >
-                plan run
-              </Button>
-            ) : (
-              <Button asChild variant='secondary' size='lg' className='uppercase'>
-                <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>plan run</Link>
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
+      {/* The stage's single next step. The former always-on "next: …" sentence is demoted to this
+          button's tooltip, so the strip stays quiet while the action stays one click away. */}
+      {actions.length > 0 && (
+        <div className='flex justify-end'>{renderAction(actions[0], hint)}</div>
+      )}
     </div>
   );
 }

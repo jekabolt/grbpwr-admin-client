@@ -18,7 +18,9 @@ const CHIP_PARAM_KEYS = [
   'size',
   'sale',
   'preorder',
+  'status',
   'hidden',
+  'archived',
   'tag',
   'from',
   'to',
@@ -73,8 +75,20 @@ export function ActiveFilters() {
   if (get('preorder') === 'true') {
     chips.push({ key: 'preorder', label: 'preorder', remove: () => removeKeys(['preorder']) });
   }
-  if (get('hidden') === 'false') {
-    chips.push({ key: 'hidden', label: 'hidden excluded', remove: () => removeKeys(['hidden']) });
+  const status = get('status');
+  if (status) {
+    chips.push({ key: 'status', label: `${status} only`, remove: () => removeKeys(['status']) });
+  }
+  // Legacy params (superseded by `status`, kept for old links).
+  if (!status && get('hidden') === 'false') {
+    chips.push({ key: 'hidden', label: 'active only', remove: () => removeKeys(['hidden']) });
+  }
+  if (!status && get('archived') === 'true') {
+    chips.push({
+      key: 'archived',
+      label: 'archived only',
+      remove: () => removeKeys(['archived']),
+    });
   }
 
   const tag = get('tag');

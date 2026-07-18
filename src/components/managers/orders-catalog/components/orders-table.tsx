@@ -3,6 +3,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Text from 'ui/components/text';
 import { useInfiniteOrders } from './useOrdersQuery';
 import { formatDateShort, getOrderStatusName, getStatusColor } from './utility';
@@ -62,6 +63,15 @@ export function OrdersTable({ orders, orderFactor, isLoading, onToggleSort }: Or
           ) : (
             orders.map((o) => {
               const statusName = getOrderStatusName(dictionary, o.orderStatusId);
+              // common_Order now projects the buyer identity onto ListOrders rows (buyerEmail /
+              // buyerFirstName / buyerLastName) so the operator can see who placed the order
+              // without opening it. Either half can be empty (guest / legacy orders) — fall back
+              // gracefully by only rendering the pieces that are actually present.
+              const buyerName = [o.buyerFirstName, o.buyerLastName]
+                .map((s) => s?.trim())
+                .filter(Boolean)
+                .join(' ');
+              const buyerEmail = o.buyerEmail?.trim();
               return (
                 <tr
                   key={o.id}
@@ -69,7 +79,27 @@ export function OrdersTable({ orders, orderFactor, isLoading, onToggleSort }: Or
                   onClick={() => handleRowClick(o)}
                 >
                   <td className='sticky left-0 z-10 border border-textInactiveColor bg-bgColor px-2 text-center group-hover:bg-highlightColor/20'>
-                    <Text>{o.uuid}</Text>
+                    <Text>#{o.id ?? ''}</Text>
+                    {buyerName || buyerEmail ? (
+                      <div
+                        className='mx-auto mt-0.5 max-w-32 truncate'
+                        title={[buyerName, buyerEmail].filter(Boolean).join(' · ')}
+                      >
+                        {buyerName ? (
+                          <Text size='small' className='truncate'>
+                            {buyerName}
+                          </Text>
+                        ) : null}
+                        {buyerEmail ? (
+                          <Text size='small' variant='inactive' className='truncate'>
+                            {buyerEmail}
+                          </Text>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div onClick={(e) => e.stopPropagation()} className='flex justify-center'>
+                      <CopyToClipboard text={o.uuid || ''} cutText />
+                    </div>
                   </td>
                   <td className='border border-textInactiveColor px-2 text-center'>
                     <span className={cn('inline-block px-1.5 py-0.5', getStatusColor(statusName))}>

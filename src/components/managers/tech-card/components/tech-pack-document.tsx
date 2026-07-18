@@ -1,6 +1,20 @@
-import { common_MediaFull, common_TechCard, googletype_Decimal } from 'api/proto-http/admin';
+import { useQuery } from '@tanstack/react-query';
+import { adminService } from 'api/api';
+import {
+  common_AdminColorwayRef,
+  common_Category,
+  common_Color,
+  common_MediaFull,
+  common_TechCard,
+  common_TechCardReleaseMeta,
+  googletype_Decimal,
+  PackagingRecipeLine,
+  StyleAssemblyLine,
+} from 'api/proto-http/admin';
+import { formatCompositionEntries } from './composition-entries';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
+import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
 import {
   approvalStateLabel,
   formatTechCardDate,
@@ -12,7 +26,6 @@ import {
   techCardGenderOptions,
   techCardIssueSeverityOptions,
   techCardIssueStatusOptions,
-  techCardLabDipStatusOptions,
   techCardLabelTypeOptions,
   techCardMeasurementUnitOptions,
   techCardMediaKindOptions,
@@ -27,6 +40,7 @@ import { decimalToInput } from 'utils/decimal';
 import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
+import { useTechCardReleases } from './useSamples';
 
 const mapOf = (opts: ReadonlyArray<{ value: string; label: string }>) =>
   Object.fromEntries(opts.map((o) => [o.value, o.label])) as Record<string, string>;
@@ -36,12 +50,18 @@ const unitL = mapOf(techCardMeasurementUnitOptions);
 const mediaKindL = mapOf(techCardMediaKindOptions);
 const bomSectionL = mapOf(techCardBomSectionOptions);
 const fabricDirL = mapOf(techCardFabricDirectionOptions);
-const labDipL = mapOf(techCardLabDipStatusOptions);
 const labelTypeL = mapOf(techCardLabelTypeOptions);
 const issueSevL = mapOf(techCardIssueSeverityOptions);
 const issueStatusL = mapOf(techCardIssueStatusOptions);
 const signoffSectionL = mapOf(techCardSignoffSectionOptions);
 const signoffStateL = mapOf(techCardSignoffStateOptions);
+
+// No shared option list for these two (colourway lifecycle / aux subtype) — strip the enum
+// prefix for a compact print label, same convention as the maps above.
+const enumLabel = (v: string | undefined, prefix: string): string =>
+  v && v !== `${prefix}UNKNOWN` ? v.replace(prefix, '').replace(/_/g, ' ').toLowerCase() : '';
+const lifecycleLabel = (v?: string) => enumLabel(v, 'COLORWAY_LIFECYCLE_STATUS_');
+const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
 const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
@@ -77,11 +97,23 @@ function KV({ k, v }: { k: string; v?: ReactNode }) {
 // Full printable tech-pack document for one tech card. Pure presentational — reads the
 // loaded card (server truth, so save before exporting). Self-contained black-on-white so
 // it prints/PDFs identically regardless of the app theme. See print-page for the @media
-// print isolation that hides app chrome.
-export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
+// print isolation that hides app chrome. `assembly` (on-garment items) and `packagingRecipe`
+// are fetched by the caller (print-page) — separate per-style RPCs, not part of GetTechCard.
+export function TechPackDocument({
+  techCard,
+  assembly = [],
+  packagingRecipe = [],
+}: {
+  techCard: common_TechCard;
+  assembly?: StyleAssemblyLine[];
+  packagingRecipe?: PackagingRecipeLine[];
+}) {
   const tc = techCard.techCard;
   const { dictionary } = useDictionary();
   const { data: models } = useAllModels();
+  // Rev.N (task: header proof-of-version) — techCard.id === styleId (R1), same call ReleasesField
+  // already makes; free once the constructor tab warmed the cache.
+  const { data: releasesData } = useTechCardReleases(techCard.id);
 
   const sizeById = useMemo(() => {
     const m = new Map<number, string>();
@@ -114,18 +146,96 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
   const libraryMap = useMediaMap();
   const resolveMedia = (id: number) => mediaById.get(id) ?? libraryMap.get(id);
 
+  // Size/measurement grading chart (task: point-of-measure table never printed). Walk the stored
+  // leaf category up to {top, sub, type} — same derivation SizeChartField uses — so the columns
+  // resolve exactly as the live editor's grid did.
+  const catPath = useMemo(() => {
+    const byId = new Map<number, common_Category>();
+    for (const c of dictionary?.categories ?? []) if (c.id != null) byId.set(c.id, c);
+    const out = { top: 0, sub: 0, type: 0 };
+    let cur = tc?.categoryId ? byId.get(tc.categoryId) : undefined;
+    let guard = 0;
+    while (cur && guard++ < 8) {
+      if (cur.level === 'top_category') out.top = cur.id ?? 0;
+      else if (cur.level === 'sub_category') out.sub = cur.id ?? 0;
+      else out.type = cur.id ?? 0;
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+    return out;
+  }, [dictionary?.categories, tc?.categoryId]);
+  const { measurements } = useMeasurements(dictionary, catPath.top, catPath.sub, catPath.type);
+  const { data: sizeChartData } = useQuery({
+    queryKey: ['styleSizeChart', techCard.id],
+    queryFn: () => adminService.GetStyleSizeChart({ styleId: techCard.id ?? 0 }),
+    enabled: !!techCard.id,
+  });
+  const chartCellByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of sizeChartData?.chart?.cells ?? []) {
+      if (c.sizeId == null || c.measurementNameId == null) continue;
+      m.set(`${c.sizeId}:${c.measurementNameId}`, c.value?.value ?? '');
+    }
+    return m;
+  }, [sizeChartData]);
+
+  const colorByCode = useMemo(() => {
+    const m = new Map<string, common_Color>();
+    for (const c of dictionary?.colors ?? []) if (c.code) m.set(c.code, c);
+    return m;
+  }, [dictionary?.colors]);
+
   if (!tc) return null;
 
-  // `constructor` is an Object.prototype key — when the backend omits it, tc.constructor is
-  // the Object constructor function, not a string. Guard so React never renders a function.
-  const patternMaker = typeof tc.constructor === 'string' ? tc.constructor : '';
+  // Responsible people come from the role-assignment table now (Q5), not free-text header fields.
+  const roleNames = (role: string) =>
+    (techCard.roleAssignments ?? [])
+      .filter((a) => a.role === role)
+      .map((a) => a.adminUsername || `#${a.adminId}`)
+      .join(', ') || '—';
+  const designer = roleNames('TECH_CARD_ROLE_DESIGNER');
+  const patternMaker = roleNames('TECH_CARD_ROLE_PATTERN_MAKER');
+  const technologist = roleNames('TECH_CARD_ROLE_TECHNOLOGIST');
+  const approver = roleNames('TECH_CARD_ROLE_APPROVER');
   const sizeName = (id?: number) => (id ? sizeById.get(id) ?? `#${id}` : '—');
   const unitAbbr = tc.measurementUnit === 'TECH_CARD_MEASUREMENT_UNIT_MM' ? 'mm' : 'cm';
   const sizeIds = tc.sizeIds ?? [];
-  const colorways = tc.colorways ?? [];
+  // The live colourway data — this is the actual fix for #71/M10: previously hardcoded to `[]`,
+  // so the colourways sheet and per-colourway cost labels below never rendered for any card.
+  const colorways = techCard.colorways ?? [];
+  const colorwayLabel = (cw?: common_AdminColorwayRef): string => {
+    if (!cw) return '—';
+    const dc = cw.colorCode ? colorByCode.get(cw.colorCode) : undefined;
+    return (
+      dc?.name?.trim() || cw.colorCode?.trim() || cw.baseSku?.trim() || `#${cw.colorwayId ?? ''}`
+    );
+  };
+  const bomLabel = (idx?: number): string =>
+    idx != null && idx >= 0 ? (tc.bomItems ?? [])[idx]?.name || '' : '';
+  // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
+  const latestRelease = (releasesData?.releases ?? []).reduce<
+    common_TechCardReleaseMeta | undefined
+  >(
+    (best, r) => (best == null || (r.releaseNumber ?? 0) > (best.releaseNumber ?? 0) ? r : best),
+    undefined,
+  );
   const captionById = new Map<number, { caption?: string; kind?: string }>();
   for (const m of [...(tc.technicalMedia ?? []), ...(tc.moodboardMedia ?? [])])
     if (m.mediaId != null) captionById.set(m.mediaId, { caption: m.caption, kind: m.kind });
+
+  // #71 root cause: on-garment assembly (labels/tags attached to the garment) and the packaging
+  // recipe (materials consumed on ship) each live behind their own per-style RPC that neither
+  // this component nor the print route ever called — printing only inactive/disabled lines would
+  // misstate the spec, so both are filtered to active before rendering.
+  const activeAssembly = assembly.filter((a) => a.active !== false);
+  const activePackaging = packagingRecipe.filter((p) => p.active !== false);
+  // Mirrors PackagingRecipeField's own resolution: this style's active lines if it has any,
+  // else the global fallback it would inherit at order time.
+  const stylePackaging = activePackaging.filter(
+    (p) => p.scope === 'style' && p.techCardId === techCard.id,
+  );
+  const globalPackaging = activePackaging.filter((p) => p.scope === 'global');
+  const packagingRows = stylePackaging.length > 0 ? stylePackaging : globalPackaging;
+  const packagingIsFallback = stylePackaging.length === 0 && globalPackaging.length > 0;
 
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
@@ -144,16 +254,19 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               <div className='text-sm'>
                 style <span className='font-semibold'>{tc.styleNumber || '—'}</span>
                 {tc.collection ? ` · ${tc.collection}` : ''}
-                {tc.season ? ` · ${tc.season}` : ''}
+                {/* TODO(final-bump): season no longer on TechCardInsert (moved to skuSeason). */}
               </div>
             </div>
           </div>
           <div className='text-right text-[11px] leading-tight'>
             <div className='font-semibold uppercase'>{stageLabel(tc.stage)}</div>
             <div>{approvalStateLabel(tc.approvalState)}</div>
-            <div className='text-labelColor'>
-              v{tc.version || '—'} · {formatTechCardDate(techCard.updatedAt)}
+            {/* Proof of which frozen snapshot (if any) this printout matches — so a printed
+                copy is never mistaken for a newer/older edit. */}
+            <div className='font-semibold'>
+              {latestRelease ? `Rev.${latestRelease.releaseNumber ?? '—'}` : 'unreleased'}
             </div>
+            <div className='text-labelColor'>{formatTechCardDate(techCard.updatedAt)}</div>
           </div>
         </div>
       </header>
@@ -166,12 +279,16 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
           <KV k='sample size' v={sizeName(tc.baseSampleSizeId)} />
           <KV k='measurement unit' v={unitL[tc.measurementUnit ?? ''] ?? unitAbbr} />
           <KV k='size range' v={sizeIds.map(sizeName).join(', ')} />
+          {/* structured fibre composition (S17/M1 typed composition_entries); omitted when empty */}
+          {has(techCard.compositionEntries) && (
+            <KV k='composition' v={formatCompositionEntries(techCard.compositionEntries)} />
+          )}
         </div>
         <div>
-          <KV k='designer' v={tc.designer} />
+          <KV k='designer' v={designer} />
           <KV k='pattern maker' v={patternMaker} />
-          <KV k='technologist' v={tc.technologist} />
-          <KV k='approved by' v={tc.approvedBy} />
+          <KV k='technologist' v={technologist} />
+          <KV k='approved by' v={approver} />
         </div>
       </div>
 
@@ -331,6 +448,37 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
         </Sheet>
       )}
 
+      {/* MEASUREMENTS — point-of-measure grading chart (GetStyleSizeChart), the single most
+          standard artifact of a garment tech pack; previously never fetched/printed. */}
+      {has(sizeIds) && measurements.length > 0 && (
+        <Sheet title={`measurements (${unitAbbr})`}>
+          <table className='w-full border-collapse text-[10px]'>
+            <thead>
+              <tr>
+                <th className={`${TH} w-16`}>size</th>
+                {measurements.map((m) => (
+                  <th key={m.id} className={`${TH} text-center`}>
+                    {m.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sizeIds.map((sizeId) => (
+                <tr key={sizeId} className='break-inside-avoid'>
+                  <td className={`${TD} font-semibold`}>{sizeName(sizeId)}</td>
+                  {measurements.map((m) => (
+                    <td key={m.id} className={`${TD} text-center`}>
+                      {chartCellByKey.get(`${sizeId}:${m.id}`) || '—'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Sheet>
+      )}
+
       {/* PATTERNS (выкройки) — per-size PDF, QR-linked for the factory */}
       {has(tc.patterns) && (
         <Sheet title='patterns (выкройки)'>
@@ -409,33 +557,88 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
         </Sheet>
       )}
 
+      {/* CUT PIECES — structural pieces (детали кроя) + per-colourway fabric mapping (NF-05).
+          Sat unrendered right alongside the BOM/colourways data it references (task: M10). */}
+      {has(tc.pieces) && (
+        <Sheet title='cut pieces'>
+          <table className='w-full border-collapse text-[10px]'>
+            <thead>
+              <tr>
+                <th className={`${TH} w-6`}>#</th>
+                <th className={TH}>piece</th>
+                <th className={`${TH} text-center`}>qty / garment</th>
+                <th className={`${TH} text-center`}>mirrored</th>
+                <th className={TH}>grainline</th>
+                <th className={`${TH} text-center`}>fused</th>
+                <th className={TH}>fabric (by colourway)</th>
+                <th className={TH}>note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(tc.pieces ?? []).map((p, i) => {
+                const materials = p.materials ?? [];
+                return (
+                  <tr key={p.lineKey || i} className='break-inside-avoid'>
+                    <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
+                    <td className={TD}>
+                      <div className='font-medium'>{p.name || '—'}</div>
+                      {p.detached && (
+                        <div className='text-labelColor'>unpinned from sketch callout</div>
+                      )}
+                    </td>
+                    <td className={`${TD} text-center`}>{p.piecesPerGarment ?? '—'}</td>
+                    <td className={`${TD} text-center`}>{p.mirrored ? 'yes' : 'no'}</td>
+                    <td className={TD}>{p.grainline || '—'}</td>
+                    <td className={`${TD} text-center`}>{p.fused ? 'yes' : 'no'}</td>
+                    <td className={TD}>
+                      {materials.length === 0 ? (
+                        '—'
+                      ) : (
+                        <div className='flex flex-col gap-0.5'>
+                          {materials.map((m, j) => {
+                            const cw = colorways.find((c) => c.colorwayId === m.colorwayId);
+                            const fabricName = bomLabel(m.bomItemIndex);
+                            const fusingName = bomLabel(m.fusingBomItemIndex);
+                            return (
+                              <div key={j}>
+                                <span className='font-medium'>{colorwayLabel(cw)}</span>:{' '}
+                                {fabricName || '—'}
+                                {fusingName ? ` (+ fusing: ${fusingName})` : ''}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </td>
+                    <td className={TD}>{p.note || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Sheet>
+      )}
+
       {/* COLOURWAYS — each colourway is a recipe (usages over the BOM catalog) */}
       {has(colorways) && (
         <Sheet title='colourways'>
           <div className='space-y-4'>
             {colorways.map((c, i) => {
               const usages = c.usages ?? [];
+              const dictColor = c.colorCode ? colorByCode.get(c.colorCode) : undefined;
               return (
-                <div key={i} className='break-inside-avoid'>
+                <div key={c.colorwayId ?? i} className='break-inside-avoid'>
                   <div className='mb-1 flex items-center gap-2 border-b border-black pb-1 text-[11px]'>
-                    {c.hex && (
+                    {dictColor?.hex && (
                       <span
                         className='inline-block size-4 border border-black'
-                        style={{ backgroundColor: c.hex }}
+                        style={{ backgroundColor: dictColor.hex }}
                       />
                     )}
-                    <span className='font-bold uppercase'>{c.name || c.code || `#${i + 1}`}</span>
-                    {c.code && <span className='text-labelColor'>{c.code}</span>}
-                    {c.pantone && (
-                      <span className='text-labelColor'>
-                        · {c.pantone}
-                        {c.pantoneSystem ? ` ${c.pantoneSystem}` : ''}
-                      </span>
-                    )}
-                    <span className='ml-auto text-labelColor'>
-                      {labDipL[c.labDipStatus ?? ''] ?? ''}
-                      {c.labDipRound ? ` · round ${c.labDipRound}` : ''}
-                    </span>
+                    <span className='font-bold uppercase'>{colorwayLabel(c)}</span>
+                    {c.colorCode && <span className='text-labelColor'>{c.colorCode}</span>}
+                    {c.baseSku && <span className='text-labelColor'>· {c.baseSku}</span>}
+                    <span className='ml-auto text-labelColor'>{lifecycleLabel(c.status)}</span>
                   </div>
                   {usages.length === 0 ? (
                     <p className='text-[10px] text-labelColor'>нет материалов</p>
@@ -516,22 +719,38 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                 </tr>
               </thead>
               <tbody>
-                {(tc.operations ?? []).map((o, i) => (
-                  <tr key={i} className='break-inside-avoid'>
-                    <td className={`${TD} text-center`}>{o.operationNumber || (i + 1) * 10}</td>
-                    <td className={TD}>{o.node || '—'}</td>
-                    <td className={TD}>{o.placement || '—'}</td>
-                    <td className={TD}>
-                      <div>{o.description || '—'}</div>
-                      {o.seamType && <div className='text-labelColor'>{o.seamType}</div>}
-                    </td>
-                    <td className={TD}>{o.machine || '—'}</td>
-                    <td className={TD}>
-                      {[o.seamAllowance, o.needle].filter(Boolean).join(' / ') || '—'}
-                    </td>
-                    <td className={`${TD} text-right`}>{dec(o.timeNorm) || '—'}</td>
-                  </tr>
-                ))}
+                {(tc.operations ?? []).map((o, i) => {
+                  // Compact secondary line instead of 4 more raw columns (thread/attachment/
+                  // stitches-per-cm/BOM-material) — an 11-column table doesn't fit A4, and this
+                  // mirrors the seam-type secondary line already used below.
+                  const bomMaterial = bomLabel(o.bomItemIndex);
+                  const detail = [
+                    o.thread && `thread: ${o.thread}`,
+                    o.attachment && `attach: ${o.attachment}`,
+                    dec(o.stitchesPerCm) && `${dec(o.stitchesPerCm)} st/cm`,
+                    bomMaterial && `material: ${bomMaterial}`,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+                  return (
+                    <tr key={i} className='break-inside-avoid'>
+                      <td className={`${TD} text-center`}>{o.operationNumber || (i + 1) * 10}</td>
+                      <td className={TD}>{o.node || '—'}</td>
+                      <td className={TD}>{o.placement || '—'}</td>
+                      <td className={TD}>
+                        <div>{o.description || '—'}</div>
+                        {o.seamType && <div className='text-labelColor'>{o.seamType}</div>}
+                        {detail && <div className='text-labelColor'>{detail}</div>}
+                        {o.note && <div className='italic text-labelColor'>{o.note}</div>}
+                      </td>
+                      <td className={TD}>{o.machine || '—'}</td>
+                      <td className={TD}>
+                        {[o.seamAllowance, o.needle].filter(Boolean).join(' / ') || '—'}
+                      </td>
+                      <td className={`${TD} text-right`}>{dec(o.timeNorm) || '—'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -611,13 +830,92 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                 <KV
                   k='weight net / gross'
                   v={
-                    (dec(tc.packaging.weightNet) || dec(tc.packaging.weightGross)) &&
-                    `${dec(tc.packaging.weightNet) || '—'} / ${dec(tc.packaging.weightGross) || '—'}`
+                    tc.packaging.weightNetGrams || tc.packaging.weightGrossGrams
+                      ? `${tc.packaging.weightNetGrams || '—'} / ${tc.packaging.weightGrossGrams || '—'} g`
+                      : ''
                   }
                 />
               </div>
             </div>
           )}
+        </Sheet>
+      )}
+
+      {/* ASSEMBLY — ON-GARMENT ITEMS: labels/tags/hangtags attached on or into the garment
+          (ListStyleAssembly). Root cause of #71 — this RPC was never fetched, so the section
+          was structurally impossible to render regardless of what this component did. */}
+      {has(activeAssembly) && (
+        <Sheet title='assembly — on-garment items'>
+          <table className='w-full border-collapse text-[10px]'>
+            <thead>
+              <tr>
+                <th className={TH}>component</th>
+                <th className={TH}>type</th>
+                <th className={TH}>size</th>
+                <th className={`${TH} text-right`}>qty</th>
+                <th className={TH}>position</th>
+                <th className={TH}>print note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeAssembly.map((a, i) => (
+                <tr key={a.id ?? i} className='break-inside-avoid'>
+                  <td className={TD}>
+                    <div className='font-medium'>
+                      {a.componentName || `#${a.componentTechCardId}`}
+                    </div>
+                    {a.outputMaterialName && (
+                      <div className='text-labelColor'>→ {a.outputMaterialName}</div>
+                    )}
+                  </td>
+                  <td className={TD}>{auxSubtypeLabel(a.componentAuxSubtype) || '—'}</td>
+                  <td className={TD}>{a.sizeId ? sizeName(a.sizeId) : 'all sizes'}</td>
+                  <td className={`${TD} text-right`}>{dec(a.qty) || '—'}</td>
+                  <td className={TD}>{a.positionNote || '—'}</td>
+                  <td className={TD}>{a.printNote || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Sheet>
+      )}
+
+      {/* PACKAGING RECIPE — materials consumed on ship (ListPackagingRecipe): once per shipment
+          (qty/order, e.g. a branded box) plus once per unit (qty/item, e.g. a dust bag). Same
+          missing-RPC root cause as assembly, one tab over. */}
+      {packagingRows.length > 0 && (
+        <Sheet title='packaging recipe'>
+          {packagingIsFallback && (
+            <p className='mb-1 text-[9px] text-labelColor'>
+              no style-specific recipe — showing the inherited global fallback
+            </p>
+          )}
+          <table className='w-full border-collapse text-[10px]'>
+            <thead>
+              <tr>
+                <th className={TH}>material</th>
+                <th className={`${TH} text-right`}>qty / order</th>
+                <th className={`${TH} text-right`}>qty / item</th>
+              </tr>
+            </thead>
+            <tbody>
+              {packagingRows.map((p, i) => (
+                <tr key={p.id ?? i} className='break-inside-avoid'>
+                  <td className={TD}>{p.materialName || `#${p.materialId}`}</td>
+                  <td className={`${TD} whitespace-nowrap text-right`}>
+                    {dec(p.qtyPerOrder)
+                      ? `${dec(p.qtyPerOrder)} ${p.materialUnit ?? ''}`.trim()
+                      : '—'}
+                  </td>
+                  <td className={`${TD} whitespace-nowrap text-right`}>
+                    {dec(p.qtyPerItem)
+                      ? `${dec(p.qtyPerItem)} ${p.materialUnit ?? ''}`.trim()
+                      : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Sheet>
       )}
 
@@ -654,13 +952,12 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
               </thead>
               <tbody>
                 {(tc.costing.colorwayCosts ?? []).map((cc, i) => {
-                  const cw = colorways[cc.colorwayIndex ?? -1];
+                  // colorway_id is a real FK (product id), not a positional index into
+                  // `colorways` — resolve by id, not by array offset.
+                  const cw = colorways.find((c) => c.colorwayId === cc.colorwayId);
                   return (
                     <tr key={i} className='break-inside-avoid'>
-                      <td className={TD}>
-                        {cw?.name || cw?.code || `#${(cc.colorwayIndex ?? 0) + 1}`}
-                        {cc.colorwayIndex === 0 ? ' (primary)' : ''}
-                      </td>
+                      <td className={TD}>{cw ? colorwayLabel(cw) : `#${cc.colorwayId ?? '—'}`}</td>
                       <td className={`${TD} whitespace-nowrap text-right`}>
                         {dec(cc.materialsPerUnit) || '—'}
                         {cc.hasUnconvertedCurrencies ? ' ⚠' : ''}
@@ -754,34 +1051,6 @@ export function TechPackDocument({ techCard }: { techCard: common_TechCard }) {
                   <td className={TD}>{s.signedBy || '—'}</td>
                   <td className={TD}>{formatTechCardDate(s.signedAt)}</td>
                   <td className={TD}>{s.note || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Sheet>
-      )}
-
-      {/* REVISIONS */}
-      {has(tc.revisions) && (
-        <Sheet title='revision log'>
-          <table className='w-full border-collapse text-[10px]'>
-            <thead>
-              <tr>
-                <th className={TH}>version</th>
-                <th className={TH}>date</th>
-                <th className={TH}>author</th>
-                <th className={TH}>section</th>
-                <th className={TH}>change</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(tc.revisions ?? []).map((r, i) => (
-                <tr key={i} className='break-inside-avoid'>
-                  <td className={TD}>{r.version || '—'}</td>
-                  <td className={TD}>{formatTechCardDate(r.revisionDate)}</td>
-                  <td className={TD}>{r.author || '—'}</td>
-                  <td className={TD}>{r.section || '—'}</td>
-                  <td className={TD}>{r.changeNote || '—'}</td>
                 </tr>
               ))}
             </tbody>

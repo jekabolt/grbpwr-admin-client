@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { common_OrderFull, common_OrderStripeDetails } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { fulfillmentService } from '../api/fulfillmentService';
-import { FulfillmentAnnotation } from '../api/types';
+import { FulfillmentAnnotation, SchedulePickupInput, ShippingParcel } from '../api/types';
 
 type CardData = {
   order: common_OrderFull | undefined;
@@ -15,6 +15,7 @@ export const fulfillmentKeys = {
   board: (deliveredLimit?: number) =>
     [...fulfillmentKeys.all, 'board', deliveredLimit ?? 0] as const,
   card: (uuid: string) => [...fulfillmentKeys.all, 'card', uuid] as const,
+  label: (uuid: string) => [...fulfillmentKeys.all, 'label', uuid] as const,
 };
 
 // ---- Reads ----
@@ -181,5 +182,83 @@ export function useMarkFulfillmentDelivered() {
     },
     onError: (e) =>
       showMessage(e instanceof Error ? e.message : 'Failed to mark delivered', 'error'),
+  });
+}
+
+// ---- Shipping labels (Sendcloud) ----
+// PrepareShippingLabel is read-only (derives the default parcel from tech cards,
+// reports whether Sendcloud is configured, and returns an existing label if any).
+// Gated by `enabled` so it only fires when the label flow is actually opened.
+
+export function useShippingLabelPrep(uuid: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: fulfillmentKeys.label(uuid ?? ''),
+    queryFn: () => fulfillmentService.prepareLabel(uuid as string),
+    enabled: !!uuid && enabled,
+    staleTime: 15_000,
+  });
+}
+
+// On-demand carrier quote for the (possibly overridden) parcel. A mutation, not a
+// query, because it's a POST triggered by an explicit "get options" click.
+export function useShippingOptions() {
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { orderUuid: string; parcel: ShippingParcel }) =>
+      fulfillmentService.getShippingOptions(vars.orderUuid, vars.parcel),
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to fetch shipping options', 'error'),
+  });
+}
+
+// GenerateShippingLabel announces the parcel to Sendcloud AND performs the real
+// shipped transition (+ shipped email) — irreversible except via void. Invalidate
+// the whole tree so the board/card/label all reflect the new SHIPPED state.
+export function useGenerateShippingLabel() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: {
+      orderUuid: string;
+      parcel: ShippingParcel;
+      shippingOptionCode?: string;
+    }) => fulfillmentService.generateLabel(vars.orderUuid, vars.parcel, vars.shippingOptionCode),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: fulfillmentKeys.all });
+      showMessage('Label generated — order shipped', 'success');
+    },
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to generate label', 'error'),
+  });
+}
+
+// VoidShippingLabel cancels the carrier label and reverts Shipped -> Confirmed.
+export function useVoidShippingLabel() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (orderUuid: string) => fulfillmentService.voidLabel(orderUuid),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: fulfillmentKeys.all });
+      showMessage('Label voided — order reverted to confirmed', 'success');
+    },
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to void label', 'error'),
+  });
+}
+
+// SchedulePickup books an end-of-day carrier handover. Board-level, touches no order.
+export function useSchedulePickup() {
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (input: SchedulePickupInput) => fulfillmentService.schedulePickup(input),
+    onSuccess: (r) =>
+      showMessage(
+        r.confirmed
+          ? `Pickup scheduled${r.pickupId ? ` (#${r.pickupId})` : ''}`
+          : r.message || 'Pickup could not be confirmed',
+        r.confirmed ? 'success' : 'error',
+      ),
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to schedule pickup', 'error'),
   });
 }

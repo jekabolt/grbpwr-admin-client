@@ -1,10 +1,8 @@
 import { common_OrderFull } from 'api/proto-http/admin';
 import { common_OrderItem } from 'api/proto-http/frontend';
-import { BASE_PATH } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 
@@ -51,21 +49,19 @@ export function OrderTable({
         label: 'THUMBNAIL',
         showOnPrint: true,
         className: 'print:!w-24 print:min-w-0 print:overflow-hidden print:max-w-24',
+        // R2/p021: the order line no longer carries the colourway id, so the admin product link can't
+        // be rebuilt (the frozen line references a variant SKU snapshot, not a live product).
         accessor: ({ item }) => (
-          <Link
-            to={`${BASE_PATH}/products/${item.orderItem?.productId}`}
-            target='_blank'
-            className='cursor-pointer flex items-center justify-center w-24 max-w-full h-full mx-auto overflow-hidden print:block print:max-h-24'
-          >
+          <div className='flex items-center justify-center w-24 max-w-full h-full mx-auto overflow-hidden print:block print:max-h-24'>
             <Media src={item.thumbnail || ''} alt='thumbnail' aspectRatio='1/1' fit='contain' />
-          </Link>
+          </div>
         ),
       },
       {
         label: 'SKU',
         showOnPrint: true,
         className: HIDDEN_ON_MOBILE_STYLE,
-        accessor: ({ item }) => item.sku,
+        accessor: ({ item }) => item.variantSkuSnapshot,
       },
       {
         label: 'PRODUCT NAME',
@@ -75,10 +71,8 @@ export function OrderTable({
       {
         label: 'SIZE',
         showOnPrint: false,
-        accessor: ({ item }) =>
-          dictionary?.sizes
-            ?.find((x) => x.id === item.orderItem?.sizeId)
-            ?.name?.replace('SIZE_ENUM_', ''),
+        // R2/p021: the size is a frozen snapshot on the order line now (no live size_id lookup).
+        accessor: ({ item }) => item.sizeNameSnapshot?.replace('SIZE_ENUM_', ''),
       },
       {
         label: 'PRICE',

@@ -1,6 +1,8 @@
+import { common_TechCard } from 'api/proto-http/admin';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { BomLineSelect } from './bom-line-picker';
 import { pieceCodeOptions } from './piece-codes';
 import { TechCardFormData } from './schema';
 
@@ -18,86 +20,49 @@ const FABRIC_SECTIONS = [
   'TECH_CARD_BOM_SECTION_INSULATION',
 ];
 const FUSING_SECTIONS = ['TECH_CARD_BOM_SECTION_INTERLINING'];
-const SECTION_SHORT: Record<string, string> = {
-  TECH_CARD_BOM_SECTION_FABRIC: 'fabric',
-  TECH_CARD_BOM_SECTION_LINING: 'lining',
-  TECH_CARD_BOM_SECTION_INTERLINING: 'interlining',
-  TECH_CARD_BOM_SECTION_INSULATION: 'insulation',
-};
 const grainlineOptions = ['lengthwise', 'crosswise', 'bias'];
 
 type FormPiece = NonNullable<TechCardFormData['pieces']>[number];
 type FormMaterial = NonNullable<FormPiece['materials']>[number];
 
-// Cut-piece details (детали кроя) + the piece × colourway fabric map (NF-05). Pieces are positional:
-// removing one renumbers usages.pieceIndex here; BOM/colourway removals renumber the map cells from
-// the BOM / colourways tabs (nf05-01). The map stores a sparse materials list keyed by colorwayIndex.
-export function PiecesTab() {
+// Cut-piece details (детали кроя) + the piece × colourway fabric map (NF-05). Pieces are positional.
+// The map stores a sparse materials list keyed by the colourway id (pieceMaterial.colorwayIndex holds
+// colorway_id on the wire, schema.ts); a colourway with no entry is unmapped.
+export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'pieces' });
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
-  const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
-    code?: string;
-    name?: string;
-  }>;
+  // NF-05 fix (M8): the fabric-map columns are the style's REAL colourways (techCard.colorways,
+  // AdminColorwayRef[]) — the RHF `colorways` form array is permanently [] since colourways became
+  // products. Reading form state here left the whole section un-populatable regardless of how many
+  // colourways existed.
+  const colorways = techCard?.colorways ?? [];
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     name?: string;
     section?: string;
   }>;
 
-  const bomLabel = (gi: number) => {
-    const b = bomItems[gi];
-    if (!b) return `#${gi + 1}`;
-    const section = b.section ? ` · ${SECTION_SHORT[b.section] ?? ''}` : '';
-    return `${b.name?.trim() || `#${gi + 1}`}${section}`;
-  };
-  const optionsForSections = (sections: string[]) => [
-    { value: -1, label: '— none —' },
-    ...bomItems
-      .map((b, gi) => ({ b, gi }))
-      .filter(({ b }) => sections.includes(b.section ?? ''))
-      .map(({ gi }) => ({ value: gi, label: bomLabel(gi) })),
-  ];
-  const fabricOptions = optionsForSections(FABRIC_SECTIONS);
-  const fusingOptions = optionsForSections(FUSING_SECTIONS);
-  // Keep the currently-mapped article selectable even if its BOM section was later changed out of
-  // the filtered set, so editing a section never silently blanks a cell's stored choice.
-  const withCurrent = (options: { value: number; label: string }[], current: number) =>
-    current < 0 || options.some((o) => o.value === current)
-      ? options
-      : [...options, { value: current, label: bomLabel(current) }];
-
-  // Fabric-map cell read/write. materials is sparse — a colourway with no entry is unmapped.
-  const cellFor = (pi: number, ci: number) =>
-    (pieces[pi]?.materials ?? []).find((m) => (m.colorwayIndex ?? 0) === ci);
-  const setCell = (pi: number, ci: number, patch: Partial<FormMaterial>) => {
+  // Fabric-map cell read/write, keyed by the real colourway id (nf05-01: resolve to the id, never a
+  // positional index — the cell must stay attached to the colourway that was picked, not whatever
+  // sits at that array position). materials is sparse — a colourway with no entry is unmapped.
+  const cellFor = (pi: number, colorwayId: number) =>
+    (pieces[pi]?.materials ?? []).find((m) => (m.colorwayIndex ?? 0) === colorwayId);
+  const setCell = (pi: number, colorwayId: number, patch: Partial<FormMaterial>) => {
     const materials = (getValues(`pieces.${pi}.materials`) ?? []) as FormMaterial[];
-    const at = materials.findIndex((m) => (m.colorwayIndex ?? 0) === ci);
+    const at = materials.findIndex((m) => (m.colorwayIndex ?? 0) === colorwayId);
     const nextEntry: FormMaterial =
       at >= 0
         ? { ...materials[at], ...patch }
-        : { colorwayIndex: ci, bomItemIndex: -1, fusingBomItemIndex: -1, note: '', ...patch };
+        : { colorwayIndex: colorwayId, bomLineKey: '', fusingBomLineKey: '', note: '', ...patch };
     const next =
       at >= 0 ? materials.map((m, i) => (i === at ? nextEntry : m)) : [...materials, nextEntry];
     setValue(`pieces.${pi}.materials`, next, { shouldDirty: true });
   };
 
-  // Removing a piece shifts every usage's pieceIndex — renumber so a "norm per piece" never points
-  // at the wrong detail (nf05-01).
-  const removePiece = (pi: number) => {
-    const cws = (getValues('colorways') ?? []) as TechCardFormData['colorways'];
-    (cws ?? []).forEach((c, ci) => {
-      (c.usages ?? []).forEach((u, ui) => {
-        const idx = u.pieceIndex ?? -1;
-        if (idx === pi) {
-          setValue(`colorways.${ci}.usages.${ui}.pieceIndex`, -1, { shouldDirty: true });
-        } else if (idx > pi) {
-          setValue(`colorways.${ci}.usages.${ui}.pieceIndex`, idx - 1, { shouldDirty: true });
-        }
-      });
-    });
-    remove(pi);
-  };
+  // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
+  // edited via UpdateColorwayRecipe) — the RHF `colorways` array is always empty, so the old
+  // form-state renumbering loop was dead. Just drop the piece row here.
+  const removePiece = (pi: number) => remove(pi);
 
   const addPiece = () =>
     append({
@@ -279,9 +244,9 @@ export function PiecesTab() {
               <thead>
                 <tr>
                   <th className={th}>piece</th>
-                  {colorways.map((c, ci) => (
-                    <th key={ci} className={th}>
-                      {c.code?.trim() || c.name?.trim() || `#${ci + 1}`}
+                  {colorways.map((c) => (
+                    <th key={c.colorwayId} className={th}>
+                      {c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId}`}
                     </th>
                   ))}
                 </tr>
@@ -294,44 +259,29 @@ export function PiecesTab() {
                       <td className={`${td} whitespace-nowrap`}>
                         <Text size='small'>{p.name?.trim() || `piece ${pi + 1}`}</Text>
                       </td>
-                      {colorways.map((_, ci) => {
-                        const c = cellFor(pi, ci);
-                        const fabricVal = c?.bomItemIndex ?? -1;
-                        const fusingVal = c?.fusingBomItemIndex ?? -1;
-                        const missingFusing = !!p.fused && fusingVal < 0;
+                      {colorways.map((cw) => {
+                        const cwId = cw.colorwayId ?? 0;
+                        const c = cellFor(pi, cwId);
+                        const fabricVal = c?.bomLineKey ?? '';
+                        const fusingVal = c?.fusingBomLineKey ?? '';
+                        const missingFusing = !!p.fused && !fusingVal;
                         return (
-                          <td key={ci} className={td}>
+                          <td key={cwId} className={td}>
                             <div className='flex flex-col gap-1'>
-                              <select
-                                className={cell}
+                              <BomLineSelect
                                 value={fabricVal}
-                                onChange={(e) =>
-                                  setCell(pi, ci, { bomItemIndex: Number(e.target.value) })
-                                }
-                              >
-                                {withCurrent(fabricOptions, fabricVal).map((o) => (
-                                  <option key={o.value} value={o.value}>
-                                    {o.label}
-                                  </option>
-                                ))}
-                              </select>
+                                onChange={(lk) => setCell(pi, cwId, { bomLineKey: lk })}
+                                sections={FABRIC_SECTIONS}
+                                noneLabel='— fabric —'
+                              />
                               {p.fused && (
                                 <div className='flex items-center gap-1'>
-                                  <select
-                                    className={cell}
+                                  <BomLineSelect
                                     value={fusingVal}
-                                    onChange={(e) =>
-                                      setCell(pi, ci, {
-                                        fusingBomItemIndex: Number(e.target.value),
-                                      })
-                                    }
-                                  >
-                                    {withCurrent(fusingOptions, fusingVal).map((o) => (
-                                      <option key={o.value} value={o.value}>
-                                        {o.value === -1 ? '— fusing —' : o.label}
-                                      </option>
-                                    ))}
-                                  </select>
+                                    onChange={(lk) => setCell(pi, cwId, { fusingBomLineKey: lk })}
+                                    sections={FUSING_SECTIONS}
+                                    noneLabel='— fusing —'
+                                  />
                                   {missingFusing && (
                                     <span className='text-error' title='fused piece needs a fusing'>
                                       !

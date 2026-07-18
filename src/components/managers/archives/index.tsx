@@ -8,11 +8,16 @@ import { ListArchive } from './components/archive-list';
 
 export function Archives() {
   const { canWrite } = usePermissions();
-  const [count, setCount] = useState({ loaded: 0, hasMore: false });
+  const [count, setCount] = useState<{ loaded: number; hasMore: boolean; total?: number }>({
+    loaded: 0,
+    hasMore: false,
+  });
 
-  const handleCount = useCallback((loaded: number, hasMore: boolean) => {
+  const handleCount = useCallback((loaded: number, hasMore: boolean, total?: number) => {
     setCount((prev) =>
-      prev.loaded === loaded && prev.hasMore === hasMore ? prev : { loaded, hasMore },
+      prev.loaded === loaded && prev.hasMore === hasMore && prev.total === total
+        ? prev
+        : { loaded, hasMore, total },
     );
   }, []);
 
@@ -25,8 +30,11 @@ export function Archives() {
           </Text>
           {count.loaded > 0 && (
             <Text variant='inactive'>
-              {count.loaded}
-              {count.hasMore ? '+' : ''}
+              {/* A11: show the real backend total once known, not just an
+                  approximate "N+ loaded". */}
+              {typeof count.total === 'number'
+                ? `${count.loaded} of ${count.total}`
+                : `${count.loaded}${count.hasMore ? '+' : ''}`}
             </Text>
           )}
         </div>

@@ -78,6 +78,12 @@ export type RefundReason =
   | "REFUND_REASON_DEFECTIVE"
   | "REFUND_REASON_CHANGED_MIND"
   | "REFUND_REASON_OTHER";
+// StyleCostPriceSource is the Q4 price-ladder level a material line resolved to.
+export type StyleCostPriceSource =
+  | "STYLE_COST_PRICE_SOURCE_UNKNOWN"
+  | "STYLE_COST_PRICE_SOURCE_BOM_SNAPSHOT"
+  | "STYLE_COST_PRICE_SOURCE_CATALOG_LATEST"
+  | "STYLE_COST_PRICE_SOURCE_NONE";
 // TrendGranularity defines time bucket size for trend analysis
 export type TrendGranularity =
   | "TREND_GRANULARITY_DAILY"
@@ -120,6 +126,13 @@ export type common_Dictionary = {
   // Hero section background color for the storefront (CSS). Empty if unset.
   backgroundHeroColor: string | undefined;
   productTags: string[] | undefined;
+  colors: common_Color[] | undefined;
+  countries: common_Country[] | undefined;
+  fibers: common_Fiber[] | undefined;
+  tags: common_Tag[] | undefined;
+  skuContractVersion: string | undefined;
+  revisions: common_DictionaryRevision[] | undefined;
+  categorySizeSystems: common_CategorySizeSystem[] | undefined;
 };
 
 // Category represents a hierarchical category structure
@@ -181,6 +194,12 @@ export type common_ShipmentCarrierInsert = {
   description: string | undefined;
   trackingUrl: string | undefined;
   expectedDeliveryTime: string | undefined;
+  // aftership_slug is the AfterShip courier slug used to auto-track this carrier's shipments.
+  // Empty = the carrier has no tracking API, so its orders are auto-delivered only by the timer.
+  aftershipSlug: string | undefined;
+  // auto_deliver_after_hours is the timer safety-net window: hours after shipment to silently mark
+  // an order delivered when no real delivery signal arrived. 0 = use the server default (14 days).
+  autoDeliverAfterHours: number | undefined;
 };
 
 export type common_ShipmentCarrierPrice = {
@@ -254,12 +273,23 @@ export type common_Size = {
   name: string | undefined;
   countMen: number | undefined;
   countWomen: number | undefined;
+  skuOrd: number | undefined;
+  skuSystem: common_SizeSkuSystem | undefined;
 };
 
+export type common_SizeSkuSystem =
+  | "SIZE_SKU_SYSTEM_UNKNOWN"
+  | "SIZE_SKU_SYSTEM_APPAREL"
+  | "SIZE_SKU_SYSTEM_SHOE"
+  | "SIZE_SKU_SYSTEM_COMPOSITE_TA"
+  | "SIZE_SKU_SYSTEM_COMPOSITE_BO";
 export type common_Collection = {
   name: string | undefined;
   countMen: number | undefined;
   countWomen: number | undefined;
+  code: string | undefined;
+  archived: boolean | undefined;
+  id: number | undefined;
 };
 
 export type common_Language = {
@@ -280,6 +310,67 @@ export type common_AnnounceTranslation = {
   text: string | undefined;
 };
 
+// Color is a controlled colour-dictionary entry. code is exactly 3 chars and unique; it feeds the
+// colour segment of the SKU and is referenced by product.color_code.
+export type common_Color = {
+  id: number | undefined;
+  code: string | undefined;
+  name: string | undefined;
+  hex: string | undefined;
+  archived: boolean | undefined;
+};
+
+// Country is an ISO 3166-1 alpha-2 controlled dictionary (R9). Arbitrary creation is forbidden — the
+// full ISO list is seeded and only activation toggles.
+export type common_Country = {
+  code: string | undefined;
+  name: string | undefined;
+  active: boolean | undefined;
+};
+
+// Fiber is one entry of the controlled fibre vocabulary (COT/POL/WOL/…): a material's structural
+// composition references these codes, and a style's composition is derived from its shell-fabric
+// materials' fibres. Authored via the dictionary (CreateFiber/ArchiveFiber).
+export type common_Fiber = {
+  code: string | undefined;
+  name: string | undefined;
+  archived: boolean | undefined;
+};
+
+// Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
+// admin-only.
+export type common_Tag = {
+  code: string | undefined;
+  name: string | undefined;
+  archived: boolean | undefined;
+  id: number | undefined;
+};
+
+// DictionaryRevision is a per-namespace revision snapshot used for cross-instance cache invalidation (R9).
+export type common_DictionaryRevision = {
+  namespace: string | undefined;
+  revision: number | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// Encoded using RFC 3339, where generated output will always be Z-normalized
+// and uses 0, 3, 6 or 9 fractional digits.
+// Offsets other than "Z" are also accepted.
+type wellKnownTimestamp = string;
+
+// CategorySizeSystem maps a category-tree node to a permitted SizeSkuSystem (S10/WS5, migration
+// 0175). A row targets EITHER category_id (a broad category/sub-category node) OR type_id (a specific
+// leaf type) -- never both set; 0 means unset. The admin size picker resolves a style's category
+// chain against this table (most specific match wins: type_id, then category_id) to filter which
+// size systems/sizes it offers; CreateVariant and the style's size-range write (UpdateTechCard)
+// enforce the same rule server-side.
+export type common_CategorySizeSystem = {
+  id: number | undefined;
+  categoryId: number | undefined;
+  typeId: number | undefined;
+  skuSystem: common_SizeSkuSystem | undefined;
+};
+
 export type UploadContentImageRequest = {
   rawB64Image: string | undefined;
 };
@@ -296,11 +387,6 @@ export type common_MediaFull = {
   // media
   media: common_MediaItem | undefined;
 };
-
-// Encoded using RFC 3339, where generated output will always be Z-normalized
-// and uses 0, 3, 6 or 9 fractional digits.
-// Offsets other than "Z" are also accepted.
-type wellKnownTimestamp = string;
 
 export type common_MediaItem = {
   // Full-size media URL
@@ -363,108 +449,240 @@ export type DeleteFromBucketRequest = {
 export type DeleteFromBucketResponse = {
 };
 
-export type UpsertProductRequest = {
-  id: number | undefined;
-  product: common_ProductNew | undefined;
-};
-
-export type common_ProductNew = {
-  product: common_ProductInsert | undefined;
-  sizeMeasurements: common_SizeWithMeasurementInsert[] | undefined;
-  mediaIds: number[] | undefined;
-  tags: common_ProductTagInsert[] | undefined;
-  prices: common_ProductPriceInsert[] | undefined;
-};
-
-export type common_ProductInsert = {
-  productBodyInsert: common_ProductBodyInsert | undefined;
+// CreateColorway/UpdateColorway/UpdateStyle replace the coupled UpsertColorway (R2/R4 write
+// decomposition, §6). A colourway is created DRAFT against an existing style and carries only
+// colourway-owned fields; the style facts are patched separately through UpdateStyle under a shared
+// optimistic lock.
+export type CreateColorwayRequest = {
+  styleId: number | undefined;
+  merchandising: common_ColorwayMerchandisingInsert | undefined;
+  development: common_ColorwayDevelopmentInsert | undefined;
   thumbnailMediaId: number | undefined;
-  translations: common_ProductInsertTranslation[] | undefined;
   secondaryThumbnailMediaId: number | undefined;
-  prices: common_ProductPriceInsert[] | undefined;
-  // cost_price is the confidential per-unit cost of goods (COGS) in base currency (EUR),
-  // used for margin analytics. Omit/empty to leave the stored value unchanged on update.
-  // Deliberately on ProductInsert (write-only) and NOT on ProductBodyInsert, so it is
-  // never serialized on the storefront product read path.
+  mediaIds: number[] | undefined;
+  tags: common_ColorwayTagInsert[] | undefined;
+  prices: common_ColorwayPriceInsert[] | undefined;
+  translations: common_ColorwayInsertTranslation[] | undefined;
   costPrice: googletype_Decimal | undefined;
+  countryCode: string | undefined;
 };
 
-export type common_ProductBodyInsert = {
+// ColorwayMerchandisingInsert (R8: renamed from ColorwayBodyInsert) carries the colourway-owned
+// merchandising fields ONLY. The garment/style facts (brand, season, collection, target_gender, fit,
+// composition, care instructions, model-wears, categories) are owned by the Style and written via
+// UpdateStyle (R4/§14.7) — they are reserved here. The free-text country_of_origin is replaced by the
+// ISO country_code (R9).
+export type common_ColorwayMerchandisingInsert = {
   preorder: wellKnownTimestamp | undefined;
-  brand: string | undefined;
-  color: string | undefined;
-  colorHex: string | undefined;
-  countryOfOrigin: string | undefined;
+  // Optional per-colorway shade override. When absent, clients use dictionary_color.hex.
+  colorHexOverride?: string;
   salePercentage: googletype_Decimal | undefined;
+  // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
+  minTier: number | undefined;
+  // REQUIRED canonical FK to Dictionary.colors; the sole color/SKU identity on writes.
+  colorCode: string | undefined;
+  // OUTPUT-ONLY resolved dictionary entry. Ignored on write.
+  dictionaryColor: common_Color | undefined;
+  // country_code is the ISO 3166-1 alpha-2 manufacture country (R9; FK Country dict). Colourway-owned.
+  countryCode: string | undefined;
+};
+
+// ColorwayDevelopmentInsert carries the PLM / lab-dip development fields that moved onto the colourway
+// (product) in the R1 merge: ex tech_card_colorway.code/name/hex/comment become dev_code/name/dev_hex/
+// comment. Lives in techcard.proto to reach TechCardLabDipStatus and the usage recipe without a circular
+// import (product.proto cannot import techcard.proto). NOTE: `usages` (the material recipe) is keyed by
+// an explicit colorway_id = product.id (R1/§14.3); the positional colorway_index model is gone.
+export type common_ColorwayDevelopmentInsert = {
+  devCode: string | undefined;
+  name: string | undefined;
+  labDipStatus: common_TechCardLabDipStatus | undefined;
+  comment: string | undefined;
+  pantone: string | undefined;
+  pantoneSystem: string | undefined;
+  devHex: string | undefined;
+  swatchMediaId: number | undefined;
+  labDipRound: number | undefined;
+  labDipSubmittedAt: wellKnownTimestamp | undefined;
+  labDipDecidedAt: wellKnownTimestamp | undefined;
+  labDipDecidedBy: string | undefined;
+  labDipRejectReason: string | undefined;
+  usages: common_TechCardColorwayUsage[] | undefined;
+  displayOrder: number | undefined;
+};
+
+// TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
+export type common_TechCardLabDipStatus =
+  | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
+  | "TECH_CARD_LAB_DIP_STATUS_PENDING"
+  | "TECH_CARD_LAB_DIP_STATUS_SUBMITTED"
+  | "TECH_CARD_LAB_DIP_STATUS_APPROVED"
+  | "TECH_CARD_LAB_DIP_STATUS_REJECTED";
+// TechCardColorwayUsage is one material use inside a colourway: which catalog article
+// (bom_item_index) goes on which garment part (placement), the colour it takes HERE, and
+// how much is consumed (per-garment and/or per-size). The BOM is a pure article catalog;
+// per-colourway divergence lives here.
+export type common_TechCardColorwayUsage = {
+  // explicit presence: index 0 is a real BOM line, distinct from "unset"
+  // (mirrors TechCardOperation.bom_item_index).
+  bomItemIndex?: number;
+  placement: string | undefined;
+  // matched (trim+lower) against TechCardOperation.placement
+  color: string | undefined;
+  // independent of the colourway swatch pantone (ColorwayDevelopmentInsert.pantone)
+  pantone: string | undefined;
+  consumption: googletype_Decimal | undefined;
+  quantity: googletype_Decimal | undefined;
+  sizeConsumptions: common_TechCardBomSizeConsumption[] | undefined;
+  lineTotal: googletype_Decimal | undefined;
+  sizeRunTotal: googletype_Decimal | undefined;
+  // explicit presence: 0-based index into TechCardInsert.pieces saying which cut-piece this
+  // consumption norm is about; unset = whole garment (informational, NF-05).
+  pieceIndex?: number;
+  // bom_line_key references the owning style's BOM line by its stable line_key (S2/S3) — the durable
+  // reference the recipe write-path resolves to a real bom_item_id. Preferred over bom_item_index
+  // (which stays for the transition / legacy read). bom_item_id is the resolved FK on read.
+  bomLineKey: string | undefined;
+  bomItemId: number | undefined;
+  // piece_line_key references the cut-piece this norm is about by its stable TechCardPiece.line_key
+  // (WS4). The recipe write-path resolves it to the real piece_id FK (usage.piece_id RESTRICT).
+  // Preferred over the positional piece_index (kept for the transition). piece_id is the resolved FK.
+  pieceLineKey: string | undefined;
+  pieceId: number | undefined;
+};
+
+// TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
+// material — different sizes consume different amounts of fabric.
+export type common_TechCardBomSizeConsumption = {
+  sizeId: number | undefined;
+  consumption: googletype_Decimal | undefined;
+};
+
+export type common_ColorwayTagInsert = {
+  tag: string | undefined;
+};
+
+export type common_ColorwayPriceInsert = {
+  currency: string | undefined;
+  price: googletype_Decimal | undefined;
+};
+
+export type common_ColorwayInsertTranslation = {
+  languageId: number | undefined;
+  name: string | undefined;
+  description: string | undefined;
+};
+
+export type CreateColorwayResponse = {
+  colorwayId: number | undefined;
+};
+
+export type UpdateColorwayRequest = {
+  colorwayId: number | undefined;
+  expectedColorwayVersion: number | undefined;
+  merchandising: common_ColorwayMerchandisingInsert | undefined;
+  development: common_ColorwayDevelopmentInsert | undefined;
+  mediaIds: number[] | undefined;
+  tags: common_ColorwayTagInsert[] | undefined;
+  prices: common_ColorwayPriceInsert[] | undefined;
+  updateMask: wellKnownFieldMask | undefined;
+  thumbnailMediaId: number | undefined;
+  secondaryThumbnailMediaId: number | undefined;
+  costPrice: googletype_Decimal | undefined;
+  countryCode: string | undefined;
+  translations: common_ColorwayInsertTranslation[] | undefined;
+};
+
+// In JSON, a field mask is encoded as a single string where paths are
+// separated by a comma. Fields name in each path are converted
+// to/from lower-camel naming conventions.
+// As an example, consider the following message declarations:
+//
+//     message Profile {
+//       User user = 1;
+//       Photo photo = 2;
+//     }
+//     message User {
+//       string display_name = 1;
+//       string address = 2;
+//     }
+//
+// In proto a field mask for `Profile` may look as such:
+//
+//     mask {
+//       paths: "user.display_name"
+//       paths: "photo"
+//     }
+//
+// In JSON, the same mask is represented as below:
+//
+//     {
+//       mask: "user.displayName,photo"
+//     }
+type wellKnownFieldMask = string;
+
+export type UpdateColorwayResponse = {
+  lockVersion: number | undefined;
+};
+
+export type UpdateColorwayRecipeRequest = {
+  colorwayId: number | undefined;
+  // expected_colorway_version echoes the shared tech_card.lock_version (R4); a mismatch -> Aborted.
+  expectedColorwayVersion: number | undefined;
+  usages: common_TechCardColorwayUsage[] | undefined;
+};
+
+export type UpdateColorwayRecipeResponse = {
+  lockVersion: number | undefined;
+};
+
+// StylePatch is the narrow set of catalogue-style facts UpdateStyle owns (R4/§14.7-8). It deliberately
+// does NOT reuse the heavy TechCardInsert, so a style-catalogue edit can never full-replace the PLM
+// children (BOM/POM/ops). category_id stays a PLM/UpdateTechCard fact; canonical style translations
+// await a dedicated style_translation table (deferred).
+export type StylePatch = {
+  brand: string | undefined;
+  season: common_SeasonEnum | undefined;
+  collection: string | undefined;
+  targetGender: common_GenderEnum | undefined;
+  fit: string | undefined;
+  composition: string | undefined;
+  careInstructions: string | undefined;
+  modelWearsHeightCm: number | undefined;
+  modelWearsSizeId: number | undefined;
   topCategoryId: number | undefined;
   subCategoryId: number | undefined;
   typeId: number | undefined;
-  modelWearsHeightCm: number | undefined;
-  modelWearsSizeId: number | undefined;
-  careInstructions: string | undefined;
-  composition: string | undefined;
-  hidden: boolean | undefined;
-  targetGender: common_GenderEnum | undefined;
-  season: common_SeasonEnum | undefined;
-  version: string | undefined;
-  collection: string | undefined;
-  fit: string | undefined;
-  // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
-  minTier: number | undefined;
 };
 
-export type common_GenderEnum =
-  | "GENDER_ENUM_UNKNOWN"
-  | "GENDER_ENUM_MALE"
-  | "GENDER_ENUM_FEMALE"
-  | "GENDER_ENUM_UNISEX";
 export type common_SeasonEnum =
   | "SEASON_ENUM_UNKNOWN"
   | "SEASON_ENUM_SS"
   | "SEASON_ENUM_FW"
   | "SEASON_ENUM_PF"
   | "SEASON_ENUM_RC";
-export type common_ProductInsertTranslation = {
-  languageId: number | undefined;
-  name: string | undefined;
-  description: string | undefined;
+export type common_GenderEnum =
+  | "GENDER_ENUM_UNKNOWN"
+  | "GENDER_ENUM_MALE"
+  | "GENDER_ENUM_FEMALE"
+  | "GENDER_ENUM_UNISEX";
+export type UpdateStyleRequest = {
+  styleId: number | undefined;
+  patch: StylePatch | undefined;
+  expectedLockVersion: number | undefined;
+  updateMask: wellKnownFieldMask | undefined;
 };
 
-export type common_ProductPriceInsert = {
-  currency: string | undefined;
-  price: googletype_Decimal | undefined;
+export type UpdateStyleResponse = {
+  lockVersion: number | undefined;
 };
 
-export type common_SizeWithMeasurementInsert = {
-  productSize: common_ProductSizeInsert | undefined;
-  measurements: common_ProductMeasurementInsert[] | undefined;
-};
-
-export type common_ProductSizeInsert = {
-  quantity: googletype_Decimal | undefined;
-  sizeId: number | undefined;
-};
-
-export type common_ProductMeasurementInsert = {
-  measurementNameId: number | undefined;
-  measurementValue: googletype_Decimal | undefined;
-};
-
-export type common_ProductTagInsert = {
-  tag: string | undefined;
-};
-
-export type UpsertProductResponse = {
-  id: number | undefined;
-};
-
-export type GetProductsPagedRequest = {
+export type GetColorwaysPagedRequest = {
   limit: number | undefined;
   offset: number | undefined;
   sortFactors: common_SortFactor[] | undefined;
   orderFactor: common_OrderFactor | undefined;
   filterConditions: common_FilterConditions | undefined;
-  showHidden: boolean | undefined;
+  statuses: common_ColorwayLifecycleStatus[] | undefined;
 };
 
 export type common_SortFactor =
@@ -479,7 +697,6 @@ export type common_FilterConditions = {
   currency: string | undefined;
   onSale: boolean | undefined;
   gender: common_GenderEnum[] | undefined;
-  color: string | undefined;
   topCategoryIds: number[] | undefined;
   subCategoryIds: number[] | undefined;
   typeIds: number[] | undefined;
@@ -489,121 +706,196 @@ export type common_FilterConditions = {
   collections: string[] | undefined;
   seasons: common_SeasonEnum[] | undefined;
   excludeTopCategoryIds: number[] | undefined;
+  colorCodes: string[] | undefined;
+  exclusive: boolean | undefined;
 };
 
-export type GetProductsPagedResponse = {
-  products: common_Product[] | undefined;
+// ColorwayLifecycleStatus is the stored lifecycle of a colourway (R6). Numbers are fixed and match the
+// DB tinyint + entity.ColorwayStatus. UNKNOWN is rejected on write; an unknown read value fails closed
+// (the colourway is not shown). Only ACTIVE is exposed publicly.
+export type common_ColorwayLifecycleStatus =
+  | "COLORWAY_LIFECYCLE_STATUS_UNKNOWN"
+  | "COLORWAY_LIFECYCLE_STATUS_DRAFT"
+  | "COLORWAY_LIFECYCLE_STATUS_ACTIVE"
+  | "COLORWAY_LIFECYCLE_STATUS_HIDDEN"
+  | "COLORWAY_LIFECYCLE_STATUS_ARCHIVED";
+export type GetColorwaysPagedResponse = {
+  colorways: common_Colorway[] | undefined;
+  total: number | undefined;
 };
 
-export type common_Product = {
+export type common_Colorway = {
   id: number | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   slug: string | undefined;
-  sku: string | undefined;
-  productDisplay: common_ProductDisplay | undefined;
-  prices: common_ProductPrice[] | undefined;
+  baseSku: string | undefined;
+  display: common_ColorwayDisplay | undefined;
+  prices: common_ColorwayPrice[] | undefined;
   soldOut: boolean | undefined;
+  // status is the colourway's stored lifecycle (R6). Type change string→enum on the same wire number
+  // (non-identity, big-bang regen). Only ACTIVE is exposed publicly; an UNKNOWN read fails closed.
+  status: common_ColorwayLifecycleStatus | undefined;
+  styleId: number | undefined;
+  lockVersion: number | undefined;
+  colorCode: string | undefined;
+  publishedAt: wellKnownTimestamp | undefined;
 };
 
-export type common_ProductDisplay = {
-  productBody: common_ProductBody | undefined;
+export type common_ColorwayDisplay = {
   thumbnail: common_MediaFull | undefined;
   secondaryThumbnail: common_MediaFull | undefined;
+  merchandising: common_ColorwayMerchandising | undefined;
+  translations: common_ColorwayInsertTranslation[] | undefined;
 };
 
-export type common_ProductBody = {
-  productBodyInsert: common_ProductBodyInsert | undefined;
-  translations: common_ProductInsertTranslation[] | undefined;
+// ColorwayMerchandising is the admin/internal READ projection of a colourway's display fields: the
+// colourway-owned merchandising PLUS the style-resolved garment facts (output-only), so the admin
+// detail view keeps rendering brand/season/collection/etc even though they are now written on the
+// Style. Never reachable from FrontendService (the storefront uses StorefrontColorway, R3).
+export type common_ColorwayMerchandising = {
+  preorder: wellKnownTimestamp | undefined;
+  brand: string | undefined;
+  colorHexOverride?: string;
+  countryOfOrigin: string | undefined;
+  salePercentage: googletype_Decimal | undefined;
+  topCategoryId: number | undefined;
+  subCategoryId: number | undefined;
+  typeId: number | undefined;
+  modelWearsHeightCm: number | undefined;
+  modelWearsSizeId: number | undefined;
+  careInstructions: string | undefined;
+  composition: string | undefined;
+  targetGender: common_GenderEnum | undefined;
+  season: common_SeasonEnum | undefined;
+  collection: string | undefined;
+  fit: string | undefined;
+  minTier: number | undefined;
+  colorCode: string | undefined;
+  dictionaryColor: common_Color | undefined;
+  countryCode: string | undefined;
 };
 
-export type common_ProductPrice = {
+export type common_ColorwayPrice = {
   currency: string | undefined;
   price: googletype_Decimal | undefined;
 };
 
-export type GetProductByIDRequest = {
-  id: number | undefined;
+export type GetColorwayByIDRequest = {
+  colorwayId: number | undefined;
 };
 
-export type GetProductByIDResponse = {
-  product: common_ProductFull | undefined;
+export type GetColorwayByIDResponse = {
+  colorway: common_ColorwayFull | undefined;
   // cost_info carries the confidential COGS/provenance fields. Admin-only — this lives on the
-  // admin GetProductByID response, never on the shared ProductFull, so it cannot leak to the
+  // admin GetColorwayByID response, never on the shared ColorwayFull, so it cannot leak to the
   // storefront read path.
-  costInfo: ProductCostInfo | undefined;
+  costInfo: ColorwayCostInfo | undefined;
+  // usages is this colourway's material recipe (H1 fix: the recipe is colourway-owned — S2/S3,
+  // 01-DOMAIN-MODEL §2.3 — so GetColorwayByID is the minimum surface that must return it; a
+  // full-replace UpdateColorwayRecipe is unsafe to edit-partially without a matching read). Lives
+  // here rather than on the shared common.ColorwayFull so it never reaches the storefront read
+  // path (admin.proto only). Money fields are stripped without costing:read.
+  usages: common_TechCardColorwayUsage[] | undefined;
 };
 
-export type common_ProductFull = {
-  product: common_Product | undefined;
-  sizes: common_ProductSize[] | undefined;
-  measurements: common_ProductMeasurement[] | undefined;
+export type common_ColorwayFull = {
+  colorway: common_Colorway | undefined;
+  variants: common_Variant[] | undefined;
   media: common_MediaFull[] | undefined;
-  tags: common_ProductTag[] | undefined;
+  tags: common_ColorwayTag[] | undefined;
 };
 
-export type common_ProductSize = {
-  id: number | undefined;
+export type common_Variant = {
+  variantId: number | undefined;
   quantity: googletype_Decimal | undefined;
-  productId: number | undefined;
+  colorwayId: number | undefined;
   sizeId: number | undefined;
+  variantSku: string | undefined;
+  status: common_VariantLifecycleStatus | undefined;
+  lockVersion: number | undefined;
 };
 
-export type common_ProductMeasurement = {
+// VariantLifecycleStatus is the stored lifecycle of a variant (R2). Variants archive, never delete.
+export type common_VariantLifecycleStatus =
+  | "VARIANT_LIFECYCLE_STATUS_UNKNOWN"
+  | "VARIANT_LIFECYCLE_STATUS_ACTIVE"
+  | "VARIANT_LIFECYCLE_STATUS_ARCHIVED";
+export type common_ColorwayTag = {
   id: number | undefined;
-  productId: number | undefined;
-  productSizeId: number | undefined;
-  measurementNameId: number | undefined;
-  measurementValue: googletype_Decimal | undefined;
+  colorwayId: number | undefined;
+  tagInsert: common_ColorwayTagInsert | undefined;
 };
 
-export type common_ProductTag = {
-  id: number | undefined;
-  productId: number | undefined;
-  productTagInsert: common_ProductTagInsert | undefined;
-};
-
-// ProductCostInfo is the admin-only view of a product's confidential cost of goods and where
+// ColorwayCostInfo is the admin-only view of a product's confidential cost of goods and where
 // that cost came from. source is "manual" | "tech_card" | "" (unset); tech-card ids are 0
 // when absent.
-export type ProductCostInfo = {
+export type ColorwayCostInfo = {
   costPrice: googletype_Decimal | undefined;
-  costPriceSource: string | undefined;
-  costPriceTechCardId: number | undefined;
+  costPriceSource: common_ColorwayCostSource | undefined;
+  costSourceTechCardId: number | undefined;
   costPriceUpdatedAt: wellKnownTimestamp | undefined;
   primaryTechCardId: number | undefined;
 };
 
-export type SyncProductCostFromTechCardRequest = {
-  productId: number | undefined;
-  // tech_card_id optionally repoints the product's primary card before seeding; 0 = use the
-  // product's existing primary card.
-  techCardId: number | undefined;
+// ColorwayCostSource records where a colourway's COGS came from (R4), separating cost provenance from
+// the owning style relation.
+export type common_ColorwayCostSource =
+  | "COLORWAY_COST_SOURCE_UNKNOWN"
+  | "COLORWAY_COST_SOURCE_MANUAL"
+  | "COLORWAY_COST_SOURCE_STYLE"
+  | "COLORWAY_COST_SOURCE_PRODUCTION_RUN";
+export type SyncColorwayCostFromOwningStyleRequest = {
+  colorwayId: number | undefined;
+  expectedVersion: number | undefined;
 };
 
-export type SyncProductCostFromTechCardResponse = {
+export type SyncColorwayCostFromOwningStyleResponse = {
   // the cost_price written, in base currency.
   costPrice: googletype_Decimal | undefined;
   currency: string | undefined;
-  // the tech card the cost was sourced from.
+  // the tech card the cost was sourced from (the owning style's primary card).
   techCardId: number | undefined;
+  source: common_ColorwayCostSource | undefined;
 };
 
-export type DeleteProductByIDRequest = {
-  id: number | undefined;
+// Lifecycle transition requests (R6). expected_version echoes tech_card.lock_version for future
+// optimistic-lock wiring; concurrency today is enforced by the server's lifecycle_status guard (a
+// concurrent transition is rejected, never silently lost).
+export type ArchiveColorwayByIDRequest = {
+  colorwayId: number | undefined;
+  expectedVersion: number | undefined;
 };
 
-export type DeleteProductByIDResponse = {
+export type ArchiveColorwayByIDResponse = {
 };
 
-export type UpdateProductSizeStockRequest = {
+export type PublishColorwayRequest = {
+  colorwayId: number | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type PublishColorwayResponse = {
+  colorway: common_Colorway | undefined;
+};
+
+export type TransitionColorwayStatusRequest = {
+  colorwayId: number | undefined;
+  expectedVersion: number | undefined;
+  target: common_ColorwayLifecycleStatus | undefined;
+};
+
+export type TransitionColorwayStatusResponse = {
+  colorway: common_Colorway | undefined;
+};
+
+export type UpdateVariantStockRequest = {
   mode: common_StockAdjustmentMode | undefined;
-  productId: number | undefined;
-  sizeId: number | undefined;
   quantity: number | undefined;
   direction: common_StockAdjustmentDirection | undefined;
   reason: common_StockChangeReason | undefined;
   comment?: string;
+  variantId: number | undefined;
 };
 
 export type common_StockAdjustmentMode =
@@ -634,13 +926,293 @@ export type common_StockChangeReason =
   | "STOCK_CHANGE_REASON_RETURN_TO_STOCK"
   // order_cancelled reasons
   | "STOCK_CHANGE_REASON_ORDER_CANCELLED";
-export type UpdateProductSizeStockResponse = {
+export type UpdateVariantStockResponse = {
+};
+
+// Variant CRUD (R2). A variant is created at zero stock, its size is immutable, and it is archived
+// (never deleted) so the frozen order/stock references stay valid. expected_*_version echoes the
+// shared tech_card.lock_version for future optimistic-lock wiring; concurrency today is enforced by
+// the store's existence + status guards (a concurrent change is rejected, never silently lost).
+export type CreateVariantRequest = {
+  colorwayId: number | undefined;
+  sizeId: number | undefined;
+  expectedColorwayVersion: number | undefined;
+};
+
+export type CreateVariantResponse = {
+  variant: common_Variant | undefined;
+};
+
+export type UpdateVariantRequest = {
+  variantId: number | undefined;
+  expectedVersion: number | undefined;
+  patch: VariantPatch | undefined;
+  updateMask: wellKnownFieldMask | undefined;
+};
+
+// VariantPatch carries the only mutable variant field: its lifecycle status (archive-not-delete).
+export type VariantPatch = {
+  status: common_VariantLifecycleStatus | undefined;
+};
+
+export type UpdateVariantResponse = {
+  variant: common_Variant | undefined;
+};
+
+export type ArchiveVariantRequest = {
+  variantId: number | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveVariantResponse = {
+};
+
+// Style size chart (R5, full-replace). The chart is style-owned (tech_card_size_measurement) and shares
+// the style's tech_card.lock_version; there is no separate chart version.
+export type GetStyleSizeChartRequest = {
+  styleId: number | undefined;
+};
+
+export type GetStyleSizeChartResponse = {
+  chart: common_StyleSizeChart | undefined;
+};
+
+export type common_StyleSizeChart = {
+  styleId: number | undefined;
+  lockVersion: number | undefined;
+  cells: common_StyleSizeChartCell[] | undefined;
+};
+
+// StyleSizeChart is the style-owned size chart (R5). Written full-replace under the shared
+// tech_card.lock_version; there is no separate chart version.
+export type common_StyleSizeChartCell = {
+  sizeId: number | undefined;
+  measurementNameId: number | undefined;
+  value: googletype_Decimal | undefined;
+};
+
+export type UpdateStyleSizeChartRequest = {
+  styleId: number | undefined;
+  expectedLockVersion: number | undefined;
+  cells: common_StyleSizeChartCell[] | undefined;
+};
+
+export type UpdateStyleSizeChartResponse = {
+  chart: common_StyleSizeChart | undefined;
+};
+
+// RelinkDraftColorway (R4): move a DRAFT colourway onto target_style_id. Both expected versions echo the
+// respective styles' shared tech_card.lock_version (stale -> ABORTED).
+export type RelinkDraftColorwayRequest = {
+  colorwayId: number | undefined;
+  targetStyleId: number | undefined;
+  expectedColorwayVersion: number | undefined;
+  expectedTargetStyleVersion: number | undefined;
+};
+
+export type RelinkDraftColorwayResponse = {
+};
+
+export type CloneStyleForSeasonRequest = {
+  sourceStyleId: number | undefined;
+  skuSeason: common_SkuSeason | undefined;
+  expectedSourceVersion: number | undefined;
+};
+
+// SkuSeason is the normalized style-owned season used in every SKU. The pair is atomic: callers
+// either omit the whole message (early draft/idea) or provide both a known code and a 2000..2099
+// year. Free-text season labels are not part of the contract.
+export type common_SkuSeason = {
+  code: common_SeasonEnum | undefined;
+  year: number | undefined;
+};
+
+export type CloneStyleForSeasonResponse = {
+  newStyleId: number | undefined;
+};
+
+// ColorwayCustoms is a product's international-shipping customs data. hs_code and
+// customs_description are the customs-only fields set by SetColorwayCustoms. country_of_origin is the
+// existing core product field (free-text manufacture country) returned read-only for display and
+// reused as the Sendcloud origin_country — SetColorwayCustoms ignores it (edit it on the product form).
+export type ColorwayCustoms = {
+  hsCode: string | undefined;
+  countryOfOrigin: string | undefined;
+  customsDescription: string | undefined;
+};
+
+export type GetColorwayCustomsRequest = {
+  colorwayId: number | undefined;
+};
+
+export type GetColorwayCustomsResponse = {
+  customs: ColorwayCustoms | undefined;
+};
+
+export type SetColorwayCustomsRequest = {
+  colorwayId: number | undefined;
+  customs: ColorwayCustoms | undefined;
+};
+
+export type SetColorwayCustomsResponse = {
+};
+
+export type ListColorsRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListColorsResponse = {
+  colors: common_Color[] | undefined;
+};
+
+export type CreateColorRequest = {
+  code: string | undefined;
+  name: string | undefined;
+  hex: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type CreateColorResponse = {
+  color: common_Color | undefined;
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type UpdateColorRequest = {
+  code: string | undefined;
+  name: string | undefined;
+  hex: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type UpdateColorResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ArchiveColorRequest = {
+  code: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveColorResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ListCollectionsRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListCollectionsResponse = {
+  collections: common_Collection[] | undefined;
+};
+
+export type CreateCollectionRequest = {
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type CreateCollectionResponse = {
+  collection: common_Collection | undefined;
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type UpdateCollectionRequest = {
+  id: number | undefined;
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type UpdateCollectionResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ArchiveCollectionRequest = {
+  id: number | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveCollectionResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ListTagsRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListTagsResponse = {
+  tags: common_Tag[] | undefined;
+};
+
+export type CreateTagRequest = {
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type CreateTagResponse = {
+  tag: common_Tag | undefined;
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type UpdateTagRequest = {
+  id: number | undefined;
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type UpdateTagResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ArchiveTagRequest = {
+  id: number | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveTagResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type CreateFiberRequest = {
+  code: string | undefined;
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type CreateFiberResponse = {
+  fiber: common_Fiber | undefined;
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ArchiveFiberRequest = {
+  code: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveFiberResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ListCountriesRequest = {
+  activeOnly: boolean | undefined;
+};
+
+export type ListCountriesResponse = {
+  countries: common_Country[] | undefined;
+};
+
+export type SetCountryActiveRequest = {
+  code: string | undefined;
+  active: boolean | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type SetCountryActiveResponse = {
+  revision: common_DictionaryRevision | undefined;
 };
 
 export type ListStockChangeHistoryRequest = {
   dateFrom: wellKnownTimestamp | undefined;
   dateTo: wellKnownTimestamp | undefined;
-  productId: number | undefined;
+  colorwayId: number | undefined;
   sizeId?: number;
   source: common_StockChangeSource | undefined;
   limit: number | undefined;
@@ -664,7 +1236,7 @@ export type ListStockChangeHistoryResponse = {
 
 export type common_StockChange = {
   id: number | undefined;
-  productId: number | undefined;
+  colorwayId: number | undefined;
   sizeId: number | undefined;
   quantityDelta: googletype_Decimal | undefined;
   quantityBefore: googletype_Decimal | undefined;
@@ -677,12 +1249,14 @@ export type common_StockChange = {
   referenceId: string | undefined;
   reason?: common_StockChangeReason;
   comment?: string;
+  variantId: number | undefined;
+  variantSku: string | undefined;
 };
 
 export type ListStockChangesRequest = {
   from: wellKnownTimestamp | undefined;
   to: wellKnownTimestamp | undefined;
-  productId?: number;
+  colorwayId?: number;
   source: common_StockChangeSource | undefined;
   limit: number | undefined;
   offset: number | undefined;
@@ -715,7 +1289,7 @@ export type ListStockChangesResponse = {
 };
 
 export type DeleteProductMediaRequest = {
-  productId: number | undefined;
+  colorwayId: number | undefined;
   mediaId: number | undefined;
 };
 
@@ -738,6 +1312,15 @@ export type common_PromoCodeInsert = {
 };
 
 export type AddPromoResponse = {
+};
+
+export type UpdatePromoCodeRequest = {
+  // The promo to update, identified by promo.code. The mutable fields are replaced in place; the
+  // row's id and any usage/creation data are preserved (no delete+recreate).
+  promo: common_PromoCodeInsert | undefined;
+};
+
+export type UpdatePromoCodeResponse = {
 };
 
 export type ListPromosRequest = {
@@ -806,6 +1389,12 @@ export type common_Order = {
   refundReason: string | undefined;
   orderComment: string | undefined;
   refundedAmount: googletype_Decimal | undefined;
+  // Buyer identity for the order-list projection: populated by the paged ListOrders query (which
+  // already joins buyer), so the admin orders list shows who placed the order instead of a raw UUID.
+  // Empty on read paths that don't project the buyer — OrderFull carries a full Buyer message instead.
+  buyerEmail: string | undefined;
+  buyerFirstName: string | undefined;
+  buyerLastName: string | undefined;
 };
 
 export type common_OrderItem = {
@@ -822,16 +1411,19 @@ export type common_OrderItem = {
   topCategoryId: number | undefined;
   subCategoryId: number | undefined;
   typeId: number | undefined;
-  sku: string | undefined;
+  // R2/p021: the frozen variant SKU of the sold line (immutable snapshot; no live fallback). Renamed
+  // from `sku`.
+  variantSkuSnapshot: string | undefined;
   preorder: wellKnownTimestamp | undefined;
   orderItem: common_OrderItemInsert | undefined;
-  translations: common_ProductInsertTranslation[] | undefined;
+  translations: common_ColorwayInsertTranslation[] | undefined;
+  baseSkuSnapshot: string | undefined;
+  sizeNameSnapshot: string | undefined;
 };
 
 export type common_OrderItemInsert = {
-  productId: number | undefined;
   quantity: number | undefined;
-  sizeId: number | undefined;
+  variantSku: string | undefined;
 };
 
 // Payment represents the payment table
@@ -868,6 +1460,12 @@ export type common_Shipment = {
   shippingDate: wellKnownTimestamp | undefined;
   estimatedArrivalDate: wellKnownTimestamp | undefined;
   freeShipping: boolean | undefined;
+  // actual_cost is the real carrier invoice for this shipment (EUR), distinct from cost
+  // (the price charged to the customer). NULL until an operator enters it.
+  actualCost: googletype_Decimal | undefined;
+  // return_shipping_cost is the reverse-logistics cost of a return (EUR), NULL when the
+  // order was not returned.
+  returnShippingCost: googletype_Decimal | undefined;
 };
 
 export type common_Buyer = {
@@ -1112,6 +1710,22 @@ export type CommerceCoreMetrics = {
   // resolved per order from the destination country (0 for export / pre-feature orders).
   revenueInclVat: MetricWithComparison | undefined;
   vatAmount: MetricWithComparison | undefined;
+  // unique_customers: distinct buyer emails with a net-revenue order in the period (the
+  // "покупатели" KPI). Differs from new_customers (first-ever order in the period) and from
+  // clv_distribution.sample_size (distinct emails with non-zero apportioned revenue).
+  uniqueCustomers: MetricWithComparison | undefined;
+  // peak_day: the single calendar day with the highest net revenue in the period (KPI card).
+  // Computed from a daily net-revenue rollup independent of trend_granularity; unset when the
+  // period has no revenue.
+  peakDay: PeakDay | undefined;
+  // discount_rate_pct: total_discount / gross_revenue × 100 — the share of list revenue given
+  // away as product-sale + promo discounts (a margin-erosion factor). lower_is_better. Numerator
+  // and denominator differ slightly in refunded-order treatment; see caveat.
+  discountRatePct: MetricWithComparison | undefined;
+  // new_vs_returning: revenue / orders / AOV split by whether the buyer's first-ever order (any
+  // status) falls in the period. Complements the existing new/returning_customers_by_day COUNT
+  // series with money. new+returning revenue reconciles with headline revenue.
+  newVsReturning: NewVsReturningSplit | undefined;
   newSubscribers: MetricWithComparison | undefined;
   newCustomers: MetricWithComparison | undefined;
   repeatCustomersRate: MetricWithComparison | undefined;
@@ -1156,10 +1770,6 @@ export type CommerceCoreMetrics = {
   returningCustomersByDayCompare: TimeSeriesPoint[] | undefined;
   shippedByDayCompare: TimeSeriesPoint[] | undefined;
   deliveredByDayCompare: TimeSeriesPoint[] | undefined;
-  uniqueCustomers: MetricWithComparison | undefined;
-  peakDay: PeakDay | undefined;
-  discountRatePct: MetricWithComparison | undefined;
-  newVsReturning: NewVsReturningSplit | undefined;
 };
 
 export type MetricWithComparison = {
@@ -1183,6 +1793,34 @@ export type MetricWithComparison = {
   marginOfError: number | undefined;
 };
 
+// PeakDay is the highest-net-revenue calendar day in the reporting period.
+export type PeakDay = {
+  date: wellKnownTimestamp | undefined;
+  revenue: googletype_Decimal | undefined;
+  orders: number | undefined;
+};
+
+// NewVsReturningSplit breaks the period's net revenue, orders and AOV into new vs returning
+// customers. "New" = the buyer's first-ever order (any status) falls in the period; a customer's
+// second order in the same period is still counted new (matching the new_customers_by_day series).
+export type NewVsReturningSplit = {
+  newOrders: MetricWithComparison | undefined;
+  newRevenue: MetricWithComparison | undefined;
+  newAov: MetricWithComparison | undefined;
+  returningOrders: MetricWithComparison | undefined;
+  returningRevenue: MetricWithComparison | undefined;
+  returningAov: MetricWithComparison | undefined;
+  newRevenueSharePct: number | undefined;
+  newRevenueByDay: TimeSeriesPoint[] | undefined;
+  returningRevenueByDay: TimeSeriesPoint[] | undefined;
+};
+
+export type TimeSeriesPoint = {
+  date: wellKnownTimestamp | undefined;
+  value: googletype_Decimal | undefined;
+  count: number | undefined;
+};
+
 export type CLVStats = {
   mean: googletype_Decimal | undefined;
   median: googletype_Decimal | undefined;
@@ -1200,6 +1838,10 @@ export type GeographyMetric = {
   compareCount: number | undefined;
   sharePct: number | undefined;
   avgOrderValue: googletype_Decimal | undefined;
+  // analytics-v2 task 10 (scaling): period-over-period revenue growth, (value − compare)/compare × 100,
+  // computed server-side so the frontend needn't divide decimal strings. Only set with a compare
+  // period; 0 when the country had no compare-period revenue — read compare_count == 0 as "new country"
+  // (an infinite growth rate) rather than as flat.
   changePct: number | undefined;
 };
 
@@ -1244,6 +1886,9 @@ export type CategoryMetric = {
   value: googletype_Decimal | undefined;
   count: number | undefined;
   categoryDisplayName: string | undefined;
+  // share_pct: this category's value as a percentage of total category revenue in the period.
+  // Categories are an item-level split (shipping is not attributed), so shares sum to 100 within
+  // the breakdown, not against headline revenue.
   sharePct: number | undefined;
 };
 
@@ -1268,30 +1913,6 @@ export type PromoMetric = {
 export type StatusCount = {
   statusName: string | undefined;
   count: number | undefined;
-};
-
-export type TimeSeriesPoint = {
-  date: wellKnownTimestamp | undefined;
-  value: googletype_Decimal | undefined;
-  count: number | undefined;
-};
-
-export type PeakDay = {
-  date: wellKnownTimestamp | undefined;
-  revenue: googletype_Decimal | undefined;
-  orders: number | undefined;
-};
-
-export type NewVsReturningSplit = {
-  newOrders: MetricWithComparison | undefined;
-  newRevenue: MetricWithComparison | undefined;
-  newAov: MetricWithComparison | undefined;
-  returningOrders: MetricWithComparison | undefined;
-  returningRevenue: MetricWithComparison | undefined;
-  returningAov: MetricWithComparison | undefined;
-  newRevenueSharePct: number | undefined;
-  newRevenueByDay: TimeSeriesPoint[] | undefined;
-  returningRevenueByDay: TimeSeriesPoint[] | undefined;
 };
 
 // MarginMetrics is the DB-trusted COGS / margin view (from product.cost_price), computed over
@@ -1849,6 +2470,12 @@ export type GeographySection = {
   demandByCountry: CountryDemandRow[] | undefined;
 };
 
+// CountryEconomicsRow is per-country profitability (analytics-v2 task 08): margin and its inputs,
+// contribution, profit per order, and average customer LTV. Revenue/orders reconcile with
+// by_country (same shipping-address attribution). Margin is over items that HAVE a cost snapshot, so
+// gate on cost_coverage_pct and orders — a 2-order country can show 80% margin. gross_margin,
+// revenue_cost, contribution_margin, payment_fees and profit_per_order are confidential cost data
+// (stripped without costing:read); revenue, orders, discount and ltv_avg (revenue-side) stay visible.
 export type CountryEconomicsRow = {
   country: string | undefined;
   revenue: googletype_Decimal | undefined;
@@ -1866,6 +2493,11 @@ export type CountryEconomicsRow = {
   ltvSample: number | undefined;
 };
 
+// CountryLogisticsRow is per-country fulfilment and returns (analytics-v2 task 09). Durations come
+// from order_status_history for orders PLACED in the period; delivered figures are operator-flipped so
+// gate them on delivered_sample (a small country with one missing flip reads as 0% coverage). Refund
+// rate on a handful of orders swings 0↔100, so refund_orders is surfaced for the UI to gate. No
+// confidential cost fields — avg_shipping_cost is logistics (not COGS) and stays visible.
 export type CountryLogisticsRow = {
   country: string | undefined;
   avgDaysPlacedToDelivered: number | undefined;
@@ -1877,6 +2509,13 @@ export type CountryLogisticsRow = {
   refundOrders: number | undefined;
 };
 
+// CountryDemandRow is per-country demand mix (analytics-v2 task 09): conversion, new-vs-returning and
+// the top categories. Conversion is DIRECTIONAL only — sessions are geo-IP (a tourist buying from a
+// hotel), and consent/ad-block undercounts them, so the rate is systematically OVER-stated; compare
+// countries to each other, never to external benchmarks. GA4's cache is 90 days, so sessions (and thus
+// conversion) are 0 when the window exceeds it — the caveat says which. Orders are DB net-revenue,
+// attributed by shipping-address country; sessions by GA4 country name mapped to ISO-2 (an unmapped GA4
+// country lands in a "(unmatched)" row so it is visible, not dropped).
 export type CountryDemandRow = {
   country: string | undefined;
   sessions: number | undefined;
@@ -2002,6 +2641,10 @@ export type MaterialValuationRow = {
   value: googletype_Decimal | undefined;
 };
 
+// OrderValueBandRow is one fixed order-value bucket: how many orders and how much net revenue
+// fall in [from, to) EUR. Bands are fixed (not quantile) so they are comparable across periods.
+// Order value is net of VAT and after discounts/refunds — consistent with AOV, so band edges will
+// not line up with on-site sticker prices.
 export type OrderValueBandRow = {
   label: string | undefined;
   from: googletype_Decimal | undefined;
@@ -2013,6 +2656,10 @@ export type OrderValueBandRow = {
   avgOrderValue: googletype_Decimal | undefined;
 };
 
+// DeliverySection reports fulfilment speed for orders PLACED in the period (a placed-cohort, so the
+// average is not dragged by tails of earlier periods). Durations come from order_status_history
+// timestamps; on-time compares delivered_at against shipment.estimated_arrival_date. Delivered is
+// operator-flipped, so gate the delivered-based figures on delivered_coverage_pct / delivered_sample.
 export type DeliverySection = {
   avgDaysPlacedToShipped: number | undefined;
   avgDaysShippedToDelivered: number | undefined;
@@ -2028,6 +2675,9 @@ export type DeliverySection = {
   caveat: string | undefined;
 };
 
+// RevenueForecast projects net revenue for the calendar month containing the period end. It blends a
+// day-of-week run-rate (trailing 8 weeks) with a seasonal ratio-to-date from last year when that data
+// exists. DB-only (no GA4). Directional at this data scale — read the low/high band, not the point.
 export type RevenueForecast = {
   month: wellKnownTimestamp | undefined;
   mtdActual: googletype_Decimal | undefined;
@@ -2042,7 +2692,14 @@ export type RevenueForecast = {
   caveat: string | undefined;
 };
 
+// ProfitabilitySection is the self-contained "Profitability" tab (analytics-v2 task 07): the margin
+// figures and their erosion (discounts), the acquisition-economics block (CPO / blended CAC / LTV /
+// LTV·CAC), fulfilment cost per order, returns, and the operating-result roll-up — assembled from the
+// SAME builders the dashboard uses so the shared figures tie out. CPO/CAC/LTV·CAC use manually-entered
+// media spend (channel_spend): when none is entered has_spend=false and they are 0 (N/A, not "free").
+// Cost/margin fields are stripped for accounts without costing:read; ltv (revenue-side) is kept.
 export type ProfitabilitySection = {
+  // --- margin and its erosion (assembly of existing figures) ---
   grossMargin: MetricWithComparison | undefined;
   grossMarginPct: MetricWithComparison | undefined;
   costCoveragePct: number | undefined;
@@ -2051,12 +2708,14 @@ export type ProfitabilitySection = {
   promoCodeDiscount: MetricWithComparison | undefined;
   discountRatePct: MetricWithComparison | undefined;
   contributionMargin: MetricWithComparison | undefined;
+  // --- acquisition economics (new) ---
   cpo: MetricWithComparison | undefined;
   blendedCac: MetricWithComparison | undefined;
   hasSpend: boolean | undefined;
   ltv: googletype_Decimal | undefined;
   ltvCacRatio: number | undefined;
   fulfilmentCostPerOrder: MetricWithComparison | undefined;
+  // --- returns and the bottom line ---
   refundRate: MetricWithComparison | undefined;
   totalRefunded: MetricWithComparison | undefined;
   opexTotal: googletype_Decimal | undefined;
@@ -2225,12 +2884,12 @@ export type CreateCustomOrderRequest = {
   shipmentCost: googletype_Decimal | undefined;
 };
 
-// CustomOrderItemInsert allows custom pricing per item (admin-only).
+// CustomOrderItemInsert allows custom pricing per item (admin-only). Admin addresses the variant by its
+// internal id (R2).
 export type common_CustomOrderItemInsert = {
-  productId: number | undefined;
   quantity: number | undefined;
-  sizeId: number | undefined;
   customPrice: googletype_Decimal | undefined;
+  variantId: number | undefined;
 };
 
 export type CreateCustomOrderResponse = {
@@ -2573,7 +3232,7 @@ export type common_ArchiveMediaWithCaptionInsert = {
 };
 
 export type common_ArchiveProductInsert = {
-  productId: number | undefined;
+  colorwayId: number | undefined;
   translations: common_ArchiveItemTranslation[] | undefined;
 };
 
@@ -2584,7 +3243,7 @@ export type common_ArchiveProductsTagInsert = {
 };
 
 export type common_ArchiveProductsManualInsert = {
-  productIds: number[] | undefined;
+  colorwayIds: number[] | undefined;
   translations: common_ArchiveItemTranslation[] | undefined;
 };
 
@@ -2617,6 +3276,9 @@ export type common_ArchiveList = {
   slug: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   thumbnail: common_MediaFull | undefined;
+  // code is the stable, immutable public identifier used in the /timeline URL tail
+  // and by GetArchive to resolve the archive (id is no longer the public key).
+  code: string | undefined;
 };
 
 // ArchiveItemFull is a single resolved timeline body block (read side). Exactly
@@ -2667,20 +3329,20 @@ export type common_ArchiveMediaWithCaptionFull = {
 
 // PRODUCT: a single product. Optional caption in translations.caption.
 export type common_ArchiveProductFull = {
-  product: common_Product | undefined;
+  product: common_Colorway | undefined;
   translations: common_ArchiveItemTranslation[] | undefined;
 };
 
 // PRODUCTS_TAG: products resolved by tag. Optional caption in translations.caption.
 export type common_ArchiveProductsTagFull = {
   tag: string | undefined;
-  products: common_Product[] | undefined;
+  products: common_Colorway[] | undefined;
   translations: common_ArchiveItemTranslation[] | undefined;
 };
 
 // PRODUCTS_MANUAL: hand-picked, ordered products. Optional caption.
 export type common_ArchiveProductsManualFull = {
-  products: common_Product[] | undefined;
+  products: common_Colorway[] | undefined;
   translations: common_ArchiveItemTranslation[] | undefined;
 };
 
@@ -2692,6 +3354,17 @@ export type DeleteArchiveByIdRequest = {
 };
 
 export type DeleteArchiveByIdResponse = {
+};
+
+export type GetArchivesPagedRequest = {
+  limit: number | undefined;
+  offset: number | undefined;
+  orderFactor: common_OrderFactor | undefined;
+};
+
+export type GetArchivesPagedResponse = {
+  archives: common_ArchiveList[] | undefined;
+  total: number | undefined;
 };
 
 export type AddModelRequest = {
@@ -2876,16 +3549,24 @@ export type common_FittingCallout = {
   posY: googletype_Decimal | undefined;
 };
 
-// FittingChangeRequest is one structured change produced by a fitting (task 13): the target area
-// to change, a note, an optional link to a photo callout pin, and a resolved flag (set when the
-// change has been carried into the tech card). The lightweight replacement for the removed POM
-// feedback loop — it records WHY the spec changed without the full point/grade machinery.
+// FittingChangeRequest is one structured remark item produced by a fitting (S26, §2.7). target is the
+// change CATEGORY; zone + piece_id are the structured LOCATION (which replace the front's misuse of
+// target as a free "sleeve/collar" field, A2). status (open|resolved) replaces the old boolean
+// resolved; carried_from_id links this item to the one in the PREVIOUS round it continues, giving a
+// visible carry-over history (acceptance E.15). The free fitting.comment stays a separate free note.
 export type common_FittingChangeRequest = {
   id: number | undefined;
   target: string | undefined;
   note: string | undefined;
   calloutNumber: number | undefined;
   resolved: boolean | undefined;
+  zone: string | undefined;
+  pieceId: number | undefined;
+  status: string | undefined;
+  carriedFromId: number | undefined;
+  createdBy: string | undefined;
+  fittingId: number | undefined;
+  roundNumber: number | undefined;
 };
 
 export type AddFittingResponse = {
@@ -2913,6 +3594,9 @@ export type common_Fitting = {
   media: common_MediaFull[] | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  lockVersion: number | undefined;
+  createdBy: string | undefined;
+  updatedBy: string | undefined;
 };
 
 export type GetFittingRequest = {
@@ -2926,6 +3610,7 @@ export type GetFittingResponse = {
 export type UpdateFittingRequest = {
   id: number | undefined;
   fitting: common_FittingInsert | undefined;
+  expectedLockVersion: number | undefined;
 };
 
 export type UpdateFittingResponse = {
@@ -2957,6 +3642,10 @@ export type common_SampleInsert = {
   mediaIds: number[] | undefined;
   patternUrl: string | undefined;
   patternNote: string | undefined;
+  // Round spine (Q7/§2.7): a sample is the OBJECT of a development round.
+  roundNumber: number | undefined;
+  specReleaseId: number | undefined;
+  previousSampleId: number | undefined;
 };
 
 export type AddSampleResponse = {
@@ -2966,9 +3655,110 @@ export type AddSampleResponse = {
 export type UpdateSampleRequest = {
   id: number | undefined;
   sample: common_SampleInsert | undefined;
+  expectedLockVersion: number | undefined;
 };
 
 export type UpdateSampleResponse = {
+};
+
+export type AddSampleSubstitutionRequest = {
+  substitution: common_SampleSubstitutionInsert | undefined;
+};
+
+// SampleSubstitutionInsert records a dev-time deviation from the spec BOM on a sample (§2.7): a BOM
+// line was sewn with a different material. Q2 invariant: this is documentation, never COGS — the
+// authoritative spend stays in the stock ledger (actual) and the BOM line (plan).
+export type common_SampleSubstitutionInsert = {
+  sampleId: number | undefined;
+  bomItemId: number | undefined;
+  originalMaterialId: number | undefined;
+  substitutedMaterialId: number | undefined;
+  reason: string | undefined;
+  plannedQty: googletype_Decimal | undefined;
+  actualQty: googletype_Decimal | undefined;
+};
+
+export type AddSampleSubstitutionResponse = {
+  id: number | undefined;
+};
+
+export type ListSampleSubstitutionsRequest = {
+  sampleId: number | undefined;
+};
+
+export type ListSampleSubstitutionsResponse = {
+  substitutions: common_SampleSubstitution[] | undefined;
+};
+
+// SampleSubstitution is a stored substitution (insert payload + identity, audit stamp and timestamp).
+export type common_SampleSubstitution = {
+  id: number | undefined;
+  sampleId: number | undefined;
+  bomItemId: number | undefined;
+  originalMaterialId: number | undefined;
+  substitutedMaterialId: number | undefined;
+  reason: string | undefined;
+  plannedQty: googletype_Decimal | undefined;
+  actualQty: googletype_Decimal | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+export type DeleteSampleSubstitutionRequest = {
+  id: number | undefined;
+};
+
+export type DeleteSampleSubstitutionResponse = {
+};
+
+export type AddFittingChangeRequestRequest = {
+  changeRequest: common_FittingChangeRequestInsert | undefined;
+};
+
+// FittingChangeRequestInsert is the write payload for the dedicated change-request CRUD (S26). Unlike
+// the embedded initial batch on FittingInsert, these items are managed individually so their id is
+// STABLE — which carried_from_id (and the resolve/carry-over flow) depends on. created_by is stamped
+// server-side.
+export type common_FittingChangeRequestInsert = {
+  fittingId: number | undefined;
+  target: string | undefined;
+  note: string | undefined;
+  calloutNumber: number | undefined;
+  zone: string | undefined;
+  pieceId: number | undefined;
+  status: string | undefined;
+  carriedFromId: number | undefined;
+};
+
+export type AddFittingChangeRequestResponse = {
+  id: number | undefined;
+};
+
+export type UpdateFittingChangeRequestRequest = {
+  id: number | undefined;
+  changeRequest: common_FittingChangeRequestInsert | undefined;
+};
+
+export type UpdateFittingChangeRequestResponse = {
+};
+
+export type DeleteFittingChangeRequestRequest = {
+  id: number | undefined;
+};
+
+export type DeleteFittingChangeRequestResponse = {
+};
+
+// ListOpenFittingChangeRequests returns the OPEN structured remarks from a style's earlier rounds — the
+// carry-over view shown when opening the next round (task 2). before_round scopes to items raised
+// strictly before that round (0 = every round).
+export type ListOpenFittingChangeRequestsRequest = {
+  techCardId: number | undefined;
+  beforeRound: number | undefined;
+};
+
+export type ListOpenFittingChangeRequestsResponse = {
+  changeRequests: common_FittingChangeRequest[] | undefined;
 };
 
 export type DeleteSampleRequest = {
@@ -2996,6 +3786,9 @@ export type common_Sample = {
   updatedAt: wellKnownTimestamp | undefined;
   cost: common_SampleCost | undefined;
   media: common_MediaFull[] | undefined;
+  lockVersion: number | undefined;
+  createdBy: string | undefined;
+  updatedBy: string | undefined;
 };
 
 // SampleCost is the composed cost of a sample in the base currency (confidential; stripped without
@@ -3365,6 +4158,89 @@ export type MarkFulfillmentDeliveredRequest = {
 export type MarkFulfillmentDeliveredResponse = {
 };
 
+// ShippingParcel is the physical parcel a label is generated for. Weight is in
+// grams; dimensions are whole centimetres (0 = unknown, omitted from the label).
+export type ShippingParcel = {
+  weightGrams: number | undefined;
+  lengthCm: number | undefined;
+  widthCm: number | undefined;
+  heightCm: number | undefined;
+  boxType: string | undefined;
+};
+
+export type PrepareShippingLabelRequest = {
+  orderUuid: string | undefined;
+};
+
+export type PrepareShippingLabelResponse = {
+  parcel: ShippingParcel | undefined;
+  complete: boolean | undefined;
+  missingProductIds: number[] | undefined;
+  carrierId: number | undefined;
+  carrierName: string | undefined;
+  labelsEnabled: boolean | undefined;
+  alreadyGenerated: boolean | undefined;
+  labelUrl: string | undefined;
+  trackingCode: string | undefined;
+};
+
+export type GenerateShippingLabelRequest = {
+  orderUuid: string | undefined;
+  parcel: ShippingParcel | undefined;
+  shippingOptionCode: string | undefined;
+};
+
+export type GenerateShippingLabelResponse = {
+  trackingCode: string | undefined;
+  labelUrl: string | undefined;
+  carrierShipmentId: string | undefined;
+  shippingOptionCode: string | undefined;
+  carrierName: string | undefined;
+};
+
+// ShippingOption is one Sendcloud shipping option (carrier + service) with its quote. code is the
+// shipping_option_code passed back to GenerateShippingLabel to select it.
+export type ShippingOption = {
+  code: string | undefined;
+  carrierCode: string | undefined;
+  carrierName: string | undefined;
+  productName: string | undefined;
+  totalCharge: googletype_Decimal | undefined;
+  currency: string | undefined;
+  transitDays: number | undefined;
+  deliveryDate: string | undefined;
+};
+
+export type GetShippingOptionsRequest = {
+  orderUuid: string | undefined;
+  parcel: ShippingParcel | undefined;
+};
+
+export type GetShippingOptionsResponse = {
+  options: ShippingOption[] | undefined;
+};
+
+export type VoidShippingLabelRequest = {
+  orderUuid: string | undefined;
+};
+
+export type VoidShippingLabelResponse = {
+};
+
+export type SchedulePickupRequest = {
+  carrierCode: string | undefined;
+  date: string | undefined;
+  quantity: number | undefined;
+  fromTime: string | undefined;
+  toTime: string | undefined;
+};
+
+export type SchedulePickupResponse = {
+  pickupId: string | undefined;
+  confirmed: boolean | undefined;
+  message: string | undefined;
+};
+
 export type UpdateSettingsRequest = {
   shipmentCarriers: ShipmentCarrierAllowancePrice[] | undefined;
   paymentMethods: PaymentMethodAllowance[] | undefined;
@@ -3438,6 +4314,8 @@ export type AddShipmentCarrierRequest = {
   description: string | undefined;
   allowedRegions: common_ShippingRegion[] | undefined;
   allowed: boolean | undefined;
+  aftershipSlug: string | undefined;
+  autoDeliverAfterHours: number | undefined;
 };
 
 export type AddShipmentCarrierResponse = {
@@ -3453,6 +4331,8 @@ export type UpdateShipmentCarrierRequest = {
   description: string | undefined;
   allowedRegions: common_ShippingRegion[] | undefined;
   allowed: boolean | undefined;
+  aftershipSlug: string | undefined;
+  autoDeliverAfterHours: number | undefined;
 };
 
 export type UpdateShipmentCarrierResponse = {
@@ -3618,6 +4498,12 @@ export type common_TechCardDevCostSummary = {
   // production unit cost is unavailable. NOT part of cost_price (development is a period cost).
   unitCostWithDev: googletype_Decimal | undefined;
   orderQty: number | undefined;
+  // Q8 rollup (read projection, built alongside — never seeded into cost_price):
+  byRound: common_TechCardDevCostByRound[] | undefined;
+  roundsToApproval: number | undefined;
+  firstExpenseAt: wellKnownTimestamp | undefined;
+  approvedAt: wellKnownTimestamp | undefined;
+  daysToApproval: number | undefined;
 };
 
 // TechCardDevCostByKind is the base-currency development spend for one kind.
@@ -3626,12 +4512,135 @@ export type common_TechCardDevCostByKind = {
   amountBase: googletype_Decimal | undefined;
 };
 
+// TechCardDevCostByRound is a style's development spend attributed to one fitting round (Q8 — the
+// attribution S20 asked to fix). round_number 0 collects expenses tied to no fitting round.
+export type common_TechCardDevCostByRound = {
+  roundNumber: number | undefined;
+  amountBase: googletype_Decimal | undefined;
+  expenseCount: number | undefined;
+};
+
 export type GetStyleEconomicsRequest = {
   techCardId: number | undefined;
 };
 
 export type GetStyleEconomicsResponse = {
   economics: StyleEconomics | undefined;
+};
+
+// StyleCutListFabric is, for one colourway, which fabric (and optional fusing / клеевая) BOM line a
+// cut-piece is cut from. Names come from the BOM line so the cut-list is self-contained.
+export type StyleCutListFabric = {
+  colorwayId: number | undefined;
+  bomItemId: number | undefined;
+  fabricName: string | undefined;
+  fusingBomItemId: number | undefined;
+  fusingName: string | undefined;
+};
+
+// StyleCutListPiece is one cut-piece expanded for production (Q6): total_per_garment folds the
+// mirrored pair into the count (pieces_per_garment × 2 when mirrored), and fabrics lists the material
+// per colourway.
+export type StyleCutListPiece = {
+  pieceId: number | undefined;
+  name: string | undefined;
+  piecesPerGarment: number | undefined;
+  mirrored: boolean | undefined;
+  totalPerGarment: number | undefined;
+  grainline: string | undefined;
+  fused: boolean | undefined;
+  fabrics: StyleCutListFabric[] | undefined;
+};
+
+export type GetStyleCutListRequest = {
+  techCardId: number | undefined;
+};
+
+// GetStyleCutListResponse is the read-only production cut-list projection over a style's cut-pieces.
+export type GetStyleCutListResponse = {
+  techCardId: number | undefined;
+  styleNumber: string | undefined;
+  name: string | undefined;
+  pieces: StyleCutListPiece[] | undefined;
+};
+
+// StyleCostMaterialLine is one BOM material's contribution to the estimated per-garment cost, with
+// full provenance so the operator can see WHERE each number came from (Q4 transparency).
+export type StyleCostMaterialLine = {
+  bomItemId: number | undefined;
+  materialName: string | undefined;
+  section: string | undefined;
+  unit: string | undefined;
+  consumption: googletype_Decimal | undefined;
+  unitPrice: googletype_Decimal | undefined;
+  currency: string | undefined;
+  priceSource: StyleCostPriceSource | undefined;
+  priceDate: wellKnownTimestamp | undefined;
+  wastagePct: googletype_Decimal | undefined;
+  lineTotalBase: googletype_Decimal | undefined;
+  hasBase: boolean | undefined;
+};
+
+// StyleCostArticleLine is one typed manual cost article (cmt/hardware/packaging/logistics/overhead).
+export type StyleCostArticleLine = {
+  kind: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  amountBase: googletype_Decimal | undefined;
+  hasBase: boolean | undefined;
+};
+
+// StyleCostKindVariance compares the estimate to the production actual for one cost kind, per unit
+// (base EUR) — the line-by-line plan/fact discrepancy.
+export type StyleCostKindVariance = {
+  kind: string | undefined;
+  estimateBase: googletype_Decimal | undefined;
+  actualBase: googletype_Decimal | undefined;
+  variance: googletype_Decimal | undefined;
+  hasActual: boolean | undefined;
+};
+
+// StyleCostComparison ties the plan estimate to the two downstream facts (Q4 scope 2). The three
+// figures are deliberately distinct: an estimate is NOT an actual is NOT the booked COGS snapshot.
+export type StyleCostComparison = {
+  estimateUnitCostBase: googletype_Decimal | undefined;
+  actualUnitCostBase: googletype_Decimal | undefined;
+  hasActual: boolean | undefined;
+  snapshotCostBase: googletype_Decimal | undefined;
+  snapshotSource: string | undefined;
+  hasSnapshot: boolean | undefined;
+  estimateVsActual: googletype_Decimal | undefined;
+  estimateVsSnapshot: googletype_Decimal | undefined;
+  actualVsSnapshot: googletype_Decimal | undefined;
+  byKind: StyleCostKindVariance[] | undefined;
+  caveat: string | undefined;
+};
+
+// StyleCostEstimate is the transparent plan cost of one colourway (Q4).
+export type StyleCostEstimate = {
+  techCardId: number | undefined;
+  styleNumber: string | undefined;
+  name: string | undefined;
+  colorwayId: number | undefined;
+  baseCurrency: string | undefined;
+  materials: StyleCostMaterialLine[] | undefined;
+  materialsPerUnitBase: googletype_Decimal | undefined;
+  articles: StyleCostArticleLine[] | undefined;
+  defectPct: googletype_Decimal | undefined;
+  unitCostBase: googletype_Decimal | undefined;
+  orderQty: number | undefined;
+  orderCostBase: googletype_Decimal | undefined;
+  caveat: string | undefined;
+  comparison: StyleCostComparison | undefined;
+};
+
+export type GetStyleCostEstimateRequest = {
+  techCardId: number | undefined;
+  colorwayId: number | undefined;
+};
+
+export type GetStyleCostEstimateResponse = {
+  estimate: StyleCostEstimate | undefined;
 };
 
 // ChannelSettledRoasRow is one marketing channel's settled-revenue economics over a period (task 20
@@ -4085,33 +5094,33 @@ export type common_TechCardInsert = {
   // identification (Sheet «Титул»)
   // Артикул. Required from the PROTO stage onward; OPTIONAL (empty) while stage == IDEA — an idea
   // is by definition pre-article (NF-03/B-2). Moving a card out of IDEA without a real style
-  // number is rejected with InvalidArgument.
+  // number is rejected with InvalidArgument. A hand-typed override must set style_number_source =
+  // MANUAL and pass the strict format validator; the global UNIQUE(style_number) index is the
+  // authority on collisions (Q1). Use SuggestStyleNumber to get the server proposal.
   styleNumber: string | undefined;
+  styleNumberSource: common_StyleNumberSource | undefined;
   name: string | undefined;
   brand: string | undefined;
-  season: string | undefined;
   collection: string | undefined;
   categoryId: number | undefined;
   targetGender: common_GenderEnum | undefined;
   stage: common_TechCardStage | undefined;
   status: string | undefined;
   approvalState: common_TechCardApprovalState | undefined;
-  approvedBy: string | undefined;
+  // approved_by (36) removed (Q5): approval is the APPROVER role + a server-stamped journal event,
+  // not a free-text name. version (10) / revision_date (11) removed (Q1): the card's version is the
+  // sequence of named releases (Rev.N) + the auto-journal, not a free-text string. designer (14) /
+  // constructor (15) / technologist (16) removed (Q5): roles are admin-account assignments now (see
+  // the role-assignment RPCs). All are dropped from tech_card in M3.
   releasedAt: wellKnownTimestamp | undefined;
   measurementUnit: common_TechCardMeasurementUnit | undefined;
-  version: string | undefined;
-  revisionDate: wellKnownTimestamp | undefined;
   baseModelId: number | undefined;
   baseSampleSizeId: number | undefined;
-  designer: string | undefined;
-  constructor: string | undefined;
-  technologist: string | undefined;
   // construction description (lower block of Sheet «Титул») now lives in details[]; the
   // header targets / currency were removed (pricing is on costing, single brand policy).
   notes: string | undefined;
   // children (full-replace on update)
   sizeIds: number[] | undefined;
-  productIds: number[] | undefined;
   // Sketch media split into two INDEPENDENT lists (replaces the single `media = 32`):
   // moodboard_media — mood / inspiration / reference / fabric-swatch photos (design intent)
   // technical_media — flat sketches used in construction (front / back / detail / lining / preview)
@@ -4122,18 +5131,16 @@ export type common_TechCardInsert = {
   moodboardMedia: common_TechCardMediaItem[] | undefined;
   technicalMedia: common_TechCardMediaItem[] | undefined;
   callouts: common_TechCardCallout[] | undefined;
-  revisions: common_TechCardRevision[] | undefined;
-  // materials (Phase 2): bill of materials (article catalog) and colourways (recipes).
-  // CONTRACT (nf05-01): downstream references into bom_items and colorways are POSITIONAL, by index,
-  // and every write is a full replace (there are no stable ids to reference across a save). So when a
-  // BOM line or colourway is removed or reordered, the client MUST renumber all downstream indices in
-  // the SAME payload — colorway usages' bom_item_index, operations' bom_item_index, and pieces'
-  // colorway_index / bom_item_index / fusing_bom_item_index. An index left pointing at a shifted row
-  // silently maps a detail to the wrong material/colourway (data that goes to the factory); an
-  // out-of-range index is rejected, but an in-range-but-wrong one is not. The server range-checks but
-  // cannot detect a wrong-but-valid index.
+  // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
+  // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
+  // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.
+  // CONTRACT (nf05-01): downstream references into bom_items are POSITIONAL, by index, and every
+  // write is a full replace (bom_items have no stable ids across a save). So when a BOM line is
+  // removed or reordered, the client MUST renumber all downstream bom_item_index / fusing_bom_item_index
+  // in the SAME payload (operations, pieces). An out-of-range index is rejected; an in-range-but-wrong
+  // one is not — the server range-checks but cannot detect a wrong-but-valid index. Pieces address
+  // their colourway by explicit colorway_id (not a positional index).
   bomItems: common_TechCardBomItem[] | undefined;
-  colorways: common_TechCardColorway[] | undefined;
   // production (Phase 3): construction, operations, labels, packaging, costing.
   construction: common_TechCardConstruction | undefined;
   operations: common_TechCardOperation[] | undefined;
@@ -4154,10 +5161,21 @@ export type common_TechCardInsert = {
   // NF-07 auxiliary items. purpose is "sellable" (default/empty) or "auxiliary"; an auxiliary card
   // produces a packaging material rather than a product, so it may not link products and its run
   // output receipts into output_material_id (required before the first run; 0 = unset).
-  purpose: string | undefined;
+  purpose: common_TechCardPurpose | undefined;
   outputMaterialId: number | undefined;
+  skuSeason: common_SkuSeason | undefined;
+  // WS7: sub-classifies an auxiliary card (UNKNOWN=unset). Ignored / must be UNKNOWN for a sellable card.
+  auxSubtype: common_TechCardAuxSubtype | undefined;
 };
 
+// StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
+// server proposed it from the season+sequence contract (SuggestStyleNumber); MANUAL = the owner
+// overrode the proposal (the value then passes the strict format validator). UNKNOWN defaults to
+// GENERATED on write.
+export type common_StyleNumberSource =
+  | "STYLE_NUMBER_SOURCE_UNKNOWN"
+  | "STYLE_NUMBER_SOURCE_GENERATED"
+  | "STYLE_NUMBER_SOURCE_MANUAL";
 // TechCardStage is the development stage of a tech pack: prototype, fit sample,
 // salesman sample, pre-production, production.
 export type common_TechCardStage =
@@ -4213,17 +5231,6 @@ export type common_TechCardCallout = {
   posY: googletype_Decimal | undefined;
 };
 
-// TechCardRevision is one entry in the spec-document changelog (what changed in
-// which section, by whom). This is NOT fit history — fitting verdicts and
-// measurements live in the separate fitting feature.
-export type common_TechCardRevision = {
-  version: string | undefined;
-  revisionDate: wellKnownTimestamp | undefined;
-  author: string | undefined;
-  section: string | undefined;
-  changeNote: string | undefined;
-};
-
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
 // The per-colourway colour, placement and consumption live on TechCardColorwayUsage; the
 // BOM line is now a pure material-article catalog entry.
@@ -4247,6 +5254,15 @@ export type common_TechCardBomItem = {
   // material_id optionally links this line to a catalog Material (task 10). The line keeps its
   // own snapshot fields regardless; 0 means unlinked (free-text / legacy).
   materialId: number | undefined;
+  // id is the stable server-assigned PK (read-only). line_key is the client-generated ULID assigned
+  // when the line is first created in the UI, round-tripped on every save so the server keyed-
+  // reconciles by it (S2/S3) and keeps id stable — which is what lets operations/pieces/recipes hold
+  // a real FK instead of a fragile positional index.
+  id: number | undefined;
+  lineKey: string | undefined;
+  // material_snapshot is a read-only JSON snapshot of the linked material's descriptive fields at
+  // save time (S23), so the document is self-contained.
+  materialSnapshot: string | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -4269,71 +5285,6 @@ export type common_TechCardFabricDirection =
   | "TECH_CARD_FABRIC_DIRECTION_ANY"
   | "TECH_CARD_FABRIC_DIRECTION_ONE_WAY"
   | "TECH_CARD_FABRIC_DIRECTION_TWO_WAY";
-// TechCardColorway is a development colourway (Sheet «Колористика» columns). It is
-// distinct from tech_card_product (published catalog SKUs); product_id optionally
-// links the published SKU that realises this colourway.
-export type common_TechCardColorway = {
-  code: string | undefined;
-  name: string | undefined;
-  labDipStatus: common_TechCardLabDipStatus | undefined;
-  productId: number | undefined;
-  comment: string | undefined;
-  pantone: string | undefined;
-  pantoneSystem: string | undefined;
-  hex: string | undefined;
-  swatchMediaId: number | undefined;
-  labDipRound: number | undefined;
-  labDipSubmittedAt: wellKnownTimestamp | undefined;
-  labDipDecidedAt: wellKnownTimestamp | undefined;
-  labDipDecidedBy: string | undefined;
-  labDipRejectReason: string | undefined;
-  // the colour's material recipe: which catalog article (bom_item_index) goes on which
-  // garment part, in what colour, at what consumption. Per-colourway divergence lives here.
-  usages: common_TechCardColorwayUsage[] | undefined;
-  // OUTPUT-ONLY stable row id (B-10): set on Get/List so a sample can be linked to a colourway
-  // (Sample.colorway_id). Ignored on write — a card save full-replaces colourways with fresh ids
-  // (the server re-points existing sample links by colourway identity, case-folded code+name), so
-  // re-read the card and use a fresh id right before linking a sample.
-  id: number | undefined;
-};
-
-// TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
-export type common_TechCardLabDipStatus =
-  | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
-  | "TECH_CARD_LAB_DIP_STATUS_PENDING"
-  | "TECH_CARD_LAB_DIP_STATUS_SUBMITTED"
-  | "TECH_CARD_LAB_DIP_STATUS_APPROVED"
-  | "TECH_CARD_LAB_DIP_STATUS_REJECTED";
-// TechCardColorwayUsage is one material use inside a colourway: which catalog article
-// (bom_item_index) goes on which garment part (placement), the colour it takes HERE, and
-// how much is consumed (per-garment and/or per-size). The BOM is a pure article catalog;
-// per-colourway divergence lives here.
-export type common_TechCardColorwayUsage = {
-  // explicit presence: index 0 is a real BOM line, distinct from "unset"
-  // (mirrors TechCardOperation.bom_item_index).
-  bomItemIndex?: number;
-  placement: string | undefined;
-  // matched (trim+lower) against TechCardOperation.placement
-  color: string | undefined;
-  // independent of TechCardColorway.pantone (the swatch colour)
-  pantone: string | undefined;
-  consumption: googletype_Decimal | undefined;
-  quantity: googletype_Decimal | undefined;
-  sizeConsumptions: common_TechCardBomSizeConsumption[] | undefined;
-  lineTotal: googletype_Decimal | undefined;
-  sizeRunTotal: googletype_Decimal | undefined;
-  // explicit presence: 0-based index into TechCardInsert.pieces saying which cut-piece this
-  // consumption norm is about; unset = whole garment (informational, NF-05).
-  pieceIndex?: number;
-};
-
-// TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
-// material — different sizes consume different amounts of fabric.
-export type common_TechCardBomSizeConsumption = {
-  sizeId: number | undefined;
-  consumption: googletype_Decimal | undefined;
-};
-
 // TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
 export type common_TechCardConstruction = {
   mainStitchType: string | undefined;
@@ -4371,6 +5322,12 @@ export type common_TechCardOperation = {
   calloutNumber: number | undefined;
   zone: common_TechCardConstructionZone | undefined;
   placement: string | undefined;
+  // via the selected colourway's usages (match trim+lower; bom_item_index wins if set)
+  // bom_line_key references the BOM line by its stable line_key (WS3 follow-up: take positionality off
+  // the wire). Preferred over the positional bom_item_index (kept for the transition). The store
+  // resolves it to bom_item_id, the real FK on read.
+  bomLineKey: string | undefined;
+  bomItemId: number | undefined;
 };
 
 // TechCardOperationType classifies an operation by its machine / stitch class
@@ -4399,6 +5356,14 @@ export type common_TechCardConstructionZone =
   | "TECH_CARD_CONSTRUCTION_ZONE_INTERLINING"
   | "TECH_CARD_CONSTRUCTION_ZONE_OTHER";
 // TechCardLabel is one label / tag spec (Sheet «Этикетки и упаковка»).
+// TechCardLabel is the garment's label/tag SPEC — one of the three historically-unconnected "label"
+// concepts (S21): (a) THIS spec, (b) the shipment label (common/shipment.proto — a shipping document,
+// deliberately NOT merged, a different domain), (c) the label MATERIAL as a BOM line
+// (tech_card_bom_item, section=label). WS7 unifies (a)↔(c) via bom_item_id below, and classifies the
+// auxiliary item via TechCard.aux_subtype. DEPRECATION (destructive → M3, not done here): once
+// bom_item_id + aux_subtype are adopted, label_type collapses into aux_subtype and the free-text
+// content/placement/attachment/size overlap (also carried structurally by the linked material + the
+// assembly bill's print_note/position_note) is dropped in a guarded migration.
 export type common_TechCardLabel = {
   labelType: common_TechCardLabelType | undefined;
   content: string | undefined;
@@ -4406,6 +5371,9 @@ export type common_TechCardLabel = {
   attachment: string | undefined;
   size: string | undefined;
   note: string | undefined;
+  // WS7/§2.8 (S21 unification bridge): FK to the physical label material's BOM line
+  // (tech_card_bom_item). 0 = unlinked. Links this free-text label SPEC to the material it prints on.
+  bomItemId: number | undefined;
 };
 
 // TechCardLabelType classifies a label / tag (Sheet «Этикетки и упаковка»).
@@ -4428,8 +5396,8 @@ export type common_TechCardPackaging = {
   unitsPerBox: number | undefined;
   boxMarking: string | undefined;
   boxDimensions: string | undefined;
-  weightNet: googletype_Decimal | undefined;
-  weightGross: googletype_Decimal | undefined;
+  weightNetGrams: number | undefined;
+  weightGrossGrams: number | undefined;
   notes: string | undefined;
 };
 
@@ -4482,7 +5450,7 @@ export type common_TechCardCostLine = {
 // articles (CMT/hardware/…) are shared across colourways, so unit_cost folds them in. All
 // figures are per GARMENT except order_cost (whole run). No FX conversion.
 export type common_TechCardColorwayCost = {
-  colorwayIndex: number | undefined;
+  colorwayId: number | undefined;
   materialsTotal: common_TechCardCostLine[] | undefined;
   materialsPerUnit: googletype_Decimal | undefined;
   unitCost: googletype_Decimal | undefined;
@@ -4532,7 +5500,7 @@ export type common_TechCardSignoff = {
 };
 
 // TechCardInsert is the writable payload for a tech card. Nested lists are full
-// replacements on update (like ProductNew).
+// replacements on update (like ColorwayNew).
 // TechCardSignoffSection is the sheet a sign-off covers.
 export type common_TechCardSignoffSection =
   | "TECH_CARD_SIGNOFF_SECTION_UNKNOWN"
@@ -4575,27 +5543,136 @@ export type common_TechCardDetail = {
 export type common_TechCardPiece = {
   name: string | undefined;
   piecesPerGarment: number | undefined;
+  // Q6: mirrored means the piece is CUT AS A MIRRORED PAIR (left+right), not a decorative flag. The
+  // cut-list (GetStyleCutList) expands a mirrored piece ×2 over pieces_per_garment.
   mirrored: boolean | undefined;
   grainline: string | undefined;
   fused: boolean | undefined;
   calloutNumber?: number;
   note: string | undefined;
   materials: common_TechCardPieceColorwayMaterial[] | undefined;
+  // line_key is the stable client-generated ULID identity of the cut-piece (S8, mirrors BOM's
+  // line_key): the store keyed-upserts by it so the piece id stays stable across saves, which is what
+  // lets a colourway recipe usage hold a real piece_id FK. Empty on a legacy payload → server mints one.
+  lineKey: string | undefined;
+  // detached is OUTPUT-ONLY: the store sets it when the piece's callout_number no longer resolves to a
+  // callout on the card (its source sketch callout was removed) — the piece survives, visibly
+  // detached, instead of being silently dropped (orphan-control, S8).
+  detached: boolean | undefined;
 };
 
 // TechCardPieceColorwayMaterial maps ONE cut-piece to its fabric (and optional fusing) for ONE
-// colourway. colorway_index is positional into TechCardInsert.colorways (full-replace recreates
-// colourway ids, so the link is by position — mirrors bom_item_index / operation refs). The BOM
-// refs are positional into TechCardInsert.bom_items.
+// colourway. The colourway is addressed by an explicit colorway_id = product.id (R1/§14.3); the old
+// positional colorway_index into TechCardInsert.colorways is gone (colourways are no longer style
+// children). The BOM refs remain positional into TechCardInsert.bom_items.
 export type common_TechCardPieceColorwayMaterial = {
-  colorwayIndex: number | undefined;
+  colorwayId: number | undefined;
   bomItemIndex?: number;
   fusingBomItemIndex?: number;
   note: string | undefined;
+  // bom_line_key / fusing_bom_line_key reference the fabric / fusing BOM line by its stable line_key
+  // (WS3 follow-up: positionality off the wire). Preferred over the positional *_index (kept for the
+  // transition). The store resolves them to the real FKs bom_item_id / fusing_bom_item_id (output).
+  bomLineKey: string | undefined;
+  fusingBomLineKey: string | undefined;
+  bomItemId: number | undefined;
+  fusingBomItemId: number | undefined;
 };
 
+// TechCardPurpose is the numeric enum form of a style's purpose (R6). Replaces the free-text
+// `purpose` field; UNKNOWN is rejected on write.
+export type common_TechCardPurpose =
+  | "TECH_CARD_PURPOSE_UNKNOWN"
+  | "TECH_CARD_PURPOSE_SELLABLE"
+  | "TECH_CARD_PURPOSE_AUXILIARY";
+// TechCardAuxSubtype sub-classifies an AUXILIARY card (purpose=auxiliary) into the concrete kind of
+// non-sold item it produces (WS7). UNKNOWN=0 means unset — a sellable card, or an auxiliary card not yet
+// classified (stored NULL). Only meaningful with purpose=auxiliary.
+export type common_TechCardAuxSubtype =
+  | "TECH_CARD_AUX_SUBTYPE_UNKNOWN"
+  | "TECH_CARD_AUX_SUBTYPE_BRAND_LABEL"
+  | "TECH_CARD_AUX_SUBTYPE_CARE_LABEL"
+  | "TECH_CARD_AUX_SUBTYPE_SIZE_LABEL"
+  | "TECH_CARD_AUX_SUBTYPE_HANGTAG"
+  | "TECH_CARD_AUX_SUBTYPE_STICKER"
+  | "TECH_CARD_AUX_SUBTYPE_DUST_BAG"
+  | "TECH_CARD_AUX_SUBTYPE_BOX"
+  | "TECH_CARD_AUX_SUBTYPE_INSERT"
+  | "TECH_CARD_AUX_SUBTYPE_HANGER"
+  | "TECH_CARD_AUX_SUBTYPE_OTHER";
 export type CreateTechCardResponse = {
   id: number | undefined;
+};
+
+export type SuggestStyleNumberRequest = {
+  skuSeason: common_SkuSeason | undefined;
+};
+
+export type SuggestStyleNumberResponse = {
+  styleNumber: string | undefined;
+};
+
+export type AssignTechCardRoleRequest = {
+  techCardId: number | undefined;
+  role: common_TechCardRole | undefined;
+  adminId: number | undefined;
+};
+
+// TechCardRole is a responsible-account role on a tech card (PLM-rework Q5). Replaces the free-text
+// designer/constructor/technologist/approved_by strings; approval is the APPROVER role plus a
+// server-stamped journal event, not a free-text name.
+export type common_TechCardRole =
+  | "TECH_CARD_ROLE_UNKNOWN"
+  | "TECH_CARD_ROLE_DESIGNER"
+  | "TECH_CARD_ROLE_CONSTRUCTOR"
+  | "TECH_CARD_ROLE_TECHNOLOGIST"
+  | "TECH_CARD_ROLE_PATTERN_MAKER"
+  | "TECH_CARD_ROLE_GRADER"
+  | "TECH_CARD_ROLE_APPROVER"
+  | "TECH_CARD_ROLE_OTHER";
+export type AssignTechCardRoleResponse = {
+  assignment: common_TechCardRoleAssignment | undefined;
+};
+
+// TechCardRoleAssignment is one "this admin account is <role> of this card" record (Q5), multi per
+// role. Managed via the AssignTechCardRole / RemoveTechCardRoleAssignment / ListTechCardRoleAssignments
+// RPCs, NOT through the tech-card full-replace. admin_username is resolved on read (never written).
+export type common_TechCardRoleAssignment = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  role: common_TechCardRole | undefined;
+  adminId: number | undefined;
+  adminUsername: string | undefined;
+  assignedBy: string | undefined;
+  assignedAt: wellKnownTimestamp | undefined;
+};
+
+export type RemoveTechCardRoleAssignmentRequest = {
+  id: number | undefined;
+};
+
+export type RemoveTechCardRoleAssignmentResponse = {
+};
+
+export type ListTechCardRoleAssignmentsRequest = {
+  techCardId: number | undefined;
+};
+
+export type ListTechCardRoleAssignmentsResponse = {
+  assignments: common_TechCardRoleAssignment[] | undefined;
+};
+
+// AdminRef is a lightweight admin-account reference for the role-assignment picker.
+export type AdminRef = {
+  id: number | undefined;
+  username: string | undefined;
+};
+
+export type ListAdminsRequest = {
+};
+
+export type ListAdminsResponse = {
+  admins: AdminRef[] | undefined;
 };
 
 export type GetTechCardRequest = {
@@ -4613,9 +5690,47 @@ export type common_TechCard = {
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   lockVersion: number | undefined;
+  // Server-stamped audit usernames (norm §2.11, GetAdminUsername). Read-only: set by the server on
+  // create/update, never accepted from the write payload.
+  createdBy: string | undefined;
+  updatedBy: string | undefined;
+  // Responsible-account roles (Q5), read-only here — managed via the role-assignment RPCs, not the
+  // tech-card write. Replaces the removed free-text designer/constructor/technologist strings.
+  roleAssignments: common_TechCardRoleAssignment[] | undefined;
+  // Server-stamped auto-journal (Q1): who/what/when across the card's significant transitions.
+  // Read-only — appended by the server, never client-supplied. Replaces the removed input `revisions`.
+  revisions: common_TechCardRevision[] | undefined;
   // Resolved sketch media (MediaFull), split to mirror the writable lists.
   resolvedMoodboardMedia: common_TechCardMediaFull[] | undefined;
   resolvedTechnicalMedia: common_TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY derived colourways of this style (R1/§3.3): a style's colourways are its products.
+  // Not writable through the style — created/relinked via the Colorway RPCs.
+  colorways: common_AdminColorwayRef[] | undefined;
+  // composition_entries is the style's structured fibre composition (S17/M1 fix), resolved from
+  // style_composition; empty when the style has no structural composition data yet. Read-only,
+  // admin/constructor view — the storefront's equivalent is StorefrontColorwayDisplay.composition_entries.
+  compositionEntries: common_CompositionEntry[] | undefined;
+  // fit / composition (legacy free-text) / care_instructions are style catalogue facts stored on
+  // the tech_card row but WRITTEN via UpdateStyle (StylePatch), not the tech-card write — so they are
+  // read-only projections here, surfaced for the constructor to display and edit-in-place (the admin
+  // saves them through UpdateStyle). composition is always legacy plain text on the wire (M1); the
+  // structured fibre breakdown is composition_entries above.
+  fit: string | undefined;
+  composition: string | undefined;
+  careInstructions: string | undefined;
+};
+
+// TechCardRevision is one entry in the spec-document changelog (what changed in
+// which section, by whom). This is NOT fit history — fitting verdicts and
+// measurements live in the separate fitting feature.
+export type common_TechCardRevision = {
+  version: string | undefined;
+  revisionDate: wellKnownTimestamp | undefined;
+  author: string | undefined;
+  section: string | undefined;
+  changeNote: string | undefined;
+  action: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 // TechCardMediaFull is a resolved sketch-media reference for display.
@@ -4625,6 +5740,49 @@ export type common_TechCardMediaFull = {
   caption: string | undefined;
 };
 
+// AdminColorwayRef is a derived, output-only reference to a colourway from its style (R1: GetStyle may
+// return its colourways, but they are not writable through the style).
+export type common_AdminColorwayRef = {
+  colorwayId: number | undefined;
+  baseSku: string | undefined;
+  colorCode: string | undefined;
+  status: common_ColorwayLifecycleStatus | undefined;
+  // usages is this colourway's material recipe (H1 fix, WS3/S2-S3): the constructor view of a
+  // style now shows each colourway's recipe alongside its identity, instead of the recipe being
+  // write-only (UpdateColorwayRecipe persisted usages that no read path ever surfaced). Money
+  // fields (line_total/size_run_total) are stripped for an account without costing:read, same as
+  // the rest of the tech-card read (stripTechCardCosting).
+  usages: common_TechCardColorwayUsage[] | undefined;
+  // Lab-dip lifecycle mirrored from the colourway's development submessage (ColorwayDevelopmentInsert),
+  // so the tech-card colourways tab can READ the current lab-dip state inline instead of a second
+  // GetColorwayByID round-trip. These are written through the Colorway write path (UpdateColorway's
+  // development.*), never through the style; here they are output-only.
+  labDipStatus: common_TechCardLabDipStatus | undefined;
+  labDipRound: number | undefined;
+  labDipSubmittedAt: wellKnownTimestamp | undefined;
+  labDipDecidedAt: wellKnownTimestamp | undefined;
+  labDipDecidedBy: string | undefined;
+  labDipRejectReason: string | undefined;
+  // lock_version is the colourway's optimistic-lock token — its style's shared tech_card.lock_version
+  // (R2/R4). Echo it into UpdateColorwayRequest.expected_colorway_version; a stale value is rejected
+  // (ABORTED). Surfaced on the ref so a per-colourway lab-dip edit is optimistically locked straight
+  // from here, without the caller reaching up to the tech-card's top-level lock_version.
+  lockVersion: number | undefined;
+};
+
+// CompositionEntry is one fibre share of a style's structured composition (S17), resolved with its
+// dictionary display name. M1 fix: the typed replacement for overloading the free-text `composition`
+// field with an encoded array of these once style_composition gains rows — that overload is removed;
+// `composition` on the wire is legacy plain text ONLY, always, and composition_entries (StorefrontColorwayDisplay,
+// TechCard) is the structured projection, populated from style_composition, empty when the style has
+// none yet. percent mirrors style_composition.percent (DECIMAL(5,2)): a decimal, not int32, because an
+// equal-split derivation (S17, DeriveStyleComposition) can produce fractional shares (e.g. 33.33).
+export type common_CompositionEntry = {
+  fiberCode: string | undefined;
+  name: string | undefined;
+  percent: googletype_Decimal | undefined;
+};
+
 export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;
@@ -4632,6 +5790,23 @@ export type UpdateTechCardRequest = {
 };
 
 export type UpdateTechCardResponse = {
+};
+
+// GenerateTechCardOperationsRequest asks the AI to draft sewing operations for a tech card from a
+// free-text description. tech_card_id supplies grounding context (the card's pieces, BOM and type
+// are loaded server-side, read-only); description is the technologist's plain-language brief.
+export type GenerateTechCardOperationsRequest = {
+  techCardId: number | undefined;
+  description: string | undefined;
+};
+
+// GenerateTechCardOperationsResponse is a PROPOSED draft: operations in the exact shape the card
+// stores (common.TechCardOperation), for the technologist to review, edit and save via
+// UpdateTechCard. This call persists nothing itself.
+export type GenerateTechCardOperationsResponse = {
+  operations: common_TechCardOperation[] | undefined;
+  model: string | undefined;
+  notes: string | undefined;
 };
 
 export type DeleteTechCardRequest = {
@@ -4648,9 +5823,11 @@ export type ListTechCardsRequest = {
   stage: common_TechCardStage | undefined;
   gender: common_GenderEnum | undefined;
   brand: string | undefined;
-  season: string | undefined;
   name: string | undefined;
   productId: number | undefined;
+  purpose: string | undefined;
+  // product-linking picker passes "sellable" to hide auxiliary/packaging cards.
+  skuSeason: common_SkuSeason | undefined;
 };
 
 export type ListTechCardsResponse = {
@@ -4667,7 +5844,6 @@ export type common_TechCardListItem = {
   stage: common_TechCardStage | undefined;
   status: string | undefined;
   targetGender: common_GenderEnum | undefined;
-  season: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
   approvalState: common_TechCardApprovalState | undefined;
@@ -4678,7 +5854,10 @@ export type common_TechCardListItem = {
   previewUrl: string | undefined;
   // Card purpose: "sellable" (default) or "auxiliary" (NF-07). Lets a board/list badge auxiliary
   // cards (dust bags, shoppers…) without an N+1 GetTechCard, mirroring TechCard.purpose.
-  purpose: string | undefined;
+  purpose: common_TechCardPurpose | undefined;
+  skuSeason: common_SkuSeason | undefined;
+  // WS7: auxiliary sub-type badge for list views (UNKNOWN=unset), mirroring purpose above.
+  auxSubtype: common_TechCardAuxSubtype | undefined;
 };
 
 // GetStylePipeline is the development board: one column per lifecycle stage
@@ -4748,8 +5927,6 @@ export type CreateMaterialRequest = {
   material: common_Material | undefined;
 };
 
-// Material is a catalog material — shared nomenclature a tech-card BOM line can optionally link
-// to. Descriptive fields only; price lives in the append-only MaterialPrice history.
 export type common_Material = {
   id: number | undefined;
   name: string | undefined;
@@ -4771,6 +5948,30 @@ export type common_Material = {
   pantone: string | undefined;
   minStock: googletype_Decimal | undefined;
   notes: string | undefined;
+  // lock_version is the optimistic-lock counter (S25, read-only). Echo it back in
+  // UpdateMaterialRequest.expected_lock_version; a stale value is rejected (Aborted).
+  lockVersion: number | undefined;
+  // CTI typing (S15): material_class selects which typed attribute set applies. Exactly one of the
+  // `attributes` oneof is populated for the four typed classes; other_attrs (a JSON object) is the
+  // escape-hatch used only when material_class = MATERIAL_CLASS_OTHER.
+  materialClass: common_MaterialClass | undefined;
+  fabricAttrs?: common_MaterialFabricAttrs;
+  hardwareAttrs?: common_MaterialHardwareAttrs;
+  threadAttrs?: common_MaterialThreadAttrs;
+  packagingAttrs?: common_MaterialPackagingAttrs;
+  otherAttrs: string | undefined;
+  // Structural fibre composition (S17): fiber_code + percent, summing to 100 when present. Replaces
+  // the free-text `composition` string (which stays legacy plain text). On write, only fiber_code +
+  // percent are read (name is resolved server-side from the fibre dictionary). Empty = unset. A
+  // shell-fabric material's composition is what a style's derived composition_entries is built from.
+  compositionEntries: common_CompositionEntry[] | undefined;
+  // Catalog image (#39): image_id is the write-side media reference (FK media(id); 0 = unset); image
+  // is the resolved MediaFull on read (null when unset). Mirrors Model.thumbnail_id / Model.thumbnail.
+  imageId: number | undefined;
+  image: common_MediaFull | undefined;
+  // purpose (#40) marks whether the material is used for samples, production, or both. Defaults to
+  // BOTH on write when UNKNOWN, so the admin can mark and filter materials.
+  purpose: common_MaterialPurpose | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -4784,12 +5985,69 @@ export type common_MaterialPrice = {
   note: string | undefined;
 };
 
+// Material is a catalog material — shared nomenclature a tech-card BOM line can optionally link
+// to. Descriptive fields only; price lives in the append-only MaterialPrice history.
+// MaterialClass is the class-table-inheritance discriminant (S15): it selects which typed
+// attribute set a material carries. Mirrors entity.MaterialClass and the DB CHECK chk_material_class.
+export type common_MaterialClass =
+  | "MATERIAL_CLASS_UNKNOWN"
+  | "MATERIAL_CLASS_FABRIC"
+  | "MATERIAL_CLASS_HARDWARE"
+  | "MATERIAL_CLASS_THREAD"
+  | "MATERIAL_CLASS_PACKAGING"
+  | "MATERIAL_CLASS_OTHER";
+// MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
+export type common_MaterialFabricAttrs = {
+  widthCm: googletype_Decimal | undefined;
+  weightGsm: googletype_Decimal | undefined;
+  fabricDirection: string | undefined;
+  shrinkagePct: googletype_Decimal | undefined;
+  rollLengthM: googletype_Decimal | undefined;
+};
+
+// MaterialHardwareAttrs are the typed attributes of a hardware-class material (material_hardware_attr).
+export type common_MaterialHardwareAttrs = {
+  diameterMm: googletype_Decimal | undefined;
+  dimensions: string | undefined;
+  finish: string | undefined;
+  baseMaterial: string | undefined;
+  weightG: googletype_Decimal | undefined;
+};
+
+// MaterialThreadAttrs are the typed attributes of a thread-class material (material_thread_attr).
+// Fibre composition is not here — it lives in the structural material_composition (S17).
+export type common_MaterialThreadAttrs = {
+  ticketTex: string | undefined;
+  lengthPerConeM: googletype_Decimal | undefined;
+  needleReco: string | undefined;
+};
+
+// MaterialPackagingAttrs are the typed attributes of a packaging-class material (material_packaging_attr).
+export type common_MaterialPackagingAttrs = {
+  substrate: string | undefined;
+  dimensions: string | undefined;
+  gsm: googletype_Decimal | undefined;
+  printMethod: string | undefined;
+};
+
+// MaterialPurpose (#40) marks whether a catalog material is used for samples, production, or both,
+// so the admin can mark and filter materials. Mirrors entity.ValidMaterialPurposes and the DB CHECK
+// chk_material_purpose. UNKNOWN defaults to BOTH on write.
+export type common_MaterialPurpose =
+  | "MATERIAL_PURPOSE_UNKNOWN"
+  | "MATERIAL_PURPOSE_SAMPLE"
+  | "MATERIAL_PURPOSE_PRODUCTION"
+  | "MATERIAL_PURPOSE_BOTH";
 export type CreateMaterialResponse = {
   id: number | undefined;
 };
 
 export type UpdateMaterialRequest = {
   material: common_Material | undefined;
+  // expected_lock_version is the material.lock_version the caller last read (optimistic lock,
+  // S25). A mismatch means the row changed underneath the caller — the update is rejected with
+  // Aborted and the caller should reload and retry.
+  expectedLockVersion: number | undefined;
 };
 
 export type UpdateMaterialResponse = {
@@ -4814,6 +6072,7 @@ export type GetMaterialResponse = {
 export type ListMaterialsRequest = {
   section: string | undefined;
   includeArchived: boolean | undefined;
+  purpose: common_MaterialPurpose | undefined;
 };
 
 export type ListMaterialsResponse = {
@@ -4851,6 +6110,7 @@ export type common_TechCardReleaseMeta = {
   id: number | undefined;
   techCardId: number | undefined;
   version: string | undefined;
+  releaseNumber: number | undefined;
   releasedBy: string | undefined;
   unitCost: googletype_Decimal | undefined;
   currency: string | undefined;
@@ -4945,6 +6205,11 @@ export type common_ProductionRunInsert = {
   markerEfficiencyPct: googletype_Decimal | undefined;
   markerNotes: string | undefined;
   markers: common_ProductionRunMarker[] | undefined;
+  // Run ACTUAL cutting wastage % (0..100), entered per run once the marker/lay is known. When set it
+  // OVERRIDES the BOM line's estimate wastage_percent in the run's cost calc (planned-cost snapshot +
+  // material plan); unset falls back to the BOM estimate. Refines the plan side only — the run's ACTUAL
+  // cost still derives from real material issues.
+  actualWastagePercent: googletype_Decimal | undefined;
 };
 
 // ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
@@ -5332,6 +6597,130 @@ export type ListPackagingBomResponse = {
   items: PackagingBomItem[] | undefined;
 };
 
+// PackagingRecipeLine is one stored line of a packaging recipe for a scope target (PLM rework §2.8,
+// Q3): a material consumed on ship — qty_per_order once per shipment (a box) plus qty_per_item × the
+// order's unit count (a dust bag). Resolution at order time is product → style → global (first match
+// wins). material_name / material_unit are resolved server-side for display and ignored on write.
+export type PackagingRecipeLine = {
+  id: number | undefined;
+  scope: string | undefined;
+  techCardId: number | undefined;
+  productId: number | undefined;
+  materialId: number | undefined;
+  materialName: string | undefined;
+  materialUnit: string | undefined;
+  qtyPerOrder: googletype_Decimal | undefined;
+  qtyPerItem: googletype_Decimal | undefined;
+  active: boolean | undefined;
+};
+
+// PackagingRecipeItem is one writable recipe line; the scope target is carried by the request.
+export type PackagingRecipeItem = {
+  materialId: number | undefined;
+  qtyPerOrder: googletype_Decimal | undefined;
+  qtyPerItem: googletype_Decimal | undefined;
+  active: boolean | undefined;
+};
+
+// UpsertPackagingRecipeRequest full-replaces the recipe lines of ONE scope target. scope selects the
+// target: tech_card_id is required iff scope=style, product_id iff scope=product, neither for global.
+// An empty items list clears that target's recipe.
+export type UpsertPackagingRecipeRequest = {
+  scope: string | undefined;
+  techCardId: number | undefined;
+  productId: number | undefined;
+  items: PackagingRecipeItem[] | undefined;
+};
+
+export type UpsertPackagingRecipeResponse = {
+};
+
+export type ListPackagingRecipeRequest = {
+};
+
+export type ListPackagingRecipeResponse = {
+  items: PackagingRecipeLine[] | undefined;
+};
+
+// StyleAssemblyLine is one stored line of a garment style's assembly bill (WS7, §2.8): an auxiliary item
+// (labels/tags) on/into the garment, with qty and print/position notes. component_name/component_aux_subtype/
+// output_material_* and size_name are resolved server-side for display and ignored on write.
+export type StyleAssemblyLine = {
+  id: number | undefined;
+  styleId: number | undefined;
+  componentTechCardId: number | undefined;
+  componentName: string | undefined;
+  componentAuxSubtype: common_TechCardAuxSubtype | undefined;
+  sizeId: number | undefined;
+  sizeName: string | undefined;
+  qty: googletype_Decimal | undefined;
+  printNote: string | undefined;
+  positionNote: string | undefined;
+  active: boolean | undefined;
+  outputMaterialId: number | undefined;
+  outputMaterialName: string | undefined;
+};
+
+// StyleAssemblyItem is one writable assembly line; the style target is carried by the request.
+export type StyleAssemblyItem = {
+  componentTechCardId: number | undefined;
+  sizeId: number | undefined;
+  qty: googletype_Decimal | undefined;
+  printNote: string | undefined;
+  positionNote: string | undefined;
+  active: boolean | undefined;
+};
+
+// UpsertStyleAssemblyRequest full-replaces one style's assembly bill. Empty items clears it.
+export type UpsertStyleAssemblyRequest = {
+  styleId: number | undefined;
+  items: StyleAssemblyItem[] | undefined;
+};
+
+export type UpsertStyleAssemblyResponse = {
+};
+
+export type ListStyleAssemblyRequest = {
+  styleId: number | undefined;
+};
+
+export type ListStyleAssemblyResponse = {
+  items: StyleAssemblyLine[] | undefined;
+};
+
+// OrderPackingSpecItem is one garment line in an order's packing spec: the colourway/variant, quantity,
+// and the on-garment assembly (labels/tags) the packer must verify, size-resolved to this line's variant.
+export type OrderPackingSpecItem = {
+  orderItemId: number | undefined;
+  productId: number | undefined;
+  variantId: number | undefined;
+  styleId: number | undefined;
+  styleName: string | undefined;
+  sku: string | undefined;
+  sizeName: string | undefined;
+  quantity: googletype_Decimal | undefined;
+  assembly: StyleAssemblyLine[] | undefined;
+};
+
+// OrderPackingSpecPackaging is one packaging material the order needs (WS2 resolution product → style →
+// global), summed across the order.
+export type OrderPackingSpecPackaging = {
+  materialId: number | undefined;
+  materialName: string | undefined;
+  materialUnit: string | undefined;
+  qty: googletype_Decimal | undefined;
+};
+
+export type GetOrderPackingSpecRequest = {
+  orderUuid: string | undefined;
+};
+
+export type GetOrderPackingSpecResponse = {
+  orderUuid: string | undefined;
+  items: OrderPackingSpecItem[] | undefined;
+  packaging: OrderPackingSpecPackaging[] | undefined;
+};
+
 export type ListMaterialLotsRequest = {
   materialId: number | undefined;
   includeArchived: boolean | undefined;
@@ -5464,26 +6853,114 @@ export interface AdminService {
   DeleteFromBucket(request: DeleteFromBucketRequest): Promise<DeleteFromBucketResponse>;
   // ListObjectsPaged lists all objects in the base folder.
   ListObjectsPaged(request: ListObjectsPagedRequest): Promise<ListObjectsPagedResponse>;
-  // Adds a new product or updates an existing one.
-  UpsertProduct(request: UpsertProductRequest): Promise<UpsertProductResponse>;
-  // Retrieves a paginated list of products.
-  GetProductsPaged(request: GetProductsPagedRequest): Promise<GetProductsPagedResponse>;
-  // Gets a product by its ID.
-  GetProductByID(request: GetProductByIDRequest): Promise<GetProductByIDResponse>;
-  // Deletes a product by its ID.
-  DeleteProductByID(request: DeleteProductByIDRequest): Promise<DeleteProductByIDResponse>;
+  // CreateColorway creates a new DRAFT colourway attached to an existing style (R2/R4 write
+  // decomposition; replaces the coupled UpsertColorway). It writes only colourway-owned fields — no
+  // style facts (UpdateStyle), no variants (CreateVariant), no size chart (UpdateStyleSizeChart). The
+  // colourway starts DRAFT and is made live through PublishColorway.
+  CreateColorway(request: CreateColorwayRequest): Promise<CreateColorwayResponse>;
+  // UpdateColorway patches a colourway's own merchandising fields under an optimistic lock
+  // (expected_colorway_version = the shared tech_card.lock_version). It never touches style facts,
+  // variants, stock or the size chart (R2/R4).
+  UpdateColorway(request: UpdateColorwayRequest): Promise<UpdateColorwayResponse>;
+  // UpdateColorwayRecipe replaces a colourway's material recipe (usages) — the write-path cut in the
+  // R1 merge (R2/R4: the recipe is a colourway-owned sub-aggregate with its own concurrency).
+  // Optimistically locked on the shared tech_card.lock_version; each usage references a style BOM
+  // line by its stable line_key (S2/S3), resolved to a real bom_item_id FK. Restores the previously
+  // accepted-but-never-written ColorwayDevelopmentInsert.usages (the silent no-op, A3.4).
+  UpdateColorwayRecipe(request: UpdateColorwayRecipeRequest): Promise<UpdateColorwayRecipeResponse>;
+  // Gets a colourway by its id.
+  GetColorwayByID(request: GetColorwayByIDRequest): Promise<GetColorwayByIDResponse>;
+  // Retrieves a paginated list of colourways. NOTE on ordering: grpc-gateway's mux prepends
+  // handlers, so the LAST-declared route wins — the literal `/colorways/paged` GET must be declared
+  // AFTER `/colorways/{colorway_id}` or {colorway_id} captures "paged" (beta seeding caught this).
+  GetColorwaysPaged(request: GetColorwaysPagedRequest): Promise<GetColorwaysPagedResponse>;
+  // ArchiveColorwayByID retires a colourway (archive-not-delete, R6/R9): ACTIVE|HIDDEN -> ARCHIVED
+  // (terminal). Was DeleteColorwayByID.
+  ArchiveColorwayByID(request: ArchiveColorwayByIDRequest): Promise<ArchiveColorwayByIDResponse>;
+  // PublishColorway transitions a DRAFT colourway to ACTIVE (R6), enforcing the sellable
+  // preconditions (built base SKU, ≥1 valid-SKU variant, complete sku_season+model_no, dictionary
+  // colour, country, price, default translation).
+  PublishColorway(request: PublishColorwayRequest): Promise<PublishColorwayResponse>;
+  // TransitionColorwayStatus applies a non-publish lifecycle edge (R6): ACTIVE<->HIDDEN and
+  // ACTIVE|HIDDEN->ARCHIVED, validated through the server state machine. Publish has its own RPC
+  // because it carries preconditions.
+  TransitionColorwayStatus(request: TransitionColorwayStatusRequest): Promise<TransitionColorwayStatusResponse>;
   // Updates the stock for a specific product size.
-  UpdateProductSizeStock(request: UpdateProductSizeStockRequest): Promise<UpdateProductSizeStockResponse>;
-  // Forces a product's confidential cost_price to be (re)seeded from a tech card, overriding
-  // any manual value. If tech_card_id is set it also becomes the product's primary card;
-  // otherwise the product's existing primary card is used.
-  SyncProductCostFromTechCard(request: SyncProductCostFromTechCardRequest): Promise<SyncProductCostFromTechCardResponse>;
+  UpdateVariantStock(request: UpdateVariantStockRequest): Promise<UpdateVariantStockResponse>;
+  // CreateVariant adds a new variant (size) to a colourway at zero stock (R2). The size is immutable;
+  // the variant SKU is minted from the colourway's base. Fails if the size already exists or the
+  // colourway is archived.
+  CreateVariant(request: CreateVariantRequest): Promise<CreateVariantResponse>;
+  // UpdateVariant patches a variant's mutable state (R2). size_id and the variant SKU are immutable;
+  // only the lifecycle status is writable (archive-not-delete).
+  UpdateVariant(request: UpdateVariantRequest): Promise<UpdateVariantResponse>;
+  // ArchiveVariant retires a variant (ACTIVE -> ARCHIVED, R2): it drops off the storefront and rejects
+  // stock writes, but its id stays valid for the frozen order/stock references.
+  ArchiveVariant(request: ArchiveVariantRequest): Promise<ArchiveVariantResponse>;
+  // UpdateStyle is the SOLE writer of a style's catalogue facts (brand, sku_season, collection,
+  // target_gender, fit, composition, care instructions, model-wears, categories) — R4/§14.7. It is
+  // optimistically locked on expected_lock_version (stale -> ABORTED). Changing a SKU fact (season)
+  // re-mints every unfrozen sibling colourway in one tx; if ANY sibling is SKU-frozen (has order/label
+  // history) the change is refused (FAILED_PRECONDITION) — use CloneStyleForSeason instead. PLM facts
+  // (BOM/POM/ops/lifecycle) stay on UpdateTechCard; no fact is written by both.
+  UpdateStyle(request: UpdateStyleRequest): Promise<UpdateStyleResponse>;
+  // GetStyleSizeChart returns a style's full size chart plus the shared lock_version (R5). The admin
+  // UI loads the whole chart before editing, because UpdateStyleSizeChart is a full-replace.
+  GetStyleSizeChart(request: GetStyleSizeChartRequest): Promise<GetStyleSizeChartResponse>;
+  // GetStyleCutList is the first real consumer of the piece.mirrored flag (Q6): a read-only cut-list
+  // for production. For each cut-piece it expands the quantity (pieces_per_garment × 2 for a mirrored
+  // pair) and resolves, per colourway, which fabric (and fusing) BOM line it is cut from. It is a
+  // projection over the tech card — no marker/CAD export, no mutable table.
+  GetStyleCutList(request: GetStyleCutListRequest): Promise<GetStyleCutListResponse>;
+  // UpdateStyleSizeChart replaces a style's ENTIRE size chart in one versioned request (R5). A colourway
+  // save never touches the chart; the chart is style-owned and shared by every colourway of the style.
+  UpdateStyleSizeChart(request: UpdateStyleSizeChartRequest): Promise<UpdateStyleSizeChartResponse>;
+  // CloneStyleForSeason deep-clones a style (tech card header + ALL children) under a new sku_season
+  // (R4 official path for a season change that would otherwise re-mint frozen siblings). The clone
+  // starts as a fresh DRAFT tech card with no colourways; move drafts onto it with RelinkDraftColorway
+  // or create new ones. Optimistically guarded on the source's expected_source_version.
+  CloneStyleForSeason(request: CloneStyleForSeasonRequest): Promise<CloneStyleForSeasonResponse>;
+  // RelinkDraftColorway moves a DRAFT colourway onto a different style (R4 official workaround for the
+  // frozen-sibling problem). Only a DRAFT may be relinked; both sides are optimistically locked and the
+  // colourway's SKU is re-minted from the target style's facts.
+  RelinkDraftColorway(request: RelinkDraftColorwayRequest): Promise<RelinkDraftColorwayResponse>;
+  // GetColorwayCustoms returns a product's international-shipping customs data (HS code, origin,
+  // declared description).
+  GetColorwayCustoms(request: GetColorwayCustomsRequest): Promise<GetColorwayCustomsResponse>;
+  // SetColorwayCustoms sets a colourway's customs data used to build international shipping labels.
+  SetColorwayCustoms(request: SetColorwayCustomsRequest): Promise<SetColorwayCustomsResponse>;
+  // SyncColorwayCostFromOwningStyle (re)seeds a colourway's confidential cost_price from its owning
+  // style's primary card, overriding any manual value. R4/p019: it derives the style from the owner
+  // relation and never repoints it — cost provenance is separated from ownership. Was
+  // SyncColorwayCostFromStyle.
+  SyncColorwayCostFromOwningStyle(request: SyncColorwayCostFromOwningStyleRequest): Promise<SyncColorwayCostFromOwningStyleResponse>;
   // Lists stock change history with optional filters.
   ListStockChangeHistory(request: ListStockChangeHistoryRequest): Promise<ListStockChangeHistoryResponse>;
   // Lists stock changes with simplified format for reporting.
   ListStockChanges(request: ListStockChangesRequest): Promise<ListStockChangesResponse>;
+  ListColors(request: ListColorsRequest): Promise<ListColorsResponse>;
+  CreateColor(request: CreateColorRequest): Promise<CreateColorResponse>;
+  UpdateColor(request: UpdateColorRequest): Promise<UpdateColorResponse>;
+  ArchiveColor(request: ArchiveColorRequest): Promise<ArchiveColorResponse>;
+  ListCollections(request: ListCollectionsRequest): Promise<ListCollectionsResponse>;
+  CreateCollection(request: CreateCollectionRequest): Promise<CreateCollectionResponse>;
+  UpdateCollection(request: UpdateCollectionRequest): Promise<UpdateCollectionResponse>;
+  ArchiveCollection(request: ArchiveCollectionRequest): Promise<ArchiveCollectionResponse>;
+  ListTags(request: ListTagsRequest): Promise<ListTagsResponse>;
+  CreateTag(request: CreateTagRequest): Promise<CreateTagResponse>;
+  UpdateTag(request: UpdateTagRequest): Promise<UpdateTagResponse>;
+  ArchiveTag(request: ArchiveTagRequest): Promise<ArchiveTagResponse>;
+  CreateFiber(request: CreateFiberRequest): Promise<CreateFiberResponse>;
+  ArchiveFiber(request: ArchiveFiberRequest): Promise<ArchiveFiberResponse>;
+  ListCountries(request: ListCountriesRequest): Promise<ListCountriesResponse>;
+  SetCountryActive(request: SetCountryActiveRequest): Promise<SetCountryActiveResponse>;
   // Adds a new promotional code
   AddPromo(request: AddPromoRequest): Promise<AddPromoResponse>;
+  // Updates an existing promotional code in place — the mutable fields (free_shipping, discount,
+  // expiration, start, voucher and the `allowed` on/off toggle), identified by promo.code — without
+  // the delete+recreate that drops the row's identity and history. Re-enables a disabled code by
+  // sending allowed=true.
+  UpdatePromoCode(request: UpdatePromoCodeRequest): Promise<UpdatePromoCodeResponse>;
   // Lists all promotional codes
   ListPromos(request: ListPromosRequest): Promise<ListPromosResponse>;
   // Deletes a specific promotional code
@@ -5516,6 +6993,14 @@ export interface AdminService {
   // fitting rounds, and a plan/fact production summary — one place tying a style's revenue to the
   // money spent developing and making it. Cost/margin fields are costing:read-gated.
   GetStyleEconomics(request: GetStyleEconomicsRequest): Promise<GetStyleEconomicsResponse>;
+  // GetStyleCostEstimate returns the transparent estimated (plan) cost of one style colourway
+  // (Q4): a line-by-line material breakdown resolved via the price ladder
+  // (bom_item.unit_price → latest material_price → base via costing FX), each line carrying its
+  // price source/date/currency, plus the typed cost articles (cmt/hardware/packaging/logistics/
+  // overhead) and defect %, and a plan-vs-fact comparison (estimate vs production-run actual vs
+  // the order-time cost snapshot). All money is costing:read-gated; the estimate is a read
+  // projection and never writes product.cost_price.
+  GetStyleCostEstimate(request: GetStyleCostEstimateRequest): Promise<GetStyleCostEstimateResponse>;
   // GetChannelRoasSettled returns per-channel ROAS/CAC computed from the AUTHORITATIVE settled order
   // revenue (task 20 step 2), attributing orders to channels server-side via the bq_order_channel map
   // (order.ga_client_id → last non-direct UTM). Unlike the GA4-revenue campaign attribution, the
@@ -5572,6 +7057,11 @@ export interface AdminService {
   // DeleteArchiveById deletes an archive by ID.
   DeleteArchiveById(request: DeleteArchiveByIdRequest): Promise<DeleteArchiveByIdResponse>;
   GetArchiveByID(request: GetArchiveByIDRequest): Promise<GetArchiveByIDResponse>;
+  // GetArchivesPaged is the ADMIN archive list: unlike the storefront projection it carries the
+  // numeric ids the admin write path (UpdateArchive/DeleteArchiveById/HeroFeaturedArchiveInsert)
+  // keys on (R3: internal ids stay on the admin surface). Registered after GetArchiveByID so the
+  // literal `/paged` GET wins over `/{id}` in grpc-gateway's prepend-mux ordering.
+  GetArchivesPaged(request: GetArchivesPagedRequest): Promise<GetArchivesPagedResponse>;
   // AddModel creates a new fit-model profile.
   AddModel(request: AddModelRequest): Promise<AddModelResponse>;
   // GetModel returns a fit-model profile by id.
@@ -5601,6 +7091,16 @@ export interface AdminService {
   DeleteSample(request: DeleteSampleRequest): Promise<DeleteSampleResponse>;
   GetSample(request: GetSampleRequest): Promise<GetSampleResponse>;
   ListSamples(request: ListSamplesRequest): Promise<ListSamplesResponse>;
+  // SAMPLE SUBSTITUTIONS (§2.7): dev-time material deviations on a sample.
+  AddSampleSubstitution(request: AddSampleSubstitutionRequest): Promise<AddSampleSubstitutionResponse>;
+  DeleteSampleSubstitution(request: DeleteSampleSubstitutionRequest): Promise<DeleteSampleSubstitutionResponse>;
+  ListSampleSubstitutions(request: ListSampleSubstitutionsRequest): Promise<ListSampleSubstitutionsResponse>;
+  // FITTING CHANGE REQUESTS (S26): dedicated CRUD (stable id) + the carry-over view.
+  AddFittingChangeRequest(request: AddFittingChangeRequestRequest): Promise<AddFittingChangeRequestResponse>;
+  UpdateFittingChangeRequest(request: UpdateFittingChangeRequestRequest): Promise<UpdateFittingChangeRequestResponse>;
+  DeleteFittingChangeRequest(request: DeleteFittingChangeRequestRequest): Promise<DeleteFittingChangeRequestResponse>;
+  // Declared last (see ListModels ordering note) so the fixed /open path is not shadowed.
+  ListOpenFittingChangeRequests(request: ListOpenFittingChangeRequestsRequest): Promise<ListOpenFittingChangeRequestsResponse>;
   // AddTask creates a new kanban task from its content plus placement (target
   // board + optional initial column). Server sets created_by (from JWT) and
   // appends the card to the end of its (board,status) column (position).
@@ -5663,8 +7163,40 @@ export interface AdminService {
   // MarkFulfillmentDelivered performs the real delivered transition for a shipped
   // order.
   MarkFulfillmentDelivered(request: MarkFulfillmentDeliveredRequest): Promise<MarkFulfillmentDeliveredResponse>;
+  // PrepareShippingLabel returns the default parcel (weight/box derived from the
+  // order's tech cards, editable) plus whether label generation is available, so the
+  // UI can pre-fill the label form before generating. Read-only.
+  PrepareShippingLabel(request: PrepareShippingLabelRequest): Promise<PrepareShippingLabelResponse>;
+  // GenerateShippingLabel announces the order's parcel with Sendcloud (carrier label
+  // + tracking number), then performs the real shipped transition via the shared ship
+  // path. Returns the printable label URL. Gated by fulfillment perms.
+  GenerateShippingLabel(request: GenerateShippingLabelRequest): Promise<GenerateShippingLabelResponse>;
+  // GetShippingOptions fetches the shipping options (carrier + service + quote)
+  // available for the order's parcel via Sendcloud, so an operator can pick one
+  // before generating. Read-only.
+  GetShippingOptions(request: GetShippingOptionsRequest): Promise<GetShippingOptionsResponse>;
+  // VoidShippingLabel cancels a generated label with the carrier and reverts the
+  // order Shipped -> Confirmed so it can be regenerated. Gated by fulfillment perms.
+  VoidShippingLabel(request: VoidShippingLabelRequest): Promise<VoidShippingLabelResponse>;
+  // SchedulePickup books a carrier pickup from the warehouse origin for the day
+  // (Sendcloud's end-of-day handover equivalent; v3 has no generic manifest API).
+  // Gated by fulfillment perms.
+  SchedulePickup(request: SchedulePickupRequest): Promise<SchedulePickupResponse>;
   // CreateTechCard creates a new tech card (техкарта) with its nested sections.
   CreateTechCard(request: CreateTechCardRequest): Promise<CreateTechCardResponse>;
+  // SuggestStyleNumber proposes the next free style number for a season (Q1): {SEASON}{YY}-{SEQ}, a
+  // per-season monotonic sequence. Advisory — the client accepts it (style_number_source=GENERATED)
+  // or overrides it (MANUAL) on the tech-card write; the global UNIQUE(style_number) is authoritative.
+  SuggestStyleNumber(request: SuggestStyleNumberRequest): Promise<SuggestStyleNumberResponse>;
+  // AssignTechCardRole assigns an admin account a role on a tech card (Q5), multi per role.
+  AssignTechCardRole(request: AssignTechCardRoleRequest): Promise<AssignTechCardRoleResponse>;
+  // RemoveTechCardRoleAssignment removes one role assignment by id.
+  RemoveTechCardRoleAssignment(request: RemoveTechCardRoleAssignmentRequest): Promise<RemoveTechCardRoleAssignmentResponse>;
+  // ListTechCardRoleAssignments lists a card's role assignments with resolved usernames (Q5).
+  ListTechCardRoleAssignments(request: ListTechCardRoleAssignmentsRequest): Promise<ListTechCardRoleAssignmentsResponse>;
+  // ListAdmins is the lightweight admin-account picker source for role assignment (id + username
+  // only), gated tech_cards:read so a role-assigner need not hold the broader accounts:read.
+  ListAdmins(request: ListAdminsRequest): Promise<ListAdminsResponse>;
   // GetTechCard returns a tech card by id with its nested sections resolved.
   GetTechCard(request: GetTechCardRequest): Promise<GetTechCardResponse>;
   // UpdateTechCard updates a tech card, replacing its nested sections.
@@ -5679,6 +7211,11 @@ export interface AdminService {
   // GetStylePipeline returns the development board: per-stage counts + a few light cards per column
   // (gap-01), so the idea→prod pipeline loads in one call.
   GetStylePipeline(request: GetStylePipelineRequest): Promise<GetStylePipelineResponse>;
+  // GenerateTechCardOperations drafts structured sewing operations from a plain-language
+  // description via OpenRouter, grounded in the card's pieces + BOM + type. It only PROPOSES a
+  // draft for a technologist to review, edit and save through UpdateTechCard — it persists nothing.
+  // Requires OPENROUTER_API_KEY; unconfigured it returns FailedPrecondition (degrades gracefully).
+  GenerateTechCardOperations(request: GenerateTechCardOperationsRequest): Promise<GenerateTechCardOperationsResponse>;
   // Material catalog (task 10): shared nomenclature for BOM lines + append-only price history.
   CreateMaterial(request: CreateMaterialRequest): Promise<CreateMaterialResponse>;
   UpdateMaterial(request: UpdateMaterialRequest): Promise<UpdateMaterialResponse>;
@@ -5722,6 +7259,22 @@ export interface AdminService {
   UpsertPackagingBom(request: UpsertPackagingBomRequest): Promise<UpsertPackagingBomResponse>;
   // ListPackagingBom returns the packaging recipe (material name/unit + per-order/per-item quantities).
   ListPackagingBom(request: ListPackagingBomRequest): Promise<ListPackagingBomResponse>;
+  // UpsertPackagingRecipe full-replaces one scope target's packaging recipe (PLM rework §2.8, Q3): the
+  // whole global set, or one style's set, or one product's set (scope = global|style|product).
+  UpsertPackagingRecipe(request: UpsertPackagingRecipeRequest): Promise<UpsertPackagingRecipeResponse>;
+  // ListPackagingRecipe returns every packaging recipe (all scopes) with material name/unit.
+  ListPackagingRecipe(request: ListPackagingRecipeRequest): Promise<ListPackagingRecipeResponse>;
+  // UpsertStyleAssembly full-replaces a garment style's ASSEMBLY bill (WS7, §2.8): the auxiliary items
+  // (labels/tags) that physically go on/into it. Distinct from packaging (on the shipment). Empty items
+  // clears the bill. Every component must be an auxiliary tech card.
+  UpsertStyleAssembly(request: UpsertStyleAssemblyRequest): Promise<UpsertStyleAssemblyResponse>;
+  // ListStyleAssembly returns a garment style's assembly bill, resolved with component name/aux_subtype
+  // and the output material (the warehouse material consumed in production).
+  ListStyleAssembly(request: ListStyleAssemblyRequest): Promise<ListStyleAssemblyResponse>;
+  // GetOrderPackingSpec is the packer/QC-readable composition of an order (WS7, scope 3): the garments
+  // that ship, the on-garment assembly (labels/tags) to verify per line, and the packaging the whole
+  // order needs (resolved from WS2 packaging_recipe). Read-only — reserves/consumes nothing.
+  GetOrderPackingSpec(request: GetOrderPackingSpecRequest): Promise<GetOrderPackingSpecResponse>;
   // ListMaterialLots returns a material's structured lots / rolls (gap-07 v2 D).
   ListMaterialLots(request: ListMaterialLotsRequest): Promise<ListMaterialLotsResponse>;
   // GetCostingFxRates returns the manual FX rates used to fold multi-currency tech-card
@@ -5942,8 +7495,8 @@ export function createAdminServiceClient(
         method: "ListObjectsPaged",
       }) as Promise<ListObjectsPagedResponse>;
     },
-    UpsertProduct(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/product/upsert`; // eslint-disable-line quotes
+    CreateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/colorways`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
@@ -5956,11 +7509,71 @@ export function createAdminServiceClient(
         body,
       }, {
         service: "AdminService",
-        method: "UpsertProduct",
-      }) as Promise<UpsertProductResponse>;
+        method: "CreateColorway",
+      }) as Promise<CreateColorwayResponse>;
     },
-    GetProductsPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/products/paged`; // eslint-disable-line quotes
+    UpdateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateColorway",
+      }) as Promise<UpdateColorwayResponse>;
+    },
+    UpdateColorwayRecipe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/recipe`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateColorwayRecipe",
+      }) as Promise<UpdateColorwayRecipeResponse>;
+    },
+    GetColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetColorwayByID",
+      }) as Promise<GetColorwayByIDResponse>;
+    },
+    GetColorwaysPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/colorways/paged`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
@@ -5993,9 +7606,6 @@ export function createAdminServiceClient(
         request.filterConditions.gender.forEach((x) => {
           queryParams.push(`filterConditions.gender=${encodeURIComponent(x.toString())}`)
         })
-      }
-      if (request.filterConditions?.color) {
-        queryParams.push(`filterConditions.color=${encodeURIComponent(request.filterConditions.color.toString())}`)
       }
       if (request.filterConditions?.topCategoryIds) {
         request.filterConditions.topCategoryIds.forEach((x) => {
@@ -6038,8 +7648,18 @@ export function createAdminServiceClient(
           queryParams.push(`filterConditions.excludeTopCategoryIds=${encodeURIComponent(x.toString())}`)
         })
       }
-      if (request.showHidden) {
-        queryParams.push(`showHidden=${encodeURIComponent(request.showHidden.toString())}`)
+      if (request.filterConditions?.colorCodes) {
+        request.filterConditions.colorCodes.forEach((x) => {
+          queryParams.push(`filterConditions.colorCodes=${encodeURIComponent(x.toString())}`)
+        })
+      }
+      if (request.filterConditions?.exclusive) {
+        queryParams.push(`filterConditions.exclusive=${encodeURIComponent(request.filterConditions.exclusive.toString())}`)
+      }
+      if (request.statuses) {
+        request.statuses.forEach((x) => {
+          queryParams.push(`statuses=${encodeURIComponent(x.toString())}`)
+        })
       }
       let uri = path;
       if (queryParams.length > 0) {
@@ -6051,15 +7671,15 @@ export function createAdminServiceClient(
         body,
       }, {
         service: "AdminService",
-        method: "GetProductsPaged",
-      }) as Promise<GetProductsPagedResponse>;
+        method: "GetColorwaysPaged",
+      }) as Promise<GetColorwaysPagedResponse>;
     },
-    GetProductByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      if (!request.id) {
-        throw new Error("missing required field request.id");
+    ArchiveColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
       }
-      const path = `api/admin/product/${request.id}`; // eslint-disable-line quotes
-      const body = null;
+      const path = `api/admin/colorways/${request.colorwayId}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
@@ -6067,19 +7687,19 @@ export function createAdminServiceClient(
       }
       return handler({
         path: uri,
-        method: "GET",
+        method: "POST",
         body,
       }, {
         service: "AdminService",
-        method: "GetProductByID",
-      }) as Promise<GetProductByIDResponse>;
+        method: "ArchiveColorwayByID",
+      }) as Promise<ArchiveColorwayByIDResponse>;
     },
-    DeleteProductByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      if (!request.id) {
-        throw new Error("missing required field request.id");
+    PublishColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
       }
-      const path = `api/admin/product/${request.id}`; // eslint-disable-line quotes
-      const body = null;
+      const path = `api/admin/colorways/${request.colorwayId}/publish`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
@@ -6087,14 +7707,34 @@ export function createAdminServiceClient(
       }
       return handler({
         path: uri,
-        method: "DELETE",
+        method: "POST",
         body,
       }, {
         service: "AdminService",
-        method: "DeleteProductByID",
-      }) as Promise<DeleteProductByIDResponse>;
+        method: "PublishColorway",
+      }) as Promise<PublishColorwayResponse>;
     },
-    UpdateProductSizeStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+    TransitionColorwayStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/status`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "TransitionColorwayStatus",
+      }) as Promise<TransitionColorwayStatusResponse>;
+    },
+    UpdateVariantStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/stock/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
@@ -6108,11 +7748,14 @@ export function createAdminServiceClient(
         body,
       }, {
         service: "AdminService",
-        method: "UpdateProductSizeStock",
-      }) as Promise<UpdateProductSizeStockResponse>;
+        method: "UpdateVariantStock",
+      }) as Promise<UpdateVariantStockResponse>;
     },
-    SyncProductCostFromTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/product/cost/sync-from-tech-card`; // eslint-disable-line quotes
+    CreateVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/variants`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
@@ -6125,8 +7768,225 @@ export function createAdminServiceClient(
         body,
       }, {
         service: "AdminService",
-        method: "SyncProductCostFromTechCard",
-      }) as Promise<SyncProductCostFromTechCardResponse>;
+        method: "CreateVariant",
+      }) as Promise<CreateVariantResponse>;
+    },
+    UpdateVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.variantId) {
+        throw new Error("missing required field request.variant_id");
+      }
+      const path = `api/admin/variants/${request.variantId}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateVariant",
+      }) as Promise<UpdateVariantResponse>;
+    },
+    ArchiveVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.variantId) {
+        throw new Error("missing required field request.variant_id");
+      }
+      const path = `api/admin/variants/${request.variantId}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveVariant",
+      }) as Promise<ArchiveVariantResponse>;
+    },
+    UpdateStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.styleId) {
+        throw new Error("missing required field request.style_id");
+      }
+      const path = `api/admin/styles/${request.styleId}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateStyle",
+      }) as Promise<UpdateStyleResponse>;
+    },
+    GetStyleSizeChart(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.styleId) {
+        throw new Error("missing required field request.style_id");
+      }
+      const path = `api/admin/styles/${request.styleId}/size-chart`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStyleSizeChart",
+      }) as Promise<GetStyleSizeChartResponse>;
+    },
+    GetStyleCutList(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/styles/${request.techCardId}/cut-list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStyleCutList",
+      }) as Promise<GetStyleCutListResponse>;
+    },
+    UpdateStyleSizeChart(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.styleId) {
+        throw new Error("missing required field request.style_id");
+      }
+      const path = `api/admin/styles/${request.styleId}/size-chart`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateStyleSizeChart",
+      }) as Promise<UpdateStyleSizeChartResponse>;
+    },
+    CloneStyleForSeason(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.sourceStyleId) {
+        throw new Error("missing required field request.source_style_id");
+      }
+      const path = `api/admin/styles/${request.sourceStyleId}/clone-for-season`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CloneStyleForSeason",
+      }) as Promise<CloneStyleForSeasonResponse>;
+    },
+    RelinkDraftColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/relink`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RelinkDraftColorway",
+      }) as Promise<RelinkDraftColorwayResponse>;
+    },
+    GetColorwayCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/customs`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetColorwayCustoms",
+      }) as Promise<GetColorwayCustomsResponse>;
+    },
+    SetColorwayCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/colorways/customs`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetColorwayCustoms",
+      }) as Promise<SetColorwayCustomsResponse>;
+    },
+    SyncColorwayCostFromOwningStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/cost/sync`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SyncColorwayCostFromOwningStyle",
+      }) as Promise<SyncColorwayCostFromOwningStyleResponse>;
     },
     ListStockChangeHistory(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/stock-change-history`; // eslint-disable-line quotes
@@ -6138,8 +7998,8 @@ export function createAdminServiceClient(
       if (request.dateTo) {
         queryParams.push(`dateTo=${encodeURIComponent(request.dateTo.toString())}`)
       }
-      if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      if (request.colorwayId) {
+        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`)
       }
       if (request.sizeId) {
         queryParams.push(`sizeId=${encodeURIComponent(request.sizeId.toString())}`)
@@ -6179,8 +8039,8 @@ export function createAdminServiceClient(
       if (request.to) {
         queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
-      if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      if (request.colorwayId) {
+        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`)
       }
       if (request.source) {
         queryParams.push(`source=${encodeURIComponent(request.source.toString())}`)
@@ -6213,6 +8073,314 @@ export function createAdminServiceClient(
         method: "ListStockChanges",
       }) as Promise<ListStockChangesResponse>;
     },
+    ListColors(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/colors`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListColors",
+      }) as Promise<ListColorsResponse>;
+    },
+    CreateColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/colors`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateColor",
+      }) as Promise<CreateColorResponse>;
+    },
+    UpdateColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/colors/${request.code}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateColor",
+      }) as Promise<UpdateColorResponse>;
+    },
+    ArchiveColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/colors/${request.code}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveColor",
+      }) as Promise<ArchiveColorResponse>;
+    },
+    ListCollections(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/collections`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCollections",
+      }) as Promise<ListCollectionsResponse>;
+    },
+    CreateCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/collections`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateCollection",
+      }) as Promise<CreateCollectionResponse>;
+    },
+    UpdateCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/dictionaries/collections/${request.id}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateCollection",
+      }) as Promise<UpdateCollectionResponse>;
+    },
+    ArchiveCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/dictionaries/collections/${request.id}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveCollection",
+      }) as Promise<ArchiveCollectionResponse>;
+    },
+    ListTags(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/tags`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTags",
+      }) as Promise<ListTagsResponse>;
+    },
+    CreateTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/tags`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateTag",
+      }) as Promise<CreateTagResponse>;
+    },
+    UpdateTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/dictionaries/tags/${request.id}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTag",
+      }) as Promise<UpdateTagResponse>;
+    },
+    ArchiveTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/dictionaries/tags/${request.id}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveTag",
+      }) as Promise<ArchiveTagResponse>;
+    },
+    CreateFiber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/fibers`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateFiber",
+      }) as Promise<CreateFiberResponse>;
+    },
+    ArchiveFiber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/fibers/${request.code}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveFiber",
+      }) as Promise<ArchiveFiberResponse>;
+    },
+    ListCountries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/countries`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.activeOnly) {
+        queryParams.push(`activeOnly=${encodeURIComponent(request.activeOnly.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCountries",
+      }) as Promise<ListCountriesResponse>;
+    },
+    SetCountryActive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/countries/${request.code}/active`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetCountryActive",
+      }) as Promise<SetCountryActiveResponse>;
+    },
     AddPromo(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/promo/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -6229,6 +8397,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AddPromo",
       }) as Promise<AddPromoResponse>;
+    },
+    UpdatePromoCode(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/promo/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdatePromoCode",
+      }) as Promise<UpdatePromoCodeResponse>;
     },
     ListPromos(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/promo/list`; // eslint-disable-line quotes
@@ -6484,6 +8669,29 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetStyleEconomics",
       }) as Promise<GetStyleEconomicsResponse>;
+    },
+    GetStyleCostEstimate(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/metrics/style-cost-estimate`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.techCardId) {
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
+      }
+      if (request.colorwayId) {
+        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStyleCostEstimate",
+      }) as Promise<GetStyleCostEstimateResponse>;
     },
     GetChannelRoasSettled(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/channel-roas-settled`; // eslint-disable-line quotes
@@ -6894,6 +9102,32 @@ export function createAdminServiceClient(
         method: "GetArchiveByID",
       }) as Promise<GetArchiveByIDResponse>;
     },
+    GetArchivesPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/archive/paged`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetArchivesPaged",
+      }) as Promise<GetArchivesPagedResponse>;
+    },
     AddModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/model/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -7217,6 +9451,140 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListSamples",
       }) as Promise<ListSamplesResponse>;
+    },
+    AddSampleSubstitution(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/sample/substitution/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddSampleSubstitution",
+      }) as Promise<AddSampleSubstitutionResponse>;
+    },
+    DeleteSampleSubstitution(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/sample/substitution/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteSampleSubstitution",
+      }) as Promise<DeleteSampleSubstitutionResponse>;
+    },
+    ListSampleSubstitutions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.sampleId) {
+        throw new Error("missing required field request.sample_id");
+      }
+      const path = `api/admin/sample/${request.sampleId}/substitutions`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSampleSubstitutions",
+      }) as Promise<ListSampleSubstitutionsResponse>;
+    },
+    AddFittingChangeRequest(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fitting/change-request/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddFittingChangeRequest",
+      }) as Promise<AddFittingChangeRequestResponse>;
+    },
+    UpdateFittingChangeRequest(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fitting/change-request/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateFittingChangeRequest",
+      }) as Promise<UpdateFittingChangeRequestResponse>;
+    },
+    DeleteFittingChangeRequest(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/fitting/change-request/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFittingChangeRequest",
+      }) as Promise<DeleteFittingChangeRequestResponse>;
+    },
+    ListOpenFittingChangeRequests(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fitting/change-request/open`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.techCardId) {
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
+      }
+      if (request.beforeRound) {
+        queryParams.push(`beforeRound=${encodeURIComponent(request.beforeRound.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOpenFittingChangeRequests",
+      }) as Promise<ListOpenFittingChangeRequestsResponse>;
     },
     AddTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/add`; // eslint-disable-line quotes
@@ -7640,6 +10008,94 @@ export function createAdminServiceClient(
         method: "MarkFulfillmentDelivered",
       }) as Promise<MarkFulfillmentDeliveredResponse>;
     },
+    PrepareShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.orderUuid) {
+        throw new Error("missing required field request.order_uuid");
+      }
+      const path = `api/admin/fulfillment/label/${request.orderUuid}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PrepareShippingLabel",
+      }) as Promise<PrepareShippingLabelResponse>;
+    },
+    GenerateShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/label`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateShippingLabel",
+      }) as Promise<GenerateShippingLabelResponse>;
+    },
+    GetShippingOptions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/label/options`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetShippingOptions",
+      }) as Promise<GetShippingOptionsResponse>;
+    },
+    VoidShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/label/void`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "VoidShippingLabel",
+      }) as Promise<VoidShippingLabelResponse>;
+    },
+    SchedulePickup(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/fulfillment/pickup`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SchedulePickup",
+      }) as Promise<SchedulePickupResponse>;
+    },
     CreateTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -7656,6 +10112,94 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "CreateTechCard",
       }) as Promise<CreateTechCardResponse>;
+    },
+    SuggestStyleNumber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/suggest-style-number`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestStyleNumber",
+      }) as Promise<SuggestStyleNumberResponse>;
+    },
+    AssignTechCardRole(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/role/assign`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AssignTechCardRole",
+      }) as Promise<AssignTechCardRoleResponse>;
+    },
+    RemoveTechCardRoleAssignment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/role/remove`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RemoveTechCardRoleAssignment",
+      }) as Promise<RemoveTechCardRoleAssignmentResponse>;
+    },
+    ListTechCardRoleAssignments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/roles`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCardRoleAssignments",
+      }) as Promise<ListTechCardRoleAssignmentsResponse>;
+    },
+    ListAdmins(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/admins/pick`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAdmins",
+      }) as Promise<ListAdminsResponse>;
     },
     GetTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
@@ -7736,14 +10280,20 @@ export function createAdminServiceClient(
       if (request.brand) {
         queryParams.push(`brand=${encodeURIComponent(request.brand.toString())}`)
       }
-      if (request.season) {
-        queryParams.push(`season=${encodeURIComponent(request.season.toString())}`)
-      }
       if (request.name) {
         queryParams.push(`name=${encodeURIComponent(request.name.toString())}`)
       }
       if (request.productId) {
         queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      }
+      if (request.purpose) {
+        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`)
+      }
+      if (request.skuSeason?.code) {
+        queryParams.push(`skuSeason.code=${encodeURIComponent(request.skuSeason.code.toString())}`)
+      }
+      if (request.skuSeason?.year) {
+        queryParams.push(`skuSeason.year=${encodeURIComponent(request.skuSeason.year.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
@@ -7777,6 +10327,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetStylePipeline",
       }) as Promise<GetStylePipelineResponse>;
+    },
+    GenerateTechCardOperations(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/operations/generate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateTechCardOperations",
+      }) as Promise<GenerateTechCardOperationsResponse>;
     },
     CreateMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes
@@ -7858,6 +10425,9 @@ export function createAdminServiceClient(
       }
       if (request.includeArchived) {
         queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      if (request.purpose) {
+        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
@@ -8329,6 +10899,97 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListPackagingBom",
       }) as Promise<ListPackagingBomResponse>;
+    },
+    UpsertPackagingRecipe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/packaging-recipe/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertPackagingRecipe",
+      }) as Promise<UpsertPackagingRecipeResponse>;
+    },
+    ListPackagingRecipe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/packaging-recipe`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListPackagingRecipe",
+      }) as Promise<ListPackagingRecipeResponse>;
+    },
+    UpsertStyleAssembly(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/style-assembly/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertStyleAssembly",
+      }) as Promise<UpsertStyleAssemblyResponse>;
+    },
+    ListStyleAssembly(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.styleId) {
+        throw new Error("missing required field request.style_id");
+      }
+      const path = `api/admin/tech-card/${request.styleId}/style-assembly`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListStyleAssembly",
+      }) as Promise<ListStyleAssemblyResponse>;
+    },
+    GetOrderPackingSpec(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.orderUuid) {
+        throw new Error("missing required field request.order_uuid");
+      }
+      const path = `api/admin/fulfillment/${request.orderUuid}/packing-spec`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOrderPackingSpec",
+      }) as Promise<GetOrderPackingSpecResponse>;
     },
     ListMaterialLots(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.materialId) {

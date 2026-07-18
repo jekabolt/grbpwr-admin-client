@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_SampleInsert } from 'api/proto-http/admin';
+import {
+  common_Fitting,
+  common_SampleInsert,
+  common_SampleSubstitutionInsert,
+} from 'api/proto-http/admin';
+import { useTechCardFittings } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useMemo } from 'react';
 
 // Samples (сэмплы) of a tech card (new-flow NF-04). A sample is one sewn prototype; its `number`
 // is server-assigned (MAX+1 per card) and its composed cost is filled only by GetSample.
@@ -26,6 +32,26 @@ export function useSamples(techCardId?: number) {
   });
 }
 
+// Fittings that tried each sample on, grouped by sample_id (NF-04: a sample:fittings 1:N link).
+// Built from the card's already-cached fitting list (one request, shared with TechCardFittings —
+// this adds no extra fetch), so the card board's "N fittings · last verdict" chip and the open
+// sample's fittings panel always read the exact same grouping.
+export function useSampleFittings(techCardId?: number) {
+  const { data, isLoading } = useTechCardFittings(techCardId);
+  const bySample = useMemo(() => {
+    const m = new Map<number, common_Fitting[]>();
+    for (const f of data ?? []) {
+      const sampleId = f.fitting?.sampleId;
+      if (!sampleId) continue;
+      const existing = m.get(sampleId);
+      if (existing) existing.push(f);
+      else m.set(sampleId, [f]);
+    }
+    return m;
+  }, [data]);
+  return { bySample, isLoading };
+}
+
 // One sample with its composed cost (materials issued + manual dev-expenses). costing:read strips
 // the money.
 export function useSample(id: number, enabled: boolean) {
@@ -38,18 +64,75 @@ export function useSample(id: number, enabled: boolean) {
 
 // Resolves to the sample's id (server-assigned on create) so callers can open the fresh
 // sample's editor — its sub-panels (movements / dev expenses / fittings) need a saved id.
+// expectedLockVersion is the sample.lock_version the editor last read (S25); a stale value is
+// rejected with Aborted (409) — the caller shows a reload prompt.
 export function useSaveSample() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, sample }: { id: number; sample: common_SampleInsert }) => {
+    mutationFn: async ({
+      id,
+      sample,
+      expectedLockVersion,
+    }: {
+      id: number;
+      sample: common_SampleInsert;
+      expectedLockVersion: number;
+    }) => {
       if (id) {
-        await adminService.UpdateSample({ id, sample });
+        await adminService.UpdateSample({ id, sample, expectedLockVersion });
         return id;
       }
       const res = await adminService.AddSample({ sample });
       return res.id ?? 0;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: sampleKeys.all }),
+  });
+}
+
+// Optimistic-lock rejection (Aborted → 409) reads clearly: someone else saved the sample.
+export function saveSampleErrorMessage(e: unknown): string {
+  const status = (e as { status?: number } | undefined)?.status;
+  if (status === 409)
+    return 'This sample was changed by someone else — reload and re-apply your edits.';
+  return e instanceof Error ? e.message : 'Failed to save sample';
+}
+
+// Sample substitutions (§2.7): dev-time BOM deviations, documentation only (never COGS, Q2).
+export const substitutionKeys = {
+  list: (sampleId: number) => ['sampleSubstitutions', sampleId] as const,
+};
+
+export function useSampleSubstitutions(sampleId?: number) {
+  return useQuery({
+    queryKey: substitutionKeys.list(sampleId ?? 0),
+    queryFn: () => adminService.ListSampleSubstitutions({ sampleId: sampleId ?? 0 }),
+    enabled: !!sampleId,
+  });
+}
+
+export function useAddSampleSubstitution(sampleId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (substitution: common_SampleSubstitutionInsert) =>
+      adminService.AddSampleSubstitution({ substitution }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: substitutionKeys.list(sampleId) }),
+  });
+}
+
+export function useDeleteSampleSubstitution(sampleId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => adminService.DeleteSampleSubstitution({ id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: substitutionKeys.list(sampleId) }),
+  });
+}
+
+// Named immutable releases (Rev.N) of a tech card — used as the sample's spec_release picker (§2.7).
+export function useTechCardReleases(techCardId?: number) {
+  return useQuery({
+    queryKey: ['techCardReleases', techCardId ?? 0],
+    queryFn: () => adminService.ListTechCardReleases({ techCardId: techCardId ?? 0 }),
+    enabled: !!techCardId,
   });
 }
 

@@ -1,22 +1,21 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { OpexLine } from 'api/proto-http/admin';
-import { CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
-import { isRecurringLine, opexCategoryOptions } from '../utils/options';
-
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+import { isRecurringLine } from '../utils/options';
+import { AmountInput, CategorySelect, CurrencySelect, Field, fieldCls } from './fields';
 
 type Draft = { category: string; label: string; amount: string; currency: string; note: string };
 
-// Add / edit one manual OPEX line for a month. OpexLineInsert carries no id, so the server upserts
-// by natural key (month, category, label): an amount-only edit is a plain upsert, but changing the
-// category/label also deletes the old row (after the new one is safely written) so it isn't
-// orphaned. `lines` = the month's current lines, used to refuse silent natural-key clobbers.
+// Edit one manual OPEX line for a month (creation goes through the wizard). OpexLineInsert carries
+// no id, so the server upserts by natural key (month, category, label): an amount-only edit is a
+// plain upsert, but changing the category/label also deletes the old row (after the new one is
+// safely written) so it isn't orphaned. `lines` = the month's current lines, used to refuse silent
+// natural-key clobbers.
 export function LineFormModal({
   open,
   onOpenChange,
@@ -127,8 +126,8 @@ export function LineFormModal({
   return (
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
-        <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[440px] lg:-translate-x-1/2'>
+        <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[440px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               {existing ? 'edit line' : 'add line'}
@@ -141,64 +140,32 @@ export function LineFormModal({
           </div>
           <DialogPrimitives.Description className='sr-only'>opex line</DialogPrimitives.Description>
           <div className='flex flex-col gap-3 p-4'>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>category</Text>
+            <Field label='category'>
+              <CategorySelect value={d.category} onChange={(v) => set({ category: v })} />
+            </Field>
+            <Field label='label'>
               <input
-                className={cell}
-                list='opex-category-suggestions'
-                value={d.category}
-                onChange={(e) => set({ category: e.target.value })}
-              />
-              <datalist id='opex-category-suggestions'>
-                {opexCategoryOptions.map((c) => (
-                  <option key={c} value={c} />
-                ))}
-              </datalist>
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>label</Text>
-              <input
-                className={cell}
+                className={fieldCls}
                 value={d.label}
                 onChange={(e) => set({ label: e.target.value })}
                 placeholder='e.g. seamstress Maria'
               />
-            </label>
+            </Field>
             <div className='grid grid-cols-[1fr_7rem] gap-2'>
-              <label className='flex flex-col gap-1'>
-                <Text size='small'>amount</Text>
-                <input
-                  className={cell}
-                  type='number'
-                  step='0.01'
-                  min='0'
-                  value={d.amount}
-                  onChange={(e) => set({ amount: e.target.value })}
-                />
-              </label>
-              <label className='flex flex-col gap-1'>
-                <Text size='small'>currency</Text>
-                <select
-                  className={cell}
-                  value={d.currency}
-                  onChange={(e) => set({ currency: e.target.value })}
-                >
-                  {CURRENCIES.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.value}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Field label='amount'>
+                <AmountInput value={d.amount} onChange={(v) => set({ amount: v })} />
+              </Field>
+              <Field label='currency'>
+                <CurrencySelect value={d.currency} onChange={(v) => set({ currency: v })} />
+              </Field>
             </div>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>note (optional)</Text>
+            <Field label='note (optional)'>
               <input
-                className={cell}
+                className={fieldCls}
                 value={d.note}
                 onChange={(e) => set({ note: e.target.value })}
               />
-            </label>
+            </Field>
           </div>
           <div className='sticky bottom-0 flex justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>

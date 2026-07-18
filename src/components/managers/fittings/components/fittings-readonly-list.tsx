@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Link, useNavigate } from 'react-router-dom';
+import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { useInfiniteFittings } from './useFittingQuery';
 import { formatFittingDate, statusLabel, verdictLabel } from './utils';
@@ -130,7 +131,19 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                     <Text>{insert?.sizes?.length ?? 0}</Text>
                   </td>
                   <td className='border border-textInactiveColor px-2 py-1'>
-                    <Text>{fitting.media?.length ?? 0}</Text>
+                    <div className='flex items-center gap-2'>
+                      {/* Same thumbnail treatment as FittingCardList — a photo count alone
+                          wasn't scannable for what's fundamentally visual QA data. */}
+                      <div className='h-10 w-8 shrink-0 overflow-hidden border border-textInactiveColor'>
+                        <Media
+                          src={fitting.media?.[0]?.media?.thumbnail?.mediaUrl || ''}
+                          alt={`fitting #${id}`}
+                          aspectRatio='3/4'
+                          fit='cover'
+                        />
+                      </div>
+                      <Text>{fitting.media?.length ?? 0}</Text>
+                    </div>
                   </td>
                   <td className='border border-textInactiveColor px-2 py-1 text-right'>
                     <Text variant='underlined'>open</Text>
@@ -154,17 +167,28 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
               tabIndex={0}
               onClick={() => navigate(`/fittings/${id}`)}
               onKeyDown={(e) => e.key === 'Enter' && navigate(`/fittings/${id}`)}
-              className='flex cursor-pointer flex-col gap-0.5 border border-textInactiveColor p-3'
+              className='flex cursor-pointer items-center gap-3 border border-textInactiveColor p-3'
             >
-              <Text>
-                {formatFittingDate(insert?.fittingDate)}
-                {showProduct && insert?.productId ? ` · product #${insert.productId}` : ''}
-                {showModel && insert?.modelId ? ` · model #${insert.modelId}` : ''}
-              </Text>
-              <Text variant='inactive' size='small'>
-                {statusLabel(insert?.status)} · {verdictLabel(insert?.verdict)} ·{' '}
-                {insert?.sizes?.length ?? 0} size(s) · {fitting.media?.length ?? 0} photo(s)
-              </Text>
+              {/* Same thumbnail treatment as FittingCardList. */}
+              <div className='h-14 w-11 shrink-0 overflow-hidden border border-textInactiveColor'>
+                <Media
+                  src={fitting.media?.[0]?.media?.thumbnail?.mediaUrl || ''}
+                  alt={`fitting #${id}`}
+                  aspectRatio='3/4'
+                  fit='cover'
+                />
+              </div>
+              <div className='flex min-w-0 flex-col gap-0.5'>
+                <Text>
+                  {formatFittingDate(insert?.fittingDate)}
+                  {showProduct && insert?.productId ? ` · product #${insert.productId}` : ''}
+                  {showModel && insert?.modelId ? ` · model #${insert.modelId}` : ''}
+                </Text>
+                <Text variant='inactive' size='small'>
+                  {statusLabel(insert?.status)} · {verdictLabel(insert?.verdict)} ·{' '}
+                  {insert?.sizes?.length ?? 0} size(s) · {fitting.media?.length ?? 0} photo(s)
+                </Text>
+              </div>
             </div>
           );
         })}

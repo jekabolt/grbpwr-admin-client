@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import { common_ProductFull, ProductCostInfo } from 'api/proto-http/admin';
+import { common_ColorwayFull, ColorwayCostInfo } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
@@ -10,9 +10,9 @@ export const Product: FC = () => {
   const { id } = useParams();
   const { pathname } = useLocation();
   const isCopyMode = pathname.includes('/copy');
-  const [product, setProduct] = useState<common_ProductFull | undefined>();
+  const [product, setProduct] = useState<common_ColorwayFull | undefined>();
   // cost_info is null when the caller lacks costing:read — the block stays hidden.
-  const [costInfo, setCostInfo] = useState<ProductCostInfo | undefined>();
+  const [costInfo, setCostInfo] = useState<ColorwayCostInfo | undefined>();
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
 
   const fetchProduct = async () => {
@@ -22,8 +22,8 @@ export const Product: FC = () => {
         showMessage('Invalid product ID', 'error');
         return;
       }
-      const response = await adminService.GetProductByID({ id: productId });
-      setProduct(response.product);
+      const response = await adminService.GetColorwayByID({ colorwayId: productId });
+      setProduct(response.colorway);
       setCostInfo(response.costInfo);
     }
   };
@@ -34,7 +34,7 @@ export const Product: FC = () => {
 
   return (
     <ProductForm
-      key={product?.product?.id || `new-${id}`}
+      key={product?.colorway?.id || `new-${id}`}
       isEditMode={isEditMode}
       isAddingProduct={isCopyMode || !id}
       isCopyMode={isCopyMode}

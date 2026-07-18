@@ -2,7 +2,7 @@ import {
   common_GenderEnum,
   common_OrderFactor,
   common_SortFactor,
-  GetProductsPagedRequest,
+  GetColorwaysPagedRequest,
 } from 'api/proto-http/admin';
 
 import { GENDER_MAP, ORDER_MAP, SORT_MAP_URL } from 'constants/constants';
@@ -71,7 +71,9 @@ export function getProductPagedParans({
   to,
   sale,
   preorder,
+  status,
   hidden,
+  archived,
   collections,
   currency,
   seasons,
@@ -89,13 +91,15 @@ export function getProductPagedParans({
   from?: string | null;
   to?: string | null;
   preorder?: string | null;
+  status?: string | null;
   hidden?: string | null;
+  archived?: string | null;
   collections?: string | null;
   currency?: string | null;
   seasons?: string | null;
 }): Pick<
-  GetProductsPagedRequest,
-  'sortFactors' | 'orderFactor' | 'filterConditions' | 'showHidden'
+  GetColorwaysPagedRequest,
+  'sortFactors' | 'orderFactor' | 'filterConditions' | 'statuses'
 > {
   const sortFactor = normalizeSort(sort);
   const orderFactor = normalizeOrder(order);
@@ -108,7 +112,8 @@ export function getProductPagedParans({
       from: from ? from : undefined, //done
       to: to ? to : undefined, //done
       gender: isGenderFilter(genderEnum) ? [genderEnum] : undefined,
-      color: color && color !== 'all' ? color : undefined,
+      // R1/R9: catalog filters by dictionary color_code(s) now, not free-text color.
+      colorCodes: color && color !== 'all' ? [color] : undefined,
       topCategoryIds: topCategory ? topCategory.split(',').map((id) => parseInt(id)) : undefined, //done
       excludeTopCategoryIds: undefined,
       subCategoryIds: subCategory ? subCategory.split(',').map((id) => parseInt(id)) : undefined, //done
@@ -120,7 +125,30 @@ export function getProductPagedParans({
       collections: collections ? collections.split(',') : undefined,
       currency: currency ? currency : undefined,
       seasons: undefined,
+      // storefront-only tier-gated filter; unused in admin catalog.
+      exclusive: undefined,
     },
-    showHidden: hidden === 'false' ? false : true,
+    // R6/§14.6: show_hidden is replaced by an explicit lifecycle-status filter. The `status` filter
+    // (all/active/hidden/archived) is the source of truth; the legacy `hidden`/`archived` params are
+    // still honoured as a fallback so old links keep working. 'all' MUST send the full status set
+    // explicitly — an empty/undefined `statuses` is NOT treated as "everything" by the backend, it
+    // falls back to ACTIVE only (the bug this fixes: the "all" filter returned only active).
+    statuses:
+      status === 'active'
+        ? ['COLORWAY_LIFECYCLE_STATUS_ACTIVE']
+        : status === 'hidden'
+          ? ['COLORWAY_LIFECYCLE_STATUS_HIDDEN']
+          : status === 'archived'
+            ? ['COLORWAY_LIFECYCLE_STATUS_ARCHIVED']
+            : archived === 'true'
+              ? ['COLORWAY_LIFECYCLE_STATUS_ARCHIVED']
+              : hidden === 'false'
+                ? ['COLORWAY_LIFECYCLE_STATUS_ACTIVE']
+                : [
+                    'COLORWAY_LIFECYCLE_STATUS_DRAFT',
+                    'COLORWAY_LIFECYCLE_STATUS_ACTIVE',
+                    'COLORWAY_LIFECYCLE_STATUS_HIDDEN',
+                    'COLORWAY_LIFECYCLE_STATUS_ARCHIVED',
+                  ],
   };
 }

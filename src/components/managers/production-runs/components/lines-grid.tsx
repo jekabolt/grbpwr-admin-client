@@ -35,7 +35,23 @@ export function LinesGrid({
   const editable = canEdit && !locked;
 
   const { data: techCard } = useTechCard(run.run?.techCardId ? run.run.techCardId : undefined);
-  const colorways = useMemo(() => techCard?.techCard?.colorways ?? [], [techCard]);
+  // Colour-model rows/options are the run's tech-card colourways (R1: a colourway is a product;
+  // techCardId === styleId). useTechCard already reads the live AdminColorwayRef[] — the same
+  // source construction-tab.tsx uses — so no separate GetColorwaysPaged call is needed. Name
+  // resolves from dictionary.colors by colour code.
+  const colorways = useMemo(
+    () =>
+      (techCard?.colorways ?? []).map((cw) => {
+        const dc = dictionary?.colors?.find((c) => c.code === cw.colorCode);
+        return {
+          productId: cw.colorwayId ?? 0,
+          code: cw.colorCode ?? '',
+          name: dc?.name ?? cw.colorCode ?? '',
+          id: cw.colorwayId ?? 0,
+        };
+      }),
+    [techCard?.colorways, dictionary?.colors],
+  );
   const cardSizeIds = useMemo(() => techCard?.techCard?.sizeIds ?? [], [techCard]);
   const sizeQuantities = useMemo(() => techCard?.techCard?.sizeQuantities ?? [], [techCard]);
 

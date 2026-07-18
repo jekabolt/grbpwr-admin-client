@@ -6,9 +6,11 @@ import {
   MovementTarget,
 } from 'components/managers/materials/components/movement-modals';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { SECTION } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
@@ -32,6 +34,7 @@ const variance = (d?: googletype_Decimal, issued?: googletype_Decimal) => {
 export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canEdit: boolean }) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
+  const { dictionary } = useDictionary();
   // Issuing stock is a warehouse write — gate on the same section the warehouse module uses,
   // or a production-only account gets a button that 403s at submit.
   const { canWrite } = usePermissions();
@@ -42,18 +45,23 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
   const caveats = data?.caveats ?? [];
 
   // The run's colourways (products) so an issue can be attributed to the one it was cut for
-  // (gap-07 v2 C) — only the published ones, since attribution keys on product_id.
+  // (gap-07 v2 C). R1: a colourway is a product; useTechCard's live AdminColorwayRef[] is the
+  // same source lines-grid.tsx uses — name resolves from dictionary.colors by colour code.
   const techCardId = run.run?.techCardId ?? 0;
   const { data: techCard } = useTechCard(techCardId ? techCardId : undefined);
   const colorways = useMemo(
     () =>
-      (techCard?.techCard?.colorways ?? [])
-        .filter((c) => (c.productId ?? 0) > 0)
-        .map((c) => ({
-          productId: c.productId ?? 0,
-          label: `${c.code ? `${c.code} · ` : ''}${c.name ?? `#${c.productId}`}`,
-        })),
-    [techCard],
+      (techCard?.colorways ?? [])
+        .filter((cw) => (cw.colorwayId ?? 0) > 0)
+        .map((cw) => {
+          const dc = dictionary?.colors?.find((c) => c.code === cw.colorCode);
+          const name = dc?.name ?? cw.colorCode ?? `#${cw.colorwayId}`;
+          return {
+            productId: cw.colorwayId ?? 0,
+            label: `${cw.colorCode ? `${cw.colorCode} · ` : ''}${name}`,
+          };
+        }),
+    [techCard?.colorways, dictionary?.colors],
   );
 
   const [issue, setIssue] = useState<{ target: MovementTarget; qty: string } | undefined>();
@@ -76,7 +84,7 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
   };
 
   return (
-    <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-4'>
+    <div className='flex flex-col gap-2'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
           material plan
@@ -112,7 +120,10 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
         <Text size='small'>Material plan is unavailable.</Text>
       ) : rows.length === 0 ? (
         <Text variant='inactive' size='small'>
-          no material requirement — the card's colourways have no linked materials with norms
+          no material requirement — the card's colourways have no linked materials with norms ·{' '}
+          <Link to={`${ROUTES.techCards}/${techCardId}`} className='underline'>
+            open tech card ↗
+          </Link>
         </Text>
       ) : (
         <div className='overflow-x-auto'>

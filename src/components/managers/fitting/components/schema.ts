@@ -8,9 +8,11 @@ import { ZERO_TIMESTAMP } from 'components/managers/fittings/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 
+// The per-size fit-note UI is gone; sizes is derived from the linked sample (see
+// mapFormToFittingInsert) and carries only its sizeId. fitNote lives on the proto
+// (common_FittingSizeInsert) but is set once at the wire boundary, not in the form.
 const fittingSizeSchema = z.object({
   sizeId: z.number().int().min(1, 'Pick a size'),
-  fitNote: z.string().optional().default(''),
 });
 
 // The iteration выкройка actually tried on in this fitting (a snapshot, independent of the
@@ -33,22 +35,26 @@ const fittingCalloutSchema = z.object({
   posY: z.string().optional().default(''),
 });
 
-// The structured "what to change" work list a fitting produces. calloutNumber optionally ties an
-// item to a numbered photo marker; resolved is toggled when the change is carried into the card.
+// The structured "what to change" work list a fitting produces (S26). target is the change CATEGORY;
+// zone + pieceId are the structured LOCATION; status (open|resolved) replaces the legacy boolean;
+// carriedFromId links an item to the one in the previous round it continues.
 const fittingChangeRequestSchema = z.object({
   id: z.number().int().optional().default(0),
   target: z.string().optional().default(''),
   note: z.string().optional().default(''),
   calloutNumber: z.number().int().optional().default(0),
-  resolved: z.boolean().optional().default(false),
+  zone: z.string().optional().default('TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
+  pieceId: z.number().int().optional().default(0),
+  status: z.string().optional().default('open'),
+  carriedFromId: z.number().int().optional().default(0),
 });
 
 export const fittingSchema = z
   .object({
-    // A fitting anchors to a product AND/OR a tech card — at least one must be set
-    // (backend contract). Product is optional so accessories without a catalog product
-    // (пыльники, кофры, …) can be fitted against their tech card instead.
-    productId: z.number().int().optional().default(0), // 0 = unset
+    // A fitting anchors to the tech card (style) and its sample — a fitting tries a SAMPLE, not a
+    // catalogue product. productId is a legacy anchor kept for old records; new fittings require a
+    // tech card and link the sample tried on.
+    productId: z.number().int().optional().default(0), // 0 = unset (legacy; not surfaced in the editor)
     techCardId: z.number().int().optional().default(0), // optional link to the tech card (style)
     sampleId: z.number().int().optional().default(0), // optional link to the specific sample tried on
     modelId: z.number().int().optional().default(0),
@@ -67,9 +73,15 @@ export const fittingSchema = z
     outcome: z.string().optional().default('undecided'),
     changeRequests: z.array(fittingChangeRequestSchema).default([]),
   })
-  .refine((data) => !!data.productId || !!data.techCardId, {
-    message: 'Укажите продукт или тех карту',
-    path: ['productId'],
+  .refine((data) => !!data.techCardId, {
+    message: 'Укажите тех карту (примерка делается по её сэмплу)',
+    path: ['techCardId'],
+  })
+  // A fitting measures a SAMPLE — there is nothing to try on without one, so both the tech card and
+  // the sample are required (the sample is picked once a tech card is chosen).
+  .refine((data) => !!data.sampleId, {
+    message: 'Выберите сэмпл — примерка делается на конкретном сэмпле',
+    path: ['sampleId'],
   });
 
 export type FittingFormData = z.input<typeof fittingSchema>;
@@ -111,6 +123,22 @@ function dateInputToTimestamp(value?: string): string {
   return date.toISOString();
 }
 
+// outcomeToVerdict derives the wire verdict from the structured round outcome (they encoded the same
+// decision; the UI now asks only outcome). undecided→pending, approved→approved, new round→needs
+// rework, dropped→rejected.
+function outcomeToVerdict(outcome?: string): common_FittingVerdict {
+  switch (outcome) {
+    case 'approved':
+      return 'FITTING_VERDICT_APPROVED';
+    case 'new_round':
+      return 'FITTING_VERDICT_NEEDS_REWORK';
+    case 'dropped':
+      return 'FITTING_VERDICT_REJECTED';
+    default:
+      return 'FITTING_VERDICT_PENDING';
+  }
+}
+
 export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
   const insert = fitting.fitting;
   return {
@@ -131,7 +159,6 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
     recordedBy: insert?.recordedBy || '',
     sizes: (insert?.sizes ?? []).map((s) => ({
       sizeId: s.sizeId || 0,
-      fitNote: s.fitNote || '',
     })),
     patterns: (insert?.patterns ?? []).map((p) => ({
       sizeId: p.sizeId || 0,
@@ -159,7 +186,11 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       target: cr.target || '',
       note: cr.note || '',
       calloutNumber: cr.calloutNumber || 0,
-      resolved: cr.resolved ?? false,
+      zone: cr.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
+      pieceId: cr.pieceId || 0,
+      // status (open|resolved) is authoritative; fall back to the legacy boolean for old rows.
+      status: cr.status || (cr.resolved ? 'resolved' : 'open'),
+      carriedFromId: cr.carriedFromId || 0,
     })),
   };
 }
@@ -167,6 +198,12 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
 export function mapFormToFittingInsert(
   data: FittingFormData,
   original?: common_FittingInsert,
+  // The single size actually tried on, resolved from the linked sample (task 2). A fitting
+  // tries ONE sample and that sample already carries its own sizeId — the old UI let you pick
+  // a separate multi-size list that could disagree with it, so sizes is now always derived
+  // from the sample instead of read from the (no-longer-editable) form field. 0/undefined =
+  // sample has no size set → sizes saves empty, which the contract allows.
+  sampleSizeId?: number,
 ): common_FittingInsert {
   return {
     // Spread the loaded insert first so fields not yet managed by the form survive
@@ -179,12 +216,14 @@ export function mapFormToFittingInsert(
     fittingDate: dateInputToTimestamp(data.fittingDate),
     comment: data.comment?.trim() || '',
     status: (data.status || 'FITTING_STATUS_UNKNOWN') as common_FittingStatus,
-    verdict: (data.verdict || 'FITTING_VERDICT_UNKNOWN') as common_FittingVerdict,
+    // verdict is no longer a separate field — it was the same decision as `outcome` asked twice and
+    // could contradict. It is derived from the structured outcome so the wire contract still carries it.
+    verdict: outcomeToVerdict(data.outcome),
     recordedBy: data.recordedBy?.trim() || '',
-    sizes: (data.sizes ?? []).map((s) => ({
-      sizeId: s.sizeId,
-      fitNote: s.fitNote?.trim() || '',
-    })),
+    // common_FittingSizeInsert requires the fitNote key (proto: `fitNote: string | undefined`),
+    // so send it once here at the wire boundary — always '' now that the per-size fit-note UI is
+    // gone — rather than carrying a dead, hard-coded field through the form schema.
+    sizes: sampleSizeId ? [{ sizeId: sampleSizeId, fitNote: '' }] : [],
     patterns: (data.patterns ?? [])
       .filter((p) => p.url?.trim())
       .map((p) => ({
@@ -205,18 +244,35 @@ export function mapFormToFittingInsert(
         posY: inputToDecimal(c.posY),
       })),
     // §4 round tracking (form-managed). roundNumber 0 = server auto-assigns per tech card;
-    // the 'undecided' sentinel maps back to '' on the wire. Change requests are full-replace,
-    // like callouts — drop blank notes.
+    // the 'undecided' sentinel maps back to '' on the wire.
     roundNumber: data.roundNumber || 0,
     outcome: data.outcome === 'undecided' ? '' : data.outcome?.trim() || '',
-    changeRequests: (data.changeRequests ?? [])
-      .filter((cr) => cr.note?.trim() || cr.target?.trim())
-      .map((cr) => ({
-        id: cr.id || 0,
-        target: cr.target?.trim() || '',
-        note: cr.note?.trim() || '',
-        calloutNumber: cr.calloutNumber || 0,
-        resolved: cr.resolved ?? false,
-      })),
+    // Change requests (S26): CREATE sends the form's structured initial batch. On EDIT they are
+    // create-only on the wire — managed individually via Add/Update/DeleteFittingChangeRequest
+    // (the change-requests-fields.tsx editor uses those RPCs, so nothing is lost). UpdateFitting
+    // REJECTS any change_requests payload, so omit the key entirely: `undefined` overrides the
+    // `...original` spread above and JSON.stringify drops it, so the backend never sees a
+    // change_requests field (a JSON `[]` would unmarshal to a non-nil empty slice in Go).
+    changeRequests: original
+      ? undefined
+      : (data.changeRequests ?? [])
+          .filter((cr) => cr.note?.trim() || cr.target?.trim())
+          .map((cr) => {
+            const status = cr.status || 'open';
+            return {
+              id: cr.id || 0,
+              target: cr.target?.trim() || '',
+              note: cr.note?.trim() || '',
+              calloutNumber: cr.calloutNumber || 0,
+              resolved: status === 'resolved',
+              zone: cr.zone && cr.zone !== 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN' ? cr.zone : '',
+              pieceId: cr.pieceId || 0,
+              status,
+              carriedFromId: cr.carriedFromId || 0,
+              createdBy: '',
+              fittingId: 0,
+              roundNumber: 0,
+            };
+          }),
   };
 }

@@ -2,17 +2,15 @@ import { useSearchParams } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { cn } from 'lib/utility';
 import { CatalogTab } from './components/catalog-tab';
-import { LotsTab } from './components/lots-tab';
 import { PackagingBomTab } from './components/packaging-bom-tab';
 import { StockTab } from './components/stock-tab';
 import { MovementsTab } from './components/movements-tab';
 
-type Tab = 'catalog' | 'stock' | 'movements' | 'lots' | 'packaging';
+type Tab = 'catalog' | 'stock' | 'movements' | 'packaging';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'catalog', label: 'catalog' },
   { id: 'stock', label: 'stock' },
   { id: 'movements', label: 'movements' },
-  { id: 'lots', label: 'lots' },
   { id: 'packaging', label: 'packaging' },
 ];
 
@@ -68,8 +66,6 @@ export function Materials() {
         <StockTab />
       ) : tab === 'movements' ? (
         <MovementsTab />
-      ) : tab === 'lots' ? (
-        <LotsTab />
       ) : tab === 'packaging' ? (
         <PackagingBomTab />
       ) : (

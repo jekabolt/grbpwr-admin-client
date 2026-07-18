@@ -15,7 +15,7 @@ const AddressSchema = z.object({
   city: z.string().min(1, 'City is required'),
   addressLineOne: z.string().min(1, 'Address line one is required'),
   addressLineTwo: z.string().optional(),
-  company: z.string().min(1, 'Company is required'),
+  company: z.string().optional(),
   postalCode: z.string().min(1, 'Postal code is required'),
 });
 
@@ -61,7 +61,7 @@ const emptyBuyer = {
   lastName: '',
   email: '',
   phone: '',
-  receivePromoEmails: true,
+  receivePromoEmails: false,
 };
 
 export const defaultCustomOrder = {

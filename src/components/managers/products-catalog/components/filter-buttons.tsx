@@ -2,7 +2,6 @@
 
 import { common_Collection, common_Size } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 
@@ -14,7 +13,11 @@ export function formatSizeName(name: string): string {
 type FilterItem = common_Size | common_Collection;
 
 function getItemId(item: FilterItem): string {
-  return 'id' in item ? String(item.id) : item.name || '';
+  // common_Size and common_Collection both carry `id` now, so it can no longer discriminate the
+  // union (an `'id' in item` check narrows the else-branch to `never`). `code` is unique to
+  // common_Collection, so key off that instead — same Size-uses-id / Collection-uses-name mapping
+  // as before.
+  return 'code' in item ? item.name || '' : String(item.id);
 }
 
 function getItemName(item: FilterItem): string {
@@ -43,8 +46,6 @@ export default function FilterOptionButtons({
   gender?: string;
   handleFilterChange: (id: string) => void;
 }) {
-  const [loadingId, setLoadingId] = useState<string | null>(null);
-
   const isSizeType = (name: string, type: keyof typeof SIZE_PATTERNS) =>
     SIZE_PATTERNS[type].test(name);
 
@@ -61,17 +62,15 @@ export default function FilterOptionButtons({
   const showBottoms = showSeparated ? bottomsValues.length > 0 : false;
   const showTailored = showSeparated ? tailoredValues.length > 0 : false;
 
-  const handleClick = async (id: string) => {
-    setLoadingId(id);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  const handleClick = (id: string) => {
+    // Apply the filter immediately — there is no real async work here, so the old artificial 500ms
+    // delay only added latency to the catalog's most-used control.
     handleFilterChange(id);
-    setLoadingId(null);
   };
 
   const renderButton = (factor: FilterItem) => {
     const factorId = getItemId(factor);
     const isSelected = selectedValues.includes(factorId);
-    const isLoading = loadingId === factorId;
     const menCount = factor.countMen || 0;
     const womenCount = factor.countWomen || 0;
 
@@ -87,10 +86,7 @@ export default function FilterOptionButtons({
     return (
       <Button
         onClick={() => handleClick(factorId)}
-        loading={isLoading}
-        loadingReverse={isSelected}
-        loadingType='overlay'
-        disabled={isLoading || !isAvailable}
+        disabled={!isAvailable}
         className={cn(
           'block border border-transparent uppercase md:hover:border-textInactiveColor',
           {

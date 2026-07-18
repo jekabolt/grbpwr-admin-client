@@ -9,21 +9,21 @@ import { StockModal } from './stock-modal';
 import { UpdateStockData } from './update-stock-schema';
 import { useUpdateStock } from './useUpdateStock';
 
-interface SizeOption {
-  id?: number;
+interface VariantOption {
+  variantId?: number;
   name?: string;
 }
 
 export function UpdateStock({
-  productId,
-  sizes = [],
+  variants = [],
   onStockUpdated,
 }: {
-  productId?: number;
-  sizes?: SizeOption[];
+  variants?: VariantOption[];
   onStockUpdated?: () => void;
 }) {
   const {
+    open,
+    onOpenChange,
     form,
     mode,
     direction,
@@ -33,10 +33,10 @@ export function UpdateStock({
     directionOptions,
     commentPlaceholder,
     onSubmit,
-  } = useUpdateStock({ productId, sizes, onStockUpdated });
+  } = useUpdateStock({ variants, onStockUpdated });
 
   return (
-    <StockModal title='update stock'>
+    <StockModal title='update stock' open={open} onOpenChange={onOpenChange}>
       <Form {...form}>
         <form
           onSubmit={form.handleSubmit(onSubmit)}
@@ -52,7 +52,9 @@ export function UpdateStock({
                     name='mode'
                     label={o.label}
                     checked={mode === o.value}
-                    onCheckedChange={() => form.setValue('mode', o.value as UpdateStockData['mode'])}
+                    onCheckedChange={() =>
+                      form.setValue('mode', o.value as UpdateStockData['mode'])
+                    }
                   />
                 ))}
               </div>
@@ -75,7 +77,7 @@ export function UpdateStock({
                 </div>
               </div>
             )}
-            <SelectField name='sizeId' label='size' items={sizeItems} valueAsNumber />
+            <SelectField name='variantId' label='size' items={sizeItems} valueAsNumber />
             <InputField
               name='quantity'
               label='quantity'

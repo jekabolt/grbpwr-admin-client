@@ -61,14 +61,22 @@ function toItemInsert(item: any): common_ArchiveItemInsert {
         },
       };
     case 'ARCHIVE_ITEM_TYPE_PRODUCT':
-      return { ...base, product: { productId: item.productId || 0, translations: tx } };
+      // R2: archive product blocks reference a colourway now (was product_id). The form field keeps
+      // its `productId` name; only the proto key changes.
+      return { ...base, product: { colorwayId: item.productId || 0, translations: tx } };
     case 'ARCHIVE_ITEM_TYPE_PRODUCTS_TAG':
+      // P0: `limit` is write-only on read (mapArchiveFullToForm always loads it as
+      // undefined — a contract limitation, see that file). `item.limit || 0` used
+      // to coerce that unknown/untouched state to an explicit 0 ("no cap") on
+      // every save, silently zeroing a previously-set cap on any block the
+      // operator never opened. Send the form's actual value (undefined when
+      // untouched) instead of manufacturing a 0 the operator never entered.
       return {
         ...base,
-        productsTag: { tag: item.tag || '', limit: item.limit || 0, translations: tx },
+        productsTag: { tag: item.tag || '', limit: item.limit, translations: tx },
       };
     case 'ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL':
-      return { ...base, productsManual: { productIds: item.productIds || [], translations: tx } };
+      return { ...base, productsManual: { colorwayIds: item.productIds || [], translations: tx } };
     default:
       return base;
   }

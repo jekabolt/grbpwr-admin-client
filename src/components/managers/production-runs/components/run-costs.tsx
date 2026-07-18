@@ -3,7 +3,7 @@ import {
   common_ProductionRunCost,
   common_ProductionRunCostKind,
 } from 'api/proto-http/admin';
-import { CURRENCIES } from 'constants/constants';
+import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -118,7 +118,7 @@ export function RunCosts({
   };
 
   return (
-    <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-4'>
+    <div className='flex flex-col gap-2'>
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='small'>
           actual costs
@@ -189,7 +189,7 @@ export function RunCosts({
               value={c.currency}
               onChange={(e) => patchCost(i, { currency: e.target.value })}
             >
-              {CURRENCIES.map((cur) => (
+              {EXPENSE_CURRENCIES.map((cur) => (
                 <option key={cur.value} value={cur.value}>
                   {cur.value}
                 </option>

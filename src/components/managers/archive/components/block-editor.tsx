@@ -2,11 +2,13 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { useCallback } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { HeroProductPicker } from '../../hero/components/hero-product-picker';
 import { TagPicker } from '../../hero/components/tag-picker';
+import { useProductsByTag } from '../../hero/components/useProductsByTag';
 import { ProductSelectionApi } from '../../hero/components/useProductSelection';
 import { MediaGallerySelector } from '../../media/components/media-gallery-selector';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
@@ -95,6 +97,15 @@ export function BlockEditor({ index, item, productApi }: BlockEditorProps) {
   const { setValue } = useFormContext<ArchiveFormData>();
   const uid = item._uid as string;
   const base = `items.${index}`;
+
+  // A4: live match preview for the PRODUCTS_TAG block — called unconditionally
+  // (Rules of Hooks) with `enabled` gating the actual network call to just this
+  // block type, mirroring FeaturedProductBase's identical pattern on the hero side.
+  const isProductsTag = item.type === 'ARCHIVE_ITEM_TYPE_PRODUCTS_TAG';
+  const { data: tagMatches = [], isLoading: tagMatchesLoading } = useProductsByTag(
+    isProductsTag ? item.tag : undefined,
+    isProductsTag,
+  );
 
   const setField = useCallback(
     (key: string, value: any) =>
@@ -284,7 +295,8 @@ export function BlockEditor({ index, item, productApi }: BlockEditorProps) {
         </div>
       );
 
-    case 'ARCHIVE_ITEM_TYPE_PRODUCTS_TAG':
+    case 'ARCHIVE_ITEM_TYPE_PRODUCTS_TAG': {
+      const cap = typeof item.limit === 'number' && item.limit > 0 ? item.limit : undefined;
       return (
         <div className='space-y-5 p-3 lg:p-4'>
           <BlockTitle>products by tag</BlockTitle>
@@ -301,9 +313,46 @@ export function BlockEditor({ index, item, productApi }: BlockEditorProps) {
             valueAsNumber
             placeholder='e.g. 8'
           />
+          {/* A4: live match count + thumbnails as the tag is typed — previously a
+              misspelled tag shipped silently with zero matching products and no
+              feedback anywhere (editor, rail, or preview). */}
+          {item.tag ? (
+            tagMatchesLoading ? (
+              <Text variant='label' size='small'>
+                checking matches…
+              </Text>
+            ) : (
+              <div className='space-y-1'>
+                <Text variant={tagMatches.length === 0 ? 'error' : 'label'} size='small'>
+                  {tagMatches.length} product{tagMatches.length === 1 ? '' : 's'} currently match
+                  {tagMatches.length === 1 ? 'es' : ''} this tag
+                  {cap ? ` (capped to ${cap} on the live site)` : ''}
+                </Text>
+                {tagMatches.length > 0 && (
+                  <div className='flex flex-wrap gap-1'>
+                    {tagMatches.slice(0, 12).map((p) => (
+                      <div key={p.id} className='w-10 shrink-0'>
+                        <Media
+                          src={p.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+                          alt=''
+                          aspectRatio='1/1'
+                          fit='cover'
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            <Text variant='label' size='small'>
+              enter a tag to preview matches.
+            </Text>
+          )}
           <CaptionFields index={index} />
         </div>
       );
+    }
 
     case 'ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL':
       return (

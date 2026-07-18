@@ -26,11 +26,11 @@ function useLinkName(link: TaskLink) {
           return { name: r?.techCard?.techCard?.name || null };
         }
         if (link.kind === 'product') {
-          const r: any = await adminService.GetProductByID({ id: link.id });
+          const r: any = await adminService.GetColorwayByID({ colorwayId: link.id });
           return {
             name:
-              r?.product?.product?.productDisplay?.productBody?.translations?.[0]?.name ||
-              r?.product?.product?.slug ||
+              r?.colorway?.colorway?.display?.translations?.[0]?.name ||
+              r?.colorway?.colorway?.slug ||
               null,
           };
         }

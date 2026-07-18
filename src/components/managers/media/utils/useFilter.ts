@@ -18,6 +18,7 @@ export function useFilter(
 ) {
   const [type, setType] = useState<FilterType>(initialType || 'all');
   const [order, setOrder] = useState<SortOrder>('desc');
+  const [search, setSearch] = useState('');
 
   function matchesTypeFilter(m: common_MediaFull) {
     const isVideoMedia = isVideo(m.media?.thumbnail?.mediaUrl);
@@ -29,6 +30,23 @@ export function useFilter(
       default:
         return true;
     }
+  }
+
+  // common_MediaFull carries no filename metadata (uploads go through the backend as raw
+  // bytes, never a file name — see useUploadMedia) — the closest text every item actually has
+  // is its own storage id/url, so matching against those is the only search the client can do
+  // without a backend change. Still useful: pasting a copied url/id, or a remembered fragment
+  // of it, finds the item instead of scrolling an unindexed grid.
+  function matchesSearch(m: common_MediaFull) {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    if (m.id != null && String(m.id).includes(q)) return true;
+    const urls = [
+      m.media?.fullSize?.mediaUrl,
+      m.media?.thumbnail?.mediaUrl,
+      m.media?.compressed?.mediaUrl,
+    ];
+    return urls.some((u) => u?.toLowerCase().includes(q));
   }
 
   const matchesAspectRatioFilter = (m: common_MediaFull) => {
@@ -55,7 +73,7 @@ export function useFilter(
   };
 
   const filtered = media?.filter((m) => {
-    return matchesTypeFilter(m) && matchesAspectRatioFilter(m);
+    return matchesTypeFilter(m) && matchesAspectRatioFilter(m) && matchesSearch(m);
   });
 
   const filteredMedia = filtered?.sort((a, b) => {
@@ -68,7 +86,9 @@ export function useFilter(
     filteredMedia,
     type,
     order,
+    search,
     setType,
     setOrder,
+    setSearch,
   };
 }

@@ -4,8 +4,9 @@ import {
 } from 'components/managers/orders-catalog/components/utility';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -14,6 +15,7 @@ import Text from 'ui/components/text';
 import { Buyer } from './components/buyer';
 import { Comment } from './components/comment';
 import { OrderTable } from './components/order-table';
+import { OrderPackingSpec } from './components/packing-spec';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
 import { RefundConfirmation } from './components/refund-confirmation';
@@ -86,8 +88,24 @@ export function OrderDetails() {
 
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
   const [isShipCostOpen, setIsShipCostOpen] = useState(false);
+  // Local reflection of the last successful SetShipmentActualCost call: that mutation
+  // doesn't refetch the order, so without this both the summary block and the modal's
+  // prefill would keep showing the pre-edit value until the page is reloaded. Cleared on
+  // order change so it can never leak from one uuid onto another.
+  const [shipmentCostOverride, setShipmentCostOverride] = useState<{
+    actualCost: string;
+    returnShippingCost?: string;
+  } | null>(null);
   const { canWrite, canReadCosting } = usePermissions();
   const canEditOrder = canWrite(SECTION.orders);
+  const { dictionary } = useDictionary();
+  // Carrier cost (actual/return) is stored in the base currency, not the order's checkout currency
+  // — same source the shipment-cost modal and employee screens use.
+  const baseCurrency = dictionary?.baseCurrency || 'EUR';
+
+  useEffect(() => {
+    setShipmentCostOverride(null);
+  }, [uuid]);
 
   const form = useForm<{ refundReason: string; notes: string }>({
     defaultValues: { refundReason: '', notes: '' },
@@ -98,8 +116,26 @@ export function OrderDetails() {
     refundOrder(payload);
   };
 
+  const handleShipmentCostSubmit = async (actualCost: string, returnShippingCost?: string) => {
+    const ok = await setShipmentActualCost(actualCost, returnShippingCost);
+    if (!ok) return;
+    setShipmentCostOverride((prev) => ({
+      actualCost,
+      // A blank return field means "unchanged", not "clear" — mirrors the write itself
+      // (useOrderDetails sends undefined, not an explicit value, when the field is blank).
+      returnShippingCost: returnShippingCost?.trim()
+        ? returnShippingCost.trim()
+        : prev?.returnShippingCost ?? orderDetails?.shipment?.returnShippingCost?.value,
+    }));
+  };
+
   const order = orderDetails?.order;
   const currency = order?.currency ?? '';
+  const actualShipmentCost =
+    shipmentCostOverride?.actualCost ?? orderDetails?.shipment?.actualCost?.value;
+  const returnShipmentCost =
+    shipmentCostOverride?.returnShippingCost ?? orderDetails?.shipment?.returnShippingCost?.value;
+  const hasShipmentCost = !!actualShipmentCost;
   const statusColor = getStatusColor(orderStatus);
   const orderPlaced = formatDateShort(order?.placed, true);
   const isRefunded = orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED';
@@ -172,9 +208,28 @@ export function OrderDetails() {
               <Section title='summary'>
                 <div className='space-y-1'>
                   <SummaryRow
-                    label='shipping cost'
-                    value={`${orderDetails?.shipment?.cost?.value ?? '-'} ${currency}`}
+                    label='customer paid'
+                    value={
+                      orderDetails?.shipment?.cost?.value
+                        ? `${orderDetails.shipment.cost.value} ${currency}`
+                        : '—'
+                    }
                   />
+                  {canReadCosting && (
+                    <div className='space-y-1 border-t border-textInactiveColor pt-2 print:hidden'>
+                      <Text variant='label' size='small' className='uppercase'>
+                        carrier cost ({baseCurrency})
+                      </Text>
+                      <SummaryRow
+                        label='actual carrier cost'
+                        value={actualShipmentCost ? `${actualShipmentCost} ${baseCurrency}` : '—'}
+                      />
+                      <SummaryRow
+                        label='return'
+                        value={returnShipmentCost ? `${returnShipmentCost} ${baseCurrency}` : '—'}
+                      />
+                    </div>
+                  )}
                   <div className='flex items-center justify-between gap-4 print:hidden'>
                     <Text variant='inactive'>promo</Text>
                     <PromoApplied orderDetails={orderDetails} />
@@ -234,21 +289,21 @@ export function OrderDetails() {
                 />
               </Section>
 
-              {canEditOrder &&
-                orderStatus === 'CONFIRMED' &&
-                !orderDetails?.shipment?.trackingCode && (
-                  <Section title='tracking' className='print:hidden'>
-                    <NewTrackCode
-                      isPrinting={isPrinting}
-                      trackingNumber={trackingNumber}
-                      handleTrackingNumberChange={handleTrackingNumberChange}
-                      saveTrackingNumber={saveTrackingNumber}
-                    />
-                  </Section>
-                )}
+              {canEditOrder && !orderDetails?.shipment?.trackingCode && (
+                <Section title='tracking' className='print:hidden'>
+                  <NewTrackCode
+                    isPrinting={isPrinting}
+                    trackingNumber={trackingNumber}
+                    handleTrackingNumberChange={handleTrackingNumberChange}
+                    saveTrackingNumber={saveTrackingNumber}
+                  />
+                </Section>
+              )}
             </div>
           </div>
         )}
+
+        <OrderPackingSpec orderUuid={uuid || ''} />
 
         {canEditOrder && (
           <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>
@@ -258,7 +313,7 @@ export function OrderDetails() {
               className='uppercase'
               onClick={() => setIsShipCostOpen(true)}
             >
-              record shipping cost
+              {hasShipmentCost ? 'edit shipping cost' : 'record shipping cost'}
             </Button>
             {showDeliver && (
               <Button variant='main' size='lg' className='uppercase' onClick={markAsDelivered}>
@@ -278,7 +333,9 @@ export function OrderDetails() {
         <ShipmentCostModal
           open={isShipCostOpen}
           onOpenChange={setIsShipCostOpen}
-          onSubmit={setShipmentActualCost}
+          onSubmit={handleShipmentCostSubmit}
+          currentActualCost={actualShipmentCost}
+          currentReturnShippingCost={returnShipmentCost}
         />
 
         <RefundConfirmation

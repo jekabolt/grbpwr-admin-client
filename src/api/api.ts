@@ -39,6 +39,9 @@ export const requestHandler = async (
 
     if (!response.ok) {
       let msg = `Error: ${response.status} - ${response.statusText}`;
+      // google.rpc.Status details (grpc-gateway) carry BadRequest.fieldViolations — keep them so
+      // forms can pin server validation errors on the exact field (see utils/field-errors.ts).
+      let details: unknown[] | undefined;
       try {
         const text = await response.text();
         if (text) {
@@ -48,6 +51,7 @@ export const requestHandler = async (
               .map((k) => json[k])
               .find((v) => typeof v === 'string');
             if (s) msg = s as string;
+            if (Array.isArray(json.details)) details = json.details;
           } else {
             msg = text;
           }
@@ -55,8 +59,9 @@ export const requestHandler = async (
       } catch {
         /* keep default */
       }
-      const err = new Error(msg) as Error & { status?: number };
+      const err = new Error(msg) as Error & { status?: number; details?: unknown[] };
       err.status = response.status;
+      err.details = details;
       throw err;
     }
 

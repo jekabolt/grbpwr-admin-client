@@ -1,7 +1,9 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { common_MaterialMovement } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { CURRENCIES } from 'constants/constants';
+import { EntityPicker } from 'components/managers/tasks/components/entity-picker';
+import { runConfig, sampleConfig } from 'components/managers/tasks/utils/entity-configs';
+import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { ReactNode, useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -63,7 +65,7 @@ function MovementDialog({
   return (
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
-        <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
+        <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[440px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>{title}</DialogPrimitives.Title>
@@ -116,6 +118,9 @@ export function ReceiveStockModal({
   const [unitCost, setUnitCost] = useState('');
   const [currency, setCurrency] = useState('EUR');
   const [lot, setLot] = useState('');
+  // #48: "lot / roll" read as unexplained jargon ("не понимаю что это, для малого производства
+  // оверкил") — collapsed behind an opt-in toggle instead of an unconditional field.
+  const [showLot, setShowLot] = useState(false);
   const [supplierDoc, setSupplierDoc] = useState('');
   const [occurredAt, setOccurredAt] = useState(todayISO());
   const [comment, setComment] = useState('');
@@ -126,6 +131,7 @@ export function ReceiveStockModal({
     setUnitCost('');
     setCurrency('EUR');
     setLot('');
+    setShowLot(false);
     setSupplierDoc('');
     setOccurredAt(todayISO());
     setComment('');
@@ -187,7 +193,7 @@ export function ReceiveStockModal({
           </Field>
           <Field label='currency'>
             <select className={cell} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              {CURRENCIES.map((c) => (
+              {EXPENSE_CURRENCIES.map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.value}
                 </option>
@@ -200,18 +206,32 @@ export function ReceiveStockModal({
           Uncosted receipt — moving average unchanged.
         </Text>
       )}
-      <div className='grid grid-cols-2 gap-2'>
-        <Field label='lot / roll'>
-          <input className={cell} value={lot} onChange={(e) => setLot(e.target.value)} />
-        </Field>
-        <Field label='supplier doc'>
-          <input
-            className={cell}
-            value={supplierDoc}
-            onChange={(e) => setSupplierDoc(e.target.value)}
-          />
-        </Field>
-      </div>
+      <Field label='supplier doc'>
+        <input
+          className={cell}
+          value={supplierDoc}
+          onChange={(e) => setSupplierDoc(e.target.value)}
+        />
+      </Field>
+      {showLot ? (
+        <div className='flex flex-col gap-1'>
+          <Field label='lot / roll'>
+            <input className={cell} value={lot} onChange={(e) => setLot(e.target.value)} />
+          </Field>
+          <Text variant='inactive' size='small'>
+            Lots = incoming stock batches / receipts. Optional traceability — skip it for a small
+            run.
+          </Text>
+        </div>
+      ) : (
+        <button
+          type='button'
+          className='self-start text-small uppercase underline text-textInactiveColor'
+          onClick={() => setShowLot(true)}
+        >
+          + record lot / roll (optional)
+        </button>
+      )}
       <Field label='date'>
         <input
           className={cell}
@@ -380,13 +400,15 @@ export function IssueStockModal({
               <Text size='small'>sample</Text>
             </label>
           </div>
-          <Field label={targetKind === 'run' ? 'production run id' : 'sample id'}>
-            <input
-              className={cell}
-              type='number'
-              min='0'
-              value={targetId}
-              onChange={(e) => setTargetId(e.target.value)}
+          {/* gap-04 (M2): a searchable run/sample picker — a mistyped raw id silently books the
+              movement (and its cost) against the wrong run. key by kind so switching run<>sample
+              resets the picker instead of showing a stale resolved label. */}
+          <Field label={targetKind === 'run' ? 'production run' : 'sample'}>
+            <EntityPicker
+              key={targetKind}
+              config={targetKind === 'run' ? runConfig : sampleConfig}
+              value={Number(targetId) || 0}
+              onChange={(v) => setTargetId(v ? String(v) : '')}
             />
           </Field>
         </div>
@@ -422,21 +444,26 @@ export function IssueStockModal({
         />
       </Field>
       {lots.length > 0 ? (
-        <Field label='lot (optional)'>
-          <select
-            className={cell}
-            value={lotId || 0}
-            onChange={(e) => setLotId(Number(e.target.value) || 0)}
-          >
-            <option value={0}>— any / unspecified —</option>
-            {lots.map((l) => (
-              <option key={l.id} value={l.id ?? 0}>
-                {l.lotCode || `lot #${l.id}`} · rem {decimalToInput(l.remainingQty) || '0'}
-                {target.unit ? ` ${target.unit}` : ''}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <div className='flex flex-col gap-1'>
+          <Field label='lot (optional)'>
+            <select
+              className={cell}
+              value={lotId || 0}
+              onChange={(e) => setLotId(Number(e.target.value) || 0)}
+            >
+              <option value={0}>— any / unspecified —</option>
+              {lots.map((l) => (
+                <option key={l.id} value={l.id ?? 0}>
+                  {l.lotCode || `lot #${l.id}`} · rem {decimalToInput(l.remainingQty) || '0'}
+                  {target.unit ? ` ${target.unit}` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Text variant='inactive' size='small'>
+            Draw from one received batch for traceability — leave as "any" if you don't track lots.
+          </Text>
+        </div>
       ) : null}
       <Field label='comment'>
         <input className={cell} value={comment} onChange={(e) => setComment(e.target.value)} />

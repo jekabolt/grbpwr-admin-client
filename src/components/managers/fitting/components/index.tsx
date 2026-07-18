@@ -2,13 +2,15 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Fitting, common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
+  fittingSaveErrorMessage,
   useCreateFitting,
   useUpdateFitting,
 } from 'components/managers/fittings/components/useFittingQuery';
 import { ModelMeasurementsView } from 'components/managers/model/components/measurements-view';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { SamplePicker } from 'components/managers/tech-card/components/sample-picker';
-import { fittingStatusOptions, fittingVerdictOptions } from 'constants/filter';
+import { useSamples } from 'components/managers/tech-card/components/useSamples';
+import { fittingStatusOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -21,11 +23,11 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { ChangeRequestsFields } from './change-requests-fields';
+import { useDisclosure } from './disclosure';
 import { FittingCallouts } from './fitting-callouts';
 import { FittingMedia } from './fitting-media';
 import { PatternsFields } from './patterns-fields';
-import { ProductField } from './product-field';
-import { TechCardField } from './tech-card-field';
+import { RecordedByField } from './recorded-by-field';
 import {
   FittingFormData,
   fittingDefaultData,
@@ -34,7 +36,8 @@ import {
   mapFormToFittingInsert,
   todayDateInput,
 } from './schema';
-import { SizesFields } from './sizes-fields';
+import { SampleSizeInfo } from './sizes-fields';
+import { TechCardField } from './tech-card-field';
 
 // Structured round outcome (raw strings per the FittingInsert contract; distinct from verdict).
 // The wire uses '' for undecided, but a Radix <Select.Item> may not carry an empty-string value —
@@ -50,17 +53,42 @@ function Section({
   title,
   className,
   children,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   title: string;
   className?: string;
   children: React.ReactNode;
+  // Advanced/secondary sections can start collapsed to keep the long form scannable (task 6).
+  // defaultOpen is re-derived live by the caller (e.g. "open while there's data in it") but a
+  // manual toggle always wins once the user has touched it — see useDisclosure.
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
+  const [open, toggle] = useDisclosure(defaultOpen);
+  const isOpen = !collapsible || open;
   return (
     <section className={`space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}>
-      <Text variant='uppercase' size='large'>
-        {title}
-      </Text>
-      {children}
+      {collapsible ? (
+        <button
+          type='button'
+          onClick={toggle}
+          aria-expanded={isOpen}
+          className='flex w-full cursor-pointer items-center justify-between gap-2 text-left'
+        >
+          <Text variant='uppercase' size='large'>
+            {title}
+          </Text>
+          <Text variant='inactive' size='small' className='uppercase'>
+            {isOpen ? '− hide' : '+ show'}
+          </Text>
+        </button>
+      ) : (
+        <Text variant='uppercase' size='large'>
+          {title}
+        </Text>
+      )}
+      {isOpen && children}
     </section>
   );
 }
@@ -132,7 +160,24 @@ export function FittingForm({
     }
   }, [selectedTechCardId, selectedSampleId, form]);
 
-  // Resolved-media map shared by the photo picker and the callouts editor, so a
+  // The sample actually tried on already carries its own size and development round — surface
+  // both read-only (tasks 2/3) instead of asking the fitter to re-enter them. Same list query
+  // SamplePicker itself uses for this tech card, so React Query dedupes it into one request.
+  const { data: samplesData } = useSamples(selectedTechCardId);
+  const selectedSample = (samplesData?.samples ?? []).find((s) => s.id === selectedSampleId);
+  const sampleSizeId = selectedSample?.sample?.sizeId || 0;
+  const sampleRoundNumber = selectedSample?.sample?.roundNumber || 0;
+
+  // Keep roundNumber mirroring the sample's round live, not just at submit — ChangeRequestsFields
+  // → FittingCarryOver watches this field to filter carry-over items to "before this round", so
+  // it has to already be right while the form is still open, not only in the saved payload.
+  useEffect(() => {
+    if (form.getValues('roundNumber') !== sampleRoundNumber) {
+      form.setValue('roundNumber', sampleRoundNumber);
+    }
+  }, [sampleRoundNumber, form]);
+
+  // Resolved-media map shared by the photo carousel and the callouts editor, so a
   // freshly-picked photo can be annotated before the fitting is saved (saved
   // fitting.media + media picked this session).
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
@@ -143,11 +188,18 @@ export function FittingForm({
     return m;
   }, [fitting?.media, picked]);
 
+  const patternsCount = (form.watch('patterns') ?? []).length;
+
   async function handleSubmit(data: FittingFormData) {
-    const fittingInsert = mapFormToFittingInsert(data, fitting?.fitting);
+    const fittingInsert = mapFormToFittingInsert(data, fitting?.fitting, sampleSizeId);
     try {
       if (isEditMode) {
-        await updateFitting.mutateAsync({ id: parseInt(id || '0', 10), fitting: fittingInsert });
+        await updateFitting.mutateAsync({
+          id: parseInt(id || '0', 10),
+          fitting: fittingInsert,
+          // S25: echo the lock_version the form loaded — a stale value is rejected (409).
+          expectedLockVersion: fitting?.lockVersion ?? 0,
+        });
         showMessage('fitting updated', 'success');
         form.reset(data);
       } else {
@@ -156,18 +208,25 @@ export function FittingForm({
         navigate(returnTo || ROUTES.fittings);
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to submit fitting';
-      showMessage(msg, 'error');
+      showMessage(fittingSaveErrorMessage(error), 'error');
       console.error('Failed to submit fitting', error);
     }
   }
 
+  // The schema's .refine()s (tech card / sample required) previously failed dead silent — clicking
+  // "add" with nothing picked ran validation, rejected the submit, and gave zero feedback (no toast,
+  // no red text). onInvalid fires whenever handleSubmit's own validation blocks the call, so a snackbar
+  // always fires on a blocked submit; the field-level messages are additionally rendered inline below.
+  function onInvalid() {
+    showMessage('Fix the highlighted fields before saving', 'error');
+  }
+  const submit = form.handleSubmit(handleSubmit, onInvalid);
+  const techCardError = form.formState.errors.techCardId?.message;
+  const sampleError = form.formState.errors.sampleId?.message;
+
   return (
     <Form {...form}>
-      <form
-        className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
-        onSubmit={form.handleSubmit(handleSubmit)}
-      >
+      <form className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6' onSubmit={submit}>
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
             {/* Back respects ?returnTo= so bailing from the sample-panel loop lands back in
@@ -181,28 +240,47 @@ export function FittingForm({
           </div>
         </div>
 
-        <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
-          <Section title='session' className='w-full lg:w-1/2'>
-            <div className='space-y-1'>
+        {/* Change requests are the actionable output of a fitting (what to fix, carried into the next
+            round and the tech card) — surfaced full-width at the top, not buried below the fold. */}
+        <Section title='change requests (что доработать) — главный итог примерки'>
+          <ChangeRequestsFields
+            fittingId={isEditMode ? parseInt(id || '0', 10) : 0}
+            techCardId={selectedTechCardId || undefined}
+            serverChangeRequests={fitting?.fitting?.changeRequests}
+          />
+        </Section>
+
+        {/* Visual evidence for the change requests above: a photo carousel with fit-note pins
+            shown in place on the photo (hover/focus a pin for its note), task 5. */}
+        <Section title='photos & fit notes (замечания по посадке)'>
+          <FittingMedia
+            mediaById={mediaById}
+            onPicked={(items) => setPicked((prev) => [...prev, ...items])}
+          />
+          <FittingCallouts mediaById={mediaById} />
+        </Section>
+
+        <Section title='session'>
+          <div className='grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2'>
+            <div className='space-y-1 sm:col-span-2'>
               <Text variant='uppercase' size='small'>
-                product (optional)
-              </Text>
-              <ProductField />
-            </div>
-            <div className='space-y-1'>
-              <Text variant='uppercase' size='small'>
-                tech card (style)
+                tech card (style) *
               </Text>
               <TechCardField />
+              {techCardError && (
+                <Text size='small' className='text-error'>
+                  {String(techCardError)}
+                </Text>
+              )}
+              <Text variant='inactive' size='small'>
+                примерка делается по тех карте и её сэмплу (а не по продукту)
+              </Text>
             </div>
-            <Text variant='inactive' size='small'>
-              укажите продукт или тех карту (для пыльников, кофров и т.п. — по тех карте, без
-              продукта)
-            </Text>
+
             {!!selectedTechCardId && (
-              <div className='space-y-1'>
+              <div className='space-y-1 sm:col-span-2'>
                 <Text variant='uppercase' size='small'>
-                  sample (optional)
+                  sample (tried on) *
                 </Text>
                 <SamplePicker
                   techCardId={selectedTechCardId}
@@ -211,57 +289,66 @@ export function FittingForm({
                     form.setValue('sampleId', sampleId, { shouldDirty: true })
                   }
                 />
+                {sampleError && (
+                  <Text size='small' className='text-error'>
+                    {String(sampleError)}
+                  </Text>
+                )}
                 <Text variant='inactive' size='small'>
-                  какой именно сэмпл примеряли (для истории примерок сэмпла)
+                  примерка делается на конкретном сэмпле — обязательно
                 </Text>
+                <SampleSizeInfo sampleId={selectedSampleId ?? 0} sampleSizeId={sampleSizeId} />
               </div>
             )}
-            <SelectField
-              name='modelId'
-              label='model (optional)'
-              items={modelOptions}
-              valueAsNumber
-            />
-            {!!selectedModelId && (
-              <ModelMeasurementsView measurements={selectedModel?.model?.measurements} />
-            )}
-            <InputField name='fittingDate' type='date' label='fitting date' />
-            <SelectField name='status' label='status' items={fittingStatusOptions} />
-            <SelectField name='verdict' label='verdict' items={fittingVerdictOptions} />
-            <div className='grid grid-cols-2 gap-3'>
-              <InputField
-                name='roundNumber'
-                type='number'
-                label='round # (0 = auto)'
+
+            <div className='space-y-3 sm:col-span-2'>
+              <SelectField
+                name='modelId'
+                label='model (optional)'
+                items={modelOptions}
                 valueAsNumber
               />
-              <SelectField name='outcome' label='outcome' items={fittingOutcomeOptions} />
+              {!!selectedModelId && (
+                <ModelMeasurementsView measurements={selectedModel?.model?.measurements} />
+              )}
             </div>
-            <InputField name='recordedBy' label='recorded by (optional)' placeholder='name' />
-            <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={2000} />
-          </Section>
 
-          <div className='flex w-full flex-col gap-6 lg:w-1/2'>
-            <Section title='sizes'>
-              <SizesFields modelGender={selectedModel?.model?.gender} />
-            </Section>
-            <Section title='выкройка (что мерили)'>
-              <PatternsFields />
-            </Section>
-            <Section title='photos'>
-              <FittingMedia
-                mediaById={mediaById}
-                onPicked={(items) => setPicked((prev) => [...prev, ...items])}
-              />
-            </Section>
-            <Section title='callouts (замечания по посадке)'>
-              <FittingCallouts mediaById={mediaById} />
-            </Section>
-            <Section title='change requests (что доработать)'>
-              <ChangeRequestsFields />
-            </Section>
+            <InputField name='fittingDate' type='date' label='fitting date' />
+            <SelectField name='status' label='status' items={fittingStatusOptions} />
+
+            {/* Round is no longer typed in — it always mirrors the linked sample's development
+                round (task 3), so there is nothing to disagree with the carry-over filter. */}
+            <div className='space-y-1'>
+              <Text variant='uppercase' size='small'>
+                round
+              </Text>
+              <div className='border-b border-textInactiveColor py-1.5'>
+                <Text>
+                  {selectedSampleId
+                    ? `round ${sampleRoundNumber || '—'} · from sample #${
+                        selectedSample?.number ?? selectedSampleId
+                      }`
+                    : 'round — · pick a sample first'}
+                </Text>
+              </div>
+            </div>
+            <SelectField name='outcome' label='outcome' items={fittingOutcomeOptions} />
+
+            <div className='sm:col-span-2'>
+              <RecordedByField isEditMode={isEditMode} />
+            </div>
+
+            <div className='sm:col-span-2'>
+              <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={2000} />
+            </div>
           </div>
-        </div>
+        </Section>
+
+        {/* Secondary/advanced: attaching the exact PDF выкройка measured is common but not part
+            of the primary decision flow, so it starts collapsed once there's nothing in it yet. */}
+        <Section title='выкройка (что мерили)' collapsible defaultOpen={patternsCount > 0}>
+          <PatternsFields sampleSizeId={sampleSizeId} />
+        </Section>
       </form>
 
       <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>
@@ -286,7 +373,7 @@ export function FittingForm({
               className='uppercase cursor-pointer'
               disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
               loading={form.formState.isSubmitting}
-              onClick={() => form.handleSubmit(handleSubmit)()}
+              onClick={() => submit()}
             >
               {isEditMode ? 'save' : 'add'}
             </Button>

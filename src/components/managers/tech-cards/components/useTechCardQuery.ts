@@ -13,6 +13,7 @@ export type TechCardFilter = {
   season?: string;
   name?: string;
   productId?: number;
+  purpose?: string;
 };
 
 export const techCardKeys = {
@@ -37,8 +38,9 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
         stage: filter.stage ?? 'TECH_CARD_STAGE_UNKNOWN',
         gender: filter.gender ?? 'GENDER_ENUM_UNKNOWN',
         brand: filter.brand ?? '',
-        season: filter.season ?? '',
         name: filter.name ?? '',
+        purpose: filter.purpose,
+        skuSeason: undefined,
         productId: filter.productId ?? 0,
       });
       const techCards = response.techCards || [];

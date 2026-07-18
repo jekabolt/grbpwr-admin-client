@@ -1,6 +1,6 @@
 import { common_ShipmentCarrier } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { CURRENCIES } from 'constants/constants';
+import { SELLING_CURRENCIES } from 'constants/constants';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
@@ -11,7 +11,7 @@ import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { UpsertShipping } from './components/upsert-shipping';
 
-const currencyOptions = CURRENCIES.map((c) => ({ value: c.value, label: c.label }));
+const currencyOptions = SELLING_CURRENCIES.map((c) => ({ value: c.value, label: c.label }));
 
 const formatRegion = (region: string) =>
   region.replace(/^SHIPPING_REGION_/i, '').replace(/_/g, ' ');

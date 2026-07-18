@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import { common_TechCardDevExpense } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { CURRENCIES } from 'constants/constants';
+import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SamplePicker } from './sample-picker';
@@ -91,6 +93,10 @@ export function DevExpensesField({
     },
     onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to remove', 'error'),
   });
+
+  // Deleting a financial record is immediate and permanent server-side (no undo) — confirm first,
+  // same as every other destructive delete in this app (materials/, order/, tech-cards list).
+  const [pendingDelete, setPendingDelete] = useState<common_TechCardDevExpense | null>(null);
 
   const allExpenses = data?.expenses ?? [];
   const expenses = scoped ? allExpenses.filter((e) => e.sampleId === scopedSampleId) : allExpenses;
@@ -180,7 +186,7 @@ export function DevExpensesField({
               <button
                 type='button'
                 className='text-textInactiveColor hover:text-error'
-                onClick={() => e.id && del.mutate(e.id)}
+                onClick={() => setPendingDelete(e)}
                 aria-label='remove'
               >
                 ✕
@@ -228,7 +234,7 @@ export function DevExpensesField({
               value={form.currency}
               onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
             >
-              {CURRENCIES.map((c) => (
+              {EXPENSE_CURRENCIES.map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.value}
                 </option>
@@ -264,6 +270,23 @@ export function DevExpensesField({
           </Button>
         </div>
       )}
+
+      <ConfirmationModal
+        open={!!pendingDelete}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+        onConfirm={() => pendingDelete?.id && del.mutate(pendingDelete.id)}
+        title='remove dev expense?'
+        confirmLabel='remove'
+      >
+        <Text size='small'>
+          Permanently delete this {pendingDelete?.kind ?? ''} expense
+          {pendingDelete?.description ? ` — "${pendingDelete.description}"` : ''}
+          {pendingDelete
+            ? ` (${decimalToInput(pendingDelete.amount)} ${pendingDelete.currency})`
+            : ''}
+          ? This cannot be undone.
+        </Text>
+      </ConfirmationModal>
     </div>
   );
 }

@@ -304,7 +304,16 @@ export function ArchiveForm({
                 fieldPrefix='translations'
                 fields={[{ name: 'heading', label: 'heading (title)', maxLength: 90 }]}
               />
-              <InputField name='tag' label='tag' placeholder='free text, e.g. ss24 or editorial' />
+              {/* A10: this archive-level free-text label and the PRODUCTS_TAG
+                  block's dictionary-backed product filter (block-editor.tsx) were
+                  both called "tag" in the same form — two unrelated concepts
+                  sharing one label. This one classifies the whole timeline entry
+                  (e.g. a season or editorial); renamed to disambiguate. */}
+              <InputField
+                name='tag'
+                label='timeline tag'
+                placeholder='free text, e.g. ss24 or editorial — classifies this entry, unrelated to a block’s product tag'
+              />
             </div>
             <div className='w-full lg:w-1/3'>
               <ArchiveThumbnail />
@@ -322,6 +331,7 @@ export function ArchiveForm({
               onSelectBlock={(uid) => setEditingUid(uid)}
               selectedUid={editingUid}
               onAddClick={() => setAddMenuOpen(true)}
+              products={productApi.products}
             />
           </div>
           <div className='min-w-0 flex-1'>

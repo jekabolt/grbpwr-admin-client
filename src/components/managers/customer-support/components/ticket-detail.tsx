@@ -3,7 +3,9 @@ import {
   common_SupportTicketPriority,
   common_SupportTicketStatus,
 } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
@@ -15,6 +17,7 @@ import {
   getStatusColor,
   PRIORITY_OPTIONS,
   STATUS_OPTIONS,
+  useTicketById,
   useUpdateTicket,
   useUpdateTicketStatus,
 } from './utils';
@@ -25,38 +28,43 @@ interface TicketDetailProps {
 }
 
 export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
-  const insert = ticket.supportTicketInsert;
+  // `ticket` is a one-time row snapshot from the list click; refetch by id so a successful save
+  // (which only invalidates the list query) is reflected here too, instead of leaving the
+  // Update/Save buttons stuck "on" against stale local state.
+  const { data } = useTicketById(ticket.id ?? null);
+  const currentTicket = data?.ticket ?? ticket;
+  const insert = currentTicket.supportTicketInsert;
   const updateStatus = useUpdateTicketStatus();
   const updateTicket = useUpdateTicket();
 
   const [status, setStatus] = useState<common_SupportTicketStatus>(
-    ticket.status ?? 'SUPPORT_TICKET_STATUS_SUBMITTED',
+    currentTicket.status ?? 'SUPPORT_TICKET_STATUS_SUBMITTED',
   );
   const [priority, setPriority] = useState<common_SupportTicketPriority>(
-    ticket.priority ?? 'SUPPORT_TICKET_PRIORITY_MEDIUM',
+    currentTicket.priority ?? 'SUPPORT_TICKET_PRIORITY_MEDIUM',
   );
-  const [category, setCategory] = useState(ticket.category ?? '');
-  const [internalNotes, setInternalNotes] = useState(ticket.internalNotes ?? '');
+  const [category, setCategory] = useState(currentTicket.category ?? '');
+  const [internalNotes, setInternalNotes] = useState(currentTicket.internalNotes ?? '');
 
-  const statusChanged = status !== ticket.status;
+  const statusChanged = status !== currentTicket.status;
   const detailsChanged =
-    priority !== ticket.priority ||
-    category !== (ticket.category ?? '') ||
-    internalNotes !== (ticket.internalNotes ?? '');
+    priority !== currentTicket.priority ||
+    category !== (currentTicket.category ?? '') ||
+    internalNotes !== (currentTicket.internalNotes ?? '');
 
   const handleSaveStatus = () => {
-    if (!ticket.id) return;
+    if (!currentTicket.id) return;
     updateStatus.mutate({
-      id: ticket.id,
+      id: currentTicket.id,
       status,
       internalNotes: internalNotes || undefined,
     });
   };
 
   const handleSaveDetails = () => {
-    if (!ticket.id) return;
+    if (!currentTicket.id) return;
     updateTicket.mutate({
-      id: ticket.id,
+      id: currentTicket.id,
       priority,
       category: category || undefined,
       internalNotes: internalNotes || undefined,
@@ -67,7 +75,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
     <div className='flex flex-col gap-6 p-4 border border-textInactiveColor bg-bgColor'>
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='large'>
-          ticket #{ticket.id} &mdash; {ticket.caseNumber}
+          ticket #{currentTicket.id} &mdash; {currentTicket.caseNumber}
         </Text>
         <Button variant='secondary' size='lg' onClick={onClose}>
           Close
@@ -85,7 +93,15 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
             value={`${insert?.civility ?? ''} ${insert?.firstName ?? ''} ${insert?.lastName ?? ''}`.trim()}
           />
           <InfoRow label='Email' value={insert?.email} />
-          <InfoRow label='Order Ref' value={insert?.orderReference} />
+          <InfoRow
+            label='Order Ref'
+            value={insert?.orderReference}
+            href={
+              insert?.orderReference
+                ? `${ROUTES.orders}?ref=${encodeURIComponent(insert.orderReference)}`
+                : undefined
+            }
+          />
           <InfoRow label='Topic' value={insert?.topic} />
           <InfoRow label='Subject' value={insert?.subject} />
           <InfoRow label='Customer Category' value={insert?.category} />
@@ -108,17 +124,17 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
             Ticket Management
           </Text>
 
-          <InfoRow label='Created' value={formatDateShort(ticket.createdAt, true)} />
-          <InfoRow label='Updated' value={formatDateShort(ticket.updatedAt, true)} />
-          <InfoRow label='Resolved' value={formatDateShort(ticket.resolvedAt, true)} />
+          <InfoRow label='Created' value={formatDateShort(currentTicket.createdAt, true)} />
+          <InfoRow label='Updated' value={formatDateShort(currentTicket.updatedAt, true)} />
+          <InfoRow label='Resolved' value={formatDateShort(currentTicket.resolvedAt, true)} />
 
           <div className='flex flex-col gap-1 mt-2'>
             <Text variant='inactive' size='small'>
               Status
             </Text>
             <div className='flex gap-2 items-center'>
-              <span className={`inline-block px-2 py-0.5 ${getStatusColor(ticket.status)}`}>
-                <Text>{formatStatusLabel(ticket.status)}</Text>
+              <span className={`inline-block px-2 py-0.5 ${getStatusColor(currentTicket.status)}`}>
+                <Text>{formatStatusLabel(currentTicket.status)}</Text>
               </span>
               <Text variant='inactive'>&rarr;</Text>
               <Selector
@@ -145,8 +161,10 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
               Priority
             </Text>
             <div className='flex gap-2 items-center'>
-              <span className={`inline-block px-2 py-0.5 ${getPriorityColor(ticket.priority)}`}>
-                <Text>{formatPriorityLabel(ticket.priority)}</Text>
+              <span
+                className={`inline-block px-2 py-0.5 ${getPriorityColor(currentTicket.priority)}`}
+              >
+                <Text>{formatPriorityLabel(currentTicket.priority)}</Text>
               </span>
               <Text variant='inactive'>&rarr;</Text>
               <Selector
@@ -199,13 +217,27 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string | undefined }) {
+function InfoRow({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: string | undefined;
+  href?: string;
+}) {
   return (
     <div className='flex gap-2'>
       <Text variant='inactive' size='small' className='min-w-28 shrink-0'>
         {label}
       </Text>
-      <Text size='small'>{value || '-'}</Text>
+      {href ? (
+        <Link to={href} className='underline underline-offset-2 hover:opacity-70'>
+          <Text size='small'>{value}</Text>
+        </Link>
+      ) : (
+        <Text size='small'>{value || '-'}</Text>
+      )}
     </div>
   );
 }

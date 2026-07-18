@@ -1,4 +1,5 @@
 import { Cross2Icon } from '@radix-ui/react-icons';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -23,12 +24,25 @@ export function Tags({
     setValue,
     formState: { errors },
   } = useFormContext<ProductFormData>();
+  const { dictionary } = useDictionary();
   const values = watch();
   const [tag, setTag] = useState('');
-  const [localTags, setLocalTags] = useState<string[]>(() => {
-    const storedTags = localStorage.getItem('productTags');
-    return storedTags ? JSON.parse(storedTags) : [];
-  });
+
+  // R9: dictionary-backed tag suggestions (controlled Tag list; archived hidden). The final contract
+  // keeps ColorwayTagInsert as free-text `tag` (no tag_id FK), so clicking a suggestion seeds the
+  // value and the dictionary is purely for autocomplete/consistency.
+  const dictTagOptions = useMemo(
+    () =>
+      (dictionary?.tags ?? [])
+        .filter((t) => !t.archived)
+        .map((t) => t.name || t.code || '')
+        .filter(Boolean),
+    [dictionary?.tags],
+  );
+  // In-memory only, scoped to THIS add-product session. The old global localStorage['productTags']
+  // key leaked an abandoned draft's tags onto the next, unrelated new product; dictionary tags
+  // already provide cross-session suggestions.
+  const [localTags, setLocalTags] = useState<string[]>([]);
   const [copiedTags, setCopiedTags] = useState<string[]>([]);
   const [editedTags, setEditedTags] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -67,24 +81,26 @@ export function Tags({
     }
   }, [isEditMode]);
 
+  const addTagValue = (raw: string) => {
+    const trimmedTag = raw.trim();
+    if (trimmedTag === '' || localTags.includes(trimmedTag)) return;
+    const newTags = [...localTags, trimmedTag];
+    if (isAddingProduct) {
+      setLocalTags(newTags);
+    }
+    if (isCopyMode) {
+      setCopiedTags((prevCopiedTags) => [...prevCopiedTags, trimmedTag]);
+    }
+    if (isEditMode) {
+      setEditedTags((prevTags) => [...prevTags, trimmedTag]);
+    }
+    setSelectedTags((prev) => (prev.includes(trimmedTag) ? prev : [...prev, trimmedTag]));
+  };
+
   const handleAddTag = (e: React.MouseEvent) => {
     e.preventDefault();
-    const trimmedTag = tag.trim();
-    if (trimmedTag !== '' && !localTags.includes(trimmedTag)) {
-      const newTags = [...localTags, trimmedTag];
-      if (isAddingProduct) {
-        localStorage.setItem('productTags', JSON.stringify(newTags));
-        setLocalTags(newTags);
-      }
-      if (isCopyMode) {
-        setCopiedTags((prevCopiedTags) => [...prevCopiedTags, trimmedTag]);
-      }
-      if (isEditMode) {
-        setEditedTags((prevTags) => [...prevTags, trimmedTag]);
-      }
-      setSelectedTags((prev) => (prev.includes(trimmedTag) ? prev : [...prev, trimmedTag]));
-      setTag('');
-    }
+    addTagValue(tag);
+    setTag('');
   };
 
   const handleDeleteTag = (tagToDelete: string, e: React.MouseEvent) => {
@@ -92,7 +108,6 @@ export function Tags({
     let updatedTags = [];
     if (isAddingProduct) {
       const newTags = localTags.filter((t) => t !== tagToDelete);
-      localStorage.setItem('productTags', JSON.stringify(newTags));
       setLocalTags(newTags);
       updatedTags = newTags;
     }
@@ -174,6 +189,27 @@ export function Tags({
           >
             save
           </Button>
+        </div>
+      )}
+      {editMode && dictTagOptions.length > 0 && (
+        <div className='flex flex-col gap-1'>
+          <Text variant='inactive' size='small'>
+            dictionary tags
+          </Text>
+          <div className='flex flex-wrap gap-1'>
+            {dictTagOptions.map((name) => (
+              <Button
+                key={name}
+                type='button'
+                size='sm'
+                variant='secondary'
+                className='lowercase'
+                onClick={() => addTagValue(name)}
+              >
+                + {name}
+              </Button>
+            ))}
+          </div>
         </div>
       )}
       {!isEditMode && !isAddingProduct && <Text variant='uppercase'>list of tags</Text>}

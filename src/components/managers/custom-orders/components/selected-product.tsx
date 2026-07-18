@@ -1,4 +1,4 @@
-import { common_Product } from 'api/proto-http/admin';
+import { common_Colorway } from 'api/proto-http/admin';
 import { formatSizeName, getFilteredSizes } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
@@ -12,15 +12,15 @@ export function SelectedProduct({
   product,
   itemIdx,
 }: {
-  product?: common_Product;
+  product?: common_Colorway;
   itemIdx: number;
 }) {
   const { dictionary } = useDictionary();
-  const name = product?.productDisplay?.productBody?.translations?.[0]?.name;
-  const productBody = product?.productDisplay?.productBody?.productBodyInsert;
-  const topCategoryId = Number(productBody?.topCategoryId) || 0;
-  const typeId = Number(productBody?.typeId) || 0;
-  const targetGender = productBody?.targetGender;
+  const name = product?.display?.translations?.[0]?.name;
+  const merchandising = product?.display?.merchandising;
+  const topCategoryId = Number(merchandising?.topCategoryId) || 0;
+  const typeId = Number(merchandising?.typeId) || 0;
+  const targetGender = merchandising?.targetGender;
 
   const sizeItems = useMemo(() => {
     const opts = { gender: targetGender };
@@ -70,7 +70,7 @@ export function SelectedProduct({
     >
       <div className='relative h-full min-w-[90px] shrink-0'>
         <Media
-          src={product?.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl ?? ''}
+          src={product?.display?.thumbnail?.media?.thumbnail?.mediaUrl ?? ''}
           alt='product'
           aspectRatio='4/5'
           fit='contain'

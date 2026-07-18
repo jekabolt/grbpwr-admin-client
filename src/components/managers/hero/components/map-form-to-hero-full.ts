@@ -22,7 +22,7 @@ import { HeroSchema } from './schema';
  * the true fullSize URL at selection time is a later fidelity pass.
  *
  * `productsByUid` is the uid-keyed featured-products cache the editor already
- * holds (resolved common_Product objects); it is passed straight into the
+ * holds (resolved common_Colorway objects); it is passed straight into the
  * featuredProducts block so the preview shows real product media.
  */
 export function mapFormToHeroFull(

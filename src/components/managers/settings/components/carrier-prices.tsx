@@ -1,4 +1,4 @@
-import { CURRENCIES, currencySymbols } from 'constants/constants';
+import { SELLING_CURRENCIES, currencySymbols } from 'constants/constants';
 import { useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
@@ -59,7 +59,7 @@ export function CarrierPrices(props: CarrierPricesProps) {
   return (
     <div className='space-y-2'>
       <div className='grid grid-cols-2 gap-x-4 gap-y-3 border border-textInactiveColor p-3 sm:grid-cols-3'>
-        {CURRENCIES.map((currency) => {
+        {SELLING_CURRENCIES.map((currency) => {
           const isIntegerCurrency = currency.value === 'JPY' || currency.value === 'KRW';
           const step = isIntegerCurrency ? '1' : '0.01';
           const placeholder = isIntegerCurrency ? '0' : '0.00';

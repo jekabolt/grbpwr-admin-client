@@ -1,35 +1,35 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
-import {
-  common_ProductFull,
-  common_SizeWithMeasurementInsert,
-  ProductCostInfo,
-} from 'api/proto-http/admin';
+import { common_ColorwayFull, ColorwayCostInfo } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
+import { ProductCustomsSection, type ProductCustomsHandle } from './customs/customs-section';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { generatePath, Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
-import { defaultData, ProductFormData, productSchema } from '../utility/schema';
+import { defaultData, draftProductSchema, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
 import { ProductCostSection } from './cost-section';
+import { LifecycleControls, StatusBadge } from './lifecycle-controls';
 import { MediaAds } from './media-ads';
 import { SizeMeasurements } from './size-measurements';
+import { StylePicker } from './style-picker';
+import { StyleSection } from './style-section';
 import { Tags } from './tags';
 import { Thumbnail } from './thumbnail';
-import { createProductPayload, mapProductDataToForm, mapProductFullToFormData } from './utils';
+import { buildColorwayUpdateMask, buildColorwayWrite, mapProductFullToFormData } from './utils';
 
 type Props = {
   isEditMode: boolean;
   isAddingProduct: boolean;
   isCopyMode: boolean;
-  product: common_ProductFull | undefined;
-  costInfo?: ProductCostInfo;
+  product: common_ColorwayFull | undefined;
+  costInfo?: ColorwayCostInfo;
   productId?: string;
   onEditModeChange: (isEditMode: boolean) => void;
   onStockUpdated?: () => void;
@@ -51,12 +51,22 @@ export function ProductForm({
   const editMode = isEditMode || isAddingProduct;
   const navigate = useNavigate();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
+  // Lets the main Save flush a dirty customs block (its country of origin is entered once in Details
+  // and must stay in sync with the shipping-label customs record) — see handleSubmit.
+  const customsRef = useRef<ProductCustomsHandle>(null);
 
   const initialValues =
     product && (!isAddingProduct || isCopyMode) ? mapProductFullToFormData(product) : defaultData;
 
+  // #65: a DRAFT colourway (and every create) validates with the lenient schema — partial prices, no
+  // media/translation/size completeness gate — so it can be created and completed incrementally.
+  // Publish (server-side) is the real completeness check. An ACTIVE/HIDDEN colourway keeps the strict
+  // schema so a live product can't be saved back into an incomplete state.
+  const isDraftColorway = product?.colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_DRAFT';
+  const activeSchema = isAddingProduct || isDraftColorway ? draftProductSchema : productSchema;
+
   const form = useForm<ProductFormData>({
-    resolver: zodResolver(productSchema),
+    resolver: zodResolver(activeSchema),
     defaultValues: initialValues,
     mode: 'onTouched',
   });
@@ -72,48 +82,77 @@ export function ProductForm({
     }
   }, [product]);
 
-  const filterEmptySizes = (sizes: ProductFormData['sizeMeasurements']) =>
-    sizes
-      ?.filter((size) => {
-        const hasValidQuantity =
-          size.productSize?.quantity?.value && size.productSize.quantity.value !== '0';
-        const hasValidMeasurements = size.measurements?.some(
-          (m) => m.measurementValue?.value && m.measurementValue.value !== '0',
-        );
-        return hasValidQuantity || hasValidMeasurements;
-      })
-      .map((size) => ({
-        ...size,
-        measurements: size.measurements || [],
-      })) as common_SizeWithMeasurementInsert[];
-
+  // R2/R4 write decomposition: this form owns only the colourway (merch/media/prices/tags/
+  // translations/cost). Style facts save through <StyleSection/> (UpdateStyle) and the size chart /
+  // stock / variants through <SizeMeasurements/>, each under its own optimistic lock.
   async function handleSubmit(data: ProductFormData) {
-    const processedData = mapProductDataToForm(data);
-    const filteredData = {
-      ...processedData,
-      sizeMeasurements: filterEmptySizes(data.sizeMeasurements),
-    };
-
-    const payload = createProductPayload(filteredData, productId, isCopyMode);
-
+    const common = buildColorwayWrite(data);
     try {
-      await adminService.UpsertProduct(payload);
+      if (isAddingProduct) {
+        // A colourway attaches to an existing style — there is no CreateStyle RPC (a style is a tech
+        // card). Copy mode prefills styleId from the source; a from-scratch add needs it entered.
+        const styleId = data.styleId ? parseInt(data.styleId, 10) : NaN;
+        if (!styleId || Number.isNaN(styleId)) {
+          showMessage('Enter the style (tech card) id to attach this colourway to', 'error');
+          return;
+        }
+        const res = await adminService.CreateColorway({ styleId, ...common });
+        setIsFormChanged(false);
+        form.reset(data, { keepValues: true });
+        showMessage('Draft colourway created', 'success');
+        if (isCopyMode) {
+          navigate(ROUTES.product, { replace: true });
+        } else if (res.colorwayId) {
+          // Open the fresh DRAFT so the operator can add variants, the size chart, then publish.
+          navigate(generatePath(ROUTES.singleProduct, { id: String(res.colorwayId) }));
+        } else {
+          setMediaClearKey((k) => k + 1);
+        }
+        return;
+      }
+
+      const colorwayId = product?.colorway?.id;
+      if (colorwayId == null) {
+        showMessage('Missing colourway id', 'error');
+        return;
+      }
+      await adminService.UpdateColorway({
+        colorwayId,
+        expectedColorwayVersion: product?.colorway?.lockVersion,
+        updateMask: buildColorwayUpdateMask(data),
+        ...common,
+      });
+      // Country of origin is entered once in Details and persisted down TWO paths: merchandising +
+      // top-level countryCode (via UpdateColorway above) and the separate customs record (its own
+      // SetColorwayCustoms RPC, used for international shipping labels). The customs block has its own
+      // Save an operator can forget now that the input is merged into one — so the main Save flushes
+      // it here when it is dirty, using the same shared country. Non-fatal: a customs failure must
+      // never undo the colourway save, so it is caught and surfaced as its own toast.
+      let customsFlushError: string | null = null;
+      try {
+        await customsRef.current?.flushIfDirty();
+      } catch (customsErr) {
+        customsFlushError = customsErr instanceof Error ? customsErr.message : 'unknown error';
+      }
       setIsFormChanged(false);
       form.reset(data, { keepValues: true });
-      showMessage(isAddingProduct ? 'Product created' : 'Product updated', 'success');
-
-      if (isAddingProduct && !isCopyMode) {
-        setMediaClearKey((k) => k + 1);
-      } else if (isCopyMode) {
-        navigate(ROUTES.product, { replace: true });
-      } else {
-        // Existing product saved — drop back to read-only view.
-        onEditModeChange(false);
+      showMessage('Colourway updated', 'success');
+      if (customsFlushError) {
+        showMessage(`Colourway saved, but customs didn't update: ${customsFlushError}`, 'error');
       }
+      onEditModeChange(false);
+      onStockUpdated?.();
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to save product';
+      const err = e as Error & { status?: number };
+      // gRPC ABORTED (stale optimistic lock) surfaces as HTTP 409 through the gateway.
+      const message =
+        err?.status === 409
+          ? 'This colourway changed since you loaded it — reload and retry.'
+          : err instanceof Error
+            ? err.message
+            : 'Failed to save colourway';
       showMessage(message, 'error');
-      console.error('UpsertProduct error', e);
+      console.error('Colorway save error', e);
     }
   }
 
@@ -141,15 +180,14 @@ export function ProductForm({
     showMessage(message, 'error');
   };
 
-  const productDisplayBody = product?.product?.productDisplay?.productBody;
-  const productHidden = productDisplayBody?.productBodyInsert?.hidden;
+  const display = product?.colorway?.display;
   const headerTitle = isAddingProduct
     ? isCopyMode
       ? 'copy product'
       : 'new product'
-    : `[${product?.product?.id ?? productId ?? ''}] ${
-        productDisplayBody?.productBodyInsert?.brand ?? ''
-      } ${productDisplayBody?.translations?.[0]?.name ?? ''}`.trim();
+    : `[${product?.colorway?.id ?? productId ?? ''}] ${display?.merchandising?.brand ?? ''} ${
+        display?.translations?.[0]?.name ?? ''
+      }`.trim();
 
   const handleCancel = () => {
     if (isAddingProduct) {
@@ -162,6 +200,22 @@ export function ProductForm({
   };
 
   const submitForm = () => form.handleSubmit(handleSubmit, handleFormError)();
+
+  const sectionNavItems = [
+    { id: 'sec-media', label: 'media', show: true },
+    { id: 'sec-details', label: 'details', show: true },
+    {
+      id: 'sec-model',
+      label: 'model',
+      show: !isAddingProduct && product?.colorway?.styleId != null,
+    },
+    { id: 'sec-cost', label: 'cost', show: canReadCosting || canWriteCosting },
+    { id: 'sec-sizes', label: 'sizes & stock', show: true },
+    { id: 'sec-fittings', label: 'fittings', show: !!productId && !isCopyMode },
+    { id: 'sec-customs', label: 'customs', show: !!productId && !isCopyMode },
+  ]
+    .filter((i) => i.show)
+    .map(({ id, label }) => ({ id, label }));
 
   return (
     <Form {...form}>
@@ -178,13 +232,7 @@ export function ProductForm({
             <Text variant='uppercase' size='large'>
               {headerTitle || 'product'}
             </Text>
-            {productHidden && (
-              <span className='bg-textColor px-1.5 py-0.5'>
-                <Text className='!text-bgColor' size='small' variant='uppercase'>
-                  hidden
-                </Text>
-              </span>
-            )}
+            <StatusBadge status={product?.colorway?.status} />
             {!editMode && (
               <Text variant='inactive' size='small'>
                 view only
@@ -193,8 +241,22 @@ export function ProductForm({
           </div>
         </div>
 
+        {/* R6: stored lifecycle — publish/hide/unhide/archive act on the persisted colourway,
+            independent of the form's edit state. Only for existing (saved) colourways. */}
+        {productId && !isCopyMode && !isAddingProduct && product?.colorway?.id != null && (
+          <LifecycleControls
+            colorwayId={product.colorway.id}
+            status={product.colorway.status}
+            lockVersion={product.colorway.lockVersion}
+            canWrite={canWrite(SECTION.products)}
+            onChanged={onStockUpdated}
+          />
+        )}
+
+        <SectionNav items={sectionNavItems} />
+
         <div className='flex flex-col lg:flex-row lg:items-start gap-6'>
-          <Section title='media' className='w-full lg:w-1/2'>
+          <Section title='media' id='sec-media' className='w-full lg:w-1/2'>
             <div className='flex flex-row gap-5'>
               <Thumbnail
                 product={product}
@@ -217,8 +279,13 @@ export function ProductForm({
             />
           </Section>
 
-          <Section title='details' className='w-full lg:w-1/2'>
-            <BodyFields editMode={editMode} />
+          <Section title='details' id='sec-details' className='w-full lg:w-1/2'>
+            {isAddingProduct && <StylePicker name='styleId' disabled={!editMode} />}
+            <BodyFields
+              editMode={editMode}
+              isAddingProduct={isAddingProduct}
+              styleId={product?.colorway?.styleId}
+            />
             <Tags
               isAddingProduct={isAddingProduct}
               isEditMode={isEditMode}
@@ -228,29 +295,63 @@ export function ProductForm({
           </Section>
         </div>
 
+        {/* R4: style facts (brand, season, collection, gender, fit, categories, composition, care,
+            model-wears) are shared by every colourway of the style and save through UpdateStyle under
+            their own optimistic lock — isolated here so a blocked season change (frozen siblings) does
+            not fail the colourway save. Shown outside editMode too (read-only) so model-wears stays
+            visible without entering edit — not gated on editMode the way the rest of this form is;
+            <StyleSection/> derives its own canEdit from the editMode prop instead. Never shown in
+            add-mode: there is no created colourway yet for this section's own Save to attach to. */}
+        {!isAddingProduct && product?.colorway?.styleId != null && (
+          <div id='sec-model' className='scroll-mt-20'>
+            <StyleSection
+              styleId={product.colorway.styleId}
+              lockVersion={product.colorway.lockVersion}
+              canWrite={canWrite(SECTION.products)}
+              editMode={editMode}
+              onChanged={onStockUpdated}
+            />
+          </div>
+        )}
+
         {(canReadCosting || canWriteCosting) && (
-          <Section title='cost'>
+          <Section title='cost' id='sec-cost'>
             <ProductCostSection
               editMode={editMode}
               costInfo={costInfo}
               productId={productId}
+              lockVersion={product?.colorway?.lockVersion}
               isAddingProduct={isAddingProduct}
               onCostSynced={onStockUpdated}
             />
           </Section>
         )}
 
-        <Section title='sizes & stock'>
+        <Section title='sizes & stock' id='sec-sizes'>
           <SizeMeasurements
             editMode={editMode}
             productId={productId ? Number(productId) : undefined}
+            styleId={product?.colorway?.styleId}
+            lockVersion={product?.colorway?.lockVersion}
+            variants={product?.variants}
             onStockUpdated={onStockUpdated}
           />
         </Section>
 
         {productId && !isCopyMode && (
-          <Section title='fittings'>
+          <Section title='fittings' id='sec-fittings'>
             <FittingsReadonlyList productId={Number(productId)} />
+          </Section>
+        )}
+
+        {productId && !isCopyMode && (
+          <Section title='customs' id='sec-customs'>
+            <ProductCustomsSection
+              ref={customsRef}
+              productId={Number(productId)}
+              canWrite={canWrite(SECTION.products)}
+              isLive={product?.colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE'}
+            />
           </Section>
         )}
       </form>
@@ -306,18 +407,47 @@ export function ProductForm({
 function Section({
   title,
   className,
+  id,
   children,
 }: {
   title: string;
   className?: string;
+  id?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className={`space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}>
+    <section
+      id={id}
+      className={`scroll-mt-20 space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}
+    >
       <Text variant='uppercase' size='large'>
         {title}
       </Text>
       {children}
     </section>
+  );
+}
+
+// Sticky in-page nav for the long product editor — jumps to each independently-saving section
+// (P3 #16). Only lists the sections actually rendered for this colourway.
+function SectionNav({ items }: { items: { id: string; label: string }[] }) {
+  if (items.length < 2) return null;
+  const jump = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return (
+    <nav className='sticky top-0 z-30 -mx-2 flex flex-wrap gap-2 border-b border-textInactiveColor bg-bgColor px-2 py-2 lg:-mx-6 lg:px-6 print:hidden'>
+      {items.map((it) => (
+        <Button
+          key={it.id}
+          type='button'
+          size='sm'
+          variant='secondary'
+          className='uppercase'
+          onClick={() => jump(it.id)}
+        >
+          {it.label}
+        </Button>
+      ))}
+    </nav>
   );
 }

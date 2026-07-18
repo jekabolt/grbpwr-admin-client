@@ -31,6 +31,27 @@ export const runStatusLabel = (s?: common_ProductionRunStatus | string): string 
   }
 };
 
+// Status → badge tone (Tailwind classes on the app's semantic tokens), shared by the run list
+// card and the detail header so a status reads the same colour everywhere: nothing-yet stays
+// plain, in-flight is the app's "in progress, keep an eye on it" blue, received/closed are the
+// two "done, stock is posted" milestones (green while still open to cost true-up, solid once
+// closed for good), cancelled is the app's red "dead" tone.
+export const runStatusTone = (s?: common_ProductionRunStatus | string): string => {
+  switch (s) {
+    case 'PRODUCTION_RUN_STATUS_IN_PROGRESS':
+      return 'border-warning text-warning bg-warning/10';
+    case 'PRODUCTION_RUN_STATUS_RECEIVED':
+      return 'border-success text-success bg-success/10';
+    case 'PRODUCTION_RUN_STATUS_CLOSED':
+      return 'border-textColor bg-textColor text-bgColor';
+    case 'PRODUCTION_RUN_STATUS_CANCELLED':
+      return 'border-error text-error bg-error/10';
+    case 'PRODUCTION_RUN_STATUS_PLANNED':
+    default:
+      return 'border-textInactiveColor text-textInactiveColor';
+  }
+};
+
 // received/closed are terminal facts (stock + cost_price posted): delete is rejected by the
 // backend, so the UI hides/disables it for these.
 export const isRunLocked = (s?: common_ProductionRunStatus | string): boolean =>

@@ -1,11 +1,18 @@
 import { cn } from 'lib/utility';
+import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
 import CheckboxField from 'ui/form/fields/checkbox-field';
 import InputField from 'ui/form/fields/input-field';
+import SelectField from 'ui/form/fields/select-field';
+import { getUniqueCountries } from '../utility/constant';
 
 export function BillingFieldsGroup() {
   const { watch } = useFormContext();
   const billingSameAsShipping = watch('billingSameAsShipping');
+  const countryItems = useMemo(
+    () => getUniqueCountries().map((c) => ({ value: c.countryCode, label: c.name })),
+    [],
+  );
 
   return (
     <div
@@ -17,7 +24,7 @@ export function BillingFieldsGroup() {
       {!billingSameAsShipping && (
         <div className='grid gap-6'>
           <InputField name='billingAddress.addressLineOne' label='street and house number' />
-          <InputField name='billingAddress.country' label='country' />
+          <SelectField name='billingAddress.country' label='country' items={countryItems} />
           <InputField name='billingAddress.state' label='state' />
           <InputField name='billingAddress.city' label='city' />
           <InputField name='billingAddress.addressLineTwo' label='additional address' />

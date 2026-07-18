@@ -2,7 +2,7 @@ import {
   common_ArchiveFull,
   common_ArchiveItemFull,
   common_MediaFull,
-  common_Product,
+  common_Colorway,
 } from 'api/proto-http/frontend';
 import { ArchiveFormData } from './schema';
 
@@ -18,11 +18,12 @@ import { ArchiveFormData } from './schema';
  */
 export function mapFormToArchiveFull(
   data: ArchiveFormData,
-  productsByUid: Record<string, common_Product[]> = {},
+  productsByUid: Record<string, common_Colorway[]> = {},
 ): common_ArchiveFull {
   return {
     archiveList: {
       id: undefined,
+      code: undefined, // preview-only read model; the real code is assigned server-side on create
       tag: data.tag,
       slug: undefined,
       createdAt: undefined,
@@ -56,7 +57,7 @@ function toTranslations(translations: any) {
 
 function toItemFull(
   item: any,
-  productsByUid: Record<string, common_Product[]>,
+  productsByUid: Record<string, common_Colorway[]>,
 ): common_ArchiveItemFull {
   const base: common_ArchiveItemFull = {
     type: item.type,

@@ -43,8 +43,9 @@ export function useUpdateRunSection() {
 // silently retrying would re-introduce the last-write-wins the lock exists to prevent.
 export function updateRunErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
-  if (status === 409) return 'Партия была изменена в другом окне — обновите страницу и повторите';
-  return e instanceof Error ? e.message : 'Не удалось сохранить изменения партии';
+  if (status === 409)
+    return 'This run was changed in another window — refresh the page and try again';
+  return e instanceof Error ? e.message : 'Could not save the run changes';
 }
 
 export const productionRunKeys = {
@@ -132,8 +133,8 @@ export function useReceiveProductionRun() {
 // Friendly copy for the delete guard. FAILED_PRECONDITION (received/closed) → 400; NOT_FOUND → 404.
 export function deleteRunErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
-  if (status === 404) return 'Партия не найдена';
+  if (status === 404) return 'Run not found';
   if (status === 400 || status === 412)
-    return 'Партия уже принята — её нельзя удалить; создайте корректирующую';
-  return e instanceof Error ? e.message : 'Не удалось удалить партию';
+    return "This run has already been received — it can't be deleted; create a correcting run instead";
+  return e instanceof Error ? e.message : 'Could not delete the run';
 }

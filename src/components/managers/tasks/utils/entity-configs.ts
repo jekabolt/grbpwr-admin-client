@@ -2,12 +2,12 @@ import { adminService, frontendService } from 'api/api';
 import type {
   common_Fitting,
   common_Order,
-  common_Product,
+  common_Colorway,
   common_ProductionRun,
   common_Sample,
   common_TechCardListItem,
 } from 'api/proto-http/admin';
-import type { common_ArchiveList } from 'api/proto-http/frontend';
+import type { StorefrontArchiveList } from 'api/proto-http/frontend';
 import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
@@ -40,8 +40,9 @@ export const techCardConfig: EntityConfig = {
       stage: undefined,
       gender: undefined,
       brand: undefined,
-      season: undefined,
       name: q || undefined,
+      purpose: undefined,
+      skuSeason: undefined,
       productId: undefined,
     });
     return (r.techCards ?? []).map(techCardOption);
@@ -58,17 +59,16 @@ export const techCardConfig: EntityConfig = {
   },
 };
 
-// ---- product (GetProductsPaged has no name search → client filter) ----------
-function productName(p: common_Product): string {
-  const body = p.productDisplay?.productBody;
-  return body?.translations?.[0]?.name || p.slug || `product #${p.id}`;
+// ---- product (GetColorwaysPaged has no name search → client filter) ----------
+function productName(p: common_Colorway): string {
+  return p.display?.translations?.[0]?.name || p.slug || `product #${p.id}`;
 }
-function productOption(p: common_Product): EntityOption {
+function productOption(p: common_Colorway): EntityOption {
   return {
     value: p.id ?? 0,
     label: productName(p),
-    sublabel: p.sku || p.slug || `#${p.id}`,
-    thumbnail: p.productDisplay?.thumbnail?.media?.thumbnail?.mediaUrl,
+    sublabel: p.baseSku || p.slug || `#${p.id}`,
+    thumbnail: p.display?.thumbnail?.media?.thumbnail?.mediaUrl,
   };
 }
 
@@ -79,19 +79,19 @@ export const productConfig: EntityConfig = {
   searchPlaceholder: 'search products by name / sku…',
   emptyResult: 'no products',
   load: async () => {
-    const r = await adminService.GetProductsPaged({
+    const r = await adminService.GetColorwaysPaged({
       limit: 100,
       offset: undefined,
       sortFactors: undefined,
       orderFactor: 'ORDER_FACTOR_DESC',
       filterConditions: undefined,
-      showHidden: true,
+      statuses: undefined,
     });
-    return (r.products ?? []).map(productOption);
+    return (r.colorways ?? []).map(productOption);
   },
   resolve: async (value) => {
-    const r: any = await adminService.GetProductByID({ id: value as number });
-    const p: common_Product | undefined = r?.product?.product;
+    const r: any = await adminService.GetColorwayByID({ colorwayId: value as number });
+    const p: common_Colorway | undefined = r?.colorway?.colorway;
     return p ? productOption(p) : null;
   },
 };
@@ -145,11 +145,18 @@ export const orderConfig: EntityConfig = {
 };
 
 // ---- archive / timeline drop (frontendService.GetArchivesPaged, no search) --
-function archiveOption(a: common_ArchiveList): EntityOption {
+// NOTE(R6 cutover): StorefrontArchiveList (the storefront-facing list item) no longer carries the
+// internal numeric `id` — only admin's own common_ArchiveList does. archiveConfig.resolve still
+// round-trips through adminService.GetArchiveByID({ id }), so this option's `value` needs a real
+// id. Falling back to `any` here to unblock the typecheck; hero/components/archive-picker.tsx hits
+// the identical gap (also reads `.id` off a StorefrontArchiveList) and should be reconciled the
+// same way — ideally both move to `code`-based identity instead of this cast.
+function archiveOption(a: StorefrontArchiveList): EntityOption {
+  const id = (a as any).id ?? 0;
   return {
-    value: a.id ?? 0,
-    label: a.translations?.[0]?.heading || a.slug || `drop #${a.id}`,
-    sublabel: a.tag || `#${a.id}`,
+    value: id,
+    label: a.translations?.[0]?.heading || a.slug || `drop #${id}`,
+    sublabel: a.tag || `#${id}`,
     thumbnail: a.thumbnail?.media?.thumbnail?.mediaUrl,
   };
 }
