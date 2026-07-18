@@ -235,18 +235,16 @@ export function OrderDetails() {
                 />
               </Section>
 
-              {canEditOrder &&
-                orderStatus === 'CONFIRMED' &&
-                !orderDetails?.shipment?.trackingCode && (
-                  <Section title='tracking' className='print:hidden'>
-                    <NewTrackCode
-                      isPrinting={isPrinting}
-                      trackingNumber={trackingNumber}
-                      handleTrackingNumberChange={handleTrackingNumberChange}
-                      saveTrackingNumber={saveTrackingNumber}
-                    />
-                  </Section>
-                )}
+              {canEditOrder && !orderDetails?.shipment?.trackingCode && (
+                <Section title='tracking' className='print:hidden'>
+                  <NewTrackCode
+                    isPrinting={isPrinting}
+                    trackingNumber={trackingNumber}
+                    handleTrackingNumberChange={handleTrackingNumberChange}
+                    saveTrackingNumber={saveTrackingNumber}
+                  />
+                </Section>
+              )}
             </div>
           </div>
         )}

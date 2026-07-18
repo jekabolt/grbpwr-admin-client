@@ -69,8 +69,15 @@ export function SamplePicker({
   return (
     <GenericPopover
       title='pick a sample'
-      contentProps={{ align: 'start' }}
-      triggerProps={{ disabled: isDisabled }}
+      contentProps={{ align: 'start', sideOffset: 6 }}
+      // Explicit width + full-width flex so the trigger always matches the sibling form
+      // fields it sits next to, instead of shrink-wrapping to the label text.
+      triggerProps={{ disabled: isDisabled, className: 'flex w-full items-center' }}
+      // GenericPopover's content defaults to w-full; unconstrained inside a floating
+      // (position: absolute, off-flow) popper that resolves to a huge/viewport-driven box
+      // instead of a compact card. Pin it to a fixed, phone-safe width so the mini-card
+      // grid below reads as an actual grid, not a stretched single column.
+      className='w-[19rem] max-w-[calc(100vw-1.5rem)]'
       openElement={
         <span
           className={`flex w-full items-center gap-2 border border-textInactiveColor bg-bgColor px-2 py-1.5 text-left ${
@@ -84,7 +91,7 @@ export function SamplePicker({
         </span>
       }
     >
-      <div className='flex max-h-72 flex-col gap-1 overflow-y-auto py-2'>
+      <div className='flex max-h-72 flex-col gap-2 overflow-y-auto py-2'>
         <Popover.Close asChild>
           <button
             type='button'
@@ -101,27 +108,29 @@ export function SamplePicker({
             {isLoading ? 'loading…' : 'no samples on this card yet'}
           </Text>
         ) : (
-          samples.map((s) => (
-            <Popover.Close asChild key={s.id}>
-              <button
-                type='button'
-                className={`flex items-center gap-2 border p-1.5 text-left hover:bg-highlightColor/5 ${
-                  s.id === value ? 'border-textColor' : 'border-textInactiveColor'
-                }`}
-                onClick={() => s.id && onChange(s.id)}
-              >
-                <SampleThumb url={sampleThumbUrl(s)} />
-                <span className='flex min-w-0 flex-col'>
-                  <Text size='small' className='truncate'>
-                    {sampleLabel(s, sizeNameFor(s))}
-                  </Text>
-                  <Text variant='inactive' size='small'>
-                    {sampleRoundLabel(s.sample?.roundNumber)}
-                  </Text>
-                </span>
-              </button>
-            </Popover.Close>
-          ))
+          <div className='grid grid-cols-2 gap-1.5'>
+            {samples.map((s) => (
+              <Popover.Close asChild key={s.id}>
+                <button
+                  type='button'
+                  className={`flex min-w-0 items-center gap-1.5 border p-1.5 text-left hover:bg-highlightColor/5 ${
+                    s.id === value ? 'border-textColor' : 'border-textInactiveColor'
+                  }`}
+                  onClick={() => s.id && onChange(s.id)}
+                >
+                  <SampleThumb url={sampleThumbUrl(s)} />
+                  <span className='flex min-w-0 flex-col'>
+                    <Text size='small' className='truncate'>
+                      {sampleLabel(s, sizeNameFor(s))}
+                    </Text>
+                    <Text variant='inactive' size='small' className='truncate'>
+                      {sampleRoundLabel(s.sample?.roundNumber)}
+                    </Text>
+                  </span>
+                </button>
+              </Popover.Close>
+            ))}
+          </div>
         )}
       </div>
     </GenericPopover>

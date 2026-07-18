@@ -1,6 +1,8 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { common_MaterialMovement } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { EntityPicker } from 'components/managers/tasks/components/entity-picker';
+import { runConfig, sampleConfig } from 'components/managers/tasks/utils/entity-configs';
 import { CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { ReactNode, useEffect, useState } from 'react';
@@ -380,13 +382,15 @@ export function IssueStockModal({
               <Text size='small'>sample</Text>
             </label>
           </div>
-          <Field label={targetKind === 'run' ? 'production run id' : 'sample id'}>
-            <input
-              className={cell}
-              type='number'
-              min='0'
-              value={targetId}
-              onChange={(e) => setTargetId(e.target.value)}
+          {/* gap-04 (M2): a searchable run/sample picker — a mistyped raw id silently books the
+              movement (and its cost) against the wrong run. key by kind so switching run<>sample
+              resets the picker instead of showing a stale resolved label. */}
+          <Field label={targetKind === 'run' ? 'production run' : 'sample'}>
+            <EntityPicker
+              key={targetKind}
+              config={targetKind === 'run' ? runConfig : sampleConfig}
+              value={Number(targetId) || 0}
+              onChange={(v) => setTargetId(v ? String(v) : '')}
             />
           </Field>
         </div>

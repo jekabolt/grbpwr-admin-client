@@ -1,4 +1,5 @@
 import { useDictionary } from 'lib/providers/dictionary-provider';
+import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
 import InputField from 'ui/form/fields/input-field';
@@ -10,7 +11,7 @@ import Text from 'ui/components/text';
 // optional per-colourway shade tweak (when empty the storefront falls back to dictionary_color.hex).
 export function ColorFields({ editMode }: { editMode: boolean }) {
   const { dictionary } = useDictionary();
-  const { watch } = useFormContext();
+  const { watch, setValue } = useFormContext();
 
   const activeColors = useMemo(
     () => (dictionary?.colors ?? []).filter((c) => !c.archived && c.code),
@@ -44,6 +45,38 @@ export function ColorFields({ editMode }: { editMode: boolean }) {
           />
         )}
       </div>
+
+      {/* Full colour palette as swatch tiles — the whole dictionary is pickable at a glance, not just
+          from the dropdown. Add more colours under dictionaries › colors. */}
+      {editMode && activeColors.length > 0 && (
+        <div className='flex flex-wrap gap-1.5'>
+          {activeColors.map((color) => {
+            const isSelected = color.code === selectedCode;
+            return (
+              <button
+                key={color.code}
+                type='button'
+                title={`${color.code} · ${color.name ?? ''}`.trim()}
+                aria-pressed={isSelected}
+                onClick={() =>
+                  setValue('product.productBodyInsert.colorCode', color.code || '', {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
+                }
+                className={cn(
+                  'h-7 w-7 border transition-transform hover:scale-110',
+                  isSelected
+                    ? 'border-textColor ring-1 ring-textColor'
+                    : 'border-textInactiveColor',
+                )}
+                style={{ backgroundColor: color.hex || 'transparent' }}
+              />
+            );
+          })}
+        </div>
+      )}
+
       <InputField
         type='color'
         name='product.productBodyInsert.colorHexOverride'

@@ -36,6 +36,12 @@ function getContentTypeFromDataUrl(dataUrl: string): string {
   return match ? match[1] : 'image/jpeg';
 }
 
+// Client-side pre-upload size gates, mirroring the backend's real limits (see the error mapper
+// below): images up to 40 megapixels (≈28 MB), video up to 50 MB. Keeping these as one constant
+// each avoids the two pre-check call sites (File / data-URL) silently drifting apart.
+const MAX_IMAGE_BYTES = 28 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+
 // Maps an upload failure to a clear, media-specific message. The grpc-gateway surfaces the
 // gRPC code as an HTTP status on the thrown error: INVALID_ARGUMENT → 400 (bad file — the
 // backend rejects images over 40 megapixels / 28 MB and videos that aren't a real MP4/WebM),
@@ -70,7 +76,7 @@ export function useUploadMedia() {
       if (input instanceof File) {
         isVideo = input.type.startsWith('video/');
         contentType = input.type;
-        const maxSize = isVideo ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+        const maxSize = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
 
         if (input.size > maxSize) {
           const maxSizeMB = Math.round((maxSize / (1024 * 1024)) * 10) / 10;
@@ -88,7 +94,7 @@ export function useUploadMedia() {
         base64 = input;
 
         const size = getDataUrlSize(input);
-        const maxSize = isVideo ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+        const maxSize = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
 
         if (size > maxSize) {
           const maxSizeMB = Math.round((maxSize / (1024 * 1024)) * 10) / 10;

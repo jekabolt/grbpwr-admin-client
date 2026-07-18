@@ -212,6 +212,7 @@ export function MediaSelector({
               <MediaCropper
                 selectedFile={cropSrc ?? undefined}
                 initialAspect={cropAspect}
+                lockAspect={ratioConstrained}
                 busy={isUploading}
                 saveCroppedImage={handleCropSave}
                 onUseOriginal={handleUseOriginal}

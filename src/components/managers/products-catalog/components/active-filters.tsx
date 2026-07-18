@@ -19,6 +19,7 @@ const CHIP_PARAM_KEYS = [
   'sale',
   'preorder',
   'hidden',
+  'archived',
   'tag',
   'from',
   'to',
@@ -74,7 +75,14 @@ export function ActiveFilters() {
     chips.push({ key: 'preorder', label: 'preorder', remove: () => removeKeys(['preorder']) });
   }
   if (get('hidden') === 'false') {
-    chips.push({ key: 'hidden', label: 'hidden excluded', remove: () => removeKeys(['hidden']) });
+    chips.push({ key: 'hidden', label: 'active only', remove: () => removeKeys(['hidden']) });
+  }
+  if (get('archived') === 'true') {
+    chips.push({
+      key: 'archived',
+      label: 'archived only',
+      remove: () => removeKeys(['archived']),
+    });
   }
 
   const tag = get('tag');

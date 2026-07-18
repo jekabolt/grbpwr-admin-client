@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
   defaultData,
@@ -28,6 +28,9 @@ export function useUpdateStock({
 }) {
   const queryClient = useQueryClient();
   const { showMessage } = useSnackBarStore();
+  // Controlled modal open state so a successful save can auto-close the dialog (M5: the form used to
+  // silently reset to blank, leaving the operator unsure the write landed).
+  const [open, setOpen] = useState(false);
 
   const form = useForm<UpdateStockData>({
     resolver: zodResolver(updateStockSchema),
@@ -75,10 +78,19 @@ export function useUpdateStock({
     };
     try {
       await adminService.UpdateVariantStock(payload);
-      showMessage('Stock updated successfully', 'success');
+      // Summarise the applied change (the RPC returns no quantity), then auto-close and refresh the
+      // table behind the modal so the operator can confirm the new stock.
+      const sizeLabel =
+        variants.find((v) => v.variantId === data.variantId)?.name ?? `#${data.variantId}`;
+      const summary =
+        data.mode === 'STOCK_ADJUSTMENT_MODE_SET'
+          ? `set to ${data.quantity}`
+          : `${data.direction === 'STOCK_ADJUSTMENT_DIRECTION_DECREASE' ? '−' : '+'}${data.quantity}`;
+      showMessage(`Stock updated — ${sizeLabel} ${summary}`, 'success');
       form.reset();
       queryClient.invalidateQueries({ queryKey: stockChangeHistoryKeys.all });
       onStockUpdated?.();
+      setOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to update stock';
       showMessage(message, 'error');
@@ -112,7 +124,16 @@ export function useUpdateStock({
     return DIRECTION_OPTIONS;
   }
 
+  // Reset the form whenever the modal is closed (via [x], overlay, escape or a successful save) so it
+  // never reopens showing a stale half-filled entry.
+  function onOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) form.reset();
+  }
+
   return {
+    open,
+    onOpenChange,
     form,
     mode,
     reason,

@@ -38,11 +38,11 @@ export function PatternUploadButton({ onUploaded, label, disabled, className }: 
     setError(null);
 
     if (!isPdfFile(file)) {
-      setError('Только PDF.');
+      setError('PDF files only.');
       return;
     }
     if (file.size > MAX_PATTERN_BYTES) {
-      setError('Файл больше 25 МБ.');
+      setError('File too large — maximum size is 25 MB.');
       return;
     }
 
@@ -93,7 +93,7 @@ export function PatternUploadButton({ onUploaded, label, disabled, className }: 
         disabled={disabled || uploading}
         onClick={() => inputRef.current?.click()}
       >
-        {label ?? '+ загрузить PDF'}
+        {label ?? '+ upload PDF'}
       </Button>
       {error && (
         <Text size='small' className='mt-1 block text-error'>

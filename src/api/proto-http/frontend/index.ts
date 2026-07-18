@@ -581,6 +581,7 @@ export type common_Dictionary = {
   productTags: string[] | undefined;
   colors: common_Color[] | undefined;
   countries: common_Country[] | undefined;
+  fibers: common_Fiber[] | undefined;
   tags: common_Tag[] | undefined;
   skuContractVersion: string | undefined;
   revisions: common_DictionaryRevision[] | undefined;
@@ -714,6 +715,15 @@ export type common_Country = {
   code: string | undefined;
   name: string | undefined;
   active: boolean | undefined;
+};
+
+// Fiber is one entry of the controlled fibre vocabulary (COT/POL/WOL/…): a material's structural
+// composition references these codes, and a style's composition is derived from its shell-fabric
+// materials' fibres. Authored via the dictionary (CreateFiber/ArchiveFiber).
+export type common_Fiber = {
+  code: string | undefined;
+  name: string | undefined;
+  archived: boolean | undefined;
 };
 
 // Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is

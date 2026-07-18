@@ -25,11 +25,35 @@ export function ProductItem({
   // R6: dim/badge anything not live on the storefront (draft/hidden/archived), driven by the stored
   // lifecycle status rather than the vestigial `hidden` flag.
   const isActive = product.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE';
+  const isArchived = product.status === 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
   const description = `[${product.id}] ${product.display?.merchandising?.brand} ${product.display?.translations?.[0]?.name}`;
   const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
+  const [restoring, setRestoring] = useState(false);
   const navigate = useNavigate();
   const canEdit = usePermissions().canWrite(SECTION.products);
+
+  async function handleRestore(id: number | undefined, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (id == null || restoring) return;
+    setRestoring(true);
+    try {
+      // #60: restore a retired colourway back into the manageable set. TransitionColorwayStatus →
+      // HIDDEN un-archives it (kept off the storefront until it is explicitly unhidden/published).
+      await adminService.TransitionColorwayStatus({
+        colorwayId: id,
+        expectedVersion: product.lockVersion ?? 0,
+        target: 'COLORWAY_LIFECYCLE_STATUS_HIDDEN',
+      });
+      showMessage('PRODUCT RESTORED — NOW HIDDEN', 'success');
+      refresh(id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to restore product';
+      showMessage(msg, 'error');
+    } finally {
+      setRestoring(false);
+    }
+  }
 
   async function handleDeleteItem(id: number | undefined, e: React.MouseEvent) {
     e.stopPropagation();
@@ -78,7 +102,7 @@ export function ProductItem({
             <StatusBadge status={product.status} />
           </span>
         )}
-        {canEdit && (
+        {canEdit && !isArchived && (
           <Button
             onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
             className={cn(
@@ -89,7 +113,7 @@ export function ProductItem({
             {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
           </Button>
         )}
-        {canEdit && (
+        {canEdit && !isArchived && (
           <Button
             size='lg'
             className='absolute bottom-0 left-0 z-30'
@@ -97,6 +121,18 @@ export function ProductItem({
             onClick={(e: React.MouseEvent) => handleCopyProduct(product.id, e)}
           >
             copy
+          </Button>
+        )}
+        {/* #60: an archived colourway is read-only, but can be restored (→ hidden) from here. */}
+        {canEdit && isArchived && (
+          <Button
+            size='lg'
+            className='absolute bottom-0 left-0 z-30'
+            variant='main'
+            disabled={restoring}
+            onClick={(e: React.MouseEvent) => handleRestore(product.id, e)}
+          >
+            {restoring ? 'restoring…' : 'restore'}
           </Button>
         )}
         {!isActive && <Overlay cover='container' />}

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import InputField from 'ui/form/fields/input-field';
+import { ReadOnlyField } from '../read-only-field';
 import { CompositionModal } from './composition-modal/composition-modal';
 
 interface CompositionProps {
@@ -114,6 +115,13 @@ export function Composition({ editMode }: CompositionProps) {
       return currentCompositionValue;
     }
   };
+
+  // Composition is a STYLE fact (edited on the tech card) — render it as clean read-only text here,
+  // never as an input that merely looks disabled.
+  if (!editMode) {
+    const display = getDisplayValue();
+    return <ReadOnlyField label='composition' value={display || undefined} />;
+  }
 
   return (
     <div className='w-full h-full'>

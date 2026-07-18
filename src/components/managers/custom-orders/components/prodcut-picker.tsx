@@ -5,6 +5,7 @@ import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Button } from 'ui/components/button';
+import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { getProductPickerColumns } from '../utility/product-picker-columns';
 import type { ProductListProps } from './mobile-product-items';
@@ -34,6 +35,7 @@ export function ProductPicker({
   const { ref, inView } = useInView({ rootMargin: '100px' });
   const [open, setOpen] = useState(false);
   const [pendingSelection, setPendingSelection] = useState<common_Colorway[]>([]);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (inView && hasMore && products.length > 0) {
@@ -44,8 +46,25 @@ export function ProductPicker({
   useEffect(() => {
     if (open) {
       setPendingSelection([...selectedProducts]);
+    } else {
+      setSearch('');
     }
   }, [open, selectedProducts]);
+
+  // NOTE: GetColorwaysPagedRequest.filterConditions (common_FilterConditions, admin/index.ts)
+  // has no name/SKU field today — only price range, gender/category/type/size ids, preorder,
+  // byTag, collections, seasons, colorCodes. A true server-side text search needs a proto change.
+  // Until then, filter client-side over whatever page(s) are already loaded; the infinite-scroll
+  // sentinel below keeps paging in more of the catalog while a search narrows the visible rows.
+  const filteredProducts = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return products;
+    return products.filter((p) => {
+      const name = p.display?.translations?.[0]?.name?.toLowerCase() ?? '';
+      const sku = p.baseSku?.toLowerCase() ?? '';
+      return name.includes(term) || sku.includes(term);
+    });
+  }, [products, search]);
 
   const togglePending = useCallback(
     (product: common_Colorway) => {
@@ -72,12 +91,12 @@ export function ProductPicker({
 
   const productListProps = useMemo<ProductListProps>(
     () => ({
-      products,
+      products: filteredProducts,
       pendingSelection,
       togglePending,
       categories: dictionary?.categories,
     }),
-    [products, pendingSelection, togglePending, dictionary?.categories],
+    [filteredProducts, pendingSelection, togglePending, dictionary?.categories],
   );
 
   return (
@@ -108,6 +127,15 @@ export function ProductPicker({
               <Button>[x]</Button>
             </DialogPrimitives.Close>
           </div>
+          <div className='shrink-0 mt-3'>
+            <Input
+              name='product-picker-search'
+              type='text'
+              placeholder='search by name or SKU'
+              value={search}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+            />
+          </div>
           <div className='min-h-0 flex-1 overflow-y-auto mt-2'>
             <div className='hidden lg:block w-full overflow-x-auto'>
               <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
@@ -129,14 +157,16 @@ export function ProductPicker({
                   </tr>
                 </thead>
                 <tbody>
-                  {products.length === 0 ? (
+                  {filteredProducts.length === 0 ? (
                     <tr>
                       <td colSpan={columns.length} className='text-center py-8'>
-                        <Text variant='uppercase'>no products found</Text>
+                        <Text variant='uppercase'>
+                          {search ? 'no products match your search' : 'no products found'}
+                        </Text>
                       </td>
                     </tr>
                   ) : (
-                    products.map((product) => {
+                    filteredProducts.map((product) => {
                       const isSelected = pendingSelection.some((p) => p.id === product.id);
                       return (
                         <tr

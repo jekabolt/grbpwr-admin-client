@@ -13,6 +13,7 @@ import { useEditConfirmation } from '../utility/useEditConfirmation';
 import { useLastSizeOnly } from '../utility/useLastSizeOnly';
 import { useMeasurements } from '../utility/useMeasurements';
 import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle';
+import { TechCardLink } from './read-only-field';
 import { StockHistory } from './stock/stock-history';
 import { UpdateStock } from './stock/update-stock';
 import { ToggleSizeNames } from './toggle-sizenames';
@@ -63,7 +64,8 @@ export function SizeMeasurements({
     },
   );
 
-  const { handleLastSizeCheck, shouldShowSize } = useLastSizeOnly(filteredSizes);
+  const { handleLastSizeCheck, shouldShowSize, pendingPrune, confirmPrune, cancelPrune } =
+    useLastSizeOnly(filteredSizes);
 
   const sizeMeasurementsMap = useMemo(() => {
     const map = new Map();
@@ -203,6 +205,22 @@ export function SizeMeasurements({
           {confirmationModal.message}
         </Text>
       </ConfirmationModal>
+
+      {/* OS / One-Size collapses to a single row. Confirm before discarding the other sizes' stock.
+          onOpenChange handles the cancel/dismiss path (the guard in the hook keeps a confirm from
+          being undone by the trailing close). */}
+      <ConfirmationModal
+        open={pendingPrune}
+        onOpenChange={(o) => {
+          if (!o) cancelPrune();
+        }}
+        onConfirm={confirmPrune}
+      >
+        <Text variant='uppercase' className='font-bold'>
+          One-Size stock replaces individual sizes. Remove the other sizes and keep One-Size only?
+          Their stock will be discarded.
+        </Text>
+      </ConfirmationModal>
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
           <ToggleSizeNames
@@ -214,12 +232,14 @@ export function SizeMeasurements({
           <Text variant='inactive' size='small'>
             {sizesInStock} size{sizesInStock === 1 ? '' : 's'} in stock · {totalUnits} unit
             {totalUnits === 1 ? '' : 's'}
-            {productId != null && ' · stock is read-only here — use “update stock”'}
+            {productId != null && ' · stock changes via “update stock” (below) or production runs'}
           </Text>
-          <Text variant='inactive' size='small'>
-            measurements are the style’s size chart (shared by all colourways) — edit them on the
-            tech card
-          </Text>
+          <div className='flex flex-wrap items-center gap-1'>
+            <Text variant='inactive' size='small'>
+              measurements are the style’s size chart, shared by all colourways —
+            </Text>
+            <TechCardLink styleId={styleId} label='edit them on the tech card' />
+          </div>
         </div>
         <div className='flex flex-wrap gap-2'>
           {productId != null && (

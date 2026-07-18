@@ -72,6 +72,7 @@ export function getProductPagedParans({
   sale,
   preorder,
   hidden,
+  archived,
   collections,
   currency,
   seasons,
@@ -90,6 +91,7 @@ export function getProductPagedParans({
   to?: string | null;
   preorder?: string | null;
   hidden?: string | null;
+  archived?: string | null;
   collections?: string | null;
   currency?: string | null;
   seasons?: string | null;
@@ -124,7 +126,14 @@ export function getProductPagedParans({
     },
     // R6/§14.6: show_hidden is replaced by an explicit lifecycle-status filter. An empty `statuses`
     // is the default admin set (everything but ARCHIVED, so DRAFT/ACTIVE/HIDDEN show); the
-    // "hide hidden" toggle narrows it to ACTIVE only.
-    statuses: hidden === 'false' ? ['COLORWAY_LIFECYCLE_STATUS_ACTIVE'] : undefined,
+    // "drafts & hidden" toggle off narrows it to ACTIVE only. The "archived" view is exclusive — it
+    // asks the backend for ARCHIVED colourways (GetColorwaysPaged honours it) so retired colourways
+    // are findable again (#60).
+    statuses:
+      archived === 'true'
+        ? ['COLORWAY_LIFECYCLE_STATUS_ARCHIVED']
+        : hidden === 'false'
+          ? ['COLORWAY_LIFECYCLE_STATUS_ACTIVE']
+          : undefined,
   };
 }

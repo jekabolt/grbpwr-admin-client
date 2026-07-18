@@ -128,6 +128,7 @@ export type common_Dictionary = {
   productTags: string[] | undefined;
   colors: common_Color[] | undefined;
   countries: common_Country[] | undefined;
+  fibers: common_Fiber[] | undefined;
   tags: common_Tag[] | undefined;
   skuContractVersion: string | undefined;
   revisions: common_DictionaryRevision[] | undefined;
@@ -325,6 +326,15 @@ export type common_Country = {
   code: string | undefined;
   name: string | undefined;
   active: boolean | undefined;
+};
+
+// Fiber is one entry of the controlled fibre vocabulary (COT/POL/WOL/…): a material's structural
+// composition references these codes, and a style's composition is derived from its shell-fabric
+// materials' fibres. Authored via the dictionary (CreateFiber/ArchiveFiber).
+export type common_Fiber = {
+  code: string | undefined;
+  name: string | undefined;
+  archived: boolean | undefined;
 };
 
 // Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
@@ -1157,6 +1167,26 @@ export type ArchiveTagRequest = {
 };
 
 export type ArchiveTagResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type CreateFiberRequest = {
+  code: string | undefined;
+  name: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type CreateFiberResponse = {
+  fiber: common_Fiber | undefined;
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type ArchiveFiberRequest = {
+  code: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type ArchiveFiberResponse = {
   revision: common_DictionaryRevision | undefined;
 };
 
@@ -5876,6 +5906,11 @@ export type common_Material = {
   threadAttrs?: common_MaterialThreadAttrs;
   packagingAttrs?: common_MaterialPackagingAttrs;
   otherAttrs: string | undefined;
+  // Structural fibre composition (S17): fiber_code + percent, summing to 100 when present. Replaces
+  // the free-text `composition` string (which stays legacy plain text). On write, only fiber_code +
+  // percent are read (name is resolved server-side from the fibre dictionary). Empty = unset. A
+  // shell-fabric material's composition is what a style's derived composition_entries is built from.
+  compositionEntries: common_CompositionEntry[] | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -6840,6 +6875,8 @@ export interface AdminService {
   CreateTag(request: CreateTagRequest): Promise<CreateTagResponse>;
   UpdateTag(request: UpdateTagRequest): Promise<UpdateTagResponse>;
   ArchiveTag(request: ArchiveTagRequest): Promise<ArchiveTagResponse>;
+  CreateFiber(request: CreateFiberRequest): Promise<CreateFiberResponse>;
+  ArchiveFiber(request: ArchiveFiberRequest): Promise<ArchiveFiberResponse>;
   ListCountries(request: ListCountriesRequest): Promise<ListCountriesResponse>;
   SetCountryActive(request: SetCountryActiveRequest): Promise<SetCountryActiveResponse>;
   // Adds a new promotional code
@@ -8178,6 +8215,43 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ArchiveTag",
       }) as Promise<ArchiveTagResponse>;
+    },
+    CreateFiber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/dictionaries/fibers`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateFiber",
+      }) as Promise<CreateFiberResponse>;
+    },
+    ArchiveFiber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/fibers/${request.code}/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveFiber",
+      }) as Promise<ArchiveFiberResponse>;
     },
     ListCountries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/countries`; // eslint-disable-line quotes

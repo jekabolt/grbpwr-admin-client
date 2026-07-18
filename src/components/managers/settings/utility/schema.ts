@@ -1,5 +1,18 @@
+import { common_PaymentMethodNameEnum } from 'api/proto-http/admin';
 import { CURRENCIES, LANGUAGES } from 'constants/constants';
 import z from 'zod';
+
+// Payment methods the storefront checkout screen (this Settings page) actually supports today.
+// `common_PaymentMethodNameEnum` also defines BANK_INVOICE and CASH, but those are for
+// manually-created custom orders (see custom-orders/components/schema.ts), not online checkout
+// — do not add them here just because they exist on the enum. This is the single allow-list
+// source for both the form validator below and which `dictionary.paymentMethods` rows render
+// in the "payment methods" / "processing fees" sections of the Settings page — extend only
+// here (and only once checkout itself supports the method) to surface a new one.
+export const ALLOWED_PAYMENT_METHOD_NAMES = [
+  'PAYMENT_METHOD_NAME_ENUM_CARD',
+  'PAYMENT_METHOD_NAME_ENUM_CARD_TEST',
+] as const satisfies readonly common_PaymentMethodNameEnum[];
 
 const requiredLanguageIds = LANGUAGES.map((l) => l.id);
 
@@ -38,15 +51,7 @@ const announceTranslationSchema = z.object({
 const paymentMethodSchema = z.object({
   allow: z.boolean().optional(),
   paymentMethod: z
-    .enum([
-      'PAYMENT_METHOD_NAME_ENUM_UNKNOWN',
-      'PAYMENT_METHOD_NAME_ENUM_CARD',
-      'PAYMENT_METHOD_NAME_ENUM_CARD_TEST',
-      // 'PAYMENT_METHOD_NAME_ENUM_ETH',
-      // 'PAYMENT_METHOD_NAME_ENUM_ETH_TEST',
-      // 'PAYMENT_METHOD_NAME_ENUM_USDT_TRON',
-      // 'PAYMENT_METHOD_NAME_ENUM_USDT_SHASTA',
-    ])
+    .enum(['PAYMENT_METHOD_NAME_ENUM_UNKNOWN', ...ALLOWED_PAYMENT_METHOD_NAMES] as const)
     .optional(),
 });
 
@@ -142,11 +147,7 @@ export function transformDictionaryToSettings(dictionary: any): SettingsSchema {
   return {
     complimentaryShippingPrices: complimentaryMap,
     paymentMethods: dictionary.paymentMethods
-      ?.filter(
-        (method: any) =>
-          method?.name === 'PAYMENT_METHOD_NAME_ENUM_CARD' ||
-          method?.name === 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST',
-      )
+      ?.filter((method: any) => ALLOWED_PAYMENT_METHOD_NAMES.includes(method?.name))
       .map((method: any) => ({
         paymentMethod: method.name,
         allow: method.allowed ?? false,

@@ -139,6 +139,8 @@ export function MediaItem({
               },
             )}
             onClick={handleDelete}
+            aria-label={confirmDelete === media.id ? 'confirm delete' : 'delete'}
+            title={confirmDelete === media.id ? 'confirm delete' : 'delete'}
           >
             {confirmDelete === media.id ? <CheckIcon /> : '[x]'}
           </Button>

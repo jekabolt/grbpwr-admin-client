@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 
+import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
@@ -22,6 +23,43 @@ import { SelectHeroType } from './selectHeroType';
 import { useHero, useSaveHero } from './useHero';
 import { useProductSelection } from './useProductSelection';
 
+// H9: publishing the hero is a full, unversioned overwrite of the live storefront
+// hero with no server-side history. This is a frontend-only mitigation: stash the
+// state that's about to be overwritten (a single slot, refreshed on every publish)
+// so "revert to last published" can load it back into the editor for review.
+const HERO_SNAPSHOT_KEY = 'hero:lastPublishedSnapshot';
+
+// H4: LAST_CHANCE/NEW_ARRIVALS stockThreshold/limit are write-only on read (the
+// contract returns resolved `products`, not the rule that produced them — see the
+// comments in map-schema-to-hero-data.ts). Any heroData-driven form reset —
+// including the background refetch that follows a publish — would otherwise stomp
+// a value the operator just entered with `undefined` moments later. Carry the
+// last-known value forward positionally when the freshly mapped entity is missing
+// it and the previous form state (same slot, same type) had one.
+function carryForwardWriteOnlyRuleValues(prevEntities: any[], newEntities: any[]): any[] {
+  return newEntities.map((entity, i) => {
+    const prev = prevEntities[i];
+    if (!prev || prev.type !== entity.type) return entity;
+    if (entity.type === 'HERO_TYPE_LAST_CHANCE') {
+      const stockThreshold = entity.lastChance?.stockThreshold ?? prev.lastChance?.stockThreshold;
+      const limit = entity.lastChance?.limit ?? prev.lastChance?.limit;
+      if (
+        stockThreshold === entity.lastChance?.stockThreshold &&
+        limit === entity.lastChance?.limit
+      ) {
+        return entity;
+      }
+      return { ...entity, lastChance: { ...entity.lastChance, stockThreshold, limit } };
+    }
+    if (entity.type === 'HERO_TYPE_NEW_ARRIVALS') {
+      const limit = entity.newArrivals?.limit ?? prev.newArrivals?.limit;
+      if (limit === entity.newArrivals?.limit) return entity;
+      return { ...entity, newArrivals: { ...entity.newArrivals, limit } };
+    }
+    return entity;
+  });
+}
+
 export function Hero() {
   const { data: heroData, isLoading, isError, refetch } = useHero();
   const saveHero = useSaveHero();
@@ -42,6 +80,11 @@ export function Hero() {
     incomplete: 0,
   });
   const isResettingRef = useRef(false);
+  // H9: tracks the most-recently-loaded live hero, so a publish can snapshot
+  // "what's about to be overwritten" right before it does.
+  const publishedSnapshotRef = useRef<common_HeroFullWithTranslations | null>(null);
+  const [revertAvailable, setRevertAvailable] = useState(false);
+  const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const heroZodResolver = useMemo(() => zodResolver(heroSchema) as any, []);
 
   const form = useForm<HeroSchema>({
@@ -68,7 +111,14 @@ export function Hero() {
       isResettingRef.current = true;
       const mappedData = mapHeroFullToFormData(heroData.hero);
       productsByEntityUidRef.current = mappedData.productsByEntityUid || {};
-      form.reset(mappedData);
+      // H4: patch in any write-only rule values (LAST_CHANCE/NEW_ARRIVALS) the
+      // current form already knows but this fresh read doesn't carry.
+      const prevEntities = form.getValues().entities || [];
+      const patchedEntities = carryForwardWriteOnlyRuleValues(
+        prevEntities,
+        mappedData.entities || [],
+      );
+      form.reset({ ...mappedData, entities: patchedEntities });
       deletedIndicesRef.current.clear();
       setHasUserMadeChanges(false);
       // Give form time to fully reset before allowing watch to track changes
@@ -76,7 +126,24 @@ export function Hero() {
         isResettingRef.current = false;
       }, 0);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [heroData, form]);
+
+  // H9: remember the live hero as last loaded (pre-edit), so a publish can
+  // snapshot it right before overwriting it.
+  useEffect(() => {
+    if (heroData?.hero) {
+      publishedSnapshotRef.current = heroData.hero;
+    }
+  }, [heroData]);
+
+  useEffect(() => {
+    try {
+      setRevertAvailable(!!localStorage.getItem(HERO_SNAPSHOT_KEY));
+    } catch {
+      setRevertAvailable(false);
+    }
+  }, []);
 
   // Track when user makes changes
   useEffect(() => {
@@ -143,6 +210,26 @@ export function Hero() {
     };
 
     const heroData = mapFormFieldsToHeroData(filteredData);
+
+    // H9: stash what's about to be overwritten (a single slot, refreshed on every
+    // publish — including a revert-publish) so "revert to last published" can
+    // load it back in. Best-effort: storage being full/unavailable shouldn't block
+    // publishing.
+    if (publishedSnapshotRef.current) {
+      try {
+        localStorage.setItem(
+          HERO_SNAPSHOT_KEY,
+          JSON.stringify({
+            hero: publishedSnapshotRef.current,
+            savedAt: new Date().toISOString(),
+          }),
+        );
+        setRevertAvailable(true);
+      } catch {
+        // ignore — revert just won't be offered from this publish
+      }
+    }
+
     try {
       await saveHero.mutateAsync(heroData);
       isResettingRef.current = true;
@@ -159,6 +246,43 @@ export function Hero() {
       // (and so the form isn't reset — the user's edits are preserved).
     }
   }
+
+  // H9: load the pre-last-publish snapshot into the editor for review. Nothing
+  // goes live until the operator reviews it and clicks publish themselves — this
+  // reuses the normal validate/confirm/publish pipeline rather than force-pushing
+  // straight back to the storefront.
+  const handleRevertConfirm = useCallback(() => {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(HERO_SNAPSHOT_KEY);
+    } catch {
+      raw = null;
+    }
+    if (!raw) {
+      showMessage('no earlier published snapshot to revert to', 'error');
+      setRevertConfirmOpen(false);
+      return;
+    }
+    try {
+      const snapshot = JSON.parse(raw) as { hero: common_HeroFullWithTranslations };
+      const formData = mapHeroFullToFormData(snapshot.hero);
+      isResettingRef.current = true;
+      productsByEntityUidRef.current = formData.productsByEntityUid || {};
+      form.reset(formData);
+      deletedIndicesRef.current.clear();
+      setHasUserMadeChanges(true);
+      setTimeout(() => {
+        isResettingRef.current = false;
+      }, 0);
+      showMessage(
+        'loaded the last published snapshot — review it, then click publish to make it live',
+        'success',
+      );
+    } catch {
+      showMessage("couldn't read the last published snapshot", 'error');
+    }
+    setRevertConfirmOpen(false);
+  }, [form, showMessage]);
 
   // Pre-flight before publishing: validate everything (so every incomplete block
   // gets flagged in the rail), tally live vs incomplete blocks, then open the
@@ -277,6 +401,20 @@ export function Hero() {
           </div>
           {canWrite(SECTION.hero) && (
             <div className='flex items-center gap-2'>
+              {/* H9: frontend-only "undo" — loads the state from right before the
+                  last publish back into the editor for review. */}
+              {revertAvailable && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='lg'
+                  className='uppercase'
+                  onClick={() => setRevertConfirmOpen(true)}
+                  disabled={isLoading || isError || saveHero.isPending}
+                >
+                  revert to last published
+                </Button>
+              )}
               <Button
                 type='button'
                 variant='secondary'
@@ -286,6 +424,9 @@ export function Hero() {
               >
                 nav featured
               </Button>
+              {/* H12: this button used to read "save" but was wired to an
+                  immediate full publish to the live storefront — relabeled to
+                  match what it actually does. */}
               <Button
                 size='lg'
                 variant='main'
@@ -295,7 +436,7 @@ export function Hero() {
                 loading={saveHero.isPending}
                 className='uppercase'
               >
-                save
+                publish
               </Button>
             </div>
           )}
@@ -407,6 +548,21 @@ export function Hero() {
               </Text>
             )}
           </div>
+        </ConfirmationModal>
+
+        <ConfirmationModal
+          open={revertConfirmOpen}
+          onOpenChange={setRevertConfirmOpen}
+          onConfirm={handleRevertConfirm}
+          title='revert to last published'
+          confirmLabel='load snapshot'
+          cancelLabel='cancel'
+        >
+          <Text>
+            this loads the hero as it looked right before your last publish back into the editor
+            (discarding any unsaved edits here). nothing goes live until you review it and click
+            publish.
+          </Text>
         </ConfirmationModal>
       </form>
     </Form>

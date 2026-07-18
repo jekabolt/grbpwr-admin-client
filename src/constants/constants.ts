@@ -24,6 +24,7 @@ export const currencySymbols: Record<string, string> = {
   GBP: '£', // British Pound Sterling
   JPY: '¥', // Japanese Yen
   USD: '$', // United States Dollar
+  PLN: 'zł', // Polish Zloty
 };
 
 export const CURRENCIES = [
@@ -33,6 +34,7 @@ export const CURRENCIES = [
   { id: 'JPY', label: 'JPY - Japanese Yen', value: 'JPY' },
   { id: 'CNY', label: 'CNY - Chinese Yuan', value: 'CNY' },
   { id: 'KRW', label: 'KRW - South Korean Won', value: 'KRW' },
+  { id: 'PLN', label: 'PLN - Polish Zloty', value: 'PLN' },
 ];
 
 export const LANGUAGES = [
@@ -120,6 +122,10 @@ export const GENDER_ENUM_TO_SLUG: Record<string, string> = {
   GENDER_ENUM_UNKNOWN: '',
 };
 
+// 'partial refund' was removed from this list: it describes refund *scope* (already conveyed by
+// the refund modal's full/partial framing and unit selection), not a *cause*, and had no matching
+// entry in REFUND_REASON_CODE (order/components/refund-confirmation.tsx) — picking it always
+// silently miscoded to REFUND_REASON_OTHER.
 export const REASONS = [
   'size issues',
   'damaged or defective',
@@ -128,7 +134,6 @@ export const REASONS = [
   'changed my mind',
   'quality not as expected',
   'ordered by mistake',
-  'partial refund',
   'other',
 ];
 

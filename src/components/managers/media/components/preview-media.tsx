@@ -110,7 +110,8 @@ export function PreviewMedia({
                   size='lg'
                   className='uppercase'
                   onClick={handleUploadClick}
-                  disabled={isUploading}
+                  disabled={isUploading || !croppedUrl}
+                  title={!croppedUrl ? 'Crop the image first to save it as new media' : undefined}
                 >
                   {isUploading ? 'uploading...' : 'upload'}
                 </Button>

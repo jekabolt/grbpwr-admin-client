@@ -1,75 +1,45 @@
-import { UseFormReturn, useWatch } from 'react-hook-form';
+import { UseFormReturn } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import CheckboxField from 'ui/form/fields/checkbox-field';
 import InputField from 'ui/form/fields/input-field';
-import { emptyPromoDraft, type PromoDraftSchema } from './schema';
-import { useExistingPromoCodes } from './usePromoQuery';
+import { type PromoDraftSchema } from './schema';
 
 type Props = {
   form: UseFormReturn<PromoDraftSchema>;
   onSubmit: (data: PromoDraftSchema) => void;
   onCancel: () => void;
+  /** Current allowed state — display-only here; toggled via the table's own column. */
+  allowed: boolean;
 };
 
-// H5: random, readable-enough candidate code (base36 avoids ambiguous-looking
-// separators); collision is astronomically unlikely but still checked live below.
-function generatePromoCode(): string {
-  return `PROMO-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-}
-
-export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
-  const code = useWatch({ control: form.control, name: 'code' });
-  const { data: existingCodes } = useExistingPromoCodes();
-  const normalizedCode = code?.trim().toUpperCase();
-  const isDuplicate = !!normalizedCode && !!existingCodes?.has(normalizedCode);
-
+/**
+ * H8: inline edit for an existing promo code (discount / dates / free shipping /
+ * voucher / code itself), pre-filled by the caller. Previously the only way to fix
+ * a typo'd discount or extend an expiration was deleting and recreating the code
+ * by hand. Submits through usePromo's submitEdit, which recreates the code under
+ * the hood (no UpdatePromoCode RPC exists) — see useUpdatePromo.
+ */
+export function PromoEditRow({ form, onSubmit, onCancel, allowed }: Props) {
   return (
     <Form {...form}>
       <tr className='bg-bgColor'>
-        {/* H18: "Allowed" used to render as a checkbox here but was always
-            disabled+hardcoded true on submit regardless of what it showed — a
-            new code is always created allowed, so this is a static label, not a
-            dead control pretending to be live. */}
         <td className='border border-r border-textInactiveColor px-0'>
           <div className='flex justify-center'>
             <Text variant='inactive' size='small'>
-              new
+              {allowed ? 'allowed' : 'disabled'}
             </Text>
           </div>
         </td>
         <td className='border border-r border-textInactiveColor text-center px-2'>
-          <div className='flex items-center gap-1'>
-            <InputField
-              name='code'
-              label='Code'
-              srLabel
-              placeholder='promo code'
-              className='w-full text-center border-none'
-            />
-            {/* H5: was a bare hand-typed input with no generate action and no
-                uniqueness feedback before submit. */}
-            <Button
-              type='button'
-              size='lg'
-              variant='simple'
-              className='shrink-0 whitespace-nowrap px-1.5'
-              onClick={() =>
-                form.setValue('code', generatePromoCode(), {
-                  shouldDirty: true,
-                  shouldValidate: true,
-                })
-              }
-            >
-              generate
-            </Button>
-          </div>
-          {isDuplicate && (
-            <Text variant='error' size='small'>
-              code already exists
-            </Text>
-          )}
+          <InputField
+            name='code'
+            label='Code'
+            srLabel
+            placeholder='promo code'
+            className='w-full text-center border-none'
+          />
         </td>
         <td className='border border-r border-textInactiveColor px-2'>
           <InputField
@@ -129,15 +99,7 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             >
               Save
             </Button>
-            <Button
-              size='lg'
-              variant='main'
-              className='w-full'
-              onClick={() => {
-                onCancel();
-                form.reset(emptyPromoDraft);
-              }}
-            >
+            <Button size='lg' variant='main' className='w-full' onClick={onCancel}>
               Cancel
             </Button>
           </div>

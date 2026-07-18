@@ -975,6 +975,7 @@ export type Dictionary = {
   productTags: string[] | undefined;
   colors: Color[] | undefined;
   countries: Country[] | undefined;
+  fibers: Fiber[] | undefined;
   tags: Tag[] | undefined;
   skuContractVersion: string | undefined;
   revisions: DictionaryRevision[] | undefined;
@@ -996,6 +997,15 @@ export type Country = {
   code: string | undefined;
   name: string | undefined;
   active: boolean | undefined;
+};
+
+// Fiber is one entry of the controlled fibre vocabulary (COT/POL/WOL/…): a material's structural
+// composition references these codes, and a style's composition is derived from its shell-fabric
+// materials' fibres. Authored via the dictionary (CreateFiber/ArchiveFiber).
+export type Fiber = {
+  code: string | undefined;
+  name: string | undefined;
+  archived: boolean | undefined;
 };
 
 // Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
@@ -2013,6 +2023,11 @@ export type Material = {
   threadAttrs?: MaterialThreadAttrs;
   packagingAttrs?: MaterialPackagingAttrs;
   otherAttrs: string | undefined;
+  // Structural fibre composition (S17): fiber_code + percent, summing to 100 when present. Replaces
+  // the free-text `composition` string (which stays legacy plain text). On write, only fiber_code +
+  // percent are read (name is resolved server-side from the fibre dictionary). Empty = unset. A
+  // shell-fabric material's composition is what a style's derived composition_entries is built from.
+  compositionEntries: CompositionEntry[] | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the

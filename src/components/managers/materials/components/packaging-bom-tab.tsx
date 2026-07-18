@@ -193,7 +193,10 @@ export function PackagingBomTab() {
                 <tr key={i}>
                   <td className={`${td} w-72`}>
                     {canEdit ? (
+                      // #7 (M7): pin the picker to the packaging section so the "consumed on every
+                      // shipment" recipe can't pull in an arbitrary fabric/hardware/thread material.
                       <MaterialPicker
+                        section='TECH_CARD_BOM_SECTION_PACKAGING'
                         value={r.materialId}
                         onChange={(materialId, material) =>
                           patch(i, {

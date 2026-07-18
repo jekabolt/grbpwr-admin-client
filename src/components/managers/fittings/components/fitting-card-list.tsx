@@ -1,4 +1,5 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { sampleLabel } from 'components/managers/tech-card/components/sample-picker';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
@@ -9,7 +10,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { useDeleteFitting, useInfiniteFittings } from './useFittingQuery';
-import { useModelsByIds } from './useResolvers';
+import { useModelsByIds, useSamplesByIds, useTechCardsByIds } from './useResolvers';
 import { formatFittingDate, statusLabel } from './utils';
 
 const LIMIT = 24;
@@ -40,6 +41,22 @@ export function FittingCardList() {
 
   const modelMap = useModelsByIds(fittings.map((f) => f.fitting?.modelId ?? 0));
   const modelName = (id?: number) => (id ? modelMap.get(id)?.model?.name || `#${id}` : '—');
+
+  // Resolve the raw tech_card_id/sample_id every card otherwise showed verbatim (M10) into the
+  // same style/sample labels used elsewhere (tech-card-field.tsx, sample-picker.tsx).
+  const techCardMap = useTechCardsByIds(fittings.map((f) => f.fitting?.techCardId ?? 0));
+  const sampleMap = useSamplesByIds(fittings.map((f) => f.fitting?.sampleId ?? 0));
+  const techCardLabel = (id?: number) => {
+    if (!id) return null;
+    const tc = techCardMap.get(id)?.techCard;
+    const parts = [tc?.styleNumber, tc?.name].filter(Boolean);
+    return parts.length ? parts.join(' · ') : `тех карта #${id}`;
+  };
+  const sampleName = (id?: number) => {
+    if (!id) return null;
+    const s = sampleMap.get(id);
+    return s ? sampleLabel(s) : `сэмпл #${id}`;
+  };
 
   function confirmDelete() {
     if (!pendingDelete) return;
@@ -79,6 +96,7 @@ export function FittingCardList() {
           {fittings.map((fitting) => {
             const id = fitting.id ?? 0;
             const insert = fitting.fitting;
+            const sample = sampleName(insert?.sampleId);
             return (
               <div
                 key={id}
@@ -96,8 +114,8 @@ export function FittingCardList() {
                 />
                 <div className='flex flex-col gap-1 p-2'>
                   <Text>
-                    {insert?.techCardId ? `тех карта #${insert.techCardId}` : '—'}
-                    {insert?.sampleId ? ` · сэмпл #${insert.sampleId}` : ''}
+                    {techCardLabel(insert?.techCardId) ?? '—'}
+                    {sample ? ` · ${sample}` : ''}
                   </Text>
                   <Text variant='inactive' size='small'>
                     {modelName(insert?.modelId)} · {formatFittingDate(insert?.fittingDate)}

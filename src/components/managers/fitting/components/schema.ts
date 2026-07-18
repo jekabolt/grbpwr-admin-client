@@ -197,6 +197,12 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
 export function mapFormToFittingInsert(
   data: FittingFormData,
   original?: common_FittingInsert,
+  // The single size actually tried on, resolved from the linked sample (task 2). A fitting
+  // tries ONE sample and that sample already carries its own sizeId — the old UI let you pick
+  // a separate multi-size list that could disagree with it, so sizes is now always derived
+  // from the sample instead of read from the (no-longer-editable) form field. 0/undefined =
+  // sample has no size set → sizes saves empty, which the contract allows.
+  sampleSizeId?: number,
 ): common_FittingInsert {
   return {
     // Spread the loaded insert first so fields not yet managed by the form survive
@@ -213,10 +219,7 @@ export function mapFormToFittingInsert(
     // could contradict. It is derived from the structured outcome so the wire contract still carries it.
     verdict: outcomeToVerdict(data.outcome),
     recordedBy: data.recordedBy?.trim() || '',
-    sizes: (data.sizes ?? []).map((s) => ({
-      sizeId: s.sizeId,
-      fitNote: s.fitNote?.trim() || '',
-    })),
+    sizes: sampleSizeId ? [{ sizeId: sampleSizeId, fitNote: '' }] : [],
     patterns: (data.patterns ?? [])
       .filter((p) => p.url?.trim())
       .map((p) => ({

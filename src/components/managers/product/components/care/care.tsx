@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
+import { ReadOnlyField } from '../read-only-field';
+import { CARE_CODE_META } from './care-picker';
 import { careInstruction } from './careInstruction';
 import { CareInstructions } from './careInstructions';
 
@@ -17,6 +20,9 @@ export function Care({ editMode }: CareInterface) {
   const [isCareTableOpen, setIsCareTableOpen] = useState(false);
   const { setValue, getValues } = useFormContext();
   const [selectedInstructions, setSelectedInstructions] = useState<SelectedInstructions>({});
+  // Watch so the read-only display re-renders when a care code is (re)loaded into the form.
+  const careValue =
+    (useWatch({ name: 'product.productBodyInsert.careInstructions' }) as string) || '';
 
   const handleSelectCareInstruction = (
     category: string,
@@ -94,6 +100,37 @@ export function Care({ editMode }: CareInterface) {
       shouldValidate: true,
     });
   };
+
+  // Care is a STYLE fact (edited on the tech card) — render the selected codes as their laundry
+  // SYMBOLS in a clean read-only row, never as an input showing raw "MWN,DNB…" codes.
+  if (!editMode) {
+    const codes = careValue
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return (
+      <ReadOnlyField label='care instructions'>
+        {codes.length === 0 ? (
+          <Text size='small' className='text-textInactiveColor'>
+            —
+          </Text>
+        ) : (
+          <div className='flex flex-wrap items-center gap-1'>
+            {codes.map((code) => {
+              const m = CARE_CODE_META[code];
+              return m?.img ? (
+                <img key={code} src={m.img} title={m.name} alt={m.name} className='size-7' />
+              ) : (
+                <span key={code} className='text-textBaseSize'>
+                  {code}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </ReadOnlyField>
+    );
+  }
 
   return (
     <>

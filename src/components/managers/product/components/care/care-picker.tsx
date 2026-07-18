@@ -109,7 +109,7 @@ export function CarePicker({
         <div className='flex flex-1 flex-wrap items-center gap-1 py-1'>
           {codes.length === 0 ? (
             <Text variant='inactive' size='small'>
-              — не выбрано —
+              — none selected —
             </Text>
           ) : (
             codes.map((code) => {
@@ -142,7 +142,7 @@ export function CarePicker({
               onClick={openModal}
               className='px-2 py-1 text-textBaseSize uppercase'
             >
-              выбрать
+              select
             </Button>
           </div>
         )}

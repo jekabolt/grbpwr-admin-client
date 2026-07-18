@@ -10,7 +10,13 @@ import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
-import { isRunLocked, isRunReceivable, runDetailPath, runStatusLabel } from './components/options';
+import {
+  isRunLocked,
+  isRunReceivable,
+  runDetailPath,
+  runStatusLabel,
+  runStatusTone,
+} from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import {
@@ -191,7 +197,7 @@ export function ProductionRuns() {
         confirmLabel='delete'
       >
         <Text size='small'>
-          Удалить план партии? Действие необратимо. Принятые партии удалить нельзя.
+          Delete this production run? This action is irreversible. Received runs can't be deleted.
         </Text>
       </ConfirmationModal>
     </div>
@@ -222,13 +228,20 @@ function RunCard({
   return (
     <div className='border border-textInactiveColor'>
       <div className='flex flex-wrap items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-3 py-2'>
-        <Text size='small'>
-          <Link to={runDetailPath(run.id ?? 0)} className='underline'>
-            PR-{run.id}
-          </Link>{' '}
-          · TC-{ins?.techCardId}
-          {ins?.releaseId ? ` · rel ${ins.releaseId}` : ''} · {runStatusLabel(ins?.status)}
-        </Text>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Text size='small'>
+            <Link to={runDetailPath(run.id ?? 0)} className='underline'>
+              PR-{run.id}
+            </Link>{' '}
+            · TC-{ins?.techCardId}
+            {ins?.releaseId ? ` · rel ${ins.releaseId}` : ''}
+          </Text>
+          <span
+            className={`inline-block border px-1.5 py-0.5 text-textBaseSize uppercase ${runStatusTone(ins?.status)}`}
+          >
+            {runStatusLabel(ins?.status)}
+          </span>
+        </div>
         <div className='flex items-center gap-2'>
           {canEdit && receivable && (
             <Button
@@ -270,10 +283,10 @@ function RunCard({
         <div className='flex flex-col gap-1'>
           {(ins?.lines ?? []).map((l, i) => (
             <Text key={`${l.productId}-${l.sizeId}-${i}`} size='small'>
-              #{l.productId} · {findInDictionary(dictionary, l.sizeId, 'size') || l.sizeId} · план{' '}
+              #{l.productId} · {findInDictionary(dictionary, l.sizeId, 'size') || l.sizeId} · plan{' '}
               {l.plannedQty ?? 0}
-              {l.receivedQty != null ? ` / факт ${l.receivedQty}` : ' / факт —'}
-              {l.defectQty ? ` · брак ${l.defectQty}` : ''}
+              {l.receivedQty != null ? ` / received ${l.receivedQty}` : ' / received —'}
+              {l.defectQty ? ` · defect ${l.defectQty}` : ''}
             </Text>
           ))}
         </div>
@@ -282,24 +295,24 @@ function RunCard({
           <div className='flex flex-col gap-1'>
             {run.plannedUnitCost?.value ? (
               <Text size='small'>
-                план / ед: {decimalToInput(run.plannedUnitCost)} {run.plannedCurrency || ''}
+                plan / unit: {decimalToInput(run.plannedUnitCost)} {run.plannedCurrency || ''}
               </Text>
             ) : null}
             {actuals?.actualUnitCost?.value ? (
               <Text size='small'>
-                факт / ед: {decimalToInput(actuals.actualUnitCost)} {actuals.baseCurrency || ''}
+                fact / unit: {decimalToInput(actuals.actualUnitCost)} {actuals.baseCurrency || ''}
                 {actuals.unitCostVariance?.value
                   ? ` (Δ ${decimalToInput(actuals.unitCostVariance)})`
                   : ''}
               </Text>
             ) : (
               <Text variant='inactive' size='small'>
-                факт / ед: — до приёмки
+                fact / unit: — until received
               </Text>
             )}
             {actuals?.defectPctActual?.value ? (
               <Text variant='inactive' size='small'>
-                брак: {decimalToInput(actuals.defectPctActual)}%
+                defect: {decimalToInput(actuals.defectPctActual)}%
               </Text>
             ) : null}
           </div>

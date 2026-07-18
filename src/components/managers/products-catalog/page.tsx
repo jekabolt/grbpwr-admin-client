@@ -37,6 +37,7 @@ export default function ProductsCatalog() {
     ...params,
     sizes: params.sizes ?? params.size,
     hidden: params.hidden ?? 'true',
+    archived: params.archived ?? 'false',
   };
 
   const debouncedFetch = useCallback(
@@ -98,8 +99,13 @@ export default function ProductsCatalog() {
             filter +
           </Button>
           {canWrite(SECTION.products) && (
-            <Button variant='main' size='lg' className='uppercase' onClick={handleCreateNewProduct}>
-              create new
+            <Button
+              variant='main'
+              size='lg'
+              className='uppercase font-bold'
+              onClick={handleCreateNewProduct}
+            >
+              + create product
             </Button>
           )}
         </div>

@@ -6,7 +6,7 @@ export const shippingSchema = z
   .object({
     allowed: z.boolean(),
     allowedRegions: z.array(z.string()),
-    carrier: z.string(),
+    carrier: z.string().min(1, 'Carrier is required'),
     description: z.string(),
     from: z.string(),
     to: z.string(),

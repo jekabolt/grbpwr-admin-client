@@ -320,8 +320,8 @@ export function ReceiveModal({
 
             <Text variant='inactive' size='small'>
               {isAux
-                ? 'Приёмка приходует выпуск в склад материала (output material) и переводит партию в received — после этого её нельзя удалить.'
-                : 'Приёмка приходует сток по каждой строке в её продукт и переводит партию в received — после этого её нельзя удалить.'}
+                ? 'Receiving posts the output into the material warehouse and moves this run to received — after that it cannot be deleted.'
+                : 'Receiving posts stock for each line into its own product and moves this run to received — after that it cannot be deleted.'}
             </Text>
           </div>
 
