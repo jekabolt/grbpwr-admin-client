@@ -377,7 +377,7 @@ function GenerateOperationsPanel({
     <div className='space-y-3 border border-textInactiveColor p-4'>
       <div className='flex items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
-          ✨ сгенерировать операции по описанию (ai)
+          generate operations from description (ai)
         </Text>
         <Button type='button' variant='secondary' onClick={() => setOpen((o) => !o)}>
           {open ? 'свернуть ▴' : 'развернуть ▾'}

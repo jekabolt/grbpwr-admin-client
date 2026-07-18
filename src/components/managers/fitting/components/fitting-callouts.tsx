@@ -82,7 +82,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                     </Button>
                   </div>
                   <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
-                    {/* Auto-assigned (fields.length+1) and a cross-reference target
+                    {/* Auto-assigned (max existing number + 1) and a cross-reference target
                         (changeRequests.calloutNumber) — read-only so hand-edits can't collide
                         with the sequence. Kept in the field array so it still round-trips. */}
                     <div className='flex flex-col gap-1'>
@@ -141,7 +141,15 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
             variant='main'
             className='uppercase'
             onClick={() =>
-              append({ number: fields.length + 1, note: '', mediaId: 0, posX: '', posY: '' })
+              // max+1, not length+1: after a mid-list delete, length+1 collides with an existing
+              // number — and the number is read-only, so a duplicate can't be fixed by hand.
+              append({
+                number: Math.max(0, ...fields.map((f) => (f as FormCallout).number ?? 0)) + 1,
+                note: '',
+                mediaId: 0,
+                posX: '',
+                posY: '',
+              })
             }
           >
             add fit note

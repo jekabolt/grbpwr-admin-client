@@ -217,7 +217,7 @@ function AnnotatedMediaGrid({
           <Text variant='label' size='small'>
             {addMode
               ? 'click a tile to drop a callout · drag a pin to move it'
-              : 'hover or focus a pin to read and edit its note'}
+              : 'click a tile to enlarge · hover a pin to read its note'}
           </Text>
           <div className='flex shrink-0 items-center gap-4'>
             {notesMode === 'auto' && (
@@ -498,7 +498,7 @@ export function SketchTab({
           mediaById={mediaById}
           onPickedMedia={onPicked}
           gridClassName='grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4'
-          zoomable={false}
+          zoomable
           notesMode='hover'
           pinSize='sm'
           emptyLabel='no moodboard images yet. add references to pin notes on them'

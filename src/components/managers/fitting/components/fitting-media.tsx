@@ -105,8 +105,13 @@ export function FittingMedia({
   }, [mediaIds]);
 
   function addPinTo(mediaId: number, x: number, y: number) {
+    // max+1, not length+1: after a mid-list delete, length+1 collides with an existing number —
+    // and the number is read-only, so a duplicate can't be fixed by hand. change requests
+    // reference fit notes BY number, so it must stay unique.
+    const nextNumber =
+      Math.max(0, ...callouts.map((c) => (Number.isFinite(c.number) ? Number(c.number) : 0))) + 1;
     append({
-      number: fields.length + 1,
+      number: nextNumber,
       note: '',
       mediaId,
       posX: x.toFixed(3),
