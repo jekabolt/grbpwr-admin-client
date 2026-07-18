@@ -2,7 +2,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { FxRatesModal } from 'components/managers/tech-cards/components/fx-rates-modal';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -55,7 +54,6 @@ export function Settings() {
   const { dictionary, refetch } = useDictionary();
   const showMessage = useSnackBarStore((state) => state.showMessage);
   const [isLoading, setIsLoading] = useState(false);
-  const [fxOpen, setFxOpen] = useState(false);
   const { canWrite, canRead } = usePermissions();
 
   const initialValues = useMemo(
@@ -161,29 +159,15 @@ export function Settings() {
         </ConfirmationModal>
 
         {canRead(SECTION.techCards) && (
-          <>
-            <Section
-              title='currency / FX rates'
-              description='Costing FX rates fold multi-currency tech-card BOM lines into the base currency. Shared across every tech card.'
-            >
-              <div className='flex flex-wrap items-center justify-between gap-3'>
-                <Text variant='label' size='small'>
-                  Base currency is {baseCurrency}. Add a rate for each other currency so its costs
-                  convert into {baseCurrency}.
-                </Text>
-                <Button
-                  type='button'
-                  size='lg'
-                  variant='secondary'
-                  className='uppercase'
-                  onClick={() => setFxOpen(true)}
-                >
-                  edit FX rates
-                </Button>
-              </div>
-            </Section>
-            <FxRatesModal open={fxOpen} onOpenChange={setFxOpen} />
-          </>
+          <Section
+            title='currency / FX rates'
+            description='Costing FX rates fold multi-currency tech-card BOM lines into the base currency and power the per-currency margin view. Shared across every tech card.'
+          >
+            <Text variant='label' size='small'>
+              Base currency is {baseCurrency}. FX rates update automatically every day from the ECB
+              euro reference rates — there&apos;s nothing to enter by hand.
+            </Text>
+          </Section>
         )}
 
         <Section title='payment methods'>
