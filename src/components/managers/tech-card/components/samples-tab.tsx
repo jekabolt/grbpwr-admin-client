@@ -43,6 +43,7 @@ import {
   useSaveSample,
   useTechCardReleases,
 } from './useSamples';
+import { SampleCreationWizard } from './sample-creation-wizard';
 import { SamplePicker } from './sample-picker';
 import { SampleSubstitutions } from './sample-substitutions';
 
@@ -143,14 +144,18 @@ export function SamplesTab({
       </div>
 
       {expanded === 'new' ? (
-        <SampleEditor
+        // Feature #47: sample creation is a guided wizard — basics → pick the sample-marked
+        // materials consumed → review → on confirm it creates the sample AND issues those
+        // materials from stock (written off, attributed to the sample) and surfaces the dev cost.
+        <SampleCreationWizard
           techCardId={techCardId}
           techCard={techCard}
+          colorways={colorways}
           canEdit={canEdit}
           canReadCosting={canReadCosting}
-          onClose={() => setExpanded('')}
-          // A fresh sample opens straight into its editor — the sub-panels it needs next
-          // (issue materials, dev expenses, fittings) only exist on a saved id.
+          onCancel={() => setExpanded('')}
+          // A fresh sample opens straight into its full editor — the sub-panels it needs next
+          // (more material movements, dev expenses, fittings) only exist on a saved id.
           onCreated={(id) => setExpanded(String(id))}
         />
       ) : openSample ? (

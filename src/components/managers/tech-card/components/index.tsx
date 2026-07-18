@@ -45,6 +45,7 @@ import { AssemblyField } from './assembly-field';
 import { LabelsField } from './labels-field';
 import { PackagingRecipeField } from './packaging-recipe-field';
 import { LifecycleStrip } from './lifecycle-strip';
+import { TechCardTasksPanel } from './tech-card-tasks-panel';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
 import { PiecesTab } from './pieces-tab';
@@ -545,23 +546,28 @@ export function TechCardForm({
       </div>
 
       {isEditMode && numId ? (
-        <LifecycleStrip
-          techCardId={numId}
-          stage={stage}
-          approvalState={approvalState}
-          productCount={productCount}
-          frozen={frozen}
-          canEdit={canWrite(SECTION.techCards)}
-          unsaved={form.formState.isDirty}
-          planRunDisabled={isAux && !outputMaterialId}
-          planRunDisabledReason='set an output material before planning an auxiliary run'
-          onStageChange={(next) => form.setValue('stage', next, { shouldDirty: true })}
-          onGoSamples={() => navTo('samples')}
-          onAddSample={() => navTo('samples', { sample: 'new' })}
-          onGoFittings={(unresolvedOnly) =>
-            navTo('history', unresolvedOnly ? { fits: 'unresolved' } : undefined)
-          }
-        />
+        <>
+          <LifecycleStrip
+            techCardId={numId}
+            stage={stage}
+            approvalState={approvalState}
+            productCount={productCount}
+            frozen={frozen}
+            canEdit={canWrite(SECTION.techCards)}
+            unsaved={form.formState.isDirty}
+            planRunDisabled={isAux && !outputMaterialId}
+            planRunDisabledReason='set an output material before planning an auxiliary run'
+            onStageChange={(next) => form.setValue('stage', next, { shouldDirty: true })}
+            onGoSamples={() => navTo('samples')}
+            onAddSample={() => navTo('samples', { sample: 'new' })}
+            onGoFittings={(unresolvedOnly) =>
+              navTo('history', unresolvedOnly ? { fits: 'unresolved' } : undefined)
+            }
+          />
+          {/* TASKS hub panel (#75) — техкарта как рабочий хаб: work items linked to this style,
+              scannable and always visible next to the lifecycle spine regardless of active tab. */}
+          <TechCardTasksPanel techCardId={numId} />
+        </>
       ) : null}
 
       {conflict && (
