@@ -10,6 +10,7 @@ import { currencySymbols } from 'constants/constants';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
+import { ProductMarginPanel } from './margin-panel';
 
 // Internal per-unit COGS + its provenance. Field-shaping (🔒 costing): the whole
 // block is hidden unless the account has costing:read or costing:write — never
@@ -156,6 +157,10 @@ export function ProductCostSection({
           )}
         </div>
       )}
+
+      {/* Full margin: (discounted) selling price − COGS, per selling currency, + the style-economics
+          drill-down. Gated to costing:read inside the panel. */}
+      <ProductMarginPanel costInfo={costInfo} />
     </div>
   );
 }
