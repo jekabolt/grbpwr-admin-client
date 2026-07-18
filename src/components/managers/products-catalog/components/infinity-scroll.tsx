@@ -1,13 +1,18 @@
 import { adminService } from 'api/api';
 import { common_Colorway } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { DEFAULT_PRODUCT_LIMIT } from 'constants/filter';
+import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useSearchParams } from 'react-router-dom';
 import Text from 'ui/components/text';
+import { BatchActionBar } from './batch-action-bar';
 import { ProductGrid } from './product-grid';
+import { SelectionToolbar } from './selection-toolbar';
 import { getProductPagedParans } from './utility';
+import { useCatalogSelection } from './useCatalogSelection';
 
 interface Props {
   firstItems: common_Colorway[];
@@ -26,6 +31,10 @@ export function InfinityScroll({ firstItems, initialLoading = false, onCountChan
   const [hasMore, setHasMore] = useState(true);
   const prevInViewRef = useRef(false);
 
+  const canEdit = usePermissions().canWrite(SECTION.products);
+  const selection = useCatalogSelection({ items, setItems });
+  const { exitSelection } = selection;
+
   useEffect(() => {
     setItems(firstItems);
     const noLoadMore = searchParams.has('limit');
@@ -33,7 +42,9 @@ export function InfinityScroll({ firstItems, initialLoading = false, onCountChan
     setHasMore(!noLoadMore);
     pageRef.current = 2;
     setIsLoading(false);
-  }, [firstItems, searchParams]);
+    // A new filter/search result invalidates any in-progress selection.
+    exitSelection();
+  }, [firstItems, searchParams, exitSelection]);
 
   const params = Object.fromEntries(searchParams.entries());
   const limit = params.limit
@@ -106,7 +117,37 @@ export function InfinityScroll({ firstItems, initialLoading = false, onCountChan
           </Text>
         </div>
       ) : (
-        <ProductGrid products={items} refresh={refreshAfterDeletetion} />
+        <div className='flex flex-col gap-4'>
+          {canEdit && (
+            <SelectionToolbar
+              selectionMode={selection.selectionMode}
+              onEnter={selection.enterSelection}
+              onExit={selection.exitSelection}
+              selectedCount={selection.selectedCount}
+              totalOnPage={selection.totalOnPage}
+              allOnPageSelected={selection.allOnPageSelected}
+              onSelectAll={selection.selectAllOnPage}
+            />
+          )}
+          <ProductGrid
+            products={items}
+            refresh={refreshAfterDeletetion}
+            selectionMode={selection.selectionMode}
+            isSelected={selection.isSelected}
+            onToggleSelect={selection.toggle}
+          />
+        </div>
+      )}
+      {canEdit && (
+        <BatchActionBar
+          selectedCount={selection.selectedCount}
+          hideableCount={selection.hideableCount}
+          unhideableCount={selection.unhideableCount}
+          busy={selection.busy}
+          onHide={selection.hideSelected}
+          onUnhide={selection.unhideSelected}
+          onClear={selection.clearSelection}
+        />
       )}
       {hasMore && items.length > 0 && (
         <div ref={ref} className='flex justify-center py-6' style={{ minHeight: '80px' }}>

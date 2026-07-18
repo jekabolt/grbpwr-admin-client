@@ -10,22 +10,32 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
-import { Overlay } from 'ui/components/overlay';
 import Text from 'ui/components/text';
-import { StatusBadge } from 'components/managers/product/components/lifecycle-controls';
+import {
+  CatalogCommerceTags,
+  CatalogStateBadge,
+  getCatalogStateMediaClass,
+} from './state-treatment';
 
 export function ProductItem({
   product,
   refresh,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
 }: {
   product: common_Colorway;
   refresh: (id: number | undefined) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: number) => void;
 }) {
   const thumbnail = product.display?.thumbnail?.media?.thumbnail?.mediaUrl;
-  // R6: dim/badge anything not live on the storefront (draft/hidden/archived), driven by the stored
-  // lifecycle status rather than the vestigial `hidden` flag.
-  const isActive = product.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE';
+  // R6: state now reads off the stored lifecycle status. ACTIVE is left unstyled; every other status
+  // gets a distinct badge + media treatment (see state-treatment.tsx) so hidden vs archived vs draft
+  // are unmistakable on the grid.
   const isArchived = product.status === 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
+  const mediaTreatment = getCatalogStateMediaClass(product.status);
   const description = `[${product.id}] ${product.display?.merchandising?.brand} ${product.display?.translations?.[0]?.name}`;
   const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
@@ -76,6 +86,8 @@ export function ProductItem({
     }
   }
 
+  // Selection mode never hijacks the open-editor click: the card click still navigates, and selection
+  // is driven only by the explicit checkbox affordance below.
   const handleProductClick = (id: number | undefined) => {
     navigate(`${ROUTES.product}/${id}`, { replace: true });
   };
@@ -88,21 +100,60 @@ export function ProductItem({
     }
   };
 
+  const handleToggleSelect = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (product.id != null) onToggleSelect?.(product.id);
+  };
+
   return (
     <div className='space-y-1 cursor-pointer' onClick={() => handleProductClick(product.id)}>
       <div className='relative w-full h-full group'>
-        <Media
-          src={thumbnail || ''}
-          alt='prod item'
-          type={isVideo(thumbnail) ? 'video' : 'image'}
-          controls={isVideo(thumbnail)}
-        />
-        {!isActive && (
-          <span className='absolute top-1 left-1 z-30'>
-            <StatusBadge status={product.status} />
-          </span>
+        <div
+          className={cn(
+            'transition-opacity duration-200 motion-reduce:transition-none',
+            mediaTreatment,
+          )}
+        >
+          <Media
+            src={thumbnail || ''}
+            alt='prod item'
+            type={isVideo(thumbnail) ? 'video' : 'image'}
+            controls={isVideo(thumbnail)}
+          />
+        </div>
+
+        {/* Primary state marker — top-left. */}
+        <span className='absolute top-1 left-1 z-30'>
+          <CatalogStateBadge status={product.status} />
+        </span>
+
+        {/* Secondary commerce markers — bottom-right, subordinate to the state badge. */}
+        <span className='absolute bottom-1 right-1 z-30 flex flex-wrap items-center justify-end gap-1'>
+          <CatalogCommerceTags product={product} />
+        </span>
+
+        {/* Selection checkbox — top-right, only in selection mode (explicit affordance). */}
+        {selectionMode && (
+          <button
+            type='button'
+            aria-pressed={selected}
+            aria-label={selected ? 'deselect product' : 'select product'}
+            onClick={handleToggleSelect}
+            className='absolute top-0 right-0 z-40 p-1.5 cursor-pointer'
+          >
+            <span
+              className={cn(
+                'flex h-5 w-5 items-center justify-center border border-textColor',
+                selected ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
+              )}
+            >
+              {selected && <CheckIcon />}
+            </span>
+          </button>
         )}
-        {canEdit && !isArchived && (
+
+        {/* Per-card actions are hidden in selection mode to avoid competing affordances. */}
+        {!selectionMode && canEdit && !isArchived && (
           <Button
             onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
             className={cn(
@@ -113,7 +164,7 @@ export function ProductItem({
             {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
           </Button>
         )}
-        {canEdit && !isArchived && (
+        {!selectionMode && canEdit && !isArchived && (
           <Button
             size='lg'
             className='absolute bottom-0 left-0 z-30'
@@ -124,7 +175,7 @@ export function ProductItem({
           </Button>
         )}
         {/* #60: an archived colourway is read-only, but can be restored (→ hidden) from here. */}
-        {canEdit && isArchived && (
+        {!selectionMode && canEdit && isArchived && (
           <Button
             size='lg'
             className='absolute bottom-0 left-0 z-30'
@@ -135,7 +186,14 @@ export function ProductItem({
             {restoring ? 'restoring…' : 'restore'}
           </Button>
         )}
-        {!isActive && <Overlay cover='container' />}
+
+        {/* Selected frame. */}
+        {selected && (
+          <div
+            className='pointer-events-none absolute inset-0 z-30 border-2 border-textColor'
+            aria-hidden
+          />
+        )}
       </div>
       <Text className='w-full break-words' variant='underLineWithColor'>
         {description}

@@ -89,17 +89,8 @@ export function SampleSubstitutions({
 
   return (
     <div className='flex flex-col gap-2'>
-      <Text variant='uppercase' size='small'>
-        substitutions — deviations from the spec BOM
-        {substitutions.length ? ` (${substitutions.length})` : ''}
-      </Text>
-      <Text variant='inactive' size='small'>
-        Read-only overview of what changed from the plan, plus editable entries below. Documentation
-        only — never counted as COGS (Q2); the real spend stays in the stock ledger.
-      </Text>
-
       {substitutions.length === 0 ? (
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           no substitutions — this sample was sewn exactly to the spec BOM
         </Text>
       ) : (
@@ -118,7 +109,7 @@ export function SampleSubstitutions({
                   <span className='px-1 text-textInactiveColor'>→</span>
                   {materialName(s.substitutedMaterialId)}
                 </Text>
-                <Text variant='inactive' size='small'>
+                <Text variant='label' size='small'>
                   {s.reason || 'no reason given'}
                   {s.plannedQty?.value ? ` · plan ${decimalToInput(s.plannedQty)}` : ''}
                   {s.actualQty?.value ? ` · actual ${decimalToInput(s.actualQty)}` : ''}
@@ -163,7 +154,7 @@ export function SampleSubstitutions({
                 ))}
               </select>
               {bomItemId > 0 && (
-                <Text variant='inactive' size='small'>
+                <Text variant='label' size='small'>
                   spec material: {materialName(originalMaterialId)}
                 </Text>
               )}
