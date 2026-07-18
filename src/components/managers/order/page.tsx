@@ -4,6 +4,7 @@ import {
 } from 'components/managers/orders-catalog/components/utility';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
@@ -97,6 +98,10 @@ export function OrderDetails() {
   } | null>(null);
   const { canWrite, canReadCosting } = usePermissions();
   const canEditOrder = canWrite(SECTION.orders);
+  const { dictionary } = useDictionary();
+  // Carrier cost (actual/return) is stored in the base currency, not the order's checkout currency
+  // — same source the shipment-cost modal and employee screens use.
+  const baseCurrency = dictionary?.baseCurrency || 'EUR';
 
   useEffect(() => {
     setShipmentCostOverride(null);
@@ -213,15 +218,15 @@ export function OrderDetails() {
                   {canReadCosting && (
                     <div className='space-y-1 border-t border-textInactiveColor pt-2 print:hidden'>
                       <Text variant='label' size='small' className='uppercase'>
-                        carrier cost (EUR)
+                        carrier cost ({baseCurrency})
                       </Text>
                       <SummaryRow
                         label='actual carrier cost'
-                        value={actualShipmentCost ? `${actualShipmentCost} EUR` : '—'}
+                        value={actualShipmentCost ? `${actualShipmentCost} ${baseCurrency}` : '—'}
                       />
                       <SummaryRow
                         label='return'
-                        value={returnShipmentCost ? `${returnShipmentCost} EUR` : '—'}
+                        value={returnShipmentCost ? `${returnShipmentCost} ${baseCurrency}` : '—'}
                       />
                     </div>
                   )}

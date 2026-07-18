@@ -238,6 +238,9 @@ export function TechCardForm({
   // `colorways` array, which is permanently [] (vacuously true); switching it to
   // AdminColorwayRef.labDipStatus (always undefined) would permanently block release instead. Lab-dip
   // gating is deferred until the backend surfaces lab-dip on the read path (see report).
+  const bomItemsW = (useWatch({ control: form.control, name: 'bomItems' }) ?? []) as Array<{
+    materialId?: number;
+  }>;
   const releaseBlockers: string[] = [];
   if (isIdea) releaseBlockers.push('advance the stage (an IDEA draft can’t be released)');
   if (!signoffsApproved)
@@ -248,6 +251,11 @@ export function TechCardForm({
     );
   if (openIssues > 0)
     releaseBlockers.push(`resolve ${openIssues} open issue${openIssues > 1 ? 's' : ''}`);
+  // #64: every BOM article must link a catalog material before the card can be released — moved
+  // here (was a hard zod error on every save; see schema.ts superRefine) so a legacy free-text BOM
+  // line no longer blocks routine saves / sign-off recording, only release.
+  if (bomItemsW.some((b) => !(b.materialId && b.materialId > 0)))
+    releaseBlockers.push('link a catalog material on every BOM line');
   const canRelease = releaseBlockers.length === 0;
   const releaseBlockedReason = releaseBlockers.join('; ');
   const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
@@ -272,7 +280,6 @@ export function TechCardForm({
   const moodboardMedia = useWatch({ control: form.control, name: 'moodboardMedia' });
   const technicalMedia = useWatch({ control: form.control, name: 'technicalMedia' });
   const sizeIdsW = useWatch({ control: form.control, name: 'sizeIds' });
-  const bomItemsW = useWatch({ control: form.control, name: 'bomItems' });
   const piecesW = useWatch({ control: form.control, name: 'pieces' });
   const operationsW = useWatch({ control: form.control, name: 'operations' });
   const labelsW = useWatch({ control: form.control, name: 'labels' });

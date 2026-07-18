@@ -410,20 +410,11 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
       path: ['styleNumber'],
     });
   }
-  // #64: every BOM article must link a catalog material — it is essentially mandatory (a free-text
-  // line carries no price/spec/composition provenance). Enforced past IDEA so a concept draft isn't
-  // blocked; the error is pinned to the exact line so the BOM tab dot lands on it.
-  if (pastIdea) {
-    (data.bomItems ?? []).forEach((b, i) => {
-      if (!(b.materialId && b.materialId > 0)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Link a catalog material',
-          path: ['bomItems', i, 'materialId'],
-        });
-      }
-    });
-  }
+  // #64: every BOM article should link a catalog material — enforced as a RELEASE blocker
+  // (releaseBlockers in index.tsx), not here. A hard zod error on every past-IDEA save wrongly
+  // blocked the whole main insert (notes/season/labels/sign-offs/…) for any card carrying a
+  // legacy free-text BOM line, which loads with materialId: 0 (mapBomItemToForm) — see wave-2a
+  // P0 fix. The BOM tile still shows a soft red "! link a material" hint per unlinked line.
 });
 
 export type TechCardFormData = z.input<typeof techCardObject>;
