@@ -27,10 +27,7 @@ export function SampleMovements({ sampleId }: { sampleId: number }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-2'>
-      <Text variant='uppercase' size='small'>
-        material movements
-      </Text>
+    <div className='flex flex-col gap-2'>
       <div className='flex flex-wrap items-end gap-2'>
         <div className='w-64'>
           <MaterialPicker
@@ -138,7 +135,7 @@ export function SampleFittings({
           <Text variant='uppercase' size='small'>
             примерки на этом семпле
           </Text>
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             {fittingsSummary(fittings)}
           </Text>
         </div>
@@ -157,14 +154,13 @@ export function SampleFittings({
               className='flex flex-wrap items-center justify-between gap-2 border border-textInactiveColor p-2 transition-colors hover:bg-highlightColor/5'
             >
               <Text size='small'>
-                round {f.fitting?.roundNumber ?? '—'} ·{' '}
-                {formatFittingDate(f.fitting?.fittingDate)}
+                round {f.fitting?.roundNumber ?? '—'} · {formatFittingDate(f.fitting?.fittingDate)}
               </Text>
               <div className='flex flex-wrap items-center gap-1.5'>
                 <span className={verdictChipClass(f.fitting?.verdict)}>
                   {verdictLabel(f.fitting?.verdict)}
                 </span>
-                <Text variant='inactive' size='small'>
+                <Text variant='label' size='small'>
                   {statusLabel(f.fitting?.status)} · {f.media?.length ?? 0} photo(s)
                 </Text>
               </div>

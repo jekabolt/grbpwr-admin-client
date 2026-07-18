@@ -7,6 +7,7 @@ import {
 } from 'api/proto-http/admin';
 import { MediaGallerySelector } from 'components/managers/media/components/media-gallery-selector';
 import { ROUTES } from 'constants/routes';
+import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -40,6 +41,7 @@ import {
   useSample,
   useSampleFittings,
   useSamples,
+  useSampleSubstitutions,
   useSaveSample,
   useTechCardReleases,
 } from './useSamples';
@@ -170,7 +172,7 @@ export function SamplesTab({
       ) : isLoading ? (
         <Text size='small'>loading…</Text>
       ) : samples.length === 0 ? (
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           No samples yet. A sample is one sewn prototype — start with purpose “proto” in the base
           size.
         </Text>
@@ -271,7 +273,7 @@ function SampleCard({
               {sampleFabricSourceLabel(sample.sample?.fabricSource)}
             </span>
           </div>
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             {fittingsSummary(fittings)}
           </Text>
         </div>
@@ -349,6 +351,141 @@ function colorwayLabel(c?: { code?: string; name?: string; id?: number }): strin
   return c.name || c.code || `колорвей #${c.id ?? '?'}`;
 }
 
+// Identity band for the open sample. The owner's complaint was "totally unclear how to use it" —
+// so the detail now LEADS with what this sample is: its server number + round, its live status, the
+// colourway/size/purpose/fabric it represents, and who touched it when. Server-owned facts (number,
+// round, created/updated by-when) read off the envelope; the mutable identity (status, purpose, …)
+// reads off the live draft so the band tracks edits before they are saved. Round # is display-only
+// here — the server auto-assigns it on save.
+function SampleDetailHeader({
+  number,
+  round,
+  draft,
+  sizeName,
+  colorwayName,
+  thumb,
+  createdBy,
+  createdAt,
+  updatedBy,
+  updatedAt,
+}: {
+  number?: number;
+  round?: number;
+  draft: Draft;
+  sizeName: string;
+  colorwayName: string;
+  thumb?: string;
+  createdBy?: string;
+  createdAt?: string;
+  updatedBy?: string;
+  updatedAt?: string;
+}) {
+  const fmt = (t?: string) => {
+    const s = t ? formatTechCardDate(t) : '';
+    return s && s !== '—' ? s : '';
+  };
+  const cDate = fmt(createdAt);
+  const uDate = fmt(updatedAt);
+  const dates =
+    draft.startedAt || draft.finishedAt
+      ? `${draft.startedAt || '—'} → ${draft.finishedAt || '—'}`
+      : '';
+  const created =
+    createdBy || cDate
+      ? `added${createdBy ? ` by ${createdBy}` : ''}${cDate ? ` · ${cDate}` : ''}`
+      : '';
+  // Only surface an "edited" line when it is a genuinely later touch by someone.
+  const edited =
+    updatedAt !== createdAt && (updatedBy || uDate)
+      ? `edited${updatedBy ? ` by ${updatedBy}` : ''}${uDate ? ` · ${uDate}` : ''}`
+      : '';
+  const provenance = [dates, created, edited].filter(Boolean).join('   ·   ');
+
+  return (
+    <div className='flex items-start gap-3 border-b border-textInactiveColor pb-4'>
+      <span
+        className='flex w-16 shrink-0 items-center justify-center overflow-hidden border border-textInactiveColor bg-bgColor'
+        style={{ aspectRatio: '3/4' }}
+      >
+        {thumb ? (
+          <Media src={thumb} alt={`sample #${number ?? '?'}`} aspectRatio='auto' fit='cover' />
+        ) : (
+          <Text variant='inactive' size='small'>
+            —
+          </Text>
+        )}
+      </span>
+      <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Text size='large' className='uppercase'>
+            {number ? `sample #${number}` : 'new sample'}
+          </Text>
+          <span className={sampleNeutralChipClass()}>{sampleRoundLabel(round)}</span>
+          <span className={sampleStatusChipClass(draft.status)}>
+            {sampleStatusLabel(draft.status)}
+          </span>
+        </div>
+        <Text variant='label' size='small'>
+          {samplePurposeLabel(draft.purpose)} · {sizeName} · {colorwayName} ·{' '}
+          {sampleFabricSourceLabel(draft.fabricSource)}
+        </Text>
+        {provenance ? (
+          <Text variant='label' size='small'>
+            {provenance}
+          </Text>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// Progressive disclosure for a sample's advanced / rare areas (substitutions, the raw material-
+// movement ledger, provenance/lineage, dev-expense journal). Collapsed by default so the common
+// flow — identity, details, photos, fittings — is all the operator sees first, instead of a wall
+// of tables. A literal +/− glyph matches the app's other literal-glyph controls; the trigger is a
+// native <summary>, so it stays keyboard-operable and focus-ringed.
+function CollapsibleSection({
+  title,
+  hint,
+  badge,
+  defaultOpen,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  badge?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className='group border-t border-textInactiveColor pt-3' open={defaultOpen}>
+      <summary className='flex cursor-pointer select-none list-none items-center justify-between gap-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden'>
+        <div className='flex min-w-0 flex-col'>
+          <div className='flex items-center gap-2'>
+            <Text variant='uppercase' size='small'>
+              {title}
+            </Text>
+            {badge}
+          </div>
+          {hint ? (
+            <Text variant='label' size='small'>
+              {hint}
+            </Text>
+          ) : null}
+        </div>
+        <span
+          aria-hidden
+          className='flex size-5 shrink-0 items-center justify-center border border-textInactiveColor leading-none text-textColor transition-colors group-hover:bg-highlightColor/5'
+        >
+          <span className='group-open:hidden'>+</span>
+          <span className='hidden group-open:inline'>−</span>
+        </span>
+      </summary>
+      <div className='flex flex-col gap-2 pt-3'>{children}</div>
+    </details>
+  );
+}
+
 function SampleEditor({
   sample,
   techCardId,
@@ -415,6 +552,24 @@ function SampleEditor({
     .map((id) => mediaById.get(id))
     .filter((m): m is common_MediaFull => m != null);
 
+  // Substitutions count for the collapsed section's badge — same query key as the panel below, so
+  // React Query dedupes it (no extra request); disabled until the sample has an id.
+  const { data: subsData } = useSampleSubstitutions(sample?.id);
+  const subsCount = subsData?.substitutions?.length ?? 0;
+
+  // Live identity for the header band — the mutable bits track the draft (so the band reflects
+  // edits before they're saved) and the thumbnail follows the first picked photo.
+  const headerThumb =
+    mediaLinks[0]?.media?.thumbnail?.mediaUrl ||
+    mediaLinks[0]?.media?.fullSize?.mediaUrl ||
+    sampleThumbUrl(sample);
+  const liveSizeName = d.sizeId
+    ? String(findInDictionary(dictionary, d.sizeId, 'size') || d.sizeId)
+    : '—';
+  const liveColorwayName = d.colorwayId
+    ? colorwayLabel(colorways.find((c) => c.id === d.colorwayId))
+    : '—';
+
   const onPick = (picked: common_MediaFull[]) => {
     const fresh = picked.filter((m) => m.id && !d.mediaIds.includes(m.id));
     if (!fresh.length) return;
@@ -472,12 +627,41 @@ function SampleEditor({
 
   return (
     <div className='flex flex-col gap-4 border border-textInactiveColor p-3'>
-      {/* что / когда — identity essentials, always visible */}
+      <SampleDetailHeader
+        number={sample?.number}
+        round={sample?.sample?.roundNumber}
+        draft={d}
+        sizeName={liveSizeName}
+        colorwayName={liveColorwayName}
+        thumb={headerThumb}
+        createdBy={sample?.createdBy}
+        createdAt={sample?.createdAt}
+        updatedBy={sample?.updatedBy}
+        updatedAt={sample?.updatedAt}
+      />
+
+      {/* details — the everyday edit: the sample's state plus what it is and when it ran. Status
+          leads, because advancing it (planned → in sewing → done) is the thing done most often. */}
       <div className='flex flex-col gap-2'>
         <Text variant='uppercase' size='small'>
-          что / когда
+          details
         </Text>
         <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+          <label className='flex flex-col gap-1'>
+            <Text size='small'>status</Text>
+            <select
+              className={cell}
+              disabled={!canEdit}
+              value={d.status}
+              onChange={(e) => set({ status: e.target.value })}
+            >
+              {sampleStatusOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className='flex flex-col gap-1'>
             <Text size='small'>purpose</Text>
             <select
@@ -531,21 +715,6 @@ function SampleEditor({
             </select>
           </label>
           <label className='flex flex-col gap-1'>
-            <Text size='small'>status</Text>
-            <select
-              className={cell}
-              disabled={!canEdit}
-              value={d.status}
-              onChange={(e) => set({ status: e.target.value })}
-            >
-              {sampleStatusOptions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className='flex flex-col gap-1'>
             <Text size='small'>started</Text>
             <input
               className={cell}
@@ -580,8 +749,10 @@ function SampleEditor({
 
       {/* photos — the first one becomes this sample's card thumbnail on the board */}
       <div className='flex flex-col gap-1 border-t border-textInactiveColor pt-3'>
-        <Text size='small'>photos</Text>
-        <Text variant='inactive' size='small'>
+        <Text variant='uppercase' size='small'>
+          photos
+        </Text>
+        <Text variant='label' size='small'>
           the first photo is this sample's thumbnail on the samples board
         </Text>
         <MediaGallerySelector
@@ -598,11 +769,19 @@ function SampleEditor({
         />
       </div>
 
-      {/* материалы — чем шили: fabric source + composed cost + substitutions (owner decision 3:
-          no new materials entity — just the spec release snapshot + substitutions, made legible). */}
+      {/* fittings — this sample's 1:N link to fittings, a primary action (link a fitting). Kept
+          visible: a summary line, a round/verdict mini-card per fitting, and a one-click add. */}
+      {isEdit && sample?.id ? (
+        <div className='border-t border-textInactiveColor pt-3'>
+          <SampleFittings sampleId={sample.id} techCardId={techCardId} returnTo={returnTo} />
+        </div>
+      ) : null}
+
+      {/* materials & cost — the single fabric choice plus the composed cost, read cleanly. The rare
+          detail (spec deviations, the raw stock ledger) lives in the collapsed sections below. */}
       <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
         <Text variant='uppercase' size='small'>
-          материалы — чем шили
+          materials & cost
         </Text>
         <label className='flex flex-col gap-1 sm:w-1/2'>
           <Text size='small'>{sampleFabricSourceFieldLabel}</Text>
@@ -618,128 +797,138 @@ function SampleEditor({
               </option>
             ))}
           </select>
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             {sampleFabricSourceHint}
           </Text>
         </label>
 
         {canReadCosting && cost ? (
-          <Text size='small'>
-            cost: materials {decimalToInput(cost.materialsBase) || '0'} + manual{' '}
-            {decimalToInput(cost.manualBase) || '0'} = {decimalToInput(cost.totalBase) || '0'}
-            {cost.hasUncosted ? ' · ! some issues / expenses are not costed — total is partial' : ''}
-          </Text>
+          <div className='flex flex-col gap-0.5'>
+            <Text size='small'>cost {decimalToInput(cost.totalBase) || '0'}</Text>
+            <Text variant='label' size='small'>
+              materials {decimalToInput(cost.materialsBase) || '0'} + manual{' '}
+              {decimalToInput(cost.manualBase) || '0'}
+            </Text>
+            {cost.hasUncosted ? (
+              <Text variant='label' size='small'>
+                ! partial — some issues or expenses aren't costed yet
+              </Text>
+            ) : null}
+          </div>
         ) : null}
-
-        {isEdit && sample?.id ? (
-          <SampleSubstitutions sampleId={sample.id} techCard={techCard} canEdit={canEdit} />
-        ) : (
-          <Text variant='inactive' size='small'>
-            save the sample first to record material substitutions
-          </Text>
-        )}
       </div>
 
-      {/* примерки — this sample's 1:N link to fittings already existed; elevated into its own
-          explicit, scannable section instead of being reachable only by filtering. */}
+      {/* --- advanced / rare, collapsed by default (progressive disclosure) --- */}
+
+      {/* substitutions — dev-time deviations from the spec BOM (documentation only). The badge
+          flags a sample that was NOT sewn to spec, without needing to expand. */}
       {isEdit && sample?.id ? (
-        <div className='border-t border-textInactiveColor pt-3'>
-          <SampleFittings sampleId={sample.id} techCardId={techCardId} returnTo={returnTo} />
-        </div>
+        <CollapsibleSection
+          title='substitutions'
+          hint='dev-time deviations from the spec BOM — documentation only, never COGS'
+          badge={
+            subsCount > 0 ? (
+              <span className={sampleNeutralChipClass()}>{subsCount}</span>
+            ) : undefined
+          }
+        >
+          <SampleSubstitutions sampleId={sample.id} techCard={techCard} canEdit={canEdit} />
+        </CollapsibleSection>
       ) : null}
 
-      {/* происхождение — power-user provenance (round spine, §2.7): collapsed by default, a
-          plain proto sample rarely needs it, a later-round sample can expand it. */}
-      <details className='border border-textInactiveColor'>
-        <summary className='cursor-pointer select-none px-3 py-2 text-textBaseSize uppercase hover:bg-highlightColor/5'>
-          происхождение — round · spec release · previous sample · pattern
-        </summary>
-        <div className='flex flex-col gap-2 border-t border-textInactiveColor p-3'>
-          <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>round # (0 = auto)</Text>
-              <input
-                className={cell}
-                type='number'
-                min='0'
-                disabled={!canEdit}
-                value={d.roundNumber || 0}
-                onChange={(e) => set({ roundNumber: Number(e.target.value) || 0 })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>spec release (Rev.N)</Text>
-              <select
-                className={cell}
-                disabled={!canEdit}
-                value={d.specReleaseId || 0}
-                onChange={(e) => set({ specReleaseId: Number(e.target.value) || 0 })}
-              >
-                <option value={0}>— none (live spec) —</option>
-                {/* keep a saved release selectable even if the list hasn't loaded it */}
-                {d.specReleaseId > 0 && !releases.some((r) => r.id === d.specReleaseId) ? (
-                  <option value={d.specReleaseId}>release #{d.specReleaseId}</option>
-                ) : null}
-                {releases.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    Rev.{r.releaseNumber ?? '—'}
-                    {r.version ? ` · ${r.version}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>previous sample</Text>
-              <SamplePicker
-                techCardId={techCardId}
-                value={d.previousSampleId || 0}
-                disabled={!canEdit}
-                onChange={(id) => set({ previousSampleId: id === sample?.id ? 0 : id })}
-              />
-            </label>
-          </div>
-
-          <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>pattern url (выкройка snapshot)</Text>
-              <input
-                className={cell}
-                disabled={!canEdit}
-                placeholder='cdn url'
-                value={d.patternUrl}
-                onChange={(e) => set({ patternUrl: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>pattern note</Text>
-              <input
-                className={cell}
-                disabled={!canEdit}
-                placeholder='e.g. выкройка v2, размер S'
-                value={d.patternNote}
-                onChange={(e) => set({ patternNote: e.target.value })}
-              />
-            </label>
-          </div>
-        </div>
-      </details>
-
-      {/* Movement / dev-expense sub-panels need a saved sample id (W3.3 / W3.5). */}
+      {/* material movements & write-off — the raw stock ledger for this sample plus a one-click
+          issue. Sub-panel needs a saved sample id (W3.3). */}
       {isEdit && sample?.id ? (
-        <>
+        <CollapsibleSection
+          title='material movements & write-off'
+          hint='stock issued to / returned from this sample'
+        >
           <SampleMovements sampleId={sample.id} />
-          {canReadCosting ? (
-            <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-2'>
-              <Text variant='uppercase' size='small'>
-                dev expenses
-              </Text>
-              <DevExpensesField techCardId={techCardId} scopedSampleId={sample.id} />
-            </div>
-          ) : null}
-        </>
+        </CollapsibleSection>
       ) : null}
 
-      <div className='flex items-center justify-end gap-2 border-t border-textInactiveColor pt-2'>
+      {/* provenance & lineage — the round spine (§2.7). Round # is display-only (the server
+          auto-assigns it on save); spec release, previous sample and the pattern snapshot stay
+          editable for a later-round sample that needs them. */}
+      <CollapsibleSection
+        title='provenance & lineage'
+        hint='round · spec release · previous sample · pattern'
+      >
+        <Text variant='label' size='small'>
+          round {sample?.sample?.roundNumber ? `#${sample.sample.roundNumber}` : 'not assigned yet'}{' '}
+          — the server assigns this automatically when the sample is saved
+        </Text>
+        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+          <label className='flex flex-col gap-1'>
+            <Text size='small'>spec release (Rev.N)</Text>
+            <select
+              className={cell}
+              disabled={!canEdit}
+              value={d.specReleaseId || 0}
+              onChange={(e) => set({ specReleaseId: Number(e.target.value) || 0 })}
+            >
+              <option value={0}>— none (live spec) —</option>
+              {/* keep a saved release selectable even if the list hasn't loaded it */}
+              {d.specReleaseId > 0 && !releases.some((r) => r.id === d.specReleaseId) ? (
+                <option value={d.specReleaseId}>release #{d.specReleaseId}</option>
+              ) : null}
+              {releases.map((r) => (
+                <option key={r.id} value={r.id}>
+                  Rev.{r.releaseNumber ?? '—'}
+                  {r.version ? ` · ${r.version}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className='flex flex-col gap-1'>
+            <Text size='small'>previous sample</Text>
+            <SamplePicker
+              techCardId={techCardId}
+              value={d.previousSampleId || 0}
+              disabled={!canEdit}
+              onChange={(id) => set({ previousSampleId: id === sample?.id ? 0 : id })}
+            />
+          </label>
+        </div>
+
+        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+          <label className='flex flex-col gap-1'>
+            <Text size='small'>pattern url (выкройка snapshot)</Text>
+            <input
+              className={cell}
+              disabled={!canEdit}
+              placeholder='cdn url'
+              value={d.patternUrl}
+              onChange={(e) => set({ patternUrl: e.target.value })}
+            />
+          </label>
+          <label className='flex flex-col gap-1'>
+            <Text size='small'>pattern note</Text>
+            <input
+              className={cell}
+              disabled={!canEdit}
+              placeholder='e.g. выкройка v2, размер S'
+              value={d.patternNote}
+              onChange={(e) => set({ patternNote: e.target.value })}
+            />
+          </label>
+        </div>
+      </CollapsibleSection>
+
+      {/* dev expenses — periodic R&D spend attributed to this sample (W3.5, costing only). */}
+      {isEdit && sample?.id && canReadCosting ? (
+        <CollapsibleSection
+          title='dev expenses (R&D)'
+          hint='periodic R&D spend attributed to this sample'
+        >
+          <DevExpensesField techCardId={techCardId} scopedSampleId={sample.id} />
+        </CollapsibleSection>
+      ) : null}
+
+      {/* One primary action (save, solid) on the right; the destructive delete sits beside it but
+          demoted to a secondary outline and guarded by a confirm; close/back is kept clear on the
+          left, away from the primary. */}
+      <div className='flex items-center justify-between gap-2 border-t border-textInactiveColor pt-3'>
         <Button
           type='button'
           variant='secondary'
@@ -749,29 +938,31 @@ function SampleEditor({
         >
           close
         </Button>
-        {canEdit && isEdit && (
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase'
-            onClick={() => setDeleteOpen(true)}
-          >
-            delete
-          </Button>
-        )}
-        {canEdit && (
-          <Button
-            type='button'
-            variant='main'
-            size='lg'
-            className='uppercase'
-            disabled={save.isPending}
-            onClick={submit}
-          >
-            {save.isPending ? 'saving…' : isEdit ? 'save' : 'create'}
-          </Button>
-        )}
+        <div className='flex items-center gap-2'>
+          {canEdit && isEdit && (
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => setDeleteOpen(true)}
+            >
+              delete
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              className='uppercase'
+              disabled={save.isPending}
+              onClick={submit}
+            >
+              {save.isPending ? 'saving…' : isEdit ? 'save' : 'create'}
+            </Button>
+          )}
+        </div>
       </div>
 
       <ConfirmationModal

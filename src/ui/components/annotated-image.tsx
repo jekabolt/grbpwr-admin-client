@@ -117,6 +117,13 @@ function StickyNote({
 }) {
   return (
     <div
+      // The note is an interactive child of the image surface (inline it lives inside the
+      // transformed stage; as a hover Popover it is portalled but STILL bubbles through the React
+      // tree). Swallow its pointer gestures so a press on the note body or the ✕ remove control can
+      // never reach the Stage's background add-callout / pan handler — the root of the phantom
+      // callout that used to appear when closing a note.
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
       className={cn(
         'w-64 max-w-[min(16rem,72vw)] border border-textColor bg-bgColor text-left',
         'shadow-[0_2px_10px_rgba(0,0,0,0.12)]',
@@ -444,20 +451,29 @@ function Stage({
 
   const isZoomed = zoom && scale > 1;
 
-  // Screen point -> normalised 0..1, undoing the current pan/zoom so a pin lands on the right
-  // spot no matter how the frame is transformed.
-  const coords = useCallback((clientX: number, clientY: number) => {
+  // Screen point -> RAW normalised position, undoing the current pan/zoom. NOT clamped, so a caller
+  // can tell an in-image press (0..1 on both axes) from one that landed outside the picture.
+  const rawCoords = useCallback((clientX: number, clientY: number) => {
     const rect = wrapRef.current?.getBoundingClientRect();
-    if (!rect || rect.width === 0) return { x: 0, y: 0 };
+    if (!rect || rect.width === 0) return null;
     const cx = clientX - rect.left - rect.width / 2;
     const cy = clientY - rect.top - rect.height / 2;
     const s = scaleRef.current;
     const p = posRef.current;
     return {
-      x: clamp01(0.5 + (cx - p.x) / s / rect.width),
-      y: clamp01(0.5 + (cy - p.y) / s / rect.height),
+      x: 0.5 + (cx - p.x) / s / rect.width,
+      y: 0.5 + (cy - p.y) / s / rect.height,
     };
   }, []);
+
+  // Clamped variant for pin drag (dragging a pin off-frame parks it on the nearest edge).
+  const coords = useCallback(
+    (clientX: number, clientY: number) => {
+      const r = rawCoords(clientX, clientY);
+      return r ? { x: clamp01(r.x), y: clamp01(r.y) } : { x: 0, y: 0 };
+    },
+    [rawCoords],
+  );
 
   const clampPan = (px: number, py: number, s: number, w: number, h: number) => {
     const maxX = Math.max(0, (w * s - w) / 2);
@@ -623,8 +639,13 @@ function Stage({
     resetPointer(e);
     if (!isPress || !p || p.moved) return;
     if (addMode && onAdd) {
-      const { x, y } = coords(e.clientX, e.clientY);
-      onAdd(x, y);
+      // Only a deliberate press that lands INSIDE the picture drops a callout. An out-of-bounds
+      // release (a click on the ground around the frame, or one that slipped past a control) is
+      // rejected outright rather than clamped to an edge — no more phantom pins at 0/1.
+      const raw = rawCoords(e.clientX, e.clientY);
+      const EPS = 0.001;
+      if (!raw || raw.x < -EPS || raw.x > 1 + EPS || raw.y < -EPS || raw.y > 1 + EPS) return;
+      onAdd(clamp01(raw.x), clamp01(raw.y));
     } else if (onBackgroundView) {
       onBackgroundView();
     }
