@@ -4,6 +4,7 @@ import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useImageAnnotate, useMediaStageGestures, ZoomDrawToolbar } from './media-viewer-zoom';
 
 // One normalized shape the viewer understands. Every call site maps its own data
 // (proto MediaFull, a bare url, a { thumbnail, fullSize } row) down to this.
@@ -54,14 +55,14 @@ interface MediaViewerProps {
   onIndexChange: (index: number) => void;
 }
 
-const SWIPE_THRESHOLD = 48;
-
 export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }: MediaViewerProps) {
   const count = items.length;
   const hasMany = count > 1;
   // Clamp defensively — the list can shrink (a delete) while the viewer is open.
   const safeIndex = count ? Math.min(Math.max(index, 0), count - 1) : 0;
   const current = items[safeIndex];
+  const activeType = current ? resolveViewerType(current) : undefined;
+  const isImage = activeType === 'image';
 
   const go = useCallback(
     (dir: 1 | -1) => {
@@ -85,30 +86,16 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
     [hasMany, go],
   );
 
-  const touchStartX = useRef<number | null>(null);
-  // Set when a touch ends as a swipe, so the click it synthesizes doesn't also
-  // close the viewer.
-  const swipedRef = useRef(false);
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0]?.clientX ?? null;
-  };
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current == null) return;
-    const dx = (e.changedTouches[0]?.clientX ?? touchStartX.current) - touchStartX.current;
-    touchStartX.current = null;
-    if (Math.abs(dx) > SWIPE_THRESHOLD) {
-      swipedRef.current = true;
-      go(dx < 0 ? 1 : -1);
-    }
-  };
+  // Reset zoom/pan/drawing whenever the viewer moves to a different item, or
+  // closes — each image gets a fresh, session-only stage.
+  const resetKey = `${open ? 1 : 0}:${safeIndex}:${current?.src ?? ''}`;
+  const gestures = useMediaStageGestures({ active: isImage, resetKey, hasMany, onSwipe: go });
+  const annotate = useImageAnnotate({ resetKey, baseSize: gestures.baseSize });
 
   // Close only when the click lands on the empty ground (not the media or a control),
   // and not as the tail of a swipe.
   const handleStageClick = (e: React.MouseEvent) => {
-    if (swipedRef.current) {
-      swipedRef.current = false;
-      return;
-    }
+    if (gestures.consumeJustSwiped()) return;
     if (e.target === e.currentTarget) onOpenChange(false);
   };
 
@@ -121,7 +108,7 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
 
   if (!current) return null;
 
-  const type = resolveViewerType(current);
+  const type = activeType as 'image' | 'video';
   const label = `${safeIndex + 1} / ${count}`;
 
   // Neighbours to preload so arrow / swipe nav feels instant.
@@ -158,16 +145,22 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
             </Dialog.Close>
           </div>
 
-          {/* Stage — click on the empty ground (not the media) closes. */}
+          {/* Stage — click on the empty ground (not the media) closes. Images get
+              real pan/zoom (wheel, drag, pinch) and an optional draw overlay;
+              video is untouched. */}
           <div
-            className='relative flex min-h-0 flex-1 items-center justify-center px-4 sm:px-16'
+            ref={gestures.viewportRef}
+            className={cn(
+              'relative flex min-h-0 flex-1 items-center justify-center px-4 sm:px-16',
+              isImage && 'touch-none',
+            )}
             onClick={handleStageClick}
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
+            {...gestures.viewportHandlers}
           >
             <div
               key={safeIndex}
               className='media-viewer-stage relative flex max-h-full max-w-full items-center justify-center'
+              style={isImage ? gestures.stageStyle : undefined}
             >
               {type === 'video' ? (
                 <video
@@ -178,12 +171,29 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
                   className='max-h-[calc(100vh-11rem)] max-w-full object-contain'
                 />
               ) : (
-                <img
-                  src={current.src}
-                  alt={current.alt || ''}
-                  draggable={false}
-                  className='max-h-[calc(100vh-11rem)] max-w-full select-none object-contain'
-                />
+                <>
+                  <img
+                    ref={gestures.imgRef}
+                    src={current.src}
+                    alt={current.alt || ''}
+                    draggable={false}
+                    onDoubleClick={gestures.onImageDoubleClick}
+                    className={cn(
+                      'max-h-[calc(100vh-11rem)] max-w-full select-none object-contain',
+                      gestures.isZoomed && 'cursor-grab active:cursor-grabbing',
+                      !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',
+                    )}
+                  />
+                  {annotate.drawMode && (
+                    <canvas
+                      ref={annotate.canvasRef}
+                      aria-label='Drawing surface'
+                      style={{ width: gestures.baseSize.w, height: gestures.baseSize.h }}
+                      className='absolute left-0 top-0 touch-none cursor-crosshair'
+                      {...annotate.canvasHandlers}
+                    />
+                  )}
+                </>
               )}
             </div>
 
@@ -204,6 +214,26 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
                   }}
                 />
               </>
+            )}
+
+            {isImage && (
+              <ZoomDrawToolbar
+                scale={gestures.scale}
+                canZoomIn={gestures.canZoomIn}
+                canZoomOut={gestures.canZoomOut}
+                isZoomed={gestures.isZoomed}
+                onZoomIn={gestures.zoomIn}
+                onZoomOut={gestures.zoomOut}
+                onReset={gestures.reset}
+                drawMode={annotate.drawMode}
+                onToggleDraw={annotate.toggleDrawMode}
+                color={annotate.color}
+                onColorChange={annotate.setColor}
+                colors={annotate.colors}
+                hasStrokes={annotate.hasStrokes}
+                onUndo={annotate.undo}
+                onClear={annotate.clear}
+              />
             )}
           </div>
 
