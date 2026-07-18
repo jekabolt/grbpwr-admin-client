@@ -4,10 +4,13 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { TooltipProvider } from 'ui/components/tooltip';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { generateCareLabel, hasAnyComposition } from 'utils/care-label';
+import { LabelPlacementBadge } from './label-placement-pictogram';
+import { LabelsChecklist } from './labels-checklist';
 import { TechCardFormData } from './schema';
 import { labelAttachmentOptions, labelPlacementOptions } from './tech-card-options';
 
@@ -51,6 +54,8 @@ function LabelTypeTile({ type }: { type: string }) {
 function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) {
   const { control } = useFormContext<TechCardFormData>();
   const labelType = useWatch({ control, name: `labels.${index}.labelType` }) as string;
+  const placement = useWatch({ control, name: `labels.${index}.placement` }) as string;
+  const attachment = useWatch({ control, name: `labels.${index}.attachment` }) as string;
   const isCare = labelType === CARE;
 
   return (
@@ -81,11 +86,18 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         ) : (
           <InputField name={`labels.${index}.content`} label='content / ref' />
         )}
-        <ComboField
-          name={`labels.${index}.placement`}
-          label='placement'
-          options={labelPlacementOptions}
-        />
+        <div className='flex items-end gap-2'>
+          <div className='min-w-0 flex-1'>
+            <ComboField
+              name={`labels.${index}.placement`}
+              label='placement'
+              options={labelPlacementOptions}
+            />
+          </div>
+          {/* Pictogram of WHERE this label sits on the garment + a glyph for how it's attached —
+              hover/focus for the enlarged view (mirrors the measurement pictograms). */}
+          <LabelPlacementBadge placement={placement} attachment={attachment} />
+        </div>
         <ComboField
           name={`labels.${index}.attachment`}
           label='attachment'
@@ -141,37 +153,42 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
   };
 
   return (
-    <div className='space-y-3'>
-      <div className='space-y-1'>
-        <Button type='button' variant='secondary' className='uppercase' onClick={generateCare}>
-          сгенерировать состав / уход
-        </Button>
-        <Text variant='inactive' size='small'>
-          собирает состав из BOM (composition) → пишет в этикетку «care». Символы стирки/глажки
-          выбираются пикером «care symbols». Страна — из этикетки «origin», если есть.
-        </Text>
-      </div>
-
-      {fields.length === 0 ? (
-        <Text variant='inactive' size='small'>
-          no labels
-        </Text>
-      ) : (
+    <TooltipProvider delayDuration={200} skipDelayDuration={150}>
+      <div className='space-y-4'>
+        <LabelsChecklist />
         <div className='space-y-3'>
-          {fields.map((f, index) => (
-            <LabelRow key={f.id} index={index} onRemove={() => remove(index)} />
-          ))}
-        </div>
-      )}
+          <div className='space-y-1'>
+            <Button type='button' variant='secondary' className='uppercase' onClick={generateCare}>
+              сгенерировать состав / уход
+            </Button>
+            <Text variant='inactive' size='small'>
+              собирает состав из BOM (composition) → пишет в этикетку «care». Символы стирки/глажки
+              выбираются пикером «care symbols». Страна — из этикетки «origin», если есть.
+            </Text>
+          </div>
 
-      <Button
-        type='button'
-        variant='main'
-        className='uppercase'
-        onClick={() => append({ ...emptyLabel })}
-      >
-        add label
-      </Button>
-    </div>
+          {fields.length === 0 ? (
+            <Text variant='inactive' size='small'>
+              no labels
+            </Text>
+          ) : (
+            <div className='space-y-3'>
+              {fields.map((f, index) => (
+                <LabelRow key={f.id} index={index} onRemove={() => remove(index)} />
+              ))}
+            </div>
+          )}
+
+          <Button
+            type='button'
+            variant='main'
+            className='uppercase'
+            onClick={() => append({ ...emptyLabel })}
+          >
+            add label
+          </Button>
+        </div>
+      </div>
+    </TooltipProvider>
   );
 }
