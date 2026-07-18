@@ -1,5 +1,5 @@
 import { common_GenderEnum, common_SeasonEnum } from 'api/proto-http/admin';
-import { currencySymbols, LANGUAGES } from 'constants/constants';
+import { LANGUAGES, SELLING_CURRENCIES } from 'constants/constants';
 import { z } from 'zod';
 
 const requiredLanguageIds = LANGUAGES.map((l) => l.id);
@@ -264,14 +264,14 @@ export const defaultData = {
     thumbnailMediaId: 0,
     secondaryThumbnailMediaId: 0,
     translations: LANGUAGES.map((l) => ({ languageId: l.id, name: '', description: '' })),
-    prices: Object.keys(currencySymbols).map((currency) => ({
-      currency,
+    prices: SELLING_CURRENCIES.map((c) => ({
+      currency: c.value,
       price: { value: '0' },
     })),
     costPrice: '',
   },
-  prices: Object.keys(currencySymbols).map((currency) => ({
-    currency,
+  prices: SELLING_CURRENCIES.map((c) => ({
+    currency: c.value,
     price: { value: '0' },
   })),
   mediaIds: [],

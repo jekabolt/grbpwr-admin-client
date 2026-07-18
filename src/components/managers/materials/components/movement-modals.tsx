@@ -3,7 +3,7 @@ import { common_MaterialMovement } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { EntityPicker } from 'components/managers/tasks/components/entity-picker';
 import { runConfig, sampleConfig } from 'components/managers/tasks/utils/entity-configs';
-import { CURRENCIES } from 'constants/constants';
+import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { ReactNode, useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -193,7 +193,7 @@ export function ReceiveStockModal({
           </Field>
           <Field label='currency'>
             <select className={cell} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              {CURRENCIES.map((c) => (
+              {EXPENSE_CURRENCIES.map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.value}
                 </option>

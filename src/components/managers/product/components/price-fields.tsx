@@ -1,4 +1,4 @@
-import { CURRENCIES, currencySymbols } from 'constants/constants';
+import { SELLING_CURRENCIES, currencySymbols } from 'constants/constants';
 import { useEffect } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import Text from 'ui/components/text';
@@ -20,7 +20,7 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
 
   useEffect(() => {
     if (prices.length === 0) {
-      const initialPrices = CURRENCIES.map((currency) => ({
+      const initialPrices = SELLING_CURRENCIES.map((currency) => ({
         currency: currency.value,
         price: { value: '0' },
       }));
@@ -32,7 +32,7 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
         validPrices.length !== prices.length ||
         validPrices.some((price: any) => typeof price.currency !== 'string')
       ) {
-        const updatedPrices = CURRENCIES.map((currency) => {
+        const updatedPrices = SELLING_CURRENCIES.map((currency) => {
           const existingPrice = validPrices.find((p: any) => p?.currency === currency.value);
           if (existingPrice) {
             let value = existingPrice.price?.value ?? '0';
@@ -79,7 +79,7 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
     }
   };
 
-  const filledCount = CURRENCIES.filter((currency) => {
+  const filledCount = SELLING_CURRENCIES.filter((currency) => {
     const priceIndex = prices.findIndex((price: any) => price?.currency === currency.value);
     const value = priceIndex >= 0 ? prices[priceIndex]?.price?.value : undefined;
     return value != null && value !== '' && parseFloat(value) > 0;
@@ -99,26 +99,30 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
   };
   const formatSale = (v: number, isInt: boolean) =>
     isInt ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : v.toFixed(2);
-  const anyFractionalSale = sale > 0 && CURRENCIES.some((c) => salePreview(c.value)?.fractional);
+  const anyFractionalSale =
+    sale > 0 && SELLING_CURRENCIES.some((c) => salePreview(c.value)?.fractional);
 
   return (
     <div className='space-y-2'>
       <div className='flex items-center justify-between'>
         <Text>prices</Text>
-        <Text variant={filledCount === CURRENCIES.length ? 'default' : 'inactive'} size='small'>
-          {filledCount}/{CURRENCIES.length} set
+        <Text
+          variant={filledCount === SELLING_CURRENCIES.length ? 'default' : 'inactive'}
+          size='small'
+        >
+          {filledCount}/{SELLING_CURRENCIES.length} set
         </Text>
       </div>
 
       <div className='grid grid-cols-2 gap-x-4 gap-y-3 border border-textInactiveColor p-3 sm:grid-cols-3'>
-        {CURRENCIES.map((currency) => {
+        {SELLING_CURRENCIES.map((currency) => {
           const priceIndex = prices.findIndex((price: any) => price?.currency === currency.value);
           const isIntegerCurrency = currency.value === 'JPY' || currency.value === 'KRW';
           const step = isIntegerCurrency ? '1' : '0.01';
           const placeholder = isIntegerCurrency ? '0' : '0.00';
           const symbol = currencySymbols[currency.value] ?? '';
 
-          const actualIndex = priceIndex >= 0 ? priceIndex : CURRENCIES.indexOf(currency);
+          const actualIndex = priceIndex >= 0 ? priceIndex : SELLING_CURRENCIES.indexOf(currency);
 
           return (
             <div key={currency.id} className='flex flex-col gap-1'>

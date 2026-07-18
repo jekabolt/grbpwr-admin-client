@@ -28,7 +28,10 @@ export const currencySymbols: Record<string, string> = {
   USDT: '₮', // Tether — priced/accounting only (settled manually, not a storefront-checkout currency)
 };
 
-export const CURRENCIES = [
+// Currencies a colourway/product can be SOLD in — storefront checkout, carrier/shipping prices and
+// complimentary-shipping thresholds. USDT is deliberately absent: the backend rejects it as a
+// selling price ("not a selling currency"). Use this list for every SELLING price surface.
+export const SELLING_CURRENCIES = [
   { id: 'EUR', label: 'EUR - Euro', value: 'EUR' },
   { id: 'USD', label: 'USD - US Dollar', value: 'USD' },
   { id: 'GBP', label: 'GBP - British Pound', value: 'GBP' },
@@ -36,6 +39,15 @@ export const CURRENCIES = [
   { id: 'CNY', label: 'CNY - Chinese Yuan', value: 'CNY' },
   { id: 'KRW', label: 'KRW - South Korean Won', value: 'KRW' },
   { id: 'PLN', label: 'PLN - Polish Zloty', value: 'PLN' },
+];
+
+// Currencies an EXPENSE/cost can be booked in — the selling set PLUS USDT. USDT is accounting-only
+// (settled manually, never a storefront-checkout currency): the backend accepts it on cost surfaces
+// (material price, material lot, dev expense, BOM line, tech-card costing, production-run cost, opex,
+// employee default currency) but rejects it as a selling price. Use this list for every EXPENSE
+// currency picker.
+export const EXPENSE_CURRENCIES = [
+  ...SELLING_CURRENCIES,
   { id: 'USDT', label: 'USDT - Tether', value: 'USDT' },
 ];
 

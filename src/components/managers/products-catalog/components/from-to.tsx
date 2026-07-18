@@ -1,11 +1,13 @@
-import { currencySymbols } from 'constants/constants';
+import { currencySymbols, SELLING_CURRENCIES } from 'constants/constants';
 import useFilter from 'lib/useFilter';
 import Input from 'ui/components/input';
 import SelectComponent from 'ui/components/select';
 
-const CURRENCY_ITEMS = Object.entries(currencySymbols).map(([value, symbol]) => ({
-  value,
-  label: `${value} ${symbol}`,
+// Catalog price filter runs against colourway SELLING prices, so it offers only selling currencies
+// (no USDT — products are never priced in it).
+const CURRENCY_ITEMS = SELLING_CURRENCIES.map((c) => ({
+  value: c.value,
+  label: `${c.value} ${currencySymbols[c.value] ?? ''}`,
 }));
 
 export default function FromTo() {

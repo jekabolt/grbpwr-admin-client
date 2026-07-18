@@ -7,7 +7,7 @@ import {
   CreateColorwayRequest,
   StylePatch,
 } from 'api/proto-http/admin';
-import { currencySymbols, LANGUAGES } from 'constants/constants';
+import { LANGUAGES, SELLING_CURRENCIES } from 'constants/constants';
 import { ProductFormData } from '../utility/schema';
 
 // R2/R4 write decomposition. The single coupled UpsertColorway is gone; a save now targets three
@@ -167,9 +167,9 @@ export function mapProductFullToFormData(
   const mediaIds = productFull?.media?.map((media) => media.id || 0).filter((id) => id > 0) || [];
 
   const apiPrices = colorway?.prices ?? [];
-  const prices = Object.keys(currencySymbols).map((currency) => {
-    const fromApi = apiPrices.find((p) => p.currency === currency);
-    return { currency, price: { value: fromApi?.price?.value ?? '0' } };
+  const prices = SELLING_CURRENCIES.map((c) => {
+    const fromApi = apiPrices.find((p) => p.currency === c.value);
+    return { currency: c.value, price: { value: fromApi?.price?.value ?? '0' } };
   });
 
   return {
