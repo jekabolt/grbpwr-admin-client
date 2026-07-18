@@ -1,19 +1,12 @@
 import { common_MediaFull, common_TechCard, common_TechCardMediaKind } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { techCardMediaKindOptions } from 'constants/filter';
-import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { AnnotatedImage, type AnnotatedCallout } from 'ui/components/annotated-image';
+import { type AnnotatedCallout } from 'ui/components/annotated-image';
 import { Button } from 'ui/components/button';
-import {
-  MediaViewer,
-  mediaFullListToViewerItems,
-  useMediaViewer,
-} from 'ui/components/media-viewer';
+import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import Text from 'ui/components/text';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
@@ -69,20 +62,10 @@ function Section({
   );
 }
 
-// Frame the focused image to the media's own aspect ratio so the picture fills it exactly (no crop,
-// no letterbox) — which keeps every pin mapped 1:1 onto the image it was placed on.
-function mediaAspect(full?: common_MediaFull): string {
-  const dim = full?.media?.fullSize ?? full?.media?.thumbnail;
-  const w = dim?.width;
-  const h = dim?.height;
-  return w && h ? `${w}/${h}` : '4/5';
-}
-
+// Media resolves to a URL only a tick after it's picked; an unresolved id is skipped (not rendered
+// blank), so this gates which field-array rows become gallery images.
 const mediaUrl = (full?: common_MediaFull): string =>
   full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
-
-const thumbUrl = (full?: common_MediaFull): string =>
-  full?.media?.thumbnail?.mediaUrl || full?.media?.fullSize?.mediaUrl || '';
 
 // The editable body of a callout's sticky note: just its text. The structured fields (part,
 // dimensions, number, which image it's pinned to) live in the collapsed "all callouts" list
@@ -108,12 +91,13 @@ function CalloutNoteBody({ index }: { index: number }) {
   );
 }
 
-// A focused gallery for one media list (moodboard OR technical): ONE large image you annotate in
-// place, a thumbnail carousel of every image below it, and a "set as preview" control. Owns that
-// list's media (add / remove / reorder) and the callouts pinned onto it — the same image is the
-// picker, the preview, and the annotation canvas at once, so it is only ever shown once. The zoom
-// button opens the shared media lightbox (pan + freehand draw) for on-image markup.
-function FocusedAnnotator({
+// The tech-card adapter over the shared FocusedAnnotator: binds one media list (moodboard OR
+// technical) + its callouts to the gallery grammar. It owns the tech-card-specific data — the
+// `{ mediaId, kind }` media rows, the structured `{ part, description, dimensions }` callouts, the
+// per-image "kind" select, and "set as preview" — and hands the shared component only resolved
+// views + callbacks, so moodboard/sketch behave exactly as before while the fitting reuses the same
+// component with its own bindings.
+function TechCardFocusedGallery({
   listName,
   mediaById,
   onPickedMedia,
@@ -136,10 +120,6 @@ function FocusedAnnotator({
   const mediaFA = useFieldArray({ control, name: listName });
   const calloutFA = useFieldArray({ control, name: 'callouts' });
   const calloutValues = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
-  const [addMode, setAddMode] = useState(false);
-  const [showAllNotes, setShowAllNotes] = useState(false);
-  const [focusedId, setFocusedId] = useState<number | null>(null);
-  const viewer = useMediaViewer();
 
   const isMoodboard = listName === 'moodboardMedia';
   const siblingName: MediaListName = isMoodboard ? 'technicalMedia' : 'moodboardMedia';
@@ -153,30 +133,33 @@ function FocusedAnnotator({
     Math.max(0, ...calloutValues.map((c) => (Number.isFinite(c.number) ? Number(c.number) : 0))) +
     1;
 
-  function handleAddMedia(items: common_MediaFull[]) {
-    // Dedupe against BOTH lists — media ids are assumed unique across technical ∪ moodboard.
+  // Commit a media pick: dedupe against BOTH lists (ids are unique across technical ∪ moodboard),
+  // resolve the picked full-media, append, and report the fresh ids so the gallery focuses one.
+  function handleAddMedia(items: common_MediaFull[]): number[] {
     const selectedIds = mediaFA.fields.map((f) => f.mediaId);
     const siblingIds = (getValues(siblingName) ?? []).map((m) => m.mediaId);
     const fresh = items.filter(
       (it) => it.id != null && !selectedIds.includes(it.id) && !siblingIds.includes(it.id),
     );
-    if (!fresh.length) return;
+    if (!fresh.length) return [];
     onPickedMedia(fresh);
-    for (const it of fresh) mediaFA.append({ mediaId: it.id as number, kind: defaultKind });
-    // Focus the first freshly-added image so it is immediately annotatable.
-    if (fresh[0]?.id != null) setFocusedId(fresh[0].id);
+    const ids: number[] = [];
+    for (const it of fresh) {
+      mediaFA.append({ mediaId: it.id as number, kind: defaultKind });
+      ids.push(it.id as number);
+    }
+    return ids;
   }
 
   // Removing an image un-pins its callouts (keeps the text, drops the now-dead pin) so the
   // payload never carries a media id that is on neither list.
-  function removeMediaAt(index: number) {
-    const removedId = mediaFA.fields[index]?.mediaId;
+  function removeMedia(view: FocusedView) {
+    const index = mediaFA.fields.findIndex((f) => f.mediaId === view.mediaId);
+    if (index < 0) return;
     mediaFA.remove(index);
-    if (!removedId) return;
-    if (removedId === focusedId) setFocusedId(null); // fall back to the new first image
     const cs = getValues('callouts') ?? [];
     cs.forEach((c, ci) => {
-      if (c.mediaId === removedId) {
+      if (c.mediaId === view.mediaId) {
         setValue(`callouts.${ci}.mediaId`, 0, { shouldDirty: true });
         setValue(`callouts.${ci}.posX`, '', { shouldDirty: true });
         setValue(`callouts.${ci}.posY`, '', { shouldDirty: true });
@@ -219,210 +202,79 @@ function FocusedAnnotator({
         };
       });
 
-  // Only images that actually resolve to a URL are shown; the resolved-media map arrives a tick
-  // after a pick, so an unresolved id is skipped rather than rendered blank.
-  const views = mediaFA.fields
-    .map((f, index) => ({ field: f, index, full: mediaById.get(f.mediaId) }))
-    .filter((v) => !!mediaUrl(v.full));
-  const hasMedia = views.length > 0;
+  const views: FocusedView[] = mediaFA.fields
+    .map((f) => ({ f, full: mediaById.get(f.mediaId) }))
+    .filter((v) => !!mediaUrl(v.full))
+    .map((v) => ({ key: v.f.id, mediaId: v.f.mediaId, full: v.full as common_MediaFull }));
 
-  const focused = views.find((v) => v.field.mediaId === focusedId) ?? views[0];
-  const focusedUrl = mediaUrl(focused?.full);
-  const isPreviewFocused = focused ? focused.index === 0 : false;
-  const focusedLabel = focused
-    ? kindLabels[focused.field.kind ?? ''] ?? (isMoodboard ? 'reference' : 'sketch')
-    : '';
-
-  const viewerItems = useMemo(
-    () => mediaFullListToViewerItems(views.map((v) => v.full as common_MediaFull)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [views.map((v) => v.field.mediaId).join(','), focusedUrl],
-  );
-  const focusedViewerIndex = focused ? views.findIndex((v) => v === focused) : 0;
-
-  function setFocusedAsPreview() {
-    if (!focused || focused.index === 0) return;
-    mediaFA.move(focused.index, 0); // first item = the card's preview / thumbnail (proto: idea preview_url)
-  }
+  const mediaLabel = (view: FocusedView): string => {
+    const f = mediaFA.fields.find((mf) => mf.mediaId === view.mediaId);
+    return kindLabels[f?.kind ?? ''] ?? (isMoodboard ? 'reference' : 'sketch');
+  };
 
   return (
-    <div className='space-y-3'>
-      {hasMedia && (
-        <div className='flex flex-wrap items-center justify-between gap-3'>
-          <Text variant='label' size='small'>
-            {addMode
-              ? 'click the image to drop a callout · drag a pin to move it'
-              : 'hover a pin to read · click a pin to edit · use zoom to draw'}
-          </Text>
-          <div className='flex shrink-0 items-center gap-4'>
-            {notesMode === 'auto' && (
-              <ToggleSwitch
-                checked={showAllNotes}
-                onCheckedChange={setShowAllNotes}
-                label='show all notes'
-              />
-            )}
-            <ToggleSwitch checked={addMode} onCheckedChange={setAddMode} label='add callout' />
-          </div>
-        </div>
-      )}
-
-      {!hasMedia ? (
-        <Text variant='label' size='small'>
-          {emptyLabel}
-        </Text>
-      ) : (
-        <div className='space-y-3'>
-          {/* Focused image — annotate in place; the zoom control opens the lightbox for pan + draw */}
-          {focused && (
-            <div className='mx-auto w-full max-w-[26rem] space-y-2'>
-              <AnnotatedImage
-                src={focusedUrl}
-                alt={focusedLabel}
-                type={isVideo(focusedUrl) ? 'video' : 'image'}
-                aspectRatio={mediaAspect(focused.full)}
-                callouts={calloutsFor(focused.field.mediaId)}
-                editable
-                addMode={addMode}
-                zoomable={false}
-                notesMode={notesMode}
-                showAllNotes={showAllNotes}
-                pinSize={pinSize}
-                onAdd={(x, y) => addCalloutTo(focused.field.mediaId, x, y)}
-                onMove={(key, x, y) => {
-                  const i = keyToIndex.get(key);
-                  if (i == null) return;
-                  setValue(`callouts.${i}.posX`, x.toFixed(3), { shouldDirty: true });
-                  setValue(`callouts.${i}.posY`, y.toFixed(3), { shouldDirty: true });
-                }}
-                onRemove={(key) => {
-                  const i = keyToIndex.get(key);
-                  if (i != null) calloutFA.remove(i);
-                }}
-                noteTitle={(key) => {
-                  const i = keyToIndex.get(key);
-                  return i != null ? calloutValues[i]?.part || undefined : undefined;
-                }}
-                renderNote={(key) => {
-                  const i = keyToIndex.get(key);
-                  return i != null ? <CalloutNoteBody index={i} /> : null;
-                }}
-                cornerSlot={
-                  <button
-                    type='button'
-                    aria-label='zoom · pan · draw'
-                    // Stop the press from reaching the Stage's add-callout / pan gesture.
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      viewer.openAt(focusedViewerIndex);
-                    }}
-                    className='cursor-pointer border border-textInactiveColor bg-bgColor px-2 py-0.5 text-textBaseSize uppercase leading-none hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-                  >
-                    zoom
-                  </button>
-                }
-              />
-
-              <div className='flex items-end justify-between gap-3'>
-                <div className='min-w-0 flex-1'>
-                  <SelectField
-                    name={`${listName}.${focused.index}.kind`}
-                    label='kind'
-                    items={kindOptions}
-                  />
-                </div>
-                <div className='flex shrink-0 flex-col items-end gap-1'>
-                  {isPreviewFocused ? (
-                    <Text variant='label' size='small' className='uppercase'>
-                      preview image
-                    </Text>
-                  ) : (
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      onClick={setFocusedAsPreview}
-                      className='px-2 py-1 uppercase'
-                    >
-                      set as preview
-                    </Button>
-                  )}
-                </div>
-              </div>
+    <FocusedAnnotator
+      views={views}
+      calloutsFor={calloutsFor}
+      onAddCallout={addCalloutTo}
+      onMoveCallout={(key, x, y) => {
+        const i = keyToIndex.get(key);
+        if (i == null) return;
+        setValue(`callouts.${i}.posX`, x.toFixed(3), { shouldDirty: true });
+        setValue(`callouts.${i}.posY`, y.toFixed(3), { shouldDirty: true });
+      }}
+      onRemoveCallout={(key) => {
+        const i = keyToIndex.get(key);
+        if (i != null) calloutFA.remove(i);
+      }}
+      renderNote={(key) => {
+        const i = keyToIndex.get(key);
+        return i != null ? <CalloutNoteBody index={i} /> : null;
+      }}
+      noteTitle={(key) => {
+        const i = keyToIndex.get(key);
+        return i != null ? calloutValues[i]?.part || undefined : undefined;
+      }}
+      onPickMedia={handleAddMedia}
+      onRemoveMedia={removeMedia}
+      addLabel={addLabel}
+      purpose={purpose}
+      pickerAspectRatio={['Custom']}
+      notesMode={notesMode}
+      pinSize={pinSize}
+      emptyLabel={emptyLabel}
+      previewFirst
+      mediaLabel={mediaLabel}
+      carouselLabel={`${isMoodboard ? 'moodboard' : 'sketch'} images`}
+      renderFocusedFooter={(view) => {
+        const index = mediaFA.fields.findIndex((f) => f.mediaId === view.mediaId);
+        if (index < 0) return null;
+        return (
+          <div className='flex items-end justify-between gap-3'>
+            <div className='min-w-0 flex-1'>
+              <SelectField name={`${listName}.${index}.kind`} label='kind' items={kindOptions} />
             </div>
-          )}
-
-          {/* Thumbnail carousel — every image; click to focus. The first is the preview. */}
-          <div
-            aria-label={`${isMoodboard ? 'moodboard' : 'sketch'} images`}
-            className='flex snap-x items-start gap-2 overflow-x-auto pb-2'
-          >
-            {views.map((v) => {
-              const active = focused?.field.mediaId === v.field.mediaId;
-              const isPreview = v.index === 0;
-              const url = thumbUrl(v.full);
-              const video = isVideo(mediaUrl(v.full)) || isVideo(url);
-              return (
-                <div key={v.field.id} className='relative shrink-0 snap-start'>
-                  <button
-                    type='button'
-                    aria-current={active ? 'true' : undefined}
-                    aria-label={`focus image ${v.index + 1}`}
-                    onClick={() => setFocusedId(v.field.mediaId)}
-                    className={cn(
-                      'block size-16 overflow-hidden border transition-opacity sm:size-20',
-                      'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                      active
-                        ? 'border-textColor outline outline-2 outline-offset-1 outline-textColor'
-                        : 'border-textInactiveColor opacity-70 hover:opacity-100',
-                    )}
-                  >
-                    {video ? (
-                      <video src={url} muted className='size-full object-cover' />
-                    ) : (
-                      <img src={url} alt='' draggable={false} className='size-full object-cover' />
-                    )}
-                  </button>
-                  <span className='pointer-events-none absolute left-0 top-0 bg-textColor px-1 leading-none'>
-                    <Text className='!text-bgColor tabular-nums' size='small'>
-                      {v.index + 1}
-                    </Text>
-                  </span>
-                  {isPreview && (
-                    <span className='pointer-events-none absolute inset-x-0 bottom-0 bg-textColor text-center leading-none'>
-                      <Text className='!text-bgColor uppercase' size='small'>
-                        preview
-                      </Text>
-                    </span>
-                  )}
-                  <button
-                    type='button'
-                    aria-label={`remove image ${v.index + 1}`}
-                    onClick={() => removeMediaAt(v.index)}
-                    className='absolute right-0 top-0 cursor-pointer border border-textInactiveColor bg-bgColor px-1 leading-none hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-                  >
-                    [x]
-                  </button>
-                </div>
-              );
-            })}
+            <div className='flex shrink-0 flex-col items-end gap-1'>
+              {index === 0 ? (
+                <Text variant='label' size='small' className='uppercase'>
+                  preview image
+                </Text>
+              ) : (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  // first item = the card's preview / thumbnail (proto: idea preview_url)
+                  onClick={() => mediaFA.move(index, 0)}
+                  className='px-2 py-1 uppercase'
+                >
+                  set as preview
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-
-      <MediaSelector
-        label={addLabel}
-        purpose={purpose}
-        aspectRatio={['Custom']}
-        allowMultiple
-        showVideos
-        saveSelectedMedia={handleAddMedia}
-        triggerClassName='uppercase px-3 py-1.5'
-      />
-
-      {/* Shared lightbox — pan + freehand draw (session-only markup). */}
-      <MediaViewer items={viewerItems} {...viewer} />
-    </div>
+        );
+      }}
+    />
   );
 }
 
@@ -607,7 +459,7 @@ export function SketchTab({
   if (view === 'moodboard') {
     return (
       <Section title='moodboard (mood / reference / swatches)'>
-        <FocusedAnnotator
+        <TechCardFocusedGallery
           listName='moodboardMedia'
           mediaById={mediaById}
           onPickedMedia={onPicked}
@@ -625,7 +477,7 @@ export function SketchTab({
 
   return (
     <Section title='technical sketch'>
-      <FocusedAnnotator
+      <TechCardFocusedGallery
         listName='technicalMedia'
         mediaById={mediaById}
         onPickedMedia={onPicked}
