@@ -56,15 +56,16 @@ export function usePromo() {
   );
 
   // H2: the "Allowed" checkbox used to only ever call disable, even when the code
-  // was already disabled — there was no way back. Re-enable recreates the code
-  // (see useUpdatePromo) with every field unchanged except `allowed`.
+  // was already disabled — there was no way back. Re-enable now calls the atomic
+  // UpdatePromoCode RPC (see useUpdatePromo) with every field unchanged except
+  // `allowed`.
   const openEnableConfirm = useCallback(
     (promo: common_PromoCodeInsert) => {
       const code = promo.code || '';
       setConfirmMessage(`Re-enable promo code "${code}"?`);
       setConfirmAction(() => () => {
         updatePromoMutation.mutate(
-          { originalCode: code, promo: { ...promo, allowed: true } },
+          { ...promo, allowed: true },
           {
             onError: (error) => {
               const message = error instanceof Error ? error.message : 'Promo cannot be enabled';
@@ -136,7 +137,7 @@ export function usePromo() {
   // H8: there was previously no way to fix a typo'd discount or extend an
   // expiration without deleting and recreating the code by hand (losing it from
   // the list momentarily and forcing the operator to re-type everything). This
-  // wraps the same delete+recreate workaround behind an "edit" affordance that
+  // wraps the atomic UpdatePromoCode RPC behind an "edit" affordance that
   // pre-fills the current values.
   const startEdit = useCallback((code: string) => {
     setIsCreating(false);
@@ -146,20 +147,17 @@ export function usePromo() {
   const cancelEdit = useCallback(() => setEditingCode(null), []);
 
   const submitEdit = useCallback(
-    (originalCode: string, data: PromoDraftSchema) => {
-      updatePromoMutation.mutate(
-        { originalCode, promo: toPromoInsert(data) },
-        {
-          onSuccess: () => {
-            showMessage('Promo updated', 'success');
-            setEditingCode(null);
-          },
-          onError: (error) => {
-            const message = error instanceof Error ? error.message : 'Failed to update promo';
-            showMessage(message, 'error');
-          },
+    (data: PromoDraftSchema) => {
+      updatePromoMutation.mutate(toPromoInsert(data), {
+        onSuccess: () => {
+          showMessage('Promo updated', 'success');
+          setEditingCode(null);
         },
-      );
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : 'Failed to update promo';
+          showMessage(message, 'error');
+        },
+      });
     },
     [updatePromoMutation, showMessage],
   );

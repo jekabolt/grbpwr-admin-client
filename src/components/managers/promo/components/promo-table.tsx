@@ -98,8 +98,8 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
               onChange={() => {
                 // H2: this used to unconditionally call disable, even on an
                 // already-disabled code — there was no way back. Now it's a real
-                // two-way toggle (re-enable recreates the code under the hood,
-                // see useUpdatePromo — the backend has no EnablePromoCode RPC).
+                // two-way toggle (re-enable calls the atomic UpdatePromoCode RPC,
+                // see useUpdatePromo).
                 const insert = p.promoCodeInsert;
                 if (!insert) return;
                 isAllowed ? handleDisablePromo(insert.code || '') : handleEnablePromo(insert);
@@ -209,7 +209,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
                     key={code}
                     form={editForm}
                     allowed={!!p.promoCodeInsert?.allowed}
-                    onSubmit={(data) => submitEdit(code, data)}
+                    onSubmit={submitEdit}
                     onCancel={cancelEdit}
                   />
                 );

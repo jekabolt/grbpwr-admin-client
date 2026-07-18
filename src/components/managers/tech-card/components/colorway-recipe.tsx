@@ -1,9 +1,15 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import {
   common_AdminColorwayRef,
+  common_ColorwayDevelopmentInsert,
   common_TechCard,
   common_TechCardColorwayUsage,
+  common_TechCardLabDipStatus,
+  UpdateColorwayRequest,
 } from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
+import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardLabDipStatusOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
@@ -61,7 +67,8 @@ type UsageDraft = {
   sizeRunTotal: string;
 };
 
-// Lab-dip editing state (M8). Local-only — see LabDipEditor for why it isn't persisted yet.
+// Lab-dip editing state (M8). Initialised from the colourway ref's labDip* fields and PERSISTED through
+// UpdateColorway's development submessage under LAB_DIP_UPDATE_MASK — see LabDipEditor.
 type LabDipDraft = {
   labDipStatus: string;
   labDipRound: string;
@@ -70,14 +77,115 @@ type LabDipDraft = {
   labDipDecidedBy: string;
   labDipRejectReason: string;
 };
-const emptyLabDip: LabDipDraft = {
-  labDipStatus: 'TECH_CARD_LAB_DIP_STATUS_PENDING',
-  labDipRound: '',
-  labDipSubmittedAt: '',
-  labDipDecidedAt: '',
-  labDipDecidedBy: '',
-  labDipRejectReason: '',
-};
+
+// UpdateColorway is a field-masked write. This mask lists ONLY the six lab-dip leaves INSIDE `development`,
+// so a save touches exactly those columns and nothing else on the colourway. Everything else in the
+// development submessage (devCode / name / pantone / pantoneSystem / devHex / swatchMediaId / usages /
+// displayOrder) is left intact by the backend even though it is sent undefined here — that subpath mask is
+// precisely what prevents clobbering. It also means no read-merge is needed (and none is possible: no read
+// path returns those dev identity fields). `usages` stays owned by UpdateColorwayRecipe — never sent here.
+const LAB_DIP_UPDATE_MASK = [
+  'development.labDipStatus',
+  'development.labDipRound',
+  'development.labDipSubmittedAt',
+  'development.labDipDecidedAt',
+  'development.labDipDecidedBy',
+  'development.labDipRejectReason',
+].join(',');
+
+// protobuf Timestamp (RFC 3339) <-> <input type="date"> (YYYY-MM-DD). The 0001-01-01 zero value is "unset".
+const ZERO_TS = '0001-01-01T00:00:00Z';
+function tsToDateInput(ts?: string): string {
+  if (!ts || ts.startsWith('0001-01-01')) return '';
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(ts);
+  return m ? m[1] : '';
+}
+function dateInputToTs(v: string): string {
+  if (!v) return ZERO_TS;
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00.000Z` : v;
+}
+
+// Initialise the editor from the colourway ref's mirrored lab-dip fields (techCard.colorways[].labDip*),
+// instead of always starting empty. An UNKNOWN/absent status falls back to PENDING (the editor baseline).
+function fromRefLabDip(cw: common_AdminColorwayRef): LabDipDraft {
+  const status = cw.labDipStatus;
+  return {
+    labDipStatus:
+      status && status !== 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN'
+        ? status
+        : 'TECH_CARD_LAB_DIP_STATUS_PENDING',
+    labDipRound: cw.labDipRound ? String(cw.labDipRound) : '',
+    labDipSubmittedAt: tsToDateInput(cw.labDipSubmittedAt),
+    labDipDecidedAt: tsToDateInput(cw.labDipDecidedAt),
+    labDipDecidedBy: cw.labDipDecidedBy ?? '',
+    labDipRejectReason: cw.labDipRejectReason ?? '',
+  };
+}
+
+// Build the field-masked UpdateColorway request that persists ONLY this colourway's lab-dip state. Every
+// non-lab-dip key is sent undefined AND left out of the mask, so merchandising / media / prices / tags and
+// the rest of `development` are untouched. expected_colorway_version echoes the ref's own lockVersion (the
+// shared tech_card.lock_version) for the optimistic lock.
+function buildLabDipRequest(
+  cw: common_AdminColorwayRef,
+  draft: LabDipDraft,
+  expectedColorwayVersion: number,
+): UpdateColorwayRequest {
+  const development: common_ColorwayDevelopmentInsert = {
+    devCode: undefined,
+    name: undefined,
+    labDipStatus: draft.labDipStatus as common_TechCardLabDipStatus,
+    comment: undefined,
+    pantone: undefined,
+    pantoneSystem: undefined,
+    devHex: undefined,
+    swatchMediaId: undefined,
+    labDipRound: parseInt(draft.labDipRound, 10) || 0,
+    labDipSubmittedAt: dateInputToTs(draft.labDipSubmittedAt),
+    labDipDecidedAt: dateInputToTs(draft.labDipDecidedAt),
+    labDipDecidedBy: draft.labDipDecidedBy.trim(),
+    // Only meaningful when rejected; cleared otherwise so a stale reason never lingers.
+    labDipRejectReason: draft.labDipStatus === REJECTED ? draft.labDipRejectReason.trim() : '',
+    usages: undefined, // recipe is owned by UpdateColorwayRecipe — never write it through here.
+    displayOrder: undefined,
+  };
+  return {
+    colorwayId: cw.colorwayId ?? 0,
+    expectedColorwayVersion,
+    merchandising: undefined,
+    development,
+    mediaIds: undefined,
+    tags: undefined,
+    prices: undefined,
+    updateMask: LAB_DIP_UPDATE_MASK,
+    thumbnailMediaId: undefined,
+    secondaryThumbnailMediaId: undefined,
+    costPrice: undefined,
+    countryCode: undefined,
+    translations: undefined,
+  };
+}
+
+const labDipStatusLabel = new Map<common_TechCardLabDipStatus, string>(
+  techCardLabDipStatusOptions.map((o) => [o.value, o.label]),
+);
+
+function labDipSaveErrorMessage(e: unknown): string {
+  const status = (e as { status?: number } | undefined)?.status;
+  if (status === 409)
+    return 'This colourway changed since you loaded it — its lab-dip state was reloaded, re-apply your change.';
+  return e instanceof Error ? e.message : 'Failed to save lab-dip';
+}
+
+// Lab-dip write: UpdateColorway under the subpath mask above. Mirrors useUpdateColorwayRecipe — invalidate
+// the tech-card detail so techCard.colorways[].labDip* (and each ref's lockVersion) refresh after a save.
+function useUpdateColorwayLabDip(techCardId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: UpdateColorwayRequest) => adminService.UpdateColorway(req),
+    onSuccess: () => qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
+  });
+}
 
 function measured(section?: string): boolean {
   return !section || MEASURED_SECTIONS.has(section);
@@ -478,17 +586,64 @@ function UsageRowEditor({
   );
 }
 
-// Lab-dip approval lifecycle (M8). BACKEND GAP: the tech-card read model (AdminColorwayRef) exposes
-// NO lab-dip fields, and the write RPC (UpdateColorway.development) needs the colourway's own
-// lockVersion (also absent from AdminColorwayRef) + is a shared submessage that also carries the
-// recipe usages / merch dev fields, so a blind write would clobber them. Until the backend surfaces
-// lab-dip on the read path (and a safe, field-masked write keyed by a readable version), this editor
-// is LOCAL-ONLY — it is wired as far as it safely can be, and clearly flagged as non-persistent so no
-// one mistakes it for saved. See report for the exact backend requirements.
-function LabDipEditor({ canEdit }: { canEdit: boolean }) {
+// Lab-dip approval lifecycle (M8). PERSISTED: the tech-card read model (AdminColorwayRef) now mirrors the
+// colourway's lab-dip fields + its lockVersion, and the write goes through UpdateColorway's `development`
+// submessage under LAB_DIP_UPDATE_MASK — a field mask that names ONLY the six lab-dip leaves. That subpath
+// mask is what keeps the rest of `development` (devCode / name / pantone / devHex / swatch / usages) intact,
+// so no read-merge is needed (and none is possible — no read path returns those dev identity fields). The
+// editor initialises from the ref, re-syncs on refetch while clean, and handles the 409 lock conflict.
+function LabDipEditor({
+  colorway,
+  techCardId,
+  lockVersion,
+  canEdit,
+}: {
+  colorway: common_AdminColorwayRef;
+  techCardId: number;
+  lockVersion: number;
+  canEdit: boolean;
+}) {
+  const { showMessage } = useSnackBarStore();
+  const qc = useQueryClient();
+  const save = useUpdateColorwayLabDip(techCardId);
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<LabDipDraft>(emptyLabDip);
-  const set = (patch: Partial<LabDipDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const [dirty, setDirty] = useState(false);
+  // Initialise from the ref's labDip* fields; re-sync after a save's refetch unless there are unsaved edits
+  // (mirrors the usages editor above).
+  const [draft, setDraft] = useState<LabDipDraft>(() => fromRefLabDip(colorway));
+  useEffect(() => {
+    if (dirty) return;
+    setDraft(fromRefLabDip(colorway));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    colorway.labDipStatus,
+    colorway.labDipRound,
+    colorway.labDipSubmittedAt,
+    colorway.labDipDecidedAt,
+    colorway.labDipDecidedBy,
+    colorway.labDipRejectReason,
+    dirty,
+  ]);
+  const set = (patch: Partial<LabDipDraft>) => {
+    setDirty(true);
+    setDraft((d) => ({ ...d, ...patch }));
+  };
+
+  const submit = () => {
+    save.mutate(buildLabDipRequest(colorway, draft, colorway.lockVersion ?? lockVersion), {
+      onSuccess: () => {
+        setDirty(false);
+        showMessage('Lab-dip saved', 'success');
+      },
+      onError: (e) => {
+        // 409 = stale optimistic lock: refetch so the ref (and its lockVersion) refresh; the operator then
+        // re-applies the edit against the fresh version.
+        if ((e as { status?: number })?.status === 409)
+          qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+        showMessage(labDipSaveErrorMessage(e), 'error');
+      },
+    });
+  };
 
   return (
     <div className='border-t border-textInactiveColor pt-3'>
@@ -501,17 +656,13 @@ function LabDipEditor({ canEdit }: { canEdit: boolean }) {
           {open ? '▾' : '▸'} lab-dip
         </Text>
         <Text variant='inactive' size='small'>
-          not persisted yet
+          {dirty
+            ? 'unsaved'
+            : labDipStatusLabel.get(draft.labDipStatus as common_TechCardLabDipStatus) ?? '—'}
         </Text>
       </button>
       {open && (
         <div className='mt-3 flex flex-col gap-3'>
-          <div className='border border-warning bg-highlightColor/10 p-2'>
-            <Text size='small' className='text-warning'>
-              Lab-dip approval is not saved yet — the tech-card read model exposes no lab-dip fields
-              to load or persist against (backend gap). Edits here are local only.
-            </Text>
-          </div>
           <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
             <label className='flex flex-col gap-1'>
               <Text size='small'>status</Text>
@@ -581,6 +732,21 @@ function LabDipEditor({ canEdit }: { canEdit: boolean }) {
                 onChange={(e) => set({ labDipRejectReason: e.target.value })}
               />
             </label>
+          )}
+          {canEdit && (
+            <div className='flex items-center justify-end'>
+              <Button
+                type='button'
+                variant='main'
+                size='lg'
+                className='uppercase'
+                disabled={save.isPending || !dirty}
+                loading={save.isPending}
+                onClick={submit}
+              >
+                save lab-dip
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -773,7 +939,12 @@ function ColorwayRecipeEditor({
             </div>
           )}
 
-          <LabDipEditor canEdit={canEdit} />
+          <LabDipEditor
+            colorway={colorway}
+            techCardId={techCardId}
+            lockVersion={lockVersion}
+            canEdit={canEdit}
+          />
 
           {canEdit && (
             <div className='flex items-center justify-between'>
