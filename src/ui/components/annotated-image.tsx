@@ -1,5 +1,6 @@
 'use client';
 
+import * as Dialog from '@radix-ui/react-dialog';
 import * as Popover from '@radix-ui/react-popover';
 import { cn } from 'lib/utility';
 import {
@@ -360,29 +361,68 @@ export type AnnotatedImageProps = {
   cornerSlot?: ReactNode;
 };
 
-export function AnnotatedImage({
+// ---------------------------------------------------------------------------
+// Stage — the interactive image surface: the picture, its pins + notes, click-to-add, and (only
+// when `zoom`) wheel/drag/pinch zoom + pan. AnnotatedImage renders it twice: inline as a PASSIVE
+// tile (zoom OFF — the page scrolls normally over it and a plain view-mode click opens the
+// enlarged view) and inside the enlarged dialog (zoom ON — every pan/zoom gesture lives here, so
+// the inline grid can never hijack the wheel).
+// ---------------------------------------------------------------------------
+
+type StageProps = {
+  src: string;
+  alt: string;
+  type: 'image' | 'video';
+  aspectRatio: string;
+  /** Sizing utilities for the frame (the inline tile fills its cell; the enlarged frame is
+   *  capped to the viewport via `frameStyle`). */
+  frameClassName?: string;
+  frameStyle?: React.CSSProperties;
+  callouts: AnnotatedCallout[];
+  renderNote: (key: string, opts: { close: () => void }) => ReactNode;
+  noteTitle?: (key: string) => string | undefined;
+  editable: boolean;
+  addMode: boolean;
+  onAdd?: (xNorm: number, yNorm: number) => void;
+  onMove?: (key: string, xNorm: number, yNorm: number) => void;
+  onRemove?: (key: string) => void;
+  /** Wheel/drag/pinch zoom + pan active — the enlarged view only. */
+  zoom: boolean;
+  /** Render every note inline instead of a hover Popover. */
+  showAll: boolean;
+  pinSize: keyof typeof pinSizes;
+  cornerSlot?: ReactNode;
+  /** A plain (non-drag) click on empty canvas in VIEW mode. The inline tile passes this to open
+   *  the enlarged view; the enlarged view leaves it undefined so a plain click there does
+   *  nothing (pan/zoom is the only background gesture). */
+  onBackgroundView?: () => void;
+};
+
+function Stage({
   src,
   alt,
-  type = 'image',
-  aspectRatio = '4/5',
-  className,
+  type,
+  aspectRatio,
+  frameClassName,
+  frameStyle,
   callouts,
   renderNote,
   noteTitle,
-  editable = false,
-  addMode = false,
+  editable,
+  addMode,
   onAdd,
   onMove,
   onRemove,
-  zoomable = false,
-  notesMode = 'hover',
-  showAllNotes = false,
-  pinSize = 'md',
+  zoom,
+  showAll,
+  pinSize,
   cornerSlot,
-}: AnnotatedImageProps) {
+  onBackgroundView,
+}: StageProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  // Zoom/pan: refs hold live values for event handlers, mirrored to state to drive renders.
+  // Zoom/pan: refs hold live values for event handlers, mirrored to state to drive renders. With
+  // `zoom` off these never change (scale 1, no pan) — the tile is a flat, passive picture.
   const scaleRef = useRef(1);
   const posRef = useRef({ x: 0, y: 0 });
   const [scale, setScaleState] = useState(1);
@@ -402,8 +442,7 @@ export function AnnotatedImage({
   const dragPosRef = useRef<{ x: number; y: number } | null>(null);
   const [dragState, setDragState] = useState<{ key: string; x: number; y: number } | null>(null);
 
-  const isZoomed = scale > 1;
-  const showAll = notesMode === 'auto' && (showAllNotes || isZoomed);
+  const isZoomed = zoom && scale > 1;
 
   // Screen point -> normalised 0..1, undoing the current pan/zoom so a pin lands on the right
   // spot no matter how the frame is transformed.
@@ -452,10 +491,12 @@ export function AnnotatedImage({
     setPos({ x: 0, y: 0 });
   }, []);
 
-  // Wheel-zoom needs a non-passive listener so preventDefault stops the page scrolling.
+  // Wheel-zoom needs a non-passive listener so preventDefault stops the page scrolling. Attached
+  // ONLY in the enlarged view (`zoom`): inline tiles must never capture the wheel, so scrolling
+  // the page over a grid of sketches scrolls the page instead of zooming a thumbnail.
   useEffect(() => {
     const el = wrapRef.current;
-    if (!el || !zoomable) return;
+    if (!el || !zoom) return;
     function onWheel(e: WheelEvent) {
       if (e.deltaY === 0) return;
       e.preventDefault();
@@ -463,9 +504,11 @@ export function AnnotatedImage({
     }
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomable, zoomAt]);
+  }, [zoom, zoomAt]);
 
-  // Pin drag uses window listeners so a fast drag that leaves the frame still tracks.
+  // Pin drag uses window listeners so a fast drag that leaves the frame still tracks. Each Stage
+  // guards on its own `dragRef`, so the inline + enlarged instances never process each other's
+  // drag.
   useEffect(() => {
     function move(e: PointerEvent) {
       const d = dragRef.current;
@@ -500,8 +543,10 @@ export function AnnotatedImage({
     setDragState({ key, ...p });
   }
 
-  // Background gesture: drag-to-pan when zoomed; a press that barely moves is a click (adds a
-  // pin in add-mode, otherwise a no-op). Two pointers pinch-zoom.
+  // Background gesture. A press that barely moves is a click: in add-mode it drops a pin, in
+  // view-mode it opens the enlarged view (inline) or does nothing (already enlarged). With `zoom`
+  // on, a moved single pointer pans and two pointers pinch-zoom; with it off the press is only
+  // ever a click, so touch scrolling over the tile is left to the browser.
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchRef = useRef<{ prevDist: number } | null>(null);
   const panRef = useRef<{
@@ -514,9 +559,9 @@ export function AnnotatedImage({
   } | null>(null);
 
   function handlePointerDown(e: ReactPointerEvent) {
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    if (zoom) (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pointersRef.current.size === 2) {
+    if (zoom && pointersRef.current.size === 2) {
       panRef.current = null;
       const [a, b] = Array.from(pointersRef.current.values());
       if (a && b) pinchRef.current = { prevDist: Math.hypot(a.x - b.x, a.y - b.y) };
@@ -536,11 +581,11 @@ export function AnnotatedImage({
   function handlePointerMove(e: ReactPointerEvent) {
     if (!pointersRef.current.has(e.pointerId)) return;
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pointersRef.current.size === 2 && pinchRef.current) {
+    if (zoom && pointersRef.current.size === 2 && pinchRef.current) {
       const [a, b] = Array.from(pointersRef.current.values());
       if (!a || !b) return;
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      if (pinchRef.current.prevDist > 0 && zoomable) {
+      if (pinchRef.current.prevDist > 0) {
         zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, dist / pinchRef.current.prevDist);
       }
       pinchRef.current.prevDist = dist;
@@ -552,9 +597,9 @@ export function AnnotatedImage({
     const dy = e.clientY - p.startClientY;
     if (!p.moved && Math.hypot(dx, dy) > CLICK_MOVE_THRESHOLD) {
       p.moved = true;
-      if (zoomable && scaleRef.current > 1) setIsPanning(true);
+      if (zoom && scaleRef.current > 1) setIsPanning(true);
     }
-    if (p.moved && zoomable && scaleRef.current > 1) {
+    if (p.moved && zoom && scaleRef.current > 1) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
       setPos(
@@ -574,98 +619,223 @@ export function AnnotatedImage({
 
   function handlePointerUp(e: ReactPointerEvent) {
     const p = panRef.current;
-    const isPan = p?.pointerId === e.pointerId;
+    const isPress = p?.pointerId === e.pointerId;
     resetPointer(e);
-    if (isPan && p && !p.moved && addMode && onAdd) {
+    if (!isPress || !p || p.moved) return;
+    if (addMode && onAdd) {
       const { x, y } = coords(e.clientX, e.clientY);
       onAdd(x, y);
+    } else if (onBackgroundView) {
+      onBackgroundView();
     }
   }
 
   const cursorClass = addMode
     ? 'cursor-crosshair'
-    : zoomable
-      ? isZoomed
-        ? isPanning
-          ? 'cursor-grabbing'
-          : 'cursor-grab'
-        : 'cursor-zoom-in'
-      : 'cursor-default';
+    : isZoomed
+      ? isPanning
+        ? 'cursor-grabbing'
+        : 'cursor-grab'
+      : onBackgroundView
+        ? 'cursor-zoom-in'
+        : 'cursor-default';
+
+  return (
+    <div
+      ref={wrapRef}
+      className={cn(
+        'relative select-none overflow-hidden border border-textInactiveColor',
+        zoom && 'touch-none',
+        frameClassName,
+        cursorClass,
+      )}
+      style={{ aspectRatio, ...frameStyle }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={resetPointer}
+    >
+      <div
+        className='absolute inset-0'
+        style={{ transform: `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${scale})` }}
+      >
+        {type === 'video' ? (
+          <video
+            src={src}
+            className='absolute inset-0 h-full w-full object-cover'
+            muted
+            loop
+            playsInline
+          />
+        ) : (
+          <img
+            src={src}
+            alt={alt}
+            className='absolute inset-0 h-full w-full object-cover'
+            draggable={false}
+          />
+        )}
+
+        {callouts.map((c) => {
+          if (Number.isNaN(c.xNorm) || Number.isNaN(c.yNorm)) return null;
+          return (
+            <ImageCallout
+              key={c.key}
+              data={c}
+              title={noteTitle?.(c.key)}
+              scale={scale}
+              showAll={showAll}
+              editable={editable}
+              pinSize={pinSize}
+              dragging={dragState?.key === c.key}
+              dragPos={dragState}
+              onPinPointerDown={(e) => startPinDrag(c.key, e)}
+              onRemove={() => onRemove?.(c.key)}
+              renderNote={(opts) => renderNote(c.key, opts)}
+            />
+          );
+        })}
+      </div>
+
+      {zoom && isZoomed && (
+        <button
+          type='button'
+          aria-label='reset zoom'
+          title='reset zoom'
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            resetZoom();
+          }}
+          className='absolute bottom-1 left-1 z-[4] cursor-pointer border border-textInactiveColor bg-bgColor px-1 text-textBaseSize leading-none tabular-nums hover:bg-textColor hover:text-bgColor'
+        >
+          {Math.round(scale * 100)}%
+        </button>
+      )}
+
+      {cornerSlot && <div className='absolute right-1 top-1 z-[4]'>{cornerSlot}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AnnotatedImage — a passive inline tile (pins + hover notes; in add-mode a click drops a pin at
+// the normalised click position) that opens a dedicated enlarged/zoom dialog on a plain view-mode
+// click. All wheel/pinch/drag zoom + pan lives inside that dialog, never on the inline grid — so
+// scrolling the page over a tile scrolls the page.
+// ---------------------------------------------------------------------------
+
+export function AnnotatedImage({
+  src,
+  alt,
+  type = 'image',
+  aspectRatio = '4/5',
+  className,
+  callouts,
+  renderNote,
+  noteTitle,
+  editable = false,
+  addMode = false,
+  onAdd,
+  onMove,
+  onRemove,
+  zoomable = false,
+  notesMode = 'hover',
+  showAllNotes = false,
+  pinSize = 'md',
+  cornerSlot,
+}: AnnotatedImageProps) {
+  const [enlarged, setEnlarged] = useState(false);
+
+  // Inline tiles never zoom, so nothing implies "show all" there but the explicit toggle. The
+  // enlarged view is the read-everything surface: it lays every note out at once (and they track
+  // its zoom), keeping the "hover peek / zoom shows all" grammar.
+  const inlineShowAll = notesMode === 'auto' && showAllNotes;
+
+  // A plain view-mode click opens the enlarged/zoom view; in add-mode the same click drops a pin,
+  // so the two never fight. Only meaningful when the surface is zoomable.
+  const openEnlarged = zoomable && !addMode ? () => setEnlarged(true) : undefined;
+
+  // The enlarged frame keeps the media's own aspect ratio while fitting inside the viewport:
+  // width is the smaller of the available width and (available height × ratio), so height can
+  // never overflow and the picture is never distorted.
+  const arNum = (() => {
+    const [a, b] = aspectRatio.split('/').map(Number);
+    return a && b ? a / b : 0.8;
+  })();
+
+  const shared = {
+    src,
+    alt,
+    type,
+    aspectRatio,
+    callouts,
+    renderNote,
+    noteTitle,
+    editable,
+    addMode,
+    onAdd,
+    onMove,
+    onRemove,
+    pinSize,
+  } as const;
 
   return (
     <div className={cn('relative select-none', className)}>
-      <div
-        ref={wrapRef}
-        className={cn(
-          'relative w-full touch-none overflow-hidden border border-textInactiveColor',
-          cursorClass,
-        )}
-        style={{ aspectRatio }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={resetPointer}
-      >
-        <div
-          className='absolute inset-0'
-          style={{ transform: `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${scale})` }}
-        >
-          {type === 'video' ? (
-            <video
-              src={src}
-              className='absolute inset-0 h-full w-full object-cover'
-              muted
-              loop
-              playsInline
-            />
-          ) : (
-            <img
-              src={src}
-              alt={alt}
-              className='absolute inset-0 h-full w-full object-cover'
-              draggable={false}
-            />
-          )}
+      <Stage
+        {...shared}
+        zoom={false}
+        showAll={inlineShowAll}
+        frameClassName='w-full'
+        cornerSlot={cornerSlot}
+        onBackgroundView={openEnlarged}
+      />
 
-          {callouts.map((c) => {
-            if (Number.isNaN(c.xNorm) || Number.isNaN(c.yNorm)) return null;
-            return (
-              <ImageCallout
-                key={c.key}
-                data={c}
-                title={noteTitle?.(c.key)}
-                scale={scale}
-                showAll={showAll}
-                editable={editable}
-                pinSize={pinSize}
-                dragging={dragState?.key === c.key}
-                dragPos={dragState}
-                onPinPointerDown={(e) => startPinDrag(c.key, e)}
-                onRemove={() => onRemove?.(c.key)}
-                renderNote={(opts) => renderNote(c.key, opts)}
-              />
-            );
-          })}
-        </div>
+      {zoomable && (
+        <Dialog.Root open={enlarged} onOpenChange={setEnlarged}>
+          <Dialog.Portal>
+            <Dialog.Overlay className='media-viewer-overlay fixed inset-0 z-[var(--z-modal)] bg-overlay' />
+            <Dialog.Content
+              aria-label={`${alt} — enlarged`}
+              className='media-viewer-content fixed inset-0 z-[var(--z-modal)] flex flex-col bg-bgColor text-textColor focus:outline-none'
+            >
+              <Dialog.Title className='sr-only'>{alt}</Dialog.Title>
+              <Dialog.Description className='sr-only'>
+                Enlarged view. Scroll or pinch to zoom, drag to pan; hover a pin to read its note.
+              </Dialog.Description>
 
-        {zoomable && isZoomed && (
-          <button
-            type='button'
-            aria-label='reset zoom'
-            title='reset zoom'
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              resetZoom();
-            }}
-            className='absolute bottom-1 left-1 z-[4] cursor-pointer border border-textInactiveColor bg-bgColor px-1 text-textBaseSize leading-none tabular-nums hover:bg-textColor hover:text-bgColor'
-          >
-            {Math.round(scale * 100)}%
-          </button>
-        )}
+              <div className='flex shrink-0 items-center justify-between gap-4 border-b border-textInactiveColor px-3 py-2'>
+                <Text variant='label' size='small' className='truncate uppercase'>
+                  {alt}
+                </Text>
+                <Dialog.Close
+                  aria-label='close enlarged view'
+                  className='shrink-0 cursor-pointer border border-textInactiveColor px-2 py-0.5 text-textBaseSize uppercase leading-none hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                >
+                  close [x]
+                </Dialog.Close>
+              </div>
 
-        {cornerSlot && <div className='absolute right-1 top-1 z-[4]'>{cornerSlot}</div>}
-      </div>
+              {/* Clicking the empty ground around the picture closes; clicks land on this box
+                  itself only when they miss the framed image. */}
+              <div
+                className='flex min-h-0 flex-1 items-center justify-center p-2 sm:p-4'
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) setEnlarged(false);
+                }}
+              >
+                <Stage
+                  {...shared}
+                  zoom
+                  showAll
+                  frameClassName='max-w-full'
+                  frameStyle={{ width: `min(95%, calc((100dvh - 6rem) * ${arNum}))` }}
+                />
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
     </div>
   );
 }

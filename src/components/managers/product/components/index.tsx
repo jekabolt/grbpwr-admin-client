@@ -3,10 +3,10 @@ import { adminService } from 'api/api';
 import { common_ColorwayFull, ColorwayCostInfo } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
-import { ProductCustomsSection } from './customs/customs-section';
+import { ProductCustomsSection, type ProductCustomsHandle } from './customs/customs-section';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
 import { generatePath, Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -51,6 +51,9 @@ export function ProductForm({
   const editMode = isEditMode || isAddingProduct;
   const navigate = useNavigate();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
+  // Lets the main Save flush a dirty customs block (its country of origin is entered once in Details
+  // and must stay in sync with the shipping-label customs record) — see handleSubmit.
+  const customsRef = useRef<ProductCustomsHandle>(null);
 
   const initialValues =
     product && (!isAddingProduct || isCopyMode) ? mapProductFullToFormData(product) : defaultData;
@@ -119,9 +122,24 @@ export function ProductForm({
         updateMask: buildColorwayUpdateMask(data),
         ...common,
       });
+      // Country of origin is entered once in Details and persisted down TWO paths: merchandising +
+      // top-level countryCode (via UpdateColorway above) and the separate customs record (its own
+      // SetColorwayCustoms RPC, used for international shipping labels). The customs block has its own
+      // Save an operator can forget now that the input is merged into one — so the main Save flushes
+      // it here when it is dirty, using the same shared country. Non-fatal: a customs failure must
+      // never undo the colourway save, so it is caught and surfaced as its own toast.
+      let customsFlushError: string | null = null;
+      try {
+        await customsRef.current?.flushIfDirty();
+      } catch (customsErr) {
+        customsFlushError = customsErr instanceof Error ? customsErr.message : 'unknown error';
+      }
       setIsFormChanged(false);
       form.reset(data, { keepValues: true });
       showMessage('Colourway updated', 'success');
+      if (customsFlushError) {
+        showMessage(`Colourway saved, but customs didn't update: ${customsFlushError}`, 'error');
+      }
       onEditModeChange(false);
       onStockUpdated?.();
     } catch (e) {
@@ -329,6 +347,7 @@ export function ProductForm({
         {productId && !isCopyMode && (
           <Section title='customs' id='sec-customs'>
             <ProductCustomsSection
+              ref={customsRef}
               productId={Number(productId)}
               canWrite={canWrite(SECTION.products)}
               isLive={product?.colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE'}

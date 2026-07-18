@@ -215,6 +215,16 @@ export function SizeMeasurements({
           onChanged={onStockUpdated}
         />
       )}
+      {/* On a new product there is no colourway yet for sellable sizes / stock to attach to
+          (VariantsPanel is gated on productId). Cue the operator that they come after the first
+          save, so the collapsed read-only chart below doesn't read as the whole story. */}
+      {editMode && productId == null && (
+        <div className='border border-textInactiveColor px-2 py-1'>
+          <Text variant='label' size='small'>
+            save the product first, then add sellable sizes & stock
+          </Text>
+        </div>
+      )}
       {/* The size chart and its stock are read-only here — the chart is style-owned (tech card) and
           stock is managed per-variant in the sellable-sizes panel above. Collapsed by default so the
           Variants panel is the primary size surface; expand to review the full chart. */}

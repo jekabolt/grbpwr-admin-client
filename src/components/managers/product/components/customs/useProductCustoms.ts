@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { ColorwayCustoms } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
 
 // Colourway customs data — an independent panel with its own Get/SetColorwayCustoms RPCs, separate
 // from the main colourway save. Needed to build international (non-EU) shipping labels: the backend
@@ -35,9 +34,12 @@ export function useProductCustoms(productId: number) {
   });
 }
 
+// Toast-free on purpose: this mutation is driven from two call sites with different feedback — the
+// standalone "save customs" button (its own success/error toast) and the main colourway Save, which
+// flushes a dirty customs block and reports a *non-fatal* failure so it can't revert the save. Each
+// caller owns its message; cache invalidation stays here because it is always correct.
 export function useSetProductCustoms(productId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (form: CustomsForm) => {
       const customs: ColorwayCustoms = {
@@ -49,8 +51,6 @@ export function useSetProductCustoms(productId: number) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customsKey(productId) });
-      showMessage('Customs data saved', 'success');
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save customs', 'error'),
   });
 }

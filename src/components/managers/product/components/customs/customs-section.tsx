@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useSnackBarStore } from 'lib/stores/store';
+import { useEffect, useImperativeHandle, useState, type Ref } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
@@ -10,6 +11,15 @@ import {
   useSetProductCustoms,
 } from './useProductCustoms';
 
+// Imperative handle so the main colourway Save can flush a dirty customs block (its country of
+// origin is entered once in Details and must not drift from the shipping-label customs record).
+export type ProductCustomsHandle = {
+  // Persist the customs block when it is dirty AND valid. Resolves on success or when there is
+  // nothing to flush; REJECTS when SetColorwayCustoms fails so the caller can show a non-fatal
+  // message without reverting the (already-succeeded) colourway save.
+  flushIfDirty: () => Promise<void>;
+};
+
 // Self-contained customs editor for one product — loads and saves via its own RPCs,
 // independent of the main product form's edit/save. HS code + country of origin are
 // required for international (non-EU) shipping labels.
@@ -17,15 +27,19 @@ export function ProductCustomsSection({
   productId,
   canWrite,
   isLive = false,
+  ref,
 }: {
   productId: number;
   canWrite: boolean;
   // Whether the colourway is live on the storefront — an incomplete-customs warning is escalated for
   // a live product (its international labels will actually be rejected).
   isLive?: boolean;
+  // Lets the parent (main colourway Save) flush this block imperatively — see ProductCustomsHandle.
+  ref?: Ref<ProductCustomsHandle>;
 }) {
   const { data, isLoading, isError, refetch } = useProductCustoms(productId);
   const save = useSetProductCustoms(productId);
+  const { showMessage } = useSnackBarStore();
 
   // Country of origin is a single fact, shared with the product's merchandising country. It is entered
   // ONCE in Details (the country picker) and read from the shared form here, so customs and merch can
@@ -62,8 +76,31 @@ export function ProductCustomsSection({
 
   function onSave() {
     if (!dirty || save.isPending) return;
-    save.mutate(outgoing, { onSuccess: () => setBaseline(outgoing) });
+    save.mutate(outgoing, {
+      onSuccess: () => {
+        setBaseline(outgoing);
+        showMessage('Customs data saved', 'success');
+      },
+      onError: (e) =>
+        showMessage(e instanceof Error ? e.message : 'Failed to save customs', 'error'),
+    });
   }
+
+  // Flush path for the main colourway Save. Skip when there is nothing to persist, when required
+  // fields are missing (the inline warning already nudges — don't fire a doomed write on every
+  // save), or when a save is already running. Reuses `save` but WITHOUT its own toast so the caller
+  // owns the message; rejects on failure so the caller can keep it non-fatal.
+  useImperativeHandle(
+    ref,
+    () => ({
+      async flushIfDirty() {
+        if (!dirty || missingRequired || save.isPending) return;
+        await save.mutateAsync(outgoing);
+        setBaseline(outgoing);
+      },
+    }),
+    [dirty, missingRequired, outgoing, save],
+  );
 
   if (isLoading) {
     return (
