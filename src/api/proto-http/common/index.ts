@@ -648,6 +648,7 @@ export type FilterConditions = {
   seasons: SeasonEnum[] | undefined;
   excludeTopCategoryIds: number[] | undefined;
   colorCodes: string[] | undefined;
+  exclusive: boolean | undefined;
 };
 
 export type PaymentMethodNameEnum =
@@ -2790,6 +2791,11 @@ export type ProductionRunInsert = {
   markerEfficiencyPct: googletype_Decimal | undefined;
   markerNotes: string | undefined;
   markers: ProductionRunMarker[] | undefined;
+  // Run ACTUAL cutting wastage % (0..100), entered per run once the marker/lay is known. When set it
+  // OVERRIDES the BOM line's estimate wastage_percent in the run's cost calc (planned-cost snapshot +
+  // material plan); unset falls back to the BOM estimate. Refines the plan side only — the run's ACTUAL
+  // cost still derives from real material issues.
+  actualWastagePercent: googletype_Decimal | undefined;
 };
 
 // ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen

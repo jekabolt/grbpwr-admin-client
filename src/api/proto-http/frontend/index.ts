@@ -774,6 +774,13 @@ export type StorefrontColorway = {
   colorCode: string | undefined;
   soldOut: boolean | undefined;
   status: common_ColorwayLifecycleStatus | undefined;
+  // locked is TRUE when the requesting viewer's loyalty tier does not satisfy required_tier: the
+  // colourway is shown as a locked teaser (fully renderable) but cannot be purchased (the purchase
+  // block is enforced server-side on the order path). FALSE for viewers who qualify.
+  locked: boolean | undefined;
+  // required_tier is the minimum loyalty tier code required to purchase (0=member, 1=plus,
+  // 2=plus_plus, 99=hacker/invite-only). 0 for ordinary, ungated products.
+  requiredTier: number | undefined;
 };
 
 export type StorefrontColorwayDisplay = {
@@ -871,6 +878,7 @@ export type common_FilterConditions = {
   seasons: common_SeasonEnum[] | undefined;
   excludeTopCategoryIds: number[] | undefined;
   colorCodes: string[] | undefined;
+  exclusive: boolean | undefined;
 };
 
 export type GetColorwaysPagedResponse = {
@@ -1692,6 +1700,9 @@ export function createFrontendServiceClient(
         request.filterConditions.colorCodes.forEach((x) => {
           queryParams.push(`filterConditions.colorCodes=${encodeURIComponent(x.toString())}`)
         })
+      }
+      if (request.filterConditions?.exclusive) {
+        queryParams.push(`filterConditions.exclusive=${encodeURIComponent(request.filterConditions.exclusive.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {

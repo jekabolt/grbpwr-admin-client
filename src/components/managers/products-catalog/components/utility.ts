@@ -125,6 +125,8 @@ export function getProductPagedParans({
       collections: collections ? collections.split(',') : undefined,
       currency: currency ? currency : undefined,
       seasons: undefined,
+      // storefront-only tier-gated filter; unused in admin catalog.
+      exclusive: undefined,
     },
     // R6/§14.6: show_hidden is replaced by an explicit lifecycle-status filter. The `status` filter
     // (all/active/hidden/archived) is the source of truth; the legacy `hidden`/`archived` params are
