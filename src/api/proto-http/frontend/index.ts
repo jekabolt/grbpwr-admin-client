@@ -1019,6 +1019,12 @@ export type common_Shipment = {
   shippingDate: wellKnownTimestamp | undefined;
   estimatedArrivalDate: wellKnownTimestamp | undefined;
   freeShipping: boolean | undefined;
+  // actual_cost is the real carrier invoice for this shipment (EUR), distinct from cost
+  // (the price charged to the customer). NULL until an operator enters it.
+  actualCost: googletype_Decimal | undefined;
+  // return_shipping_cost is the reverse-logistics cost of a return (EUR), NULL when the
+  // order was not returned.
+  returnShippingCost: googletype_Decimal | undefined;
 };
 
 // PromoCode represents the promo_code table

@@ -2,8 +2,11 @@ import {
   common_CompositionEntry,
   common_Material,
   common_MaterialClass,
+  common_MaterialPurpose,
+  common_MediaFull,
   common_TechCardBomSection,
 } from 'api/proto-http/admin';
+import { MediaPreviewWithSelector } from 'components/managers/media/components/media-preview-with-selector';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -14,6 +17,8 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { fieldErrorSummary } from 'utils/field-errors';
+import { mediaThumbUrl } from './material-thumb';
+import { materialPurposeOptions, resolveMaterialPurpose } from './purpose-options';
 import { useSaveMaterial } from './useMaterials';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
@@ -309,9 +314,12 @@ export function MaterialModal({
   // #51: warehouse block is progressive-disclosure — collapsed on the common "just log a material"
   // create path, auto-expanded when editing a material that already carries warehouse data.
   const [warehouseOpen, setWarehouseOpen] = useState(false);
-  // #40: sample-vs-production usage tag. No proto field carries it yet (backend gap — see report),
-  // so this is an affordance only: it is not persisted and resets to `production` each open.
-  const [usage, setUsage] = useState<'production' | 'sample'>('production');
+  // #40: sample vs production vs both — persisted via common_Material.purpose.
+  const [purpose, setPurpose] = useState<common_MaterialPurpose>('MATERIAL_PURPOSE_BOTH');
+  // #39: catalog image. image_id is the write-side reference; image is kept alongside it purely
+  // for an immediate preview after picking (no round-trip needed to see the new thumbnail).
+  const [imageId, setImageId] = useState(0);
+  const [image, setImage] = useState<common_MediaFull | undefined>(undefined);
 
   useEffect(() => {
     if (!open) return;
@@ -324,9 +332,22 @@ export function MaterialModal({
         };
     setD(next);
     setCodeOverride(false);
-    setUsage('production');
+    setPurpose(resolveMaterialPurpose(material?.purpose));
+    setImageId(material?.imageId ?? 0);
+    setImage(material?.image);
     setWarehouseOpen(!!(next.code || next.color || next.pantone || next.minStock || next.notes));
   }, [material, open, defaultSection]);
+
+  const handleSetImage = (media: common_MediaFull[]) => {
+    const m = media[0];
+    if (!m) return;
+    setImageId(m.id ?? 0);
+    setImage(m);
+  };
+  const clearImage = () => {
+    setImageId(0);
+    setImage(undefined);
+  };
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
   const setFabric = (patch: Partial<FabricDraft>) =>
@@ -482,6 +503,11 @@ export function MaterialModal({
       fabricWeightGsm: undefined,
       archived: material?.archived ?? false,
       latestPrice: undefined,
+      // Catalog image (#39): image_id is the write-side reference; `image` itself is read-only
+      // (server-resolved from image_id, like latest_price is resolved from AddMaterialPrice) —
+      // never sent back.
+      imageId,
+      image: undefined,
       materialClass: d.materialClass,
       fabricAttrs:
         d.materialClass === 'MATERIAL_CLASS_FABRIC'
@@ -531,6 +557,8 @@ export function MaterialModal({
       // #37: structured fibre composition — resolves the missing-field type error and feeds label
       // generation. Only fiber_code + percent are read on write (name resolved server-side).
       compositionEntries,
+      // #40: sample vs production vs both, from the segmented control below.
+      purpose,
     };
     save.mutate(payload, {
       onSuccess: (data) => {
@@ -563,6 +591,23 @@ export function MaterialModal({
       <div className='flex w-full flex-col gap-3 lg:w-[36rem]'>
         {/* ---- IDENTITY -------------------------------------------------------------------- */}
         <SectionHeader title='identity' />
+        {/* #39: catalog image — image_id is the write-side ref; MediaSelector handles upload +
+            crop (reused as-is from the product/archive thumbnail pattern). */}
+        <div className='flex flex-col gap-1'>
+          <Text size='small'>image</Text>
+          <MediaPreviewWithSelector
+            mediaUrl={mediaThumbUrl(image)}
+            aspectRatio={['1:1', 'Custom']}
+            allowMultiple={false}
+            showVideos={false}
+            heightClass='h-24'
+            label='add image'
+            purpose='material image'
+            alt={d.name || 'material image'}
+            onSaveMedia={handleSetImage}
+            onClear={imageId ? clearImage : undefined}
+          />
+        </div>
         <div className={grid}>
           <label className='sm:col-span-2 flex flex-col gap-1'>
             <Text size='small'>name *</Text>
@@ -625,25 +670,22 @@ export function MaterialModal({
               onChange={(e) => set({ supplierRef: e.target.value })}
             />
           </label>
-          {/* #40: sample-vs-production tag. Affordance only until a proto field lands (see report). */}
+          {/* #40: sample vs production vs both — persisted on common_Material.purpose. */}
           <div className='sm:col-span-2 flex flex-col gap-1'>
-            <Text size='small'>usage</Text>
+            <Text size='small'>purpose</Text>
             <div className='flex gap-2'>
-              {(['production', 'sample'] as const).map((u) => (
+              {materialPurposeOptions.map((o) => (
                 <Button
-                  key={u}
+                  key={o.value}
                   type='button'
-                  variant={usage === u ? 'main' : 'secondary'}
+                  variant={purpose === o.value ? 'main' : 'secondary'}
                   className='uppercase'
-                  onClick={() => setUsage(u)}
+                  onClick={() => setPurpose(o.value)}
                 >
-                  {u}
+                  {o.label}
                 </Button>
               ))}
             </div>
-            <Text variant='label' size='small'>
-              tag only — not saved yet (backend field pending)
-            </Text>
           </div>
         </div>
 

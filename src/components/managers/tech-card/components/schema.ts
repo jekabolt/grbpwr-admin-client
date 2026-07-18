@@ -402,13 +402,19 @@ const techCardObject = z.object({
 
 // style_number is required past the IDEA stage; at IDEA it may be blank (the backend accepts it).
 export const techCardSchema = techCardObject.superRefine((data, ctx) => {
-  if (data.stage !== 'TECH_CARD_STAGE_IDEA' && !data.styleNumber?.trim()) {
+  const pastIdea = data.stage !== 'TECH_CARD_STAGE_IDEA';
+  if (pastIdea && !data.styleNumber?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'Style number is required',
       path: ['styleNumber'],
     });
   }
+  // #64: every BOM article should link a catalog material — enforced as a RELEASE blocker
+  // (releaseBlockers in index.tsx), not here. A hard zod error on every past-IDEA save wrongly
+  // blocked the whole main insert (notes/season/labels/sign-offs/…) for any card carrying a
+  // legacy free-text BOM line, which loads with materialId: 0 (mapBomItemToForm) — see wave-2a
+  // P0 fix. The BOM tile still shows a soft red "! link a material" hint per unlinked line.
 });
 
 export type TechCardFormData = z.input<typeof techCardObject>;

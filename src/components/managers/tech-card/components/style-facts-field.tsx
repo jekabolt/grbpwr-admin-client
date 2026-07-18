@@ -1,16 +1,46 @@
 import { adminService } from 'api/api';
+import {
+  CARE_CODE_META,
+  CarePicker,
+} from 'components/managers/product/components/care/care-picker';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
 import { TechCardFormData } from './schema';
 
 const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped', 'tailored'].map(
   (f) => ({ label: f, value: f }),
 );
+
+// Render the picked care codes as symbol + text chips (the "symbols + text" view the wizard
+// produces), so the constructor reads the actual instructions, not a raw "MWN,DNB" code string.
+function CareSummary({ name }: { name: string }) {
+  const value = (useWatch({ name }) as string) || '';
+  const codes = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (codes.length === 0) return null;
+  return (
+    <div className='flex flex-wrap gap-1.5'>
+      {codes.map((code) => {
+        const m = CARE_CODE_META[code];
+        return (
+          <span
+            key={code}
+            className='flex items-center gap-1 border border-textInactiveColor px-1.5 py-0.5'
+          >
+            {m?.img ? <img src={m.img} alt='' className='size-5' /> : null}
+            <Text size='small'>{m?.name ?? code}</Text>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 // StyleFactsField edits the style catalogue facts fit / care at the tech-card level — they belong to
 // the style (shared by every colourway), so they are authored here and shown read-only on each
@@ -73,7 +103,20 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
         is derived from the BOM’s shell-fabric materials (see the composition on the BOM tab).
       </Text>
       <SelectField name='fit' label='fit' items={FIT_OPTIONS} readOnly={!canEdit} />
-      <TextareaField name='careInstructions' label='care instructions' rows={2} />
+      <div className='space-y-2'>
+        {/* Structured care wizard (ISO 3758: washing / bleaching / tumble-dry / ironing /
+            professional care) — reuses the app's CarePicker instead of a free-form textarea, so
+            care is pickable symbols that render on labels and the storefront, not typed prose. */}
+        <CarePicker name='careInstructions' label='care instructions' editMode={canEdit} />
+        <CareSummary name='careInstructions' />
+        <div className='border border-textInactiveColor p-2'>
+          <Text variant='inactive' size='small'>
+            Saved as a canonical ISO-3758 code string (e.g. “MWN,DNB,TDL”) — this already feeds the
+            care-label generator. Backend gap: symbol-accurate labels & storefront care need a
+            STRUCTURED backend care field; today care round-trips as one plain string.
+          </Text>
+        </div>
+      </div>
       {canEdit && (
         <Button
           type='button'

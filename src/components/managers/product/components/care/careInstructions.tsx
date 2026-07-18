@@ -1,6 +1,7 @@
 import { cn } from 'lib/utility';
 import { FC, useState } from 'react';
 import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 import { CareCompositionModal } from '../care-composition-modal';
 import { CareMethodsList } from './care-card';
 import { careInstruction } from './careInstruction';
@@ -19,6 +20,9 @@ interface CareInstructionsProps {
     subCategory?: string,
   ) => void;
   selectedInstructions: SelectedInstructions;
+  // Raw prior value when it's legacy free-text that matched no known code (nothing shows as
+  // selected below) — surfaced so the operator sees what their first pick is about to replace.
+  legacyValue?: string;
 }
 
 export const CareInstructions: FC<CareInstructionsProps> = ({
@@ -26,6 +30,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
   selectedInstructions,
   close,
   onSelectCareInstruction,
+  legacyValue,
 }) => {
   const careCategories = Object.keys(careInstruction.care_instructions);
   const [selectedCare, setSelectedCare] = useState<string | null>('Washing');
@@ -56,6 +61,15 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
       }
     >
       <div className='space-y-6'>
+        {legacyValue && (
+          <Text
+            variant='inactive'
+            size='small'
+            className='border border-warning bg-highlightColor/10 p-2'
+          >
+            current: {legacyValue} — picking an option below replaces this text
+          </Text>
+        )}
         <div className='flex gap-3 sticky top-0 bg-bgColor'>
           {careCategories.map((category) => (
             <Button

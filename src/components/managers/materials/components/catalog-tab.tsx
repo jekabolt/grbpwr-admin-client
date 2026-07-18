@@ -1,4 +1,8 @@
-import { common_Material, common_MaterialClass } from 'api/proto-http/admin';
+import {
+  common_Material,
+  common_MaterialClass,
+  common_MaterialPurpose,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { formatCompositionEntries } from 'components/managers/tech-card/components/composition-entries';
 import { techCardBomSectionOptions } from 'constants/filter';
@@ -11,6 +15,8 @@ import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { MaterialModal } from './material-modal';
 import { MaterialPricesModal } from './material-prices-modal';
+import { MaterialThumb } from './material-thumb';
+import { materialPurposeFilterOptions, materialPurposeLabel } from './purpose-options';
 import { useArchiveMaterial, useMaterials } from './useMaterials';
 
 const sectionLabel = (v?: string) =>
@@ -42,6 +48,9 @@ export function CatalogTab() {
   const [params, setParams] = useSearchParams();
   const section = params.get('section') ?? '';
   const includeArchived = params.get('archived') === '1';
+  // #4: purpose filter (sample / production / both / all). Absent from the URL, same as UNKNOWN,
+  // means "all" — the server applies no purpose filter.
+  const purpose = (params.get('purpose') as common_MaterialPurpose) || 'MATERIAL_PURPOSE_UNKNOWN';
   const patch = (next: Record<string, string | boolean>) =>
     setParams(
       (prev) => {
@@ -58,7 +67,7 @@ export function CatalogTab() {
   const [editOpen, setEditOpen] = useState(false);
   const [pricesOf, setPricesOf] = useState<common_Material | undefined>();
 
-  const { data, isLoading } = useMaterials(section, includeArchived);
+  const { data, isLoading } = useMaterials(section, includeArchived, true, purpose);
   const archive = useArchiveMaterial();
   const materials = useMemo(() => data?.materials ?? [], [data]);
 
@@ -132,6 +141,18 @@ export function CatalogTab() {
               </option>
             ))}
           </select>
+          {/* #4: sample / production / both / all — UNKNOWN (default) applies no purpose filter. */}
+          <select
+            className={cell}
+            value={purpose}
+            onChange={(e) => patch({ purpose: e.target.value })}
+          >
+            {materialPurposeFilterOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
           <label className='flex items-center gap-2'>
             <input
               type='checkbox'
@@ -190,37 +211,41 @@ export function CatalogTab() {
                 key={m.id}
                 className='flex flex-wrap items-center justify-between gap-2 border border-textInactiveColor p-2'
               >
-                <div className='flex min-w-0 flex-col gap-1'>
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <Text size='small'>
-                      {m.code ? `${m.code} · ` : ''}
-                      {m.name}
+                <div className='flex min-w-0 items-center gap-3'>
+                  <MaterialThumb material={m} />
+                  <div className='flex min-w-0 flex-col gap-1'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <Text size='small'>
+                        {m.code ? `${m.code} · ` : ''}
+                        {m.name}
+                      </Text>
+                      {classLabel(m.materialClass) ? (
+                        <span className={chip}>{classLabel(m.materialClass)}</span>
+                      ) : null}
+                      <span className={chip}>{materialPurposeLabel(m.purpose)}</span>
+                      {m.archived ? (
+                        <span className={`${chip} text-textInactiveColor`}>archived</span>
+                      ) : null}
+                    </div>
+                    <Text variant='inactive' size='small'>
+                      {sectionLabel(m.section)}
+                      {m.supplier ? ` · ${m.supplier}` : ''}
+                      {m.unit ? ` · ${m.unit}` : ''}
+                      {canReadCosting && m.latestPrice?.price?.value
+                        ? ` · ${decimalToInput(m.latestPrice.price)} ${m.latestPrice.currency || ''}`
+                        : ''}
                     </Text>
-                    {classLabel(m.materialClass) ? (
-                      <span className={chip}>{classLabel(m.materialClass)}</span>
+                    {composition ? (
+                      <Text variant='label' size='small'>
+                        {composition}
+                      </Text>
                     ) : null}
-                    {m.archived ? (
-                      <span className={`${chip} text-textInactiveColor`}>archived</span>
+                    {m.color || m.pantone ? (
+                      <Text variant='inactive' size='small'>
+                        {[m.color, m.pantone].filter(Boolean).join(' · ')}
+                      </Text>
                     ) : null}
                   </div>
-                  <Text variant='inactive' size='small'>
-                    {sectionLabel(m.section)}
-                    {m.supplier ? ` · ${m.supplier}` : ''}
-                    {m.unit ? ` · ${m.unit}` : ''}
-                    {canReadCosting && m.latestPrice?.price?.value
-                      ? ` · ${decimalToInput(m.latestPrice.price)} ${m.latestPrice.currency || ''}`
-                      : ''}
-                  </Text>
-                  {composition ? (
-                    <Text variant='label' size='small'>
-                      {composition}
-                    </Text>
-                  ) : null}
-                  {m.color || m.pantone ? (
-                    <Text variant='inactive' size='small'>
-                      {[m.color, m.pantone].filter(Boolean).join(' · ')}
-                    </Text>
-                  ) : null}
                 </div>
                 <div className='flex items-center gap-2'>
                   {canReadCosting && (

@@ -18,7 +18,7 @@ import { useStyleAssembly, useUpsertStyleAssembly } from './useAssemblyPacking';
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
 // Strip the enum prefix for a compact human label (e.g. TECH_CARD_AUX_SUBTYPE_DUST_BAG -> "dust bag").
-function auxSubtypeLabel(subtype?: string): string {
+export function auxSubtypeLabel(subtype?: string): string {
   if (!subtype || subtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN') return '';
   return subtype.replace('TECH_CARD_AUX_SUBTYPE_', '').replace(/_/g, ' ').toLowerCase();
 }
@@ -69,10 +69,13 @@ const newRow = (): Row => ({
 });
 
 // Auxiliary cards only (WS7): the components an assembly line can point at, mirroring the
-// output-material picker's purpose filter on the tech-card header.
-function useAuxTechCards() {
+// output-material picker's purpose filter on the tech-card header. Exported: the packaging
+// recipe's "pick an aux card's output" convenience (packaging-recipe-field.tsx) reuses this same
+// query/cache instead of re-fetching — both live on the same "labels & packaging" tab, so a
+// shared cache key also means they never double-fetch when mounted together.
+export function useAuxTechCards() {
   return useQuery({
-    queryKey: ['assemblyField', 'auxTechCards'],
+    queryKey: ['techCardAuxCards'],
     queryFn: () =>
       adminService.ListTechCards({
         purpose: 'auxiliary',
@@ -90,7 +93,7 @@ function useAuxTechCards() {
   });
 }
 
-function auxCardLabel(c: common_TechCardListItem): string {
+export function auxCardLabel(c: common_TechCardListItem): string {
   const subtype = auxSubtypeLabel(c.auxSubtype);
   return `${c.styleNumber ? `${c.styleNumber} · ` : ''}${c.name || `#${c.id}`}${
     subtype ? ` · ${subtype}` : ''
@@ -400,15 +403,19 @@ export function AssemblyField({
             >
               + line
             </Button>
+            {/* Distinct from the main card's header Save (variant='main') — this button persists
+                to UpsertStyleAssembly, a separate RPC the header Save does NOT cover. secondary +
+                an explicit label (mirrors style-facts-field.tsx's own sub-panel save) so it's
+                never mistaken for "save the whole tech card". */}
             <Button
               type='button'
-              variant='main'
+              variant='secondary'
               size='lg'
               className='uppercase'
               disabled={upsert.isPending || !dirty}
               onClick={save}
             >
-              {upsert.isPending ? 'saving…' : 'save'}
+              {upsert.isPending ? 'saving…' : 'save assembly bill'}
             </Button>
           </div>
         )}

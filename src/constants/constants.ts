@@ -25,6 +25,7 @@ export const currencySymbols: Record<string, string> = {
   JPY: '¥', // Japanese Yen
   USD: '$', // United States Dollar
   PLN: 'zł', // Polish Zloty
+  USDT: '₮', // Tether — priced/accounting only (settled manually, not a storefront-checkout currency)
 };
 
 export const CURRENCIES = [
@@ -35,6 +36,7 @@ export const CURRENCIES = [
   { id: 'CNY', label: 'CNY - Chinese Yuan', value: 'CNY' },
   { id: 'KRW', label: 'KRW - South Korean Won', value: 'KRW' },
   { id: 'PLN', label: 'PLN - Polish Zloty', value: 'PLN' },
+  { id: 'USDT', label: 'USDT - Tether', value: 'USDT' },
 ];
 
 export const LANGUAGES = [
