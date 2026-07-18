@@ -12,25 +12,18 @@ import { TechCardFormData } from './schema';
 const GENERATED = 'STYLE_NUMBER_SOURCE_GENERATED';
 const MANUAL = 'STYLE_NUMBER_SOURCE_MANUAL';
 
-// v1 template ({SEASON}{YY}-{SEQ}); a loose client hint only — the server's strict validator +
-// global UNIQUE(style_number) is the authority (Q1). A non-matching manual value is not blocked
-// client-side (the owner may have a deliberately non-standard number), just flagged.
-const FORMAT_HINT = 'e.g. SS25-001 — season + sequence';
-const LOOSE_PATTERN = /^[A-Z]{2}\d{2}-\d{2,}$/;
-
 // Style Number (Q1): server-proposed via SuggestStyleNumber, with a strict manual override. Typing
-// switches the source to MANUAL (persisted). Server field-tagged errors show at the field.
+// switches the source to MANUAL (persisted, passes the server validator). Server field-tagged
+// errors show at the field. The source/format provenance is tracked but not surfaced inline — it
+// cluttered the top field for a value the server ultimately authorises.
 export function StyleNumberField({ isIdea }: { isIdea: boolean }) {
   const { control, setValue, clearErrors } = useFormContext<TechCardFormData>();
   const season = useWatch({ control, name: 'season' }) as string | undefined;
   const source = useWatch({ control, name: 'styleNumberSource' }) as string | undefined;
-  const value = useWatch({ control, name: 'styleNumber' }) as string | undefined;
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState('');
 
   const sku = parseSeasonToSku(season);
-  const isManual = source === MANUAL;
-  const looksOff = isManual && !!value?.trim() && !LOOSE_PATTERN.test(value.trim());
 
   const suggest = async () => {
     if (!sku) return;
@@ -70,7 +63,8 @@ export function StyleNumberField({ isIdea }: { isIdea: boolean }) {
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                     field.onChange(e);
                     // any hand-edit is a manual override (Q1)
-                    if (source !== MANUAL) setValue('styleNumberSource', MANUAL, { shouldDirty: true });
+                    if (source !== MANUAL)
+                      setValue('styleNumberSource', MANUAL, { shouldDirty: true });
                     clearErrors('styleNumber');
                   }}
                 />
@@ -89,24 +83,9 @@ export function StyleNumberField({ isIdea }: { isIdea: boolean }) {
             </Button>
           </div>
 
-          <div className='flex flex-wrap items-center gap-x-2'>
+          {!sku && (
             <Text variant='inactive' size='small'>
-              {isManual ? 'manual override' : 'generated'}
-            </Text>
-            {!sku && (
-              <Text variant='inactive' size='small'>
-                · pick a season to enable suggest
-              </Text>
-            )}
-            {isManual && (
-              <Text variant='inactive' size='small'>
-                · {FORMAT_HINT}
-              </Text>
-            )}
-          </div>
-          {looksOff && (
-            <Text variant='inactive' size='small' className='text-warning'>
-              doesn’t match the usual format — allowed, but double-check it’s intentional
+              pick a season to enable suggest
             </Text>
           )}
           {suggestError && (

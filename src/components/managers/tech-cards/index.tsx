@@ -1,17 +1,14 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { AttentionStrip } from './components/attention-strip';
 import { PipelineBoard } from './components/pipeline-board';
 import { TechCardList } from './components/tech-card-list';
-import { FxRatesModal } from './components/fx-rates-modal';
 
 export function TechCards() {
-  const { canRead, canWrite } = usePermissions();
-  const [fxOpen, setFxOpen] = useState(false);
+  const { canWrite } = usePermissions();
   // The list ↔ board view lives in the URL (R-1) so a board link is shareable and the spine's
   // "see all" hand-off can target the list. Board = GetStylePipeline (W2.9).
   const [params, setParams] = useSearchParams();
@@ -59,16 +56,6 @@ export function TechCards() {
               board
             </button>
           </div>
-          {canRead(SECTION.techCards) && (
-            <Button
-              size='lg'
-              variant='secondary'
-              className='uppercase'
-              onClick={() => setFxOpen(true)}
-            >
-              FX rates
-            </Button>
-          )}
           {canWrite(SECTION.techCards) && (
             <>
               <Button size='lg' variant='secondary' className='uppercase' asChild>
@@ -83,7 +70,6 @@ export function TechCards() {
       </div>
 
       <AttentionStrip />
-      <FxRatesModal open={fxOpen} onOpenChange={setFxOpen} />
       {view === 'board' ? <PipelineBoard /> : <TechCardList />}
     </div>
   );

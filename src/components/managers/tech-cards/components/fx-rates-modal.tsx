@@ -15,13 +15,24 @@ const cellClass =
 
 // Costing FX rates fold a multi-currency costing into the base currency. Without a rate
 // for a currency, the tech-card costing flags has_unconverted_currencies and cannot
-// compute a base-currency unit cost. Small table editor in the tech_cards section.
-export function FxRatesModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+// compute a base-currency unit cost. Small table editor, opened from Settings → currency / FX
+// rates. The valid-from (dated history) column is collapsed by default: most brands run 1-2
+// currencies and never need it.
+export function FxRatesModal({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
   const { canWrite } = usePermissions();
   const canEdit = canWrite(SECTION.techCards);
   const { showMessage } = useSnackBarStore();
   const qc = useQueryClient();
   const [rows, setRows] = useState<Row[]>([]);
+  // valid-from is dated history most brands never touch — hidden until they already have a dated
+  // rate, or they reveal the column to add one.
+  const [showDates, setShowDates] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['costingFxRates'],
@@ -31,13 +42,17 @@ export function FxRatesModal({ open, onOpenChange }: { open: boolean; onOpenChan
 
   useEffect(() => {
     if (!open) return;
+    const rates = data?.rates ?? [];
     setRows(
-      (data?.rates ?? []).map((r) => ({
+      rates.map((r) => ({
         currency: r.currency ?? '',
         rateToBase: r.rateToBase?.value ?? '',
         validFrom: r.validFrom ? r.validFrom.slice(0, 10) : '',
       })),
     );
+    // Reveal the dated-history column when saved data already uses it, so existing dates are
+    // never hidden from the operator.
+    setShowDates(rates.some((r) => !!r.validFrom));
   }, [data, open]);
 
   const save = useMutation({
@@ -47,7 +62,8 @@ export function FxRatesModal({ open, onOpenChange }: { open: boolean; onOpenChan
       showMessage('FX rates saved', 'success');
       onOpenChange(false);
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save FX rates', 'error'),
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to save FX rates', 'error'),
   });
 
   const update = (i: number, patch: Partial<Row>) =>
@@ -76,20 +92,42 @@ export function FxRatesModal({ open, onOpenChange }: { open: boolean; onOpenChan
       confirmDisabled={!canEdit || save.isPending}
     >
       <div className='flex min-w-[min(90vw,32rem)] flex-col gap-2'>
-        <Text variant='inactive' size='small'>
-          rate_to_base = how many units of the base currency (EUR) one unit of `currency` is worth.
+        <Text variant='label' size='small'>
+          rate → EUR = how many units of the base currency (EUR) one unit of the row currency is
+          worth.
         </Text>
         {isLoading ? (
           <Text size='small'>loading…</Text>
         ) : (
           <>
-            <div className='grid grid-cols-[5rem_1fr_9rem_2rem] items-center gap-2'>
-              <Text variant='inactive' size='small'>currency</Text>
-              <Text variant='inactive' size='small'>rate → EUR</Text>
-              <Text variant='inactive' size='small'>valid from</Text>
+            <div
+              className={
+                showDates
+                  ? 'grid grid-cols-[5rem_1fr_9rem_2rem] items-center gap-2'
+                  : 'grid grid-cols-[5rem_1fr_2rem] items-center gap-2'
+              }
+            >
+              <Text variant='label' size='small'>
+                currency
+              </Text>
+              <Text variant='label' size='small'>
+                rate → EUR
+              </Text>
+              {showDates && (
+                <Text variant='label' size='small'>
+                  valid from
+                </Text>
+              )}
               <span />
               {rows.map((r, i) => (
-                <div key={i} className='col-span-4 grid grid-cols-[5rem_1fr_9rem_2rem] items-center gap-2'>
+                <div
+                  key={i}
+                  className={
+                    showDates
+                      ? 'col-span-4 grid grid-cols-[5rem_1fr_9rem_2rem] items-center gap-2'
+                      : 'col-span-3 grid grid-cols-[5rem_1fr_2rem] items-center gap-2'
+                  }
+                >
                   <input
                     className={`${cellClass} uppercase`}
                     value={r.currency}
@@ -108,16 +146,18 @@ export function FxRatesModal({ open, onOpenChange }: { open: boolean; onOpenChan
                     placeholder='0.92'
                     onChange={(e) => update(i, { rateToBase: e.target.value })}
                   />
-                  <input
-                    className={cellClass}
-                    type='date'
-                    value={r.validFrom}
-                    disabled={!canEdit}
-                    onChange={(e) => update(i, { validFrom: e.target.value })}
-                  />
+                  {showDates && (
+                    <input
+                      className={cellClass}
+                      type='date'
+                      value={r.validFrom}
+                      disabled={!canEdit}
+                      onChange={(e) => update(i, { validFrom: e.target.value })}
+                    />
+                  )}
                   <button
                     type='button'
-                    className='text-textInactiveColor hover:text-error disabled:opacity-50'
+                    className='text-labelColor hover:text-error disabled:opacity-50'
                     disabled={!canEdit}
                     onClick={() => removeRow(i)}
                     aria-label='remove'
@@ -128,19 +168,28 @@ export function FxRatesModal({ open, onOpenChange }: { open: boolean; onOpenChan
               ))}
             </div>
             {rows.length === 0 && (
-              <Text variant='inactive' size='small'>
-                no FX rates — costing stays single-currency
+              <Text variant='label' size='small'>
+                no FX rates yet; costing stays single-currency
               </Text>
             )}
-            {canEdit && (
+            <div className='flex flex-wrap items-center gap-4'>
+              {canEdit && (
+                <button
+                  type='button'
+                  className='text-textBaseSize uppercase underline'
+                  onClick={addRow}
+                >
+                  + add rate
+                </button>
+              )}
               <button
                 type='button'
-                className='self-start text-textBaseSize uppercase underline'
-                onClick={addRow}
+                className='text-textBaseSize uppercase text-labelColor underline hover:text-textColor'
+                onClick={() => setShowDates((v) => !v)}
               >
-                + add rate
+                {showDates ? 'hide valid-from' : 'show valid-from'}
               </button>
-            )}
+            </div>
           </>
         )}
       </div>

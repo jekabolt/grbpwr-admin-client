@@ -1,7 +1,9 @@
 import { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import Text from 'ui/components/text';
 import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
@@ -54,12 +56,11 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
     !!rollup?.materialsPerUnit?.value ||
     !!rollup?.unitCost?.value ||
     !!rollup?.orderCost?.value ||
-    !!rollup?.totalSam?.value ||
     colorwayCosts.length > 0;
 
   return (
     <div className='space-y-3'>
-      <Text variant='inactive' size='small'>
+      <Text variant='label' size='small'>
         Manual per-garment cost articles + the server-computed materials rollup. The transparent,
         per-colourway plan-vs-actual estimate lives in the “cost estimate” tab.
       </Text>
@@ -84,7 +85,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         <DecimalField name='costing.defectPercent' label='defect %' />
         <CurrencySelect name='costing.currency' label='currency' />
       </fieldset>
-      <Text variant='inactive' size='small'>
+      <Text variant='label' size='small'>
         Все статьи — на 1 изделие, в одной валюте. Себестоимость считается на изделие, затем
         масштабируется на тираж (order qty). Ценообразование (наценка/опт/розница) живёт на
         опубликованном продукте, не здесь.
@@ -133,20 +134,20 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                       {cc.colorwayId === 0 ? ' (основной)' : ''}
                     </Text>
                     {(cc.materialsTotal ?? []).map((line, li) => (
-                      <Text key={li} variant='inactive' size='small'>
+                      <Text key={li} variant='label' size='small'>
                         материалы ({line.currency || 'no currency'}):{' '}
                         {decimalToInput(line.amount) || '—'}
                       </Text>
                     ))}
-                    <Text variant='inactive' size='small'>
+                    <Text variant='label' size='small'>
                       материалы/изделие: {decimalToInput(cc.materialsPerUnit) || '—'} ·
                       себестоимость/изделие: {decimalToInput(cc.unitCost) || '—'}
                     </Text>
-                    <Text variant='inactive' size='small'>
+                    <Text variant='label' size='small'>
                       тираж {cc.orderQty || 0} · на тираж: {decimalToInput(cc.orderCost) || '—'}
                     </Text>
                     {cc.hasUnconvertedCurrencies && (
-                      <Text variant='inactive' size='small'>
+                      <Text variant='label' size='small'>
                         ⚠ часть материалов в другой валюте — исключены из итога (без конвертации)
                       </Text>
                     )}
@@ -154,62 +155,44 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                 ))}
               </div>
             )}
-            {/* per-currency material totals + informative SAM (detail under the tiles) */}
+            {/* per-currency material totals for the primary colourway (detail under the tiles) */}
             <div className='space-y-1 border-t border-textInactiveColor pt-2'>
-              <Text variant='inactive' size='small'>
+              <Text variant='label' size='small'>
                 итог по основному колорвею:
               </Text>
               {materialsTotal.map((line, i) => (
-                <Text key={i} variant='inactive' size='small'>
+                <Text key={i} variant='label' size='small'>
                   materials ({line.currency || 'no currency'}): {decimalToInput(line.amount) || '—'}
                 </Text>
               ))}
-              <Text variant='inactive' size='small'>
-                Σ SAM (информативно): {decimalToInput(rollup?.totalSam) || '—'} min
-              </Text>
             </div>
 
-            {/* Costing FX rates — labelled + explained: they drive the base-currency fold in the
-                tile above and seed the product cost. Rates are GLOBAL (shared across all cards),
-                not a per-card number — which is why they're managed from the tech-cards list. */}
-            <div className='space-y-1 border border-textInactiveColor p-3'>
-              <Text variant='uppercase' size='small'>
-                costing FX rates
+            {/* Costing FX rates are global (shared across all cards) and now live in Settings —
+                here we only note the fold + link out, keeping the hard "unconverted" warning. */}
+            <div className='space-y-2 border-t border-textInactiveColor pt-3'>
+              <Text variant='label' size='small'>
+                Multi-currency BOM lines fold into the base currency
+                {rollup?.baseCurrency ? ` (${rollup.baseCurrency})` : ''} via the global costing FX
+                rates, which also seed the product’s cost price.{' '}
+                <Link to={ROUTES.settings} className='underline hover:text-textColor'>
+                  Manage FX rates in Settings
+                </Link>
+                .
               </Text>
-              <Text variant='inactive' size='small'>
-                Multi-currency BOM lines are folded into the base currency
-                {rollup?.baseCurrency ? ` (${rollup.baseCurrency})` : ''} using the global costing
-                FX rates — the “base” tile above is what seeds the product’s cost price. Manage
-                rates in Tech cards → “FX rates” (shared across all cards, not set per card).
-              </Text>
-              {rollup?.baseCurrency &&
-              (rollup?.unitCostBase?.value || rollup?.orderCostBase?.value) ? (
-                <Text size='small' className='block'>
-                  base ({rollup.baseCurrency}): / изделие{' '}
-                  {decimalToInput(rollup?.unitCostBase) || '—'} · тираж{' '}
-                  {decimalToInput(rollup?.orderCostBase) || '—'}
-                </Text>
-              ) : rollup?.hasUnconvertedCurrencies ? null : rollup?.unitCost?.value ||
-                rollup?.orderCost?.value ? (
-                <Text variant='inactive' size='small'>
-                  base-currency cost unavailable — add a costing FX rate for every currency used.
-                </Text>
-              ) : null}
               {rollup?.hasUnconvertedCurrencies && (
                 <div className='border border-warning p-2'>
                   <Text size='small' className='block text-warning'>
-                    ⚠ some BOM lines are in another currency without an FX rate — they are excluded
+                    ⚠ some BOM lines are in another currency with no FX rate, so they’re excluded
                     from the total and no base-currency cost can be computed. Add a costing FX rate
-                    (Tech cards → FX rates) so they fold into the base cost instead of silently
-                    lowering it.
+                    in Settings so they fold into the base cost instead of silently lowering it.
                   </Text>
                 </div>
               )}
             </div>
           </>
         ) : (
-          <Text variant='inactive' size='small'>
-            computed from BOM on save — reload to refresh
+          <Text variant='label' size='small'>
+            computed from BOM on save; reload to refresh
           </Text>
         )}
       </div>

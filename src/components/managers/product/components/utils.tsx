@@ -188,9 +188,6 @@ export function mapProductFullToFormData(
         topCategoryId: merch?.topCategoryId ? merch.topCategoryId.toString() : '',
         subCategoryId: merch?.subCategoryId ? merch.subCategoryId.toString() : '',
         typeId: merch?.typeId ? merch.typeId.toString() : '',
-        // R6: visibility is the stored lifecycle status; keep the vestigial `hidden` in sync so it
-        // never contradicts a Hide/Unhide transition.
-        hidden: colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_HIDDEN',
         minTier: merch?.minTier?.toString() ?? '0',
         targetGender: merch?.targetGender || ('' as common_GenderEnum),
         modelWearsHeightCm: merch?.modelWearsHeightCm?.toString() || undefined,

@@ -63,7 +63,8 @@ export function useMediaStageGestures(params: {
   const baseSizeRef = useRef<Size>({ w: 0, h: 0 });
 
   const viewportRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const imgElRef = useRef<HTMLImageElement | null>(null);
+  const imgResizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const setScale = (s: number) => {
     scaleRef.current = s;
@@ -83,19 +84,38 @@ export function useMediaStageGestures(params: {
   // ResizeObserver reports the img's laid-out (content-box) size, which is
   // unaffected by the CSS transform we apply for zoom/pan — exactly the
   // "fit" size we need as the pan-clamp and draw-canvas basis.
-  useEffect(() => {
-    const el = imgRef.current;
-    if (!active || !el) return;
-    const ro = new ResizeObserver((entries) => {
-      const box = entries[0]?.contentRect;
-      if (!box) return;
-      const next = { w: box.width, h: box.height };
-      baseSizeRef.current = next;
-      setBaseSizeState(next);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [active, resetKey]);
+  //
+  // Wired up as a *callback ref* rather than a resetKey-keyed effect on
+  // purpose: Radix's Dialog.Content is wrapped in Presence, which defers
+  // actually mounting its children by one render pass — `open` flips true,
+  // but Presence's own state machine only transitions unmounted -> mounted
+  // inside a layout effect, so the <img> isn't in the DOM yet on the render
+  // where `resetKey` first changes. An effect keyed on [active, resetKey]
+  // fires too early (the ref is still null), bails out, and — since neither
+  // dep changes again once the image actually mounts a render later — never
+  // gets a second chance to run, so baseSize was stuck at {0,0} for the
+  // whole session and the draw canvas never got a hit-testable size (see
+  // report: this was the actual cause of "draw mode does nothing"). A
+  // callback ref sidesteps the race: it fires exactly when the node attaches
+  // or detaches, regardless of which render pass that happens on.
+  const attachImg = useCallback(
+    (el: HTMLImageElement | null) => {
+      imgElRef.current = el;
+      imgResizeObserverRef.current?.disconnect();
+      imgResizeObserverRef.current = null;
+      if (!active || !el) return;
+      const ro = new ResizeObserver((entries) => {
+        const box = entries[0]?.contentRect;
+        if (!box) return;
+        const next = { w: box.width, h: box.height };
+        baseSizeRef.current = next;
+        setBaseSizeState(next);
+      });
+      ro.observe(el);
+      imgResizeObserverRef.current = ro;
+    },
+    [active],
+  );
 
   const zoomAt = useCallback((clientX: number, clientY: number, factor: number) => {
     const vpEl = viewportRef.current;
@@ -184,7 +204,7 @@ export function useMediaStageGestures(params: {
       // Pan only ever starts from a press directly on the <img> — never the
       // bare background, the toolbar, arrows, or the draw canvas (which owns
       // its own gesture when draw mode is on).
-      const targetIsImage = e.target === imgRef.current;
+      const targetIsImage = e.target === imgElRef.current;
       if (active && scaleRef.current > 1 && targetIsImage) {
         (e.target as Element).setPointerCapture?.(e.pointerId);
         drag.current = {
@@ -273,7 +293,7 @@ export function useMediaStageGestures(params: {
     reset,
     baseSize,
     viewportRef,
-    imgRef,
+    imgRef: attachImg,
     stageStyle: { transform: `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${scale})` },
     viewportHandlers: {
       onWheel,

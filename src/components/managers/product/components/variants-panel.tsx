@@ -155,7 +155,7 @@ export function VariantsPanel({
     <div className='space-y-2 border-t border-textInactiveColor pt-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
-          variants
+          sellable sizes &amp; stock
         </Text>
         {archivedVariants.length > 0 && (
           <Button
@@ -169,13 +169,14 @@ export function VariantsPanel({
           </Button>
         )}
       </div>
-      <Text variant='inactive' size='small'>
-        Variants are this colourway’s sellable sizes — each has its own SKU and stock. Add a size to
-        make it sellable; archiving a size hides it from the storefront (it can be restored).
+      <Text variant='label' size='small'>
+        This is where you manage this colourway’s sellable sizes and their stock. Each size is a
+        variant with its own SKU and stock count. Add a size to make it sellable; archiving a size
+        hides it from the storefront (you can restore it).
       </Text>
       {activeVariants.length === 0 ? (
-        <Text variant='inactive' size='small'>
-          no variants yet — add a size below to make this colourway sellable.
+        <Text variant='label' size='small'>
+          no sizes yet — add one below to make this colourway sellable.
         </Text>
       ) : (
         <div className='flex flex-wrap gap-2'>
@@ -187,8 +188,8 @@ export function VariantsPanel({
               <Text size='small' variant='uppercase'>
                 {sizeName(v.sizeId)}
               </Text>
-              <Text variant='inactive' size='small'>
-                {v.variantSku || `#${v.variantId}`} · {v.quantity?.value ?? '0'}
+              <Text variant='label' size='small'>
+                {v.variantSku || `#${v.variantId}`} · {v.quantity?.value ?? '0'} in stock
               </Text>
               <Button
                 type='button'

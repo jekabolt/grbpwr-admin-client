@@ -436,7 +436,7 @@ function UsagePerSizeLocal({
               расход на партию ≈ {preview ? `${preview} ${currency}`.trim() : '—'}
             </Text>
             {draft.sizeRunTotal && (
-              <Text variant='inactive' size='small'>
+              <Text variant='label' size='small'>
                 сохранённое: {draft.sizeRunTotal} {currency}
               </Text>
             )}
@@ -461,7 +461,6 @@ function UsageRowEditor({
   sizeQuantities,
   sizeNameById,
   canEdit,
-  colorwayColorLabel,
   onChange,
   onRemove,
 }: {
@@ -472,7 +471,6 @@ function UsageRowEditor({
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
-  colorwayColorLabel: string;
   onChange: (patch: Partial<UsageDraft>) => void;
   onRemove: () => void;
 }) {
@@ -484,13 +482,19 @@ function UsageRowEditor({
 
   return (
     <div className='flex flex-col gap-2 border border-textInactiveColor p-2'>
-      <div className='flex items-center justify-between'>
-        <Text variant='uppercase' size='small'>
-          {draft.placement.trim() || `material ${index + 1}`}
-          {article?.name?.trim() ? ` · ${article.name.trim()}` : ''}
+      <div className='flex items-center justify-between gap-2'>
+        <Text variant='uppercase' size='small' className='min-w-0 truncate'>
+          {index + 1} · {article?.name?.trim() || 'new material'}
+          {draft.placement.trim() ? ` · ${draft.placement.trim()}` : ''}
         </Text>
         {canEdit && (
-          <Button type='button' variant='secondary' aria-label='remove material' onClick={onRemove}>
+          <Button
+            type='button'
+            variant='secondary'
+            className='shrink-0'
+            aria-label='remove material'
+            onClick={onRemove}
+          >
             ✕
           </Button>
         )}
@@ -527,28 +531,6 @@ function UsageRowEditor({
           />
         </label>
       </div>
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-        <label className='flex flex-col gap-1'>
-          <Text size='small'>colour (override)</Text>
-          <input
-            className={cell}
-            disabled={!canEdit}
-            placeholder={colorwayColorLabel || 'colourway colour'}
-            value={draft.color}
-            onChange={(e) => onChange({ color: e.target.value })}
-          />
-        </label>
-        <label className='flex flex-col gap-1'>
-          <Text size='small'>pantone (override)</Text>
-          <input
-            className={cell}
-            disabled={!canEdit}
-            placeholder='colourway pantone'
-            value={draft.pantone}
-            onChange={(e) => onChange({ pantone: e.target.value })}
-          />
-        </label>
-      </div>
 
       {/* measured articles cost by a rate (per-size gradable); counted ones by a flat quantity (M14) */}
       {isMeasured ? (
@@ -576,7 +558,7 @@ function UsageRowEditor({
 
       {/* server-computed spend — present only with costing:read (stripped otherwise) */}
       {(draft.lineTotal || draft.sizeRunTotal) && (
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           {draft.lineTotal ? `per garment ${draft.lineTotal}` : ''}
           {draft.lineTotal && draft.sizeRunTotal ? ' · ' : ''}
           {draft.sizeRunTotal ? `run ${draft.sizeRunTotal}` : ''}
@@ -646,16 +628,16 @@ function LabDipEditor({
   };
 
   return (
-    <div className='border-t border-textInactiveColor pt-3'>
+    <div className='border-t border-textColor pt-4'>
       <button
         type='button'
         className='flex w-full items-center justify-between gap-2 text-left'
         onClick={() => setOpen((o) => !o)}
       >
         <Text variant='uppercase' size='small'>
-          {open ? '▾' : '▸'} lab-dip
+          {open ? '▾' : '▸'} dye · lab-dip
         </Text>
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           {dirty
             ? 'unsaved'
             : labDipStatusLabel.get(draft.labDipStatus as common_TechCardLabDipStatus) ?? '—'}
@@ -776,13 +758,11 @@ function ColorwayRecipeEditor({
   const { showMessage } = useSnackBarStore();
   const save = useUpdateColorwayRecipe(techCardId);
   const { dictionary } = useDictionary();
-  // #34: a usage row's color/pantone is an OPTIONAL override — resolve the colourway's own dictionary
-  // colour once so every row can placeholder/hint against it.
+  // Resolve the colourway's own dictionary colour once, for the swatch tile in the accordion header.
   const colorwayColor = useMemo(
     () => (dictionary?.colors ?? []).find((c) => c.code === colorway.colorCode),
     [dictionary?.colors, colorway.colorCode],
   );
-  const colorwayColorLabel = colorwayColor?.name?.trim() || colorway.colorCode?.trim() || '';
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   // CRITICAL (full-replace): initialise from the LIVE read (colorway.usages), never from empty. Re-sync
@@ -877,7 +857,7 @@ function ColorwayRecipeEditor({
             {colorway.baseSku ? ` · ${colorway.baseSku}` : ''}
           </Text>
         </span>
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           {usages.length} material{usages.length === 1 ? '' : 's'}
           {dirty ? ' · unsaved' : ''}
         </Text>
@@ -885,22 +865,8 @@ function ColorwayRecipeEditor({
 
       {open && (
         <div className='flex flex-col gap-3 border-t border-textInactiveColor p-3'>
-          <Text variant='inactive' size='small'>
-            Colour / pantone below are optional per-material overrides — leave them empty to use
-            this colourway’s own colour
-            {colorwayColorLabel ? ` (${colorwayColorLabel})` : ''}
-            {swatchHex ? (
-              <span
-                className='ml-1.5 inline-block h-3 w-3 shrink-0 translate-y-[1px] border border-textInactiveColor align-middle'
-                style={{ backgroundColor: swatchHex }}
-                title={swatchHex}
-              />
-            ) : null}
-            . Set them only when this article is dyed differently for this colourway or is a
-            contrast trim/hardware.
-          </Text>
           {usages.length === 0 ? (
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               no materials in this colourway’s recipe yet
             </Text>
           ) : (
@@ -914,7 +880,6 @@ function ColorwayRecipeEditor({
                 sizeQuantities={sizeQuantities}
                 sizeNameById={sizeNameById}
                 canEdit={canEdit}
-                colorwayColorLabel={colorwayColorLabel}
                 onChange={(patch) => setRow(i, patch)}
                 onRemove={() => removeRow(i)}
               />
@@ -930,7 +895,7 @@ function ColorwayRecipeEditor({
               <Text size='small' className='mt-1'>
                 {derived.fibers.map((f) => `${f.percent}% ${f.name}`).join(' · ')}
               </Text>
-              <Text variant='inactive' size='small' className='mt-1 block'>
+              <Text variant='label' size='small' className='mt-1 block'>
                 parsed from each article’s free-text composition, weighted by consumption
                 {derived.skipped > 0
                   ? ` · ${derived.skipped} article${derived.skipped > 1 ? 's' : ''} excluded (no readable composition)`
@@ -938,13 +903,6 @@ function ColorwayRecipeEditor({
               </Text>
             </div>
           )}
-
-          <LabDipEditor
-            colorway={colorway}
-            techCardId={techCardId}
-            lockVersion={lockVersion}
-            canEdit={canEdit}
-          />
 
           {canEdit && (
             <div className='flex items-center justify-between'>
@@ -971,10 +929,19 @@ function ColorwayRecipeEditor({
             </div>
           )}
           {canEdit && bomItems.length === 0 && (
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               add BOM articles first — then pick them here for each part of the garment
             </Text>
           )}
+
+          {/* Dye approval is a SEPARATE concern from the material recipe — kept below a hard divider,
+              persisted on its own via UpdateColorway under LAB_DIP_UPDATE_MASK (not this recipe save). */}
+          <LabDipEditor
+            colorway={colorway}
+            techCardId={techCardId}
+            lockVersion={lockVersion}
+            canEdit={canEdit}
+          />
         </div>
       )}
     </div>
@@ -1038,7 +1005,7 @@ function CreateColorwayInline({
         new colourway
       </Text>
       {availableColors.length === 0 ? (
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           no colours in the dictionary yet — add them under settings › colors
         </Text>
       ) : (
@@ -1073,7 +1040,7 @@ function CreateColorwayInline({
           </Button>
         </div>
       )}
-      <Text variant='inactive' size='small'>
+      <Text variant='label' size='small'>
         Creates a DRAFT colourway (colour only) so its recipe can be edited below — add media, price
         and the rest from the product manager afterwards.
       </Text>
@@ -1132,7 +1099,7 @@ export function ColorwayRecipes({
   if (colorways.length === 0) {
     return (
       <div className='flex flex-col gap-3'>
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='small'>
           no colourways yet — a colourway is a product. Create a draft below, or from the product
           manager, then its material recipe is edited here.
         </Text>
@@ -1143,9 +1110,9 @@ export function ColorwayRecipes({
 
   return (
     <div className='flex flex-col gap-3'>
-      <Text variant='inactive' size='small'>
-        Which catalog article goes on which part, in what colour and at what consumption — per
-        colourway. Saved independently (does not ride the tech-card save).
+      <Text variant='label' size='small'>
+        Which catalog article goes on each part, and how much. Saved per colourway, separately from
+        the tech-card save.
       </Text>
       {colorways.map((cw) => (
         <ColorwayRecipeEditor

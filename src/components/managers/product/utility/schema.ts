@@ -72,7 +72,6 @@ const makeProductBodySchema = (strict: boolean) =>
     careInstructions: z.string(),
     composition: z.string(),
     preorder: z.string().optional(),
-    hidden: z.boolean().optional(),
     // Minimum loyalty tier code required to buy (0 / 1 / 2 / 99).
     minTier: z.string().optional(),
     modelWearsHeightCm: z.string().optional(),
@@ -254,7 +253,6 @@ export const defaultData = {
       topCategoryId: '',
       subCategoryId: '',
       typeId: '',
-      hidden: false,
       minTier: '0',
       targetGender: '' as common_GenderEnum,
       modelWearsHeightCm: undefined,

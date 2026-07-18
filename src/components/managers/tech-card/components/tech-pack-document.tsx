@@ -261,11 +261,10 @@ export function TechPackDocument({
           <div className='text-right text-[11px] leading-tight'>
             <div className='font-semibold uppercase'>{stageLabel(tc.stage)}</div>
             <div>{approvalStateLabel(tc.approvalState)}</div>
-            {/* Proof of which frozen snapshot (if any) this printout matches, plus the live
-                lock-version — so a printed copy is never mistaken for a newer/older edit. */}
+            {/* Proof of which frozen snapshot (if any) this printout matches — so a printed
+                copy is never mistaken for a newer/older edit. */}
             <div className='font-semibold'>
-              {latestRelease ? `Rev.${latestRelease.releaseNumber ?? '—'} · ` : 'unreleased · '}
-              lock v{techCard.lockVersion ?? 0}
+              {latestRelease ? `Rev.${latestRelease.releaseNumber ?? '—'}` : 'unreleased'}
             </div>
             <div className='text-labelColor'>{formatTechCardDate(techCard.updatedAt)}</div>
           </div>
@@ -1052,34 +1051,6 @@ export function TechPackDocument({
                   <td className={TD}>{s.signedBy || '—'}</td>
                   <td className={TD}>{formatTechCardDate(s.signedAt)}</td>
                   <td className={TD}>{s.note || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Sheet>
-      )}
-
-      {/* REVISIONS — server-stamped auto-journal (Q1), read-only. */}
-      {has(techCard.revisions) && (
-        <Sheet title='revision log'>
-          <table className='w-full border-collapse text-[10px]'>
-            <thead>
-              <tr>
-                <th className={TH}>action</th>
-                <th className={TH}>date</th>
-                <th className={TH}>author</th>
-                <th className={TH}>section</th>
-                <th className={TH}>change</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(techCard.revisions ?? []).map((r, i) => (
-                <tr key={i} className='break-inside-avoid'>
-                  <td className={TD}>{(r.action || 'updated').replace(/_/g, ' ')}</td>
-                  <td className={TD}>{formatTechCardDate(r.createdAt || r.revisionDate)}</td>
-                  <td className={TD}>{r.author || '—'}</td>
-                  <td className={TD}>{(r.section || '—').replace(/_/g, ' ')}</td>
-                  <td className={TD}>{r.changeNote || '—'}</td>
                 </tr>
               ))}
             </tbody>

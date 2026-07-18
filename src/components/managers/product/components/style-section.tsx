@@ -4,6 +4,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import FieldsGroupContainer from 'ui/components/fields-group';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
@@ -55,6 +56,20 @@ export function StyleSection({
   // readOnly and the button need editMode in the mix too.
   const canEdit = editMode && canWrite;
 
+  // The model-wears form is collapsed by default (its own separate save button is a known point of
+  // confusion), but auto-opens whenever it already holds data so existing photo-shoot notes are never
+  // hidden behind the disclosure.
+  const modelWearsHeightCm = watch('product.productBodyInsert.modelWearsHeightCm') as
+    | string
+    | undefined;
+  const modelWearsSizeId = watch('product.productBodyInsert.modelWearsSizeId') as
+    | string
+    | undefined;
+  const hasModelWears = Boolean(
+    (modelWearsHeightCm && modelWearsHeightCm !== '0') ||
+      (modelWearsSizeId && modelWearsSizeId !== '0'),
+  );
+
   async function saveStyle() {
     setSaving(true);
     try {
@@ -84,17 +99,25 @@ export function StyleSection({
   }
 
   return (
-    <section className='space-y-3 border border-textInactiveColor p-4'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <Text variant='uppercase' size='large'>
-          model presentation
+    <FieldsGroupContainer
+      title='model presentation'
+      isOpen={hasModelWears}
+      className='border border-textInactiveColor p-4'
+      childrenSpacingClass='space-y-3'
+      headerContentGapClass='space-y-3'
+      preview={
+        <Text variant='label' size='small' component='span'>
+          saves separately
         </Text>
+      }
+    >
+      <div className='flex justify-end'>
         <TechCardLink styleId={styleId} label={`style #${styleId}`} />
       </div>
-      <Text variant='inactive' size='small'>
+      <Text variant='label' size='small'>
         Model-wears height and size describe this colourway’s photo shoot. They save with the “save
-        model-wears” button below — not with the colourway’s main Save. The other style facts
-        (brand, season, collection, gender, fit, category, composition, care) are shared across all
+        model-wears” button below, not with the colourway’s main Save. The other style facts (brand,
+        season, collection, gender, fit, category, composition, care) are shared across all
         colourways and are edited on the tech card.
       </Text>
       <InputField
@@ -124,6 +147,6 @@ export function StyleSection({
           {saving ? 'saving…' : 'save model-wears'}
         </Button>
       )}
-    </section>
+    </FieldsGroupContainer>
   );
 }

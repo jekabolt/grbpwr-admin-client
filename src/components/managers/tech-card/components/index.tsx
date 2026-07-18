@@ -85,7 +85,6 @@ const TABS = [
   { id: 'construction', label: 'construction' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
-  { id: 'dev', label: 'R&D cost' },
   { id: 'issues', label: 'issues' },
   { id: 'signoff', label: 'sign-off' },
   { id: 'history', label: 'history' },
@@ -97,7 +96,7 @@ type TabId = (typeof TABS)[number]['id'];
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   { band: 'design', tabs: ['header', 'sketch', 'moodboard', 'patterns'] },
   { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'pieces', 'construction'] },
-  { band: 'spec', tabs: ['labels', 'costing', 'dev', 'issues', 'signoff'] },
+  { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   { band: '', tabs: ['history'] },
 ];
 
@@ -146,6 +145,60 @@ function Section({
   );
 }
 
+function PreSaveTile({ label }: { label: string }) {
+  return (
+    <div className='flex aspect-square flex-col items-center justify-center gap-1 border border-dashed border-textInactiveColor p-2 text-center'>
+      <Text variant='inactive' size='small'>
+        {label}
+      </Text>
+    </div>
+  );
+}
+
+// Shown on the LABELS & PKG tab for a brand-new (unsaved) card: the assembly bill, packaging recipe
+// and dust-bag option are per-style and need a saved card id (their own RPCs, not the main insert),
+// so instead of silently hiding them we say so and offer Save — which lands the user right back
+// here on the saved card (see doSubmit's create branch).
+function PreSavePrompt({
+  canWrite,
+  saving,
+  onSave,
+}: {
+  canWrite: boolean;
+  saving: boolean;
+  onSave: () => void;
+}) {
+  return (
+    <div className='flex flex-col items-start gap-4 border border-textInactiveColor bg-textColor/5 p-4'>
+      <div className='space-y-1'>
+        <Text variant='uppercase'>save the tech card first</Text>
+        <Text variant='inactive' size='small'>
+          on-garment items (labels / tags), the packaging recipe and the “goes in a dust bag” option
+          are stored per style — they need a saved card to attach to. Save now and they unlock right
+          here.
+        </Text>
+      </div>
+      <div className='grid w-full max-w-md grid-cols-3 gap-2'>
+        <PreSaveTile label='on-garment items' />
+        <PreSaveTile label='packaging recipe' />
+        <PreSaveTile label='dust bag (пыльник)' />
+      </div>
+      {canWrite && (
+        <Button
+          type='button'
+          variant='main'
+          size='lg'
+          className='uppercase'
+          loading={saving}
+          onClick={onSave}
+        >
+          save tech card
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function TechCardForm({
   isEditMode,
   id,
@@ -186,7 +239,10 @@ export function TechCardForm({
 
   // Switching tabs drops a stale ?sample= / ?fits=; extra params (a sample to open, a fittings
   // filter) can be set in the same navigation (spine deep links).
-  const tabParam = params.get('tab');
+  // The old R&D-cost tab folded into costing (dev-expenses is now a costing section) — resolve a
+  // legacy ?tab=dev link straight to costing so shared links still land on the right place.
+  const rawTab = params.get('tab');
+  const tabParam = rawTab === 'dev' ? 'costing' : rawTab;
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'header';
   const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
@@ -312,15 +368,21 @@ export function TechCardForm({
   // the stage advances, their echoed fields untouched. Not disabled — hidden. A tab carrying a
   // validation error stays visible even at IDEA, or the error dot would point at an invisible tab.
   const IDEA_TABS: TabId[] = ['header', 'sketch', 'moodboard', 'samples', 'history'];
-  // Costing + R&D-cost tabs are field-shaped: hidden entirely without costing:read (server nulls
-  // the cost block / returns an empty journal; an empty tab would read as "zero cost"). Samples
+  // Costing is field-shaped: hidden entirely without costing:read (server nulls the cost block; an
+  // empty tab would read as "zero cost"). R&D dev-expenses now live as a section inside it. Samples
   // need a saved card (id).
   const isTabVisible = (t: TabId) => {
     if (isIdea && !IDEA_TABS.includes(t)) return errorTabs.has(t);
-    if ((t === 'costing' || t === 'dev') && !canReadCosting) return false;
+    if (t === 'costing' && !canReadCosting) return false;
     if (t === 'samples' && !isEditMode) return false;
     return true;
   };
+  // Rewrite a legacy ?tab=dev to ?tab=costing so the URL matches the folded tab (the alias above
+  // already renders costing; this cleans the address bar / a bookmarked deep link).
+  useEffect(() => {
+    if (rawTab === 'dev') navTo('costing');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawTab]);
   // If the open tab becomes hidden (switching a card to IDEA while on the BOM tab, or permissions
   // resolving and taking the costing tab away), fall back to header so the body isn't blank.
   useEffect(() => {
@@ -342,10 +404,17 @@ export function TechCardForm({
         draft.clear();
         form.reset(data);
       } else {
-        await createTechCard.mutateAsync(techCardInsert);
+        const created = await createTechCard.mutateAsync(techCardInsert);
         showMessage('tech card created', 'success');
         draft.clear();
-        navigate(ROUTES.techCards);
+        // If they were working on labels & pkg, land on the saved card's labels tab so the
+        // per-style assembly / packaging-recipe / dust-bag editors (which need the new id) are
+        // right there — instead of bouncing to the list and losing the thread (see PreSavePrompt).
+        if (created?.id && activeTab === 'labels') {
+          navigate(`${ROUTES.techCards}/${created.id}?tab=labels`);
+        } else {
+          navigate(ROUTES.techCards);
+        }
       }
     } catch (error) {
       if ((error as { status?: number })?.status === 409) setConflict(true);
@@ -552,12 +621,10 @@ export function TechCardForm({
             stage={stage}
             approvalState={approvalState}
             productCount={productCount}
-            frozen={frozen}
             canEdit={canWrite(SECTION.techCards)}
             unsaved={form.formState.isDirty}
             planRunDisabled={isAux && !outputMaterialId}
             planRunDisabledReason='set an output material before planning an auxiliary run'
-            onStageChange={(next) => form.setValue('stage', next, { shouldDirty: true })}
             onGoSamples={() => navTo('samples')}
             onAddSample={() => navTo('samples', { sample: 'new' })}
             onGoFittings={(unresolvedOnly) =>
@@ -642,10 +709,22 @@ export function TechCardForm({
                   </Text>
                 )}
                 <InputField name='name' label='name *' placeholder='название изделия' />
-                <InputField name='brand' label='brand' />
                 <SeasonField />
                 <InputField name='collection' label='collection' />
-                <InputField name='status' label='status (freeform note)' />
+                {/* brand + the legacy freeform `status` note are rarely touched: brand defaults to
+                    GRBPWR on the PDF when empty (list/filter still read it), and `status` has no
+                    downstream consumer. brand stays editable behind this disclosure; `status` is no
+                    longer rendered at all but its stored value round-trips — RHF keeps the field
+                    from defaultValues and the full-replace save (mapFormToTechCardInsert) sends it
+                    back verbatim. */}
+                <details>
+                  <summary className='cursor-pointer select-none text-textBaseSize uppercase text-labelColor hover:text-text'>
+                    advanced
+                  </summary>
+                  <div className='mt-3'>
+                    <InputField name='brand' label='brand' />
+                  </div>
+                </details>
               </Section>
 
               <Section title='classification' className='w-full lg:w-1/2'>
@@ -822,8 +901,10 @@ export function TechCardForm({
                 <PackagingField />
               </Section>
             </div>
-            {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs (edit-mode). */}
-            {isEditMode && numId && (
+            {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs — they
+                need a saved card id. For a brand-new card, prompt to Save (which lands back here)
+                instead of silently hiding them, so the user is never left wondering. */}
+            {isEditMode && numId ? (
               <>
                 <Section title='assembly — on-garment items (labels / tags)'>
                   <AssemblyField
@@ -832,13 +913,21 @@ export function TechCardForm({
                     canEdit={canWrite(SECTION.techCards) && !frozen}
                   />
                 </Section>
-                <Section title='packaging recipe (materials per order / item)'>
+                <Section title='packaging recipe (materials per order / item · dust bag)'>
                   <PackagingRecipeField
                     techCardId={numId}
                     canEdit={canWrite(SECTION.techCards) && !frozen}
                   />
                 </Section>
               </>
+            ) : (
+              <Section title='on-garment items, packaging & the dust bag'>
+                <PreSavePrompt
+                  canWrite={canWrite(SECTION.techCards)}
+                  saving={saving}
+                  onSave={save}
+                />
+              </Section>
             )}
           </div>
 
@@ -866,15 +955,10 @@ export function TechCardForm({
                   <CostEstimateField techCardId={numId} techCard={techCard} />
                 </Section>
               )}
-            </div>
-          )}
-          {canReadCosting && isEditMode && numId ? (
-            <StyleEconomicsModal techCardId={numId} open={econOpen} onOpenChange={setEconOpen} />
-          ) : null}
-
-          {/* R&D COST — mounted only with costing:read (field-shaped) */}
-          {canReadCosting && (
-            <div hidden={activeTab !== 'dev'}>
+              {/* R&D / development spend — folded in from its own tab: a section OF costing, not a
+                  separate rail entry. Placed after the unit-cost blocks because it is amortised
+                  style dev cost, deliberately NOT part of the product COGS. Edit-mode only (its own
+                  RPC needs a saved card id). */}
               <Section title='R&D development cost'>
                 {isEditMode && numId ? (
                   <DevExpensesField techCardId={numId} />
@@ -886,6 +970,9 @@ export function TechCardForm({
               </Section>
             </div>
           )}
+          {canReadCosting && isEditMode && numId ? (
+            <StyleEconomicsModal techCardId={numId} open={econOpen} onOpenChange={setEconOpen} />
+          ) : null}
 
           {/* ISSUES */}
           <div hidden={activeTab !== 'issues'}>

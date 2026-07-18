@@ -122,13 +122,22 @@ export function BodyFields({
       {/* Colourway-owned attributes — editable on this form. */}
       <div className='space-y-3'>
         <ColorFields editMode={editMode} />
-        <SelectField
-          fullWidth
-          name='product.productBodyInsert.countryOfOrigin'
-          label='country of origin'
-          items={countries}
-          readOnly={!editMode}
-        />
+        {/* Single source of truth for the manufacture country: this one field feeds both the
+            colourway's merchandising country (UpdateColorway) and its customs declaration
+            (SetColorwayCustoms), which is shown read-only in the Customs section. */}
+        <div className='space-y-1'>
+          <SelectField
+            fullWidth
+            name='product.productBodyInsert.countryOfOrigin'
+            label='country of origin'
+            items={countries}
+            readOnly={!editMode}
+          />
+          <Text variant='label' size='small'>
+            Set once here; this value feeds both the product’s country of origin and its customs
+            declaration.
+          </Text>
+        </div>
         <PriceFields editMode={editMode} />
         <SalePreorderFields editMode={editMode} />
         {/* Model-wears height/size moved to the "model presentation" section (<StyleSection/>), next

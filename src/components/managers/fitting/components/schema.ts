@@ -8,9 +8,11 @@ import { ZERO_TIMESTAMP } from 'components/managers/fittings/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 
+// The per-size fit-note UI is gone; sizes is derived from the linked sample (see
+// mapFormToFittingInsert) and carries only its sizeId. fitNote lives on the proto
+// (common_FittingSizeInsert) but is set once at the wire boundary, not in the form.
 const fittingSizeSchema = z.object({
   sizeId: z.number().int().min(1, 'Pick a size'),
-  fitNote: z.string().optional().default(''),
 });
 
 // The iteration выкройка actually tried on in this fitting (a snapshot, independent of the
@@ -157,7 +159,6 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
     recordedBy: insert?.recordedBy || '',
     sizes: (insert?.sizes ?? []).map((s) => ({
       sizeId: s.sizeId || 0,
-      fitNote: s.fitNote || '',
     })),
     patterns: (insert?.patterns ?? []).map((p) => ({
       sizeId: p.sizeId || 0,
@@ -219,6 +220,9 @@ export function mapFormToFittingInsert(
     // could contradict. It is derived from the structured outcome so the wire contract still carries it.
     verdict: outcomeToVerdict(data.outcome),
     recordedBy: data.recordedBy?.trim() || '',
+    // common_FittingSizeInsert requires the fitNote key (proto: `fitNote: string | undefined`),
+    // so send it once here at the wire boundary — always '' now that the per-size fit-note UI is
+    // gone — rather than carrying a dead, hard-coded field through the form schema.
     sizes: sampleSizeId ? [{ sizeId: sampleSizeId, fitNote: '' }] : [],
     patterns: (data.patterns ?? [])
       .filter((p) => p.url?.trim())
@@ -243,11 +247,14 @@ export function mapFormToFittingInsert(
     // the 'undecided' sentinel maps back to '' on the wire.
     roundNumber: data.roundNumber || 0,
     outcome: data.outcome === 'undecided' ? '' : data.outcome?.trim() || '',
-    // Change requests (S26): on CREATE, send the form's structured initial batch. On EDIT they are
-    // managed individually via the dedicated CRUD (stable ids for carry-over) — echo the server's
-    // CURRENT set (from the refetched `original`) so UpdateFitting's full-replace never clobbers them.
+    // Change requests (S26): CREATE sends the form's structured initial batch. On EDIT they are
+    // create-only on the wire — managed individually via Add/Update/DeleteFittingChangeRequest
+    // (the change-requests-fields.tsx editor uses those RPCs, so nothing is lost). UpdateFitting
+    // REJECTS any change_requests payload, so omit the key entirely: `undefined` overrides the
+    // `...original` spread above and JSON.stringify drops it, so the backend never sees a
+    // change_requests field (a JSON `[]` would unmarshal to a non-nil empty slice in Go).
     changeRequests: original
-      ? original.changeRequests ?? []
+      ? undefined
       : (data.changeRequests ?? [])
           .filter((cr) => cr.note?.trim() || cr.target?.trim())
           .map((cr) => {

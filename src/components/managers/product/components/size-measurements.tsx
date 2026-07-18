@@ -2,14 +2,13 @@ import { adminService } from 'api/api';
 import { common_Variant } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import React, { useEffect, useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
+import FieldsGroupContainer from 'ui/components/fields-group';
 import Text from 'ui/components/text';
 import { ProductFormData } from '../utility/schema';
 import { formatSizeName, getFilteredSizes } from '../utility/sizes';
-import { useEditConfirmation } from '../utility/useEditConfirmation';
 import { useLastSizeOnly } from '../utility/useLastSizeOnly';
 import { useMeasurements } from '../utility/useMeasurements';
 import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle';
@@ -44,7 +43,6 @@ export function SizeMeasurements({
   const { dictionary } = useDictionary();
   const { watch, setValue, getValues } = useFormContext<ProductFormData>();
   const values = watch();
-  const { requireConfirmation, confirmationModal } = useEditConfirmation(editMode);
   const { measurementsNames, handleToggleChange } = useSizeMeasurementsToggle();
   const { measurements, selectedSubCategoryName, selectedTypeName } = useMeasurements(
     dictionary,
@@ -64,7 +62,7 @@ export function SizeMeasurements({
     },
   );
 
-  const { handleLastSizeCheck, shouldShowSize, pendingPrune, confirmPrune, cancelPrune } =
+  const { shouldShowSize, pendingPrune, confirmPrune, cancelPrune } =
     useLastSizeOnly(filteredSizes);
 
   const sizeMeasurementsMap = useMemo(() => {
@@ -162,50 +160,8 @@ export function SizeMeasurements({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [styleId]);
 
-  const handleSizeChange = async (
-    event: React.ChangeEvent<HTMLInputElement>,
-    sizeId: number | undefined,
-  ) => {
-    const { value } = event.target;
-    if (!sizeId) return;
-    const ok = await requireConfirmation(sizeId);
-    if (!ok) return;
-
-    const sizeData = sizeMeasurementsMap.get(sizeId);
-
-    if (!sizeData) {
-      if (value && value !== '0') {
-        setValue(
-          'sizeMeasurements',
-          [
-            ...(values.sizeMeasurements || []),
-            { productSize: { sizeId, quantity: { value } }, measurements: [] },
-          ],
-          { shouldDirty: true },
-        );
-      }
-    } else {
-      setValue(`sizeMeasurements[${sizeData.index}].productSize.quantity.value` as any, value, {
-        shouldDirty: true,
-      });
-    }
-
-    handleLastSizeCheck(sizeId, value);
-  };
-
   return (
     <div className='w-full space-y-3'>
-      <ConfirmationModal
-        open={confirmationModal.open}
-        onOpenChange={confirmationModal.onOpenChange}
-        onConfirm={confirmationModal.onConfirm}
-        onCancel={confirmationModal.onCancel}
-      >
-        <Text variant='uppercase' className='font-bold'>
-          {confirmationModal.message}
-        </Text>
-      </ConfirmationModal>
-
       {/* OS / One-Size collapses to a single row. Confirm before discarding the other sizes' stock.
           onOpenChange handles the cancel/dismiss path (the guard in the hook keeps a confirm from
           being undone by the trailing close). */}
@@ -229,14 +185,14 @@ export function SizeMeasurements({
             measurementsNames={measurementsNames}
             onToggleChange={handleToggleChange}
           />
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             {sizesInStock} size{sizesInStock === 1 ? '' : 's'} in stock · {totalUnits} unit
             {totalUnits === 1 ? '' : 's'}
-            {productId != null && ' · stock changes via “update stock” (below) or production runs'}
+            {productId != null && ' · edit stock in the sizes below or “update stock”'}
           </Text>
           <div className='flex flex-wrap items-center gap-1'>
-            <Text variant='inactive' size='small'>
-              measurements are the style’s size chart, shared by all colourways —
+            <Text variant='label' size='small'>
+              measurements are the style’s size chart, shared by all colourways ·
             </Text>
             <TechCardLink styleId={styleId} label='edit them on the tech card' />
           </div>
@@ -259,95 +215,108 @@ export function SizeMeasurements({
           onChanged={onStockUpdated}
         />
       )}
-      <div className='overflow-x-auto'>
-        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
-          <thead className='bg-textInactiveColor'>
-            <tr className='border-b border-text'>
-              <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
-                <Text variant='uppercase'>size</Text>
-              </th>
-              <th className={qtyCellClass}>
-                <Text variant='uppercase'>stock</Text>
-              </th>
-              {measurements.map((m, i) => (
-                <th key={m.id} className={i < measurements.length - 1 ? cellClass : lastCellClass}>
-                  <Text variant='uppercase'>{m.name}</Text>
+      {/* The size chart and its stock are read-only here — the chart is style-owned (tech card) and
+          stock is managed per-variant in the sellable-sizes panel above. Collapsed by default so the
+          Variants panel is the primary size surface; expand to review the full chart. */}
+      <FieldsGroupContainer
+        title='size chart & stock · read-only'
+        isOpen={false}
+        childrenSpacingClass='space-y-0'
+        headerContentGapClass='space-y-3'
+      >
+        <div className='overflow-x-auto'>
+          <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
+            <thead className='bg-textInactiveColor'>
+              <tr className='border-b border-text'>
+                <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
+                  <Text variant='uppercase'>size</Text>
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className='bg-bgColor'>
-            {filteredSizes.map((size) => {
-              if (!shouldShowSize(size.id)) return null;
+                <th className={qtyCellClass}>
+                  <Text variant='uppercase'>stock</Text>
+                </th>
+                {measurements.map((m, i) => (
+                  <th
+                    key={m.id}
+                    className={i < measurements.length - 1 ? cellClass : lastCellClass}
+                  >
+                    <Text variant='uppercase'>{m.name}</Text>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className='bg-bgColor'>
+              {filteredSizes.map((size) => {
+                if (!shouldShowSize(size.id)) return null;
 
-              const sizeData = sizeMeasurementsMap.get(size.id);
-              const idx = sizeData?.index ?? -1;
-              const qty = values.sizeMeasurements?.[idx]?.productSize?.quantity?.value;
-              const isOutOfStock = !qty || qty === '0';
-              // filteredSizes is a reduced {id,name} shape; the SKU-ordinal / size-system live on the
-              // full dictionary size, so resolve it by id (R7, read-only metadata).
-              const sizeMeta = dictionary?.sizes?.find((s) => s.id === size.id);
+                const sizeData = sizeMeasurementsMap.get(size.id);
+                const idx = sizeData?.index ?? -1;
+                const qty = values.sizeMeasurements?.[idx]?.productSize?.quantity?.value;
+                const isOutOfStock = !qty || qty === '0';
+                // filteredSizes is a reduced {id,name} shape; the SKU-ordinal / size-system live on the
+                // full dictionary size, so resolve it by id (R7, read-only metadata).
+                const sizeMeta = dictionary?.sizes?.find((s) => s.id === size.id);
 
-              return (
-                <tr key={size.id} className='border-b border-text last:border-b-0'>
-                  <td className={cn(cellClass, 'sticky left-0 bg-bgColor z-10')}>
-                    <Text
-                      variant='uppercase'
-                      className={cn({ 'text-textInactiveColor': isOutOfStock })}
-                    >
-                      {formatSizeName(size.name)}
-                    </Text>
-                    {/* R7: read-only SKU-ordinal / size-system metadata from the size dictionary —
-                        the ordinal is the size segment baked into every variant SKU. */}
-                    {(sizeMeta?.skuOrd != null || sizeMeta?.skuSystem) && (
-                      <Text variant='inactive' size='small' className='block'>
-                        {sizeMeta?.skuOrd != null ? `ord ${sizeMeta.skuOrd}` : ''}
-                        {sizeMeta?.skuSystem
-                          ? ` · ${sizeMeta.skuSystem.replace('SIZE_SKU_SYSTEM_', '').toLowerCase()}`
-                          : ''}
-                      </Text>
-                    )}
-                  </td>
-                  <td className={cn(qtyCellClass, 'bg-inactive w-12 lg:w-26')}>
-                    <Input
-                      name={`sizeMeasurements[${idx}].productSize.quantity.value`}
-                      value={qty === '0' ? '' : qty || ''}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                        if (!e.target.value || /^\d+$/.test(e.target.value)) {
-                          handleSizeChange(e, size.id);
-                        }
-                      }}
-                      className='w-full border-none text-center bg-inactive disabled:text-textColor'
-                      disabled={!editMode || productId != null}
-                    />
-                  </td>
-                  {measurements.map((m, i) => {
-                    return (
-                      <td
-                        key={m.id}
-                        className={
-                          i < measurements.length - 1 ? measurementCellClass : lastCellClass
-                        }
+                return (
+                  <tr key={size.id} className='border-b border-text last:border-b-0'>
+                    <td className={cn(cellClass, 'sticky left-0 bg-bgColor z-10')}>
+                      <Text
+                        variant='uppercase'
+                        className={cn({ 'text-textInactiveColor': isOutOfStock })}
                       >
-                        <Input
-                          value={
-                            values.sizeMeasurements?.[idx]?.measurements?.find(
-                              (measurement) => measurement.measurementNameId === m.id,
-                            )?.measurementValue?.value || ''
-                          }
-                          readOnly
-                          className='w-full border-none text-center'
-                          disabled
-                        />
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                        {formatSizeName(size.name)}
+                      </Text>
+                      {/* R7: read-only SKU-ordinal / size-system metadata from the size dictionary —
+                        the ordinal is the size segment baked into every variant SKU. */}
+                      {(sizeMeta?.skuOrd != null || sizeMeta?.skuSystem) && (
+                        <Text variant='inactive' size='small' className='block'>
+                          {sizeMeta?.skuOrd != null ? `ord ${sizeMeta.skuOrd}` : ''}
+                          {sizeMeta?.skuSystem
+                            ? ` · ${sizeMeta.skuSystem.replace('SIZE_SKU_SYSTEM_', '').toLowerCase()}`
+                            : ''}
+                        </Text>
+                      )}
+                    </td>
+                    <td className={cn(qtyCellClass, 'w-12 lg:w-26 px-1 py-2')}>
+                      <Text
+                        size='small'
+                        className={cn('block text-center', {
+                          'text-textInactiveColor': isOutOfStock,
+                        })}
+                      >
+                        {qty && qty !== '0' ? qty : '0'}
+                      </Text>
+                    </td>
+                    {measurements.map((m, i) => {
+                      const measurementValue =
+                        values.sizeMeasurements?.[idx]?.measurements?.find(
+                          (measurement) => measurement.measurementNameId === m.id,
+                        )?.measurementValue?.value || '';
+                      return (
+                        <td
+                          key={m.id}
+                          className={cn(
+                            i < measurements.length - 1 ? measurementCellClass : lastCellClass,
+                            'px-1 py-2',
+                          )}
+                        >
+                          <Text
+                            size='small'
+                            className={cn('block text-center', {
+                              'text-textInactiveColor': !measurementValue,
+                            })}
+                          >
+                            {measurementValue || '—'}
+                          </Text>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </FieldsGroupContainer>
     </div>
   );
 }
