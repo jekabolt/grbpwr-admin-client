@@ -126,10 +126,11 @@ export function getProductPagedParans({
       currency: currency ? currency : undefined,
       seasons: undefined,
     },
-    // R6/§14.6: show_hidden is replaced by an explicit lifecycle-status filter. An empty `statuses`
-    // is the default admin set (everything but ARCHIVED, so DRAFT/ACTIVE/HIDDEN show). The `status`
-    // filter (all/active/hidden/archived) is the source of truth; the legacy `hidden`/`archived`
-    // params are still honoured as a fallback so old links keep working.
+    // R6/§14.6: show_hidden is replaced by an explicit lifecycle-status filter. The `status` filter
+    // (all/active/hidden/archived) is the source of truth; the legacy `hidden`/`archived` params are
+    // still honoured as a fallback so old links keep working. 'all' MUST send the full status set
+    // explicitly — an empty/undefined `statuses` is NOT treated as "everything" by the backend, it
+    // falls back to ACTIVE only (the bug this fixes: the "all" filter returned only active).
     statuses:
       status === 'active'
         ? ['COLORWAY_LIFECYCLE_STATUS_ACTIVE']
@@ -141,6 +142,11 @@ export function getProductPagedParans({
               ? ['COLORWAY_LIFECYCLE_STATUS_ARCHIVED']
               : hidden === 'false'
                 ? ['COLORWAY_LIFECYCLE_STATUS_ACTIVE']
-                : undefined,
+                : [
+                    'COLORWAY_LIFECYCLE_STATUS_DRAFT',
+                    'COLORWAY_LIFECYCLE_STATUS_ACTIVE',
+                    'COLORWAY_LIFECYCLE_STATUS_HIDDEN',
+                    'COLORWAY_LIFECYCLE_STATUS_ARCHIVED',
+                  ],
   };
 }
