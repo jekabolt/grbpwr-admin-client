@@ -1,6 +1,6 @@
 import { common_Material } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { CURRENCIES } from 'constants/constants';
+import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -122,7 +122,7 @@ export function MaterialPricesModal({
                     value={form.currency}
                     onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
                   >
-                    {CURRENCIES.map((c) => (
+                    {EXPENSE_CURRENCIES.map((c) => (
                       <option key={c.value} value={c.value}>
                         {c.value}
                       </option>

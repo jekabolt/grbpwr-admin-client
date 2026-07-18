@@ -1,4 +1,5 @@
 import { CostingFxRate, OpexLine } from 'api/proto-http/admin';
+import { currencySymbols, EXPENSE_CURRENCIES } from 'constants/constants';
 import { decimalToInput } from 'utils/decimal';
 
 // Suggested OPEX categories. This is a CLOSED set: the backend (dto.ConvertPbOpexLinesToEntity /
@@ -26,32 +27,17 @@ export const opexCategorySelectOptions = opexCategoryOptions.map((c) => ({
   label: opexCategoryLabel(c),
 }));
 
-// OPEX currency options. Superset of constants.CURRENCIES that also carries PLN — the Polish złoty
-// became a required fiat currency backend-wide (internal/currency.requiredCurrencies) but the shared
-// constants.CURRENCIES list has not been updated, and OPEX must be able to book PLN costs. Kept
-// local to the OPEX domain rather than editing the shared constant.
-export const opexCurrencyOptions = [
-  { value: 'EUR', label: 'EUR - Euro' },
-  { value: 'USD', label: 'USD - US Dollar' },
-  { value: 'GBP', label: 'GBP - British Pound' },
-  { value: 'PLN', label: 'PLN - Polish złoty' },
-  { value: 'JPY', label: 'JPY - Japanese Yen' },
-  { value: 'CNY', label: 'CNY - Chinese Yuan' },
-  { value: 'KRW', label: 'KRW - South Korean Won' },
-];
-
-const opexCurrencySymbols: Record<string, string> = {
-  EUR: '€',
-  USD: '$',
-  GBP: '£',
-  PLN: 'zł',
-  JPY: '¥',
-  CNY: '¥',
-  KRW: '₩',
-};
+// OPEX books COSTS, so its currency picker uses the shared EXPENSE currency list (every selling fiat
+// currency plus the accounting-only USDT). This was previously a hand-maintained local list that
+// drifted from the shared constants; deriving it keeps OPEX, employees and every other expense
+// surface on one source of truth. Kept as {value,label} for the <select>.
+export const opexCurrencyOptions = EXPENSE_CURRENCIES.map((c) => ({
+  value: c.value,
+  label: c.label,
+}));
 
 export const opexCurrencySymbol = (code?: string) =>
-  (code && opexCurrencySymbols[code.toUpperCase()]) || code || '';
+  (code && currencySymbols[code.toUpperCase()]) || code || '';
 
 // Months are YYYY-MM in the UI. new Date() is available in the app runtime (only workflow scripts
 // forbid it). Local date parts, not toISOString(): the user's "this month" is their wall-clock

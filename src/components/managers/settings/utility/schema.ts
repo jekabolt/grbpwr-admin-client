@@ -1,5 +1,5 @@
 import { common_PaymentMethodNameEnum } from 'api/proto-http/admin';
-import { CURRENCIES, LANGUAGES } from 'constants/constants';
+import { LANGUAGES, SELLING_CURRENCIES } from 'constants/constants';
 import z from 'zod';
 
 // Payment methods the storefront checkout screen (this Settings page) actually supports today.
@@ -119,7 +119,7 @@ export const defaultSettings = {
     translations: LANGUAGES.map((l) => ({ languageId: l.id, text: '' })),
   },
   bigMenu: false,
-  complimentaryShippingPrices: CURRENCIES.reduce<Record<string, { value: string }>>(
+  complimentaryShippingPrices: SELLING_CURRENCIES.reduce<Record<string, { value: string }>>(
     (acc, c) => ({ ...acc, [c.value]: { value: '0' } }),
     {},
   ),
@@ -134,7 +134,7 @@ export type SettingsSchema = z.infer<typeof settingsSchema>;
 
 export function transformDictionaryToSettings(dictionary: any): SettingsSchema {
   const complimentaryMap: Record<string, { value: string }> = {};
-  CURRENCIES.forEach((c) => {
+  SELLING_CURRENCIES.forEach((c) => {
     const raw = dictionary.complimentaryShippingPrices?.[c.value]?.value;
     let value = raw ?? '0';
     if (INTEGER_CURRENCIES.includes(c.value)) {

@@ -3,7 +3,7 @@ import {
   common_ProductionRunCost,
   common_ProductionRunCostKind,
 } from 'api/proto-http/admin';
-import { CURRENCIES } from 'constants/constants';
+import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -189,7 +189,7 @@ export function RunCosts({
               value={c.currency}
               onChange={(e) => patchCost(i, { currency: e.target.value })}
             >
-              {CURRENCIES.map((cur) => (
+              {EXPENSE_CURRENCIES.map((cur) => (
                 <option key={cur.value} value={cur.value}>
                   {cur.value}
                 </option>

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_TechCardDevExpense } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { CURRENCIES } from 'constants/constants';
+import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -234,7 +234,7 @@ export function DevExpensesField({
               value={form.currency}
               onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
             >
-              {CURRENCIES.map((c) => (
+              {EXPENSE_CURRENCIES.map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.value}
                 </option>
