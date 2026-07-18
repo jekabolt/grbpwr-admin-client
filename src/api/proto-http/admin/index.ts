@@ -5791,6 +5791,23 @@ export type UpdateTechCardRequest = {
 export type UpdateTechCardResponse = {
 };
 
+// GenerateTechCardOperationsRequest asks the AI to draft sewing operations for a tech card from a
+// free-text description. tech_card_id supplies grounding context (the card's pieces, BOM and type
+// are loaded server-side, read-only); description is the technologist's plain-language brief.
+export type GenerateTechCardOperationsRequest = {
+  techCardId: number | undefined;
+  description: string | undefined;
+};
+
+// GenerateTechCardOperationsResponse is a PROPOSED draft: operations in the exact shape the card
+// stores (common.TechCardOperation), for the technologist to review, edit and save via
+// UpdateTechCard. This call persists nothing itself.
+export type GenerateTechCardOperationsResponse = {
+  operations: common_TechCardOperation[] | undefined;
+  model: string | undefined;
+  notes: string | undefined;
+};
+
 export type DeleteTechCardRequest = {
   id: number | undefined;
 };
@@ -7188,6 +7205,11 @@ export interface AdminService {
   // GetStylePipeline returns the development board: per-stage counts + a few light cards per column
   // (gap-01), so the idea→prod pipeline loads in one call.
   GetStylePipeline(request: GetStylePipelineRequest): Promise<GetStylePipelineResponse>;
+  // GenerateTechCardOperations drafts structured sewing operations from a plain-language
+  // description via OpenRouter, grounded in the card's pieces + BOM + type. It only PROPOSES a
+  // draft for a technologist to review, edit and save through UpdateTechCard — it persists nothing.
+  // Requires OPENROUTER_API_KEY; unconfigured it returns FailedPrecondition (degrades gracefully).
+  GenerateTechCardOperations(request: GenerateTechCardOperationsRequest): Promise<GenerateTechCardOperationsResponse>;
   // Material catalog (task 10): shared nomenclature for BOM lines + append-only price history.
   CreateMaterial(request: CreateMaterialRequest): Promise<CreateMaterialResponse>;
   UpdateMaterial(request: UpdateMaterialRequest): Promise<UpdateMaterialResponse>;
@@ -10296,6 +10318,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetStylePipeline",
       }) as Promise<GetStylePipelineResponse>;
+    },
+    GenerateTechCardOperations(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/operations/generate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateTechCardOperations",
+      }) as Promise<GenerateTechCardOperationsResponse>;
     },
     CreateMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes
