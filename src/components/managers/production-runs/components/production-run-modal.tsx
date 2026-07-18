@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { decimalToInput } from 'utils/decimal';
+import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { isRunLocked, runDetailPath, runStatusLabel, runStatusOptions } from './options';
 import {
   updateRunErrorMessage,
@@ -25,6 +25,9 @@ type Draft = {
   status: common_ProductionRunStatus;
   startedAt: string;
   notes: string;
+  // Run ACTUAL cutting wastage % (0..100) as a plain decimal string; blank = unset (fall back to
+  // the BOM estimate). Sent as a google.type.Decimal via inputToDecimal, like markerEfficiencyPct.
+  actualWastagePercent: string;
 };
 
 const emptyDraft: Draft = {
@@ -33,6 +36,7 @@ const emptyDraft: Draft = {
   status: 'PRODUCTION_RUN_STATUS_PLANNED',
   startedAt: '',
   notes: '',
+  actualWastagePercent: '',
 };
 
 // The run's header/meta only. Lines, marker and costs are edited on the detail page (NF-06 makes a
@@ -70,6 +74,7 @@ export function ProductionRunModal({
             status: ins.status ?? 'PRODUCTION_RUN_STATUS_PLANNED',
             startedAt: isoToDate(ins.startedAt),
             notes: ins.notes ?? '',
+            actualWastagePercent: decimalToInput(ins.actualWastagePercent),
           }
         : { ...emptyDraft, techCardId: initialTechCardId ?? 0 },
     );
@@ -127,6 +132,8 @@ export function ProductionRunModal({
             status: d.status,
             startedAt: dateToIso(d.startedAt),
             notes: d.notes.trim(),
+            // Run-level ACTUAL cutting wastage %; blank → undefined clears it (back to BOM estimate).
+            actualWastagePercent: inputToDecimal(d.actualWastagePercent),
           },
         },
         {
@@ -155,6 +162,7 @@ export function ProductionRunModal({
           markerEfficiencyPct: undefined,
           markerNotes: undefined,
           markers: [],
+          actualWastagePercent: inputToDecimal(d.actualWastagePercent),
         },
       },
       {
@@ -254,6 +262,20 @@ export function ProductionRunModal({
                   value={d.startedAt}
                   onChange={(e) => set({ startedAt: e.target.value })}
                 />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text size='small'>actual cutting wastage %</Text>
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  placeholder='e.g. 12.5'
+                  value={d.actualWastagePercent}
+                  onChange={(e) => set({ actualWastagePercent: sanitizeDecimal(e.target.value) })}
+                />
+                <Text variant='label' size='small'>
+                  overrides the BOM estimate for this run's cost; leave blank to use the BOM's
+                  estimated cutting wastage
+                </Text>
               </label>
             </div>
 

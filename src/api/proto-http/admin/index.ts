@@ -707,6 +707,7 @@ export type common_FilterConditions = {
   seasons: common_SeasonEnum[] | undefined;
   excludeTopCategoryIds: number[] | undefined;
   colorCodes: string[] | undefined;
+  exclusive: boolean | undefined;
 };
 
 // ColorwayLifecycleStatus is the stored lifecycle of a colourway (R6). Numbers are fixed and match the
@@ -6204,6 +6205,11 @@ export type common_ProductionRunInsert = {
   markerEfficiencyPct: googletype_Decimal | undefined;
   markerNotes: string | undefined;
   markers: common_ProductionRunMarker[] | undefined;
+  // Run ACTUAL cutting wastage % (0..100), entered per run once the marker/lay is known. When set it
+  // OVERRIDES the BOM line's estimate wastage_percent in the run's cost calc (planned-cost snapshot +
+  // material plan); unset falls back to the BOM estimate. Refines the plan side only — the run's ACTUAL
+  // cost still derives from real material issues.
+  actualWastagePercent: googletype_Decimal | undefined;
 };
 
 // ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
@@ -7646,6 +7652,9 @@ export function createAdminServiceClient(
         request.filterConditions.colorCodes.forEach((x) => {
           queryParams.push(`filterConditions.colorCodes=${encodeURIComponent(x.toString())}`)
         })
+      }
+      if (request.filterConditions?.exclusive) {
+        queryParams.push(`filterConditions.exclusive=${encodeURIComponent(request.filterConditions.exclusive.toString())}`)
       }
       if (request.statuses) {
         request.statuses.forEach((x) => {
