@@ -1,11 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { PackagingBomItem, common_Material, common_MaterialPrice } from 'api/proto-http/admin';
+import {
+  PackagingBomItem,
+  common_Material,
+  common_MaterialPrice,
+  common_MaterialPurpose,
+} from 'api/proto-http/admin';
 
 const materialKeys = {
   all: ['materials'] as const,
-  list: (section: string, includeArchived: boolean) =>
-    [...materialKeys.all, 'list', section, includeArchived] as const,
+  list: (section: string, includeArchived: boolean, purpose: common_MaterialPurpose) =>
+    [...materialKeys.all, 'list', section, includeArchived, purpose] as const,
   prices: (materialId: number) => [...materialKeys.all, 'prices', materialId] as const,
 };
 
@@ -16,11 +21,22 @@ const materialKeys = {
 export const bomSectionToDbFilter = (section: string): string | undefined =>
   section ? section.replace('TECH_CARD_BOM_SECTION_', '').toLowerCase() : undefined;
 
-export function useMaterials(section: string, includeArchived: boolean, enabled = true) {
+// purpose defaults to UNKNOWN — the server reads that as "no purpose filter" (all materials),
+// same as every other call site here that doesn't care about sample/production/both.
+export function useMaterials(
+  section: string,
+  includeArchived: boolean,
+  enabled = true,
+  purpose: common_MaterialPurpose = 'MATERIAL_PURPOSE_UNKNOWN',
+) {
   return useQuery({
-    queryKey: materialKeys.list(section, includeArchived),
+    queryKey: materialKeys.list(section, includeArchived, purpose),
     queryFn: () =>
-      adminService.ListMaterials({ section: bomSectionToDbFilter(section), includeArchived }),
+      adminService.ListMaterials({
+        section: bomSectionToDbFilter(section),
+        includeArchived,
+        purpose,
+      }),
     enabled,
   });
 }

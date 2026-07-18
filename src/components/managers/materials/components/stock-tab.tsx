@@ -9,15 +9,18 @@ import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { MaterialModal } from './material-modal';
+import { MaterialThumb } from './material-thumb';
 import {
   AdjustStockModal,
   IssueStockModal,
   MovementTarget,
   ReceiveStockModal,
 } from './movement-modals';
+import { materialPurposeLabel } from './purpose-options';
 import { useMaterialStock } from './useWarehouse';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const chip = 'border border-textInactiveColor px-1.5 py-0.5 text-small uppercase';
 const sectionLabel = (v?: string) =>
   techCardBomSectionOptions.find((o) => o.value === v)?.label ?? '—';
 
@@ -255,6 +258,8 @@ export function StockTab() {
           <table className='w-full border-collapse'>
             <thead>
               <tr>
+                {/* #39: not sortable — just the catalog swatch. */}
+                <th className={`${cell} text-left uppercase`}>image</th>
                 <SortTh
                   label='code'
                   k='code'
@@ -322,8 +327,16 @@ export function StockTab() {
                 const below = r.belowMinStock;
                 return (
                   <tr key={id}>
+                    <td className={cell}>
+                      <MaterialThumb material={m} size='sm' />
+                    </td>
                     <td className={cell}>{m?.code || '—'}</td>
-                    <td className={cell}>{m?.name}</td>
+                    <td className={cell}>
+                      <div className='flex flex-wrap items-center gap-2'>
+                        <span>{m?.name}</span>
+                        <span className={chip}>{materialPurposeLabel(m?.purpose)}</span>
+                      </div>
+                    </td>
                     <td className={cell}>{sectionLabel(m?.section)}</td>
                     <td className={`${cell} text-right ${below ? 'font-bold' : ''}`}>
                       {decimalToInput(r.onHand) || '0'} {m?.unit}

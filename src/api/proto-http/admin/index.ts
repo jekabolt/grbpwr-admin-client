@@ -1444,6 +1444,12 @@ export type common_Shipment = {
   shippingDate: wellKnownTimestamp | undefined;
   estimatedArrivalDate: wellKnownTimestamp | undefined;
   freeShipping: boolean | undefined;
+  // actual_cost is the real carrier invoice for this shipment (EUR), distinct from cost
+  // (the price charged to the customer). NULL until an operator enters it.
+  actualCost: googletype_Decimal | undefined;
+  // return_shipping_cost is the reverse-logistics cost of a return (EUR), NULL when the
+  // order was not returned.
+  returnShippingCost: googletype_Decimal | undefined;
 };
 
 export type common_Buyer = {
@@ -5911,6 +5917,13 @@ export type common_Material = {
   // percent are read (name is resolved server-side from the fibre dictionary). Empty = unset. A
   // shell-fabric material's composition is what a style's derived composition_entries is built from.
   compositionEntries: common_CompositionEntry[] | undefined;
+  // Catalog image (#39): image_id is the write-side media reference (FK media(id); 0 = unset); image
+  // is the resolved MediaFull on read (null when unset). Mirrors Model.thumbnail_id / Model.thumbnail.
+  imageId: number | undefined;
+  image: common_MediaFull | undefined;
+  // purpose (#40) marks whether the material is used for samples, production, or both. Defaults to
+  // BOTH on write when UNKNOWN, so the admin can mark and filter materials.
+  purpose: common_MaterialPurpose | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -5969,6 +5982,14 @@ export type common_MaterialPackagingAttrs = {
   printMethod: string | undefined;
 };
 
+// MaterialPurpose (#40) marks whether a catalog material is used for samples, production, or both,
+// so the admin can mark and filter materials. Mirrors entity.ValidMaterialPurposes and the DB CHECK
+// chk_material_purpose. UNKNOWN defaults to BOTH on write.
+export type common_MaterialPurpose =
+  | "MATERIAL_PURPOSE_UNKNOWN"
+  | "MATERIAL_PURPOSE_SAMPLE"
+  | "MATERIAL_PURPOSE_PRODUCTION"
+  | "MATERIAL_PURPOSE_BOTH";
 export type CreateMaterialResponse = {
   id: number | undefined;
 };
@@ -6003,6 +6024,7 @@ export type GetMaterialResponse = {
 export type ListMaterialsRequest = {
   section: string | undefined;
   includeArchived: boolean | undefined;
+  purpose: common_MaterialPurpose | undefined;
 };
 
 export type ListMaterialsResponse = {
@@ -10303,6 +10325,9 @@ export function createAdminServiceClient(
       }
       if (request.includeArchived) {
         queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      if (request.purpose) {
+        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {

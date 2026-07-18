@@ -1,6 +1,7 @@
 import { common_Material } from 'api/proto-http/admin';
 import { useMemo, useState } from 'react';
 import Text from 'ui/components/text';
+import { MaterialThumb } from './material-thumb';
 import { useMaterials } from './useMaterials';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -29,6 +30,9 @@ export function MaterialPicker({
   const { data, isLoading } = useMaterials(section, includeArchived);
   const materials = useMemo(() => data?.materials ?? [], [data]);
   const [q, setQ] = useState('');
+  // #39: the native <select> can't show a thumbnail per <option>, so the current pick's swatch is
+  // surfaced next to the control instead — a quick visual confirmation of which material is chosen.
+  const selected = useMemo(() => materials.find((m) => m.id === value), [materials, value]);
 
   // Always keep the selected material selectable even when the filter would hide it, so typing a
   // query never silently drops the current choice.
@@ -56,25 +60,28 @@ export function MaterialPicker({
         disabled={disabled}
         onChange={(e) => setQ(e.target.value)}
       />
-      <select
-        className={cell}
-        value={value || 0}
-        disabled={disabled || isLoading}
-        onChange={(e) => {
-          const id = Number(e.target.value) || 0;
-          onChange(
-            id,
-            materials.find((m) => m.id === id),
-          );
-        }}
-      >
-        <option value={0}>{isLoading ? 'loading…' : '— select material —'}</option>
-        {filtered.map((m) => (
-          <option key={m.id} value={m.id}>
-            {label(m)}
-          </option>
-        ))}
-      </select>
+      <div className='flex items-center gap-2'>
+        <MaterialThumb material={selected} size='sm' />
+        <select
+          className={`${cell} min-w-0 flex-1`}
+          value={value || 0}
+          disabled={disabled || isLoading}
+          onChange={(e) => {
+            const id = Number(e.target.value) || 0;
+            onChange(
+              id,
+              materials.find((m) => m.id === id),
+            );
+          }}
+        >
+          <option value={0}>{isLoading ? 'loading…' : '— select material —'}</option>
+          {filtered.map((m) => (
+            <option key={m.id} value={m.id}>
+              {label(m)}
+            </option>
+          ))}
+        </select>
+      </div>
       {!isLoading && materials.length === 0 ? (
         <Text variant='inactive' size='small'>
           no materials in catalog
