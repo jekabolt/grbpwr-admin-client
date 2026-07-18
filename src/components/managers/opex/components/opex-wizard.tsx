@@ -101,10 +101,11 @@ export function OpexWizard({
 
   // The target month's existing lines, only for the one-off natural-key collision guard.
   const collisionMonth = kind === 'oneoff' ? d.month : '';
-  const { data: monthData } = useOpexLines(
-    collisionMonth,
-    open && kind === 'oneoff' && !!collisionMonth,
-  );
+  const {
+    data: monthData,
+    isLoading: monthDataLoading,
+    isFetching: monthDataFetching,
+  } = useOpexLines(collisionMonth, open && kind === 'oneoff' && !!collisionMonth);
 
   const amountNum = parseDecimalNumber(d.amount);
   const amountValid = Number.isFinite(amountNum) && amountNum >= 0;
@@ -131,6 +132,14 @@ export function OpexWizard({
       (l) => (l.category || 'other') === cat && (l.label || '') === label,
     );
   }, [kind, monthData, d.category, d.label]);
+
+  // While the collision query above is still loading/fetching, `collision` reads `undefined` —
+  // indistinguishable from "checked, no collision found". Without this, the Create button stays
+  // enabled and submit()'s `if (collision)` guard silently passes on a not-yet-answered check, so
+  // a slow-loading month could let a real collision through. Treat "unknown" as "not yet safe to
+  // create": block Create until the check has actually resolved.
+  const collisionChecking =
+    kind === 'oneoff' && !!collisionMonth && (monthDataLoading || monthDataFetching);
 
   // Base-currency preview. rate === null means the currency has no costing FX rate today → the
   // backend will book the line uncosted (excluded from the operating result until a rate exists).
@@ -176,6 +185,15 @@ export function OpexWizard({
 
   const submit = async () => {
     if (kind === 'oneoff') {
+      if (collisionChecking) {
+        // Defense in depth alongside the disabled Create button below: don't let a submit through
+        // while we still don't know whether this (month, category, label) is taken.
+        showMessage(
+          'Still checking for a conflicting line this month — try again in a moment',
+          'error',
+        );
+        return;
+      }
       if (collision) {
         showMessage(
           isRecurringLine(collision)
@@ -204,6 +222,17 @@ export function OpexWizard({
       return;
     }
 
+    // Unlike the one-off path above, recurring creation has no natural-key collision guard.
+    // UpsertOpexRecurring(id: 0) always INSERTS a new template rather than upserting on a key (see
+    // its RPC doc comment), so two templates can knowingly share (category, label). The gap that
+    // leaves open: `isRecurringLine`/`collision` above show that a worker's monthly materialisation
+    // books each template's line into the *same* OpexLine table the one-off path upserts on — keyed
+    // on (month, category, label) — so two active templates sharing that key would silently
+    // overwrite each other's materialised line every month both are active (most likely two salary
+    // templates for the same person/label). Not guarded here: the exact materialisation key isn't
+    // visible from this frontend-only repo, and the dedicated recurring-edit modal
+    // (recurring-tab.tsx) has the same gap, so a guard only in this wizard would be a false sense of
+    // safety rather than real protection. Flagging for a backend-side unique constraint instead.
     try {
       await upsertRecurring.mutateAsync({
         id: 0,
@@ -427,6 +456,12 @@ export function OpexWizard({
                   </Text>
                 )}
 
+                {collisionChecking && (
+                  <Text variant='inactive' size='small'>
+                    Checking for a conflicting line this month…
+                  </Text>
+                )}
+
                 {collision && (
                   <Text variant='error' size='small'>
                     {isRecurringLine(collision)
@@ -469,10 +504,10 @@ export function OpexWizard({
                   type='button'
                   variant='main'
                   size='lg'
-                  disabled={busy || !!collision}
+                  disabled={busy || !!collision || collisionChecking}
                   onClick={submit}
                 >
-                  {busy ? 'saving…' : 'create'}
+                  {busy ? 'saving…' : collisionChecking ? 'checking…' : 'create'}
                 </Button>
               )}
             </div>

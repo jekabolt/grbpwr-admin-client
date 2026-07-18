@@ -97,11 +97,17 @@ const priceEntrySchema = z.object({
 const priceEntryIntegerRefine = (entry: { currency: string; price?: { value?: string } }) =>
   !INTEGER_CURRENCIES.includes(entry.currency) || /^\d*$/.test(entry.price?.value ?? '');
 
-const allPricesFilledRefine = (arr: { price?: { value?: string } }[]) =>
-  arr.every((p) => {
-    const v = p?.price?.value;
-    return v != null && v !== '' && parseFloat(v) > 0;
-  });
+const isPriceFilled = (p: { price?: { value?: string } }) => {
+  const v = p?.price?.value;
+  return v != null && v !== '' && parseFloat(v) > 0;
+};
+
+// Named (not just "some price is missing") so the operator doesn't have to hunt across every
+// currency row to find which one is still blank — existing live products already have a
+// backfilled PLN price from the backend migration, so this mostly points at genuinely new
+// currencies.
+const missingPriceCurrencies = (arr: { currency: string; price?: { value?: string } }[]) =>
+  arr.filter((p) => !isPriceFilled(p)).map((p) => p.currency);
 
 // R6/§14.6 + admin #65: DRAFT colourways are created/saved incrementally — media, translations,
 // prices, sizes and the size chart are all filled after the draft exists (variants and the chart are
@@ -164,12 +170,15 @@ const makeProductSchema = (strict: boolean) =>
     .superRefine((data, ctx) => {
       // Prices are mandatory (all currencies filled) only for a live/strict colourway; a DRAFT
       // saves with partial or empty prices.
-      if (strict && !allPricesFilledRefine(data.prices)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'All prices must be filled (value greater than 0)',
-          path: ['prices'],
-        });
+      if (strict) {
+        const missing = missingPriceCurrencies(data.prices);
+        if (missing.length) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `All prices must be filled (value greater than 0). Missing prices for: ${missing.join(', ')}`,
+            path: ['prices'],
+          });
+        }
       }
 
       // At least one sellable size is required only for a live/strict colourway; on a DRAFT, variants

@@ -8,7 +8,8 @@ import Text from 'ui/components/text';
 
 // R6: the colourway lifecycle is a stored status with server-validated transitions, driven by
 // dedicated RPCs (not a raw `hidden` write). This block replaces the old visibility toggle:
-//   DRAFT --Publish--> ACTIVE <--Hide/Unhide--> HIDDEN, and ACTIVE|HIDDEN --Archive--> ARCHIVED.
+//   DRAFT --Publish--> ACTIVE <--Hide/Unhide--> HIDDEN, ACTIVE|HIDDEN --Archive--> ARCHIVED, and
+//   ARCHIVED --Restore--> HIDDEN (#60 — archiving is reversible, not terminal).
 // Publish enforces preconditions server-side; on FAILED_PRECONDITION we surface the reasons.
 
 type StatusMeta = { label: string; className: string };

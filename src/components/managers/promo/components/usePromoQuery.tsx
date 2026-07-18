@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_PromoCodeInsert } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 
 const ITEMS_PER_PAGE = 50;
 
@@ -97,6 +98,7 @@ export function useAddPromo() {
 // needs a real EnablePromoCode/UpdatePromoCode RPC.
 export function useUpdatePromo() {
   const queryClient = useQueryClient();
+  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: async ({
       originalCode,
@@ -106,10 +108,35 @@ export function useUpdatePromo() {
       promo: common_PromoCodeInsert;
     }) => {
       await adminService.DeletePromoCode({ code: originalCode });
-      return adminService.AddPromo({ promo });
+      try {
+        return await adminService.AddPromo({ promo });
+      } catch (e) {
+        // DeletePromoCode above already succeeded by this point (it didn't throw), so the
+        // original row is gone even though this mutation is about to report failure. Tag the
+        // error so onError can tell the operator the code was actually removed, instead of a
+        // generic "update failed" that implies the original code is still intact.
+        const err = e instanceof Error ? e : new Error('Failed to recreate promo code');
+        (err as Error & { promoDeleted?: boolean }).promoDeleted = true;
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: promoKeys.all });
+    },
+    onError: (error, { originalCode }) => {
+      // The delete half of this workaround can succeed even when the overall mutation fails (see
+      // mutationFn above). Invalidate unconditionally so the table never keeps showing a code
+      // that's actually already been deleted server-side.
+      queryClient.invalidateQueries({ queryKey: promoKeys.all });
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      const promoDeleted =
+        error instanceof Error && (error as Error & { promoDeleted?: boolean }).promoDeleted;
+      showMessage(
+        promoDeleted
+          ? `"${originalCode}" was removed during the update but could not be recreated (${reason}). It no longer exists — create it again.`
+          : reason,
+        'error',
+      );
     },
   });
 }
