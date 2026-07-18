@@ -2,6 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { FxRatesModal } from 'components/managers/tech-cards/components/fx-rates-modal';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -54,7 +55,8 @@ export function Settings() {
   const { dictionary, refetch } = useDictionary();
   const showMessage = useSnackBarStore((state) => state.showMessage);
   const [isLoading, setIsLoading] = useState(false);
-  const { canWrite } = usePermissions();
+  const [fxOpen, setFxOpen] = useState(false);
+  const { canWrite, canRead } = usePermissions();
 
   const initialValues = useMemo(
     () => (dictionary ? transformDictionaryToSettings(dictionary) : defaultSettings),
@@ -157,6 +159,32 @@ export function Settings() {
               : 'This moves checkout onto the TEST Stripe account (CARD_TEST) — real cards will stop being charged once you save.'}
           </Text>
         </ConfirmationModal>
+
+        {canRead(SECTION.techCards) && (
+          <>
+            <Section
+              title='currency / FX rates'
+              description='Costing FX rates fold multi-currency tech-card BOM lines into the base currency. Shared across every tech card.'
+            >
+              <div className='flex flex-wrap items-center justify-between gap-3'>
+                <Text variant='label' size='small'>
+                  Base currency is {baseCurrency}. Add a rate for each other currency so its costs
+                  convert into {baseCurrency}.
+                </Text>
+                <Button
+                  type='button'
+                  size='lg'
+                  variant='secondary'
+                  className='uppercase'
+                  onClick={() => setFxOpen(true)}
+                >
+                  edit FX rates
+                </Button>
+              </div>
+            </Section>
+            <FxRatesModal open={fxOpen} onOpenChange={setFxOpen} />
+          </>
+        )}
 
         <Section title='payment methods'>
           <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>

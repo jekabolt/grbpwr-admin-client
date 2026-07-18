@@ -2,6 +2,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
+import FieldsGroupContainer from 'ui/components/fields-group';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import Text from 'ui/components/text';
@@ -20,7 +21,9 @@ export function ColorFields({ editMode }: { editMode: boolean }) {
 
   const selectedCode = watch('product.productBodyInsert.colorCode') as string | undefined;
   const selected = activeColors.find((c) => c.code === selectedCode);
-  const swatch = (watch('product.productBodyInsert.colorHexOverride') as string) || selected?.hex;
+  // Per-colourway shade tweak; when empty the storefront falls back to the dictionary colour's hex.
+  const hexOverride = watch('product.productBodyInsert.colorHexOverride') as string | undefined;
+  const swatch = hexOverride || selected?.hex;
 
   return (
     <div className='space-y-3'>
@@ -77,12 +80,23 @@ export function ColorFields({ editMode }: { editMode: boolean }) {
         </div>
       )}
 
-      <InputField
-        type='color'
-        name='product.productBodyInsert.colorHexOverride'
-        label='color hex override (optional)'
-        readOnly={!editMode}
-      />
+      {/* The dictionary colour drives the swatch and SKU identity; the hex override is a rarely-used
+          per-colourway shade tweak, so it lives behind "advanced". Auto-opens when an override is
+          actually set so an active tweak is never hidden. The field is preserved — utils keeps the
+          undefined-when-empty round-trip. */}
+      <FieldsGroupContainer
+        title='advanced'
+        isOpen={Boolean(hexOverride)}
+        childrenSpacingClass='space-y-3'
+        headerContentGapClass='space-y-3'
+      >
+        <InputField
+          type='color'
+          name='product.productBodyInsert.colorHexOverride'
+          label='color hex override (optional)'
+          readOnly={!editMode}
+        />
+      </FieldsGroupContainer>
       {!activeColors.length && (
         <Text variant='inactive' size='small'>
           no colors in the dictionary yet — add them under dictionaries › colors

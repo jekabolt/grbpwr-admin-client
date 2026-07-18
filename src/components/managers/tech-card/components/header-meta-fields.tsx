@@ -121,21 +121,29 @@ export function HeaderMetaFields() {
   return (
     <div className='space-y-3'>
       <CategoryCascade />
-      <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
-        <SelectField
-          name='baseModelId'
-          label='base model'
-          items={modelOptions}
-          valueAsNumber
-          loading={modelsLoading}
-        />
-        <SelectField
-          name='baseSampleSizeId'
-          label='base sample size'
-          items={sampleSizeOptions}
-          valueAsNumber
-        />
-      </div>
+      {/* base model / base sample size are optional provenance FKs — both still print to the spec,
+          so they stay mounted (values round-trip) but sit behind a disclosure to keep the header
+          leading with category. Expand to set them. */}
+      <details>
+        <summary className='cursor-pointer select-none text-textBaseSize uppercase text-labelColor hover:text-text'>
+          base model & sample size — optional
+        </summary>
+        <div className='mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2'>
+          <SelectField
+            name='baseModelId'
+            label='base model'
+            items={modelOptions}
+            valueAsNumber
+            loading={modelsLoading}
+          />
+          <SelectField
+            name='baseSampleSizeId'
+            label='base sample size'
+            items={sampleSizeOptions}
+            valueAsNumber
+          />
+        </div>
+      </details>
     </div>
   );
 }

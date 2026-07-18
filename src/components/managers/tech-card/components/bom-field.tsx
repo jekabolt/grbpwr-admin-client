@@ -1,14 +1,15 @@
 import { common_Material, common_TechCardBomSection } from 'api/proto-http/admin';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
+import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
+import { ReadOnlyField } from 'components/managers/product/components/read-only-field';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import ComboField from 'ui/form/fields/combo-field';
 import CurrencySelect from 'ui/form/fields/currency-select';
@@ -51,22 +52,6 @@ function materialFabricWidth(m?: common_Material): string | undefined {
 }
 function materialFabricWeight(m?: common_Material): string | undefined {
   return m?.fabricAttrs?.weightGsm?.value || m?.fabricWeightGsm?.value;
-}
-
-// Read-only presentation for an identity field mirrored from the linked catalog material (S23):
-// shown instead of the editable input while a BOM line is linked, so the line can no longer
-// diverge from the catalog by hand-editing. Styled like the Input it replaces; the value is
-// passed in explicitly (the live catalog lookup, falling back to the line's own stored value)
-// rather than bound to the form field.
-function ReadOnlyMirrorField({ label, value }: { label: string; value?: string }) {
-  return (
-    <div className='space-y-2'>
-      <Text size='small' variant='label'>
-        {label}
-      </Text>
-      <Input value={value ?? ''} placeholder='—' disabled className='text-textInactiveColor' />
-    </div>
-  );
 }
 
 // Optionally link this BOM line to a catalog Material. Picking one snapshots the catalog's
@@ -146,7 +131,7 @@ function MaterialLinkField({ index }: { index: number }) {
         ) : null}
       </div>
       {materialId ? (
-        <Text size='small' variant='inactive'>
+        <Text size='small' variant='label'>
           Поля ниже — снимок из справочника; пока материал привязан, их нельзя редактировать. Чтобы
           изменить — отвяжите материал.
         </Text>
@@ -169,13 +154,16 @@ function MaterialLinkField({ index }: { index: number }) {
 // One catalog article (Sheet «Спецификация»). The BOM is a pure material-article catalog:
 // identity + supplier + price + fabric data. Which article goes on which part, in what
 // colour and at what consumption is the colourway's recipe (colorways tab → usages).
+//
+// A LINKED line (materialId > 0) shows the catalog article's facts as clean READ-ONLY DISPLAY —
+// a label over plain text, no input chrome (ReadOnlyField, the same pattern as the product form's
+// "style facts") — so an operator never mistakes a frozen catalog fact for something editable here
+// (root cause of the "disabled input still looks editable" confusion, M1/S23) and the line can't be
+// hand-edited to diverge from the catalog. Only what belongs to THIS style's use of the article stays
+// an input: the link itself, fabric direction, the cutting-wastage estimate and the comment. A legacy
+// UNLINKED line (materialId 0) keeps free-text inputs so it stays editable until it is linked.
 function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }) {
   const { control, getValues } = useFormContext<TechCardFormData>();
-  // materialId > 0 = this line is linked to a catalog Material: the material's own facts below render
-  // as a read-only mirror instead of editable inputs (S23) so a hand-edit can no longer diverge from
-  // the catalog (e.g. a fabric line silently set to section=hardware). What the material defines —
-  // section, unit, base colour, spec, composition, supplier, unit price — is mirrored; what belongs to
-  // THIS line's use of it stays editable: consumption/wastage/fabric-direction/currency/comment.
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const linked = materialId > 0;
@@ -185,7 +173,7 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     : undefined;
 
   // Prefer the live catalog value; fall back to whatever this line already holds (the linked
-  // material is archived/deleted, or the catalog list hasn't loaded yet) so the mirror never
+  // material is archived/deleted, or the catalog list hasn't loaded yet) so the display never
   // flashes blank while linked.
   const mirror = (catalogValue: string | undefined, field: string): string | undefined =>
     catalogValue?.trim()
@@ -194,135 +182,156 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
   const sectionLabel = (v?: string): string =>
     techCardBomSectionOptions.find((o) => o.value === v)?.label ?? v ?? '';
 
+  // #3: on a linked line the unit price and its currency are ONE derived fact — the catalog's latest
+  // price, in that price's currency — folded into a single read-only "12.50 EUR". The currency is
+  // never a free choice that can disagree with a price the operator can't edit (that standalone
+  // currency select was the field the user couldn't place). On an unlinked line the operator types
+  // the price, so currency stays an editable pick beside it.
+  const priceValue = mirror(linkedMaterial?.latestPrice?.price?.value, 'unitPrice');
+  const currencyValue = mirror(linkedMaterial?.latestPrice?.currency, 'currency') ?? '';
+  const priceDisplay = priceValue ? `${priceValue}${currencyValue ? ` ${currencyValue}` : ''}` : '';
+
+  // The composition cell carries the deep-link anchor + pulse the labels tab uses to point an operator
+  // at a missing composition (care-gen). Read-only mirror when linked, editable picker when not — kept
+  // in one place so both states keep the `#bom-composition-{index}` anchor.
+  const compositionCell = (
+    <div
+      id={`bom-composition-${index}`}
+      className={cn(
+        highlight && 'animate-pulse p-1 ring-2 ring-warning motion-reduce:animate-none',
+      )}
+    >
+      {linked ? (
+        // M1: the material's `composition` string is legacy plain text — shown as-is, never parsed.
+        // The style's STRUCTURED fibre composition is the typed composition_entries projection.
+        <ReadOnlyField
+          label='composition'
+          value={mirror(linkedMaterial?.composition, 'composition')}
+        />
+      ) : (
+        <CompositionPicker name={`bomItems.${index}.composition`} />
+      )}
+    </div>
+  );
+
   return (
-    <div className='space-y-3'>
-      <div className='grid grid-cols-1 gap-3 lg:grid-cols-3'>
-        <MaterialLinkField index={index} />
-        {linked ? (
-          <ReadOnlyMirrorField
-            label='section'
-            value={sectionLabel(mirror(linkedMaterial?.section, 'section'))}
-          />
-        ) : (
-          <SelectField
-            name={`bomItems.${index}.section`}
-            label='section *'
-            items={techCardBomSectionOptions}
-          />
-        )}
-        {linked ? (
-          <ReadOnlyMirrorField label='name' value={mirror(linkedMaterial?.name, 'name')} />
-        ) : (
-          <InputField name={`bomItems.${index}.name`} label='name *' />
-        )}
-        {linked ? (
-          <ReadOnlyMirrorField label='unit' value={mirror(linkedMaterial?.unit, 'unit')} />
-        ) : (
-          <ComboField
-            name={`bomItems.${index}.unit`}
-            label='unit'
-            options={unitOptions}
-            placeholder='м / pcs'
-          />
-        )}
-        {linked ? (
-          <ReadOnlyMirrorField
-            label='supplier'
-            value={mirror(linkedMaterial?.supplier, 'supplier')}
-          />
-        ) : (
-          <InputField name={`bomItems.${index}.supplier`} label='supplier' />
-        )}
-        {linked ? (
-          <ReadOnlyMirrorField
-            label='supplier ref'
-            value={mirror(linkedMaterial?.supplierRef, 'supplierRef')}
-          />
-        ) : (
-          <InputField name={`bomItems.${index}.supplierRef`} label='supplier ref' />
-        )}
-        {linked ? (
-          <ReadOnlyMirrorField
-            label='base color (ref)'
-            value={mirror(linkedMaterial?.color, 'color')}
-          />
-        ) : (
-          <InputField name={`bomItems.${index}.color`} label='base color (ref)' />
-        )}
-        {linked ? (
-          <ReadOnlyMirrorField
-            label='spec (width / weight)'
-            value={mirror(linkedMaterial?.spec, 'spec')}
-          />
-        ) : (
-          <InputField name={`bomItems.${index}.spec`} label='spec (width / weight)' />
-        )}
-        <div
-          id={`bom-composition-${index}`}
-          className={cn(
-            'rounded-none lg:col-span-3',
-            highlight && 'animate-pulse p-1 ring-2 ring-warning',
-          )}
-        >
-          {linked ? (
-            // M1: the material's `composition` string is legacy plain text — shown as-is, never
-            // parsed. The style's STRUCTURED fibre composition is the typed composition_entries
-            // projection (see CompositionEntries at the top of the BOM tab), not this per-line string.
-            <ReadOnlyMirrorField
-              label='composition'
-              value={mirror(linkedMaterial?.composition, 'composition')}
+    <div className='space-y-4'>
+      <MaterialLinkField index={index} />
+
+      {linked ? (
+        // From the catalog: read-only facts (label over plain text, no input chrome) so they never
+        // read as editable-but-disabled; the section is a badge and the article's photo anchors it.
+        <div className='space-y-3'>
+          <div className='flex items-center justify-between gap-2'>
+            <Text variant='uppercase' size='small'>
+              from catalog · read-only
+            </Text>
+            <span
+              title={`section: ${sectionLabel(mirror(linkedMaterial?.section, 'section'))}`}
+              className='shrink-0 border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-labelColor'
+            >
+              {sectionLabel(mirror(linkedMaterial?.section, 'section'))}
+            </span>
+          </div>
+          <div className='flex items-start gap-3'>
+            <MaterialThumb material={linkedMaterial} size='md' />
+            <div className='min-w-0 flex-1'>
+              <ReadOnlyField label='name' value={mirror(linkedMaterial?.name, 'name')} />
+            </div>
+          </div>
+          <div className='grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3'>
+            <ReadOnlyField label='unit' value={mirror(linkedMaterial?.unit, 'unit')} />
+            <ReadOnlyField label='unit price' value={priceDisplay} />
+            <ReadOnlyField
+              label='base color (ref)'
+              value={mirror(linkedMaterial?.color, 'color')}
             />
-          ) : (
-            <CompositionPicker name={`bomItems.${index}.composition`} />
-          )}
-        </div>
-      </div>
-
-      <div className='grid grid-cols-2 items-end gap-3 lg:grid-cols-3'>
-        {linked ? (
-          <ReadOnlyMirrorField
-            label='unit price'
-            value={mirror(linkedMaterial?.latestPrice?.price?.value, 'unitPrice')}
-          />
-        ) : (
-          <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
-        )}
-        <CurrencySelect name={`bomItems.${index}.currency`} label='currency' />
-      </div>
-
-      <TextareaField name={`bomItems.${index}.comment`} label='comment' rows={2} maxLength={1000} />
-
-      <div className='space-y-2 border-t border-textInactiveColor pt-3'>
-        <Text variant='uppercase' size='small'>
-          fabric data (for the cutter)
-        </Text>
-        <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
-          {linked ? (
-            <ReadOnlyMirrorField
+            <ReadOnlyField label='supplier' value={mirror(linkedMaterial?.supplier, 'supplier')} />
+            <ReadOnlyField
+              label='supplier ref'
+              value={mirror(linkedMaterial?.supplierRef, 'supplierRef')}
+            />
+            <ReadOnlyField
+              label='spec (width / weight)'
+              value={mirror(linkedMaterial?.spec, 'spec')}
+            />
+            <ReadOnlyField
               label='width (cm)'
               value={mirror(materialFabricWidth(linkedMaterial), 'fabricWidth')}
             />
-          ) : (
-            <DecimalField name={`bomItems.${index}.fabricWidth`} label='width (cm)' />
-          )}
-          {linked ? (
-            <ReadOnlyMirrorField
+            <ReadOnlyField
               label='weight (g/m²)'
               value={mirror(materialFabricWeight(linkedMaterial), 'fabricWeightGsm')}
             />
-          ) : (
+          </div>
+          {compositionCell}
+        </div>
+      ) : (
+        // Legacy free-text line: everything editable until it is linked to a catalog material.
+        <div className='space-y-3'>
+          <Text variant='uppercase' size='small'>
+            material details
+          </Text>
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+            <SelectField
+              name={`bomItems.${index}.section`}
+              label='section *'
+              items={techCardBomSectionOptions}
+            />
+            <InputField name={`bomItems.${index}.name`} label='name *' />
+            <ComboField
+              name={`bomItems.${index}.unit`}
+              label='unit'
+              options={unitOptions}
+              placeholder='м / pcs'
+            />
+            <InputField name={`bomItems.${index}.supplier`} label='supplier' />
+            <InputField name={`bomItems.${index}.supplierRef`} label='supplier ref' />
+            <InputField name={`bomItems.${index}.color`} label='base color (ref)' />
+            {/* No free-text `spec` input: it duplicated the structured width (cm) + weight (g/m²)
+                fields below. The value is preserved — it still round-trips (schema `spec` + map
+                in/out), renders read-only on a linked line's catalog mirror, and prints to the
+                release snapshot — only this hand-typed input is removed. */}
+            <DecimalField name={`bomItems.${index}.fabricWidth`} label='width (cm)' />
             <DecimalField name={`bomItems.${index}.fabricWeightGsm`} label='weight (g/m²)' />
-          )}
+            <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
+            <CurrencySelect name={`bomItems.${index}.currency`} label='currency' />
+          </div>
+          {compositionCell}
+        </div>
+      )}
+
+      {/* This style's use of the article: always editable, never mirrored from the catalog. */}
+      <div className='space-y-3 border-t border-textInactiveColor pt-3'>
+        <Text variant='uppercase' size='small'>
+          on this line · for the cutter
+        </Text>
+        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
           <SelectField
             name={`bomItems.${index}.fabricDirection`}
-            label='direction'
+            label='fabric direction'
             items={techCardFabricDirectionOptions}
           />
-          <DecimalField name={`bomItems.${index}.wastagePercent`} label='wastage %' />
+          <div className='space-y-1'>
+            <DecimalField
+              name={`bomItems.${index}.wastagePercent`}
+              label='est. cutting wastage %'
+            />
+            <Text variant='label' size='small'>
+              Estimate only. The real figure depends on marker efficiency at cutting and is set per
+              production run.
+            </Text>
+          </div>
         </div>
+        <TextareaField
+          name={`bomItems.${index}.comment`}
+          label='comment'
+          rows={2}
+          maxLength={1000}
+        />
       </div>
 
-      <Text variant='inactive' size='small'>
+      <Text variant='label' size='small'>
         Цвет, размещение и расход этого артикула задаются на вкладке colorways (в карточке
         колорвея).
       </Text>
@@ -362,6 +371,10 @@ function BomTile({
   const sectionLabel =
     techCardBomSectionOptions.find((o) => o.value === row.section)?.label ?? 'section?';
   const linked = (row.materialId ?? 0) > 0;
+  const { data } = useMaterials('', false);
+  const material = linked
+    ? (data?.materials ?? []).find((m) => m.id === row.materialId)
+    : undefined;
   const price = row.unitPrice?.trim();
   const facts = [
     row.supplier?.trim(),
@@ -383,13 +396,14 @@ function BomTile({
           className='flex min-w-0 flex-1 items-center gap-3 text-left'
           aria-expanded={open}
         >
-          <span className='shrink-0 border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+          <MaterialThumb material={material} size='sm' />
+          <span className='shrink-0 border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-labelColor'>
             {sectionLabel}
           </span>
           <span className='min-w-0 flex-1'>
             <Text className='truncate'>{row.name?.trim() || `артикул ${index + 1}`}</Text>
             <Text
-              variant={linked ? 'inactive' : undefined}
+              variant={linked ? 'label' : undefined}
               size='small'
               className={cn('truncate', !linked && 'text-error')}
             >

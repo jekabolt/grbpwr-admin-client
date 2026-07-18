@@ -17,6 +17,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { fieldErrorSummary } from 'utils/field-errors';
+import { CompositionWizard, type CompRow } from './composition-wizard';
 import { mediaThumbUrl } from './material-thumb';
 import { materialPurposeOptions, resolveMaterialPurpose } from './purpose-options';
 import { useSaveMaterial } from './useMaterials';
@@ -61,6 +62,21 @@ const classForSection = (section: common_TechCardBomSection): common_MaterialCla
   }
 };
 
+// Inverse of classForSection for the three classes that map 1:1 to a BOM section: the section is
+// derived from the class instead of being asked for a second time (killing the class-vs-section
+// contradiction). FABRIC and OTHER are intentionally absent — FABRIC fans out to
+// fabric/lining/interlining/insulation and OTHER to trim/label — so those two keep an explicit
+// section select. Both class AND section stay persisted regardless (see submit + draftFromMaterial).
+const SECTION_FOR_CLASS: Partial<Record<common_MaterialClass, common_TechCardBomSection>> = {
+  MATERIAL_CLASS_HARDWARE: 'TECH_CARD_BOM_SECTION_HARDWARE',
+  MATERIAL_CLASS_THREAD: 'TECH_CARD_BOM_SECTION_THREAD',
+  MATERIAL_CLASS_PACKAGING: 'TECH_CARD_BOM_SECTION_PACKAGING',
+};
+// A 1:1 section (control hidden, value auto-derived) for hardware/thread/packaging; undefined for
+// FABRIC/OTHER, whose section stays operator-chosen via the still-visible select.
+const derivedSection = (cls: common_MaterialClass): common_TechCardBomSection | undefined =>
+  SECTION_FOR_CLASS[cls];
+
 // Legacy rows predate CTI typing and carry MATERIAL_CLASS_UNKNOWN (or no typed attrs at all).
 // Infer FABRIC when the old flat fields carry data (the pre-migration catalog was fabric-only),
 // else OTHER — so the class select never opens on the unofferable UNKNOWN value.
@@ -95,9 +111,8 @@ type PackagingDraft = {
   gsm: string;
   printMethod: string;
 };
-// #37: one structured fibre share — a dictionary fibre code + a percent (edited as a plain string,
-// converted to google.type.Decimal at the schema boundary like every other numeric field here).
-type CompRow = { fiberCode: string; percent: string };
+// #37: CompRow (a dictionary fibre code + a percent string) is owned by the composition wizard, which
+// is now the single editor of a material's fibre blend; the modal only holds/persists the rows.
 // #39: one typed other-attribute (replaces the raw-JSON textarea) — a name/value pair serialized to
 // the material's other_attrs JSON object on save.
 type KV = { key: string; value: string };
@@ -314,6 +329,17 @@ export function MaterialModal({
   // #51: warehouse block is progressive-disclosure — collapsed on the common "just log a material"
   // create path, auto-expanded when editing a material that already carries warehouse data.
   const [warehouseOpen, setWarehouseOpen] = useState(false);
+  // Sourcing (supplier ref + purpose) is collapsed out of the identity block — both are edge fields
+  // rarely touched on the common create path. Auto-expanded when editing a material that carries a
+  // supplier ref or a non-default purpose, so a set value is never hidden. Both stay persisted.
+  const [sourcingOpen, setSourcingOpen] = useState(false);
+  // Fabric's secondary specs (direction / shrinkage / roll length) sit behind a disclosure so width
+  // and gsm read as the primary fabric fields; auto-expanded when any of them already has a value.
+  const [fabricAdvancedOpen, setFabricAdvancedOpen] = useState(false);
+  // #37: the fibre blend is edited in a guided wizard (composition-wizard.tsx) launched from the
+  // composition section below, not inline — so it works for any class and never dead-ends on an
+  // empty fibres dictionary.
+  const [compOpen, setCompOpen] = useState(false);
   // #40: sample vs production vs both — persisted via common_Material.purpose.
   const [purpose, setPurpose] = useState<common_MaterialPurpose>('MATERIAL_PURPOSE_BOTH');
   // #39: catalog image. image_id is the write-side reference; image is kept alongside it purely
@@ -330,12 +356,17 @@ export function MaterialModal({
           section: defaultSection ?? empty.section,
           materialClass: defaultSection ? classForSection(defaultSection) : 'MATERIAL_CLASS_FABRIC',
         };
+    const resolvedPurpose = resolveMaterialPurpose(material?.purpose);
     setD(next);
     setCodeOverride(false);
-    setPurpose(resolveMaterialPurpose(material?.purpose));
+    setPurpose(resolvedPurpose);
     setImageId(material?.imageId ?? 0);
     setImage(material?.image);
     setWarehouseOpen(!!(next.code || next.color || next.pantone || next.minStock || next.notes));
+    setSourcingOpen(!!next.supplierRef || resolvedPurpose !== 'MATERIAL_PURPOSE_BOTH');
+    setFabricAdvancedOpen(
+      !!(next.fabric.fabricDirection || next.fabric.shrinkagePct || next.fabric.rollLengthM),
+    );
   }, [material, open, defaultSection]);
 
   const handleSetImage = (media: common_MediaFull[]) => {
@@ -350,6 +381,23 @@ export function MaterialModal({
   };
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
+  // Changing the class keeps the section consistent (kills the class-vs-section contradiction): the
+  // 1:1 classes derive their section (control hidden); FABRIC/OTHER keep the current section when it
+  // already belongs to the new class's family, else reset to that family's canonical section so the
+  // now-visible select never shows a mismatched value. Both fields stay persisted.
+  const changeClass = (materialClass: common_MaterialClass) => {
+    const derived = derivedSection(materialClass);
+    if (derived) {
+      set({ materialClass, section: derived });
+      return;
+    }
+    const keep = classForSection(d.section) === materialClass;
+    const fallback: common_TechCardBomSection =
+      materialClass === 'MATERIAL_CLASS_FABRIC'
+        ? 'TECH_CARD_BOM_SECTION_FABRIC'
+        : 'TECH_CARD_BOM_SECTION_TRIM';
+    set({ materialClass, section: keep ? d.section : fallback });
+  };
   const setFabric = (patch: Partial<FabricDraft>) =>
     setD((prev) => ({ ...prev, fabric: { ...prev.fabric, ...patch } }));
   const setHardware = (patch: Partial<HardwareDraft>) =>
@@ -360,32 +408,11 @@ export function MaterialModal({
     setD((prev) => ({ ...prev, packaging: { ...prev.packaging, ...patch } }));
 
   // ---- composition (#37) --------------------------------------------------------------------
-  const setCompRow = (i: number, patch: Partial<CompRow>) =>
-    setD((prev) => ({
-      ...prev,
-      compositionEntries: prev.compositionEntries.map((r, idx) =>
-        idx === i ? { ...r, ...patch } : r,
-      ),
-    }));
-  const addCompRow = () =>
-    setD((prev) => ({
-      ...prev,
-      compositionEntries: [...prev.compositionEntries, { fiberCode: '', percent: '' }],
-    }));
-  const removeCompRow = (i: number) =>
-    setD((prev) => ({
-      ...prev,
-      compositionEntries: prev.compositionEntries.filter((_, idx) => idx !== i),
-    }));
-
+  // The rows themselves are edited in the CompositionWizard; the modal keeps the derived validity so
+  // it can flag an off-100 blend inline and block save, and resolve fibre names for the summary.
   const fibers = useMemo(() => (dictionary?.fibers ?? []).filter((f) => f.code), [dictionary]);
   const legacyComposition = material?.composition?.trim() ?? '';
-  // Show the fibre editor for fabrics (the class labels reference), and for any material that
-  // already carries structured or legacy composition so it never hides existing data.
-  const showComposition =
-    d.materialClass === 'MATERIAL_CLASS_FABRIC' ||
-    d.compositionEntries.length > 0 ||
-    !!legacyComposition;
+  const fiberName = (code: string) => fibers.find((f) => f.code === code)?.name || code;
 
   const compFilled = d.compositionEntries.filter((r) => r.fiberCode || r.percent.trim());
   const compTotal = compFilled.reduce((s, r) => {
@@ -412,30 +439,9 @@ export function MaterialModal({
       ...prev,
       otherAttrsRows: prev.otherAttrsRows.filter((_, idx) => idx !== i),
     }));
-  const switchOtherToRaw = () => {
-    const obj: Record<string, string> = {};
-    d.otherAttrsRows.filter((r) => r.key.trim()).forEach((r) => (obj[r.key.trim()] = r.value));
-    set({
-      otherAttrsMode: 'raw',
-      otherAttrsRaw: Object.keys(obj).length ? JSON.stringify(obj, null, 2) : '',
-    });
-  };
-  const switchOtherToKv = () => {
-    const obj = tryParseObject(d.otherAttrsRaw);
-    if (d.otherAttrsRaw.trim() && !obj) {
-      showMessage('Raw value is not a JSON object — fix it before switching to fields', 'error');
-      return;
-    }
-    set({
-      otherAttrsMode: 'kv',
-      otherAttrsRows: obj
-        ? Object.entries(obj).map(([key, value]) => ({
-            key,
-            value: typeof value === 'string' ? value : JSON.stringify(value),
-          }))
-        : [],
-    });
-  };
+  // #39 simplification: the editable raw-JSON hatch is gone. `raw` mode now only survives as a
+  // read-only view for a legacy non-object value that the key/value rows can't represent, so
+  // buildOtherAttrs still round-trips it unchanged (see the render + build below).
   const buildOtherAttrs = (): string => {
     if (d.materialClass !== 'MATERIAL_CLASS_OTHER') return '';
     if (d.otherAttrsMode === 'raw') return d.otherAttrsRaw.trim();
@@ -491,7 +497,9 @@ export function MaterialModal({
     const payload: common_Material = {
       id: material?.id ?? 0,
       name: d.name.trim(),
-      section: d.section,
+      // section stays persisted — derived from the class for the 1:1 classes (its select is hidden,
+      // so a stale/legacy mis-set section is never written back), else the operator-chosen section.
+      section: derivedSection(d.materialClass) ?? d.section,
       supplier: d.supplier.trim(),
       supplierRef: d.supplierRef.trim(),
       // Legacy free-text `composition` is superseded by the structured entries below — echo it back
@@ -622,7 +630,7 @@ export function MaterialModal({
             <select
               className={cell}
               value={d.materialClass}
-              onChange={(e) => set({ materialClass: e.target.value as common_MaterialClass })}
+              onChange={(e) => changeClass(e.target.value as common_MaterialClass)}
             >
               {materialClassOptions.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -631,20 +639,25 @@ export function MaterialModal({
               ))}
             </select>
           </label>
-          <label className='flex flex-col gap-1'>
-            <Text size='small'>section</Text>
-            <select
-              className={cell}
-              value={d.section}
-              onChange={(e) => set({ section: e.target.value as common_TechCardBomSection })}
-            >
-              {techCardBomSectionOptions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {/* section is only asked for when it's ambiguous: FABRIC (fabric/lining/interlining/
+              insulation) and OTHER (trim/label). For hardware/thread/packaging it's derived 1:1 from
+              the class (see changeClass + submit), so the control is hidden but the field persists. */}
+          {!derivedSection(d.materialClass) && (
+            <label className='flex flex-col gap-1'>
+              <Text size='small'>section</Text>
+              <select
+                className={cell}
+                value={d.section}
+                onChange={(e) => set({ section: e.target.value as common_TechCardBomSection })}
+              >
+                {techCardBomSectionOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className='flex flex-col gap-1'>
             <Text size='small'>unit</Text>
             <input
@@ -662,87 +675,121 @@ export function MaterialModal({
               onChange={(e) => set({ supplier: e.target.value })}
             />
           </label>
-          <label className='sm:col-span-2 flex flex-col gap-1'>
-            <Text size='small'>supplier ref</Text>
-            <input
-              className={cell}
-              value={d.supplierRef}
-              onChange={(e) => set({ supplierRef: e.target.value })}
-            />
-          </label>
-          {/* #40: sample vs production vs both — persisted on common_Material.purpose. */}
-          <div className='sm:col-span-2 flex flex-col gap-1'>
-            <Text size='small'>purpose</Text>
-            <div className='flex gap-2'>
-              {materialPurposeOptions.map((o) => (
-                <Button
-                  key={o.value}
-                  type='button'
-                  variant={purpose === o.value ? 'main' : 'secondary'}
-                  className='uppercase'
-                  onClick={() => setPurpose(o.value)}
-                >
-                  {o.label}
-                </Button>
-              ))}
+        </div>
+
+        {/* ---- SOURCING (collapsible) — edge fields lifted out of the identity block -------- */}
+        <SectionHeader
+          title='sourcing'
+          right={
+            <button
+              type='button'
+              className='text-small uppercase underline'
+              onClick={() => setSourcingOpen((v) => !v)}
+            >
+              {sourcingOpen ? 'hide' : 'show'}
+            </button>
+          }
+        />
+        {sourcingOpen && (
+          <div className={grid}>
+            <label className='sm:col-span-2 flex flex-col gap-1'>
+              <Text size='small'>supplier ref</Text>
+              <input
+                className={cell}
+                value={d.supplierRef}
+                onChange={(e) => set({ supplierRef: e.target.value })}
+              />
+            </label>
+            {/* #40: sample vs production vs both — persisted on common_Material.purpose (defaults to
+                BOTH; a legacy/unset value round-trips as BOTH via resolveMaterialPurpose). */}
+            <div className='sm:col-span-2 flex flex-col gap-1'>
+              <Text size='small'>purpose</Text>
+              <div className='flex gap-2'>
+                {materialPurposeOptions.map((o) => (
+                  <Button
+                    key={o.value}
+                    type='button'
+                    variant={purpose === o.value ? 'main' : 'secondary'}
+                    className='uppercase'
+                    onClick={() => setPurpose(o.value)}
+                  >
+                    {o.label}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* ---- ATTRIBUTES ------------------------------------------------------------------ */}
         <SectionHeader title='attributes' />
         {d.materialClass === 'MATERIAL_CLASS_FABRIC' && (
-          <div className={grid}>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>width (cm)</Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={d.fabric.widthCm}
-                onChange={(e) => setFabric({ widthCm: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>weight (gsm)</Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={d.fabric.weightGsm}
-                onChange={(e) => setFabric({ weightGsm: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>fabric direction</Text>
-              <select
-                className={cell}
-                value={d.fabric.fabricDirection}
-                onChange={(e) => setFabric({ fabricDirection: e.target.value })}
-              >
-                {fabricDirectionOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>shrinkage (%)</Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={d.fabric.shrinkagePct}
-                onChange={(e) => setFabric({ shrinkagePct: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>roll length (m)</Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={d.fabric.rollLengthM}
-                onChange={(e) => setFabric({ rollLengthM: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
+          <div className='flex flex-col gap-2'>
+            <div className={grid}>
+              <label className='flex flex-col gap-1'>
+                <Text size='small'>width (cm)</Text>
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  value={d.fabric.widthCm}
+                  onChange={(e) => setFabric({ widthCm: sanitizeDecimal(e.target.value) })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text size='small'>weight (gsm)</Text>
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  value={d.fabric.weightGsm}
+                  onChange={(e) => setFabric({ weightGsm: sanitizeDecimal(e.target.value) })}
+                />
+              </label>
+            </div>
+            {/* direction / shrinkage / roll length behind a disclosure so width + gsm stay the
+                primary fabric fields; all three still persist on fabricAttrs regardless of state. */}
+            <button
+              type='button'
+              className='w-fit text-small uppercase underline'
+              onClick={() => setFabricAdvancedOpen((v) => !v)}
+            >
+              {fabricAdvancedOpen ? 'hide advanced specs' : 'advanced fabric specs'}
+            </button>
+            {fabricAdvancedOpen && (
+              <div className={grid}>
+                <label className='flex flex-col gap-1'>
+                  <Text size='small'>fabric direction</Text>
+                  <select
+                    className={cell}
+                    value={d.fabric.fabricDirection}
+                    onChange={(e) => setFabric({ fabricDirection: e.target.value })}
+                  >
+                    {fabricDirectionOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className='flex flex-col gap-1'>
+                  <Text size='small'>shrinkage (%)</Text>
+                  <input
+                    className={cell}
+                    inputMode='decimal'
+                    value={d.fabric.shrinkagePct}
+                    onChange={(e) => setFabric({ shrinkagePct: sanitizeDecimal(e.target.value) })}
+                  />
+                </label>
+                <label className='flex flex-col gap-1'>
+                  <Text size='small'>roll length (m)</Text>
+                  <input
+                    className={cell}
+                    inputMode='decimal'
+                    value={d.fabric.rollLengthM}
+                    onChange={(e) => setFabric({ rollLengthM: sanitizeDecimal(e.target.value) })}
+                  />
+                </label>
+              </div>
+            )}
           </div>
         )}
 
@@ -861,7 +908,8 @@ export function MaterialModal({
           </div>
         )}
 
-        {/* #39: MATERIAL_CLASS_OTHER — typed key/value rows instead of a raw-JSON textarea. */}
+        {/* #39: MATERIAL_CLASS_OTHER — typed key/value rows. The editable raw-JSON hatch is gone; a
+            legacy non-object value the rows can't represent is shown read-only (never dropped). */}
         {d.materialClass === 'MATERIAL_CLASS_OTHER' && (
           <div className='flex flex-col gap-2'>
             {d.otherAttrsMode === 'kv' ? (
@@ -897,7 +945,7 @@ export function MaterialModal({
                     </div>
                   ))
                 )}
-                <div className='flex items-center justify-between gap-2'>
+                <div>
                   <Button
                     type='button'
                     variant='secondary'
@@ -906,114 +954,84 @@ export function MaterialModal({
                   >
                     + field
                   </Button>
-                  <button
-                    type='button'
-                    className='text-small uppercase underline'
-                    onClick={switchOtherToRaw}
-                  >
-                    edit as JSON
-                  </button>
                 </div>
               </>
             ) : (
-              <>
-                <textarea
-                  className={cell}
-                  rows={3}
-                  placeholder='{}'
-                  value={d.otherAttrsRaw}
-                  onChange={(e) => set({ otherAttrsRaw: e.target.value })}
-                />
-                <div className='flex justify-end'>
-                  <button
-                    type='button'
-                    className='text-small uppercase underline'
-                    onClick={switchOtherToKv}
-                  >
-                    edit as fields
-                  </button>
+              // Legacy non-object JSON — can't be split into name/value rows, so it's shown read-only
+              // and round-trips unchanged on save (buildOtherAttrs returns otherAttrsRaw for raw mode).
+              <div className='flex flex-col gap-1'>
+                <Text variant='label' size='small'>
+                  legacy value — read-only
+                </Text>
+                <div className='overflow-x-auto whitespace-pre-wrap break-words border border-textInactiveColor bg-bgColor px-2 py-1 text-small text-labelColor'>
+                  {d.otherAttrsRaw}
                 </div>
-              </>
+              </div>
             )}
           </div>
         )}
 
-        {/* ---- COMPOSITION (#37) ----------------------------------------------------------- */}
-        {showComposition && (
-          <>
-            <SectionHeader
-              title='composition'
-              right={
-                compFilled.length > 0 ? (
-                  <Text variant={compValid ? 'label' : 'error'} size='small'>
-                    total {Number(compTotal.toFixed(2))}%{compValid ? ' ✓' : ' / 100'}
+        {/* ---- COMPOSITION (#37) — guided wizard ------------------------------------------- */}
+        <SectionHeader
+          title='composition'
+          right={
+            compFilled.length > 0 ? (
+              <Text variant={compValid ? 'label' : 'error'} size='small'>
+                total {Number(compTotal.toFixed(2))}%{compValid ? ' ✓' : ' / 100'}
+              </Text>
+            ) : undefined
+          }
+        />
+        <div className='flex flex-col gap-2'>
+          {legacyComposition && (
+            <Text variant='inactive' size='small'>
+              legacy text: “{legacyComposition}” — re-enter as structured fibres in the wizard
+            </Text>
+          )}
+          {compFilled.length > 0 ? (
+            <div className='flex flex-wrap gap-1.5'>
+              {compFilled.map((r, i) => (
+                <div
+                  key={i}
+                  className='flex items-baseline gap-1.5 border border-textInactiveColor px-2 py-1'
+                >
+                  <Text size='small'>{fiberName(r.fiberCode)}</Text>
+                  <Text size='small' variant='inactive'>
+                    {r.percent.trim() ? `${r.percent}%` : '—'}
                   </Text>
-                ) : undefined
-              }
-            />
-            <div className='flex flex-col gap-2'>
-              {legacyComposition && (
-                <Text variant='inactive' size='small'>
-                  legacy text: “{legacyComposition}” — re-enter as structured fibres below
-                </Text>
-              )}
-              {d.compositionEntries.map((r, i) => (
-                <div key={i} className='flex items-center gap-2'>
-                  <select
-                    className={`${cell} min-w-0 flex-1`}
-                    value={r.fiberCode}
-                    onChange={(e) => setCompRow(i, { fiberCode: e.target.value })}
-                  >
-                    <option value=''>— fibre —</option>
-                    {fibers
-                      .filter((f) => !f.archived || f.code === r.fiberCode)
-                      .map((f) => (
-                        <option key={f.code} value={f.code}>
-                          {f.name ? `${f.name} (${f.code})` : f.code}
-                        </option>
-                      ))}
-                  </select>
-                  <div className='flex shrink-0 items-center gap-1'>
-                    <input
-                      className={`${cell} w-20`}
-                      inputMode='decimal'
-                      value={r.percent}
-                      onChange={(e) =>
-                        setCompRow(i, { percent: sanitizeDecimal(e.target.value, 2) })
-                      }
-                    />
-                    <Text size='small'>%</Text>
-                  </div>
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    className='shrink-0'
-                    aria-label='remove fibre'
-                    onClick={() => removeCompRow(i)}
-                  >
-                    ✕
-                  </Button>
                 </div>
               ))}
-              <div>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  className='uppercase'
-                  disabled={fibers.length === 0}
-                  onClick={addCompRow}
-                >
-                  + fibre
-                </Button>
-              </div>
-              {fibers.length === 0 && (
-                <Text variant='inactive' size='small'>
-                  no fibres in the dictionary yet — add them under dictionaries first
-                </Text>
-              )}
             </div>
-          </>
-        )}
+          ) : (
+            <Text variant='inactive' size='small'>
+              {d.materialClass === 'MATERIAL_CLASS_FABRIC'
+                ? 'no fibre blend yet — recommended for fabrics'
+                : 'no fibre blend yet (optional)'}
+            </Text>
+          )}
+          {compFilled.length > 0 && !compValid && (
+            <Text variant='error' size='small'>
+              composition must sum to 100% — open the wizard to fix
+            </Text>
+          )}
+          <div>
+            <Button
+              type='button'
+              variant='secondary'
+              className='uppercase'
+              onClick={() => setCompOpen(true)}
+            >
+              {compFilled.length > 0 ? 'edit composition' : '＋ add composition'}
+            </Button>
+          </div>
+        </div>
+
+        <CompositionWizard
+          open={compOpen}
+          onOpenChange={setCompOpen}
+          initialEntries={d.compositionEntries}
+          onSave={(entries) => set({ compositionEntries: entries })}
+        />
 
         {/* ---- WAREHOUSE (collapsible, #51) ------------------------------------------------ */}
         <SectionHeader

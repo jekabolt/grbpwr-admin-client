@@ -277,6 +277,8 @@ const labelSchema = z.object({
   attachment: z.string().optional().default(''),
   size: z.string().optional().default(''),
   note: z.string().optional().default(''),
+  // FK to the physical label material's BOM line (tech_card_bom_item); 0 = unlinked.
+  bomItemId: z.number().optional().default(0),
 });
 
 const packagingSchema = z.object({
@@ -753,6 +755,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       attachment: l.attachment || '',
       size: l.size || '',
       note: l.note || '',
+      bomItemId: l.bomItemId || 0,
     })),
     packaging: insert?.packaging
       ? {
@@ -1096,6 +1099,7 @@ export function mapFormToTechCardInsert(
       attachment: l.attachment?.trim() || '',
       size: l.size?.trim() || '',
       note: l.note?.trim() || '',
+      bomItemId: l.bomItemId || 0,
     })),
     packaging: mapPackagingOut(data.packaging),
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.

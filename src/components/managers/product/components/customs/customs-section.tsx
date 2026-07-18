@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
@@ -26,10 +27,22 @@ export function ProductCustomsSection({
   const { data, isLoading, isError, refetch } = useProductCustoms(productId);
   const save = useSetProductCustoms(productId);
 
+  // Country of origin is a single fact, shared with the product's merchandising country. It is entered
+  // ONCE in Details (the country picker) and read from the shared form here, so customs and merch can
+  // never silently disagree. It is still persisted through customs' own RPC (below), so both writes
+  // carry the same value. Fall back to the stored customs value when merch has none, so an existing
+  // customs-only country is never wiped.
+  const merchCountry =
+    (useWatch({ name: 'product.productBodyInsert.countryOfOrigin' }) as string) || '';
+
   const [form, setForm] = useState<CustomsForm>(emptyCustoms);
   const [baseline, setBaseline] = useState<CustomsForm | null>(null);
 
-  const missingRequired = !form.hsCode.trim() || !form.countryOfOrigin.trim();
+  const countryOfOrigin = merchCountry || form.countryOfOrigin;
+  // What "save customs" sends: the locally-edited hs code / description plus the shared country.
+  const outgoing: CustomsForm = { ...form, countryOfOrigin };
+
+  const missingRequired = !form.hsCode.trim() || !countryOfOrigin.trim();
 
   // Seed once — a background refetch must not clobber in-progress edits.
   useEffect(() => {
@@ -39,7 +52,9 @@ export function ProductCustomsSection({
     }
   }, [data, baseline]);
 
-  const dirty = baseline ? JSON.stringify(form) !== JSON.stringify(baseline) : false;
+  // Dirty when the hs code / description changed OR the shared country differs from what customs has
+  // stored — the latter nudges the operator to reconcile a country that was changed in Details.
+  const dirty = baseline ? JSON.stringify(outgoing) !== JSON.stringify(baseline) : false;
 
   function set<K extends keyof CustomsForm>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -47,7 +62,7 @@ export function ProductCustomsSection({
 
   function onSave() {
     if (!dirty || save.isPending) return;
-    save.mutate(form, { onSuccess: () => setBaseline(form) });
+    save.mutate(outgoing, { onSuccess: () => setBaseline(outgoing) });
   }
 
   if (isLoading) {
@@ -85,10 +100,10 @@ export function ProductCustomsSection({
             isLive ? 'border-error text-error' : 'border-textInactiveColor'
           }`}
         >
-          <Text size='small' variant={isLive ? 'error' : 'inactive'} component='span'>
+          <Text size='small' variant={isLive ? 'error' : 'label'} component='span'>
             {isLive
-              ? 'This colourway is LIVE but customs is incomplete — international shipping labels will be rejected. Add the HS code and country of origin.'
-              : 'Customs is incomplete — an HS code and country of origin are required before this ships internationally.'}
+              ? 'This colourway is LIVE but customs is incomplete. International shipping labels will be rejected until it has an HS code (below) and a country of origin (set in Details).'
+              : 'Customs is incomplete. An HS code (below) and country of origin (set in Details) are required before this ships internationally.'}
           </Text>
         </div>
       )}
@@ -107,28 +122,20 @@ export function ProductCustomsSection({
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('hsCode', e.target.value)}
           />
         </label>
-        <label className='flex flex-col gap-1'>
+        {/* Country of origin is the SAME fact as the product's merchandising country — shown here
+            read-only and edited once in Details, so the two can't drift. Saving customs still persists
+            it (see `outgoing`), so both the colourway and customs writes carry the identical value. */}
+        <div className='flex flex-col gap-1'>
           <Text variant='label' size='small' component='span'>
             country of origin (ISO-2) · required
           </Text>
-          <Input
-            name='customs-country'
-            placeholder='e.g. IT'
-            maxLength={2}
-            disabled={!canWrite}
-            aria-required
-            value={form.countryOfOrigin}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              set(
-                'countryOfOrigin',
-                e.target.value
-                  .toUpperCase()
-                  .replace(/[^A-Z]/g, '')
-                  .slice(0, 2),
-              )
-            }
-          />
-        </label>
+          <Text size='small' className={countryOfOrigin ? undefined : 'text-textInactiveColor'}>
+            {countryOfOrigin || 'set it in Details → country of origin'}
+          </Text>
+          <Text variant='label' size='small' component='span'>
+            shared with the product’s country of origin; edit it in Details and it saves here too.
+          </Text>
+        </div>
       </div>
 
       <label className='flex flex-col gap-1'>

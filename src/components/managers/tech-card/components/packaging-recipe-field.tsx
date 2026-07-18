@@ -2,9 +2,11 @@ import { adminService } from 'api/api';
 import {
   PackagingRecipeItem,
   PackagingRecipeLine,
+  common_Material,
   common_TechCardListItem,
 } from 'api/proto-http/admin';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
+import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
@@ -17,7 +19,7 @@ import {
   sanitizeDecimal,
 } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
-import { auxCardLabel, useAuxTechCards } from './assembly-field';
+import { AuxCardTilePicker, DUST_BAG_SUBTYPE, auxCardLabel } from './labels-pkg-shared';
 import { usePackagingRecipe, useUpsertPackagingRecipe } from './useAssemblyPacking';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -35,6 +37,10 @@ type Row = {
   // from the server, so it's blank until the user (re)picks it via "from an aux card's output".
   sourceLabel: string;
 };
+
+// The fields resolveAux resolves an aux card's output into (fed to a row as if MaterialPicker
+// had picked it directly).
+type AuxResolved = Pick<Row, 'materialId' | 'materialName' | 'materialUnit' | 'sourceLabel'>;
 
 const rowFrom = (i: PackagingRecipeLine): Row => ({
   key: ulid(),
@@ -58,125 +64,25 @@ const newRow = (): Row => ({
   sourceLabel: '',
 });
 
-// Resolves an auxiliary tech card's OUTPUT material into a packaging-recipe row (#43). The recipe
-// backend only ever stores a plain materialId — PackagingRecipeItem has no tech-card-link field —
-// so this is a client-side convenience, not a new relationship: search the auxiliary-card catalog
-// (ListTechCards purpose=auxiliary, same query AssemblyField's component picker uses), fetch the
-// chosen card's own detail (list rows don't carry output_material_id, only GetTechCard does), then
-// resolve that id's name/unit from the material catalog. The result is fed into the row exactly as
-// if MaterialPicker had picked it directly — once saved it's indistinguishable from a direct pick.
-function AuxOutputPicker({
-  onPicked,
-  onCancel,
-}: {
-  onPicked: (
-    materialId: number,
-    materialName: string,
-    materialUnit: string,
-    sourceLabel: string,
-  ) => void;
-  onCancel: () => void;
-}) {
-  const { showMessage } = useSnackBarStore();
-  const { data, isLoading } = useAuxTechCards();
-  const cards = useMemo(() => data?.techCards ?? [], [data]);
-  // Unfiltered: an aux card's output material can live under any catalog section, not just
-  // "packaging" (a dust bag's fabric might be tagged FABRIC, a hangtag's stock tagged elsewhere).
-  const { data: materialsData } = useMaterials('', false);
-  const materials = useMemo(() => materialsData?.materials ?? [], [materialsData]);
-  const [q, setQ] = useState('');
-  const [resolvingId, setResolvingId] = useState<number | null>(null);
-
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return cards;
-    return cards.filter(
-      (c) =>
-        (c.styleNumber ?? '').toLowerCase().includes(needle) ||
-        (c.name ?? '').toLowerCase().includes(needle),
-    );
-  }, [cards, q]);
-
-  const pick = async (card: common_TechCardListItem) => {
-    if (!card.id || resolvingId != null) return;
-    setResolvingId(card.id);
-    try {
-      const res = await adminService.GetTechCard({ id: card.id });
-      const materialId = res.techCard?.techCard?.outputMaterialId ?? 0;
-      if (!materialId) {
-        showMessage(`${auxCardLabel(card)} has no output material set yet`, 'error');
-        return;
-      }
-      const material = materials.find((m) => m.id === materialId);
-      onPicked(materialId, material?.name ?? '', material?.unit ?? '', auxCardLabel(card));
-    } catch (e) {
-      showMessage(
-        e instanceof Error ? e.message : 'Failed to resolve the aux card output',
-        'error',
-      );
-    } finally {
-      setResolvingId(null);
-    }
-  };
-
-  return (
-    <div className='space-y-2 border border-textInactiveColor bg-textInactiveColor/10 p-2'>
-      <div className='flex items-center justify-between gap-2'>
-        <Text variant='label' size='small'>
-          pick an auxiliary tech card — its output material fills this row
-        </Text>
-        <Button type='button' variant='secondary' onClick={onCancel}>
-          cancel
-        </Button>
-      </div>
-      <input
-        className={cell}
-        placeholder='search style № / name'
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        autoFocus
-      />
-      {isLoading ? (
-        <Text variant='inactive' size='small'>
-          loading…
-        </Text>
-      ) : filtered.length === 0 ? (
-        <Text variant='inactive' size='small'>
-          no auxiliary tech cards found
-        </Text>
-      ) : (
-        <div className='flex max-h-40 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor'>
-          {filtered.map((c) => (
-            <button
-              key={c.id}
-              type='button'
-              disabled={resolvingId != null}
-              className='px-2 py-1.5 text-left text-textBaseSize hover:bg-textInactiveColor/30 disabled:opacity-50'
-              onClick={() => pick(c)}
-            >
-              {auxCardLabel(c)}
-              {resolvingId === c.id ? ' · resolving…' : ''}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// One packaging-recipe line, as a guided card rather than a table row (#70): the material picker
-// is the one control that matters, the two quantities sit side by side with their meaning spelled
-// out, and "active" + remove are always in the same place.
+// One packaging-recipe line as a scannable card (#70): a prominent material thumbnail + name up
+// top, the material picker (+ "from an aux card's output" swap) to change it, then the two
+// quantities side by side with their meaning spelled out, and active + remove always in place.
 function PackagingRow({
   row,
   index,
   canEdit,
+  material,
+  resolveAux,
+  resolvingId,
   onPatch,
   onRemove,
 }: {
   row: Row;
   index: number;
   canEdit: boolean;
+  material?: common_Material; // resolved from the catalog for the thumbnail (id-only rows)
+  resolveAux: (card: common_TechCardListItem) => Promise<AuxResolved | null>;
+  resolvingId: number | null;
   onPatch: (patch: Partial<Row>) => void;
   onRemove: () => void;
 }) {
@@ -184,10 +90,21 @@ function PackagingRow({
 
   return (
     <div className='space-y-3 border border-textInactiveColor p-3'>
-      <div className='flex items-center justify-between gap-2'>
-        <Text variant='uppercase' size='small'>
-          material {index + 1}
-        </Text>
+      <div className='flex items-start gap-3'>
+        <MaterialThumb material={material} size='md' />
+        <div className='min-w-0 flex-1 space-y-0.5'>
+          <Text variant='uppercase' size='small'>
+            material {index + 1}
+          </Text>
+          <Text size='small' className='truncate'>
+            {row.materialName || (row.materialId ? `#${row.materialId}` : '— not set —')}
+          </Text>
+          {row.sourceLabel && (
+            <Text variant='inactive' size='small' className='truncate'>
+              via {row.sourceLabel}
+            </Text>
+          )}
+        </div>
         {canEdit && (
           <Button type='button' variant='secondary' aria-label='remove material' onClick={onRemove}>
             ✕
@@ -195,26 +112,32 @@ function PackagingRow({
         )}
       </div>
 
-      {canEdit ? (
+      {canEdit && (
         <div className='space-y-1'>
           <MaterialPicker
             value={row.materialId}
             section='TECH_CARD_BOM_SECTION_PACKAGING'
-            onChange={(materialId, material) =>
+            onChange={(materialId, picked) =>
               onPatch({
                 materialId,
-                materialName: material?.name ?? '',
-                materialUnit: material?.unit ?? '',
+                materialName: picked?.name ?? '',
+                materialUnit: picked?.unit ?? '',
                 sourceLabel: '', // picked directly — no longer "via" an aux card
               })
             }
           />
           {auxOpen ? (
-            <AuxOutputPicker
+            <AuxCardTilePicker
+              title="from an aux card's output"
+              hint='resolves the chosen auxiliary card’s output material into this row'
+              busyId={resolvingId}
               onCancel={() => setAuxOpen(false)}
-              onPicked={(materialId, materialName, materialUnit, sourceLabel) => {
-                onPatch({ materialId, materialName, materialUnit, sourceLabel });
-                setAuxOpen(false);
+              onPick={async (card) => {
+                const r = await resolveAux(card);
+                if (r) {
+                  onPatch(r);
+                  setAuxOpen(false);
+                }
               }}
             />
           ) : (
@@ -226,14 +149,7 @@ function PackagingRow({
               or pick from an aux card's output ▸
             </button>
           )}
-          {row.sourceLabel && (
-            <Text variant='inactive' size='small'>
-              via {row.sourceLabel}
-            </Text>
-          )}
         </div>
-      ) : (
-        <Text size='small'>{row.materialName || `#${row.materialId}`}</Text>
       )}
 
       <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
@@ -320,6 +236,15 @@ export function PackagingRecipeField({
   const { data, isLoading, isError, refetch } = usePackagingRecipe();
   const upsert = useUpsertPackagingRecipe();
 
+  // Unfiltered catalog: a packaging-recipe material (esp. an aux card's output) can live under any
+  // section, so resolve every row's thumbnail/name from the whole catalog, not just packaging.
+  const { data: materialsData } = useMaterials('', false);
+  const materialsById = useMemo(() => {
+    const m = new Map<number, common_Material>();
+    for (const x of materialsData?.materials ?? []) if (x.id != null) m.set(x.id, x);
+    return m;
+  }, [materialsData]);
+
   const allItems = useMemo(() => data?.items ?? [], [data]);
   const globalLines = useMemo(() => allItems.filter((i) => i.scope === 'global'), [allItems]);
   const styleLines = useMemo(
@@ -330,6 +255,9 @@ export function PackagingRecipeField({
   const [rows, setRows] = useState<Row[]>([]);
   // A background refetch (e.g. right after save) must not clobber unsaved edits mid-flow.
   const [dirty, setDirty] = useState(false);
+  // Top-level aux picker: 'dust' (the common пыльник case, pre-filtered) or 'aux' (any output).
+  const [addPicker, setAddPicker] = useState<'dust' | 'aux' | null>(null);
+  const [resolvingId, setResolvingId] = useState<number | null>(null);
   useEffect(() => {
     if (dirty) return;
     setRows(styleLines.map(rowFrom));
@@ -347,6 +275,49 @@ export function PackagingRecipeField({
   const removeRow = (i: number) => {
     setDirty(true);
     setRows((prev) => prev.filter((_, idx) => idx !== i));
+  };
+
+  // Resolves an auxiliary tech card's OUTPUT material into a row (#43). The recipe backend only ever
+  // stores a plain materialId (PackagingRecipeItem has no tech-card link) — so this is a client-side
+  // convenience: fetch the chosen card's detail (list rows don't carry output_material_id, only
+  // GetTechCard does), then resolve that id's name/unit from the catalog. Once saved it's
+  // indistinguishable from a direct MaterialPicker pick.
+  const resolveAux = async (card: common_TechCardListItem): Promise<AuxResolved | null> => {
+    if (!card.id || resolvingId != null) return null;
+    setResolvingId(card.id);
+    try {
+      const res = await adminService.GetTechCard({ id: card.id });
+      const materialId = res.techCard?.techCard?.outputMaterialId ?? 0;
+      if (!materialId) {
+        showMessage(`${auxCardLabel(card)} has no output material set yet`, 'error');
+        return null;
+      }
+      const material = materialsById.get(materialId);
+      return {
+        materialId,
+        materialName: material?.name ?? '',
+        materialUnit: material?.unit ?? '',
+        sourceLabel: auxCardLabel(card),
+      };
+    } catch (e) {
+      showMessage(
+        e instanceof Error ? e.message : 'Failed to resolve the aux card output',
+        'error',
+      );
+      return null;
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
+  // Adds a NEW row from an aux card's output. Dust bag ships with every garment → default 1 / item;
+  // a generic aux output is left blank so the user states per-order vs per-item intent explicitly.
+  const addFromAux = async (card: common_TechCardListItem, dust: boolean) => {
+    const r = await resolveAux(card);
+    if (!r) return;
+    setDirty(true);
+    setRows((prev) => [...prev, { ...newRow(), ...r, qtyPerItem: dust ? '1' : '' }]);
+    setAddPicker(null);
   };
 
   const save = async () => {
@@ -410,33 +381,53 @@ export function PackagingRecipeField({
             no global packaging recipe
           </Text>
         ) : (
-          <ul className='flex flex-col gap-1'>
+          <ul className='flex flex-col gap-2'>
             {globalLines.map((l) => (
-              <li
-                key={l.id}
-                className='flex flex-wrap items-baseline justify-between gap-x-3 text-textBaseSize'
-              >
-                <span>
-                  {l.materialName || `#${l.materialId}`}
-                  {l.active === false ? ' (inactive)' : ''}
-                </span>
-                <span className='text-textInactiveColor'>
-                  {decimalToInput(l.qtyPerOrder) || '—'} / order ·{' '}
-                  {decimalToInput(l.qtyPerItem) || '—'} / item {l.materialUnit}
-                </span>
+              <li key={l.id} className='flex items-center gap-2'>
+                <MaterialThumb material={materialsById.get(l.materialId ?? 0)} size='sm' />
+                <div className='flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-3 text-textBaseSize'>
+                  <span className='truncate'>
+                    {l.materialName || `#${l.materialId}`}
+                    {l.active === false ? ' (inactive)' : ''}
+                  </span>
+                  <span className='text-textInactiveColor'>
+                    {decimalToInput(l.qtyPerOrder) || '—'} / order ·{' '}
+                    {decimalToInput(l.qtyPerItem) || '—'} / item {l.materialUnit}
+                  </span>
+                </div>
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      <div className='flex flex-wrap items-center justify-between gap-3'>
+      <div className='flex flex-col gap-3'>
         <Text variant='inactive' size='small'>
           this style's own packaging recipe — overrides the global fallback above while active.
           {dirty ? <span className='ml-2 text-labelColor'>· unsaved</span> : null}
         </Text>
         {canEdit && (
-          <div className='flex items-center gap-2'>
+          <div className='flex flex-wrap items-center gap-2'>
+            {/* The common case, surfaced as an obvious action (#43): the garment ships inside an
+                aux fabric dust bag (пыльник) — same aux-output mechanism, one prominent button. */}
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              className='uppercase'
+              onClick={() => setAddPicker((p) => (p === 'dust' ? null : 'dust'))}
+            >
+              ＋ goes in a dust bag (aux)
+            </Button>
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => setAddPicker((p) => (p === 'aux' ? null : 'aux'))}
+            >
+              ＋ from an aux card's output
+            </Button>
             <Button
               type='button'
               variant='secondary'
@@ -444,12 +435,10 @@ export function PackagingRecipeField({
               className='uppercase'
               onClick={addRow}
             >
-              + add material
+              ＋ add material
             </Button>
-            {/* Distinct from the main card's header Save (variant='main') — this button persists
-                to UpsertPackagingRecipe, a separate RPC the header Save does NOT cover. secondary
-                + an explicit label (mirrors style-facts-field.tsx's own sub-panel save) so it's
-                never mistaken for "save the whole tech card". */}
+            {/* Distinct from the main card's header Save (variant='main' above) — this persists to
+                UpsertPackagingRecipe, a separate RPC the header Save does NOT cover. */}
             <Button
               type='button'
               variant='secondary'
@@ -461,6 +450,28 @@ export function PackagingRecipeField({
               {upsert.isPending ? 'saving…' : 'save packaging recipe'}
             </Button>
           </div>
+        )}
+
+        {addPicker && canEdit && (
+          <AuxCardTilePicker
+            // Remount when the mode flips (dust ↔ aux) so the sub-type filter re-initialises
+            // instead of keeping the previous mode's stale value.
+            key={addPicker}
+            initialSubtype={addPicker === 'dust' ? DUST_BAG_SUBTYPE : undefined}
+            title={
+              addPicker === 'dust'
+                ? 'pick the dust bag (пыльник) this style ships in'
+                : 'pick an aux card — its output material fills a new row'
+            }
+            hint={
+              addPicker === 'dust'
+                ? 'the garment ships inside this aux fabric bag — adds a per-item packaging line (1 / item)'
+                : 'resolves the chosen auxiliary card’s output material into a new row'
+            }
+            busyId={resolvingId}
+            onCancel={() => setAddPicker(null)}
+            onPick={(card) => addFromAux(card, addPicker === 'dust')}
+          />
         )}
       </div>
 
@@ -484,16 +495,21 @@ export function PackagingRecipeField({
       ) : rows.length === 0 ? (
         <Text variant='inactive' size='small'>
           no style-specific packaging yet
-          {canEdit ? ' — add a material to override the global fallback' : ''}
+          {canEdit
+            ? ' — add a dust bag, an aux output, or a material to override the global fallback'
+            : ''}
         </Text>
       ) : (
-        <div className='space-y-3'>
+        <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
           {rows.map((r, i) => (
             <PackagingRow
               key={r.key}
               row={r}
               index={i}
               canEdit={canEdit}
+              material={materialsById.get(r.materialId)}
+              resolveAux={resolveAux}
+              resolvingId={resolvingId}
               onPatch={(p) => patch(i, p)}
               onRemove={() => removeRow(i)}
             />

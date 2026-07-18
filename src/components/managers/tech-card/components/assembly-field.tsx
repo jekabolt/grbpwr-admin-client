@@ -1,10 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
-import { adminService } from 'api/api';
-import {
-  common_TechCardListItem,
-  StyleAssemblyItem,
-  StyleAssemblyLine,
-} from 'api/proto-http/admin';
+import { StyleAssemblyItem, StyleAssemblyLine } from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -13,15 +7,16 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
+import {
+  AuxCardTilePicker,
+  Thumb,
+  auxCardThumbUrl,
+  auxSubtypeLabel,
+  useAuxTechCards,
+} from './labels-pkg-shared';
 import { useStyleAssembly, useUpsertStyleAssembly } from './useAssemblyPacking';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
-
-// Strip the enum prefix for a compact human label (e.g. TECH_CARD_AUX_SUBTYPE_DUST_BAG -> "dust bag").
-export function auxSubtypeLabel(subtype?: string): string {
-  if (!subtype || subtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN') return '';
-  return subtype.replace('TECH_CARD_AUX_SUBTYPE_', '').replace(/_/g, ' ').toLowerCase();
-}
 
 type Row = {
   key: string; // client-only stable id (ulid) — add/remove never remaps another row's inputs
@@ -68,101 +63,6 @@ const newRow = (): Row => ({
   active: true,
 });
 
-// Auxiliary cards only (WS7): the components an assembly line can point at, mirroring the
-// output-material picker's purpose filter on the tech-card header. Exported: the packaging
-// recipe's "pick an aux card's output" convenience (packaging-recipe-field.tsx) reuses this same
-// query/cache instead of re-fetching — both live on the same "labels & packaging" tab, so a
-// shared cache key also means they never double-fetch when mounted together.
-export function useAuxTechCards() {
-  return useQuery({
-    queryKey: ['techCardAuxCards'],
-    queryFn: () =>
-      adminService.ListTechCards({
-        purpose: 'auxiliary',
-        limit: 200,
-        offset: 0,
-        orderFactor: 'ORDER_FACTOR_DESC',
-        stage: 'TECH_CARD_STAGE_UNKNOWN',
-        gender: 'GENDER_ENUM_UNKNOWN',
-        brand: '',
-        name: '',
-        productId: 0,
-        skuSeason: undefined,
-      }),
-    staleTime: 5 * 60 * 1000,
-  });
-}
-
-export function auxCardLabel(c: common_TechCardListItem): string {
-  const subtype = auxSubtypeLabel(c.auxSubtype);
-  return `${c.styleNumber ? `${c.styleNumber} · ` : ''}${c.name || `#${c.id}`}${
-    subtype ? ` · ${subtype}` : ''
-  }`;
-}
-
-// Free-text filter over the auxiliary-card catalog feeding a native <select>, mirroring
-// MaterialPicker/StylePicker. Snapshots name + aux_subtype onto the row immediately for display;
-// output_material_name stays server-resolved (unknown until the pick is saved and reloaded).
-function AuxCardField({
-  componentTechCardId,
-  onPick,
-  disabled,
-}: {
-  componentTechCardId: number;
-  onPick: (id: number, card?: common_TechCardListItem) => void;
-  disabled?: boolean;
-}) {
-  const { data, isLoading } = useAuxTechCards();
-  const cards = useMemo(() => data?.techCards ?? [], [data]);
-  const [q, setQ] = useState('');
-
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return cards.filter((c) => {
-      if (c.id === componentTechCardId) return true; // keep the current choice visible
-      if (!needle) return true;
-      return (
-        (c.styleNumber ?? '').toLowerCase().includes(needle) ||
-        (c.name ?? '').toLowerCase().includes(needle)
-      );
-    });
-  }, [cards, q, componentTechCardId]);
-
-  return (
-    <div className='space-y-1'>
-      <Text size='small' variant='label'>
-        component (auxiliary card)
-      </Text>
-      <input
-        className={cell}
-        placeholder='search style № / name'
-        value={q}
-        disabled={disabled}
-        onChange={(e) => setQ(e.target.value)}
-      />
-      <select
-        className={cell}
-        value={componentTechCardId || 0}
-        disabled={disabled || isLoading}
-        onChange={(e) => {
-          const id = Number(e.target.value) || 0;
-          onPick(
-            id,
-            cards.find((c) => c.id === id),
-          );
-        }}
-      >
-        <option value={0}>{isLoading ? 'loading…' : '— select component —'}</option>
-        {filtered.map((c) => (
-          <option key={c.id} value={c.id}>
-            {auxCardLabel(c)}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 function AssemblyRow({
   row,
   index,
@@ -180,6 +80,12 @@ function AssemblyRow({
 }) {
   const knownSize = row.sizeId === 0 || sizeOptions.some((o) => o.id === row.sizeId);
   const resolvedSubtype = auxSubtypeLabel(row.componentAuxSubtype);
+  const { data: auxData } = useAuxTechCards();
+  const selectedCard = useMemo(
+    () => (auxData?.techCards ?? []).find((c) => c.id === row.componentTechCardId),
+    [auxData, row.componentTechCardId],
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
     <div className='space-y-3 border border-textInactiveColor p-3'>
@@ -199,20 +105,75 @@ function AssemblyRow({
         )}
       </div>
 
-      <div className='grid grid-cols-1 gap-3 lg:grid-cols-3'>
-        <AuxCardField
-          componentTechCardId={row.componentTechCardId}
-          disabled={!canEdit}
-          onPick={(id, card) =>
-            onPatch({
-              componentTechCardId: id,
-              componentName: card?.name ?? '',
-              componentAuxSubtype: card?.auxSubtype ?? 'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
-              outputMaterialName: '', // unknown until saved + reloaded
-            })
-          }
-        />
+      {/* component (aux card) — a scannable square-card pick (#70), thumbnail + name + sub-type,
+          instead of the old search-box + native <select>. */}
+      <div className='space-y-2'>
+        <Text size='small' variant='label'>
+          component (auxiliary card)
+        </Text>
+        {row.componentTechCardId > 0 ? (
+          <div className='flex items-center gap-3 border border-textInactiveColor p-2'>
+            <Thumb
+              url={auxCardThumbUrl(selectedCard)}
+              alt={row.componentName || 'aux card'}
+              className='h-16 w-16'
+              placeholder='no image'
+            />
+            <div className='min-w-0 flex-1 space-y-0.5'>
+              <Text size='small' className='truncate'>
+                {row.componentName || `#${row.componentTechCardId}`}
+              </Text>
+              {resolvedSubtype ? (
+                <span className='inline-block border border-textInactiveColor px-1 text-textBaseSize uppercase leading-tight text-labelColor'>
+                  {resolvedSubtype}
+                </span>
+              ) : null}
+              {row.outputMaterialName ? (
+                <Text variant='inactive' size='small' className='truncate'>
+                  → {row.outputMaterialName}
+                </Text>
+              ) : null}
+            </div>
+            {canEdit && (
+              <Button type='button' variant='secondary' onClick={() => setPickerOpen((o) => !o)}>
+                {pickerOpen ? 'close' : 'change'}
+              </Button>
+            )}
+          </div>
+        ) : canEdit ? (
+          <Button
+            type='button'
+            variant='secondary'
+            size='lg'
+            className='w-full uppercase'
+            onClick={() => setPickerOpen(true)}
+          >
+            + pick component
+          </Button>
+        ) : (
+          <Text variant='inactive' size='small'>
+            —
+          </Text>
+        )}
+        {pickerOpen && canEdit && (
+          <AuxCardTilePicker
+            selectedId={row.componentTechCardId}
+            title='pick the on-garment auxiliary item'
+            onCancel={() => setPickerOpen(false)}
+            onPick={(card) => {
+              onPatch({
+                componentTechCardId: card.id ?? 0,
+                componentName: card.name ?? '',
+                componentAuxSubtype: card.auxSubtype ?? 'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
+                outputMaterialName: '', // unknown until saved + reloaded
+              });
+              setPickerOpen(false);
+            }}
+          />
+        )}
+      </div>
 
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
         <div className='space-y-1'>
           <Text size='small' variant='label'>
             size
@@ -272,24 +233,15 @@ function AssemblyRow({
         </div>
       </div>
 
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <label className='flex items-center gap-2'>
-          <input
-            type='checkbox'
-            checked={row.active}
-            disabled={!canEdit}
-            onChange={(e) => onPatch({ active: e.target.checked })}
-          />
-          <Text size='small'>active</Text>
-        </label>
-        {row.componentTechCardId > 0 && (
-          <Text variant='inactive' size='small'>
-            {row.componentName || `#${row.componentTechCardId}`}
-            {resolvedSubtype ? ` · ${resolvedSubtype}` : ''}
-            {row.outputMaterialName ? ` → ${row.outputMaterialName}` : ''}
-          </Text>
-        )}
-      </div>
+      <label className='flex items-center gap-2'>
+        <input
+          type='checkbox'
+          checked={row.active}
+          disabled={!canEdit}
+          onChange={(e) => onPatch({ active: e.target.checked })}
+        />
+        <Text size='small'>active</Text>
+      </label>
     </div>
   );
 }

@@ -23,7 +23,30 @@ const emptyLabel = {
   note: '',
 };
 
-// One label row. A CARE label gets the care-instruction picker for its content (laundry
+// Labels carry no image, so the "thumbnail" is a typographic square badge of the label type — it
+// keeps the tile/card look scannable at a glance (which kind of label this card is).
+const LABEL_TYPE_BADGE: Record<string, string> = {
+  TECH_CARD_LABEL_TYPE_MAIN: 'main',
+  TECH_CARD_LABEL_TYPE_SIZE: 'size',
+  TECH_CARD_LABEL_TYPE_CARE: 'care',
+  TECH_CARD_LABEL_TYPE_ORIGIN: 'orig',
+  TECH_CARD_LABEL_TYPE_FLAG: 'flag',
+  TECH_CARD_LABEL_TYPE_HANGTAG: 'tag',
+  TECH_CARD_LABEL_TYPE_BARCODE: 'code',
+  TECH_CARD_LABEL_TYPE_SPECIAL: 'spec',
+};
+
+function LabelTypeTile({ type }: { type: string }) {
+  return (
+    <div className='flex aspect-square w-16 shrink-0 items-center justify-center border border-textInactiveColor bg-textColor/5 p-1 text-center'>
+      <Text variant='uppercase' size='small'>
+        {LABEL_TYPE_BADGE[type] ?? 'lbl'}
+      </Text>
+    </div>
+  );
+}
+
+// One label card. A CARE label gets the care-instruction picker for its content (laundry
 // symbols); the composition text lives in its note. Other types use a free-text content.
 function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) {
   const { control } = useFormContext<TechCardFormData>();
@@ -32,22 +55,27 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
 
   return (
     <div className='space-y-3 border border-textInactiveColor p-3'>
-      <div className='flex items-center justify-between'>
-        <Text variant='uppercase' size='small'>
-          label {index + 1}
-        </Text>
-        <Button type='button' variant='secondary' aria-label='remove label' onClick={onRemove}>
-          ✕
-        </Button>
+      <div className='flex items-start gap-3'>
+        <LabelTypeTile type={labelType} />
+        <div className='min-w-0 flex-1 space-y-2'>
+          <div className='flex items-center justify-between gap-2'>
+            <Text variant='uppercase' size='small'>
+              label {index + 1}
+            </Text>
+            <Button type='button' variant='secondary' aria-label='remove label' onClick={onRemove}>
+              ✕
+            </Button>
+          </div>
+          <SelectField
+            name={`labels.${index}.labelType`}
+            label='type *'
+            items={techCardLabelTypeOptions}
+          />
+        </div>
       </div>
-      <div className='grid grid-cols-1 gap-3 lg:grid-cols-3'>
-        <SelectField
-          name={`labels.${index}.labelType`}
-          label='type *'
-          items={techCardLabelTypeOptions}
-        />
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
         {isCare ? (
-          <div className='lg:col-span-2'>
+          <div className='sm:col-span-2'>
             <CarePicker name={`labels.${index}.content`} label='care symbols' />
           </div>
         ) : (

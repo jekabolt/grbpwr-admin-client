@@ -3,7 +3,6 @@ import { Controller, useFieldArray, useFormContext, useWatch } from 'react-hook-
 import { Button } from 'ui/components/button';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { useDisclosure } from './disclosure';
 import { FittingFormData } from './schema';
@@ -83,12 +82,17 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                     </Button>
                   </div>
                   <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
-                    <InputField
-                      name={`callouts.${index}.number`}
-                      type='number'
-                      valueAsNumber
-                      label='number'
-                    />
+                    {/* Auto-assigned (fields.length+1) and a cross-reference target
+                        (changeRequests.calloutNumber) — read-only so hand-edits can't collide
+                        with the sequence. Kept in the field array so it still round-trips. */}
+                    <div className='flex flex-col gap-1'>
+                      <Text variant='label' size='small' component='span'>
+                        number
+                      </Text>
+                      <Text variant='label' className='tabular-nums'>
+                        {(f as FormCallout).number ?? index + 1}
+                      </Text>
+                    </div>
                     <Controller
                       control={control}
                       name={`callouts.${index}.mediaId`}
