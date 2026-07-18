@@ -91,7 +91,7 @@ export function SamplePicker({
         </span>
       }
     >
-      <div className='flex max-h-72 flex-col gap-2 overflow-y-auto py-2'>
+      <div className='flex flex-col gap-2'>
         <Popover.Close asChild>
           <button
             type='button'
