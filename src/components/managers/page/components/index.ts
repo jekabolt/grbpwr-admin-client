@@ -33,6 +33,7 @@ export { PromoBars } from './PromoBars';
 export { SectionHead } from './SectionHead';
 export { ShareBars } from './ShareBars';
 export { StatGrid } from './StatGrid';
+export { ActPill, ColHead, MiniPill, VerdictColumns, VerdictList, VerdictRow } from './VerdictList';
 export { ProfitabilityPanel } from './ProfitabilityPanel';
 export { PersistentKpiBar } from './PersistentKpiBar';
 export { ProductCharts } from './ProductCharts';

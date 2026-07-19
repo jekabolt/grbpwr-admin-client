@@ -21,7 +21,7 @@ const GroupHead: FC<{ title: string; total: ReactNode; crit?: boolean }> = ({
   crit,
 }) => (
   <div
-    className={`mb-1.5 flex items-baseline justify-between border-b border-textInactiveColor pb-1 text-textBaseSize uppercase ${crit ? 'text-error' : 'text-labelColor'}`}
+    className={`mb-1.5 flex items-baseline justify-between border-b border-textInactiveColor pb-1 text-[11px] tracking-wide uppercase ${crit ? 'text-error' : 'text-labelColor'}`}
   >
     <span>{title}</span>
     <span className='text-textColor font-bold tabular-nums'>{total}</span>
@@ -29,7 +29,7 @@ const GroupHead: FC<{ title: string; total: ReactNode; crit?: boolean }> = ({
 );
 
 const Buy: FC<{ children: ReactNode }> = ({ children }) => (
-  <span className='shrink-0 justify-self-end border border-textColor px-2 py-0.5 text-textBaseSize font-bold whitespace-nowrap uppercase'>
+  <span className='shrink-0 justify-self-end border border-textColor px-2 py-0.5 text-[11px] font-bold whitespace-nowrap uppercase'>
     {children}
   </span>
 );

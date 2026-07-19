@@ -13,7 +13,7 @@ interface DropVerdictTableProps {
 function verdict(pct: number): { label: string; cls: string } {
   if (pct >= 75) return { label: 'Strong', cls: 'text-success' };
   if (pct >= 40) return { label: 'OK', cls: 'text-textColor' };
-  return { label: 'Weak', cls: 'text-warning' };
+  return { label: 'Weak', cls: 'text-error' };
 }
 
 export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop }) => {
@@ -51,7 +51,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
           // Card = the decision verb (reprint / hold / cut), a sell-through bar coloured by band,
           // then the supporting numbers. Matches the approved "drop cards" pick.
           const action = pct >= 75 ? 'Reprint' : pct >= 40 ? 'Hold' : 'Cut';
-          const barCls = pct >= 75 ? 'bg-success' : pct >= 40 ? 'bg-textColor' : 'bg-warning';
+          const barCls = pct >= 75 ? 'bg-success' : pct >= 40 ? 'bg-textColor' : 'bg-error';
           return (
             <div key={idx} className='border border-textInactiveColor p-3'>
               <div className='flex items-baseline justify-between gap-2'>
