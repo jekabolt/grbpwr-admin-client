@@ -54,7 +54,7 @@ function Body({ economics }: { economics: StyleEconomics }) {
   const prod = e.production;
 
   return (
-    <div className='flex min-w-[min(92vw,34rem)] flex-col gap-3'>
+    <div className='flex w-full min-w-0 flex-col gap-3 lg:w-[34rem]'>
       <Section title='Sales'>
         <Row label='Revenue' value={formatCurrency(parseDecimal(sales?.revenue))} />
         <Row label='Units sold' value={formatNumber(sales?.unitsSold ?? 0)} />
@@ -123,7 +123,22 @@ function Body({ economics }: { economics: StyleEconomics }) {
                 value={formatCurrency(parseDecimal(prod.plannedCostBase))}
               />
               <Row label='Actual cost' value={formatCurrency(parseDecimal(prod.actualCostBase))} />
-              <Row label='Cost variance' value={formatCurrency(parseDecimal(prod.costVariance))} />
+              {(() => {
+                // Variance against the two figures above (actual − planned): negative = came in
+                // under plan. A bare signed "−€33.70" reads as bad when under-budget is good.
+                const variance =
+                  parseDecimal(prod.actualCostBase) - parseDecimal(prod.plannedCostBase);
+                return (
+                  <Row
+                    label='Cost variance'
+                    value={
+                      Math.abs(variance) < 0.005
+                        ? 'on plan'
+                        : `${formatCurrency(Math.abs(variance))} ${variance < 0 ? 'under' : 'over'} plan`
+                    }
+                  />
+                );
+              })()}
             </>
           ) : (
             <Text variant='inactive' size='small'>
