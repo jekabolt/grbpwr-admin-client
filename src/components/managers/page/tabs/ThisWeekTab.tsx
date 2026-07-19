@@ -4,23 +4,17 @@ import type {
   GetMetricsResponse,
   NewVsReturningSplit,
 } from 'api/proto-http/admin';
-import { format } from 'date-fns';
 import { FC, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Text from 'ui/components/text';
-import { ExecutiveHealthStrip, ForecastStrip, TimeSeriesChart } from '../components';
+import { ExecutiveHealthStrip, ForecastStrip, SectionHead } from '../components';
 import { ProductNameLink } from '../components/ProductNameLink';
-import { orderCancellationSharePercent } from '../executiveAlerts';
 import type { MetricsPeriod } from '../useMetricsQuery';
 import {
-  coarsenTimeSeries,
   formatCurrency,
-  formatCurrencyDelta,
   formatCurrencyWhole,
   formatNumber,
-  formatNumberDelta,
   getMetricComparison,
-  getTimeSeries,
   parseDecimal,
   resolveAnalyticsPeriodLabels,
 } from '../utils';
@@ -34,64 +28,8 @@ interface ThisWeekTabProps {
   customTo: Date;
 }
 
-type DotStatus = 'g' | 'a' | 'r';
-// Status dot: green ok / amber watch (the app's warning is the blue token) / red act.
-const DOT: Record<DotStatus, string> = { g: 'bg-success', a: 'bg-warning', r: 'bg-error' };
-
-/** At-a-glance health: each key metric with a green/amber/red status dot. */
-const HealthScorecard: FC<{ metrics: BusinessMetrics | undefined }> = ({ metrics }) => {
-  if (!metrics) return null;
-  const commerce = metrics.commerce;
-  const margin = metrics.margin;
-  const revenue = getMetricComparison(commerce?.revenue as any);
-  const orders = getMetricComparison(commerce?.ordersCount as any);
-  const refund = getMetricComparison(commerce?.refundRate as any);
-  const repeat = getMetricComparison(commerce?.repeatCustomersRate as any);
-  const cancelPct = orderCancellationSharePercent(metrics);
-  const coverage = margin?.costCoveragePct ?? 0;
-
-  const cells: { label: string; value: string; status: DotStatus }[] = [
-    { label: 'Revenue', value: formatCurrencyWhole(revenue.value), status: 'g' },
-    { label: 'Orders', value: formatNumber(orders.value), status: 'g' },
-    {
-      label: 'Cancellations',
-      value: cancelPct != null ? `${cancelPct.toFixed(0)}%` : '—',
-      status: cancelPct == null ? 'g' : cancelPct >= 15 ? 'r' : cancelPct >= 8 ? 'a' : 'g',
-    },
-    {
-      label: 'Cost coverage',
-      value: `${coverage.toFixed(0)}%`,
-      status: coverage < 50 ? 'r' : coverage < 80 ? 'a' : 'g',
-    },
-    {
-      label: 'Refund rate',
-      value: `${refund.value.toFixed(1)}%`,
-      status: refund.value >= 8 ? 'r' : refund.value >= 5 ? 'a' : 'g',
-    },
-    { label: 'Repeat rate', value: `${repeat.value.toFixed(0)}%`, status: 'g' },
-  ];
-
-  return (
-    <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6'>
-      {cells.map((c) => (
-        <div
-          key={c.label}
-          className='flex items-start gap-2 border border-textInactiveColor bg-bgSecondary/30 p-3'
-        >
-          <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${DOT[c.status]}`} />
-          <div className='min-w-0'>
-            <Text variant='uppercase' className='text-labelColor text-[10px]'>
-              {c.label}
-            </Text>
-            <Text className='font-bold tabular-nums'>{c.value}</Text>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-/** This period vs the previous one, as a value + delta strip (deltas only when compare is on). */
+/** This period vs the previous one as a connected stats grid: value + % change + prior value.
+ *  Deltas only render when compare is on (matches the "vs-previous" stub pick). */
 const VsPreviousStrip: FC<{
   commerce: BusinessMetrics['commerce'];
   compareEnabled: boolean;
@@ -101,35 +39,38 @@ const VsPreviousStrip: FC<{
   const aov = getMetricComparison(commerce?.avgOrderValue as any);
   const newCust = getMetricComparison(commerce?.newCustomers as any);
 
-  const cells = [
-    { label: 'Revenue', value: formatCurrencyWhole(revenue.value), cmp: revenue, currency: true },
-    { label: 'Orders', value: formatNumber(orders.value), cmp: orders, currency: false },
-    { label: 'AOV', value: formatCurrency(aov.value), cmp: aov, currency: true },
-    { label: 'New customers', value: formatNumber(newCust.value), cmp: newCust, currency: false },
+  const cells: {
+    label: string;
+    cmp: ReturnType<typeof getMetricComparison>;
+    fmt: (v: number) => string;
+  }[] = [
+    { label: 'Revenue', cmp: revenue, fmt: formatCurrencyWhole },
+    { label: 'Orders', cmp: orders, fmt: formatNumber },
+    { label: 'AOV', cmp: aov, fmt: formatCurrency },
+    { label: 'New customers', cmp: newCust, fmt: formatNumber },
   ];
 
   return (
-    <div className='grid grid-cols-2 gap-2 md:grid-cols-4'>
+    <div className='grid grid-cols-2 border-l border-t border-textInactiveColor md:grid-cols-4'>
       {cells.map((c) => {
-        const show = compareEnabled && c.cmp.compareValue !== undefined;
-        const diff = show ? c.cmp.value - (c.cmp.compareValue as number) : 0;
+        const prev = c.cmp.compareValue;
+        const show = compareEnabled && prev !== undefined && prev !== 0;
+        const diff = show ? c.cmp.value - (prev as number) : 0;
+        const pct = show ? (diff / Math.abs(prev as number)) * 100 : 0;
         const dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
         const color =
           dir === 'flat' ? 'text-labelColor' : dir === 'up' ? 'text-success' : 'text-error';
         const arrow = dir === 'up' ? '↑ ' : dir === 'down' ? '↓ ' : '';
         return (
-          <div
-            key={c.label}
-            className='flex flex-col gap-1 border border-textInactiveColor bg-bgSecondary/30 p-3'
-          >
-            <Text variant='uppercase' className='text-labelColor text-[10px]'>
+          <div key={c.label} className='border-r border-b border-textInactiveColor px-3 py-2.5'>
+            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
               {c.label}
             </Text>
-            <Text className='font-bold text-lg tabular-nums'>{c.value}</Text>
+            <Text className='block font-bold text-lg tabular-nums'>{c.fmt(c.cmp.value)}</Text>
             {show && (
-              <Text variant='uppercase' className={`text-[11px] tabular-nums ${color}`}>
+              <Text variant='uppercase' className={`block text-[10px] tabular-nums ${color}`}>
                 {arrow}
-                {c.currency ? formatCurrencyDelta(diff) : formatNumberDelta(diff)} vs prev
+                {Math.abs(pct).toFixed(0)}% vs {c.fmt(prev as number)}
               </Text>
             )}
           </div>
@@ -139,8 +80,11 @@ const VsPreviousStrip: FC<{
   );
 };
 
-/** New- vs returning-customer revenue as one split bar. */
-const NewReturningSplit: FC<{ split: NewVsReturningSplit | undefined }> = ({ split }) => {
+/** New- vs returning-customer revenue as one split bar + a plain-language verdict. */
+const NewReturningSplit: FC<{ split: NewVsReturningSplit | undefined; repeatRatePct?: number }> = ({
+  split,
+  repeatRatePct,
+}) => {
   if (!split) return null;
   const newRev = getMetricComparison(split.newRevenue as any).value;
   const retRev = getMetricComparison(split.returningRevenue as any).value;
@@ -151,24 +95,24 @@ const NewReturningSplit: FC<{ split: NewVsReturningSplit | undefined }> = ({ spl
 
   return (
     <div>
-      <div className='flex h-8 border border-textColor'>
+      <div className='flex h-[30px] border border-textColor'>
         <div
-          className='flex items-center justify-center overflow-hidden bg-textColor text-[10px] text-bgColor'
+          className='flex items-center justify-center overflow-hidden bg-textColor px-1 text-[10px] whitespace-nowrap text-bgColor'
           style={{ width: `${newShare}%` }}
         >
-          {newShare >= 14 ? `New ${newShare.toFixed(0)}%` : ''}
+          {newShare >= 22 ? `New · ${formatCurrency(newRev)} · ${newShare.toFixed(0)}%` : ''}
         </div>
         <div
-          className='flex items-center justify-center overflow-hidden bg-textInactiveColor/40 text-[10px]'
+          className='flex items-center justify-center overflow-hidden bg-textInactiveColor px-1 text-[10px] whitespace-nowrap'
           style={{ width: `${retShare}%` }}
         >
-          {retShare >= 14 ? `Returning ${retShare.toFixed(0)}%` : ''}
+          {retShare >= 14 ? `Repeat · ${retShare.toFixed(0)}%` : ''}
         </div>
       </div>
-      <div className='mt-2 flex flex-wrap justify-between gap-2 text-textBaseSize text-labelColor'>
-        <span>New: {formatCurrency(newRev)}</span>
-        <span>Returning: {formatCurrency(retRev)}</span>
-      </div>
+      <Text variant='uppercase' className='text-labelColor mt-2 block text-[10px]'>
+        {repeatRatePct != null ? `repeat ${repeatRatePct.toFixed(0)}% of customers, ` : ''}
+        {retShare.toFixed(0)}% of revenue · growth {newShare >= 50 ? 'new-led' : 'repeat-led'}
+      </Text>
     </div>
   );
 };
@@ -201,7 +145,7 @@ const TopMoverCards: FC<{
     ))}
     {source && (
       <div className='border border-textInactiveColor bg-bgSecondary/30 p-3'>
-        <Text variant='uppercase' className='text-labelColor text-[10px]'>
+        <Text variant='uppercase' className='text-labelColor block text-[10px]'>
           Top source
         </Text>
         <Text className='mt-1 block font-bold break-words'>{source.name}</Text>
@@ -224,8 +168,6 @@ export function ThisWeekTab({
   const metrics = metricsResponse.business;
   const commerce = metrics?.commerce;
   const traffic = metrics?.traffic;
-  // ordersByDay moved into the commerce sub-message; feed getTimeSeries that record.
-  const metricsRecord = commerce as Record<string, unknown> | undefined;
   const { pathname } = useLocation();
   const revenueHref = `${pathname}?tab=revenue`;
   const productsHref = `${pathname}?tab=products`;
@@ -296,11 +238,16 @@ export function ThisWeekTab({
     return { count, value };
   }, [metricsResponse.paymentFailures]);
 
+  const repeatRatePct = useMemo(
+    () => getMetricComparison(commerce?.repeatCustomersRate as any).value,
+    [commerce?.repeatCustomersRate],
+  );
+
   const hasTopMovers = top3Products.length > 0 || topTrafficSource != null;
 
   return (
     <div className='space-y-6'>
-      {/* HEALTH / ACT NOW — the scorecard is the glance, the strip's act-now list is the detail. */}
+      {/* HEALTH / ACT NOW — status pill + act-now list (config: Health=pill). */}
       <ExecutiveHealthStrip
         metrics={metrics}
         compareEnabled={compareEnabled}
@@ -308,10 +255,9 @@ export function ThisWeekTab({
         currentPeriodLabel={currentPeriodLabel}
         comparePeriodLabel={comparePeriodLabel}
       />
-      <HealthScorecard metrics={metrics} />
 
       {paymentFailures.count > 0 && (
-        <div className='flex flex-wrap items-center justify-between gap-2 border-2 border-error bg-error/10 p-3'>
+        <div className='flex flex-wrap items-center justify-between gap-2 border-2 border-error bg-bgSecondary p-3'>
           <Text variant='uppercase' className='text-error text-textBaseSize font-semibold'>
             Payment failures this period
           </Text>
@@ -324,63 +270,35 @@ export function ThisWeekTab({
 
       <ForecastStrip forecast={metricsResponse.revenueForecast} />
 
-      {/* HOW THE PERIOD IS GOING */}
+      {/* HOW THE PERIOD IS GOING — vs-previous stats grid (config: Trend=vsprev). */}
       <div className='space-y-3'>
-        <h3 className='text-textBaseSize font-bold uppercase'>How the period is going</h3>
+        <SectionHead title='How the period is going' sub='— trend & movement vs previous' />
         <VsPreviousStrip commerce={commerce} compareEnabled={compareEnabled} />
-        <div className='max-w-xl space-y-2'>
-          <TimeSeriesChart
-            title='Orders / day'
-            data={coarsenTimeSeries(getTimeSeries(metricsRecord, 'ordersByDay'))}
-            valueFormat='number'
-          />
-          {commerce?.peakDay?.date && parseDecimal(commerce.peakDay.revenue) > 0 && (
-            <Text className='text-labelColor text-textBaseSize'>
-              Peak: {format(new Date(commerce.peakDay.date), 'EEE d MMM')} ·{' '}
-              {formatCurrency(parseDecimal(commerce.peakDay.revenue))} ·{' '}
-              {formatNumber(commerce.peakDay.orders ?? 0)} orders
-            </Text>
-          )}
-        </div>
       </div>
 
-      {/* NEW VS RETURNING */}
+      {/* NEW VS RETURNING — split bar + verdict (config: Acq=split). */}
       {commerce?.newVsReturning && (
         <div className='space-y-3'>
-          <h3 className='text-textBaseSize font-bold uppercase'>New vs returning</h3>
-          <NewReturningSplit split={commerce.newVsReturning} />
-          <details className='border border-textInactiveColor'>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-2 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-              By day
-            </summary>
-            <div className='grid gap-4 p-4 md:grid-cols-2'>
-              <TimeSeriesChart
-                title='New customers'
-                data={coarsenTimeSeries(commerce?.newCustomersByDay)}
-                valueFormat='number'
-              />
-              <TimeSeriesChart
-                title='Returning customers'
-                data={coarsenTimeSeries(commerce?.returningCustomersByDay)}
-                valueFormat='number'
-              />
-            </div>
-          </details>
+          <SectionHead title='New vs returning' sub='— are we growing on new or repeat?' />
+          <NewReturningSplit split={commerce.newVsReturning} repeatRatePct={repeatRatePct} />
         </div>
       )}
 
-      {/* TOP MOVERS */}
+      {/* TOP MOVERS — product + source cards (config: Top=cards). */}
       <div className='space-y-3'>
-        <div className='flex items-center justify-between'>
-          <h3 className='text-textBaseSize font-bold uppercase'>Top movers this period</h3>
-          <Link
-            to={productsHref}
-            replace
-            className='text-textBaseSize text-labelColor underline underline-offset-2 hover:text-textColor'
-          >
-            View all →
-          </Link>
-        </div>
+        <SectionHead
+          title='Top movers'
+          sub='— best products & traffic source'
+          right={
+            <Link
+              to={productsHref}
+              replace
+              className='text-textBaseSize text-labelColor underline underline-offset-2 hover:text-textColor'
+            >
+              View all →
+            </Link>
+          }
+        />
         {hasTopMovers ? (
           <TopMoverCards products={top3Products} source={topTrafficSource} />
         ) : (

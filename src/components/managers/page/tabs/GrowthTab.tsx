@@ -143,7 +143,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
           }.`}
         >
           {sampleSize > 0 && sampleSize < 30 && (
-            <div className='mb-3 border border-warning bg-warning/10 p-2'>
+            <div className='mb-3 border border-warning bg-bgSecondary p-2'>
               <Text className='text-warning text-textBaseSize'>
                 Low sample (n={sampleSize}): directional only, not statistically reliable yet.
               </Text>

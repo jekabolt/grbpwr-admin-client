@@ -71,7 +71,7 @@ export const DeliveryPanel: FC<DeliveryPanelProps> = ({ delivery }) => {
   const notes: ReactNode[] = [];
   if (deliveredN > 0 && deliveredCov > 0 && deliveredCov < SURVIVORSHIP_FLOOR_PCT) {
     notes.push(
-      <div key='survivorship' className='border border-warning bg-warning/10 p-2'>
+      <div key='survivorship' className='border border-warning bg-bgSecondary p-2'>
         <Text className='text-warning text-textBaseSize'>
           Only {deliveredCov.toFixed(0)}% of shipped orders have reached delivered — durations are
           biased toward the fast ones.

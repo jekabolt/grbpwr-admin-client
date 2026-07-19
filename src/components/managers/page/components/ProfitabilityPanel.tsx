@@ -160,7 +160,6 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
 
   return (
     <div className='space-y-2'>
-      <h3 className='text-textBaseSize font-bold uppercase'>Profitability</h3>
       <div className='grid gap-4 border-2 border-textInactiveColor/20 bg-bgSecondary/30 p-4 md:grid-cols-2'>
         {/* Left: the P&L waterfall */}
         <div className='space-y-0 md:border-r md:border-textInactiveColor/40 md:pr-4'>
@@ -210,7 +209,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
             (coverage <= 0 ? (
               <div className='mt-1 border-t border-textInactiveColor pt-1'>
                 <WLine label='= Operating result' value='—' strong valueTone='text-labelColor' />
-                <div className='mt-2 border border-warning bg-warning/10 p-2'>
+                <div className='mt-2 border border-warning bg-bgSecondary p-2'>
                   <Text className='text-textBaseSize text-textColor'>
                     <span className='font-bold'>Can&#39;t compute yet.</span> No product costs
                     entered — add costs to get gross margin, then the operating result.
@@ -243,7 +242,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
                   />
                 </div>
                 {!fullyCosted ? (
-                  <div className='mt-2 border border-warning bg-warning/10 p-2'>
+                  <div className='mt-2 border border-warning bg-bgSecondary p-2'>
                     <Text className='text-textBaseSize text-textColor'>
                       <span className='font-bold'>Estimate · {confidence} confidence.</span> Margin
                       on the uncosted {(100 - coverage).toFixed(0)}% of revenue is extrapolated at
@@ -254,7 +253,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
                     </Text>
                   </div>
                 ) : estOperating < 0 ? (
-                  <div className='mt-2 border border-error bg-error/10 p-2'>
+                  <div className='mt-2 border border-error bg-bgSecondary p-2'>
                     <Text className='text-textBaseSize text-error'>
                       <span className='font-bold'>Operating at a loss.</span> Contribution is not
                       covering OPEX + marketing — lift contribution (price / margin / mix) or cut

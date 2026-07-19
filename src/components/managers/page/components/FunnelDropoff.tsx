@@ -42,7 +42,7 @@ export const FunnelDropoff: FC<{ funnel: FunnelSection | undefined }> = ({ funne
   return (
     <div className='space-y-3'>
       {worst && worst.lostPct > 0 && (
-        <div className='border border-error bg-error/10 p-2'>
+        <div className='border border-error bg-bgSecondary p-2'>
           <Text className='text-textBaseSize text-error'>
             <span className='font-bold'>
               Biggest leak: {worst.from} → {worst.to}
@@ -64,7 +64,7 @@ export const FunnelDropoff: FC<{ funnel: FunnelSection | undefined }> = ({ funne
               </Text>
             </div>
             <div className='h-3 w-full bg-bgSecondary/60'>
-              <div className='h-3 bg-error/60' style={{ width: `${Math.min(100, t.lostPct)}%` }} />
+              <div className='h-3 bg-error' style={{ width: `${Math.min(100, t.lostPct)}%` }} />
             </div>
           </div>
         ))}

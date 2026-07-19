@@ -132,7 +132,7 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
       )}
 
       {lowSample && (
-        <div className='border border-warning bg-warning/10 p-2'>
+        <div className='border border-warning bg-bgSecondary p-2'>
           <Text className='text-warning text-textBaseSize'>
             Low sample (n={totalOrders}): directional only, not statistically reliable yet.
           </Text>

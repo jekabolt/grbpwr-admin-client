@@ -1,25 +1,24 @@
 import type { GetDashboardResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { type FC } from 'react';
-import { Link } from 'react-router-dom';
+import { type FC, type ReactNode } from 'react';
 import Text from 'ui/components/text';
 import {
   DeliveryPanel,
   FunnelChart,
   FunnelDropoff,
   OperatingResultStrip,
-  OrderValueBandsTable,
-  PaymentMixTable,
+  OrderValueBandsBars,
+  PaymentMixBars,
   ProfitabilityPanel,
-  PromoTable,
-  RevenueOrdersCombo,
-  RevenueSplitBar,
+  PromoBars,
   RevenueWaterfall,
-  Sparkline,
+  SectionHead,
+  StatGrid,
   TimeSeriesChart,
 } from '../components';
-import { orderCancellationSharePercent } from '../executiveAlerts';
+import type { StatCell } from '../components/StatGrid';
 import type { WaterfallStep } from '../components/RevenueWaterfall';
+import { orderCancellationSharePercent } from '../executiveAlerts';
 import {
   coarsenTimeSeries,
   formatCurrency,
@@ -28,7 +27,6 @@ import {
   formatNumberDelta,
   formatPercentWithBand,
   getMetricComparison,
-  getTimeSeries,
   parseDecimal,
 } from '../utils';
 
@@ -44,7 +42,7 @@ const COVERAGE_FLOOR_FOR_PCT = 80;
 // Rate over fewer orders than this is inside its own error band — show the raw count instead.
 const MIN_ORDERS_FOR_RATE = 30;
 
-/** Compact good/bad delta vs the comparison period. */
+/** Compact good/bad delta vs the comparison period, in the shared arrow grammar. */
 const Delta: FC<{
   cur: number;
   prev: number | undefined;
@@ -66,12 +64,18 @@ const Delta: FC<{
         ? `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${Math.abs(diff).toFixed(1)}pp`
         : formatNumberDelta(diff);
   return (
-    <Text variant='uppercase' className={`text-textBaseSize ${color}`}>
+    <Text variant='uppercase' className={`text-[10px] ${color}`}>
       {arrow}
       {text}
     </Text>
   );
 };
+
+const Muted: FC<{ children: ReactNode }> = ({ children }) => (
+  <Text variant='uppercase' className='text-labelColor text-[10px]'>
+    {children}
+  </Text>
+);
 
 export function RevenueTab({
   metricsResponse,
@@ -100,19 +104,11 @@ export function RevenueTab({
   const revenueCost = getMetricComparison(margin?.revenueCost as any);
   const grossMargin = getMetricComparison(margin?.grossMargin as any);
   const grossMarginPct = getMetricComparison(margin?.grossMarginPct as any);
-  const paymentFees = getMetricComparison(margin?.paymentFees as any);
   const contributionMargin = getMetricComparison(margin?.contributionMargin as any);
   const costCoverage = margin?.costCoveragePct ?? 0;
   const marginPctTrusted = costCoverage >= COVERAGE_FLOOR_FOR_PCT;
-  // Processor fees bridge gross profit → contribution; only show the line once they're captured.
-  const showFees = paymentFees.value > 0;
-  // Directional processor cut as a share of net revenue — a creeping rate is the signal to watch.
-  // paymentFees (from MarginMetrics) and net revenue may be scoped differently by the backend
-  // (fees can be summed over a different order set than the costed-revenue view), so treat this as
-  // a trend indicator, not an exact rate. Scope is backend ask S4 in docs/analytics-backend-asks.md.
-  const feeRatePct = revenue.value > 0 ? (paymentFees.value / revenue.value) * 100 : null;
-  // Products with no cost entered are why margin is partial/dark — name the gap to close it.
-  const uncostedCount = margin?.uncostedProductIds?.length ?? 0;
+  const contribShown = canReadCosting && costCoverage > 0;
+  const marginShown = canReadCosting && marginPctTrusted;
 
   // Compact door-to-door / on-time stat for the Shipping & Delivery summary line (collapsed view).
   const delivery = metricsResponse.delivery;
@@ -127,14 +123,6 @@ export function RevenueTab({
     }
     return parts.length > 0 ? parts.join(' · ') : null;
   })();
-
-  // Top revenue band for the "Order value distribution" summary line (collapsed view).
-  const bands = metricsResponse.orderValueBands ?? [];
-  const topBand = bands.length
-    ? bands.reduce((best, b) => ((b.revenueSharePct ?? 0) > (best.revenueSharePct ?? 0) ? b : best))
-    : null;
-  const topRevenueBandLabel = topBand?.label ?? null;
-  const topRevenueBandShare = topBand ? (topBand.revenueSharePct ?? 0).toFixed(0) : null;
 
   // Money-headline waterfall: gross → net → contribution (costing rows only when we have coverage).
   const waterfallSteps: WaterfallStep[] = [
@@ -160,32 +148,102 @@ export function RevenueTab({
     });
   }
 
-  // "Where net revenue goes" split bar — estimated (grossed-up) so COGS reflects all revenue, not
-  // just the costed slice. Only when costing is readable and there is some coverage.
-  const profitability = metricsResponse.profitability;
-  const opexV = parseDecimal(profitability?.opexTotal);
-  const marketingV = parseDecimal(profitability?.marketingSpend);
-  const coverageFrac = costCoverage / 100;
-  const splitCosts =
-    canReadCosting && coverageFrac > 0 && revenue.value > 0
-      ? [
-          {
-            label: 'COGS',
-            value: Math.max(0, revenue.value - grossMargin.value / coverageFrac),
-            className: 'bg-textColor',
-          },
-          {
-            label: 'Shipping & fees',
-            value: Math.max(0, (grossMargin.value - contributionMargin.value) / coverageFrac),
-            className: 'bg-textColor/60',
-          },
-          { label: 'OPEX', value: opexV, className: 'bg-error/60' },
-          { label: 'Marketing', value: marketingV, className: 'bg-textColor/30' },
-        ]
-      : null;
+  // Two KPI grids for the money headline (config: Headline=waterfall + two).
+  const kpiPrimary: StatCell[] = [
+    {
+      label: 'Net revenue',
+      value: formatCurrency(revenue.value),
+      sub: (
+        <Delta
+          cur={revenue.value}
+          prev={revenue.compareValue}
+          kind='currency'
+          enabled={compareEnabled}
+        />
+      ),
+    },
+    {
+      label: 'Contribution',
+      value: contribShown ? formatCurrency(contributionMargin.value) : '—',
+      sub: contribShown ? (
+        <Delta
+          cur={contributionMargin.value}
+          prev={contributionMargin.compareValue}
+          kind='currency'
+          enabled={compareEnabled}
+        />
+      ) : (
+        <Muted>set product costs</Muted>
+      ),
+    },
+    {
+      label: 'Gross margin',
+      value: marginShown ? `${grossMarginPct.value.toFixed(0)}%` : '—',
+      sub: (
+        <Muted>
+          {costCoverage > 0 ? `${costCoverage.toFixed(0)}% costed` : 'no costs set'}
+          {costCoverage > 0 && !marginShown ? ` · need ≥${COVERAGE_FLOOR_FOR_PCT}%` : ''}
+        </Muted>
+      ),
+    },
+    {
+      label: 'Orders',
+      value: formatNumber(orders.value),
+      sub: (
+        <Delta
+          cur={orders.value}
+          prev={orders.compareValue}
+          kind='number'
+          enabled={compareEnabled}
+        />
+      ),
+    },
+  ];
+
+  const kpiSecondary: StatCell[] = [
+    {
+      label: 'Gross revenue',
+      value: formatCurrency(grossRevenue.value),
+      sub: (
+        <Muted>
+          before disc.{discountRate.value > 0 ? ` · −${discountRate.value.toFixed(1)}%` : ''}
+        </Muted>
+      ),
+    },
+    { label: 'AOV', value: formatCurrency(aov.value) },
+    {
+      label: 'Refunds',
+      value: (
+        <>
+          {formatNumber(refundedCount)}{' '}
+          <span className='text-labelColor text-[11px]'>of {formatNumber(ordersN)}</span>
+        </>
+      ),
+      sub: showRates ? (
+        <Muted>{formatPercentWithBand(refundRate.value, refundRate.marginOfError)}</Muted>
+      ) : undefined,
+    },
+    {
+      label: 'Cancelled',
+      value: (
+        <>
+          {formatNumber(cancelledCount)}{' '}
+          <span className='text-labelColor text-[11px]'>of {formatNumber(ordersN)}</span>
+        </>
+      ),
+      sub:
+        showRates && cancellationPct != null ? (
+          <Muted>{cancellationPct.toFixed(1)}%</Muted>
+        ) : undefined,
+    },
+  ];
 
   // Order-value verdict: revenue vs orders share carried by the big baskets (bands from ≥ €300,
   // else the single top-revenue band).
+  const bands = metricsResponse.orderValueBands ?? [];
+  const topBand = bands.length
+    ? bands.reduce((best, b) => ((b.revenueSharePct ?? 0) > (best.revenueSharePct ?? 0) ? b : best))
+    : null;
   const bigBands = bands.filter((b) => parseDecimal(b.from) >= 300);
   const verdictBands = bigBands.length > 0 ? bigBands : topBand ? [topBand] : [];
   const bigRevShare = Math.round(verdictBands.reduce((s, b) => s + (b.revenueSharePct ?? 0), 0));
@@ -194,239 +252,56 @@ export function RevenueTab({
 
   // Over-time series (coarsened weekly at volume).
   const revByDay = coarsenTimeSeries(commerce?.revenueByDay);
-  const ordersByDay = coarsenTimeSeries(getTimeSeries(commerce as any, 'ordersByDay'));
-  const unitsByDay = coarsenTimeSeries(commerce?.unitsSoldByDay);
+  const grossRevByDay = coarsenTimeSeries(commerce?.grossRevenueByDay);
+
+  const hasPayments = (commerce?.revenueByPaymentMethod?.length ?? 0) > 0;
+  const hasPromos = (commerce?.revenueByPromo?.length ?? 0) > 0;
 
   return (
-    <div className='space-y-6'>
-      {/* Profit is the point — lead with it. Margin is over the costed revenue subset.
-          Gated on costing:read: without it the server nulls the money fields, so we hide the
-          whole block rather than trust costCoveragePct (which may not be nulled) and risk €0.00. */}
-      {canReadCosting && (
-        <div className='space-y-2'>
-          <div className='flex flex-wrap items-center justify-between gap-2'>
-            <h3 className='text-textBaseSize font-bold uppercase'>Profit &amp; Margin</h3>
-            <Text variant='label' size='small'>
-              {costCoverage > 0
-                ? `over the ${costCoverage.toFixed(0)}% of revenue with a product cost set`
-                : 'set product costs to unlock'}
-              {uncostedCount > 0 &&
-                ` · ${uncostedCount} product${uncostedCount === 1 ? '' : 's'} missing cost`}
-            </Text>
-          </div>
-          {costCoverage > 0 ? (
-            <div
-              className={`grid grid-cols-2 ${showFees ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3 border-2 border-textInactiveColor/20 p-4 bg-bgSecondary/30`}
-            >
-              <div className='space-y-1'>
-                <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                  COGS
-                </Text>
-                <Text className='font-bold text-lg'>{formatCurrency(revenueCost.value)}</Text>
-              </div>
-              <div className='space-y-1'>
-                <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                  Gross Profit
-                </Text>
-                <Text className='font-bold text-lg'>{formatCurrency(grossMargin.value)}</Text>
-                <Delta
-                  cur={grossMargin.value}
-                  prev={grossMargin.compareValue}
-                  kind='currency'
-                  enabled={compareEnabled}
-                />
-              </div>
-              <div className='space-y-1'>
-                <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                  Gross Margin
-                </Text>
-                <Text className='font-bold text-lg'>
-                  {marginPctTrusted ? `${grossMarginPct.value.toFixed(0)}%` : '—'}
-                </Text>
-                {marginPctTrusted ? (
-                  <Delta
-                    cur={grossMarginPct.value}
-                    prev={grossMarginPct.compareValue}
-                    kind='pp'
-                    enabled={compareEnabled}
-                  />
-                ) : (
-                  <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                    need ≥{COVERAGE_FLOOR_FOR_PCT}% costed
-                  </Text>
-                )}
-              </div>
-              {showFees && (
-                <div className='space-y-1'>
-                  <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                    Payment fees
-                  </Text>
-                  <Text className='font-bold text-lg'>−{formatCurrency(paymentFees.value)}</Text>
-                  {feeRatePct != null && (
-                    <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                      {feeRatePct.toFixed(1)}% of revenue
-                    </Text>
-                  )}
-                  <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                    processor cut
-                  </Text>
-                </div>
-              )}
-              <div className='space-y-1'>
-                <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                  Contribution (not profit)
-                </Text>
-                <Text className='font-bold text-lg'>
-                  {formatCurrency(contributionMargin.value)}
-                </Text>
-                <Delta
-                  cur={contributionMargin.value}
-                  prev={contributionMargin.compareValue}
-                  kind='currency'
-                  enabled={compareEnabled}
-                />
-                <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                  {showFees ? 'after shipping & fees' : 'after shipping'} · before opex
-                </Text>
-              </div>
-            </div>
-          ) : (
-            <div className='border border-textInactiveColor p-4 bg-bgSecondary/20'>
-              <Text variant='label' size='small'>
-                No product costs entered yet — add cost (EUR) on products to see gross profit,
-                margin %, and contribution here.
-              </Text>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Full P&L waterfall + unit economics (costing-gated). Absorbs the operating-result
-          waterfall that used to live in OperatingResultStrip. */}
-      {canReadCosting && (
-        <ProfitabilityPanel
-          profitability={metricsResponse.profitability}
-          compareEnabled={compareEnabled}
-          operatingResultChangePct={dashboard?.compare?.operatingResultChangePct}
-        />
-      )}
-
-      {splitCosts && (
-        <div className='space-y-2'>
-          <h3 className='text-textBaseSize font-bold uppercase'>Where net revenue goes</h3>
-          <Text variant='label' size='small'>
-            estimated split of each € of net revenue (COGS grossed up to all revenue, not just the
-            costed slice)
-          </Text>
-          <div className='border border-textInactiveColor p-4'>
-            <RevenueSplitBar netRevenue={revenue.value} costs={splitCosts} />
-          </div>
-        </div>
-      )}
-
-      {/* GA4 coverage note, from GetDashboard (the waterfall moved into ProfitabilityPanel). */}
-      <OperatingResultStrip dashboard={dashboard} />
-
-      <div className='space-y-6'>
-        <h3 className='text-textBaseSize font-bold uppercase'>Revenue &amp; Orders</h3>
-
-        <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 border border-textInactiveColor p-4 bg-bgSecondary/20'>
-          <div className='space-y-1'>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-              Net revenue (ex-VAT)
-            </Text>
-            <Text className='font-bold'>{formatCurrency(revenue.value)}</Text>
-            <Delta
-              cur={revenue.value}
-              prev={revenue.compareValue}
-              kind='currency'
-              enabled={compareEnabled}
-            />
-          </div>
-          <div className='space-y-1'>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-              Gross Revenue
-            </Text>
-            <Text className='font-bold'>{formatCurrency(grossRevenue.value)}</Text>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-              before discounts
-            </Text>
-            {discountRate.value > 0 && (
-              <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                −{discountRate.value.toFixed(1)}% discounts
-              </Text>
-            )}
-          </div>
-          <div className='space-y-1'>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-              Orders
-            </Text>
-            <Text className='font-bold'>{formatNumber(orders.value)}</Text>
-            <Delta
-              cur={orders.value}
-              prev={orders.compareValue}
-              kind='number'
-              enabled={compareEnabled}
-            />
-          </div>
-          <div className='space-y-1'>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-              AOV
-            </Text>
-            <Text className='font-bold'>{formatCurrency(aov.value)}</Text>
-          </div>
-          <div className='space-y-1'>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-              Refunds
-            </Text>
-            <Text className='font-bold'>
-              {formatNumber(refundedCount)}{' '}
-              <span className='text-labelColor text-textBaseSize'>of {formatNumber(ordersN)}</span>
-            </Text>
-            {showRates && (
-              <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                {formatPercentWithBand(refundRate.value, refundRate.marginOfError)}
-              </Text>
-            )}
-          </div>
-          <div className='space-y-1'>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-              Cancelled
-            </Text>
-            <Text className='font-bold'>
-              {formatNumber(cancelledCount)}{' '}
-              <span className='text-labelColor text-textBaseSize'>of {formatNumber(ordersN)}</span>
-            </Text>
-            {showRates && cancellationPct != null && (
-              <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-                {cancellationPct.toFixed(1)}%
-              </Text>
-            )}
-          </div>
-        </div>
-
-        {/* Money story in one column: gross → net → contribution. */}
-        <div className='border border-textInactiveColor p-4'>
-          <Text variant='uppercase' className='mb-3 block font-bold'>
-            Revenue → contribution
-          </Text>
+    <div className='space-y-8'>
+      {/* MONEY HEADLINE — revenue waterfall + two KPI grids (config: Headline=waterfall + two). */}
+      <section className='space-y-3'>
+        <SectionHead title='Money headline' sub="— how much came in, what's left" />
+        <StatGrid cells={kpiPrimary} />
+        <StatGrid cells={kpiSecondary} />
+        <div className='space-y-1.5 pt-1'>
+          <Muted>Revenue → contribution</Muted>
           <RevenueWaterfall steps={waterfallSteps} />
         </div>
+      </section>
 
-        {/* How the period moved: sparkline strip + combined revenue/orders chart. */}
-        <div className='grid grid-cols-3 gap-3'>
-          <Sparkline label='Revenue' data={revByDay} />
-          <Sparkline label='Orders' data={ordersByDay} number />
-          <Sparkline label='Units' data={unitsByDay} number />
+      {/* P&L / PROFITABILITY — waterfall + unit economics (config: PL=waterfall). Costing-gated:
+          without costing:read the server nulls the money fields, so hide the whole section. */}
+      {canReadCosting && (
+        <section className='space-y-3'>
+          <SectionHead
+            title='P&L / profitability'
+            sub='— costs down to operating result + unit economics'
+          />
+          <ProfitabilityPanel
+            profitability={metricsResponse.profitability}
+            compareEnabled={compareEnabled}
+            operatingResultChangePct={dashboard?.compare?.operatingResultChangePct}
+          />
+          <OperatingResultStrip dashboard={dashboard} />
+        </section>
+      )}
+
+      {/* OVER TIME — two line charts (config: Trend=twolines). */}
+      <section className='space-y-3'>
+        <SectionHead title='Over time' sub='— revenue & order trend across the period' />
+        <div className='grid gap-4 md:grid-cols-2'>
+          <TimeSeriesChart title='Net revenue / day' data={revByDay} />
+          <TimeSeriesChart title='Gross revenue / day' data={grossRevByDay} />
         </div>
-        <RevenueOrdersCombo revenue={revByDay} orders={ordersByDay} />
-      </div>
+      </section>
 
-      {(metricsResponse.orderValueBands?.length ?? 0) > 0 && (
-        <div className='space-y-2'>
-          <h3 className='text-textBaseSize font-bold uppercase'>Order value</h3>
+      {/* ORDER VALUE — revenue-share bars + verdict (config: Bands=bars). */}
+      {bands.length > 0 && (
+        <section className='space-y-3'>
+          <SectionHead title='Order value' sub='— do a few big baskets carry the revenue?' />
           {bigRevShare > 0 && verdictBands.length > 0 ? (
-            <Text className='text-textBaseSize font-bold'>
+            <Text className='text-[13px] font-bold leading-snug'>
               {bigRevShare}% of revenue comes from the {bigOrdShare}% of orders {bandThreshold}.
             </Text>
           ) : (
@@ -434,32 +309,51 @@ export function RevenueTab({
               Net revenue by basket size — a few large baskets usually carry most of the money.
             </Text>
           )}
-          <div className='border border-textInactiveColor p-4'>
-            <OrderValueBandsTable bands={metricsResponse.orderValueBands} aovValue={aov.value} />
-          </div>
-        </div>
+          <OrderValueBandsBars bands={bands} />
+        </section>
       )}
 
+      {/* PURCHASE FUNNEL — drop-off + biggest leak (config: Funnel=dropoff). */}
       {metricsResponse.funnel?.aggregate && (
-        <div className='space-y-2'>
-          <h3 className='text-textBaseSize font-bold uppercase'>Purchase funnel</h3>
-          <Text variant='label' size='small'>
-            Where browsers drop off on the way to purchase (browse → cart → buy).
-          </Text>
-          <div className='space-y-3 border border-textInactiveColor p-4'>
-            <FunnelDropoff funnel={metricsResponse.funnel} />
-            <details>
-              <summary className='cursor-pointer text-textBaseSize text-labelColor'>
-                Full funnel bars
-              </summary>
-              <div className='mt-2'>
-                <FunnelChart funnel={metricsResponse.funnel} />
-              </div>
-            </details>
-          </div>
-        </div>
+        <section className='space-y-3'>
+          <SectionHead
+            title='Purchase funnel'
+            sub='— where browsers drop off on the way to buying'
+          />
+          <FunnelDropoff funnel={metricsResponse.funnel} />
+          <details>
+            <summary className='cursor-pointer text-textBaseSize text-labelColor'>
+              Full funnel bars
+            </summary>
+            <div className='mt-2'>
+              <FunnelChart funnel={metricsResponse.funnel} />
+            </div>
+          </details>
+        </section>
       )}
 
+      {/* PAYMENTS & PROMO — mix bars (config: PayPromo=bars). */}
+      {(hasPayments || hasPromos) && (
+        <section className='space-y-3'>
+          <SectionHead title='Payments & promo' sub='— method mix & promo-driven revenue' />
+          <div className='grid gap-6 md:grid-cols-2'>
+            {hasPayments && (
+              <div className='space-y-2'>
+                <Muted>By payment method</Muted>
+                <PaymentMixBars methods={commerce?.revenueByPaymentMethod} />
+              </div>
+            )}
+            {hasPromos && (
+              <div className='space-y-2'>
+                <Muted>By promo code</Muted>
+                <PromoBars metrics={metrics} />
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* SHIPPING & DELIVERY — ops detail, collapsed (not a headline metric). */}
       <details className='border border-textInactiveColor'>
         <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-bgSecondary/30 px-4 py-3 hover:bg-bgSecondary/50'>
           <span className='text-textBaseSize font-bold uppercase'>Shipping &amp; Delivery</span>
@@ -489,26 +383,6 @@ export function RevenueTab({
           </div>
         </div>
       </details>
-
-      {(commerce?.revenueByPaymentMethod?.length ?? 0) > 0 && (
-        <details className='border border-textInactiveColor'>
-          <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-            Payments
-          </summary>
-          <div className='space-y-3 p-4'>
-            <Text className='text-textBaseSize text-labelColor leading-relaxed'>
-              Revenue by payment method over the period. Settled revenue by channel lives in{' '}
-              <Link to={{ search: '?tab=growth' }} className='underline hover:text-blue'>
-                Growth
-              </Link>
-              .
-            </Text>
-            <PaymentMixTable methods={commerce?.revenueByPaymentMethod} />
-          </div>
-        </details>
-      )}
-
-      <PromoTable metrics={metrics} />
     </div>
   );
 }

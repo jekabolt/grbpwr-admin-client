@@ -11,9 +11,9 @@ export type WaterfallStep = {
 
 /**
  * Compact vertical revenue waterfall: gross → net → contribution in one column, so the
- * money story reads top-to-bottom. Bar width is relative to the largest magnitude; negatives
- * are muted red, the two subtotals bold. Costing-derived rows are omitted by the caller when
- * there is no cost coverage.
+ * money story reads top-to-bottom. Bar width is relative to the largest magnitude; deductions
+ * are neutral gray bars (the − amount is red), the two subtotals bold, contribution green.
+ * Costing-derived rows are omitted by the caller when there is no cost coverage.
  */
 export const RevenueWaterfall: FC<{ steps: WaterfallStep[] }> = ({ steps }) => {
   if (steps.length === 0) return null;
@@ -24,7 +24,7 @@ export const RevenueWaterfall: FC<{ steps: WaterfallStep[] }> = ({ steps }) => {
         const w = Math.min(100, (Math.abs(s.value) / max) * 100);
         const strong = s.kind === 'subtotal' || s.kind === 'final';
         const bar =
-          s.kind === 'neg' ? 'bg-error/45' : s.kind === 'final' ? 'bg-success' : 'bg-textColor';
+          s.kind === 'neg' ? 'bg-labelColor' : s.kind === 'final' ? 'bg-success' : 'bg-textColor';
         return (
           <div key={i} className='grid grid-cols-[minmax(130px,1.2fr)_2fr_auto] items-center gap-3'>
             <Text size='small' className={strong ? 'font-bold' : 'text-labelColor'}>
