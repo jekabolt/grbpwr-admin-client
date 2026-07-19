@@ -4,6 +4,7 @@ import Text from 'ui/components/text';
 import { buildClearSignals, clearBuckets } from '../productSignals';
 import { formatCurrency, formatNumber } from '../utils';
 import { ActionList } from './ActionList';
+import { ProductSection } from './ProductSection';
 
 const Stat: FC<{ label: string; value: string; sub: string; crit?: boolean }> = ({
   label,
@@ -32,16 +33,15 @@ export const ClearList: FC<{ metricsResponse: GetMetricsResponse }> = ({ metrics
   if (nothing) return null;
 
   return (
-    <div className='border border-textInactiveColor bg-bgSecondary/20 p-4'>
-      <Text variant='uppercase' className='block font-bold'>
-        Clear / cut — free up cash
-      </Text>
-      <Text className='text-labelColor text-textBaseSize mb-3 block'>
-        {b.dead.value > 0
+    <ProductSection
+      title='Clear / cut'
+      subtitle='— where cash is frozen in stock that is not selling'
+      verdict={
+        b.dead.value > 0
           ? `${formatCurrency(b.dead.value)} tied up in stock with no recent sales — mark down or pull.`
-          : 'Stock that is not moving — mark down or pull to release the cash.'}
-      </Text>
-
+          : 'Stock that is not moving — mark down or pull to release the cash.'
+      }
+    >
       <div className='mb-3 grid grid-cols-3 border border-textInactiveColor bg-bgSecondary/30'>
         <Stat
           label='Dead · >90d no sale'
@@ -62,6 +62,6 @@ export const ClearList: FC<{ metricsResponse: GetMetricsResponse }> = ({ metrics
       </div>
 
       {items.length > 0 && <ActionList items={items} total={total} />}
-    </div>
+    </ProductSection>
   );
 };

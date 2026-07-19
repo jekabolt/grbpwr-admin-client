@@ -2,6 +2,7 @@ import type { SellThroughByDropRow } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
+import { ProductSection } from './ProductSection';
 
 interface DropVerdictTableProps {
   sellThroughByDrop: SellThroughByDropRow[] | undefined;
@@ -23,15 +24,22 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
     (a, b) => parseDecimal(b.revenue) - parseDecimal(a.revenue),
   );
   const anyCosted = rows.some((r) => r.hasCost);
+  const strong = rows.filter((r) => (r.sellThroughPct ?? 0) >= 75).length;
+  const weak = rows.filter((r) => (r.sellThroughPct ?? 0) < 40 && (r.unitsBought ?? 0) > 0).length;
+  const verdictText =
+    strong || weak
+      ? `${strong ? `Reprint ${strong} strong drop${strong === 1 ? '' : 's'}` : ''}${strong && weak ? '; ' : ''}${weak ? `cut or discount ${weak} weak` : ''}.`
+      : 'Per-release sell-through — how much of each drop cleared.';
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-1 block'>
-        Drop verdict
-      </Text>
-      <Text className='text-textBaseSize text-labelColor mb-4 block'>
-        Per-release sell-through — the drop-brand KPI. Whole-drop totals, so the read is
-        decision-grade even when a single day is only a handful of orders.
+    <ProductSection
+      title='Drops'
+      subtitle='— which releases to reprint, hold, or kill'
+      verdict={verdictText}
+    >
+      <Text className='text-textBaseSize text-labelColor mb-3 block'>
+        Whole-drop sell-through, so the read is decision-grade even when a single day is only a
+        handful of orders.
       </Text>
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
@@ -143,6 +151,6 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
         </Text>
         {!anyCosted && <Text>Set product costs to see per-drop margin.</Text>}
       </div>
-    </div>
+    </ProductSection>
   );
 };

@@ -4,6 +4,7 @@ import Text from 'ui/components/text';
 import { buildReorderGroups } from '../productSignals';
 import { formatCurrency, formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
+import { ProductSection } from './ProductSection';
 
 // Link only numeric DB colorway ids; OOS / notify-me rows carry BigQuery string ids that
 // aren't colorway ids, so linking them would land on a blank product page.
@@ -41,15 +42,16 @@ export const ReorderList: FC<{ metricsResponse: GetMetricsResponse }> = ({ metri
   const waiting = g.demand.reduce((s, x) => s + x.count, 0);
 
   return (
-    <div className='border border-textInactiveColor bg-bgSecondary/20 p-4'>
-      <Text variant='uppercase' className='block font-bold'>
-        Reorder — what to restock
-      </Text>
-      <Text className='text-labelColor text-textBaseSize mb-3 block'>
-        Restock {g.lineCount} line{g.lineCount === 1 ? '' : 's'}
-        {g.lostSum > 0 && ` — about ${formatCurrency(g.lostSum)} of demand is going unsold`}.
-      </Text>
-
+    <ProductSection
+      title='Reorder'
+      subtitle='— what to restock, how much, why'
+      verdict={
+        <>
+          Restock {g.lineCount} line{g.lineCount === 1 ? '' : 's'}
+          {g.lostSum > 0 && ` — about ${formatCurrency(g.lostSum)} of demand is going unsold`}.
+        </>
+      }
+    >
       {g.oos.length > 0 && (
         <div className='mb-3'>
           <GroupHead
@@ -126,6 +128,6 @@ export const ReorderList: FC<{ metricsResponse: GetMetricsResponse }> = ({ metri
           </ul>
         </div>
       )}
-    </div>
+    </ProductSection>
   );
 };
