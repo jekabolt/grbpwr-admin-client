@@ -14,8 +14,9 @@ interface ProfitabilityPanelProps {
   profitability: ProfitabilitySection | undefined;
   compareEnabled?: boolean;
   // Period-over-period change of the operating result, from GetDashboard's DashboardComparison.
-  // ProfitabilitySection.operatingResult is a plain Decimal with no compare, so this is the only
-  // source of its delta. Percent change; higher is better.
+  // Accepted for compatibility but intentionally NOT rendered: the backend %-change is sign-inverted
+  // when the prior operating result is negative (the usual case at partial cost coverage), so it reads
+  // backwards. Re-enable once the backend delta (computeChangePct on a negative base) is fixed.
   operatingResultChangePct?: number;
 }
 
@@ -100,23 +101,9 @@ const UnitTile: FC<{ label: string; value: ReactNode; sub?: ReactNode; muted?: b
  * fields without costing:read). Absorbs the operating-result waterfall that used to live in
  * OperatingResultStrip, so the money story appears once, period-consistent, with compare deltas.
  */
-// Percent-change delta node in the shared arrow grammar (higher is better).
-const PctDelta: FC<{ pct: number | undefined; enabled: boolean }> = ({ pct, enabled }) => {
-  if (!enabled || pct == null || !Number.isFinite(pct)) return null;
-  const color = pct > 0 ? 'text-success' : pct < 0 ? 'text-error' : 'text-labelColor';
-  const arrow = pct > 0 ? '↑ ' : pct < 0 ? '↓ ' : '';
-  return (
-    <Text variant='uppercase' className={`text-textBaseSize ${color}`}>
-      {arrow}
-      {Math.abs(pct).toFixed(0)}% vs prev
-    </Text>
-  );
-};
-
 export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
   profitability,
   compareEnabled = false,
-  operatingResultChangePct,
 }) => {
   if (!profitability) return null;
 
@@ -213,12 +200,36 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
               <div className='mt-1 border-t border-textInactiveColor pt-1'>
                 <WLine
                   label='= Operating result'
-                  value={formatCurrency(operating)}
+                  value={marginPctTrusted ? formatCurrency(operating) : `${formatCurrency(operating)} *`}
                   strong
-                  valueTone={operating < 0 ? 'text-error' : ''}
-                  delta={<PctDelta pct={operatingResultChangePct} enabled={compareEnabled} />}
+                  // Only frame it red as a real loss when coverage is high enough to trust it. Below the
+                  // floor it is an artifact (see the warning), so keep it neutral instead of crying wolf.
+                  valueTone={
+                    !marginPctTrusted ? 'text-labelColor' : operating < 0 ? 'text-error' : ''
+                  }
                 />
               </div>
+              {/* Coverage-aware read. Below the floor the operating result is understated: contribution
+                  counts margin ONLY on costed sales, but opex/marketing/shipping/fees are subtracted for
+                  the whole business — so a partial-coverage period always looks like a loss. */}
+              {!marginPctTrusted ? (
+                <div className='mt-2 border border-warning bg-warning/10 p-2'>
+                  <Text className='text-textBaseSize text-textColor'>
+                    <span className='font-bold'>* Understated, not a real loss.</span> Only{' '}
+                    {coverage.toFixed(0)}% of revenue has product costs, so the margin on the other{' '}
+                    {(100 - coverage).toFixed(0)}% is missing here while all OPEX &amp; marketing are
+                    subtracted. Add product costs to see the true operating result.
+                  </Text>
+                </div>
+              ) : operating < 0 ? (
+                <div className='mt-2 border border-error bg-error/10 p-2'>
+                  <Text className='text-textBaseSize text-error'>
+                    <span className='font-bold'>Operating at a loss.</span> Contribution is not covering
+                    OPEX + marketing this period — lift contribution (price / margin / mix) or cut fixed
+                    costs.
+                  </Text>
+                </div>
+              ) : null}
             </>
           )}
 
@@ -229,7 +240,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
           )}
           <Text variant='label' size='small' className='mt-2 block'>
             {hasAssembly
-              ? 'operating result = contribution − opex − marketing (EBITDA-ish; not audited profit).'
+              ? 'operating result = contribution − opex − marketing (EBITDA-ish; not audited profit). Period compare is off here until the backend delta fix.'
               : 'add OPEX and marketing spend to complete the operating result.'}
           </Text>
         </div>
