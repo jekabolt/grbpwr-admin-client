@@ -2817,6 +2817,7 @@ export type AlertSettings = {
   contributionTrustPct: number | undefined;
   ga4CoverageWarnPct: number | undefined;
   productionRunStaleDays: number | undefined;
+  acctPostingLagHours: number | undefined;
 };
 
 export type GetAlertSettingsRequest = {
@@ -4241,16 +4242,22 @@ export type SchedulePickupResponse = {
   message: string | undefined;
 };
 
+// UpdateSettingsRequest is a PARTIAL update: every scalar field is `optional` so an omitted field is
+// left untouched (only explicitly-present fields are applied). This prevents a partial/empty request
+// from silently disabling the site or wiping the announce banner. The repeated/map fields
+// (shipment_carriers, payment_methods, complimentary_shipping_prices) are likewise only applied when
+// non-empty. To clear the announce, send an announce message with empty link + no translations; to
+// leave it unchanged, omit the announce field entirely.
 export type UpdateSettingsRequest = {
   shipmentCarriers: ShipmentCarrierAllowancePrice[] | undefined;
   paymentMethods: PaymentMethodAllowance[] | undefined;
-  siteAvailable: boolean | undefined;
-  maxOrderItems: number | undefined;
-  bigMenu: boolean | undefined;
+  siteAvailable?: boolean;
+  maxOrderItems?: number;
+  bigMenu?: boolean;
   announce: common_Announce | undefined;
-  orderExpirationSeconds: number | undefined;
+  orderExpirationSeconds?: number;
   complimentaryShippingPrices: { [key: string]: googletype_Decimal } | undefined;
-  isProd: boolean | undefined;
+  isProd?: boolean;
 };
 
 export type ShipmentCarrierAllowancePrice = {
@@ -4686,21 +4693,6 @@ export type UpsertChannelSpendRequest = {
 };
 
 export type UpsertChannelSpendResponse = {
-};
-
-// OpexEntryInsert is one fixed-cost line: an amount for a category in a month, base currency (task 22).
-export type OpexEntryInsert = {
-  month: string | undefined;
-  category: string | undefined;
-  amount: googletype_Decimal | undefined;
-  note: string | undefined;
-};
-
-export type UpsertOpexEntriesRequest = {
-  entries: OpexEntryInsert[] | undefined;
-};
-
-export type UpsertOpexEntriesResponse = {
 };
 
 // OpexLineInsert is one operating-expense line item (NF-08). Amount is in `currency`; it is folded
@@ -6838,6 +6830,332 @@ export type DeleteAccountRequest = {
 export type DeleteAccountResponse = {
 };
 
+// AcctAccount is a stored chart-of-accounts row. is_system accounts participate in automated
+// posting rules and cannot be renamed or archived (ErrAcctSystemAccount).
+export type AcctAccount = {
+  id: number | undefined;
+  code: string | undefined;
+  name: string | undefined;
+  section: string | undefined;
+  statement: string | undefined;
+  isSystem: boolean | undefined;
+  archived: boolean | undefined;
+};
+
+export type ListAcctAccountsRequest = {
+  includeArchived: boolean | undefined;
+};
+
+export type ListAcctAccountsResponse = {
+  accounts: AcctAccount[] | undefined;
+};
+
+export type CreateAcctAccountRequest = {
+  code: string | undefined;
+  name: string | undefined;
+  section: string | undefined;
+  statement: string | undefined;
+};
+
+export type CreateAcctAccountResponse = {
+  account: AcctAccount | undefined;
+};
+
+export type UpdateAcctAccountRequest = {
+  code: string | undefined;
+  name: string | undefined;
+};
+
+export type UpdateAcctAccountResponse = {
+  account: AcctAccount | undefined;
+};
+
+export type ArchiveAcctAccountRequest = {
+  code: string | undefined;
+  archived: boolean | undefined;
+};
+
+export type ArchiveAcctAccountResponse = {
+};
+
+// AcctJournalLineInput is one side of a manual journal entry being posted. Either `amount` (base
+// currency, EUR) or `amount_src`+`currency_src` (converted to base server-side via the costing FX
+// rates) must be set — never both, never neither.
+export type AcctJournalLineInput = {
+  accountCode: string | undefined;
+  isDebit: boolean | undefined;
+  amount: googletype_Decimal | undefined;
+  amountSrc: googletype_Decimal | undefined;
+  currencySrc: string | undefined;
+  note: string | undefined;
+};
+
+export type CreateJournalEntryRequest = {
+  occurredAt: string | undefined;
+  description: string | undefined;
+  lines: AcctJournalLineInput[] | undefined;
+};
+
+// AcctJournalLine is a stored journal line (read side), joined to its account's code/name.
+export type AcctJournalLine = {
+  id: number | undefined;
+  accountCode: string | undefined;
+  accountName: string | undefined;
+  side: string | undefined;
+  amount: googletype_Decimal | undefined;
+  amountSrc: googletype_Decimal | undefined;
+  currencySrc: string | undefined;
+  note: string | undefined;
+};
+
+// AcctJournalEntry is a journal-entry header with its lines. ReversalOf/ReversedBy implement
+// reversal-not-edit: a mistaken entry is never updated or deleted, only mirrored by a new entry
+// that references it. `total` is Σdebit (== Σcredit); unset (nil) on the header-only shape
+// returned by ListJournalEntries ("без lines").
+export type AcctJournalEntry = {
+  id: number | undefined;
+  occurredAt: string | undefined;
+  description: string | undefined;
+  sourceType: string | undefined;
+  sourceKey: string | undefined;
+  reversalOf: number | undefined;
+  reversedBy: number | undefined;
+  createdBy: string | undefined;
+  hasCaveat: boolean | undefined;
+  caveat: string | undefined;
+  lines: AcctJournalLine[] | undefined;
+  total: googletype_Decimal | undefined;
+};
+
+export type CreateJournalEntryResponse = {
+  entry: AcctJournalEntry | undefined;
+};
+
+export type ReverseJournalEntryRequest = {
+  entryId: number | undefined;
+  reason: string | undefined;
+};
+
+export type ReverseJournalEntryResponse = {
+  entry: AcctJournalEntry | undefined;
+};
+
+export type ListJournalEntriesRequest = {
+  from: string | undefined;
+  to: string | undefined;
+  accountCode: string | undefined;
+  sourceType: string | undefined;
+  limit: number | undefined;
+  offset: number | undefined;
+};
+
+export type ListJournalEntriesResponse = {
+  entries: AcctJournalEntry[] | undefined;
+  total: number | undefined;
+};
+
+export type GetJournalEntryRequest = {
+  id: number | undefined;
+};
+
+export type GetJournalEntryResponse = {
+  entry: AcctJournalEntry | undefined;
+};
+
+// AcctPeriod is one accounting month (period is always the 1st). status gates CreateJournalEntry:
+// posting into a closed period fails (ErrAcctPeriodClosed).
+export type AcctPeriod = {
+  period: string | undefined;
+  status: string | undefined;
+  closedAt: string | undefined;
+  closedBy: string | undefined;
+};
+
+export type ListAcctPeriodsRequest = {
+};
+
+export type ListAcctPeriodsResponse = {
+  periods: AcctPeriod[] | undefined;
+};
+
+export type CloseAcctPeriodRequest = {
+  month: string | undefined;
+};
+
+export type CloseAcctPeriodResponse = {
+  closed: boolean | undefined;
+  notReady: string[] | undefined;
+};
+
+export type ReopenAcctPeriodRequest = {
+  month: string | undefined;
+};
+
+export type ReopenAcctPeriodResponse = {
+};
+
+export type GetTrialBalanceRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// TrialBalanceRow is one account's turnover + closing balance over [from, to). balance's sign
+// follows the account's section: asset/cogs/opex → debit − credit; liability/equity/revenue →
+// credit − debit.
+export type TrialBalanceRow = {
+  code: string | undefined;
+  name: string | undefined;
+  section: string | undefined;
+  debit: googletype_Decimal | undefined;
+  credit: googletype_Decimal | undefined;
+  balance: googletype_Decimal | undefined;
+};
+
+export type GetTrialBalanceResponse = {
+  rows: TrialBalanceRow[] | undefined;
+  totalDebit: googletype_Decimal | undefined;
+  totalCredit: googletype_Decimal | undefined;
+  balanced: boolean | undefined;
+};
+
+export type GetProfitLossStatementRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// AcctPLRow is one P&L account's values across the response's month columns, plus the row total.
+export type AcctPLRow = {
+  code: string | undefined;
+  name: string | undefined;
+  values: googletype_Decimal[] | undefined;
+  total: googletype_Decimal | undefined;
+};
+
+// AcctPLSection groups P&L rows by section, in report order (revenue, cogs, opex).
+export type AcctPLSection = {
+  section: string | undefined;
+  rows: AcctPLRow[] | undefined;
+};
+
+// AcctPLTotals holds the P&L's derived summary rows, one value per response.months column.
+export type AcctPLTotals = {
+  totalRevenue: googletype_Decimal[] | undefined;
+  netCogs: googletype_Decimal[] | undefined;
+  grossProfit: googletype_Decimal[] | undefined;
+  grossMarginPct: googletype_Decimal[] | undefined;
+  totalOpex: googletype_Decimal[] | undefined;
+  operatingProfit: googletype_Decimal[] | undefined;
+  netMarginPct: googletype_Decimal[] | undefined;
+};
+
+export type GetProfitLossStatementResponse = {
+  months: string[] | undefined;
+  sections: AcctPLSection[] | undefined;
+  totals: AcctPLTotals | undefined;
+  // Phase-1 caveats: always includes "pre-tax profit (no corporate tax accrual)" and "carrier
+  // shipping cost not booked (4110 has no 6030 expense pair yet)", plus a count of entries in the
+  // period flagged has_caveat.
+  caveats: string[] | undefined;
+};
+
+export type GetBalanceSheetRequest = {
+  asOf: string | undefined;
+};
+
+// AcctBalanceSheetRow is one BS account's closing balance as of the report date.
+export type AcctBalanceSheetRow = {
+  code: string | undefined;
+  name: string | undefined;
+  balance: googletype_Decimal | undefined;
+};
+
+// AcctBalanceSheetSection is one BS grouping (assets / liabilities / equity) with its rows + total.
+export type AcctBalanceSheetSection = {
+  section: string | undefined;
+  rows: AcctBalanceSheetRow[] | undefined;
+  total: googletype_Decimal | undefined;
+};
+
+export type GetBalanceSheetResponse = {
+  asOf: string | undefined;
+  assets: AcctBalanceSheetSection | undefined;
+  liabilities: AcctBalanceSheetSection | undefined;
+  equity: AcctBalanceSheetSection | undefined;
+  netProfitRow: AcctBalanceSheetRow | undefined;
+  totalAssets: googletype_Decimal | undefined;
+  totalLiabilities: googletype_Decimal | undefined;
+  totalEquity: googletype_Decimal | undefined;
+  balanceCheck: googletype_Decimal | undefined;
+  balanced: boolean | undefined;
+  caveats: string[] | undefined;
+};
+
+export type GetAccountLedgerRequest = {
+  code: string | undefined;
+  from: string | undefined;
+  to: string | undefined;
+  limit: number | undefined;
+  offset: number | undefined;
+};
+
+// AcctLedgerRow is one drill-down line for an account with its running balance.
+export type AcctLedgerRow = {
+  entryId: number | undefined;
+  occurredAt: string | undefined;
+  description: string | undefined;
+  sourceType: string | undefined;
+  sourceKey: string | undefined;
+  side: string | undefined;
+  amount: googletype_Decimal | undefined;
+  note: string | undefined;
+  runningBalance: googletype_Decimal | undefined;
+};
+
+export type GetAccountLedgerResponse = {
+  code: string | undefined;
+  name: string | undefined;
+  section: string | undefined;
+  openingBalance: googletype_Decimal | undefined;
+  closingBalance: googletype_Decimal | undefined;
+  rows: AcctLedgerRow[] | undefined;
+  total: number | undefined;
+};
+
+export type GetAcctReconciliationRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// AcctReconItem is one row inside a reconciliation block (a top-N sample; the block's total_count
+// carries the full count). ref is the operational identity (order uuid, movement id, run id, month).
+export type AcctReconItem = {
+  ref: string | undefined;
+  label: string | undefined;
+  amount: googletype_Decimal | undefined;
+};
+
+// AcctReconBlock is one reconciliation dimension: the ledger figure, the operational figure, their
+// delta, and a bounded item sample. A non-zero delta (outside finished_goods, where drift is
+// expected) signals the ledger diverged from operational truth.
+export type AcctReconBlock = {
+  name: string | undefined;
+  ledger: googletype_Decimal | undefined;
+  operational: googletype_Decimal | undefined;
+  delta: googletype_Decimal | undefined;
+  items: AcctReconItem[] | undefined;
+  totalCount: number | undefined;
+};
+
+export type GetAcctReconciliationResponse = {
+  revenue: AcctReconBlock | undefined;
+  fees: AcctReconBlock | undefined;
+  cogs: AcctReconBlock | undefined;
+  materials: AcctReconBlock | undefined;
+  finishedGoods: AcctReconBlock | undefined;
+  pending: AcctReconBlock | undefined;
+  unpostedMovements: AcctReconBlock | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -7015,9 +7333,6 @@ export interface AdminService {
   UpsertInventoryTargets(request: UpsertInventoryTargetsRequest): Promise<UpsertInventoryTargetsResponse>;
   // Records operator-entered marketing spend per channel per day, used for ROAS.
   UpsertChannelSpend(request: UpsertChannelSpendRequest): Promise<UpsertChannelSpendResponse>;
-  // UpsertOpexEntries records the fixed-cost (OPEX) journal — one amount per month per category,
-  // base currency — feeding the dashboard operating result (task 22). Upserts on (month, category).
-  UpsertOpexEntries(request: UpsertOpexEntriesRequest): Promise<UpsertOpexEntriesResponse>;
   // UpsertOpexLines writes OPEX line items (NF-08) — each with its own currency (folded to base) and
   // a label — upserting on (month, category, label). Requires costing:write.
   UpsertOpexLines(request: UpsertOpexLinesRequest): Promise<UpsertOpexLinesResponse>;
@@ -7367,6 +7682,47 @@ export interface AdminService {
   // DeleteAccount removes an admin account (and its permissions). Requires the
   // accounts section (write).
   DeleteAccount(request: DeleteAccountRequest): Promise<DeleteAccountResponse>;
+  ListAcctAccounts(request: ListAcctAccountsRequest): Promise<ListAcctAccountsResponse>;
+  CreateAcctAccount(request: CreateAcctAccountRequest): Promise<CreateAcctAccountResponse>;
+  // UpdateAcctAccount renames a custom (non-system) account; code and section are immutable.
+  UpdateAcctAccount(request: UpdateAcctAccountRequest): Promise<UpdateAcctAccountResponse>;
+  // ArchiveAcctAccount archives/unarchives a custom (non-system) account.
+  ArchiveAcctAccount(request: ArchiveAcctAccountRequest): Promise<ArchiveAcctAccountResponse>;
+  // CreateJournalEntry posts a manual double-entry entry (source_type='manual'). Each line
+  // carries either a base-currency `amount` or an `amount_src`+`currency_src` pair the server
+  // converts via the costing FX rates; Σdebit == Σcredit is enforced by the store
+  // (ErrAcctUnbalanced), not here.
+  CreateJournalEntry(request: CreateJournalEntryRequest): Promise<CreateJournalEntryResponse>;
+  // ReverseJournalEntry posts the mirror (sides swapped) of an existing entry and links the two;
+  // the original is never edited or deleted (append-only ledger).
+  ReverseJournalEntry(request: ReverseJournalEntryRequest): Promise<ReverseJournalEntryResponse>;
+  // GetJournalEntry returns one entry with its lines. Declared before the bare list route below;
+  // the two don't actually collide (different path-segment counts) but this keeps the file's
+  // usual /{id}-before-list ordering (see the /model/{id} vs /model/list note above).
+  GetJournalEntry(request: GetJournalEntryRequest): Promise<GetJournalEntryResponse>;
+  ListJournalEntries(request: ListJournalEntriesRequest): Promise<ListJournalEntriesResponse>;
+  ListAcctPeriods(request: ListAcctPeriodsRequest): Promise<ListAcctPeriodsResponse>;
+  // CloseAcctPeriod closes a fully-past, reconciled month. A failed readiness check is NOT a gRPC
+  // error: the response comes back with closed=false and the reason in not_ready, so the UI can
+  // render a checklist instead of a toast.
+  CloseAcctPeriod(request: CloseAcctPeriodRequest): Promise<CloseAcctPeriodResponse>;
+  ReopenAcctPeriod(request: ReopenAcctPeriodRequest): Promise<ReopenAcctPeriodResponse>;
+  // GetTrialBalance returns per-account turnover + closing balance over [from, to) (to exclusive),
+  // with the ΣDr == ΣCr invariant surfaced as `balanced`.
+  GetTrialBalance(request: GetTrialBalanceRequest): Promise<GetTrialBalanceResponse>;
+  // GetProfitLossStatement returns the monthly Income Statement (revenue / cogs / opex sections)
+  // over [from, to) (to exclusive), one column per calendar month.
+  GetProfitLossStatement(request: GetProfitLossStatementRequest): Promise<GetProfitLossStatementResponse>;
+  // GetBalanceSheet returns assets/liabilities/equity balances from inception through as_of
+  // (inclusive), including the virtual "Current Period Net Profit" equity row.
+  GetBalanceSheet(request: GetBalanceSheetRequest): Promise<GetBalanceSheetResponse>;
+  // GetAccountLedger is the drill-down: a paginated statement for one account with a running
+  // balance, plus the opening balance carried into `from`.
+  GetAccountLedger(request: GetAccountLedgerRequest): Promise<GetAccountLedgerResponse>;
+  // GetAcctReconciliation proves the derived ledger matches operational truth (revenue, fees,
+  // COGS, materials, finished goods) and lists what is deliberately left unposted, over
+  // [from, to) (to exclusive).
+  GetAcctReconciliation(request: GetAcctReconciliationRequest): Promise<GetAcctReconciliationResponse>;
 }
 
 type RequestType = {
@@ -8783,23 +9139,6 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpsertChannelSpend",
       }) as Promise<UpsertChannelSpendResponse>;
-    },
-    UpsertOpexEntries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/metrics/opex/upsert`; // eslint-disable-line quotes
-      const body = JSON.stringify(request);
-      const queryParams: string[] = [];
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "POST",
-        body,
-      }, {
-        service: "AdminService",
-        method: "UpsertOpexEntries",
-      }) as Promise<UpsertOpexEntriesResponse>;
     },
     UpsertOpexLines(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/opex/lines/upsert`; // eslint-disable-line quotes
@@ -11943,6 +12282,338 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteAccount",
       }) as Promise<DeleteAccountResponse>;
+    },
+    ListAcctAccounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/accounts`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAcctAccounts",
+      }) as Promise<ListAcctAccountsResponse>;
+    },
+    CreateAcctAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/accounts`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateAcctAccount",
+      }) as Promise<CreateAcctAccountResponse>;
+    },
+    UpdateAcctAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/accounts/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateAcctAccount",
+      }) as Promise<UpdateAcctAccountResponse>;
+    },
+    ArchiveAcctAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/accounts/archive`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveAcctAccount",
+      }) as Promise<ArchiveAcctAccountResponse>;
+    },
+    CreateJournalEntry(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/journal`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateJournalEntry",
+      }) as Promise<CreateJournalEntryResponse>;
+    },
+    ReverseJournalEntry(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/journal/reverse`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReverseJournalEntry",
+      }) as Promise<ReverseJournalEntryResponse>;
+    },
+    GetJournalEntry(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/accounting/journal/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetJournalEntry",
+      }) as Promise<GetJournalEntryResponse>;
+    },
+    ListJournalEntries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/journal`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      if (request.accountCode) {
+        queryParams.push(`accountCode=${encodeURIComponent(request.accountCode.toString())}`)
+      }
+      if (request.sourceType) {
+        queryParams.push(`sourceType=${encodeURIComponent(request.sourceType.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListJournalEntries",
+      }) as Promise<ListJournalEntriesResponse>;
+    },
+    ListAcctPeriods(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/periods`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAcctPeriods",
+      }) as Promise<ListAcctPeriodsResponse>;
+    },
+    CloseAcctPeriod(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/periods/close`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CloseAcctPeriod",
+      }) as Promise<CloseAcctPeriodResponse>;
+    },
+    ReopenAcctPeriod(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/periods/reopen`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReopenAcctPeriod",
+      }) as Promise<ReopenAcctPeriodResponse>;
+    },
+    GetTrialBalance(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/trial-balance`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTrialBalance",
+      }) as Promise<GetTrialBalanceResponse>;
+    },
+    GetProfitLossStatement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/profit-loss`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProfitLossStatement",
+      }) as Promise<GetProfitLossStatementResponse>;
+    },
+    GetBalanceSheet(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/balance-sheet`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.asOf) {
+        queryParams.push(`asOf=${encodeURIComponent(request.asOf.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetBalanceSheet",
+      }) as Promise<GetBalanceSheetResponse>;
+    },
+    GetAccountLedger(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/accounting/reports/ledger/${request.code}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAccountLedger",
+      }) as Promise<GetAccountLedgerResponse>;
+    },
+    GetAcctReconciliation(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/reconciliation`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAcctReconciliation",
+      }) as Promise<GetAcctReconciliationResponse>;
     },
   };
 }
