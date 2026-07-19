@@ -1,5 +1,4 @@
 import type { CompareMode, GetMetricsResponse } from 'api/proto-http/admin';
-import { BASE_PATH } from 'constants/routes';
 import { format } from 'date-fns';
 import { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';

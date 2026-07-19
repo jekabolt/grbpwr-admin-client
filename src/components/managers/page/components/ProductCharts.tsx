@@ -1,5 +1,5 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
-import { BASE_PATH } from 'constants/routes';
+import { ROUTES } from 'constants/routes';
 import type {
   EChartsOption,
   TooltipComponentFormatterCallbackParams,
@@ -61,7 +61,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
   const handleProductBarClick = (params: { data?: unknown }) => {
     const id = (params.data as { productId?: number })?.productId;
     if (id != null && !isNaN(id)) {
-      navigate(`${BASE_PATH}/products/${id}`);
+      navigate(`${ROUTES.product}/${id}`);
     }
   };
 
