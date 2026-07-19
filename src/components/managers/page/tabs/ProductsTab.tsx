@@ -95,13 +95,6 @@ export function ProductsTab({ metricsResponse: r }: ProductsTabProps) {
 
   return (
     <div className='space-y-8'>
-      {/* DROPS — already a per-release verdict. */}
-      {has(r.sellThroughByDrop?.length) && (
-        <section id='drops'>
-          <DropVerdictTable sellThroughByDrop={r.sellThroughByDrop} />
-        </section>
-      )}
-
       {/* REORDER — what to restock. */}
       {hasReorderData && (
         <section id='reorder' className='space-y-3'>
@@ -150,6 +143,13 @@ export function ProductsTab({ metricsResponse: r }: ProductsTabProps) {
             <SizeRunEfficiencyTable sizeRunEfficiency={r.sizeRunEfficiency} />
             <SizeAnalyticsTable sizeAnalytics={r.sizeAnalytics} />
           </Drilldown>
+        </section>
+      )}
+
+      {/* DROPS — per-release reprint / hold / cut verdict. */}
+      {has(r.sellThroughByDrop?.length) && (
+        <section id='drops'>
+          <DropVerdictTable sellThroughByDrop={r.sellThroughByDrop} />
         </section>
       )}
     </div>

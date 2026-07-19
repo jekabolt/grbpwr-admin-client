@@ -244,6 +244,84 @@ export function valuationSummary(v: InventoryValuation | undefined) {
   };
 }
 
+export type ReorderOos = { key: string; productId?: number | string; name: string; lost: number };
+export type ReorderPoint = {
+  key: string;
+  productId?: number | string;
+  name: string;
+  left: number;
+  buy: number;
+};
+export type ReorderDemand = {
+  key: string;
+  productId?: number | string;
+  name: string;
+  count: number;
+};
+
+/**
+ * REORDER split into the three urgency groups the operator triages by (losing sales now →
+ * about to stock out → demand waiting). Under-bought sizes live in the Sizes section and
+ * reprintable drops in the Drops section, so they're deliberately not repeated here.
+ */
+export function buildReorderGroups(resp: GetMetricsResponse) {
+  const oosMap = new Map<string, { name: string; lost: number }>();
+  for (const o of resp.oosImpact ?? []) {
+    const id = o.productId ?? '';
+    const cur = oosMap.get(id) ?? { name: o.productName ?? `#${id}`, lost: 0 };
+    cur.lost += parseDecimal(o.estimatedLostRevenue);
+    oosMap.set(id, cur);
+  }
+  const oos: ReorderOos[] = [...oosMap.entries()]
+    .filter(([, v]) => v.lost > 0)
+    .sort((a, b) => b[1].lost - a[1].lost)
+    .map(([id, v]) => ({ key: `oos-${id}`, productId: id, name: v.name, lost: v.lost }));
+  const maxLost = oos.reduce((m, x) => Math.max(m, x.lost), 0);
+  const lostSum = oos.reduce((s, x) => s + x.lost, 0);
+
+  const reorder: ReorderPoint[] = (resp.inventoryHealth ?? [])
+    .filter((r) => r.hasTarget && r.needsReorder)
+    .sort((a, b) => (a.daysOnHand ?? 0) - (b.daysOnHand ?? 0))
+    .map((r) => {
+      const size = r.sizeName ? ` (${r.sizeName})` : '';
+      return {
+        key: `ro-${r.productId}-${r.sizeId}`,
+        productId: r.productId,
+        name: `${r.productName ?? `#${r.productId}`}${size}`,
+        left: r.quantity ?? 0,
+        buy: Math.max(0, (r.reorderPoint ?? 0) - (r.quantity ?? 0)),
+      };
+    });
+
+  const notifyMap = new Map<string, { name: string; count: number }>();
+  for (const n of resp.notifyMeIntent ?? []) {
+    const id = n.productId ?? '';
+    const cur = notifyMap.get(id) ?? { name: n.productName ?? `#${id}`, count: 0 };
+    cur.count += n.count ?? 0;
+    notifyMap.set(id, cur);
+  }
+  const demand: ReorderDemand[] = [...notifyMap.entries()]
+    .filter(([, v]) => v.count > 0)
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([id, v]) => ({ key: `nm-${id}`, productId: id, name: v.name, count: v.count }));
+
+  const lineCount = oos.length + reorder.length + demand.length;
+  return { oos, maxLost, lostSum, reorder, demand, lineCount };
+}
+
+/** CLEAR buckets summary — the headline "how much / how many" above the ranked list. */
+export function clearBuckets(resp: GetMetricsResponse) {
+  const dead = (resp.deadStock ?? []).reduce(
+    (a, r) => ({ value: a.value + parseDecimal(r.stockValue), count: a.count + 1 }),
+    { value: 0, count: 0 },
+  );
+  const slowCount = (resp.slowMovers ?? []).filter((r) => r.productHidden !== true).length;
+  const weakDrops = (resp.sellThroughByDrop ?? [])
+    .filter((r) => (r.sellThroughPct ?? 0) < OVER_BOUGHT && (r.unitsBought ?? 0) > 0)
+    .map((r) => ({ name: r.collection || 'Untagged', pct: r.sellThroughPct ?? 0 }));
+  return { dead, slowCount, weakDrops };
+}
+
 /** Highest- and lowest-margin styles (costed only), for the "where's the money" read. */
 export function marginExtremes(rows: MarginByStyleRow[] | undefined) {
   const costed = (rows ?? []).filter((r) => r.hasCost);

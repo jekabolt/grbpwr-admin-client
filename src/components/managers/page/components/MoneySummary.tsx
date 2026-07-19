@@ -51,36 +51,52 @@ export const MoneySummary: FC<{ metricsResponse: GetMetricsResponse }> = ({ metr
     <div className='space-y-4 border border-textInactiveColor bg-bgSecondary/20 p-4'>
       <div>
         <Text variant='uppercase' className='block font-bold'>
-          Money — cash in stock &amp; margin by style
+          Money
         </Text>
         <Text className='text-labelColor text-textBaseSize block'>
-          What the warehouse is worth and which styles actually earn after costs.
+          Cash in stock &amp; which styles earn vs lose after costs.
         </Text>
       </div>
 
       {val && (
-        <div className='space-y-1'>
-          <Text className='text-2xl font-bold tabular-nums leading-none'>
-            {formatCurrencyCompact(val.total)}{' '}
-            <span className='text-labelColor text-textBaseSize font-normal uppercase'>
-              frozen in stock
-            </span>
-          </Text>
-          <Text className='text-labelColor text-textBaseSize block'>
-            valued over {val.coveragePct.toFixed(0)}% of units
-            {val.uncostedProducts > 0 && ` · ${val.uncostedProducts} products have no cost set`}
-          </Text>
-          {val.top3Share > 0 && (
-            <Text className='text-labelColor text-textBaseSize block'>
-              top 3 = {val.top3Share.toFixed(0)}% of the value
-              {val.top3Names.length > 0 && ` (${val.top3Names.join(', ')})`}
+        <div className='grid grid-cols-3 border border-textInactiveColor bg-bgSecondary/30'>
+          <div className='border-r border-textInactiveColor px-3 py-2'>
+            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+              Cash in stock
             </Text>
-          )}
-          {val.deadValue > 0 && (
-            <Text className='text-labelColor text-textBaseSize block'>
-              {formatCurrency(val.deadValue)} of it is dead stock (unsold in the window)
+            <Text className='text-lg font-bold tabular-nums'>
+              {formatCurrencyCompact(val.total)}
             </Text>
-          )}
+            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+              at cost{val.uncostedProducts > 0 ? ` · ${val.uncostedProducts} uncosted` : ''}
+            </Text>
+          </div>
+          <div className='border-r border-textInactiveColor px-3 py-2'>
+            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+              In dead stock
+            </Text>
+            <Text
+              className={`text-lg font-bold tabular-nums ${val.deadValue > 0 ? 'text-error' : ''}`}
+            >
+              {formatCurrency(val.deadValue)}
+            </Text>
+            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+              {val.total > 0
+                ? `${((val.deadValue / val.total) * 100).toFixed(0)}% of it`
+                : 'unsold'}
+            </Text>
+          </div>
+          <div className='px-3 py-2'>
+            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+              Concentration
+            </Text>
+            <Text className='text-lg font-bold tabular-nums'>
+              {val.top3Share > 0 ? `${val.top3Share.toFixed(0)}%` : '—'}
+            </Text>
+            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+              top 3 products
+            </Text>
+          </div>
         </div>
       )}
 
