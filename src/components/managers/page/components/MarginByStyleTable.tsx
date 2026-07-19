@@ -57,7 +57,9 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
                       {r.styleNumber || r.name || `TC-${r.techCardId}`}
                     </Link>
                   ) : (
-                    <Text>{r.styleNumber || r.name || '—'}</Text>
+                    <Text title='No tech card linked to this style'>
+                      {r.styleNumber || r.name || '—'}
+                    </Text>
                   )}
                 </td>
                 <td className='p-2 text-right'>{formatCurrency(parseDecimal(r.revenue))}</td>

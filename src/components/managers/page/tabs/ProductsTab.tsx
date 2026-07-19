@@ -1,7 +1,8 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
-import { useEffect } from 'react';
+import { FC, ReactNode, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
+  ClearList,
   CogsStructureTable,
   DeadStockTable,
   DropVerdictTable,
@@ -9,12 +10,15 @@ import {
   InventoryTargetForm,
   InventoryValuationTable,
   MarginByStyleTable,
+  MoneySummary,
   NotifyMeIntentTable,
   OOSImpactTable,
   ProductCharts,
+  ReorderList,
   ReorderTable,
   SizeAnalyticsTable,
   SizeRunEfficiencyTable,
+  SizeVerdict,
   SlowMoversTable,
 } from '../components';
 
@@ -22,7 +26,19 @@ interface ProductsTabProps {
   metricsResponse: GetMetricsResponse;
 }
 
-export function ProductsTab({ metricsResponse }: ProductsTabProps) {
+const has = (n?: number) => (n ?? 0) > 0;
+
+/** Collapsed full-table drill-down under a decision block — the raw rows stay one click away. */
+const Drilldown: FC<{ summary: string; children: ReactNode }> = ({ summary, children }) => (
+  <details className='border border-textInactiveColor'>
+    <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-2 text-textBaseSize font-bold uppercase text-labelColor hover:bg-bgSecondary/50'>
+      {summary}
+    </summary>
+    <div className='space-y-6 p-4'>{children}</div>
+  </details>
+);
+
+export function ProductsTab({ metricsResponse: r }: ProductsTabProps) {
   const { hash } = useLocation();
 
   useEffect(() => {
@@ -41,100 +57,100 @@ export function ProductsTab({ metricsResponse }: ProductsTabProps) {
       cancelAnimationFrame(raf);
       window.clearTimeout(timeoutId);
     };
-  }, [hash, metricsResponse]);
+  }, [hash, r]);
 
-  const metrics = metricsResponse.business;
-  const commerce = metrics?.commerce;
+  const commerce = r.business?.commerce;
   const hasProductCharts =
-    (commerce?.topProductsByRevenue?.length ?? 0) > 0 ||
-    (commerce?.topProductsByQuantity?.length ?? 0) > 0 ||
-    (commerce?.revenueByCategory?.length ?? 0) > 0;
+    has(commerce?.topProductsByRevenue?.length) ||
+    has(commerce?.topProductsByQuantity?.length) ||
+    has(commerce?.revenueByCategory?.length);
+
+  const hasReorderData =
+    has(r.inventoryHealth?.length) || has(r.notifyMeIntent?.length) || has(r.oosImpact?.length);
+  const hasClearData = has(r.slowMovers?.length) || has(r.deadStock?.length);
+  const hasMoneyData =
+    !!r.inventoryValuation ||
+    has(r.marginByStyle?.length) ||
+    has(r.cogsStructure?.length) ||
+    hasProductCharts;
+  const hasSizeData = has(r.sizeRunEfficiency?.length) || has(r.sizeAnalytics?.length);
+
   const hasAnyProductData =
-    hasProductCharts ||
-    (metricsResponse.sellThroughByDrop?.length ?? 0) > 0 ||
-    (metricsResponse.slowMovers?.length ?? 0) > 0 ||
-    (metricsResponse.deadStock?.length ?? 0) > 0 ||
-    (metricsResponse.sizeAnalytics?.length ?? 0) > 0 ||
-    (metricsResponse.sizeRunEfficiency?.length ?? 0) > 0 ||
-    (metricsResponse.inventoryHealth?.length ?? 0) > 0 ||
-    (metricsResponse.notifyMeIntent?.length ?? 0) > 0 ||
-    (metricsResponse.oosImpact?.length ?? 0) > 0 ||
-    (metricsResponse.marginByStyle?.length ?? 0) > 0 ||
-    (metricsResponse.cogsStructure?.length ?? 0) > 0 ||
-    !!metricsResponse.inventoryValuation?.totalStockValue?.value;
+    has(r.sellThroughByDrop?.length) ||
+    hasReorderData ||
+    hasClearData ||
+    hasMoneyData ||
+    hasSizeData;
+
+  if (!hasAnyProductData) {
+    return (
+      <div className='border border-textInactiveColor p-8 text-center'>
+        <span className='text-labelColor'>
+          No product performance data available for this period. Data appears when there are orders
+          and product sales.
+        </span>
+      </div>
+    );
+  }
 
   return (
-    <div className='space-y-6'>
-      {!hasAnyProductData ? (
-        <div className='border border-textInactiveColor p-8 text-center'>
-          <span className='text-labelColor'>
-            No product performance data available for this period. Data appears when there are
-            orders and product sales.
-          </span>
-        </div>
-      ) : (
-        <>
-          {(metricsResponse.sellThroughByDrop?.length ?? 0) > 0 && (
-            <details className='border border-textInactiveColor' open>
-              <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-                Drops
-              </summary>
-              <div className='space-y-6 p-4'>
-                <DropVerdictTable sellThroughByDrop={metricsResponse.sellThroughByDrop} />
-              </div>
-            </details>
-          )}
+    <div className='space-y-8'>
+      {/* DROPS — already a per-release verdict. */}
+      {has(r.sellThroughByDrop?.length) && (
+        <section id='drops'>
+          <DropVerdictTable sellThroughByDrop={r.sellThroughByDrop} />
+        </section>
+      )}
 
-          <details className='border border-textInactiveColor' open>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-              What's Selling
-            </summary>
-            <div className='space-y-6 p-4'>
-              {hasProductCharts && <ProductCharts metrics={metrics} />}
-              <SlowMoversTable slowMovers={metricsResponse.slowMovers} />
-              <DeadStockTable deadStock={metricsResponse.deadStock} />
+      {/* REORDER — what to restock. */}
+      {hasReorderData && (
+        <section id='reorder' className='space-y-3'>
+          <ReorderList metricsResponse={r} />
+          <Drilldown summary='Full reorder & inventory-health tables'>
+            <div className='flex justify-end'>
+              <InventoryTargetForm />
             </div>
-          </details>
+            <ReorderTable inventoryHealth={r.inventoryHealth} />
+            <InventoryHealthTable inventoryHealth={r.inventoryHealth} />
+            <NotifyMeIntentTable notifyMeIntent={r.notifyMeIntent} />
+            <OOSImpactTable oosImpact={r.oosImpact} />
+          </Drilldown>
+        </section>
+      )}
 
-          {((metricsResponse.marginByStyle?.length ?? 0) > 0 ||
-            (metricsResponse.cogsStructure?.length ?? 0) > 0) && (
-            <details className='border border-textInactiveColor' open>
-              <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-                Margin &amp; COGS
-              </summary>
-              <div className='space-y-6 p-4'>
-                <MarginByStyleTable marginByStyle={metricsResponse.marginByStyle} />
-                <CogsStructureTable cogsStructure={metricsResponse.cogsStructure} />
-              </div>
-            </details>
-          )}
+      {/* CLEAR — where cash is frozen. */}
+      {hasClearData && (
+        <section id='clear' className='space-y-3'>
+          <ClearList metricsResponse={r} />
+          <Drilldown summary='Full slow-mover & dead-stock tables'>
+            <SlowMoversTable slowMovers={r.slowMovers} />
+            <DeadStockTable deadStock={r.deadStock} />
+          </Drilldown>
+        </section>
+      )}
 
-          <details className='border border-textInactiveColor' open>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-              Sizes
-            </summary>
-            <div className='space-y-6 p-4'>
-              <SizeAnalyticsTable sizeAnalytics={metricsResponse.sizeAnalytics} />
-              <SizeRunEfficiencyTable sizeRunEfficiency={metricsResponse.sizeRunEfficiency} />
-            </div>
-          </details>
+      {/* MONEY — cash in stock & margin by style. */}
+      {hasMoneyData && (
+        <section id='money' className='space-y-3'>
+          <MoneySummary metricsResponse={r} />
+          <Drilldown summary='Full margin, COGS & valuation tables'>
+            {hasProductCharts && <ProductCharts metrics={r.business} />}
+            <MarginByStyleTable marginByStyle={r.marginByStyle} />
+            <CogsStructureTable cogsStructure={r.cogsStructure} />
+            <InventoryValuationTable inventoryValuation={r.inventoryValuation} />
+          </Drilldown>
+        </section>
+      )}
 
-          <details className='border border-textInactiveColor' open>
-            <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-              Inventory
-            </summary>
-            <div className='space-y-6 p-4'>
-              <div className='flex justify-end'>
-                <InventoryTargetForm />
-              </div>
-              <ReorderTable inventoryHealth={metricsResponse.inventoryHealth} />
-              <InventoryHealthTable inventoryHealth={metricsResponse.inventoryHealth} />
-              <InventoryValuationTable inventoryValuation={metricsResponse.inventoryValuation} />
-              <NotifyMeIntentTable notifyMeIntent={metricsResponse.notifyMeIntent} />
-              <OOSImpactTable oosImpact={metricsResponse.oosImpact} />
-            </div>
-          </details>
-        </>
+      {/* SIZES — buy verdict, not a bar chart. */}
+      {hasSizeData && (
+        <section id='sizes' className='space-y-3'>
+          <SizeVerdict sizeRunEfficiency={r.sizeRunEfficiency} />
+          <Drilldown summary='Full size tables'>
+            <SizeRunEfficiencyTable sizeRunEfficiency={r.sizeRunEfficiency} />
+            <SizeAnalyticsTable sizeAnalytics={r.sizeAnalytics} />
+          </Drilldown>
+        </section>
       )}
     </div>
   );
