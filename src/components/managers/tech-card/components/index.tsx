@@ -935,6 +935,23 @@ export function TechCardForm({
           {canReadCosting && (
             <div hidden={activeTab !== 'costing'} className='flex flex-col gap-6'>
               <Section title='costing'>
+                {/* Costing gap at the point of action. The tech-card payload only carries the plan
+                    costing rollup (not each colorway's product cost_price), so this is a style-level
+                    signal; per-colorway precision lives on each product's detail page. */}
+                {!(
+                  techCard?.techCard?.costing?.unitCost?.value ||
+                  techCard?.techCard?.costing?.materialsPerUnit?.value ||
+                  (techCard?.techCard?.costing?.colorwayCosts?.length ?? 0) > 0 ||
+                  (techCard?.techCard?.costing?.materialsTotal?.length ?? 0) > 0
+                ) && (
+                  <div className='mb-3 border border-warning bg-warning/10 p-3'>
+                    <Text className='text-warning text-textBaseSize'>
+                      No costing set for this style — margin, break-even and economics cannot be
+                      computed for its colorways, and its sold products count as uncosted in
+                      analytics (lowering store-wide cost coverage). Add materials or costs below.
+                    </Text>
+                  </div>
+                )}
                 {isEditMode && numId && (
                   <div className='mb-3 flex justify-end'>
                     <Button

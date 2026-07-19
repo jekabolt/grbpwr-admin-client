@@ -95,6 +95,21 @@ export function computeExecutiveAlerts(
   const enoughOrders = currentMetricValue(commerce?.ordersCount) >= MIN_ORDERS_FOR_ALERT;
   const enoughSessions = currentMetricValue(traffic?.sessions) >= MIN_SESSIONS_FOR_ALERT;
 
+  // Uncosted colorways undermine every money metric: contribution, margin % and the operating
+  // result are computed only over the costed subset of revenue, so uncosted sales silently drag
+  // the picture down. Not gated on order volume — it's a data-completeness gap, not a rate. When
+  // the caller lacks costing:read the backend nulls these fields, so the alert self-suppresses.
+  const uncostedColorways = metrics.margin?.uncostedProductIds?.length ?? 0;
+  const costCoverage = metrics.margin?.costCoveragePct ?? 0;
+  if (uncostedColorways > 0) {
+    alerts.push({
+      severity: costCoverage > 0 && costCoverage < 50 ? 'high' : 'warning',
+      title: `${uncostedColorways} colorway${uncostedColorways === 1 ? '' : 's'} have no cost set`,
+      detail: `Only ${costCoverage.toFixed(0)}% of revenue is costed — margin, contribution and the operating result are understated until costs are entered on these products.`,
+      href: links.revenue,
+    });
+  }
+
   const cancelPct = orderCancellationSharePercent(metrics);
   if (enoughOrders && cancelPct != null && cancelPct >= CANCELLATION_SHARE_ALERT) {
     alerts.push({
