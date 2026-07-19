@@ -132,7 +132,7 @@ const TopMoverCards: FC<{
 }> = ({ products, source }) => (
   <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
     {products.map((p, idx) => (
-      <div key={idx} className='border border-textInactiveColor bg-bgSecondary/30 p-3'>
+      <div key={idx} className='border border-textInactiveColor p-3'>
         <ProductNameLink productId={p.productId} productName={p.productName} maxWidth='100%' />
         <Text className='mt-1 block font-bold text-lg tabular-nums'>
           {formatCurrency(p.revenue)}
@@ -144,7 +144,7 @@ const TopMoverCards: FC<{
       </div>
     ))}
     {source && (
-      <div className='border border-textInactiveColor bg-bgSecondary/30 p-3'>
+      <div className='border border-textInactiveColor p-3'>
         <Text variant='uppercase' className='text-labelColor block text-[10px]'>
           Top source
         </Text>
