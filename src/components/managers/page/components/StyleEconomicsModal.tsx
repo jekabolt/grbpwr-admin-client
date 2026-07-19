@@ -124,18 +124,26 @@ function Body({ economics }: { economics: StyleEconomics }) {
               />
               <Row label='Actual cost' value={formatCurrency(parseDecimal(prod.actualCostBase))} />
               {(() => {
-                // Variance against the two figures above (actual − planned): negative = came in
-                // under plan. A bare signed "−€33.70" reads as bad when under-budget is good.
-                const variance =
-                  parseDecimal(prod.actualCostBase) - parseDecimal(prod.plannedCostBase);
+                // Planned is the FULL planned spend (planned_qty). On an in-progress run actual is
+                // only partially accrued, so actual < planned is NOT a saving — only call it
+                // under/over plan once everything planned has been received.
+                const planned = parseDecimal(prod.plannedCostBase);
+                const actual = parseDecimal(prod.actualCostBase);
+                const variance = actual - planned;
+                const complete =
+                  (prod.plannedQtyTotal ?? 0) > 0 &&
+                  (prod.receivedQtyTotal ?? 0) >= (prod.plannedQtyTotal ?? 0);
                 return (
                   <Row
                     label='Cost variance'
                     value={
-                      Math.abs(variance) < 0.005
-                        ? 'on plan'
-                        : `${formatCurrency(Math.abs(variance))} ${variance < 0 ? 'under' : 'over'} plan`
+                      !complete
+                        ? 'run in progress — actual still partial'
+                        : Math.abs(variance) < 0.005
+                          ? 'on plan'
+                          : `${formatCurrency(Math.abs(variance))} ${variance < 0 ? 'under' : 'over'} plan`
                     }
+                    sub={!complete ? 'planned = full run; actual accrues as units are received' : undefined}
                   />
                 );
               })()}
