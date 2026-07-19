@@ -6,14 +6,20 @@ import Text from 'ui/components/text';
 import {
   DeliveryPanel,
   FunnelChart,
+  FunnelDropoff,
   OperatingResultStrip,
   OrderValueBandsTable,
   PaymentMixTable,
   ProfitabilityPanel,
   PromoTable,
+  RevenueOrdersCombo,
+  RevenueSplitBar,
+  RevenueWaterfall,
+  Sparkline,
   TimeSeriesChart,
 } from '../components';
 import { orderCancellationSharePercent } from '../executiveAlerts';
+import type { WaterfallStep } from '../components/RevenueWaterfall';
 import {
   coarsenTimeSeries,
   formatCurrency,
@@ -22,6 +28,8 @@ import {
   formatNumberDelta,
   formatPercentWithBand,
   getMetricComparison,
+  getTimeSeries,
+  parseDecimal,
 } from '../utils';
 
 interface RevenueTabProps {
@@ -127,6 +135,67 @@ export function RevenueTab({
     : null;
   const topRevenueBandLabel = topBand?.label ?? null;
   const topRevenueBandShare = topBand ? (topBand.revenueSharePct ?? 0).toFixed(0) : null;
+
+  // Money-headline waterfall: gross → net → contribution (costing rows only when we have coverage).
+  const waterfallSteps: WaterfallStep[] = [
+    { label: 'Gross revenue', value: grossRevenue.value, kind: 'base' },
+  ];
+  const discountsAndRefunds = grossRevenue.value - revenue.value;
+  if (discountsAndRefunds > 0)
+    waterfallSteps.push({
+      label: '− Discounts & refunds',
+      value: discountsAndRefunds,
+      kind: 'neg',
+    });
+  waterfallSteps.push({ label: '= Net revenue', value: revenue.value, kind: 'subtotal' });
+  if (canReadCosting && costCoverage > 0) {
+    waterfallSteps.push({ label: '− COGS', value: revenueCost.value, kind: 'neg' });
+    const shipFees = grossMargin.value - contributionMargin.value;
+    if (shipFees > 0)
+      waterfallSteps.push({ label: '− Shipping & fees', value: shipFees, kind: 'neg' });
+    waterfallSteps.push({
+      label: '= Contribution',
+      value: contributionMargin.value,
+      kind: 'final',
+    });
+  }
+
+  // "Where net revenue goes" split bar — estimated (grossed-up) so COGS reflects all revenue, not
+  // just the costed slice. Only when costing is readable and there is some coverage.
+  const profitability = metricsResponse.profitability;
+  const opexV = parseDecimal(profitability?.opexTotal);
+  const marketingV = parseDecimal(profitability?.marketingSpend);
+  const coverageFrac = costCoverage / 100;
+  const splitCosts =
+    canReadCosting && coverageFrac > 0 && revenue.value > 0
+      ? [
+          {
+            label: 'COGS',
+            value: Math.max(0, revenue.value - grossMargin.value / coverageFrac),
+            className: 'bg-textColor',
+          },
+          {
+            label: 'Shipping & fees',
+            value: Math.max(0, (grossMargin.value - contributionMargin.value) / coverageFrac),
+            className: 'bg-textColor/60',
+          },
+          { label: 'OPEX', value: opexV, className: 'bg-error/60' },
+          { label: 'Marketing', value: marketingV, className: 'bg-textColor/30' },
+        ]
+      : null;
+
+  // Order-value verdict: revenue vs orders share carried by the big baskets (bands from ≥ €300,
+  // else the single top-revenue band).
+  const bigBands = bands.filter((b) => parseDecimal(b.from) >= 300);
+  const verdictBands = bigBands.length > 0 ? bigBands : topBand ? [topBand] : [];
+  const bigRevShare = Math.round(verdictBands.reduce((s, b) => s + (b.revenueSharePct ?? 0), 0));
+  const bigOrdShare = Math.round(verdictBands.reduce((s, b) => s + (b.ordersSharePct ?? 0), 0));
+  const bandThreshold = bigBands.length > 0 ? 'over €300' : topBand?.label ?? '';
+
+  // Over-time series (coarsened weekly at volume).
+  const revByDay = coarsenTimeSeries(commerce?.revenueByDay);
+  const ordersByDay = coarsenTimeSeries(getTimeSeries(commerce as any, 'ordersByDay'));
+  const unitsByDay = coarsenTimeSeries(commerce?.unitsSoldByDay);
 
   return (
     <div className='space-y-6'>
@@ -242,6 +311,19 @@ export function RevenueTab({
         />
       )}
 
+      {splitCosts && (
+        <div className='space-y-2'>
+          <h3 className='text-textBaseSize font-bold uppercase'>Where net revenue goes</h3>
+          <Text variant='label' size='small'>
+            estimated split of each € of net revenue (COGS grossed up to all revenue, not just the
+            costed slice)
+          </Text>
+          <div className='border border-textInactiveColor p-4'>
+            <RevenueSplitBar netRevenue={revenue.value} costs={splitCosts} />
+          </div>
+        </div>
+      )}
+
       {/* GA4 coverage note, from GetDashboard (the waterfall moved into ProfitabilityPanel). */}
       <OperatingResultStrip dashboard={dashboard} />
 
@@ -299,9 +381,7 @@ export function RevenueTab({
             </Text>
             <Text className='font-bold'>
               {formatNumber(refundedCount)}{' '}
-              <span className='text-labelColor text-textBaseSize'>
-                of {formatNumber(ordersN)}
-              </span>
+              <span className='text-labelColor text-textBaseSize'>of {formatNumber(ordersN)}</span>
             </Text>
             {showRates && (
               <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
@@ -315,9 +395,7 @@ export function RevenueTab({
             </Text>
             <Text className='font-bold'>
               {formatNumber(cancelledCount)}{' '}
-              <span className='text-labelColor text-textBaseSize'>
-                of {formatNumber(ordersN)}
-              </span>
+              <span className='text-labelColor text-textBaseSize'>of {formatNumber(ordersN)}</span>
             </Text>
             {showRates && cancellationPct != null && (
               <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
@@ -327,52 +405,60 @@ export function RevenueTab({
           </div>
         </div>
 
-        <div className='grid gap-4 md:grid-cols-2'>
-          <TimeSeriesChart
-            title='Net revenue (ex-VAT)'
-            data={coarsenTimeSeries(commerce?.revenueByDay)}
-          />
-          <TimeSeriesChart
-            title='Gross revenue'
-            data={coarsenTimeSeries(commerce?.grossRevenueByDay)}
-          />
+        {/* Money story in one column: gross → net → contribution. */}
+        <div className='border border-textInactiveColor p-4'>
+          <Text variant='uppercase' className='mb-3 block font-bold'>
+            Revenue → contribution
+          </Text>
+          <RevenueWaterfall steps={waterfallSteps} />
         </div>
+
+        {/* How the period moved: sparkline strip + combined revenue/orders chart. */}
+        <div className='grid grid-cols-3 gap-3'>
+          <Sparkline label='Revenue' data={revByDay} />
+          <Sparkline label='Orders' data={ordersByDay} number />
+          <Sparkline label='Units' data={unitsByDay} number />
+        </div>
+        <RevenueOrdersCombo revenue={revByDay} orders={ordersByDay} />
       </div>
 
       {(metricsResponse.orderValueBands?.length ?? 0) > 0 && (
-        <details className='border border-textInactiveColor'>
-          <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-bgSecondary/30 px-4 py-3 hover:bg-bgSecondary/50'>
-            <span className='text-textBaseSize font-bold uppercase'>Order value distribution</span>
-            {topRevenueBandLabel && (
-              <span className='text-textBaseSize text-labelColor normal-case'>
-                {topRevenueBandLabel} carries {topRevenueBandShare}% of revenue
-              </span>
-            )}
-          </summary>
-          <div className='space-y-3 p-4'>
-            <Text className='text-textBaseSize text-labelColor leading-relaxed'>
-              Net revenue by basket size. Compare each band's share of revenue against its share of
-              orders — a few large baskets usually carry most of the money.
+        <div className='space-y-2'>
+          <h3 className='text-textBaseSize font-bold uppercase'>Order value</h3>
+          {bigRevShare > 0 && verdictBands.length > 0 ? (
+            <Text className='text-textBaseSize font-bold'>
+              {bigRevShare}% of revenue comes from the {bigOrdShare}% of orders {bandThreshold}.
             </Text>
-            <OrderValueBandsTable
-              bands={metricsResponse.orderValueBands}
-              aovValue={aov.value}
-            />
+          ) : (
+            <Text variant='label' size='small'>
+              Net revenue by basket size — a few large baskets usually carry most of the money.
+            </Text>
+          )}
+          <div className='border border-textInactiveColor p-4'>
+            <OrderValueBandsTable bands={metricsResponse.orderValueBands} aovValue={aov.value} />
           </div>
-        </details>
+        </div>
       )}
 
-      <details className='border border-textInactiveColor' open>
-        <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase hover:bg-bgSecondary/50'>
-          Purchase Funnel
-        </summary>
-        <div className='space-y-3 p-4'>
-          <Text className='text-textBaseSize text-labelColor leading-relaxed'>
+      {metricsResponse.funnel?.aggregate && (
+        <div className='space-y-2'>
+          <h3 className='text-textBaseSize font-bold uppercase'>Purchase funnel</h3>
+          <Text variant='label' size='small'>
             Where browsers drop off on the way to purchase (browse → cart → buy).
           </Text>
-          <FunnelChart funnel={metricsResponse.funnel} />
+          <div className='space-y-3 border border-textInactiveColor p-4'>
+            <FunnelDropoff funnel={metricsResponse.funnel} />
+            <details>
+              <summary className='cursor-pointer text-textBaseSize text-labelColor'>
+                Full funnel bars
+              </summary>
+              <div className='mt-2'>
+                <FunnelChart funnel={metricsResponse.funnel} />
+              </div>
+            </details>
+          </div>
         </div>
-      </details>
+      )}
 
       <details className='border border-textInactiveColor'>
         <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-bgSecondary/30 px-4 py-3 hover:bg-bgSecondary/50'>

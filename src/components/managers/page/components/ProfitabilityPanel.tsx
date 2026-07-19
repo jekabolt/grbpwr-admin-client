@@ -36,7 +36,10 @@ const Delta: FC<{
   higherIsBetter?: boolean;
 }> = ({ cmp, kind, enabled, higherIsBetter = true }) => {
   if (!enabled || cmp.compareValue === undefined) return null;
-  const diff = kind === 'pp' ? (cmp.changeAbsolute ?? cmp.value - cmp.compareValue) : cmp.value - cmp.compareValue;
+  const diff =
+    kind === 'pp'
+      ? cmp.changeAbsolute ?? cmp.value - cmp.compareValue
+      : cmp.value - cmp.compareValue;
   const dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
   const good = dir === 'flat' ? 'flat' : (dir === 'up') === higherIsBetter ? 'good' : 'bad';
   const color =
@@ -134,16 +137,26 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
     !!profitability.opexTotal?.value ||
     !!profitability.marketingSpend?.value;
 
+  // Operating result is only meaningful over the WHOLE business, but margin is known only for the
+  // costed subset — so the raw figure subtracts full opex from partial contribution and always looks
+  // like a loss. Extrapolate the costed margin rate to all revenue for an ESTIMATE. Clearly labelled;
+  // confidence scales with coverage. When fully costed there is nothing to extrapolate.
+  const coverageFrac = coverage / 100;
+  const fullyCosted = coverage >= 99.5;
+  const estMarginAdd =
+    coverageFrac > 0 && !fullyCosted ? grossMargin.value * (1 / coverageFrac - 1) : 0;
+  const estContribution = contribution.value + estMarginAdd;
+  const estOperating = operating + estMarginAdd;
+  const confidence = coverage >= 80 ? 'high' : coverage >= 50 ? 'medium' : 'low';
+
   // Nothing to render if the whole section is empty (non-costed period).
   const hasAnything =
-    grossMargin.value !== 0 ||
-    contribution.value !== 0 ||
-    totalDiscount.value !== 0 ||
-    hasAssembly;
+    grossMargin.value !== 0 || contribution.value !== 0 || totalDiscount.value !== 0 || hasAssembly;
   if (!hasAnything) return null;
 
   const ltvCacTone = ltvCac >= 3 ? 'text-success' : ltvCac > 0 && ltvCac < 1 ? 'text-error' : '';
-  const cacMuted = hasSpend && (cac.sampleSize ?? 0) > 0 && (cac.sampleSize ?? 0) < MIN_CUSTOMERS_FOR_CAC;
+  const cacMuted =
+    hasSpend && (cac.sampleSize ?? 0) > 0 && (cac.sampleSize ?? 0) < MIN_CUSTOMERS_FOR_CAC;
 
   return (
     <div className='space-y-2'>
@@ -193,45 +206,64 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
             delta={<Delta cmp={contribution} kind='currency' enabled={compareEnabled} />}
           />
 
-          {hasAssembly && (
-            <>
-              <WLine label='− OPEX (fixed, pro-rated)' value={`−${formatCurrency(opex)}`} />
-              <WLine label='− Marketing spend' value={`−${formatCurrency(marketing)}`} />
+          {hasAssembly &&
+            (coverage <= 0 ? (
               <div className='mt-1 border-t border-textInactiveColor pt-1'>
-                <WLine
-                  label='= Operating result'
-                  value={marginPctTrusted ? formatCurrency(operating) : `${formatCurrency(operating)} *`}
-                  strong
-                  // Only frame it red as a real loss when coverage is high enough to trust it. Below the
-                  // floor it is an artifact (see the warning), so keep it neutral instead of crying wolf.
-                  valueTone={
-                    !marginPctTrusted ? 'text-labelColor' : operating < 0 ? 'text-error' : ''
-                  }
-                />
-              </div>
-              {/* Coverage-aware read. Below the floor the operating result is understated: contribution
-                  counts margin ONLY on costed sales, but opex/marketing/shipping/fees are subtracted for
-                  the whole business — so a partial-coverage period always looks like a loss. */}
-              {!marginPctTrusted ? (
+                <WLine label='= Operating result' value='—' strong valueTone='text-labelColor' />
                 <div className='mt-2 border border-warning bg-warning/10 p-2'>
                   <Text className='text-textBaseSize text-textColor'>
-                    <span className='font-bold'>* Understated, not a real loss.</span> Only{' '}
-                    {coverage.toFixed(0)}% of revenue has product costs, so the margin on the other{' '}
-                    {(100 - coverage).toFixed(0)}% is missing here while all OPEX &amp; marketing are
-                    subtracted. Add product costs to see the true operating result.
+                    <span className='font-bold'>Can&#39;t compute yet.</span> No product costs
+                    entered — add costs to get gross margin, then the operating result.
                   </Text>
                 </div>
-              ) : operating < 0 ? (
-                <div className='mt-2 border border-error bg-error/10 p-2'>
-                  <Text className='text-textBaseSize text-error'>
-                    <span className='font-bold'>Operating at a loss.</span> Contribution is not covering
-                    OPEX + marketing this period — lift contribution (price / margin / mix) or cut fixed
-                    costs.
-                  </Text>
+              </div>
+            ) : (
+              <>
+                {!fullyCosted && (
+                  <>
+                    <WLine
+                      label='+ est. margin on uncosted revenue'
+                      value={`+${formatCurrency(estMarginAdd)}`}
+                      sub={`the ${(100 - coverage).toFixed(0)}% uncosted, at the costed margin rate`}
+                    />
+                    <WLine
+                      label='= est. full contribution'
+                      value={formatCurrency(estContribution)}
+                    />
+                  </>
+                )}
+                <WLine label='− OPEX (fixed, pro-rated)' value={`−${formatCurrency(opex)}`} />
+                <WLine label='− Marketing spend' value={`−${formatCurrency(marketing)}`} />
+                <div className='mt-1 border-t border-textInactiveColor pt-1'>
+                  <WLine
+                    label={fullyCosted ? '= Operating result' : '= Operating result (estimate)'}
+                    value={formatCurrency(estOperating)}
+                    strong
+                    valueTone={estOperating < 0 ? 'text-error' : 'text-success'}
+                  />
                 </div>
-              ) : null}
-            </>
-          )}
+                {!fullyCosted ? (
+                  <div className='mt-2 border border-warning bg-warning/10 p-2'>
+                    <Text className='text-textBaseSize text-textColor'>
+                      <span className='font-bold'>Estimate · {confidence} confidence.</span> Margin
+                      on the uncosted {(100 - coverage).toFixed(0)}% of revenue is extrapolated at
+                      the costed rate ({coverage.toFixed(0)}% of revenue is costed).
+                      {confidence === 'low' &&
+                        ' Most of the margin is extrapolated — read as directional.'}{' '}
+                      Cost products to firm it up.
+                    </Text>
+                  </div>
+                ) : estOperating < 0 ? (
+                  <div className='mt-2 border border-error bg-error/10 p-2'>
+                    <Text className='text-textBaseSize text-error'>
+                      <span className='font-bold'>Operating at a loss.</span> Contribution is not
+                      covering OPEX + marketing — lift contribution (price / margin / mix) or cut
+                      fixed costs.
+                    </Text>
+                  </div>
+                ) : null}
+              </>
+            ))}
 
           {profitability.opexCaveat && (
             <Text variant='label' size='small' className='mt-2 block'>
@@ -240,7 +272,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
           )}
           <Text variant='label' size='small' className='mt-2 block'>
             {hasAssembly
-              ? 'operating result = contribution − opex − marketing (EBITDA-ish; not audited profit). Period compare is off here until the backend delta fix.'
+              ? 'operating result = contribution − opex − marketing (EBITDA-ish; not audited profit).'
               : 'add OPEX and marketing spend to complete the operating result.'}
           </Text>
         </div>
