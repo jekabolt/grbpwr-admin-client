@@ -11,8 +11,8 @@ const STATUS_LABEL: Record<HealthStatus, string> = {
 };
 
 const STATUS_SHELL: Record<HealthStatus, string> = {
-  needs_attention: 'border-error text-error bg-error/10',
-  mixed: 'border-warning text-textColor bg-warning/10',
+  needs_attention: 'border-error text-error bg-bgSecondary',
+  mixed: 'border-warning text-textColor bg-bgSecondary',
   on_track: 'border-textInactiveColor text-textColor bg-bgSecondary/40',
 };
 
@@ -42,18 +42,15 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
   return (
     <div className='space-y-4 border-2 border-textInactiveColor/15 bg-bgSecondary/20 p-4'>
       <div className='space-y-1'>
-        <Text
-          variant='uppercase'
-          className='text-textBaseSize font-semibold text-textInactiveColor'
-        >
+        <Text variant='uppercase' className='text-textBaseSize font-semibold text-labelColor'>
           Business health
         </Text>
         <Text className='text-textBaseSize text-textColor/90 leading-relaxed'>
-          <span className='text-textInactiveColor'>Current: </span>
+          <span className='text-labelColor'>Current: </span>
           {currentPeriodLabel}
           {comparePeriodLabel && (
             <>
-              <span className='text-textInactiveColor'> · Compared to: </span>
+              <span className='text-labelColor'> · Compared to: </span>
               {comparePeriodLabel}
             </>
           )}
@@ -66,7 +63,7 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
         >
           {STATUS_LABEL[status]}
         </span>
-        <Text className='text-textBaseSize text-textInactiveColor uppercase'>
+        <Text className='text-textBaseSize text-labelColor uppercase'>
           {alerts.length === 0
             ? 'Nothing needs action this period'
             : `${alerts.length} thing${alerts.length === 1 ? '' : 's'} to act on`}
@@ -75,10 +72,7 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
 
       {alerts.length > 0 && (
         <div className='space-y-2 border-t border-textInactiveColor/40 pt-3'>
-          <Text
-            variant='uppercase'
-            className='text-textBaseSize font-semibold text-textInactiveColor'
-          >
+          <Text variant='uppercase' className='text-textBaseSize font-semibold text-labelColor'>
             Act now
           </Text>
           <ul className='space-y-2'>
@@ -86,9 +80,7 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
               <li key={`${a.title}-${i}`} className='text-textBaseSize leading-snug'>
                 <span className={`font-semibold ${ALERT_TITLE_CLASS[a.severity]}`}>{a.title}</span>
                 {a.detail && (
-                  <Text className='text-textInactiveColor text-textBaseSize mt-0.5 block'>
-                    {a.detail}
-                  </Text>
+                  <Text className='text-labelColor text-textBaseSize mt-0.5 block'>{a.detail}</Text>
                 )}
                 {a.href && (
                   <Link

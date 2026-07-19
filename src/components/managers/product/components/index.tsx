@@ -253,6 +253,23 @@ export function ProductForm({
           />
         )}
 
+        {/* Costing gap, surfaced at the point of action: an uncosted colorway can't produce
+            margin/economics and drags down store-wide cost coverage in analytics. */}
+        {canReadCosting &&
+          !isAddingProduct &&
+          (!costInfo?.costPrice?.value || Number(costInfo.costPrice.value) <= 0) && (
+            <div className='border border-warning bg-warning/10 p-3'>
+              <Text className='text-warning text-textBaseSize'>
+                No unit cost set for this colorway — margin, contribution and profit cannot be
+                computed for it, and it lowers store-wide cost coverage in analytics.{' '}
+                <a href='#sec-cost' className='underline'>
+                  Set a cost
+                </a>{' '}
+                in the Cost section below.
+              </Text>
+            </div>
+          )}
+
         <SectionNav items={sectionNavItems} />
 
         <div className='flex flex-col lg:flex-row lg:items-start gap-6'>

@@ -103,7 +103,7 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-textBaseSize text-textInactiveColor'>
+      <div className='mt-3 text-textBaseSize text-labelColor'>
         <Text>Clicks on out-of-stock sizes — most-wanted first. Restock priority.</Text>
       </div>
     </div>

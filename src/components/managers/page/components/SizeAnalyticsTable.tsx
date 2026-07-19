@@ -173,7 +173,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
         <Text variant='uppercase' className='font-bold mb-2 block'>
           Size distribution
         </Text>
-        <Text className='text-textBaseSize text-textInactiveColor'>
+        <Text className='text-textBaseSize text-labelColor'>
           No product sold {MIN_UNITS_FOR_SIZE_MIX}+ units this period — too few to read a size mix.
           Widen the date range.
         </Text>
@@ -311,7 +311,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
           </tbody>
         </table>
       </div>
-      <div className='text-textBaseSize text-textInactiveColor space-y-1'>
+      <div className='text-textBaseSize text-labelColor space-y-1'>
         <Text>
           Only products with {MIN_UNITS_FOR_SIZE_MIX}+ units sold this period — below that a size
           mix is noise.

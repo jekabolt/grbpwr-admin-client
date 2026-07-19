@@ -33,7 +33,7 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
           Channel ROAS · settled revenue
         </Text>
         {data?.baseCurrency && (
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='small'>
             {data.baseCurrency}
           </Text>
         )}
@@ -74,7 +74,7 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
           </tbody>
         </table>
       </div>
-      <Text className='text-textInactiveColor text-textBaseSize leading-relaxed mt-3 block'>
+      <Text className='text-labelColor text-textBaseSize leading-relaxed mt-3 block'>
         Real money (settled) and true per-channel CAC — enter channel spend to unlock ROAS/CAC (N/A
         means no spend recorded, not zero). GA4 campaign attribution above is upper-funnel
         (sessions/conversions) and leaky; use this for the money view.

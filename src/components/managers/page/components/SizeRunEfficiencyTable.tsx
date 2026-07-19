@@ -95,7 +95,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
                           {formatNumber(row.unitsSold ?? 0)}/{formatNumber(bought)}
                         </Text>
                       ) : (
-                        <Text variant='inactive'>—</Text>
+                        <Text variant='label'>—</Text>
                       )}
                     </td>
                   )}
@@ -110,7 +110,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
           </tbody>
         </table>
       </div>
-      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-labelColor space-y-1'>
         {hasUnitData ? (
           <>
             <Text>

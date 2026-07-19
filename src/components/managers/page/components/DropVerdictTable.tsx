@@ -2,6 +2,7 @@ import type { SellThroughByDropRow } from 'api/proto-http/admin';
 import { FC } from 'react';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
+import { ProductSection } from './ProductSection';
 
 interface DropVerdictTableProps {
   sellThroughByDrop: SellThroughByDropRow[] | undefined;
@@ -23,126 +24,64 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
     (a, b) => parseDecimal(b.revenue) - parseDecimal(a.revenue),
   );
   const anyCosted = rows.some((r) => r.hasCost);
+  const strong = rows.filter((r) => (r.sellThroughPct ?? 0) >= 75).length;
+  const weak = rows.filter((r) => (r.sellThroughPct ?? 0) < 40 && (r.unitsBought ?? 0) > 0).length;
+  const verdictText =
+    strong || weak
+      ? `${strong ? `Reprint ${strong} strong drop${strong === 1 ? '' : 's'}` : ''}${strong && weak ? '; ' : ''}${weak ? `cut or discount ${weak} weak` : ''}.`
+      : 'Per-release sell-through — how much of each drop cleared.';
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-1 block'>
-        Drop verdict
+    <ProductSection
+      title='Drops'
+      subtitle='— which releases to reprint, hold, or kill'
+      verdict={verdictText}
+    >
+      <Text className='text-textBaseSize text-labelColor mb-3 block'>
+        Whole-drop sell-through, so the read is decision-grade even when a single day is only a
+        handful of orders.
       </Text>
-      <Text className='text-textBaseSize text-textInactiveColor mb-4 block'>
-        Per-release sell-through — the drop-brand KPI. Whole-drop totals, so the read is
-        decision-grade even when a single day is only a handful of orders.
-      </Text>
-      <div className='overflow-x-auto'>
-        <table className='w-full text-textBaseSize'>
-          <thead>
-            <tr className='border-b border-textInactiveColor'>
-              <th className='text-left p-2'>
-                <Text variant='uppercase' className='text-textBaseSize'>
-                  Drop
+      <div
+        className='grid gap-3'
+        style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}
+      >
+        {rows.map((row, idx) => {
+          const pct = row.sellThroughPct || 0;
+          const v = verdict(pct);
+          // Card = the decision verb (reprint / hold / cut), a sell-through bar coloured by band,
+          // then the supporting numbers. Matches the approved "drop cards" pick.
+          const action = pct >= 75 ? 'Reprint' : pct >= 40 ? 'Hold' : 'Cut';
+          const barCls = pct >= 75 ? 'bg-success' : pct >= 40 ? 'bg-textColor' : 'bg-warning';
+          return (
+            <div key={idx} className='border border-textInactiveColor p-3'>
+              <div className='flex items-baseline justify-between gap-2'>
+                <Text className='truncate font-bold'>{row.collection || 'Untagged'}</Text>
+                <Text variant='uppercase' className={`text-textBaseSize font-bold ${v.cls}`}>
+                  {action}
                 </Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-textBaseSize'>
-                  Products
+              </div>
+              <div className='my-2 h-2 bg-bgSecondary'>
+                <div className={`h-2 ${barCls}`} style={{ width: `${Math.min(100, pct)}%` }} />
+              </div>
+              <Text className='text-labelColor text-textBaseSize block'>
+                {pct.toFixed(0)}% sold · {formatCurrency(parseDecimal(row.revenue))}
+                {row.daysTo50pct != null ? ` · ${formatNumber(row.daysTo50pct)}d to 50%` : ''}
+              </Text>
+              {row.hasCost && row.grossMarginPct != null && (
+                <Text className='text-labelColor text-textBaseSize block'>
+                  {row.grossMarginPct.toFixed(0)}% margin
                 </Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-textBaseSize'>
-                  Units sold / bought
-                </Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-textBaseSize'>
-                  Sell-through %
-                </Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-textBaseSize'>
-                  Days to 50%
-                </Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-textBaseSize'>
-                  Revenue
-                </Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-textBaseSize'>
-                  Margin
-                </Text>
-              </th>
-              <th className='text-right p-2'>
-                <Text variant='uppercase' className='text-textBaseSize'>
-                  Verdict
-                </Text>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, idx) => {
-              const pct = row.sellThroughPct || 0;
-              const v = verdict(pct);
-              return (
-                <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
-                  <td className='p-2'>
-                    <Text className='font-bold'>{row.collection || 'Untagged'}</Text>
-                  </td>
-                  <td className='p-2 text-right'>
-                    <Text>{formatNumber(row.productCount || 0)}</Text>
-                  </td>
-                  <td className='p-2 text-right'>
-                    <Text>
-                      {formatNumber(row.unitsSold || 0)}/{formatNumber(row.unitsBought || 0)}
-                    </Text>
-                  </td>
-                  <td className='p-2 text-right'>
-                    <Text className={`font-bold ${v.cls}`}>{pct.toFixed(1)}%</Text>
-                  </td>
-                  <td className='p-2 text-right'>
-                    {row.daysTo50pct != null ? (
-                      <Text>{formatNumber(row.daysTo50pct)}d</Text>
-                    ) : (
-                      <Text variant='inactive' title='Has not reached 50% sell-through yet'>
-                        —
-                      </Text>
-                    )}
-                  </td>
-                  <td className='p-2 text-right'>
-                    <Text>{formatCurrency(parseDecimal(row.revenue))}</Text>
-                  </td>
-                  <td
-                    className='p-2 text-right'
-                    title={
-                      row.hasCost
-                        ? `Gross margin ${formatCurrency(parseDecimal(row.grossMargin))}`
-                        : 'No product cost set for this drop'
-                    }
-                  >
-                    {row.hasCost && row.grossMarginPct != null ? (
-                      <Text>{row.grossMarginPct.toFixed(0)}%</Text>
-                    ) : (
-                      <Text variant='inactive'>N/A</Text>
-                    )}
-                  </td>
-                  <td className='p-2 text-right'>
-                    <Text variant='uppercase' className={`text-textBaseSize font-bold ${v.cls}`}>
-                      {v.label}
-                    </Text>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
+            </div>
+          );
+        })}
       </div>
-      <div className='mt-3 text-textBaseSize text-textInactiveColor space-y-1'>
+      <div className='mt-3 text-textBaseSize text-labelColor'>
         <Text>
-          Sell-through = units sold ÷ units bought. Days-to-50% is how fast the release cleared its
-          first half; blank = not there yet. Strong ≥75% · OK ≥40% · Weak below.
+          Sell-through = units sold ÷ units bought. Strong ≥75% (reprint) · OK ≥40% (hold) · Weak
+          below (cut).{!anyCosted && ' Set product costs to see per-drop margin.'}
         </Text>
-        {!anyCosted && <Text>Set product costs to see per-drop margin.</Text>}
       </div>
-    </div>
+    </ProductSection>
   );
 };

@@ -14,8 +14,9 @@ interface ProfitabilityPanelProps {
   profitability: ProfitabilitySection | undefined;
   compareEnabled?: boolean;
   // Period-over-period change of the operating result, from GetDashboard's DashboardComparison.
-  // ProfitabilitySection.operatingResult is a plain Decimal with no compare, so this is the only
-  // source of its delta. Percent change; higher is better.
+  // Accepted for compatibility but intentionally NOT rendered: the backend %-change is sign-inverted
+  // when the prior operating result is negative (the usual case at partial cost coverage), so it reads
+  // backwards. Re-enable once the backend delta (computeChangePct on a negative base) is fixed.
   operatingResultChangePct?: number;
 }
 
@@ -35,11 +36,14 @@ const Delta: FC<{
   higherIsBetter?: boolean;
 }> = ({ cmp, kind, enabled, higherIsBetter = true }) => {
   if (!enabled || cmp.compareValue === undefined) return null;
-  const diff = kind === 'pp' ? (cmp.changeAbsolute ?? cmp.value - cmp.compareValue) : cmp.value - cmp.compareValue;
+  const diff =
+    kind === 'pp'
+      ? cmp.changeAbsolute ?? cmp.value - cmp.compareValue
+      : cmp.value - cmp.compareValue;
   const dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
   const good = dir === 'flat' ? 'flat' : (dir === 'up') === higherIsBetter ? 'good' : 'bad';
   const color =
-    good === 'flat' ? 'text-textInactiveColor' : good === 'good' ? 'text-success' : 'text-error';
+    good === 'flat' ? 'text-labelColor' : good === 'good' ? 'text-success' : 'text-error';
   const arrow = dir === 'up' ? '↑ ' : dir === 'down' ? '↓ ' : '';
   const text =
     kind === 'pp'
@@ -73,7 +77,7 @@ const WLine: FC<{
     </div>
     {(sub || delta) && (
       <div className='flex items-baseline justify-between gap-3'>
-        <span className='text-textInactiveColor text-textBaseSize'>{sub}</span>
+        <span className='text-labelColor text-textBaseSize'>{sub}</span>
         {delta}
       </div>
     )}
@@ -87,11 +91,11 @@ const UnitTile: FC<{ label: string; value: ReactNode; sub?: ReactNode; muted?: b
   muted,
 }) => (
   <div className='space-y-1'>
-    <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+    <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
       {label}
     </Text>
-    <Text className={`font-bold text-lg ${muted ? 'text-textInactiveColor' : ''}`}>{value}</Text>
-    {sub && <div className='text-textInactiveColor text-textBaseSize uppercase'>{sub}</div>}
+    <Text className={`font-bold text-lg ${muted ? 'text-labelColor' : ''}`}>{value}</Text>
+    {sub && <div className='text-labelColor text-textBaseSize uppercase'>{sub}</div>}
   </div>
 );
 
@@ -100,23 +104,9 @@ const UnitTile: FC<{ label: string; value: ReactNode; sub?: ReactNode; muted?: b
  * fields without costing:read). Absorbs the operating-result waterfall that used to live in
  * OperatingResultStrip, so the money story appears once, period-consistent, with compare deltas.
  */
-// Percent-change delta node in the shared arrow grammar (higher is better).
-const PctDelta: FC<{ pct: number | undefined; enabled: boolean }> = ({ pct, enabled }) => {
-  if (!enabled || pct == null || !Number.isFinite(pct)) return null;
-  const color = pct > 0 ? 'text-success' : pct < 0 ? 'text-error' : 'text-textInactiveColor';
-  const arrow = pct > 0 ? '↑ ' : pct < 0 ? '↓ ' : '';
-  return (
-    <Text variant='uppercase' className={`text-textBaseSize ${color}`}>
-      {arrow}
-      {Math.abs(pct).toFixed(0)}% vs prev
-    </Text>
-  );
-};
-
 export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
   profitability,
   compareEnabled = false,
-  operatingResultChangePct,
 }) => {
   if (!profitability) return null;
 
@@ -147,20 +137,29 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
     !!profitability.opexTotal?.value ||
     !!profitability.marketingSpend?.value;
 
+  // Operating result is only meaningful over the WHOLE business, but margin is known only for the
+  // costed subset — so the raw figure subtracts full opex from partial contribution and always looks
+  // like a loss. Extrapolate the costed margin rate to all revenue for an ESTIMATE. Clearly labelled;
+  // confidence scales with coverage. When fully costed there is nothing to extrapolate.
+  const coverageFrac = coverage / 100;
+  const fullyCosted = coverage >= 99.5;
+  const estMarginAdd =
+    coverageFrac > 0 && !fullyCosted ? grossMargin.value * (1 / coverageFrac - 1) : 0;
+  const estContribution = contribution.value + estMarginAdd;
+  const estOperating = operating + estMarginAdd;
+  const confidence = coverage >= 80 ? 'high' : coverage >= 50 ? 'medium' : 'low';
+
   // Nothing to render if the whole section is empty (non-costed period).
   const hasAnything =
-    grossMargin.value !== 0 ||
-    contribution.value !== 0 ||
-    totalDiscount.value !== 0 ||
-    hasAssembly;
+    grossMargin.value !== 0 || contribution.value !== 0 || totalDiscount.value !== 0 || hasAssembly;
   if (!hasAnything) return null;
 
   const ltvCacTone = ltvCac >= 3 ? 'text-success' : ltvCac > 0 && ltvCac < 1 ? 'text-error' : '';
-  const cacMuted = hasSpend && (cac.sampleSize ?? 0) > 0 && (cac.sampleSize ?? 0) < MIN_CUSTOMERS_FOR_CAC;
+  const cacMuted =
+    hasSpend && (cac.sampleSize ?? 0) > 0 && (cac.sampleSize ?? 0) < MIN_CUSTOMERS_FOR_CAC;
 
   return (
     <div className='space-y-2'>
-      <h3 className='text-textBaseSize font-bold uppercase'>Profitability</h3>
       <div className='grid gap-4 border-2 border-textInactiveColor/20 bg-bgSecondary/30 p-4 md:grid-cols-2'>
         {/* Left: the P&L waterfall */}
         <div className='space-y-0 md:border-r md:border-textInactiveColor/40 md:pr-4'>
@@ -182,16 +181,16 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
                 <Text size='small'>−{formatCurrency(totalDiscount.value)}</Text>
               </summary>
               <div className='mt-1 space-y-0.5 pl-3'>
-                <div className='flex items-baseline justify-between gap-3 text-textInactiveColor text-textBaseSize'>
+                <div className='flex items-baseline justify-between gap-3 text-labelColor text-textBaseSize'>
                   <span>sale</span>
                   <span>−{formatCurrency(productDiscount.value)}</span>
                 </div>
-                <div className='flex items-baseline justify-between gap-3 text-textInactiveColor text-textBaseSize'>
+                <div className='flex items-baseline justify-between gap-3 text-labelColor text-textBaseSize'>
                   <span>promo</span>
                   <span>−{formatCurrency(promoDiscount.value)}</span>
                 </div>
                 {discountRate.value > 0 && (
-                  <Text className='text-textInactiveColor text-textBaseSize'>
+                  <Text className='text-labelColor text-textBaseSize'>
                     {discountRate.value.toFixed(1)}% of gross revenue
                   </Text>
                 )}
@@ -206,28 +205,71 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
             delta={<Delta cmp={contribution} kind='currency' enabled={compareEnabled} />}
           />
 
-          {hasAssembly && (
-            <>
-              <WLine label='− OPEX (fixed, pro-rated)' value={`−${formatCurrency(opex)}`} />
-              <WLine label='− Marketing spend' value={`−${formatCurrency(marketing)}`} />
+          {hasAssembly &&
+            (coverage <= 0 ? (
               <div className='mt-1 border-t border-textInactiveColor pt-1'>
-                <WLine
-                  label='= Operating result'
-                  value={formatCurrency(operating)}
-                  strong
-                  valueTone={operating < 0 ? 'text-error' : ''}
-                  delta={<PctDelta pct={operatingResultChangePct} enabled={compareEnabled} />}
-                />
+                <WLine label='= Operating result' value='—' strong valueTone='text-labelColor' />
+                <div className='mt-2 border border-warning bg-bgSecondary p-2'>
+                  <Text className='text-textBaseSize text-textColor'>
+                    <span className='font-bold'>Can&#39;t compute yet.</span> No product costs
+                    entered — add costs to get gross margin, then the operating result.
+                  </Text>
+                </div>
               </div>
-            </>
-          )}
+            ) : (
+              <>
+                {!fullyCosted && (
+                  <>
+                    <WLine
+                      label='+ est. margin on uncosted revenue'
+                      value={`+${formatCurrency(estMarginAdd)}`}
+                      sub={`the ${(100 - coverage).toFixed(0)}% uncosted, at the costed margin rate`}
+                    />
+                    <WLine
+                      label='= est. full contribution'
+                      value={formatCurrency(estContribution)}
+                    />
+                  </>
+                )}
+                <WLine label='− OPEX (fixed, pro-rated)' value={`−${formatCurrency(opex)}`} />
+                <WLine label='− Marketing spend' value={`−${formatCurrency(marketing)}`} />
+                <div className='mt-1 border-t border-textInactiveColor pt-1'>
+                  <WLine
+                    label={fullyCosted ? '= Operating result' : '= Operating result (estimate)'}
+                    value={formatCurrency(estOperating)}
+                    strong
+                    valueTone={estOperating < 0 ? 'text-error' : 'text-success'}
+                  />
+                </div>
+                {!fullyCosted ? (
+                  <div className='mt-2 border border-warning bg-bgSecondary p-2'>
+                    <Text className='text-textBaseSize text-textColor'>
+                      <span className='font-bold'>Estimate · {confidence} confidence.</span> Margin
+                      on the uncosted {(100 - coverage).toFixed(0)}% of revenue is extrapolated at
+                      the costed rate ({coverage.toFixed(0)}% of revenue is costed).
+                      {confidence === 'low' &&
+                        ' Most of the margin is extrapolated — read as directional.'}{' '}
+                      Cost products to firm it up.
+                    </Text>
+                  </div>
+                ) : estOperating < 0 ? (
+                  <div className='mt-2 border border-error bg-bgSecondary p-2'>
+                    <Text className='text-textBaseSize text-error'>
+                      <span className='font-bold'>Operating at a loss.</span> Contribution is not
+                      covering OPEX + marketing — lift contribution (price / margin / mix) or cut
+                      fixed costs.
+                    </Text>
+                  </div>
+                ) : null}
+              </>
+            ))}
 
           {profitability.opexCaveat && (
-            <Text variant='inactive' size='small' className='mt-2 block'>
+            <Text variant='label' size='small' className='mt-2 block'>
               {profitability.opexCaveat}
             </Text>
           )}
-          <Text variant='inactive' size='small' className='mt-2 block'>
+          <Text variant='label' size='small' className='mt-2 block'>
             {hasAssembly
               ? 'operating result = contribution − opex − marketing (EBITDA-ish; not audited profit).'
               : 'add OPEX and marketing spend to complete the operating result.'}
@@ -275,7 +317,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
           </div>
 
           {!hasSpend && (
-            <Text className='text-textInactiveColor text-textBaseSize'>
+            <Text className='text-labelColor text-textBaseSize'>
               Enter ad spend in{' '}
               <Link to={{ search: '?tab=growth' }} className='underline hover:text-blue'>
                 Growth → Campaigns &amp; channels
@@ -284,7 +326,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
             </Text>
           )}
           {profitability.caveat && (
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='small'>
               {profitability.caveat}
             </Text>
           )}

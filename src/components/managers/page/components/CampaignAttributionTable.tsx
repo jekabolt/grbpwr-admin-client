@@ -59,7 +59,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
       <Text variant='uppercase' className='font-bold mb-1 block'>
         Campaign attribution
       </Text>
-      <Text className='text-textInactiveColor text-textBaseSize leading-relaxed mb-3 block'>
+      <Text className='text-labelColor text-textBaseSize leading-relaxed mb-3 block'>
         UTM source / medium / campaign. Last-click GA4 attribution — directional, and won't tie out
         to DB revenue exactly.{' '}
         {anySpend ? 'ROAS = revenue ÷ recorded spend.' : 'Enter channel spend to see ROAS.'}
@@ -134,7 +134,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
                     <Text className='font-bold'>{formatCurrency(row.revenue)}</Text>
                   </td>
                   <td className='p-2 text-right'>
-                    <Text className='text-textInactiveColor'>
+                    <Text className='text-labelColor'>
                       {row.spend > 0 ? formatCurrency(row.spend) : '—'}
                     </Text>
                   </td>
@@ -146,11 +146,11 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
                         {roas.toFixed(2)}×
                       </Text>
                     ) : (
-                      <Text className='text-textInactiveColor'>—</Text>
+                      <Text className='text-labelColor'>—</Text>
                     )}
                   </td>
                   <td className='p-2 text-right'>
-                    <Text className='text-textInactiveColor'>
+                    <Text className='text-labelColor'>
                       {row.sessions >= MIN_SESSIONS_FOR_RATE
                         ? `${conversionRate.toFixed(1)}%`
                         : '—'}

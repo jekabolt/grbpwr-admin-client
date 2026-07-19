@@ -1,4 +1,4 @@
-import { BASE_PATH } from 'constants/routes';
+import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
 import { Link } from 'react-router-dom';
 import Text from 'ui/components/text';
@@ -37,7 +37,7 @@ export const ProductNameLink: FC<ProductNameLinkProps> = ({
   if (id != null) {
     return (
       <Link
-        to={`${BASE_PATH}/products/${id}`}
+        to={`${ROUTES.product}/${id}`}
         className={`truncate block hover:underline cursor-pointer text-inherit ${className}`}
         style={{ maxWidth }}
         title={displayName}

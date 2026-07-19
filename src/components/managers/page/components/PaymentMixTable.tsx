@@ -36,7 +36,7 @@ export const PaymentMixTable: FC<PaymentMixTableProps> = ({ methods }) => {
               <Text size='small'>{methodLabel(r.paymentMethod)}</Text>
               <Text size='small'>
                 {formatCurrency(val)}
-                <span className='text-textInactiveColor'>
+                <span className='text-labelColor'>
                   {' · '}
                   {formatNumber(r.count ?? 0)} orders · {pct.toFixed(0)}%
                 </span>

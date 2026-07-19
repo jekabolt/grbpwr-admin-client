@@ -54,7 +54,7 @@ function Body({ economics }: { economics: StyleEconomics }) {
   const prod = e.production;
 
   return (
-    <div className='flex min-w-[min(92vw,34rem)] flex-col gap-3'>
+    <div className='flex w-full min-w-0 flex-col gap-3 lg:w-[34rem]'>
       <Section title='Sales'>
         <Row label='Revenue' value={formatCurrency(parseDecimal(sales?.revenue))} />
         <Row label='Units sold' value={formatNumber(sales?.unitsSold ?? 0)} />
@@ -123,7 +123,30 @@ function Body({ economics }: { economics: StyleEconomics }) {
                 value={formatCurrency(parseDecimal(prod.plannedCostBase))}
               />
               <Row label='Actual cost' value={formatCurrency(parseDecimal(prod.actualCostBase))} />
-              <Row label='Cost variance' value={formatCurrency(parseDecimal(prod.costVariance))} />
+              {(() => {
+                // Planned is the FULL planned spend (planned_qty). On an in-progress run actual is
+                // only partially accrued, so actual < planned is NOT a saving — only call it
+                // under/over plan once everything planned has been received.
+                const planned = parseDecimal(prod.plannedCostBase);
+                const actual = parseDecimal(prod.actualCostBase);
+                const variance = actual - planned;
+                const complete =
+                  (prod.plannedQtyTotal ?? 0) > 0 &&
+                  (prod.receivedQtyTotal ?? 0) >= (prod.plannedQtyTotal ?? 0);
+                return (
+                  <Row
+                    label='Cost variance'
+                    value={
+                      !complete
+                        ? 'run in progress — actual still partial'
+                        : Math.abs(variance) < 0.005
+                          ? 'on plan'
+                          : `${formatCurrency(Math.abs(variance))} ${variance < 0 ? 'under' : 'over'} plan`
+                    }
+                    sub={!complete ? 'planned = full run; actual accrues as units are received' : undefined}
+                  />
+                );
+              })()}
             </>
           ) : (
             <Text variant='inactive' size='small'>

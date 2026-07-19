@@ -86,7 +86,7 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
           {headerLabel} · {monthLabel}
         </Text>
         {methodLabel && (
-          <Text className='text-textInactiveColor text-textBaseSize lowercase'>
+          <Text className='text-labelColor text-textBaseSize lowercase'>
             method: {methodLabel}
           </Text>
         )}
@@ -94,11 +94,11 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
 
       <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1'>
         <Text className='font-bold text-lg'>{formatCurrencyWhole(projected)}</Text>
-        <Text variant='uppercase' className='text-textInactiveColor text-textBaseSize'>
+        <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
           {headlineLabel}
         </Text>
         {!isClosed && high > low && (
-          <Text className='text-textInactiveColor text-textBaseSize'>
+          <Text className='text-labelColor text-textBaseSize'>
             ({formatCurrencyWhole(low)} – {formatCurrencyWhole(high)})
           </Text>
         )}
@@ -154,14 +154,14 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
 
       <div className='space-y-0.5'>
         {showRunRate && (
-          <Text className='text-textInactiveColor text-textBaseSize'>
+          <Text className='text-labelColor text-textBaseSize'>
             run-rate {formatCurrencyWhole(runRate)} · projection blends {methodLabel}
           </Text>
         )}
         {forecast.caveat && (
-          <Text className='text-textInactiveColor text-textBaseSize'>{forecast.caveat}</Text>
+          <Text className='text-labelColor text-textBaseSize'>{forecast.caveat}</Text>
         )}
-        <Text className='text-textInactiveColor text-textBaseSize'>
+        <Text className='text-labelColor text-textBaseSize'>
           calendar month · independent of the selected range
         </Text>
       </div>

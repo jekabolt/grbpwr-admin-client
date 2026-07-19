@@ -35,7 +35,7 @@ const CountryCell: FC<{ code: string | undefined; sub?: ReactNode }> = ({ code, 
   const { flag, name, unmatched } = countryDisplay(code);
   return (
     <div>
-      <span className={unmatched ? 'text-textInactiveColor' : undefined}>
+      <span className={unmatched ? 'text-labelColor' : undefined}>
         {flag && <span className='mr-1'>{flag}</span>}
         {name}
       </span>
@@ -114,7 +114,7 @@ const EconomicsView: FC<{ rows: CountryEconomicsRow[] }> = ({ rows }) => {
                   `${(r.grossMarginPct ?? 0).toFixed(0)}%`
                 ) : (
                   <span
-                    className='text-textInactiveColor'
+                    className='text-labelColor'
                     title={`${coverage.toFixed(0)}% of this country's revenue is costed`}
                   >
                     —
@@ -133,13 +133,13 @@ const EconomicsView: FC<{ rows: CountryEconomicsRow[] }> = ({ rows }) => {
               </td>
               <td className='p-2 text-right'>
                 {ltvSample >= LTV_SAMPLE_FLOOR ? formatCurrency(parseDecimal(r.ltvAvg)) : '—'}
-                <span className='text-textInactiveColor'> n={ltvSample}</span>
+                <span className='text-labelColor'> n={ltvSample}</span>
               </td>
             </tr>
           );
         })}
       </TableShell>
-      <Text className='mt-2 text-textInactiveColor text-textBaseSize'>
+      <Text className='mt-2 text-labelColor text-textBaseSize'>
         shipping = actual carrier cost incl. return leg · fees = captured Stripe fees · contribution
         = margin − shipping − fees.
       </Text>
@@ -167,7 +167,7 @@ const LogisticsView: FC<{ rows: CountryLogisticsRow[] }> = ({ rows }) => {
       {sorted.map((r, i) => {
         const sample = r.deliveredSample ?? 0;
         const muted = sample < LOGISTICS_SAMPLE_FLOOR;
-        const mutedCls = muted ? 'text-textInactiveColor' : '';
+        const mutedCls = muted ? 'text-labelColor' : '';
         const refundRate = r.refundRatePct ?? 0;
         const refundOrders = r.refundOrders ?? 0;
         const refundBad = refundRate >= REFUND_RATE_FLAG_PCT && refundOrders >= REFUND_ORDERS_FLAG;
@@ -184,12 +184,12 @@ const LogisticsView: FC<{ rows: CountryLogisticsRow[] }> = ({ rows }) => {
             </td>
             <td className={`p-2 text-right ${mutedCls}`}>
               {(r.onTimeRatePct ?? 0).toFixed(0)}%
-              <span className='text-textInactiveColor'> n={sample}</span>
+              <span className='text-labelColor'> n={sample}</span>
             </td>
             <td className='p-2 text-right'>{formatCurrency(parseDecimal(r.avgShippingCost))}</td>
             <td className={`p-2 text-right ${refundBad ? 'text-error' : ''}`}>
               {refundRate.toFixed(1)}%
-              <span className={refundBad ? '' : 'text-textInactiveColor'}>
+              <span className={refundBad ? '' : 'text-labelColor'}>
                 {' · '}
                 {formatNumber(refundOrders)}
               </span>
@@ -255,7 +255,7 @@ const DemandView: FC<{ rows: CountryDemandRow[] }> = ({ rows }) => {
               <td className='p-2 text-right'>{formatCurrency(parseDecimal(r.aov))}</td>
               <td className='p-2 text-right'>
                 {(r.newSharePct ?? 0).toFixed(0)}% new
-                <span className='text-textInactiveColor'>
+                <span className='text-labelColor'>
                   {' '}
                   ({formatNumber(r.newCustomers ?? 0)}/{formatNumber(r.returningCustomers ?? 0)})
                 </span>
@@ -269,7 +269,7 @@ const DemandView: FC<{ rows: CountryDemandRow[] }> = ({ rows }) => {
           );
         })}
       </TableShell>
-      <Text className='mt-2 text-textInactiveColor text-textBaseSize'>
+      <Text className='mt-2 text-labelColor text-textBaseSize'>
         sessions and conversion are GA4-sourced and directional at boutique traffic.
       </Text>
     </>
@@ -310,7 +310,7 @@ export const CountryMatrix: FC<CountryMatrixProps> = ({ geography, canReadCostin
                 className={`px-3 py-1.5 text-textBaseSize uppercase transition-colors ${
                   v === view
                     ? 'bg-textColor text-bgColor'
-                    : 'text-textInactiveColor hover:text-textColor'
+                    : 'text-labelColor hover:text-textColor'
                 }`}
               >
                 {VIEW_LABEL[v]}

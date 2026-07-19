@@ -33,6 +33,64 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+// The four real construction zones (UNKNOWN is the untagged default, not a zone to cover).
+const TOTAL_CONSTRUCTION_ZONES = 4;
+
+type SummaryOp = { calloutNumber?: number; timeNorm?: string; zone?: string };
+
+// Summary lead (config pick: Summary B) — the at-a-glance overview the tab lacked: how many
+// operations, total SAM (feeds costing), how many assembly zones are tagged, and how many steps
+// still have no place on the sketch. Sits above the assembly workspace.
+function ConstructionSummary({ operations }: { operations: SummaryOp[] }) {
+  const opCount = operations.length;
+  const totalSam = operations.reduce((s, o) => s + (parseFloat(o.timeNorm ?? '') || 0), 0);
+  const zonesCovered = new Set(
+    operations.map((o) => o.zone).filter((z) => z && z !== 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
+  ).size;
+  const unpinned = operations.filter((o) => !(o.calloutNumber && o.calloutNumber > 0)).length;
+
+  const cells: { label: string; value: React.ReactNode; sub?: string; warn?: boolean }[] = [
+    { label: 'Operations', value: opCount },
+    {
+      label: 'Total SAM',
+      value: (
+        <>
+          {totalSam.toFixed(1)}
+          <span className='text-labelColor text-[10px]'> min</span>
+        </>
+      ),
+      sub: 'feeds costing',
+    },
+    { label: 'Zones covered', value: `${zonesCovered} / ${TOTAL_CONSTRUCTION_ZONES}` },
+    {
+      label: 'Unpinned ops',
+      value: unpinned,
+      sub: 'no sketch pin',
+      warn: unpinned > 0,
+    },
+  ];
+
+  return (
+    <div className='grid grid-cols-2 border-l border-t border-textInactiveColor md:grid-cols-4'>
+      {cells.map((c) => (
+        <div key={c.label} className='border-r border-b border-textInactiveColor px-3 py-2.5'>
+          <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+            {c.label}
+          </Text>
+          <Text className={`block font-bold text-lg tabular-nums ${c.warn ? 'text-error' : ''}`}>
+            {c.value}
+          </Text>
+          {c.sub && (
+            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+              {c.sub}
+            </Text>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 type FormCallout = {
   number?: number;
   mediaId?: number;
@@ -161,9 +219,7 @@ function ConstructionSketch({
 // this tab is about HOW the garment goes together, not which fabric or colour.
 export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   const { control } = useFormContext<TechCardFormData>();
-  const operations = (useWatch({ control, name: 'operations' }) ?? []) as Array<{
-    calloutNumber?: number;
-  }>;
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as SummaryOp[];
 
   const [activePin, setActivePin] = useState<number | null>(null);
   const [activeBom, setActiveBom] = useState<string | null>(null);
@@ -183,30 +239,33 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   }, [techCard?.resolvedTechnicalMedia]);
 
   return (
-    <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
-      <div className='w-full space-y-6 lg:sticky lg:top-36 lg:w-2/5'>
-        <Section title='sketch — assembly map'>
-          <ConstructionSketch
-            mediaById={mediaById}
-            usedPins={usedPins}
-            activePin={activePin}
-            onActivePinChange={setActivePin}
-          />
-        </Section>
-        <PieceLegend />
-      </div>
-      <div className='flex w-full flex-col gap-6 lg:w-3/5'>
-        <Section title='general — finishing & defaults'>
-          <ConstructionField />
-        </Section>
-        <Section title='operations — assembly order'>
-          <OperationsField
-            activePin={activePin}
-            onActivePinChange={setActivePin}
-            activeBom={activeBom}
-            onActiveBomChange={setActiveBom}
-          />
-        </Section>
+    <div className='space-y-6'>
+      <ConstructionSummary operations={operations} />
+      <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+        <div className='w-full space-y-6 lg:sticky lg:top-36 lg:w-2/5'>
+          <Section title='sketch — assembly map'>
+            <ConstructionSketch
+              mediaById={mediaById}
+              usedPins={usedPins}
+              activePin={activePin}
+              onActivePinChange={setActivePin}
+            />
+          </Section>
+          <PieceLegend />
+        </div>
+        <div className='flex w-full flex-col gap-6 lg:w-3/5'>
+          <Section title='general — finishing & defaults'>
+            <ConstructionField />
+          </Section>
+          <Section title='operations — assembly order'>
+            <OperationsField
+              activePin={activePin}
+              onActivePinChange={setActivePin}
+              activeBom={activeBom}
+              onActiveBomChange={setActiveBom}
+            />
+          </Section>
+        </div>
       </div>
     </div>
   );
