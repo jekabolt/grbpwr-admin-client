@@ -1,22 +1,17 @@
 import type { SizeRunEfficiencyRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import Text from 'ui/components/text';
 import { sizeVerdict } from '../productSignals';
 import { ProductNameLink } from './ProductNameLink';
 import { ProductSection } from './ProductSection';
+import { ActPill, ColHead, VerdictColumns, VerdictList, VerdictRow } from './VerdictList';
 
-const Row: FC<{ row: SizeRunEfficiencyRow; note: string }> = ({ row, note }) => (
-  <li className='flex items-baseline justify-between gap-3 py-1.5'>
-    <div className='min-w-0 max-w-[55%] font-bold'>
-      <ProductNameLink productId={row.productId} productName={row.productName} maxWidth='100%' />
-    </div>
-    <Text className='text-labelColor text-textBaseSize text-right'>
-      sold {row.unitsSold}/{row.unitsBought} · {note}
-    </Text>
-  </li>
-);
+function soldPct(row: SizeRunEfficiencyRow): number {
+  const bought = row.unitsBought ?? 0;
+  return bought > 0 ? Math.round(((row.unitsSold ?? 0) / bought) * 100) : 0;
+}
 
-/** Sizes as a verdict, not a bar chart: which styles were under- vs over-bought. */
+/** Sizes as a verdict, not a bar chart: which styles were under- vs over-bought. Two columns
+ *  (sold-out early = red, dead weight = gray) with a buy/cut act pill — matches products-final. */
 export const SizeVerdict: FC<{ sizeRunEfficiency: SizeRunEfficiencyRow[] | undefined }> = ({
   sizeRunEfficiency,
 }) => {
@@ -36,32 +31,50 @@ export const SizeVerdict: FC<{ sizeRunEfficiency: SizeRunEfficiencyRow[] | undef
       subtitle='— which sizes to buy deeper vs shallower next run'
       verdict={verdict}
     >
-      <div className='grid gap-4 md:grid-cols-2'>
+      <VerdictColumns>
         {under.length > 0 && (
           <div>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize mb-1 block'>
-              Buy deeper · sold out early
-            </Text>
-            <ul>
+            <ColHead crit>Buy deeper · sold out early</ColHead>
+            <VerdictList>
               {under.map((r, i) => (
-                <Row key={`u-${r.productId ?? i}`} row={r} note='buy deeper' />
+                <VerdictRow
+                  key={`u-${r.productId ?? i}`}
+                  name={
+                    <ProductNameLink
+                      productId={r.productId}
+                      productName={r.productName}
+                      maxWidth='100%'
+                    />
+                  }
+                  why={`${soldPct(r)}% sold — under-bought`}
+                  act={<ActPill tone='crit'>+ buy</ActPill>}
+                />
               ))}
-            </ul>
+            </VerdictList>
           </div>
         )}
         {over.length > 0 && (
           <div>
-            <Text variant='uppercase' className='text-labelColor text-textBaseSize mb-1 block'>
-              Buy shallower · dead weight
-            </Text>
-            <ul>
+            <ColHead>Buy shallower · dead weight</ColHead>
+            <VerdictList>
               {over.map((r, i) => (
-                <Row key={`o-${r.productId ?? i}`} row={r} note='buy shallower' />
+                <VerdictRow
+                  key={`o-${r.productId ?? i}`}
+                  name={
+                    <ProductNameLink
+                      productId={r.productId}
+                      productName={r.productName}
+                      maxWidth='100%'
+                    />
+                  }
+                  why={`${soldPct(r)}% sold — over-bought`}
+                  act={<ActPill>− cut</ActPill>}
+                />
               ))}
-            </ul>
+            </VerdictList>
           </div>
         )}
-      </div>
+      </VerdictColumns>
     </ProductSection>
   );
 };

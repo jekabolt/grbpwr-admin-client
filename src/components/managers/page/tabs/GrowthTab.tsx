@@ -10,8 +10,10 @@ import {
   CrossSellTable,
   GeographyCharts,
   NewVsReturningPanel,
+  StatGrid,
   TrafficCharts,
 } from '../components';
+import type { StatCell } from '../components/StatGrid';
 import { ProductSection } from '../components/ProductSection';
 import { countryDisplay } from '../countries';
 import {
@@ -43,30 +45,6 @@ const Drill: FC<{ summary: string; children: ReactNode }> = ({ summary, children
   </details>
 );
 
-const Stat: FC<{
-  label: string;
-  value: ReactNode;
-  sub?: string;
-  hero?: boolean;
-  tone?: string;
-}> = ({ label, value, sub, hero, tone }) => (
-  <div className='min-w-0'>
-    <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-      {label}
-    </Text>
-    <Text
-      className={`font-bold tabular-nums ${hero ? 'text-2xl leading-none' : 'text-lg'} ${tone ?? ''}`}
-    >
-      {value}
-    </Text>
-    {sub && (
-      <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-        {sub}
-      </Text>
-    )}
-  </div>
-);
-
 /**
  * Where growth comes from — decision-first, matching the approved stub grammar (ProductSection):
  * repeat economics (DB-true) → what to bundle → channels/ROAS → geography. GA4/channel signals stay
@@ -86,6 +64,25 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
   const newShare = split?.newRevenueSharePct ?? null;
   const hasRepeat =
     repeatRate.value > 0 || ordersPerCustomer.value > 0 || uniqueBuyers.value > 0 || !!split;
+
+  // Repeat hero: three big stats + an ink/gray revenue split bar (config: Repeat=hero).
+  const repeatStats: StatCell[] = [
+    {
+      label: 'Repeat rate',
+      value: `${repeatRate.value.toFixed(0)}%`,
+      sub: <span className='text-labelColor'>ordered before</span>,
+      big: true,
+    },
+    { label: 'Orders / customer', value: ordersPerCustomer.value.toFixed(1), big: true },
+    {
+      label: 'Days to 2nd order',
+      value:
+        daysBetweenOrders.value > 0 ? formatAvgDaysBetweenOrders(daysBetweenOrders.value) : '—',
+      big: true,
+    },
+  ];
+  const splitNewShare = split ? Math.max(0, Math.min(100, split.newRevenueSharePct ?? 0)) : 0;
+  const splitRetShare = 100 - splitNewShare;
 
   // Cross-sell pairs — same gating as the full table (real support + lift), ranked by lift.
   const allPairs = commerce?.crossSellPairs ?? [];
@@ -149,36 +146,39 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
               </Text>
             </div>
           )}
-          <div className='mb-4 grid grid-cols-2 gap-3 md:grid-cols-4'>
-            <Stat
-              label='Repeat rate'
-              value={`${repeatRate.value.toFixed(0)}%`}
-              sub='ordered before'
-              hero
-            />
-            <Stat
-              label='Orders / customer'
-              value={ordersPerCustomer.value.toFixed(1)}
-              sub='lifetime avg'
-            />
-            <Stat
-              label='Days to 2nd order'
-              value={
-                daysBetweenOrders.value > 0
-                  ? formatAvgDaysBetweenOrders(daysBetweenOrders.value)
-                  : '—'
-              }
-              sub='avg gap'
-            />
-            {uniqueBuyers.value > 0 && (
-              <Stat
-                label='Unique buyers'
-                value={formatNumber(uniqueBuyers.value)}
-                sub='this period'
-              />
-            )}
+          <StatGrid minCol={150} cells={repeatStats} />
+          {split && (
+            <div className='mt-3 space-y-2'>
+              <div className='flex h-[30px] border border-textColor'>
+                <div
+                  className='flex items-center justify-center overflow-hidden bg-textColor px-1 text-[10px] whitespace-nowrap text-bgColor'
+                  style={{ width: `${splitNewShare}%` }}
+                >
+                  {splitNewShare >= 20 ? `New revenue ${splitNewShare.toFixed(0)}%` : ''}
+                </div>
+                <div
+                  className='flex items-center justify-center overflow-hidden bg-textInactiveColor px-1 text-[10px] whitespace-nowrap'
+                  style={{ width: `${splitRetShare}%` }}
+                >
+                  {splitRetShare >= 14 ? `Repeat ${splitRetShare.toFixed(0)}%` : ''}
+                </div>
+              </div>
+              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+                growth {splitNewShare >= 50 ? 'new-led' : 'repeat-led'} — a rising repeat rate is
+                the flywheel to watch
+              </Text>
+            </div>
+          )}
+          <div className='mt-3'>
+            <Drill summary='Full new vs returning'>
+              {uniqueBuyers.value > 0 && (
+                <Text className='text-labelColor text-textBaseSize'>
+                  {formatNumber(uniqueBuyers.value)} unique buyers this period.
+                </Text>
+              )}
+              <NewVsReturningPanel split={split} />
+            </Drill>
           </div>
-          <NewVsReturningPanel split={split} />
         </ProductSection>
       )}
 

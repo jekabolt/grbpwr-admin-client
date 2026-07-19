@@ -114,6 +114,16 @@ export function DevExpensesField({
   );
   const scopedHasUnconverted = scoped && expenses.some((e) => !e.amountBase?.value);
 
+  // Dev summary (config: DevRnD B) — total + amortised per-unit + by-kind bars.
+  const byKind = (summary?.byKind ?? [])
+    .map((b) => ({ kind: b.kind ?? '—', amt: parseDecimalNumber(b.amountBase?.value) || 0 }))
+    .filter((b) => b.amt > 0)
+    .sort((a, b) => b.amt - a.amt);
+  const maxKind = Math.max(...byKind.map((b) => b.amt), 1);
+  const totalBaseNum = parseDecimalNumber(summary?.totalBase?.value) || 0;
+  const orderQty = summary?.orderQty || 0;
+  const devPerUnit = orderQty > 0 ? totalBaseNum / orderQty : 0;
+
   if (isLoading) return <Text size='small'>loading…</Text>;
 
   return (
@@ -135,24 +145,67 @@ export function DevExpensesField({
             </div>
           )
         : summary && (
-            <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
-              <Text size='small'>
-                total dev cost (EUR): {decimalToInput(summary.totalBase) || '—'}
-                {summary.hasUnconverted ? ' ⚠ partial (some rows have no FX rate)' : ''}
+            <div className='flex flex-col gap-3 border border-textInactiveColor p-3'>
+              <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+                <div>
+                  <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+                    Total dev (EUR)
+                  </Text>
+                  <Text className='block font-bold text-lg tabular-nums'>
+                    {decimalToInput(summary.totalBase) || '—'}
+                  </Text>
+                  <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+                    {expenses.length} line{expenses.length === 1 ? '' : 's'}
+                    {summary.hasUnconverted ? ' · partial' : ''}
+                  </Text>
+                </div>
+                <div>
+                  <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+                    Per unit {orderQty > 0 ? `(÷${orderQty})` : ''}
+                  </Text>
+                  <Text className='block font-bold text-lg tabular-nums'>
+                    {devPerUnit > 0 ? devPerUnit.toFixed(2) : '—'}
+                  </Text>
+                  <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+                    amortised · informational
+                  </Text>
+                </div>
+                <div>
+                  <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+                    Unit cost + dev
+                  </Text>
+                  <Text className='block font-bold text-lg tabular-nums'>
+                    {decimalToInput(summary.unitCostWithDev) || '—'}
+                  </Text>
+                  <Text variant='uppercase' className='text-labelColor block text-[10px]'>
+                    reference, not COGS
+                  </Text>
+                </div>
+              </div>
+              {byKind.length > 0 && (
+                <div className='space-y-1'>
+                  {byKind.map((b) => (
+                    <div
+                      key={b.kind}
+                      className='grid grid-cols-[110px_1fr_64px] items-center gap-2'
+                    >
+                      <Text className='truncate text-textBaseSize uppercase'>{b.kind}</Text>
+                      <span className='h-3 bg-bgSecondary'>
+                        <span
+                          className='block h-3 bg-textColor'
+                          style={{ width: `${(b.amt / maxKind) * 100}%` }}
+                        />
+                      </span>
+                      <Text className='text-right text-textBaseSize tabular-nums'>
+                        {b.amt.toFixed(2)}
+                      </Text>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Text variant='label' size='small'>
+                dev is a period R&amp;D cost, amortised for info only — NOT folded into unit COGS
               </Text>
-              {(summary.byKind ?? []).length > 0 && (
-                <Text variant='inactive' size='small'>
-                  {(summary.byKind ?? [])
-                    .map((b) => `${b.kind}: ${decimalToInput(b.amountBase) || '—'}`)
-                    .join(' · ')}
-                </Text>
-              )}
-              {summary.unitCostWithDev?.value && (
-                <Text variant='inactive' size='small'>
-                  unit cost incl. dev (reference, {summary.orderQty || 0} units):{' '}
-                  {decimalToInput(summary.unitCostWithDev)} — amortised, not the COGS
-                </Text>
-              )}
             </div>
           )}
 

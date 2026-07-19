@@ -58,6 +58,37 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
     !!rollup?.orderCost?.value ||
     colorwayCosts.length > 0;
 
+  // Grouped cost tree (config: Breakdown B): manual articles from the form fields, materials +
+  // unit cost from the server rollup. Materials aren't broken out by section (the rollup returns
+  // only the per-unit total), so that group shows its subtotal alone.
+  const costing = (useWatch({ control, name: 'costing' }) ?? {}) as {
+    cmtCost?: string;
+    hardwareCost?: string;
+    packagingCost?: string;
+    logisticsCost?: string;
+    overheadCost?: string;
+    defectPercent?: string;
+    currency?: string;
+  };
+  const num = (s?: string) => {
+    const n = parseFloat((s ?? '').replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const cur = costing.currency || rollup?.baseCurrency || '';
+  const money = (n: number) => `${cur ? `${cur} ` : ''}${n.toFixed(2)}`;
+  const articleRows = [
+    { l: 'CMT', v: num(costing.cmtCost) },
+    { l: 'Hardware', v: num(costing.hardwareCost) },
+    { l: 'Packaging', v: num(costing.packagingCost) },
+    { l: 'Logistics', v: num(costing.logisticsCost) },
+    { l: 'Overhead', v: num(costing.overheadCost) },
+  ].filter((r) => r.v > 0);
+  const articlesSubtotal = articleRows.reduce((s, r) => s + r.v, 0);
+  const materialsPerUnitStr = decimalToInput(rollup?.materialsPerUnit);
+  const unitCostStr = decimalToInput(rollup?.unitCost);
+  const defect = num(costing.defectPercent);
+  const showTree = articleRows.length > 0 || !!materialsPerUnitStr || !!unitCostStr;
+
   return (
     <div className='space-y-3'>
       <Text variant='label' size='small'>
@@ -100,6 +131,50 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         </Text>
         {hasRollup ? (
           <>
+            {/* Grouped cost tree (config: Breakdown B) — materials subtotal, then the manual
+                articles, then the unit cost total. */}
+            {showTree && (
+              <div className='border border-textInactiveColor'>
+                <div className='flex items-baseline justify-between border-b border-textInactiveColor px-3 py-1.5'>
+                  <Text variant='uppercase' className='text-[11px] font-bold tracking-wide'>
+                    Materials
+                  </Text>
+                  <Text className='text-textBaseSize font-bold tabular-nums'>
+                    {materialsPerUnitStr ? money(num(materialsPerUnitStr)) : '—'}
+                  </Text>
+                </div>
+                {articleRows.length > 0 && (
+                  <>
+                    <div className='flex items-baseline justify-between border-b border-textInactiveColor px-3 py-1.5'>
+                      <Text variant='uppercase' className='text-[11px] font-bold tracking-wide'>
+                        Articles
+                      </Text>
+                      <Text className='text-textBaseSize font-bold tabular-nums'>
+                        {money(articlesSubtotal)}
+                      </Text>
+                    </div>
+                    {articleRows.map((r) => (
+                      <div
+                        key={r.l}
+                        className='flex items-baseline justify-between border-b border-textInactiveColor/50 px-3 py-1 pl-6'
+                      >
+                        <Text className='text-labelColor text-textBaseSize'>{r.l}</Text>
+                        <Text className='text-textBaseSize tabular-nums'>{money(r.v)}</Text>
+                      </div>
+                    ))}
+                  </>
+                )}
+                <div className='flex items-baseline justify-between px-3 py-1.5'>
+                  <Text variant='uppercase' className='text-[11px] font-bold tracking-wide'>
+                    Unit cost{defect > 0 ? ` (defect ${defect}% incl.)` : ''}
+                  </Text>
+                  <Text className='text-textBaseSize font-bold tabular-nums'>
+                    {unitCostStr ? money(num(unitCostStr)) : '—'}
+                  </Text>
+                </div>
+              </div>
+            )}
+
             {/* Summary-first: headline per-unit / per-order figures as tiles, before the
                 per-currency detail and per-colourway breakdown. */}
             <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
