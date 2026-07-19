@@ -40,7 +40,7 @@ export const SizeVerdict: FC<{ sizeRunEfficiency: SizeRunEfficiencyRow[] | undef
         {under.length > 0 && (
           <div>
             <Text variant='uppercase' className='text-labelColor text-textBaseSize mb-1 block'>
-              Under-bought — sold out early
+              Buy deeper · sold out early
             </Text>
             <ul>
               {under.map((r, i) => (
@@ -52,7 +52,7 @@ export const SizeVerdict: FC<{ sizeRunEfficiency: SizeRunEfficiencyRow[] | undef
         {over.length > 0 && (
           <div>
             <Text variant='uppercase' className='text-labelColor text-textBaseSize mb-1 block'>
-              Over-bought — stuck
+              Buy shallower · dead weight
             </Text>
             <ul>
               {over.map((r, i) => (

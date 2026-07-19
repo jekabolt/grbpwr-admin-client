@@ -108,7 +108,7 @@ export const MoneySummary: FC<{ metricsResponse: GetMetricsResponse }> = ({ metr
           <div className='grid gap-4 md:grid-cols-2'>
             <div>
               <Text variant='uppercase' className='text-labelColor text-textBaseSize mb-1 block'>
-                Highest margin €
+                Best margin €
               </Text>
               <ul>
                 {top.map((r, i) => (
@@ -119,7 +119,7 @@ export const MoneySummary: FC<{ metricsResponse: GetMetricsResponse }> = ({ metr
             {bottom.length > 0 && (
               <div>
                 <Text variant='uppercase' className='text-labelColor text-textBaseSize mb-1 block'>
-                  Lowest margin €
+                  Losing / thin margin
                 </Text>
                 <ul>
                   {bottom.map((r, i) => (
