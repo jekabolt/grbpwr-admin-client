@@ -28,6 +28,11 @@ import {
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 const REJECTED = 'TECH_CARD_LAB_DIP_STATUS_REJECTED';
+const APPROVED = 'TECH_CARD_LAB_DIP_STATUS_APPROVED';
+const UNKNOWN_LAB_DIP = 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN';
+
+// Ink → gray fibre shades for the composition bar (grays only, per the brand palette).
+const COMP_SHADES = ['#111111', '#666666', '#aaaaaa', '#cccccc', '#dddddd'];
 
 // Measured sections cost by a rate (consumption, per metre/gram) and support per-size grading; the
 // rest are counted (quantity, per piece). Mirrors colorways-field.tsx so the per-size grid only
@@ -169,6 +174,24 @@ function buildLabDipRequest(
 const labDipStatusLabel = new Map<common_TechCardLabDipStatus, string>(
   techCardLabDipStatusOptions.map((o) => [o.value, o.label]),
 );
+
+// Lab-dip status badge (approved = green, pending = blue/warning, rejected = red). Surfaces the
+// colour-approval state on the roster row and the collapsed lab-dip line (config: LabState B).
+function LabDipBadge({ status }: { status?: string }) {
+  if (!status || status === UNKNOWN_LAB_DIP) return null;
+  const label = labDipStatusLabel.get(status as common_TechCardLabDipStatus) ?? status;
+  const cls =
+    status === APPROVED
+      ? 'border-success text-success'
+      : status === REJECTED
+        ? 'border-error text-error'
+        : 'border-warning text-warning';
+  return (
+    <span className={`shrink-0 border px-1.5 py-px text-[10px] whitespace-nowrap uppercase ${cls}`}>
+      {label}
+    </span>
+  );
+}
 
 function labDipSaveErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
@@ -627,6 +650,18 @@ function LabDipEditor({
     });
   };
 
+  // Compact one-line summary shown while collapsed (config: LabDeep B): round · decided-by ·
+  // decided-date (or the reject reason when rejected).
+  const labDipSummary = [
+    draft.labDipRound ? `R${draft.labDipRound}` : '',
+    draft.labDipDecidedBy,
+    draft.labDipStatus === REJECTED && draft.labDipRejectReason
+      ? `“${draft.labDipRejectReason}”`
+      : draft.labDipDecidedAt,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
     <div className='border-t border-textColor pt-4'>
       <button
@@ -634,14 +669,29 @@ function LabDipEditor({
         className='flex w-full items-center justify-between gap-2 text-left'
         onClick={() => setOpen((o) => !o)}
       >
-        <Text variant='uppercase' size='small'>
+        <Text variant='uppercase' size='small' className='shrink-0'>
           {open ? '▾' : '▸'} dye · lab-dip
         </Text>
-        <Text variant='label' size='small'>
-          {dirty
-            ? 'unsaved'
-            : labDipStatusLabel.get(draft.labDipStatus as common_TechCardLabDipStatus) ?? '—'}
-        </Text>
+        <span className='flex min-w-0 shrink items-center justify-end gap-2'>
+          {dirty ? (
+            <Text variant='label' size='small'>
+              unsaved
+            </Text>
+          ) : draft.labDipStatus === UNKNOWN_LAB_DIP && !labDipSummary ? (
+            <Text variant='label' size='small'>
+              —
+            </Text>
+          ) : (
+            <>
+              <LabDipBadge status={draft.labDipStatus} />
+              {labDipSummary && (
+                <Text variant='label' size='small' className='truncate'>
+                  {labDipSummary}
+                </Text>
+              )}
+            </>
+          )}
+        </span>
       </button>
       {open && (
         <div className='mt-3 flex flex-col gap-3'>
@@ -857,10 +907,13 @@ function ColorwayRecipeEditor({
             {colorway.baseSku ? ` · ${colorway.baseSku}` : ''}
           </Text>
         </span>
-        <Text variant='label' size='small'>
-          {usages.length} material{usages.length === 1 ? '' : 's'}
-          {dirty ? ' · unsaved' : ''}
-        </Text>
+        <span className='flex shrink-0 items-center gap-2'>
+          <LabDipBadge status={colorway.labDipStatus} />
+          <Text variant='label' size='small'>
+            {usages.length} material{usages.length === 1 ? '' : 's'}
+            {dirty ? ' · unsaved' : ''}
+          </Text>
+        </span>
       </button>
 
       {open && (
@@ -886,17 +939,32 @@ function ColorwayRecipeEditor({
             ))
           )}
 
-          {/* #29 derived composition — approximate, parsed from BOM free-text, weighted by consumption */}
+          {/* #29 derived composition — approximate, parsed from BOM free-text, weighted by
+              consumption. Shown as a fibre bar (config: Recipe A + composition bar from BOM). */}
           {derived.fibers.length > 0 && (
             <div className='border border-textInactiveColor p-2'>
               <Text variant='uppercase' size='small'>
                 derived composition (approx · from BOM)
               </Text>
-              <Text size='small' className='mt-1'>
-                {derived.fibers.map((f) => `${f.percent}% ${f.name}`).join(' · ')}
-              </Text>
+              <div className='mt-1.5 flex h-4 w-full overflow-hidden border border-textInactiveColor'>
+                {derived.fibers.map((f, i) => (
+                  <div
+                    key={`${f.name}-${i}`}
+                    className='flex items-center justify-center overflow-hidden px-1 text-[10px] whitespace-nowrap'
+                    style={{
+                      width: `${f.percent}%`,
+                      backgroundColor: COMP_SHADES[i % COMP_SHADES.length],
+                      color: i < 2 ? '#fff' : '#000',
+                    }}
+                    title={`${f.name} ${f.percent}%`}
+                  >
+                    {f.percent >= 12 ? `${f.name} ${f.percent}%` : ''}
+                  </div>
+                ))}
+              </div>
               <Text variant='label' size='small' className='mt-1 block'>
-                parsed from each article’s free-text composition, weighted by consumption
+                {derived.fibers.map((f) => `${f.percent}% ${f.name}`).join(' · ')} · weighted by
+                consumption
                 {derived.skipped > 0
                   ? ` · ${derived.skipped} article${derived.skipped > 1 ? 's' : ''} excluded (no readable composition)`
                   : ''}
