@@ -2,8 +2,9 @@ import { googletype_Decimal } from 'api/proto-http/admin';
 import Text from 'ui/components/text';
 import { useOssReturn, useVatReturnPL } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
+import { adminService } from 'api/api';
 import { CopyTableButton } from './copy-table-button';
-import { JpkExportButton } from './jpk-export-button';
+import { XmlExportButton } from './xml-export-button';
 import { CaveatsNote, formatMonthLabel, formatPercent, ReportState } from './report-utils';
 
 type Props = {
@@ -100,7 +101,11 @@ export function VatTab({ from }: Props) {
           <div className='flex flex-col gap-3'>
             <CaveatsNote caveats={ret?.caveats ?? []} />
             <div className='flex flex-wrap justify-end gap-2'>
-              <JpkExportButton month={month} />
+              <XmlExportButton
+                label='download JPK_V7M (XML)'
+                fallbackName={`JPK_V7M_${month}.xml`}
+                run={() => adminService.ExportJpkV7M({ month })}
+              />
               <CopyTableButton headers={vatCopyHeaders} rows={vatCopyRows} filename='vat-return' />
             </div>
             <div className='overflow-x-auto'>
@@ -147,7 +152,12 @@ export function VatTab({ from }: Props) {
           isEmpty={ossRows.length === 0}
         >
           <div className='flex flex-col gap-3'>
-            <div className='flex justify-end'>
+            <div className='flex flex-wrap justify-end gap-2'>
+              <XmlExportButton
+                label='download OSS (XML)'
+                fallbackName={`OSS_${quarter}.xml`}
+                run={() => adminService.ExportOssReturn({ quarter })}
+              />
               <CopyTableButton headers={ossCopyHeaders} rows={ossCopyRows} filename='oss-return' />
             </div>
             <div className='overflow-x-auto'>

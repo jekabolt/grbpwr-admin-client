@@ -7272,6 +7272,16 @@ export type ExportJpkV7MResponse = {
   xmlContent: string | undefined;
 };
 
+export type ExportOssReturnRequest = {
+  // quarter: YYYY-MM-DD, any day within the target quarter (snapped to the quarter's first day).
+  quarter: string | undefined;
+};
+
+export type ExportOssReturnResponse = {
+  filename: string | undefined;
+  xmlContent: string | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -7861,6 +7871,10 @@ export interface AdminService {
   // accountant merges the purchase register (input VAT), so the file's ZakupWiersz is empty. Requires
   // the JPK_* taxpayer identity to be configured; returns FailedPrecondition otherwise.
   ExportJpkV7M(request: ExportJpkV7MRequest): Promise<ExportJpkV7MResponse>;
+  // ExportOssReturn generates the quarterly OSS (Union scheme, VIU-DO) return XML — one row per member
+  // state of consumption with its rate, taxable base and VAT — for the accountant to validate against
+  // the official schema / transcribe into the OSS portal. Requires the JPK_* taxpayer identity.
+  ExportOssReturn(request: ExportOssReturnRequest): Promise<ExportOssReturnResponse>;
 }
 
 type RequestType = {
@@ -12866,6 +12880,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ExportJpkV7M",
       }) as Promise<ExportJpkV7MResponse>;
+    },
+    ExportOssReturn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/oss-export`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.quarter) {
+        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExportOssReturn",
+      }) as Promise<ExportOssReturnResponse>;
     },
   };
 }
