@@ -1,6 +1,6 @@
 import { googletype_Decimal } from 'api/proto-http/admin';
 import Text from 'ui/components/text';
-import { useOssReturn, useVatReturnPL } from '../../utils/hooks';
+import { useOssReturn, useUkVatReturn, useVatReturnPL } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
 import { adminService } from 'api/api';
 import { CopyTableButton } from './copy-table-button';
@@ -57,6 +57,7 @@ export function VatTab({ from }: Props) {
 
   const vat = useVatReturnPL(month);
   const oss = useOssReturn(quarter);
+  const ukvat = useUkVatReturn(quarter);
 
   const ret = vat.data;
   const rows: VatRow[] = ret
@@ -85,6 +86,28 @@ export function VatTab({ from }: Props) {
     ...ossRows.map((r) => [r.country, r.ratePct?.value, r.net?.value, r.vat?.value]),
     ['total', '', oss.data?.totalNet?.value, oss.data?.totalVat?.value],
   ];
+
+  // UK VAT 9-box return (separate jurisdiction). Boxes 2/8/9 are always 0 for a GB return.
+  const uk = ukvat.data;
+  const ukBoxes: { box: string; label: string; value?: googletype_Decimal; bold?: boolean }[] = uk
+    ? [
+        { box: '1', label: 'VAT due on sales', value: uk.box1OutputVat },
+        { box: '2', label: 'VAT due on EU acquisitions', value: undefined },
+        { box: '3', label: 'total VAT due', value: uk.box3TotalVatDue },
+        { box: '4', label: 'VAT reclaimed on purchases', value: uk.box4InputVat },
+        { box: '5', label: 'net VAT (pay / reclaim)', value: uk.box5NetVat, bold: true },
+        { box: '6', label: 'total sales ex-VAT', value: uk.box6NetSales },
+        { box: '7', label: 'total purchases ex-VAT', value: uk.box7NetPurchases },
+        { box: '8', label: 'EU supplies ex-VAT', value: undefined },
+        { box: '9', label: 'EU acquisitions ex-VAT', value: undefined },
+      ]
+    : [];
+  const ukCopyHeaders = ['box', 'description', 'amount'];
+  const ukCopyRows: (string | number | undefined)[][] = ukBoxes.map((b) => [
+    b.box,
+    b.label,
+    b.value?.value ?? '0',
+  ]);
 
   return (
     <div className='flex flex-col gap-8'>
@@ -192,6 +215,54 @@ export function VatTab({ from }: Props) {
                     <AmountCell value={oss.data?.totalVat} bold />
                   </tr>
                 </tfoot>
+              </table>
+            </div>
+          </div>
+        </ReportState>
+      </section>
+
+      <section className='flex flex-col gap-3'>
+        <Text variant='uppercase' className='font-medium'>
+          UK VAT — quarterly return (9-box) · {formatQuarterLabel(quarter)}
+        </Text>
+        <ReportState
+          isLoading={ukvat.isLoading}
+          isError={ukvat.isError}
+          onRetry={() => ukvat.refetch()}
+          isEmpty={!uk}
+        >
+          <div className='flex flex-col gap-3'>
+            <Text size='small' variant='inactive'>
+              UK-stock domestic regime — a separate jurisdiction, excluded from the Polish net payable.
+              Enter these figures into MTD-compatible software to submit to HMRC.
+            </Text>
+            <div className='flex justify-end'>
+              <CopyTableButton headers={ukCopyHeaders} rows={ukCopyRows} filename='uk-vat-return' />
+            </div>
+            <div className='overflow-x-auto'>
+              <table className='w-full min-w-max border-collapse'>
+                <thead className='border-b border-textColor'>
+                  <tr>
+                    <th className='px-2 py-2 text-left text-textBaseSize uppercase'>box</th>
+                    <th className='px-2 py-2 text-left text-textBaseSize uppercase'>description</th>
+                    <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>
+                      amount
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ukBoxes.map((b) => (
+                    <tr key={b.box} className='border-b border-textInactiveColor'>
+                      <td className='w-10 px-2 py-1 tabular-nums text-labelColor'>{b.box}</td>
+                      <td
+                        className={`whitespace-nowrap px-2 py-1${b.bold ? ' border-t border-textColor font-medium' : ''}`}
+                      >
+                        {b.label}
+                      </td>
+                      <AmountCell value={b.value} bold={b.bold} />
+                    </tr>
+                  ))}
+                </tbody>
               </table>
             </div>
           </div>
