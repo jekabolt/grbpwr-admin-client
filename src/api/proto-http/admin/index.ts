@@ -7300,6 +7300,38 @@ export type GetUkVatReturnResponse = {
   box7NetPurchases: googletype_Decimal | undefined;
 };
 
+export type GetFrs105AccountsRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// GetFrs105AccountsResponse is an FRS 105 micro-entity accounts DRAFT: the Income Statement over the
+// period and the Statement of Financial Position as at `to`, re-grouped from the ledger. Figures are
+// in `currency` (the ledger base currency); the caveats flag that a UK Ltd filing needs GBP + entity
+// isolation.
+export type GetFrs105AccountsResponse = {
+  from: string | undefined;
+  to: string | undefined;
+  currency: string | undefined;
+  turnover: googletype_Decimal | undefined;
+  costOfSales: googletype_Decimal | undefined;
+  grossProfit: googletype_Decimal | undefined;
+  administrativeExpenses: googletype_Decimal | undefined;
+  depreciation: googletype_Decimal | undefined;
+  operatingProfit: googletype_Decimal | undefined;
+  tax: googletype_Decimal | undefined;
+  profitForYear: googletype_Decimal | undefined;
+  fixedAssets: googletype_Decimal | undefined;
+  currentAssets: googletype_Decimal | undefined;
+  creditorsWithinYear: googletype_Decimal | undefined;
+  netCurrentAssets: googletype_Decimal | undefined;
+  totalAssetsLessCurrentLiab: googletype_Decimal | undefined;
+  creditorsAfterYear: googletype_Decimal | undefined;
+  netAssets: googletype_Decimal | undefined;
+  capitalAndReserves: googletype_Decimal | undefined;
+  caveats: string[] | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -7897,6 +7929,10 @@ export interface AdminService {
   // regime (a separate jurisdiction from the Polish JPK). Boxes 2/8/9 are zero post-Brexit for a GB
   // return; the figures are entered into MTD-compatible software / the HMRC bridge to submit.
   GetUkVatReturn(request: GetUkVatReturnRequest): Promise<GetUkVatReturnResponse>;
+  // GetFrs105Accounts re-groups the ledger into FRS 105 UK micro-entity line items (Income Statement +
+  // Statement of Financial Position). A base-currency DRAFT: a filing-ready UK Ltd set needs GBP
+  // conversion + isolation of the UK entity's transactions — surfaced in caveats, not done here.
+  GetFrs105Accounts(request: GetFrs105AccountsRequest): Promise<GetFrs105AccountsResponse>;
 }
 
 type RequestType = {
@@ -12942,6 +12978,29 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetUkVatReturn",
       }) as Promise<GetUkVatReturnResponse>;
+    },
+    GetFrs105Accounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/frs105`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFrs105Accounts",
+      }) as Promise<GetFrs105AccountsResponse>;
     },
   };
 }
