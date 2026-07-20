@@ -116,7 +116,12 @@ export function useCreateJournalEntry() {
       occurredAt: string;
       description: string;
       lines: AcctJournalLineInput[];
-    }) => adminService.CreateJournalEntry(vars),
+      supplierId?: number;
+    }) =>
+      adminService.CreateJournalEntry({
+        ...vars,
+        supplierId: vars.supplierId, // optional AP-by-supplier tag (phase 2, wave 4)
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
   });
 }
