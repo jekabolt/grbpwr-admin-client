@@ -10,11 +10,13 @@ const TD = 'border border-black px-1.5 py-1 align-top';
 const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-neutral-100 uppercase';
 
 // GRBPWR seller identity printed as the invoice "from" party. Contact only — no legal
-// entity address is carried in the client, so we surface what we know.
+// entity address is carried in the client, so we surface what we know. vatId is GRBPWR's
+// own VAT/NIP number, printed on B2B (reverse-charge) invoices; leave empty to omit the line.
 const SELLER = {
   name: 'GRBPWR',
   site: 'grbpwr.com',
   email: 'customercare@grbpwr.com',
+  vatId: '',
 };
 
 const toNum = (s?: string): number => {
@@ -185,6 +187,7 @@ export function InvoiceDocument({
             <div className='font-bold uppercase'>{SELLER.name}</div>
             <div>{SELLER.site}</div>
             <div>{SELLER.email}</div>
+            {SELLER.vatId && <div>VAT {SELLER.vatId}</div>}
           </div>
         </div>
         <div>
@@ -197,6 +200,7 @@ export function InvoiceDocument({
             </div>
             {buyer?.email && <div>{buyer.email}</div>}
             {buyer?.phone && <div>{buyer.phone}</div>}
+            {order.buyerVatId && <div className='font-medium'>VAT {order.buyerVatId}</div>}
           </div>
           <div className='mt-1'>
             <AddressLines address={billAddr} />
