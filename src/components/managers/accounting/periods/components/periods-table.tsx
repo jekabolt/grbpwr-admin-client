@@ -87,8 +87,25 @@ export function PeriodsTable({ periods, canWrite, onClose, onReopen }: Props) {
                   </Text>
                 </td>
                 <td className='px-2 py-2 text-right'>
+                  {/* Every non-actionable state shows a VISIBLE reason (not a bare "—"), with the
+                      full explanation on hover — so it's never ambiguous whether an action is
+                      missing or simply not applicable yet. */}
                   {!canWrite ? (
-                    <span className='text-textBaseSize text-textInactiveColor'>—</span>
+                    <Tooltip
+                      trigger={
+                        <span
+                          tabIndex={0}
+                          className='cursor-help text-textBaseSize uppercase text-textInactiveColor'
+                        >
+                          read-only
+                        </span>
+                      }
+                    >
+                      <span className='block max-w-56 text-textBaseSize'>
+                        closing / reopening a period needs the accounting:write permission — ask an
+                        admin to grant it.
+                      </span>
+                    </Tooltip>
                   ) : isOpen && past ? (
                     <Button variant='secondary' size='sm' onClick={() => onClose(p)}>
                       close
@@ -98,14 +115,15 @@ export function PeriodsTable({ periods, canWrite, onClose, onReopen }: Props) {
                       trigger={
                         <span
                           tabIndex={0}
-                          className='cursor-help text-textBaseSize text-textInactiveColor'
+                          className='cursor-help text-textBaseSize uppercase text-textInactiveColor'
                         >
-                          —
+                          not over yet
                         </span>
                       }
                     >
                       <span className='block max-w-56 text-textBaseSize'>
-                        month is not over yet
+                        a month can only be closed once it has fully ended. This is the current (or a
+                        future) month — its “close” button appears on the 1st of the next month.
                       </span>
                     </Tooltip>
                   ) : isClosed ? (
