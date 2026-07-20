@@ -12,11 +12,13 @@ const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-neutral-1
 // GRBPWR seller identity printed as the invoice "from" party. Contact only — no legal
 // entity address is carried in the client, so we surface what we know. vatId is GRBPWR's
 // own VAT/NIP number, printed on B2B (reverse-charge) invoices; leave empty to omit the line.
+// TODO(grbpwr): replace the PLXXXXXXXXXX placeholder with GRBPWR's real VAT/NIP before prod —
+// it prints verbatim on invoices, so an unedited placeholder must never reach a real invoice.
 const SELLER = {
   name: 'GRBPWR',
   site: 'grbpwr.com',
   email: 'customercare@grbpwr.com',
-  vatId: '',
+  vatId: 'PLXXXXXXXXXX',
 };
 
 const toNum = (s?: string): number => {
