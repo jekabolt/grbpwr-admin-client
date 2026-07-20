@@ -3,6 +3,7 @@ import Text from 'ui/components/text';
 import { useOssReturn, useVatReturnPL } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
 import { CopyTableButton } from './copy-table-button';
+import { JpkExportButton } from './jpk-export-button';
 import { CaveatsNote, formatMonthLabel, formatPercent, ReportState } from './report-utils';
 
 type Props = {
@@ -98,7 +99,8 @@ export function VatTab({ from }: Props) {
         >
           <div className='flex flex-col gap-3'>
             <CaveatsNote caveats={ret?.caveats ?? []} />
-            <div className='flex justify-end'>
+            <div className='flex flex-wrap justify-end gap-2'>
+              <JpkExportButton month={month} />
               <CopyTableButton headers={vatCopyHeaders} rows={vatCopyRows} filename='vat-return' />
             </div>
             <div className='overflow-x-auto'>
