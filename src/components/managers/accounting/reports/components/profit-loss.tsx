@@ -49,6 +49,8 @@ export function ProfitLossTab({ from, to, onDrill }: Props) {
         { label: 'gross margin %', values: totals.grossMarginPct, percent: true },
         { label: 'total opex', values: totals.totalOpex },
         { label: 'operating profit', values: totals.operatingProfit },
+        { label: 'total tax', values: totals.totalTax },
+        { label: 'net profit after tax', values: totals.netProfitAfterTax },
         { label: 'net margin %', values: totals.netMarginPct, percent: true },
       ]
     : [];

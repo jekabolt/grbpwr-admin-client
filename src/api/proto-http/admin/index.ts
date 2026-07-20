@@ -6456,6 +6456,7 @@ export type ReceiveMaterialStockRequest = {
   // input_vat_amount above 30% of the net line cost as a likely gross unit_cost.
   inputVatAmount: googletype_Decimal | undefined;
   inputVatRegime: string | undefined;
+  supplierId: number | undefined;
 };
 
 export type ReceiveMaterialStockResponse = {
@@ -6916,6 +6917,7 @@ export type CreateJournalEntryRequest = {
   occurredAt: string | undefined;
   description: string | undefined;
   lines: AcctJournalLineInput[] | undefined;
+  supplierId: number | undefined;
 };
 
 // AcctJournalLine is a stored journal line (read side), joined to its account's code/name.
@@ -7217,6 +7219,156 @@ export type GetAcctReconciliationResponse = {
   pending: AcctReconBlock | undefined;
   unpostedMovements: AcctReconBlock | undefined;
   vat: AcctReconBlock | undefined;
+  prepayments: AcctReconBlock | undefined;
+  shipping: AcctReconBlock | undefined;
+  bank: AcctReconBlock | undefined;
+};
+
+// AcctBankTxn is one parsed bank statement line in the inbox. amount is SIGNED (negative = outflow);
+// currency is the payment currency (Revolut is multi-currency). state is unmatched | matched | posted |
+// ignored; matched_entry_id (0 = none) links a posted line to its journal entry; suggested_account (empty
+// = none) is the rule/default hint prefilled in the post modal.
+export type AcctBankTxn = {
+  id: number | undefined;
+  source: string | undefined;
+  externalId: string | undefined;
+  bookedAt: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  fee: googletype_Decimal | undefined;
+  description: string | undefined;
+  counterparty: string | undefined;
+  state: string | undefined;
+  matchedEntryId: number | undefined;
+  suggestedAccount: string | undefined;
+  createdAt: string | undefined;
+};
+
+export type ImportBankCsvRequest = {
+  source: string | undefined;
+  csvText: string | undefined;
+};
+
+export type ImportBankCsvResponse = {
+  parsed: number | undefined;
+  imported: number | undefined;
+  skipped: number | undefined;
+};
+
+export type ListBankTxnsRequest = {
+  state: string | undefined;
+  limit: number | undefined;
+};
+
+export type ListBankTxnsResponse = {
+  txns: AcctBankTxn[] | undefined;
+};
+
+export type PostBankTxnRequest = {
+  id: number | undefined;
+  accountCode: string | undefined;
+  occurredAt: string | undefined;
+};
+
+export type PostBankTxnResponse = {
+  entry: AcctJournalEntry | undefined;
+};
+
+export type IgnoreBankTxnRequest = {
+  id: number | undefined;
+  reason: string | undefined;
+};
+
+export type IgnoreBankTxnResponse = {
+};
+
+// AcctBankRule is a substring→account suggestion applied at import.
+export type AcctBankRule = {
+  id: number | undefined;
+  pattern: string | undefined;
+  accountCode: string | undefined;
+};
+
+export type ListBankRulesRequest = {
+};
+
+export type ListBankRulesResponse = {
+  rules: AcctBankRule[] | undefined;
+};
+
+export type CreateBankRuleRequest = {
+  pattern: string | undefined;
+  accountCode: string | undefined;
+};
+
+export type CreateBankRuleResponse = {
+  rule: AcctBankRule | undefined;
+};
+
+export type DeleteBankRuleRequest = {
+  id: number | undefined;
+};
+
+export type DeleteBankRuleResponse = {
+};
+
+// Supplier is a purchase-side counterparty (the AP catalog).
+export type Supplier = {
+  id: number | undefined;
+  name: string | undefined;
+  vatId: string | undefined;
+  notes: string | undefined;
+  createdAt: string | undefined;
+};
+
+export type CreateSupplierRequest = {
+  name: string | undefined;
+  vatId: string | undefined;
+  notes: string | undefined;
+};
+
+export type CreateSupplierResponse = {
+  supplier: Supplier | undefined;
+};
+
+export type ListSuppliersRequest = {
+};
+
+export type ListSuppliersResponse = {
+  suppliers: Supplier[] | undefined;
+};
+
+// AcctPayableRow is one supplier's open Accounts-Payable (2010) position. supplier_id 0 = an untagged 2010
+// position (a 2010 entry with no supplier). balance = accrued − paid.
+export type AcctPayableRow = {
+  supplierId: number | undefined;
+  supplierName: string | undefined;
+  accrued: googletype_Decimal | undefined;
+  paid: googletype_Decimal | undefined;
+  balance: googletype_Decimal | undefined;
+};
+
+export type GetPayablesRequest = {
+};
+
+export type GetPayablesResponse = {
+  rows: AcctPayableRow[] | undefined;
+};
+
+// AcctReceivableRow is one bank-invoice order's open Accounts-Receivable (1040) position. ref is the order
+// uuid; balance = invoiced − received.
+export type AcctReceivableRow = {
+  ref: string | undefined;
+  invoiced: googletype_Decimal | undefined;
+  received: googletype_Decimal | undefined;
+  balance: googletype_Decimal | undefined;
+};
+
+export type GetReceivablesRequest = {
+};
+
+export type GetReceivablesResponse = {
+  rows: AcctReceivableRow[] | undefined;
 };
 
 export type GetVatReturnPLRequest = {
@@ -7989,6 +8141,31 @@ export interface AdminService {
   // Statement of Financial Position). A base-currency DRAFT: a filing-ready UK Ltd set needs GBP
   // conversion + isolation of the UK entity's transactions — surfaced in caveats, not done here.
   GetFrs105Accounts(request: GetFrs105AccountsRequest): Promise<GetFrs105AccountsResponse>;
+  // ImportBankCsv parses a bank CSV export (Revolut) into the inbox, deduplicating on the bank
+  // transaction id + payment currency; a re-imported statement is a no-op for lines already present.
+  ImportBankCsv(request: ImportBankCsvRequest): Promise<ImportBankCsvResponse>;
+  // ListBankTxns returns inbox lines, optionally filtered by state (unmatched | matched | posted | ignored).
+  ListBankTxns(request: ListBankTxnsRequest): Promise<ListBankTxnsResponse>;
+  // PostBankTxn books a manual-provenance journal entry for an inbox line (Dr/Cr by the signed amount: an
+  // inflow Dr 1010 / Cr the chosen account, an outflow reversed) and marks the line posted. A non-EUR line
+  // posts via the costing-FX fold (amount_src + currency_src).
+  PostBankTxn(request: PostBankTxnRequest): Promise<PostBankTxnResponse>;
+  // IgnoreBankTxn marks an inbox line deliberately not booked (e.g. an internal EXCHANGE leg).
+  IgnoreBankTxn(request: IgnoreBankTxnRequest): Promise<IgnoreBankTxnResponse>;
+  // ListBankRules returns the substring→account suggestion rules applied at import.
+  ListBankRules(request: ListBankRulesRequest): Promise<ListBankRulesResponse>;
+  // CreateBankRule adds a substring→account suggestion rule.
+  CreateBankRule(request: CreateBankRuleRequest): Promise<CreateBankRuleResponse>;
+  // DeleteBankRule removes a suggestion rule.
+  DeleteBankRule(request: DeleteBankRuleRequest): Promise<DeleteBankRuleResponse>;
+  // CreateSupplier adds a purchase-side supplier to the catalog (unique name).
+  CreateSupplier(request: CreateSupplierRequest): Promise<CreateSupplierResponse>;
+  // ListSuppliers returns the supplier catalog.
+  ListSuppliers(request: ListSuppliersRequest): Promise<ListSuppliersResponse>;
+  // GetPayables returns the open Accounts-Payable (2010) balance per supplier (accrued − paid).
+  GetPayables(request: GetPayablesRequest): Promise<GetPayablesResponse>;
+  // GetReceivables returns the open Accounts-Receivable (1040) balance per bank-invoice order.
+  GetReceivables(request: GetReceivablesRequest): Promise<GetReceivablesResponse>;
   // Fixed-asset register + straight-line depreciation.
   CreateFixedAsset(request: CreateFixedAssetRequest): Promise<CreateFixedAssetResponse>;
   ListFixedAssets(request: ListFixedAssetsRequest): Promise<ListFixedAssetsResponse>;
@@ -13064,6 +13241,199 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetFrs105Accounts",
       }) as Promise<GetFrs105AccountsResponse>;
+    },
+    ImportBankCsv(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/import`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ImportBankCsv",
+      }) as Promise<ImportBankCsvResponse>;
+    },
+    ListBankTxns(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/txns`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.state) {
+        queryParams.push(`state=${encodeURIComponent(request.state.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListBankTxns",
+      }) as Promise<ListBankTxnsResponse>;
+    },
+    PostBankTxn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/post`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostBankTxn",
+      }) as Promise<PostBankTxnResponse>;
+    },
+    IgnoreBankTxn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/ignore`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "IgnoreBankTxn",
+      }) as Promise<IgnoreBankTxnResponse>;
+    },
+    ListBankRules(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/rules`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListBankRules",
+      }) as Promise<ListBankRulesResponse>;
+    },
+    CreateBankRule(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/rules`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateBankRule",
+      }) as Promise<CreateBankRuleResponse>;
+    },
+    DeleteBankRule(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/rules/delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteBankRule",
+      }) as Promise<DeleteBankRuleResponse>;
+    },
+    CreateSupplier(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/suppliers`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateSupplier",
+      }) as Promise<CreateSupplierResponse>;
+    },
+    ListSuppliers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/suppliers`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSuppliers",
+      }) as Promise<ListSuppliersResponse>;
+    },
+    GetPayables(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/payables`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetPayables",
+      }) as Promise<GetPayablesResponse>;
+    },
+    GetReceivables(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/receivables`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetReceivables",
+      }) as Promise<GetReceivablesResponse>;
     },
     CreateFixedAsset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/fixed-assets`; // eslint-disable-line quotes

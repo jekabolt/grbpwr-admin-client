@@ -20,7 +20,10 @@ type ReconKey =
   | 'finishedGoods'
   | 'pending'
   | 'unpostedMovements'
-  | 'vat';
+  | 'vat'
+  | 'prepayments'
+  | 'shipping'
+  | 'bank';
 
 const BLOCKS: { key: ReconKey; label: string }[] = [
   { key: 'revenue', label: 'revenue' },
@@ -31,6 +34,9 @@ const BLOCKS: { key: ReconKey; label: string }[] = [
   { key: 'pending', label: 'pending' },
   { key: 'unpostedMovements', label: 'unposted movements' },
   { key: 'vat', label: 'vat' },
+  { key: 'prepayments', label: 'prepayments' },
+  { key: 'shipping', label: 'shipping' },
+  { key: 'bank', label: 'bank' },
 ];
 
 // A delta within a cent reads as "matched" (§8.5). NaN (missing delta) → treated as 0 → matched.

@@ -176,6 +176,7 @@ export function ReceiveStockModal({
         currency: cost ? currency : '',
         lot: lot.trim(),
         supplierDoc: supplierDoc.trim(),
+        supplierId: undefined, // AP-by-supplier tag (phase 2, wave 4); supplier picker is a follow-up
         occurredAt,
         comment: comment.trim(),
         // Recording input VAT is a costing write; both fields optional, sent only when set.
