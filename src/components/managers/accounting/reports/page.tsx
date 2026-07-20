@@ -2,6 +2,7 @@ import { cn } from 'lib/utility';
 import { useSearchParams } from 'react-router-dom';
 import { AcctSectionHeader } from '../components/section-header';
 import { BalanceSheetTab } from './components/balance-sheet';
+import { Frs105Tab } from './components/frs105';
 import { LedgerTab } from './components/ledger';
 import { ProfitLossTab } from './components/profit-loss';
 import { RangeControls, type ControlsMode } from './components/range-controls';
@@ -22,6 +23,7 @@ const TABS = [
   { id: 'ledger', label: 'ledger' },
   { id: 'recon', label: 'reconciliation' },
   { id: 'vat', label: 'vat' },
+  { id: 'frs105', label: 'frs 105' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -115,6 +117,7 @@ export function AcctReportsPage() {
       {tab === 'ledger' && <LedgerTab code={code} from={from} to={to} />}
       {tab === 'recon' && <ReconciliationTab from={from} to={to} />}
       {tab === 'vat' && <VatTab from={from} />}
+      {tab === 'frs105' && <Frs105Tab from={from} to={to} />}
     </div>
   );
 }

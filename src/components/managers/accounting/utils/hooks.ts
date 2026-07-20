@@ -39,6 +39,7 @@ export const acctKeys = {
   vatReturn: (month: string) => [...acctKeys.all, 'vat-return', month] as const,
   ossReturn: (q: string) => [...acctKeys.all, 'oss-return', q] as const,
   ukVatReturn: (q: string) => [...acctKeys.all, 'uk-vat-return', q] as const,
+  frs105: (from: string, to: string) => [...acctKeys.all, 'frs105', from, to] as const,
   eventsReview: () => [...acctKeys.all, 'events-review'] as const,
 };
 
@@ -233,6 +234,16 @@ export function useUkVatReturn(quarterStart: string) {
     queryKey: acctKeys.ukVatReturn(quarterStart),
     queryFn: () => adminService.GetUkVatReturn({ quarter: quarterStart }),
     enabled: Boolean(quarterStart),
+  });
+}
+
+// FRS 105 UK micro-entity accounts draft over [from, to). Base-currency (a DRAFT, per the response
+// caveats); the Income Statement is the period, the SoFP is as at `to`.
+export function useFrs105Accounts(from: string, to: string) {
+  return useQuery({
+    queryKey: acctKeys.frs105(from, to),
+    queryFn: () => adminService.GetFrs105Accounts({ from, to }),
+    enabled: Boolean(from && to),
   });
 }
 
