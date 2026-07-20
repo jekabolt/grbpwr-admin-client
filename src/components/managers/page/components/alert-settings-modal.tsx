@@ -18,6 +18,7 @@ type Draft = {
   contributionTrustPct: string;
   ga4CoverageWarnPct: string;
   productionRunStaleDays: string;
+  acctPostingLagHours: string;
 };
 
 const FIELDS: { key: keyof Draft; label: string; hint: string; step?: string }[] = [
@@ -53,6 +54,12 @@ const FIELDS: { key: keyof Draft; label: string; hint: string; step?: string }[]
     hint: 'warn when a run sits in-progress this many days',
     step: '1',
   },
+  {
+    key: 'acctPostingLagHours',
+    label: 'Posting lag warn (hours)',
+    hint: 'warn when the accounting posting backlog is older than this',
+    step: '1',
+  },
 ];
 
 const numOrUndef = (s: string) => (s.trim() === '' ? undefined : Number(s));
@@ -77,6 +84,7 @@ export function AlertSettingsModal({
     contributionTrustPct: '',
     ga4CoverageWarnPct: '',
     productionRunStaleDays: '',
+    acctPostingLagHours: '',
   });
 
   const { data, isLoading } = useQuery({
@@ -96,6 +104,7 @@ export function AlertSettingsModal({
       ga4CoverageWarnPct: s?.ga4CoverageWarnPct != null ? String(s.ga4CoverageWarnPct) : '',
       productionRunStaleDays:
         s?.productionRunStaleDays != null ? String(s.productionRunStaleDays) : '',
+      acctPostingLagHours: s?.acctPostingLagHours != null ? String(s.acctPostingLagHours) : '',
     });
   }, [data, open]);
 
@@ -118,6 +127,7 @@ export function AlertSettingsModal({
       contributionTrustPct: numOrUndef(d.contributionTrustPct),
       ga4CoverageWarnPct: numOrUndef(d.ga4CoverageWarnPct),
       productionRunStaleDays: numOrUndef(d.productionRunStaleDays),
+      acctPostingLagHours: numOrUndef(d.acctPostingLagHours),
     });
 
   return (

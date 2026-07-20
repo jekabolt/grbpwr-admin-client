@@ -38,6 +38,7 @@ export const SECTION = {
   production: 'production',
   tasks: 'tasks',
   accounts: 'accounts',
+  accounting: 'accounting',
   // Field-shaping section (NOT a screen gate): when an account lacks costing:read
   // the backend nulls out cost/margin fields across products, tech cards, metrics
   // and the dashboard. Deliberately absent from the nav arrays — there is no
@@ -95,6 +96,10 @@ export enum ROUTES {
   taskDetails = '/tasks/:id',
   accounts = '/accounts',
   opex = '/opex',
+  accounting = '/accounting',
+  accountingAccounts = '/accounting/accounts',
+  accountingReports = '/accounting/reports',
+  accountingPeriods = '/accounting/periods',
   employees = '/employees',
 }
 
@@ -108,6 +113,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'analytics', route: ROUTES.main, section: SECTION.analytics },
       { label: 'opex', route: ROUTES.opex, section: SECTION.analytics },
       { label: 'employees', route: ROUTES.employees, section: SECTION.analytics },
+      { label: 'accounting', route: ROUTES.accounting, section: SECTION.accounting },
       { label: 'orders', route: ROUTES.orders, section: SECTION.orders },
       { label: 'fulfillment', route: ROUTES.fulfillment, section: SECTION.fulfillment },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks },

@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { DateRangePicker, PersistentKpiBar } from './components';
+import { BackendAlerts, DateRangePicker, PersistentKpiBar } from './components';
 import { AlertSettingsModal } from './components/alert-settings-modal';
 import { VatRatesModal } from './components/vat-rates-modal';
 import { GrowthTab, ProductsTab, RevenueTab, ThisWeekTab } from './tabs';
@@ -128,11 +128,13 @@ export function Analitic() {
 
   const compareEnabled = compareMode !== 'COMPARE_MODE_NONE';
 
-  // Operating result + GA4 coverage come from GetDashboard, only needed on the Revenue tab.
+  // Operating result + GA4 coverage need GetDashboard on the Revenue tab; 'this-week' (the
+  // default landing tab) also needs it now for dashboard.alerts (backend-alerts bridge, 06 §Шаг
+  // 6b) rendered up top below — Products/Growth read neither, so the query stays off there.
   // GetDashboard supports only the compare_mode preset (no arbitrary baseline), so when a custom
   // baseline is active we suppress the dashboard compare rather than show a mismatched "vs prev".
   const { data: dashboard } = useDashboardQuery(period, {
-    enabled: activeTab === 'revenue',
+    enabled: activeTab === 'revenue' || activeTab === 'this-week',
     customFrom: period === 'custom' ? customFrom : undefined,
     customTo: period === 'custom' ? customTo : undefined,
     compareMode: hasBaseline ? 'COMPARE_MODE_NONE' : compareMode,
@@ -196,6 +198,7 @@ export function Analitic() {
           onCompareBaselineChange={handleCompareBaselineChange}
         />
         <PersistentKpiBar metrics={metricsResponse?.business} compareEnabled={compareEnabled} />
+        <BackendAlerts alerts={dashboard?.alerts} />
       </div>
 
       <div className='border-b border-textInactiveColor'>

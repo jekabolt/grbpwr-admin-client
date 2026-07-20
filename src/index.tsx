@@ -108,6 +108,26 @@ const Tasks = lazy(() => import('components/managers/tasks').then((m) => ({ defa
 const Opex = lazy(() =>
   import('components/managers/opex/page').then((m) => ({ default: m.OpexPage })),
 );
+const AcctJournal = lazy(() =>
+  import('components/managers/accounting/journal/page').then((m) => ({
+    default: m.AcctJournalPage,
+  })),
+);
+const AcctAccounts = lazy(() =>
+  import('components/managers/accounting/accounts/page').then((m) => ({
+    default: m.AcctAccountsPage,
+  })),
+);
+const AcctReports = lazy(() =>
+  import('components/managers/accounting/reports/page').then((m) => ({
+    default: m.AcctReportsPage,
+  })),
+);
+const AcctPeriods = lazy(() =>
+  import('components/managers/accounting/periods/page').then((m) => ({
+    default: m.AcctPeriodsPage,
+  })),
+);
 const Employees = lazy(() =>
   import('components/managers/employees').then((m) => ({ default: m.Employees })),
 );
@@ -251,6 +271,10 @@ root.render(
                   <Route path={ROUTES.productionRuns} element={<ProductionRuns />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
                   <Route path={ROUTES.opex} element={<Opex />} />
+                  <Route path={ROUTES.accounting} element={<AcctJournal />} />
+                  <Route path={ROUTES.accountingAccounts} element={<AcctAccounts />} />
+                  <Route path={ROUTES.accountingReports} element={<AcctReports />} />
+                  <Route path={ROUTES.accountingPeriods} element={<AcctPeriods />} />
                   <Route path={ROUTES.employees} element={<Employees />} />
                   <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
                   <Route path={ROUTES.accounts} element={<Accounts />} />
