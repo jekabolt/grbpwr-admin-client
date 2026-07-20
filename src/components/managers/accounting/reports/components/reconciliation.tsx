@@ -50,14 +50,15 @@ function LedgerVsOp({ label, value }: { label: string; value?: googletype_Decima
   );
 }
 
-// A recon item's `ref` is an operational identity. When it looks like a uuid (order/movement) AND
-// the block is an order-bearing one (not materials / unposted movements), link to the order;
-// otherwise it's plain text (§4.5).
+// A recon item's `ref` is an operational identity. Order-bearing blocks carry the order reference
+// (always `ORD-…`; order_refund events suffix it `:seq`) — only those deep-link to the order. Every
+// other ref renders as plain text: opex months (`2026-07`), production-run / movement ids, and
+// non-order event keys. We match the `ORD-` prefix rather than a loose "contains a dash / is long"
+// heuristic, which used to link e.g. the opex month `2026-07` to a non-existent /orders/2026-07 (§4.5).
 function ReconItemRow({ item, linkOrders }: { item: AcctReconItem; linkOrders: boolean }) {
   const ref = item.ref ?? '';
-  const looksUuid = ref.length > 20 || ref.includes('-');
   const uuid = ref.split(':')[0];
-  const linkable = linkOrders && looksUuid && Boolean(uuid);
+  const linkable = linkOrders && uuid.startsWith('ORD-');
   return (
     <div className='flex items-start justify-between gap-2'>
       <div className='flex min-w-0 flex-col'>
