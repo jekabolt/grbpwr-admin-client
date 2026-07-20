@@ -47,24 +47,39 @@ export function AcctPeriodsPage() {
       <AcctSectionHeader />
 
       <div className='flex flex-col gap-4 py-6'>
-        {/* Ritual hint (05 / backend plan 08): static, three steps, always visible above the
-            table so the accountant never has to guess what "close" presupposes. */}
+        {/* Ritual hint (05 / backend plan 08): static, always visible above the table so the
+            accountant never has to guess what "close" presupposes — and how periods come to
+            exist (there is no manual "create"). */}
         <div className='flex flex-col gap-1'>
+          <Text variant='inactive' size='small'>
+            Periods open <span className='text-textColor'>automatically</span> on the first posting
+            into a month — there is no “create”. A month becomes closable{' '}
+            <span className='text-textColor'>only after it has ended</span> (the “close” button
+            appears on its row on the 1st of the next month). To close a finished month:
+          </Text>
           <Text variant='inactive' size='small'>
             1. review reconciliation
           </Text>
           <Text variant='inactive' size='small'>
-            2. add missing manual entries
+            2. add any missing manual entries
           </Text>
           <Text variant='inactive' size='small'>
-            3. close
+            3. close (a pre-close check flags pending events / unposted movements / revenue delta)
           </Text>
-          <Link
-            to={`${ROUTES.accountingReports}?tab=recon`}
-            className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
-          >
-            open reconciliation →
-          </Link>
+          <div className='flex flex-wrap gap-4'>
+            <Link
+              to={`${ROUTES.accountingReports}?tab=recon`}
+              className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+            >
+              open reconciliation →
+            </Link>
+            <Link
+              to={`${ROUTES.accounting}?new=1`}
+              className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+            >
+              add manual entry →
+            </Link>
+          </div>
         </div>
 
         {isLoading ? (
