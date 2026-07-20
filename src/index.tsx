@@ -129,6 +129,11 @@ const AcctPeriods = lazy(() =>
     default: m.AcctPeriodsPage,
   })),
 );
+const AcctEvents = lazy(() =>
+  import('components/managers/accounting/events/page').then((m) => ({
+    default: m.AcctEventsPage,
+  })),
+);
 const Employees = lazy(() =>
   import('components/managers/employees').then((m) => ({ default: m.Employees })),
 );
@@ -286,6 +291,7 @@ root.render(
                     <Route path={ROUTES.accountingAccounts} element={<AcctAccounts />} />
                     <Route path={ROUTES.accountingReports} element={<AcctReports />} />
                     <Route path={ROUTES.accountingPeriods} element={<AcctPeriods />} />
+                    <Route path={ROUTES.accountingEvents} element={<AcctEvents />} />
                   </Route>
                   <Route path={ROUTES.employees} element={<Employees />} />
                   <Route path={ROUTES.taskDetails} element={<TaskDetail />} />

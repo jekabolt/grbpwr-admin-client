@@ -7007,6 +7007,41 @@ export type ReopenAcctPeriodRequest = {
 export type ReopenAcctPeriodResponse = {
 };
 
+// AcctEvent is one posting-outbox event's disposition (the internal JSON payload is omitted).
+export type AcctEvent = {
+  id: number | undefined;
+  eventType: string | undefined;
+  sourceKey: string | undefined;
+  occurredAt: string | undefined;
+  createdAt: string | undefined;
+  processedAt: string | undefined;
+  attempts: number | undefined;
+  lastError: string | undefined;
+  needsReview: boolean | undefined;
+};
+
+export type ListAcctEventsNeedingReviewRequest = {
+  limit: number | undefined;
+};
+
+export type ListAcctEventsNeedingReviewResponse = {
+  events: AcctEvent[] | undefined;
+};
+
+export type ReprocessAcctEventRequest = {
+  id: number | undefined;
+};
+
+export type ReprocessAcctEventResponse = {
+};
+
+export type ResolveAcctEventRequest = {
+  id: number | undefined;
+};
+
+export type ResolveAcctEventResponse = {
+};
+
 export type GetTrialBalanceRequest = {
   from: string | undefined;
   to: string | undefined;
@@ -7785,6 +7820,15 @@ export interface AdminService {
   // COGS, materials, finished goods) and lists what is deliberately left unposted, over
   // [from, to) (to exclusive).
   GetAcctReconciliation(request: GetAcctReconciliationRequest): Promise<GetAcctReconciliationResponse>;
+  // ListAcctEventsNeedingReview lists outbox events that were terminally disposed but need an operator
+  // (a non-EUR/degenerate order needing a manual entry, an orphan refund, or a dead-letter). Their
+  // month cannot close until each is resolved or reprocessed.
+  ListAcctEventsNeedingReview(request: ListAcctEventsNeedingReviewRequest): Promise<ListAcctEventsNeedingReviewResponse>;
+  // ReprocessAcctEvent resets an event so the worker re-attempts it from scratch (used after the cause
+  // is fixed, e.g. the missing vat_rate was added).
+  ReprocessAcctEvent(request: ReprocessAcctEventRequest): Promise<ReprocessAcctEventResponse>;
+  // ResolveAcctEvent clears the review flag on an event handled manually (a manual journal entry posted).
+  ResolveAcctEvent(request: ResolveAcctEventRequest): Promise<ResolveAcctEventResponse>;
   // GetVatReturnPL returns the JPK_VAT monthly aggregate (filed by the 25th): output VAT by regime
   // (domestic PL, WNT/import self-charge, OSS shown for reference only), input VAT by type, and the
   // net payable. Source-type-agnostic and aggregated by the payment period, so it survives wave 2's
@@ -12684,6 +12728,60 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetAcctReconciliation",
       }) as Promise<GetAcctReconciliationResponse>;
+    },
+    ListAcctEventsNeedingReview(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/events/needs-review`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAcctEventsNeedingReview",
+      }) as Promise<ListAcctEventsNeedingReviewResponse>;
+    },
+    ReprocessAcctEvent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/events/reprocess`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReprocessAcctEvent",
+      }) as Promise<ReprocessAcctEventResponse>;
+    },
+    ResolveAcctEvent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/events/resolve`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ResolveAcctEvent",
+      }) as Promise<ResolveAcctEventResponse>;
     },
     GetVatReturnPL(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/vat-return`; // eslint-disable-line quotes

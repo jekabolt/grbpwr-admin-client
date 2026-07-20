@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { AcctJournalLineInput } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 
 // Accounting module (backend `feature/accounting-core`; docs/plan-accounting-ui/
 // 01-contract-and-api.md §1.3). One query-key domain for the whole section — small enough that
@@ -37,6 +38,7 @@ export const acctKeys = {
   reconciliation: (from: string, to: string) => [...acctKeys.all, 'recon', from, to] as const,
   vatReturn: (month: string) => [...acctKeys.all, 'vat-return', month] as const,
   ossReturn: (q: string) => [...acctKeys.all, 'oss-return', q] as const,
+  eventsReview: () => [...acctKeys.all, 'events-review'] as const,
 };
 
 // ---- Chart of accounts ----
@@ -221,5 +223,50 @@ export function useOssReturn(quarterStart: string) {
     queryKey: acctKeys.ossReturn(quarterStart),
     queryFn: () => adminService.GetOssReturn({ quarter: quarterStart }),
     enabled: Boolean(quarterStart),
+  });
+}
+
+// ---- Event review queue (dead-letter) ----
+// The posting worker terminally disposes events it can't auto-post (non-EUR/degenerate orders,
+// orphan refunds, dead-letters) and flags them needs_review; the accounting month can't close
+// until an operator reprocesses (retry after fixing the cause) or resolves (mark handled after a
+// manual journal entry). limit is fixed at 100 — the queue is small by design (backend contract).
+// Unlike the other mutations in this file, these two own their own success/error toasts: the
+// review actions are one-click terminal decisions with no calling modal to host the feedback.
+
+export function useAcctEventsNeedingReview() {
+  return useQuery({
+    queryKey: acctKeys.eventsReview(),
+    queryFn: () => adminService.ListAcctEventsNeedingReview({ limit: 100 }),
+  });
+}
+
+export function useReprocessAcctEvent() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { id: number }) => adminService.ReprocessAcctEvent(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: acctKeys.eventsReview() });
+      qc.invalidateQueries({ queryKey: acctKeys.all });
+      showMessage('Event queued for reprocessing', 'success');
+    },
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to reprocess event', 'error'),
+  });
+}
+
+export function useResolveAcctEvent() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { id: number }) => adminService.ResolveAcctEvent(vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: acctKeys.eventsReview() });
+      qc.invalidateQueries({ queryKey: acctKeys.all });
+      showMessage('Event marked resolved', 'success');
+    },
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to resolve event', 'error'),
   });
 }

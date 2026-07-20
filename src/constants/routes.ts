@@ -100,6 +100,7 @@ export enum ROUTES {
   accountingAccounts = '/accounting/accounts',
   accountingReports = '/accounting/reports',
   accountingPeriods = '/accounting/periods',
+  accountingEvents = '/accounting/events',
   employees = '/employees',
 }
 
