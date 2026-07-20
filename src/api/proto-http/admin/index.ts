@@ -7282,6 +7282,24 @@ export type ExportOssReturnResponse = {
   xmlContent: string | undefined;
 };
 
+export type GetUkVatReturnRequest = {
+  // quarter: YYYY-MM-DD, any day within the target quarter (snapped to the quarter's first day).
+  quarter: string | undefined;
+};
+
+// GetUkVatReturnResponse is the 9-box UK VAT return. Boxes 2 (EU acquisitions VAT), 8 and 9 (EU
+// supplies/acquisitions) are always zero for a post-Brexit GB return, so they are omitted here; Box 3 =
+// Box 1 and Box 5 = Box 3 − Box 4.
+export type GetUkVatReturnResponse = {
+  quarterStart: string | undefined;
+  box1OutputVat: googletype_Decimal | undefined;
+  box3TotalVatDue: googletype_Decimal | undefined;
+  box4InputVat: googletype_Decimal | undefined;
+  box5NetVat: googletype_Decimal | undefined;
+  box6NetSales: googletype_Decimal | undefined;
+  box7NetPurchases: googletype_Decimal | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -7875,6 +7893,10 @@ export interface AdminService {
   // state of consumption with its rate, taxable base and VAT — for the accountant to validate against
   // the official schema / transcribe into the OSS portal. Requires the JPK_* taxpayer identity.
   ExportOssReturn(request: ExportOssReturnRequest): Promise<ExportOssReturnResponse>;
+  // GetUkVatReturn returns the quarterly UK VAT return in 9-box MTD layout for the uk_stock_domestic
+  // regime (a separate jurisdiction from the Polish JPK). Boxes 2/8/9 are zero post-Brexit for a GB
+  // return; the figures are entered into MTD-compatible software / the HMRC bridge to submit.
+  GetUkVatReturn(request: GetUkVatReturnRequest): Promise<GetUkVatReturnResponse>;
 }
 
 type RequestType = {
@@ -12900,6 +12922,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ExportOssReturn",
       }) as Promise<ExportOssReturnResponse>;
+    },
+    GetUkVatReturn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/uk-vat-return`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.quarter) {
+        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetUkVatReturn",
+      }) as Promise<GetUkVatReturnResponse>;
     },
   };
 }

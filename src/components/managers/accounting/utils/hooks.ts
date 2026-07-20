@@ -38,6 +38,7 @@ export const acctKeys = {
   reconciliation: (from: string, to: string) => [...acctKeys.all, 'recon', from, to] as const,
   vatReturn: (month: string) => [...acctKeys.all, 'vat-return', month] as const,
   ossReturn: (q: string) => [...acctKeys.all, 'oss-return', q] as const,
+  ukVatReturn: (q: string) => [...acctKeys.all, 'uk-vat-return', q] as const,
   eventsReview: () => [...acctKeys.all, 'events-review'] as const,
 };
 
@@ -222,6 +223,15 @@ export function useOssReturn(quarterStart: string) {
   return useQuery({
     queryKey: acctKeys.ossReturn(quarterStart),
     queryFn: () => adminService.GetOssReturn({ quarter: quarterStart }),
+    enabled: Boolean(quarterStart),
+  });
+}
+
+// Quarterly UK VAT return (9-box MTD). Same quarter dimension as OSS; a separate UK jurisdiction.
+export function useUkVatReturn(quarterStart: string) {
+  return useQuery({
+    queryKey: acctKeys.ukVatReturn(quarterStart),
+    queryFn: () => adminService.GetUkVatReturn({ quarter: quarterStart }),
     enabled: Boolean(quarterStart),
   });
 }
