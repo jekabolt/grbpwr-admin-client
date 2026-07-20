@@ -14,6 +14,7 @@ import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
+import { TooltipProvider } from 'ui/components/tooltip';
 import { Layout } from 'ui/layout';
 import './global.css';
 
@@ -271,10 +272,21 @@ root.render(
                   <Route path={ROUTES.productionRuns} element={<ProductionRuns />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
                   <Route path={ROUTES.opex} element={<Opex />} />
-                  <Route path={ROUTES.accounting} element={<AcctJournal />} />
-                  <Route path={ROUTES.accountingAccounts} element={<AcctAccounts />} />
-                  <Route path={ROUTES.accountingReports} element={<AcctReports />} />
-                  <Route path={ROUTES.accountingPeriods} element={<AcctPeriods />} />
+                  {/* All accounting screens share one TooltipProvider (the design in
+                      ui/components/tooltip.tsx): <Tooltip> is raw Radix and throws without a
+                      provider ancestor, and one shared provider also shares hover timing. */}
+                  <Route
+                    element={
+                      <TooltipProvider delayDuration={200} skipDelayDuration={150}>
+                        <Outlet />
+                      </TooltipProvider>
+                    }
+                  >
+                    <Route path={ROUTES.accounting} element={<AcctJournal />} />
+                    <Route path={ROUTES.accountingAccounts} element={<AcctAccounts />} />
+                    <Route path={ROUTES.accountingReports} element={<AcctReports />} />
+                    <Route path={ROUTES.accountingPeriods} element={<AcctPeriods />} />
+                  </Route>
                   <Route path={ROUTES.employees} element={<Employees />} />
                   <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
                   <Route path={ROUTES.accounts} element={<Accounts />} />
