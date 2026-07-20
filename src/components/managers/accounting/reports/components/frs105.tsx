@@ -54,9 +54,9 @@ export function Frs105Tab({ from, to }: Props) {
   return (
     <ReportState isLoading={isLoading} isError={isError} onRetry={() => refetch()} isEmpty={!data}>
       <div className='flex flex-col gap-6'>
-        <div className='border border-error/60 bg-error/5 p-3'>
-          <Text variant='uppercase' size='small' className='font-semibold text-error'>
-            draft — not filing-ready
+        <div className='border border-textInactiveColor p-3'>
+          <Text variant='uppercase' size='small' className='font-medium'>
+            draft — for accountant finalisation
           </Text>
           <div className='mt-1'>
             <CaveatsNote caveats={data?.caveats ?? []} />
