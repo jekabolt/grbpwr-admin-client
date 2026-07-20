@@ -3,6 +3,7 @@ import Text from 'ui/components/text';
 import { useFrs105Accounts } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
 import { CopyTableButton } from './copy-table-button';
+import { FixedAssetsPanel } from './fixed-assets';
 import { CaveatsNote, ReportState } from './report-utils';
 
 type Props = {
@@ -52,28 +53,35 @@ export function Frs105Tab({ from, to }: Props) {
   ];
 
   return (
-    <ReportState isLoading={isLoading} isError={isError} onRetry={() => refetch()} isEmpty={!data}>
-      <div className='flex flex-col gap-6'>
-        <div className='border border-textInactiveColor p-3'>
-          <Text variant='uppercase' size='small' className='font-medium'>
-            draft — for accountant finalisation
-          </Text>
-          <div className='mt-1'>
-            <CaveatsNote caveats={data?.caveats ?? []} />
+    <div className='flex flex-col gap-6'>
+      <ReportState isLoading={isLoading} isError={isError} onRetry={() => refetch()} isEmpty={!data}>
+        <div className='flex flex-col gap-6'>
+          <div className='border border-textInactiveColor p-3'>
+            <Text variant='uppercase' size='small' className='font-medium'>
+              draft — for accountant finalisation
+            </Text>
+            <div className='mt-1'>
+              <CaveatsNote caveats={data?.caveats ?? []} />
+            </div>
           </div>
-        </div>
 
-        <div className='flex justify-end'>
-          <CopyTableButton headers={copyHeaders} rows={copyRows} filename='frs105-accounts' />
-        </div>
+          <div className='flex justify-end'>
+            <CopyTableButton headers={copyHeaders} rows={copyRows} filename='frs105-accounts' />
+          </div>
 
-        <Frs105Section
-          title={`Income statement · figures in ${data?.currency ?? ''}`}
-          lines={income}
-        />
-        <Frs105Section title={`Statement of financial position · as at end of period`} lines={position} />
-      </div>
-    </ReportState>
+          <Frs105Section
+            title={`Income statement · figures in ${data?.currency ?? ''}`}
+            lines={income}
+          />
+          <Frs105Section
+            title={`Statement of financial position · as at end of period`}
+            lines={position}
+          />
+        </div>
+      </ReportState>
+
+      <FixedAssetsPanel from={from} to={to} />
+    </div>
   );
 }
 

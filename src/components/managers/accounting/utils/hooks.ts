@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { AcctJournalLineInput } from 'api/proto-http/admin';
+import { AcctJournalLineInput, googletype_Decimal } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 
 // Accounting module (backend `feature/accounting-core`; docs/plan-accounting-ui/
@@ -40,6 +40,7 @@ export const acctKeys = {
   ossReturn: (q: string) => [...acctKeys.all, 'oss-return', q] as const,
   ukVatReturn: (q: string) => [...acctKeys.all, 'uk-vat-return', q] as const,
   frs105: (from: string, to: string) => [...acctKeys.all, 'frs105', from, to] as const,
+  fixedAssets: () => [...acctKeys.all, 'fixed-assets'] as const,
   eventsReview: () => [...acctKeys.all, 'events-review'] as const,
 };
 
@@ -244,6 +245,61 @@ export function useFrs105Accounts(from: string, to: string) {
     queryKey: acctKeys.frs105(from, to),
     queryFn: () => adminService.GetFrs105Accounts({ from, to }),
     enabled: Boolean(from && to),
+  });
+}
+
+// ---- Fixed assets / depreciation / corporation tax (statutory completeness) ----
+// The register drives straight-line depreciation (Dr 6370 / Cr 1225) and the CT accrual closes the
+// two FRS 105 completeness gaps the response caveats flag. All three mutations invalidate acctKeys.all
+// wholesale — a depreciation charge or CT accrual moves the P&L, SoFP, ledger and the FRS 105 view.
+
+export function useFixedAssets() {
+  return useQuery({
+    queryKey: acctKeys.fixedAssets(),
+    queryFn: () => adminService.ListFixedAssets({}),
+  });
+}
+
+export function useCreateFixedAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      name: string;
+      costBase: googletype_Decimal;
+      acquiredOn: string;
+      usefulLifeMonths: number;
+    }) => adminService.CreateFixedAsset(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
+  });
+}
+
+// Posts every un-posted monthly charge up to `upTo`'s month. Owns its toast (single-click action with
+// no hosting modal); a non-zero `skipped` means closed-period months were not posted (surfaced to the
+// caller so they can reopen the period or post a manual catch-up).
+export function usePostDepreciation() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { upTo: string }) => adminService.PostDepreciation(vars),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: acctKeys.all });
+      const posted = res.posted ?? 0;
+      const skipped = res.skipped ?? 0;
+      const base = posted === 0 ? 'No depreciation due' : `Posted ${posted} depreciation charge(s)`;
+      const tail = skipped > 0 ? ` · ${skipped} skipped (closed periods)` : '';
+      showMessage(`${base}${tail}`, skipped > 0 ? 'error' : 'success');
+    },
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to post depreciation', 'error'),
+  });
+}
+
+export function useAccrueCorporationTax() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { from: string; to: string; ratePct: googletype_Decimal }) =>
+      adminService.AccrueCorporationTax(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
   });
 }
 

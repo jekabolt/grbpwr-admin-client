@@ -7088,7 +7088,7 @@ export type AcctPLRow = {
   total: googletype_Decimal | undefined;
 };
 
-// AcctPLSection groups P&L rows by section, in report order (revenue, cogs, opex).
+// AcctPLSection groups P&L rows by section, in report order (revenue, cogs, opex, tax).
 export type AcctPLSection = {
   section: string | undefined;
   rows: AcctPLRow[] | undefined;
@@ -7103,15 +7103,20 @@ export type AcctPLTotals = {
   totalOpex: googletype_Decimal[] | undefined;
   operatingProfit: googletype_Decimal[] | undefined;
   netMarginPct: googletype_Decimal[] | undefined;
+  // Corporation Tax lines (phase 2, wave 3). total_tax is the period's Σ 8010 charge (manual journal
+  // only — zero until the accountant posts CT); net_profit_after_tax = operating_profit − total_tax.
+  totalTax: googletype_Decimal[] | undefined;
+  netProfitAfterTax: googletype_Decimal[] | undefined;
 };
 
 export type GetProfitLossStatementResponse = {
   months: string[] | undefined;
   sections: AcctPLSection[] | undefined;
   totals: AcctPLTotals | undefined;
-  // Phase-1 caveats: always includes "pre-tax profit (no corporate tax accrual)" and "carrier
-  // shipping cost not booked (4110 has no 6030 expense pair yet)", plus a count of entries in the
-  // period flagged has_caveat.
+  // Caveats. As of phase 2 wave 3 the two former permanent caveats are CONDITIONAL: "pre-tax profit"
+  // prints only when the period has no 8010 Corporation-Tax entry, and "carrier shipping cost not
+  // booked" only when the period has 4110 shipping income but no 6030 shipping expense. Followed by a
+  // count of entries in the period flagged has_caveat.
   caveats: string[] | undefined;
 };
 
@@ -7330,6 +7335,57 @@ export type GetFrs105AccountsResponse = {
   netAssets: googletype_Decimal | undefined;
   capitalAndReserves: googletype_Decimal | undefined;
   caveats: string[] | undefined;
+};
+
+// FixedAsset is one capitalised asset, depreciated straight-line over useful_life_months from acquired_on.
+export type FixedAsset = {
+  id: number | undefined;
+  name: string | undefined;
+  costBase: googletype_Decimal | undefined;
+  acquiredOn: string | undefined;
+  usefulLifeMonths: number | undefined;
+  disposedOn: string | undefined;
+};
+
+export type CreateFixedAssetRequest = {
+  name: string | undefined;
+  costBase: googletype_Decimal | undefined;
+  acquiredOn: string | undefined;
+  usefulLifeMonths: number | undefined;
+};
+
+export type CreateFixedAssetResponse = {
+  id: number | undefined;
+};
+
+export type ListFixedAssetsRequest = {
+};
+
+export type ListFixedAssetsResponse = {
+  assets: FixedAsset[] | undefined;
+};
+
+export type PostDepreciationRequest = {
+  upTo: string | undefined;
+};
+
+export type PostDepreciationResponse = {
+  posted: number | undefined;
+  // Monthly charges NOT posted because their accounting period is already closed. Non-zero means the
+  // run was incomplete (e.g. a back-dated asset whose early months are closed) — reopen the period or
+  // post a manual catch-up; the depreciation is not otherwise recovered.
+  skipped: number | undefined;
+};
+
+export type AccrueCorporationTaxRequest = {
+  from: string | undefined;
+  to: string | undefined;
+  ratePct: googletype_Decimal | undefined;
+};
+
+export type AccrueCorporationTaxResponse = {
+  corpTax: googletype_Decimal | undefined;
+  alreadyPosted: boolean | undefined;
 };
 
 export interface AdminService {
@@ -7933,6 +7989,13 @@ export interface AdminService {
   // Statement of Financial Position). A base-currency DRAFT: a filing-ready UK Ltd set needs GBP
   // conversion + isolation of the UK entity's transactions — surfaced in caveats, not done here.
   GetFrs105Accounts(request: GetFrs105AccountsRequest): Promise<GetFrs105AccountsResponse>;
+  // Fixed-asset register + straight-line depreciation.
+  CreateFixedAsset(request: CreateFixedAssetRequest): Promise<CreateFixedAssetResponse>;
+  ListFixedAssets(request: ListFixedAssetsRequest): Promise<ListFixedAssetsResponse>;
+  // PostDepreciation posts every not-yet-posted monthly depreciation charge up to the given month.
+  PostDepreciation(request: PostDepreciationRequest): Promise<PostDepreciationResponse>;
+  // AccrueCorporationTax posts a corporation-tax accrual (Dr 8010 / Cr 2050) on the period's pre-tax profit.
+  AccrueCorporationTax(request: AccrueCorporationTaxRequest): Promise<AccrueCorporationTaxResponse>;
 }
 
 type RequestType = {
@@ -13001,6 +13064,74 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetFrs105Accounts",
       }) as Promise<GetFrs105AccountsResponse>;
+    },
+    CreateFixedAsset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/fixed-assets`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateFixedAsset",
+      }) as Promise<CreateFixedAssetResponse>;
+    },
+    ListFixedAssets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/fixed-assets`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFixedAssets",
+      }) as Promise<ListFixedAssetsResponse>;
+    },
+    PostDepreciation(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/depreciation/post`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostDepreciation",
+      }) as Promise<PostDepreciationResponse>;
+    },
+    AccrueCorporationTax(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/corporation-tax/accrue`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AccrueCorporationTax",
+      }) as Promise<AccrueCorporationTaxResponse>;
     },
   };
 }
