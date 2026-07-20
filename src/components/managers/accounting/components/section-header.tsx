@@ -9,6 +9,7 @@ const TABS: { label: string; route: string }[] = [
   { label: 'accounts', route: ROUTES.accountingAccounts },
   { label: 'reports', route: ROUTES.accountingReports },
   { label: 'periods', route: ROUTES.accountingPeriods },
+  { label: 'events', route: ROUTES.accountingEvents },
 ];
 
 type Props = {
