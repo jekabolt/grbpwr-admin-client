@@ -102,6 +102,15 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 // ---- Receive (purchase-in) ------------------------------------------------------------------
 
+// Input-VAT treatment for the extended M1 posting rule (phase 2). Matches the backend's accepted
+// set (wnt|import|domestic_pl|domestic_uk); '' = not recorded.
+const vatRegimeOptions = [
+  { value: 'wnt', label: 'WNT (intra-EU)' },
+  { value: 'import', label: 'import' },
+  { value: 'domestic_pl', label: 'domestic PL' },
+  { value: 'domestic_uk', label: 'domestic UK' },
+];
+
 export function ReceiveStockModal({
   open,
   onOpenChange,
@@ -117,6 +126,10 @@ export function ReceiveStockModal({
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
   const [currency, setCurrency] = useState('EUR');
+  // Recoverable input VAT for this receipt (base currency EUR) + its regime — kept separate from
+  // the NET unit cost so the two aren't double-counted. Both optional; when set, both should be set.
+  const [inputVat, setInputVat] = useState('');
+  const [inputVatRegime, setInputVatRegime] = useState('');
   const [lot, setLot] = useState('');
   // #48: "lot / roll" read as unexplained jargon ("не понимаю что это, для малого производства
   // оверкил") — collapsed behind an opt-in toggle instead of an unconditional field.
@@ -130,6 +143,8 @@ export function ReceiveStockModal({
     setQuantity('');
     setUnitCost('');
     setCurrency('EUR');
+    setInputVat('');
+    setInputVatRegime('');
     setLot('');
     setShowLot(false);
     setSupplierDoc('');
@@ -141,6 +156,14 @@ export function ReceiveStockModal({
     const qty = parseDecimalNumber(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
       showMessage('Quantity must be greater than zero', 'error');
+      return;
+    }
+    // Input VAT is all-or-nothing (the backend rejects one without the other); catch it here to save a
+    // round-trip.
+    const hasInputVat = inputVat.trim() !== '';
+    const hasInputVatRegime = inputVatRegime !== '';
+    if (hasInputVat !== hasInputVatRegime) {
+      showMessage('Input VAT needs both an amount and a regime, or neither', 'error');
       return;
     }
     // Setting a cost is a costing write; omit it (uncosted receipt, average unchanged) otherwise.
@@ -155,6 +178,9 @@ export function ReceiveStockModal({
         supplierDoc: supplierDoc.trim(),
         occurredAt,
         comment: comment.trim(),
+        // Recording input VAT is a costing write; both fields optional, sent only when set.
+        inputVatAmount: canWriteCosting ? inputToDecimal(inputVat) : undefined,
+        inputVatRegime: canWriteCosting && inputVatRegime ? inputVatRegime : undefined,
       });
       showMessage(posted(res.movement), 'success');
       onOpenChange(false);
@@ -181,26 +207,57 @@ export function ReceiveStockModal({
         />
       </Field>
       {canWriteCosting ? (
-        <div className='grid grid-cols-[1fr_auto] gap-2'>
-          <Field label='unit cost'>
-            <input
-              className={cell}
-              inputMode='decimal'
-              placeholder='blank = uncosted'
-              value={unitCost}
-              onChange={(e) => setUnitCost(sanitizeDecimal(e.target.value))}
-            />
-          </Field>
-          <Field label='currency'>
-            <select className={cell} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              {EXPENSE_CURRENCIES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.value}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
+        <>
+          <div className='grid grid-cols-[1fr_auto] gap-2'>
+            <Field label='unit cost (net)'>
+              <input
+                className={cell}
+                inputMode='decimal'
+                placeholder='blank = uncosted'
+                value={unitCost}
+                onChange={(e) => setUnitCost(sanitizeDecimal(e.target.value))}
+              />
+            </Field>
+            <Field label='currency'>
+              <select
+                className={cell}
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+              >
+                {EXPENSE_CURRENCIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.value}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className='grid grid-cols-[1fr_auto] gap-2'>
+            <Field label='input VAT (EUR)'>
+              <input
+                className={cell}
+                inputMode='decimal'
+                placeholder='optional — VAT-exclusive of unit cost'
+                value={inputVat}
+                onChange={(e) => setInputVat(sanitizeDecimal(e.target.value))}
+              />
+            </Field>
+            <Field label='VAT regime'>
+              <select
+                className={cell}
+                value={inputVatRegime}
+                onChange={(e) => setInputVatRegime(e.target.value)}
+              >
+                <option value=''>— none —</option>
+                {vatRegimeOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </>
       ) : (
         <Text variant='inactive' size='small'>
           Uncosted receipt — moving average unchanged.

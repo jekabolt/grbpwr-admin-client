@@ -120,6 +120,8 @@ export function CustomOrderForm({
         items,
         billingAddress,
         currency,
+        // Optional B2B EU VAT id (phase 2); omit when blank so the backend keeps the B2C path.
+        buyerVatId: data.buyerVatId?.trim() || undefined,
       } as CreateCustomOrderRequest;
       const response = await adminService.CreateCustomOrder(payload);
       showMessage('Custom order created successfully', 'success');

@@ -41,6 +41,9 @@ const baseCustomOrderSchema = z.object({
   shipmentCost: z.object({
     value: z.string().min(1, 'Shipment cost is required'),
   }),
+  // Optional B2B EU VAT id (phase 2). Its presence drives the wdt / reverse-charge classification on
+  // the backend; free-form here (VIES lookup is out of scope).
+  buyerVatId: z.string().optional(),
 });
 
 export const customOrderSchema = baseCustomOrderSchema;
@@ -73,4 +76,5 @@ export const defaultCustomOrder = {
   paymentMethod: 'PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE' as const,
   shipmentCarrierId: 0,
   shipmentCost: { value: '' },
+  buyerVatId: '',
 };
