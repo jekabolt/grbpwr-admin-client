@@ -35,6 +35,8 @@ export const acctKeys = {
   balanceSheet: (asOf: string) => [...acctKeys.all, 'bs', asOf] as const,
   ledger: (code: string, f: LedgerFilter) => [...acctKeys.all, 'ledger', code, f] as const,
   reconciliation: (from: string, to: string) => [...acctKeys.all, 'recon', from, to] as const,
+  vatReturn: (month: string) => [...acctKeys.all, 'vat-return', month] as const,
+  ossReturn: (q: string) => [...acctKeys.all, 'oss-return', q] as const,
 };
 
 // ---- Chart of accounts ----
@@ -199,5 +201,25 @@ export function useReconciliation(from: string, to: string) {
     queryKey: acctKeys.reconciliation(from, to),
     queryFn: () => adminService.GetAcctReconciliation({ from, to }),
     enabled: Boolean(from && to),
+  });
+}
+
+// JPK_VAT monthly return (phase 2). `month` is any day within the target filing month; the backend
+// normalises it to the 1st. The OSS block is filed separately (GetOssReturn), not here.
+export function useVatReturnPL(month: string) {
+  return useQuery({
+    queryKey: acctKeys.vatReturn(month),
+    queryFn: () => adminService.GetVatReturnPL({ month }),
+    enabled: Boolean(month),
+  });
+}
+
+// Quarterly OSS return (phase 2). `quarterStart` is any day within the target quarter; the request
+// field is `quarter` (backend snaps it to the quarter's first day).
+export function useOssReturn(quarterStart: string) {
+  return useQuery({
+    queryKey: acctKeys.ossReturn(quarterStart),
+    queryFn: () => adminService.GetOssReturn({ quarter: quarterStart }),
+    enabled: Boolean(quarterStart),
   });
 }

@@ -8,18 +8,20 @@ import { RangeControls, type ControlsMode } from './components/range-controls';
 import { ReconciliationTab } from './components/reconciliation';
 import { defaultAsOf, defaultRange } from './components/report-utils';
 import { TrialBalanceTab } from './components/trial-balance';
+import { VatTab } from './components/vat';
 
 // Reports screen (04): one page, five tabs in ?tab (opex pattern — plain buttons + useSearchParams,
 // not Radix Tabs). The whole selection — tab, from/to, asOf, account code — lives in searchParams,
 // so every view is a shareable link and the TB/BS/P&L drill-downs, recon and dashboard alerts can
 // deep-link into an exact report state (§8.2). searchParams contract:
-// ?tab=tb|pl|bs|ledger|recon & from & to & asOf & code.
+// ?tab=tb|pl|bs|ledger|recon|vat & from & to & asOf & code.
 const TABS = [
   { id: 'tb', label: 'trial balance' },
   { id: 'pl', label: 'p&l' },
   { id: 'bs', label: 'balance sheet' },
   { id: 'ledger', label: 'ledger' },
   { id: 'recon', label: 'reconciliation' },
+  { id: 'vat', label: 'vat' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -112,6 +114,7 @@ export function AcctReportsPage() {
       {tab === 'bs' && <BalanceSheetTab asOf={asOf} onDrill={(c) => drillToLedger(c, true)} />}
       {tab === 'ledger' && <LedgerTab code={code} from={from} to={to} />}
       {tab === 'recon' && <ReconciliationTab from={from} to={to} />}
+      {tab === 'vat' && <VatTab from={from} />}
     </div>
   );
 }

@@ -2883,6 +2883,11 @@ export type CreateCustomOrderRequest = {
   shipmentCarrierId: number | undefined;
   currency: string | undefined;
   shipmentCost: googletype_Decimal | undefined;
+  // buyer_vat_id is the B2B buyer's EU VAT identifier (optional; phase 2, wave 1). Its presence
+  // drives the wdt / reverse-charge VAT classification (intra-community supply, 0%) and 4310
+  // wholesale revenue instead of the B2C path. Format: 2-letter country prefix + 8..12 alphanumeric
+  // characters (e.g. DE123456789); free-form, VIES lookup is out of scope.
+  buyerVatId: string | undefined;
 };
 
 // CustomOrderItemInsert allows custom pricing per item (admin-only). Admin addresses the variant by its
@@ -6434,6 +6439,14 @@ export type ReceiveMaterialStockRequest = {
   supplierDoc: string | undefined;
   occurredAt: string | undefined;
   comment: string | undefined;
+  // input_vat_amount / input_vat_regime record this purchase receipt's recoverable input VAT (base
+  // currency EUR) and its treatment, for the extended M1 posting rule (phase 2, wave 1). Both
+  // optional; when either is set, both must be set (amount >= 0, regime one of
+  // wnt|import|domestic_pl|domestic_uk). unit_cost stays NET — do NOT also fold this VAT into it, or
+  // it is double-counted (inflated inventory/COGS AND a 2080 recovery); the server rejects an
+  // input_vat_amount above 30% of the net line cost as a likely gross unit_cost.
+  inputVatAmount: googletype_Decimal | undefined;
+  inputVatRegime: string | undefined;
 };
 
 export type ReceiveMaterialStockResponse = {
@@ -7154,6 +7167,55 @@ export type GetAcctReconciliationResponse = {
   finishedGoods: AcctReconBlock | undefined;
   pending: AcctReconBlock | undefined;
   unpostedMovements: AcctReconBlock | undefined;
+  vat: AcctReconBlock | undefined;
+};
+
+export type GetVatReturnPLRequest = {
+  // month: YYYY-MM-DD, any day within the target filing month (normalised to the 1st).
+  month: string | undefined;
+};
+
+// GetVatReturnPLResponse is the JPK_VAT monthly aggregate (filed by the 25th). Output VAT is split
+// by regime (domestic PL, WNT/import self-charge; OSS shown for reference only — OSS is filed via
+// GetOssReturn, not JPK, and is excluded from net_payable), input VAT is split by purchase type, and
+// net_payable is the resulting liability. Caveats aggregates the period's per-entry caveats.
+export type GetVatReturnPLResponse = {
+  month: string | undefined;
+  outputDomestic: googletype_Decimal | undefined;
+  outputWntSelfCharge: googletype_Decimal | undefined;
+  ossInfoTotal: googletype_Decimal | undefined;
+  inputDomestic: googletype_Decimal | undefined;
+  inputWnt: googletype_Decimal | undefined;
+  inputImport: googletype_Decimal | undefined;
+  netPayable: googletype_Decimal | undefined;
+  // UK is a different jurisdiction — filed on the UK return, deliberately NOT in net_payable.
+  outputUkStockDomestic: googletype_Decimal | undefined;
+  inputUkDomestic: googletype_Decimal | undefined;
+  // Zero-rated NET revenue bases JPK still declares (carry no VAT, not in net_payable).
+  netWdt: googletype_Decimal | undefined;
+  netExport: googletype_Decimal | undefined;
+  caveats: string[] | undefined;
+};
+
+export type GetOssReturnRequest = {
+  // quarter: YYYY-MM-DD, first day of the quarter (any day within the quarter is accepted and
+  // snapped to that quarter's first day — see dto.ParseAcctQuarterStart).
+  quarter: string | undefined;
+};
+
+// AcctOssRow is one destination country's OSS B2C line: country, applied rate, net taxable base and VAT.
+export type AcctOssRow = {
+  country: string | undefined;
+  ratePct: googletype_Decimal | undefined;
+  net: googletype_Decimal | undefined;
+  vat: googletype_Decimal | undefined;
+};
+
+export type GetOssReturnResponse = {
+  quarterStart: string | undefined;
+  rows: AcctOssRow[] | undefined;
+  totalNet: googletype_Decimal | undefined;
+  totalVat: googletype_Decimal | undefined;
 };
 
 export interface AdminService {
@@ -7723,6 +7785,14 @@ export interface AdminService {
   // COGS, materials, finished goods) and lists what is deliberately left unposted, over
   // [from, to) (to exclusive).
   GetAcctReconciliation(request: GetAcctReconciliationRequest): Promise<GetAcctReconciliationResponse>;
+  // GetVatReturnPL returns the JPK_VAT monthly aggregate (filed by the 25th): output VAT by regime
+  // (domestic PL, WNT/import self-charge, OSS shown for reference only), input VAT by type, and the
+  // net payable. Source-type-agnostic and aggregated by the payment period, so it survives wave 2's
+  // prepayment split; refunds net with a minus sign.
+  GetVatReturnPL(request: GetVatReturnPLRequest): Promise<GetVatReturnPLResponse>;
+  // GetOssReturn returns the quarterly OSS aggregate: EU B2C sales (vat_regime=oss) broken down by
+  // destination country with the applied rate, net and VAT.
+  GetOssReturn(request: GetOssReturnRequest): Promise<GetOssReturnResponse>;
 }
 
 type RequestType = {
@@ -12614,6 +12684,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetAcctReconciliation",
       }) as Promise<GetAcctReconciliationResponse>;
+    },
+    GetVatReturnPL(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/vat-return`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.month) {
+        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetVatReturnPL",
+      }) as Promise<GetVatReturnPLResponse>;
+    },
+    GetOssReturn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/oss-return`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.quarter) {
+        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOssReturn",
+      }) as Promise<GetOssReturnResponse>;
     },
   };
 }

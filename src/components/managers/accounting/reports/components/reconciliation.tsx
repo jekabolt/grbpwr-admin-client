@@ -19,7 +19,8 @@ type ReconKey =
   | 'materials'
   | 'finishedGoods'
   | 'pending'
-  | 'unpostedMovements';
+  | 'unpostedMovements'
+  | 'vat';
 
 const BLOCKS: { key: ReconKey; label: string }[] = [
   { key: 'revenue', label: 'revenue' },
@@ -29,6 +30,7 @@ const BLOCKS: { key: ReconKey; label: string }[] = [
   { key: 'finishedGoods', label: 'finished goods' },
   { key: 'pending', label: 'pending' },
   { key: 'unpostedMovements', label: 'unposted movements' },
+  { key: 'vat', label: 'vat' },
 ];
 
 // A delta within a cent reads as "matched" (§8.5). NaN (missing delta) → treated as 0 → matched.
@@ -197,7 +199,7 @@ export function ReconciliationTab({ from, to }: Props) {
               key={key}
               block={data?.[key]}
               label={label}
-              linkOrders={key !== 'materials' && key !== 'unpostedMovements'}
+              linkOrders={key !== 'materials' && key !== 'unpostedMovements' && key !== 'vat'}
               isFinishedGoods={key === 'finishedGoods'}
               isPending={key === 'pending'}
             />

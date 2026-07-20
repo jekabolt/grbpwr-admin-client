@@ -20,6 +20,7 @@ export function BillingFieldsGroup() {
         'space-y-8': !billingSameAsShipping,
       })}
     >
+      <InputField name='buyerVatId' label='VAT ID (B2B)' />
       <CheckboxField name='billingSameAsShipping' label='Billing address same as shipping' />
       {!billingSameAsShipping && (
         <div className='grid gap-6'>
