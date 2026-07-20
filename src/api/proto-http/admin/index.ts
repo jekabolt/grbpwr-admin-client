@@ -7262,6 +7262,16 @@ export type GetOssReturnResponse = {
   totalVat: googletype_Decimal | undefined;
 };
 
+export type ExportJpkV7MRequest = {
+  // month: YYYY-MM-DD, any day within the target filing month (normalised to the 1st).
+  month: string | undefined;
+};
+
+export type ExportJpkV7MResponse = {
+  filename: string | undefined;
+  xmlContent: string | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -7846,6 +7856,11 @@ export interface AdminService {
   // GetOssReturn returns the quarterly OSS aggregate: EU B2C sales (vat_regime=oss) broken down by
   // destination country with the applied rate, net and VAT.
   GetOssReturn(request: GetOssReturnRequest): Promise<GetOssReturnResponse>;
+  // ExportJpkV7M generates the official Polish JPK_V7M (JPK_VAT) XML for a month: the taxpayer header,
+  // the VAT-7 declaration, and the sales evidence register. It is the OUTPUT-SIDE filing — the
+  // accountant merges the purchase register (input VAT), so the file's ZakupWiersz is empty. Requires
+  // the JPK_* taxpayer identity to be configured; returns FailedPrecondition otherwise.
+  ExportJpkV7M(request: ExportJpkV7MRequest): Promise<ExportJpkV7MResponse>;
 }
 
 type RequestType = {
@@ -12831,6 +12846,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetOssReturn",
       }) as Promise<GetOssReturnResponse>;
+    },
+    ExportJpkV7M(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/jpk-v7m`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.month) {
+        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExportJpkV7M",
+      }) as Promise<ExportJpkV7MResponse>;
     },
   };
 }
