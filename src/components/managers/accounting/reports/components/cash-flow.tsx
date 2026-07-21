@@ -1,8 +1,8 @@
-import { AcctCashFlowSection } from 'api/proto-http/admin';
-import Text from 'ui/components/text';
+import { googletype_Decimal } from 'api/proto-http/admin';
 import { useCashFlow } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
-import { BalancedBadge } from '../../components/balanced-badge';
+import { CheckStrip, Verdict, Waterfall, WaterfallRow } from '../../components/kit';
+import { formatBase } from '../../utils/format';
 import { CopyTableButton } from './copy-table-button';
 import { CaveatsNote, ReportState } from './report-utils';
 
@@ -11,109 +11,123 @@ type Props = {
   to: string;
 };
 
-// One cash-flow grouping (operating / investing / financing): signed line rows (label · amount)
-// with a bordered section subtotal. Amounts are signed — a use of cash arrives negative and
-// AmountCell reddens it (§8.3). The subtotal comes from the server, never summed on the client.
-function Section({ section }: { section?: AcctCashFlowSection }) {
-  if (!section) return null;
-  const lines = section.lines ?? [];
-  return (
-    <div className='flex flex-col gap-1'>
-      <Text variant='uppercase' size='small' className='text-textInactiveColor'>
-        {section.name}
-      </Text>
-      <table className='w-full border-collapse'>
-        <tbody>
-          {lines.map((l, i) => (
-            <tr key={i} className='border-b border-textInactiveColor'>
-              <td className='px-2 py-1'>{l.label}</td>
-              <AmountCell value={l.amount} />
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td className='border-t border-textColor px-2 py-1 font-medium uppercase'>
-              total {section.name}
-            </td>
-            <AmountCell value={section.subtotal} bold />
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  );
+function num(d?: googletype_Decimal): number {
+  const n = parseFloat(d?.value ?? '');
+  return Number.isFinite(n) ? n : 0;
+}
+function signed(n: number): string {
+  const mag = Math.abs(n).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${n < 0 ? '−' : '+'}${mag}`;
 }
 
-// 4.x Cash Flow: the indirect-method statement over [from, to) — operating / investing / financing
-// stacked vertically, then a reconciliation footer (net change → opening → closing cash) and a
-// trust row. `closingCash` is derived (opening + net change); `closingCashActual` is the real cash
-// balance as at `to`; `check` = actual − derived (0 when balanced, mirrors the BS balance check).
-// The client never sums anything itself (§8.6 #6) — every figure, including check, is server-sent.
+// 4.x Cash Flow — "Waterfall" (the owner's pick): the indirect-method statement told as one running
+// story, opening cash → the three activity subtotals (running the shop / buying kit / owner & loans)
+// → closing cash, each a floating bar. Every figure is server-sent (§8.6 #6); the ONLY arithmetic
+// here is the bar geometry (a display proportion of those figures). The Check strip mirrors the
+// Balance Sheet's balance check — derived closing vs the real bank balance as at `to`.
 export function CashFlowTab({ from, to }: Props) {
   const { data, isLoading, isError, refetch } = useCashFlow(from, to);
   const caveats = data?.caveats ?? [];
   const isEmpty = !data || (!data.operating && !data.investing && !data.financing);
 
-  const copyRows: (string | number | undefined)[][] = [];
-  const pushSection = (s?: AcctCashFlowSection) => {
-    if (!s) return;
-    copyRows.push([(s.name ?? '').toUpperCase()]);
-    (s.lines ?? []).forEach((l) => copyRows.push([l.label, l.amount?.value]));
-    copyRows.push([`total ${s.name ?? ''}`, s.subtotal?.value]);
-  };
-  pushSection(data?.operating);
-  pushSection(data?.investing);
-  pushSection(data?.financing);
-  copyRows.push(['NET CHANGE IN CASH', data?.netChange?.value]);
-  copyRows.push(['OPENING CASH', data?.openingCash?.value]);
-  copyRows.push(['CLOSING CASH', data?.closingCash?.value]);
-  copyRows.push(['CLOSING CASH (ACTUAL)', data?.closingCashActual?.value]);
-  copyRows.push(['CHECK', data?.check?.value]);
+  const opening = num(data?.openingCash);
+  const closing = num(data?.closingCash);
+  const flows: { label: string; amount: number }[] = [
+    { label: 'From running the shop (operating)', amount: num(data?.operating?.subtotal) },
+    { label: 'From buying/selling kit (investing)', amount: num(data?.investing?.subtotal) },
+    { label: 'Owner & loans (financing)', amount: num(data?.financing?.subtotal) },
+  ];
+
+  // Scale the bars to the largest cash level the story reaches (opening, closing, any running peak).
+  let run = opening;
+  const peaks = [0, opening, closing];
+  flows.forEach((f) => {
+    run += f.amount;
+    peaks.push(run);
+  });
+  const scale = Math.max(1, ...peaks.map((p) => Math.abs(p)));
+  const pct = (v: number) => (v / scale) * 100;
+
+  const netChange = num(data?.netChange);
+  const grew = netChange >= 0;
+
+  const copyRows: (string | number | undefined)[][] = [
+    ['Opening cash', data?.openingCash?.value],
+    ['Operating', data?.operating?.subtotal?.value],
+    ['Investing', data?.investing?.subtotal?.value],
+    ['Financing', data?.financing?.subtotal?.value],
+    ['Net change', data?.netChange?.value],
+    ['Closing cash', data?.closingCash?.value],
+    ['Closing cash (actual)', data?.closingCashActual?.value],
+    ['Check', data?.check?.value],
+  ];
 
   return (
-    <ReportState
-      isLoading={isLoading}
-      isError={isError}
-      onRetry={() => refetch()}
-      isEmpty={isEmpty}
-    >
+    <ReportState isLoading={isLoading} isError={isError} onRetry={() => refetch()} isEmpty={isEmpty}>
       <div className='flex flex-col gap-4'>
         <CaveatsNote caveats={caveats} />
+        <Verdict>
+          {`Cash ${grew ? 'grew' : 'fell'} ${Math.abs(netChange).toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })} — you ended the period with ${formatBase(data?.closingCash)}.`}
+        </Verdict>
         <div className='flex justify-end'>
           <CopyTableButton headers={['line', 'amount']} rows={copyRows} filename='cash-flow' />
         </div>
 
-        <div className='flex max-w-2xl flex-col gap-5'>
-          <Section section={data?.operating} />
-          <Section section={data?.investing} />
-          <Section section={data?.financing} />
+        <div className='max-w-2xl'>
+          <Waterfall>
+            <WaterfallRow
+              label='Opening cash'
+              value={formatBase(data?.openingCash)}
+              left={0}
+              width={pct(opening)}
+              kind='pos'
+              keyRow
+            />
+            {(() => {
+              let r = opening;
+              return flows.map((f) => {
+                const start = r;
+                const end = r + f.amount;
+                r = end;
+                return (
+                  <WaterfallRow
+                    key={f.label}
+                    label={f.label}
+                    value={signed(f.amount)}
+                    left={pct(Math.min(start, end))}
+                    width={pct(Math.abs(f.amount))}
+                    kind={f.amount >= 0 ? 'fin' : 'neg'}
+                    negValue={f.amount < 0}
+                  />
+                );
+              });
+            })()}
+            <WaterfallRow
+              label='Closing cash'
+              value={formatBase(data?.closingCash)}
+              left={0}
+              width={pct(closing)}
+              kind='pos'
+              keyRow
+            />
+          </Waterfall>
 
-          <div className='flex flex-col gap-2 border-t-2 border-textColor pt-3'>
+          <div className='mt-4 flex flex-col gap-2 border-t border-textColor pt-3'>
             <div className='flex items-center justify-between'>
-              <Text className='font-medium uppercase'>net change in cash</Text>
-              <AmountCell as='span' value={data?.netChange} className='font-medium' />
-            </div>
-            <div className='flex items-center justify-between'>
-              <Text className='uppercase'>opening cash</Text>
-              <AmountCell as='span' value={data?.openingCash} />
-            </div>
-            <div className='flex items-center justify-between border-t border-textColor pt-2'>
-              <Text className='font-medium uppercase'>closing cash</Text>
-              <AmountCell as='span' value={data?.closingCash} className='font-medium' />
-            </div>
-            <div className='flex items-center justify-between'>
-              <Text variant='inactive' className='uppercase'>
-                closing cash (actual)
-              </Text>
+              <span className='uppercase text-labelColor'>closing cash (actual bank)</span>
               <AmountCell as='span' value={data?.closingCashActual} />
             </div>
-            <div className='flex items-center justify-between border-t border-textColor pt-2'>
-              <Text className='font-medium uppercase'>check</Text>
-              <div className='flex items-center gap-3'>
-                <AmountCell as='span' value={data?.check} className='font-medium' />
-                <BalancedBadge balanced={data?.balanced} />
-              </div>
-            </div>
+            <CheckStrip
+              tone={data?.balanced ? 'ok' : 'bad'}
+              label={data?.balanced ? 'Matches the bank' : 'Off vs the actual bank balance'}
+              value={data?.balanced ? '✓ €0 difference' : formatBase(data?.check)}
+            />
           </div>
         </div>
       </div>

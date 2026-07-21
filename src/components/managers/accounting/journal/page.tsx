@@ -9,6 +9,7 @@ import { Loader } from 'ui/components/loader';
 import Text from 'ui/components/text';
 import { AcctSectionHeader } from '../components/section-header';
 import { EntryDetailModal } from '../components/entry-detail-modal';
+import { Verdict } from '../components/kit';
 import { ACCT_PAGE_SIZE } from '../utils/constants';
 import { useAcctAccounts, useJournalEntries } from '../utils/hooks';
 import { EntriesFilter, JournalFilterState } from './components/entries-filter';
@@ -152,6 +153,12 @@ export function AcctJournalPage() {
           </div>
         ) : (
           <>
+            {/* Plain-language takeaway above the table — real counts from ListJournalEntries. */}
+            <Verdict className='mb-0'>
+              {total} {total === 1 ? 'entry' : 'entries'}{' '}
+              {debounced.from || debounced.to ? 'this period' : 'all time'}
+              {debounced.accountCode || debounced.sourceType ? ' (filtered)' : ''}.
+            </Verdict>
             <EntriesTable entries={entries} isLoading={isFetching} onSelect={setSelectedEntry} />
             <div className='flex items-center justify-between'>
               <Text variant='inactive'>

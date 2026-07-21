@@ -1,6 +1,6 @@
-import { googletype_Decimal } from 'api/proto-http/admin';
-import { cn } from 'lib/utility';
+import { AcctFinancialHealthRow, googletype_Decimal } from 'api/proto-http/admin';
 import { useFinancialHealth } from '../../utils/hooks';
+import { GroupHeader, StatGrid, StatTile, Verdict } from '../../components/kit';
 import { CopyTableButton } from './copy-table-button';
 import { CaveatsNote, ReportState } from './report-utils';
 
@@ -9,19 +9,8 @@ type Props = {
   to: string;
 };
 
-// Status → cell colour. Reuses the repo's ok/error convention (text-success / text-error, see
-// BalancedBadge): a ratio that breaches its benchmark reads red like every other loss/warn signal;
-// `na`/`track` (no data yet, or an informational metric) stay muted grey. Unknown → muted too.
-const STATUS_CLS: Record<string, string> = {
-  ok: 'text-success',
-  warn: 'text-error',
-  na: 'text-textInactiveColor',
-  track: 'text-textInactiveColor',
-};
-
-// A ratio value carries its own display unit ("%", "x"/"×", "days", the base currency, or "").
-// The backend computes the figure (§8.6 #6); this only appends the unit. Missing/non-finite → em
-// dash, matching formatBase's "no data".
+// A ratio value carries its own display unit ("%", "x"/"×", "days", the base currency, or ""). The
+// backend computes the figure (§8.6 #6); this only appends the unit.
 function formatHealthValue(value?: googletype_Decimal, unit?: string): string {
   const raw = value?.value;
   if (raw == null || raw === '') return '—';
@@ -42,13 +31,68 @@ function formatHealthValue(value?: googletype_Decimal, unit?: string): string {
   }
 }
 
-// 4.x Financial Health: the ratio set over [from, to) as a flat table — metric · formula ·
-// benchmark · value (unit-aware) · status. Status is the only colour-bearing column, so the
-// benchmark comparison is legible at a glance without re-reading the numbers (§8.5).
+// ok breaches green, warn breaches red; na/track are informational → no colour.
+function toneFor(status?: string): 'up' | 'down' | undefined {
+  if (status === 'ok') return 'up';
+  if (status === 'warn') return 'down';
+  return undefined;
+}
+
+// Themed grouping of the ratio set — the plain-language buckets an owner reasons in. Rows are
+// matched to a group by their backend name; anything unmatched falls into "Other" so nothing is ever
+// dropped if the backend adds a ratio.
+const GROUPS: { title: string; names: string[] }[] = [
+  {
+    title: 'Profitability',
+    names: [
+      'Gross Margin',
+      'Net Profit Margin',
+      'Return on Assets (ROA)',
+      'Return on Equity (ROE)',
+      'COGS %',
+    ],
+  },
+  {
+    title: 'Can we pay the bills',
+    names: ['Current Ratio', 'Quick Ratio', 'Debt-to-Equity'],
+  },
+  {
+    title: 'Inventory',
+    names: ['Inventory Turnover', 'Days Inventory Outstanding (DIO)', 'Sell-Through', 'GMROI'],
+  },
+  {
+    title: 'Sales & getting paid',
+    names: [
+      'Days Sales Outstanding (DSO)',
+      'Discount Rate',
+      'Return Rate',
+      'Revenue per SKU',
+      'Cost per Unit',
+    ],
+  },
+];
+
+// 4.x Financial Health — "Scorecard" (the owner's pick): the ratio set grouped into plain-language
+// themes, each metric a tile coloured green (ok) / red (needs attention). One glance says which part
+// of the business is healthy; the benchmark sits under each value. Numbers are server-sent; this
+// only lays them out.
 export function FinancialHealthTab({ from, to }: Props) {
   const { data, isLoading, isError, refetch } = useFinancialHealth(from, to);
   const rows = data?.rows ?? [];
   const caveats = data?.caveats ?? [];
+
+  const byName = new Map<string, AcctFinancialHealthRow>();
+  rows.forEach((r) => r.name && byName.set(r.name, r));
+  const grouped = GROUPS.map((g) => ({
+    title: g.title,
+    rows: g.names.map((n) => byName.get(n)).filter((r): r is AcctFinancialHealthRow => !!r),
+  })).filter((g) => g.rows.length > 0);
+  const claimed = new Set(GROUPS.flatMap((g) => g.names));
+  const other = rows.filter((r) => !r.name || !claimed.has(r.name));
+  if (other.length) grouped.push({ title: 'Other', rows: other });
+
+  const okCount = rows.filter((r) => r.status === 'ok').length;
+  const warnCount = rows.filter((r) => r.status === 'warn').length;
 
   const copyHeaders = ['metric', 'formula', 'benchmark', 'value', 'status'];
   const copyRows: (string | number | undefined)[][] = rows.map((r) => [
@@ -68,42 +112,31 @@ export function FinancialHealthTab({ from, to }: Props) {
     >
       <div className='flex flex-col gap-3'>
         <CaveatsNote caveats={caveats} />
+        <Verdict>
+          {`${okCount} of ${rows.length} vital signs in the green${
+            warnCount ? ` — ${warnCount} to keep an eye on (shown in red).` : '.'
+          }`}
+        </Verdict>
         <div className='flex justify-end'>
           <CopyTableButton headers={copyHeaders} rows={copyRows} filename='financial-health' />
         </div>
-        <div className='overflow-x-auto'>
-          <table className='w-full min-w-max border-collapse'>
-            <thead className='border-b border-textColor'>
-              <tr>
-                <th className='px-2 py-2 text-left text-textBaseSize uppercase'>metric</th>
-                <th className='px-2 py-2 text-left text-textBaseSize uppercase'>formula</th>
-                <th className='px-2 py-2 text-left text-textBaseSize uppercase'>benchmark</th>
-                <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>value</th>
-                <th className='px-2 py-2 text-right text-textBaseSize uppercase'>status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.name ?? i} className='border-b border-textInactiveColor'>
-                  <td className='whitespace-nowrap px-2 py-1'>{r.name}</td>
-                  <td className='px-2 py-1 text-labelColor'>{r.formula}</td>
-                  <td className='whitespace-nowrap px-2 py-1 text-labelColor'>{r.benchmark}</td>
-                  <td className='w-32 min-w-32 whitespace-nowrap px-2 py-1 text-right tabular-nums'>
-                    {formatHealthValue(r.value, r.unit)}
-                  </td>
-                  <td
-                    className={cn(
-                      'whitespace-nowrap px-2 py-1 text-right uppercase',
-                      STATUS_CLS[r.status ?? ''] ?? 'text-textInactiveColor',
-                    )}
-                  >
-                    {r.status ?? '—'}
-                  </td>
-                </tr>
+
+        {grouped.map((g) => (
+          <div key={g.title}>
+            <GroupHeader>{g.title}</GroupHeader>
+            <StatGrid>
+              {g.rows.map((r) => (
+                <StatTile
+                  key={r.name}
+                  label={r.name}
+                  value={formatHealthValue(r.value, r.unit)}
+                  tone={toneFor(r.status)}
+                  sub={r.benchmark ? `target ${r.benchmark}` : undefined}
+                />
               ))}
-            </tbody>
-          </table>
-        </div>
+            </StatGrid>
+          </div>
+        ))}
       </div>
     </ReportState>
   );
