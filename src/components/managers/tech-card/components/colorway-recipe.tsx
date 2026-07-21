@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { PieceRef, PieceSinglePicker } from './piece-picker';
 import {
   createColorwayErrorMessage,
   recipeSaveErrorMessage,
@@ -478,7 +479,8 @@ function UsagePerSizeLocal({
 // A cut piece the recipe can point a norm at. line_key is the stable client-minted ULID the server
 // resolves to the real piece_id FK, so it survives reordering — unlike the positional piece_index it
 // replaces.
-type PieceRef = { lineKey: string; name: string };
+// (PieceRef and the picker itself live in piece-picker.tsx — shared with the operations tab so a
+// piece is chosen the same way everywhere.)
 
 // One usage row = one material on one part in this colourway.
 function UsageRowEditor({
@@ -554,17 +556,19 @@ function UsageRowEditor({
             piece_line_key -> a real usage.piece_id FK (RESTRICT), and the client already round-trips
             it — there was simply no control to set it, so operators retyped part names as free text
             that nothing could join on. Picking here writes the stable key; `placement` stays as the
-            human label (auto-filled from the piece) so the PDF and legacy rows keep reading. */}
+            human label (auto-filled from the piece) so the PDF and legacy rows keep reading.
+            Single-select, unlike the operation picker: a consumption norm is about exactly one
+            piece. No create affordance either — the recipe saves through UpdateColorwayRecipe and
+            cannot author a piece; that belongs to the tech-card save. */}
         <label className='flex flex-col gap-1'>
-          <Text size='small'>placement (part)</Text>
+          <Text size='small'>деталь (норма считается на неё)</Text>
           {pieces.length > 0 ? (
-            <select
-              className={cell}
-              disabled={!canEdit}
+            <PieceSinglePicker
+              pieces={pieces}
               value={draft.pieceLineKey}
-              onChange={(e) => {
-                const key = e.target.value;
-                const piece = pieces.find((p) => p.lineKey === key);
+              disabled={!canEdit}
+              placeholder='— всё изделие —'
+              onChange={(key, piece) =>
                 onChange({
                   pieceLineKey: key,
                   // Keep the label in step with the pick, but never clobber a placement the
@@ -574,16 +578,9 @@ function UsageRowEditor({
                     : key
                       ? draft.placement
                       : '',
-                });
-              }}
-            >
-              <option value=''>— whole garment —</option>
-              {pieces.map((p) => (
-                <option key={p.lineKey} value={p.lineKey}>
-                  {p.name?.trim() || 'unnamed piece'}
-                </option>
-              ))}
-            </select>
+                })
+              }
+            />
           ) : (
             <>
               <input

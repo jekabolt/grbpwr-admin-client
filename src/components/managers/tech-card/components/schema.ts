@@ -197,6 +197,13 @@ export function isBlankPiece(p: {
   );
 }
 
+// Folds a pre-0200 single bom_line_key into the repeated list without duplicating it.
+function mergeLegacyBomKey(keys: string[], legacy: string): string[] {
+  const trimmed = legacy.trim();
+  if (!trimmed || keys.includes(trimmed)) return keys;
+  return [trimmed, ...keys];
+}
+
 const pieceSchema = z
   .object({
     name: z.string().optional().default(''),
@@ -462,7 +469,28 @@ const techCardObject = z.object({
   purpose: z.string().optional().default('sellable'),
   outputMaterialId: z.number().optional().default(0),
   // Cut-piece details + per-colourway fabric map (NF-05). Positional refs (nf05-01).
-  pieces: z.array(pieceSchema).default([]),
+  // Names are unique per card (case-insensitive, trimmed): a piece name is how a human addresses the
+  // part in the operation picker, in a recipe norm and on the factory sheet, so two rows called
+  // «полочка» make every one of those references ambiguous. Mirrors the server's rule (dto/techcard
+  // parseTechCardPieces) so it lands HERE, on the offending row, instead of coming back as a blocked
+  // save with no field to point at.
+  pieces: z.array(pieceSchema).superRefine((pieces, ctx) => {
+    const seen = new Map<string, number>();
+    pieces.forEach((p, i) => {
+      const key = (p.name ?? '').trim().toLowerCase();
+      if (!key || isBlankPiece(p)) return;
+      const first = seen.get(key);
+      if (first === undefined) {
+        seen.set(key, i);
+        return;
+      }
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Duplicate piece name — «${(p.name ?? '').trim()}» is already used by piece ${first + 1}`,
+        path: [i, 'name'],
+      });
+    });
+  }),
   // Sketch media split into two independent lists (construction consumes ONLY technicalMedia;
   // callouts pin onto ANY media_id — moodboard or technical, B-1). Each item's `kind` sub-classifies.
   moodboardMedia: z.array(mediaItemSchema).default([]),
@@ -817,7 +845,13 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
       pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
-      bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
+      // The multi list is the only thing the UI edits now. An operation saved before 0200 has only
+      // the legacy single key, so fold it in — otherwise reopening such a card shows no material and
+      // the next save would drop the link it never displayed.
+      bomLineKeys: mergeLegacyBomKey(
+        (o.bomLineKeys ?? []).filter(Boolean),
+        refKey(o.bomLineKey, o.bomItemIndex),
+      ),
       node: o.node || '',
       description: o.description || '',
       seamType: o.seamType || '',
@@ -1161,12 +1195,17 @@ export function mapFormToTechCardInsert(
       .filter((d) => d.key || d.text || d.mediaIds.length > 0),
     construction: mapConstructionOut(data.construction),
     operations: (data.operations ?? []).map((o, i) => {
-      const bomRef = outBomRef(o.bomLineKey);
+      const opBomKeys = (o.bomLineKeys ?? []).map((k) => k.trim()).filter(Boolean);
+      // The legacy single ref is DERIVED from the list's first entry, never edited on its own: the
+      // UI dropped the separate «мат. напрямую» control (it asked the same question with room for
+      // one answer), but tech_card_operation.bom_item_id is still written and read during the
+      // transition (0200), so it must keep agreeing with the list.
+      const bomRef = outBomRef(opBomKeys[0] ?? '');
       return {
         // Blanks dropped here as well as server-side: an empty key would be a field violation the
         // operator never caused.
         pieceLineKeys: (o.pieceLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
-        bomLineKeys: (o.bomLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
+        bomLineKeys: opBomKeys,
         node: o.node?.trim() || '',
         description: o.description?.trim() || '',
         seamType: o.seamType?.trim() || '',
