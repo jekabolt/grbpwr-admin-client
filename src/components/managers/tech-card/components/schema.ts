@@ -342,6 +342,10 @@ const operationSchema = z.object({
   // The cut-pieces this operation works on, by stable TechCardPiece.line_key. REPEATED, unlike the
   // recipe's single piece per norm: an assembly operation joins as many pieces as it joins.
   pieceLineKeys: z.array(z.string()).default([]),
+  // The off-part materials this operation consumes (thread, fusing). REPEATED for the same reason
+  // pieceLineKeys is: one operation can join several materials. The legacy single bomLineKey above
+  // stays as the first entry during the transition.
+  bomLineKeys: z.array(z.string()).default([]),
 });
 
 const labelSchema = z.object({
@@ -813,6 +817,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
       pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
+      bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
       node: o.node || '',
       description: o.description || '',
       seamType: o.seamType || '',
@@ -1161,6 +1166,7 @@ export function mapFormToTechCardInsert(
         // Blanks dropped here as well as server-side: an empty key would be a field violation the
         // operator never caused.
         pieceLineKeys: (o.pieceLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
+        bomLineKeys: (o.bomLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
         node: o.node?.trim() || '',
         description: o.description?.trim() || '',
         seamType: o.seamType?.trim() || '',
