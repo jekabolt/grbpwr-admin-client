@@ -5328,6 +5328,14 @@ export type common_TechCardOperation = {
   // resolves it to bom_item_id, the real FK on read.
   bomLineKey: string | undefined;
   bomItemId: number | undefined;
+  // piece_line_keys references the cut-pieces this operation works on, by their stable
+  // TechCardPiece.line_key (WS4) — the same durable reference TechCardColorwayUsage.piece_line_key
+  // uses. REPEATED, unlike the usage's single key, because an assembly operation genuinely spans
+  // pieces and there is no useful bound on how many. A consumption norm, by contrast, is about
+  // exactly one piece, which is why that side stays 1:1. Empty = not tied to specific pieces.
+  // `placement` above stays the human label (PDF/legacy) and is not a join key.
+  pieceLineKeys: string[] | undefined;
+  pieceIds: number[] | undefined;
 };
 
 // TechCardOperationType classifies an operation by its machine / stitch class
