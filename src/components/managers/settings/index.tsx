@@ -5,8 +5,9 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
+import { firstErrorSummary, flattenFieldErrors, revealField } from 'utils/field-errors';
 import { useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, type FieldErrors } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
@@ -96,10 +97,20 @@ export function Settings() {
     }
   };
 
+  // Without this the Save button was simply dead on any validation failure — no toast, no scroll,
+  // nothing. The announcement banner made that reachable in normal use (see settingsSchema), but a
+  // silent submit is the wrong behaviour regardless of which field is at fault.
+  const onInvalid = (errors: FieldErrors<SettingsSchema>) => {
+    const flat = flattenFieldErrors(errors);
+    const first = flat[0];
+    if (first) revealField(first.path);
+    showMessage(firstErrorSummary(errors) || 'Check the fields with errors', 'error');
+  };
+
   return (
     <Form {...form}>
       <form
-        onSubmit={form.handleSubmit(handleSave)}
+        onSubmit={form.handleSubmit(handleSave, onInvalid)}
         className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
       >
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>

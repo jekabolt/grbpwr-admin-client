@@ -20,7 +20,12 @@ import {
   techCardStageOptions,
 } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
-import { applyServerFieldErrors, errorRootKey, flattenFieldErrors } from 'utils/field-errors';
+import {
+  applyServerFieldErrors,
+  errorRootKey,
+  flattenFieldErrors,
+  revealField,
+} from 'utils/field-errors';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useForm, useWatch, type FieldErrors } from 'react-hook-form';
@@ -122,23 +127,6 @@ const ERROR_TAB: Record<string, TabId> = {
   signoffs: 'signoff',
   revisions: 'history',
 };
-
-// Pulse classes are listed as literals so Tailwind's source scan emits them — they are applied
-// imperatively below, not through JSX.
-const FIELD_PULSE = ['animate-pulse', 'ring-2', 'ring-error', 'motion-reduce:animate-none'];
-
-// Brings the field at a dotted RHF path into view and pulses it. `[data-field]` is stamped on every
-// FormItem (ui/form), so this resolves ANY field on ANY tab from its error path — including controls
-// that register no focusable ref (Radix selects, pickers), which setFocus alone cannot reach.
-// Returns false when the path has no rendered field, so the caller can retry or fall back.
-function revealField(path: string): boolean {
-  const el = document.querySelector<HTMLElement>(`[data-field="${CSS.escape(path)}"]`);
-  if (!el) return false;
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  el.classList.add(...FIELD_PULSE);
-  window.setTimeout(() => el.classList.remove(...FIELD_PULSE), 2600);
-  return true;
-}
 
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 const DRAFT = 'TECH_CARD_APPROVAL_STATE_DRAFT';
@@ -769,7 +757,7 @@ export function TechCardForm({
         </div>
       )}
 
-      <form className='pt-4 pb-24' onSubmit={form.handleSubmit(doSubmit)}>
+      <form className='pt-4 pb-24' onSubmit={form.handleSubmit(doSubmit, onInvalid)}>
         <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
           {/* HEADER */}
           <div hidden={activeTab !== 'header'} className='flex flex-col gap-6'>
