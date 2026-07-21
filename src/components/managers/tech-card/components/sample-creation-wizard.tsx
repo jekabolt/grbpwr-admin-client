@@ -27,6 +27,7 @@ import {
   samplePurposeOptions,
   sampleStatusOptions,
 } from './sample-options';
+import { wireInt } from './schema';
 import { saveSampleErrorMessage, useSaveSample } from './useSamples';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -170,10 +171,14 @@ export function SampleCreationWizard({
       ),
     [stockData],
   );
+  // Keyed by a COERCED id. Material.id is int64, which grpc-gateway serialises as a STRING while
+  // the generated type claims `number` — so keying on the raw value built a Map of "12" that
+  // `rowById.get(12)` could never hit. That is what made the write-off preview render a nameless row
+  // with no on-hand and no cost, and it is the same trap that broke BOM material linking.
   const rowById = useMemo(() => {
     const m = new Map<number, common_MaterialStockRow>();
     for (const r of sampleRows) {
-      const id = r.material?.id;
+      const id = wireInt(r.material?.id);
       if (id) m.set(id, r);
     }
     return m;
@@ -185,7 +190,9 @@ export function SampleCreationWizard({
     const needle = q.trim().toLowerCase();
     const chosen = new Set(lines.map((l) => l.materialId));
     return sampleRows.filter((r) => {
-      const id = r.material?.id ?? 0;
+      // Same coercion as rowById: comparing a wire string against the numeric ids held in `lines`
+      // never matched, so an already-added material stayed in the picker as if nothing happened.
+      const id = wireInt(r.material?.id);
       if (chosen.has(id)) return false;
       if (!needle) return true;
       const m = r.material;
