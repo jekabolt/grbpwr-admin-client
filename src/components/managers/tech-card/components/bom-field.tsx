@@ -8,7 +8,14 @@ import { ReadOnlyField } from 'components/managers/product/components/read-only-
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
-import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
+import {
+  useFieldArray,
+  useFormContext,
+  useFormState,
+  useWatch,
+  type FieldErrors,
+} from 'react-hook-form';
+import { flattenFieldErrors } from 'utils/field-errors';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import ComboField from 'ui/form/fields/combo-field';
@@ -182,6 +189,13 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
   const sectionLabel = (v?: string): string =>
     techCardBomSectionOptions.find((o) => o.value === v)?.label ?? v ?? '';
 
+  // `name` deliberately does NOT go through `mirror`. The server resolves a linked line's name from
+  // the material by link rather than storing a copy, so the value RHF already holds IS the resolved
+  // one — preferring the catalog list over it would add a lookup that can only ever agree, and would
+  // blank the label for as long as that list is still loading. Watched rather than read through
+  // getValues so linking a material repaints the name immediately.
+  const nameValue = useWatch({ control, name: `bomItems.${index}.name` }) as string | undefined;
+
   // #3: on a linked line the unit price and its currency are ONE derived fact — the catalog's latest
   // price, in that price's currency — folded into a single read-only "12.50 EUR". The currency is
   // never a free choice that can disagree with a price the operator can't edit (that standalone
@@ -236,7 +250,7 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
           <div className='flex items-start gap-3'>
             <MaterialThumb material={linkedMaterial} size='md' />
             <div className='min-w-0 flex-1'>
-              <ReadOnlyField label='name' value={mirror(linkedMaterial?.name, 'name')} />
+              <ReadOnlyField label='name' value={nameValue} />
             </div>
           </div>
           <div className='grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3'>
@@ -375,6 +389,19 @@ function BomTile({
   const material = linked
     ? (data?.materials ?? []).find((m) => m.id === row.materialId)
     : undefined;
+
+  // A red underline inside a COLLAPSED tile is invisible, so the tile itself has to carry the
+  // error — otherwise a blocked save points at a row the operator can't see is broken.
+  const { errors } = useFormState({ control, name: `bomItems.${index}` });
+  const rowErrors = flattenFieldErrors(
+    (errors.bomItems as FieldErrors[] | undefined)?.[index] as FieldErrors | undefined,
+  );
+  const hasError = rowErrors.length > 0;
+  // Expand a broken row so its fields are reachable and visibly red. Keyed on the transition, so
+  // the operator can still collapse it again while the error stands.
+  useEffect(() => {
+    if (hasError) setOpen(true);
+  }, [hasError]);
   const price = row.unitPrice?.trim();
   const facts = [
     row.supplier?.trim(),
@@ -387,6 +414,7 @@ function BomTile({
         'border',
         open && 'lg:col-span-2',
         linked ? 'border-textInactiveColor' : 'border-error',
+        hasError && 'border-error',
       )}
     >
       <div className='flex items-start justify-between gap-2 p-3'>
@@ -410,6 +438,13 @@ function BomTile({
               {/* #64: an unlinked line is scannable on the collapsed tile — no need to expand to find it */}
               {[...facts, linked ? '' : '! link a material'].filter(Boolean).join(' · ')}
             </Text>
+            {/* Same idea as the "! link a material" hint, for anything BLOCKING the save: name the
+                offending fields on the tile so a collapsed row is diagnosable at a glance. */}
+            {hasError && (
+              <Text size='small' className='truncate text-error'>
+                {rowErrors.map((e) => `! ${e.path}: ${e.message}`).join(' · ')}
+              </Text>
+            )}
           </span>
           <Text variant='inactive' className='shrink-0'>
             {open ? '▴' : '▾'}

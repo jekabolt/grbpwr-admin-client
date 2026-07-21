@@ -36,7 +36,7 @@ export default function SelectField({
     <FormField
       control={control}
       name={name}
-      render={({ field }) => (
+      render={({ field, fieldState }) => (
         <FormItem>
           <FormLabel>{label}</FormLabel>
           <Select
@@ -48,6 +48,9 @@ export default function SelectField({
             value={valueAsNumber && field.value != null ? String(field.value) : field.value}
             {...props}
             className={className}
+            // This field is not wrapped in FormControl (a Radix Select has no single DOM control for
+            // the Slot to clone onto), so the invalid flag is read straight off the field state.
+            invalid={!!fieldState.error}
             onBlur={onBlur}
           />
           <FormMessage />

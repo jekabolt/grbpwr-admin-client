@@ -77,9 +77,19 @@ function FormItem({
   [key: string]: unknown;
 }) {
   const id = useId();
+  // Stamp the field's dotted RHF path onto its wrapper. RHF's setFocus can reach the INPUT, but
+  // scrolling/highlighting needs the whole labelled row, and some controls (Radix selects, pickers)
+  // register no focusable ref at all. `[data-field="..."]` is the one selector that resolves any
+  // field in the app from its error path — see focusFieldByPath in the tech-card editor.
+  const fieldContext = useContext(FormFieldContext);
   return (
     <FormItemContext.Provider value={{ id }}>
-      <div className={cn('space-y-2', className)} ref={ref} {...props} />
+      <div
+        className={cn('space-y-2', className)}
+        data-field={fieldContext?.name}
+        ref={ref}
+        {...props}
+      />
     </FormItemContext.Provider>
   );
 }

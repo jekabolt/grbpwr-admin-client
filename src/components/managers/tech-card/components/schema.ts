@@ -197,7 +197,7 @@ const colorwaySchema = z.object({
 // consumption live on colourway usages, not here.
 const bomItemSchema = z.object({
   section: z.string().optional().default(DEFAULT_BOM_SECTION),
-  name: z.string().min(1, 'Material name is required'),
+  name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
   supplier: z.string().optional().default(''),
   supplierRef: z.string().optional().default(''),
   color: z.string().optional().default(''), // base/reference colour (per-colourway colour is on the usage)
@@ -220,6 +220,24 @@ const bomItemSchema = z.object({
   // server keyed-reconciles by it and downstream refs (operations/pieces/usages) stay valid.
   id: z.number().optional().default(0),
   lineKey: z.string().optional().default(''),
+}).superRefine((item, ctx) => {
+  // `name` is required only on an UNLINKED line — server parity, mirroring parseTechCardBomItems,
+  // which requires a name only when material_id == 0. A LINKED line takes its identity from the
+  // catalog material: the server resolves the name by link on the read path rather than storing a
+  // copy, so requiring a form-level name here would demand a value the operator cannot edit and
+  // that the wire does not want. (A released card is unaffected either way — tech_card_release
+  // snapshots the whole enriched read model as JSON, so a frozen spec keeps the name it shipped.)
+  //
+  // It stays a superRefine rather than a plain .min(1) precisely because the rule is conditional;
+  // the issue is emitted on path ['name'] so it addresses as `bomItems.3.name` and the editor's
+  // deep-link can walk the operator straight to the offending input.
+  if ((item.materialId ?? 0) === 0 && !item.name?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Material name is required',
+      path: ['name'],
+    });
+  }
 });
 
 // One construction-description aspect (Sheet «Титул», lower block): freeform text + optional
