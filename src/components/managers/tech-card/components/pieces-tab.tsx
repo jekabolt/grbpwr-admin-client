@@ -1,12 +1,16 @@
 import { common_TechCard } from 'api/proto-http/admin';
+import { useMemo } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { ulid } from 'utils/ulid';
 import { BomLineSelect } from './bom-line-picker';
 import { pieceCodeOptions } from './piece-codes';
+import { normalizePieceName } from './piece-picker';
 import { TechCardFormData } from './schema';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell =
+  'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize aria-[invalid=true]:border-error';
 const th =
   'border border-textInactiveColor bg-textInactiveColor/20 px-2 py-1 text-left text-textBaseSize uppercase';
 const td = 'border border-textInactiveColor px-1 py-1 align-top';
@@ -64,9 +68,30 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   // form-state renumbering loop was dead. Just drop the piece row here.
   const removePiece = (pi: number) => remove(pi);
 
+  // Duplicate CODE / NAME rows, case-insensitively. A piece name is how a human addresses the part
+  // in the operation picker, the recipe norm and the factory sheet, so two rows called «полочка»
+  // make every one of those references ambiguous. Flagged here on the field (the server rejects the
+  // save with the same rule, so catching it at the source beats a blocked save later).
+  const duplicateRows = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of pieces) {
+      const key = normalizePieceName(p.name ?? '');
+      if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return new Set(
+      pieces
+        .map((p, i) => ((counts.get(normalizePieceName(p.name ?? '')) ?? 0) > 1 ? i : -1))
+        .filter((i) => i >= 0),
+    );
+  }, [pieces]);
+
+  // A new row is minted with its stable lineKey up front, NOT left for the save mapper: the
+  // operation and recipe pickers can only offer a piece that already has one, so without it a part
+  // added here stayed unlinkable until the card had been saved and reloaded.
   const addPiece = () =>
     append({
       name: '',
+      lineKey: ulid(),
       piecesPerGarment: 1,
       mirrored: false,
       grainline: '',
@@ -126,6 +151,8 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                       <td className={td}>
                         <input
                           className={`${cell} w-40`}
+                          data-field={`pieces.${pi}.name`}
+                          aria-invalid={duplicateRows.has(pi)}
                           list='piece-code-suggestions'
                           value={p.name ?? ''}
                           onChange={(e) =>
@@ -133,6 +160,11 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                           }
                           placeholder='FP front piece'
                         />
+                        {duplicateRows.has(pi) && (
+                          <Text size='small' className='text-error'>
+                            такая деталь уже есть — имя должно быть уникальным
+                          </Text>
+                        )}
                       </td>
                       <td className={td}>
                         <input

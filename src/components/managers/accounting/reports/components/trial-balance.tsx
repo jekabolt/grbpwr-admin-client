@@ -1,6 +1,8 @@
 import { useTrialBalance } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
 import { BalancedBadge } from '../../components/balanced-badge';
+import { CheckStrip, Verdict } from '../../components/kit';
+import { formatBase } from '../../utils/format';
 import { CopyTableButton } from './copy-table-button';
 import { ReportState } from './report-utils';
 
@@ -36,6 +38,11 @@ export function TrialBalanceTab({ from, to, onDrill }: Props) {
       isEmpty={rows.length === 0}
     >
       <div className='flex flex-col gap-2'>
+        <Verdict>
+          {data?.balanced
+            ? `In balance — total debits equal total credits (${formatBase(data?.totalDebit)}). Nothing's lost.`
+            : 'Out of balance — total debits and credits differ. Something needs a look.'}
+        </Verdict>
         <div className='flex justify-end'>
           <CopyTableButton headers={HEADERS} rows={copyRows} filename='trial-balance' />
         </div>
@@ -84,6 +91,15 @@ export function TrialBalanceTab({ from, to, onDrill }: Props) {
             </tfoot>
           </table>
         </div>
+        <CheckStrip
+          tone={data?.balanced ? 'ok' : 'bad'}
+          label={data?.balanced ? 'In balance' : 'Out of balance'}
+          value={
+            data?.balanced
+              ? '✓ debits = credits'
+              : `${formatBase(data?.totalDebit)} vs ${formatBase(data?.totalCredit)}`
+          }
+        />
       </div>
     </ReportState>
   );

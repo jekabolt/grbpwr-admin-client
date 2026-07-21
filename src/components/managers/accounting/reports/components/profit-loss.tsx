@@ -3,6 +3,15 @@ import { Fragment } from 'react';
 import Text from 'ui/components/text';
 import { useProfitLoss } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
+import {
+  GroupHeader,
+  Note,
+  STACK_PROFIT,
+  STACK_SHADES,
+  StackedBar,
+  Verdict,
+  type StackSegment,
+} from '../../components/kit';
 import { CopyTableButton } from './copy-table-button';
 import { CaveatsNote, formatMonthLabel, formatPercent, ReportState } from './report-utils';
 
@@ -49,9 +58,42 @@ export function ProfitLossTab({ from, to, onDrill }: Props) {
         { label: 'gross margin %', values: totals.grossMarginPct, percent: true },
         { label: 'total opex', values: totals.totalOpex },
         { label: 'operating profit', values: totals.operatingProfit },
+        { label: 'total tax', values: totals.totalTax },
+        { label: 'net profit after tax', values: totals.netProfitAfterTax },
         { label: 'net margin %', values: totals.netMarginPct, percent: true },
       ]
     : [];
+
+  // Period totals for the "where each € goes" topper: sum each derived row across the range's months
+  // (display arithmetic on server figures — the matrix below shows the authoritative per-month values).
+  // By construction netProfit = revenue − cogs − opex − tax, so the four shares fill the bar exactly.
+  const sumArr = (arr?: (googletype_Decimal | undefined)[]) =>
+    (arr ?? []).reduce((a, d) => a + (parseFloat(d?.value ?? '') || 0), 0);
+  const pRevenue = sumArr(totals?.totalRevenue);
+  const pCogs = sumArr(totals?.netCogs);
+  const pOpex = sumArr(totals?.totalOpex);
+  const pTax = sumArr(totals?.totalTax);
+  const pNet = sumArr(totals?.netProfitAfterTax);
+  const pMargin = pRevenue > 0 ? (pNet / pRevenue) * 100 : 0;
+  const isLoss = pNet < 0;
+  // On a loss the shares are of total SPEND (costs ran over revenue), so there's no profit slice.
+  const segBase = isLoss ? pCogs + pOpex + pTax : pRevenue;
+  const seg = (label: string, val: number, shade: string): StackSegment => ({
+    label,
+    pct: segBase > 0 ? Math.round((val / segBase) * 100) : 0,
+    shade,
+  });
+  const segments: StackSegment[] =
+    pRevenue > 0
+      ? [
+          seg('Cost of goods', pCogs, STACK_SHADES[0]),
+          seg('Running costs', pOpex, STACK_SHADES[2]),
+          seg('Tax', pTax, STACK_SHADES[3]),
+          ...(isLoss ? [] : [seg('Profit', pNet, STACK_PROFIT)]),
+        ]
+      : [];
+  const money = (n: number) =>
+    n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // TSV mirrors the visible matrix: section subheaders, account rows (label + per-month + YTD),
   // then derived rows (per-month, blank YTD). Amounts are raw decimal strings.
@@ -84,7 +126,29 @@ export function ProfitLossTab({ from, to, onDrill }: Props) {
     >
       <div className='flex flex-col gap-3'>
         <CaveatsNote caveats={caveats} />
-        <div className='flex justify-end'>
+
+        {pRevenue > 0 && (
+          <div className='flex flex-col gap-2'>
+            <Verdict className='mb-0'>
+              {isLoss
+                ? `You spent more than you earned — a ${money(Math.abs(pNet))} loss (${Math.abs(
+                    pMargin,
+                  ).toFixed(1)}% of sales).`
+                : `You kept ${money(pNet)} — ${pMargin.toFixed(1)}% of sales.`}
+            </Verdict>
+            <StackedBar segments={segments} />
+            <Note>
+              {isLoss
+                ? 'shares of every € spent — costs ran over revenue this period'
+                : 'where each € of sales ends up · running costs are usually the big slice'}
+            </Note>
+          </div>
+        )}
+
+        <div className='flex items-center justify-between gap-2'>
+          <GroupHeader className='mb-0 mt-0 flex-1 border-b-0 pb-0'>
+            Full month-by-month breakdown
+          </GroupHeader>
           <CopyTableButton headers={copyHeaders} rows={copyRows} filename='profit-loss' />
         </div>
         <div className='overflow-x-auto'>

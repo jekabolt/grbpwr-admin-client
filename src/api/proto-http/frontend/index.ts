@@ -990,6 +990,15 @@ export type common_Order = {
   buyerEmail: string | undefined;
   buyerFirstName: string | undefined;
   buyerLastName: string | undefined;
+  // vat_regime is the VAT treatment snapshotted onto the order at accounting-posting time
+  // (customer_order.vat_regime): oss / pl_domestic / export / wdt / uk_stock_domestic / none. Empty
+  // until the order's sale event is posted. Surfaced so the invoice can print the legally-required
+  // note for zero-VAT regimes — notably wdt (intra-community B2B supply → reverse charge).
+  vatRegime: string | undefined;
+  // buyer_vat_id is the B2B buyer's EU VAT identifier (2-letter country prefix + digits), set on
+  // custom orders only; empty for B2C/storefront orders. Surfaced so a reverse-charge invoice can
+  // print the buyer's VAT number, which substantiates the zero-rated intra-community supply.
+  buyerVatId: string | undefined;
 };
 
 export type common_OrderItem = {

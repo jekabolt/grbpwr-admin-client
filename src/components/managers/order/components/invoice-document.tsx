@@ -10,11 +10,15 @@ const TD = 'border border-black px-1.5 py-1 align-top';
 const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-neutral-100 uppercase';
 
 // GRBPWR seller identity printed as the invoice "from" party. Contact only — no legal
-// entity address is carried in the client, so we surface what we know.
+// entity address is carried in the client, so we surface what we know. vatId is GRBPWR's
+// own VAT/NIP number, printed on B2B (reverse-charge) invoices; leave empty to omit the line.
+// TODO(grbpwr): replace the PLXXXXXXXXXX placeholder with GRBPWR's real VAT/NIP before prod —
+// it prints verbatim on invoices, so an unedited placeholder must never reach a real invoice.
 const SELLER = {
   name: 'GRBPWR',
   site: 'grbpwr.com',
   email: 'customercare@grbpwr.com',
+  vatId: 'PLXXXXXXXXXX',
 };
 
 const toNum = (s?: string): number => {
@@ -126,6 +130,15 @@ export function InvoiceDocument({
   const paymentMethod = payment?.paymentMethod?.replace('PAYMENT_METHOD_NAME_ENUM_', '');
   const paid = !!payment?.isTransactionDone;
 
+  // Legally-required VAT note for zero-VAT regimes. WDT (intra-community B2B supply) is
+  // reverse-charged: the seller charges no VAT and the buyer accounts for it in the destination
+  // country — the invoice must state this. order.vatRegime is snapshotted at accounting-posting
+  // time, so the note appears once the order's sale event is posted (empty regime → no note).
+  const reverseChargeNote =
+    order.vatRegime === 'wdt'
+      ? 'Reverse charge — intra-community supply of goods (WDT). VAT is not charged by the seller; the buyer accounts for VAT in the country of destination. (EU VAT Directive 2006/112/EC, Art. 138)'
+      : undefined;
+
   // Customer-facing link to this order on the storefront, scannable off the printed
   // invoice. Origin tracks the admin environment (beta admin → beta store), so it works
   // in both. Only shown when we have the uuid + email needed to resolve it.
@@ -176,6 +189,7 @@ export function InvoiceDocument({
             <div className='font-bold uppercase'>{SELLER.name}</div>
             <div>{SELLER.site}</div>
             <div>{SELLER.email}</div>
+            {SELLER.vatId && <div>VAT {SELLER.vatId}</div>}
           </div>
         </div>
         <div>
@@ -188,6 +202,7 @@ export function InvoiceDocument({
             </div>
             {buyer?.email && <div>{buyer.email}</div>}
             {buyer?.phone && <div>{buyer.phone}</div>}
+            {order.buyerVatId && <div className='font-medium'>VAT {order.buyerVatId}</div>}
           </div>
           <div className='mt-1'>
             <AddressLines address={billAddr} />
@@ -299,6 +314,14 @@ export function InvoiceDocument({
           )}
         </div>
       </div>
+
+      {/* VAT / REVERSE CHARGE NOTE */}
+      {reverseChargeNote && (
+        <div className='mb-5 break-inside-avoid border border-black px-3 py-2 text-[10px] leading-snug'>
+          <div className='mb-0.5 font-bold uppercase tracking-[0.12em]'>vat — reverse charge</div>
+          <div>{reverseChargeNote}</div>
+        </div>
+      )}
 
       {/* PAYMENT */}
       <Sheet title='payment'>

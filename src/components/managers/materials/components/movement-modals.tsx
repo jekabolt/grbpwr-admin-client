@@ -1,5 +1,6 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { common_MaterialMovement } from 'api/proto-http/admin';
+import { useSuppliers } from 'components/managers/accounting/utils/hooks';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { EntityPicker } from 'components/managers/tasks/components/entity-picker';
 import { runConfig, sampleConfig } from 'components/managers/tasks/utils/entity-configs';
@@ -123,6 +124,11 @@ export function ReceiveStockModal({
   const { showMessage } = useSnackBarStore();
   const { canWriteCosting } = usePermissions();
   const receive = useReceiveMaterialStock();
+  // Supplier catalog for the AP-by-supplier tag (phase 2, wave 4): a costed receipt accrues 2010
+  // Accounts Payable, and tagging it here groups that payable under the counterparty on the AP/AR
+  // screen. Optional — 0 = untagged. Only fetched while the modal is mounted (it opens conditionally).
+  const { data: suppliersData } = useSuppliers();
+  const suppliers = suppliersData?.suppliers ?? [];
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
   const [currency, setCurrency] = useState('EUR');
@@ -130,6 +136,7 @@ export function ReceiveStockModal({
   // the NET unit cost so the two aren't double-counted. Both optional; when set, both should be set.
   const [inputVat, setInputVat] = useState('');
   const [inputVatRegime, setInputVatRegime] = useState('');
+  const [supplierId, setSupplierId] = useState(0);
   const [lot, setLot] = useState('');
   // #48: "lot / roll" read as unexplained jargon ("не понимаю что это, для малого производства
   // оверкил") — collapsed behind an opt-in toggle instead of an unconditional field.
@@ -145,6 +152,7 @@ export function ReceiveStockModal({
     setCurrency('EUR');
     setInputVat('');
     setInputVatRegime('');
+    setSupplierId(0);
     setLot('');
     setShowLot(false);
     setSupplierDoc('');
@@ -176,6 +184,7 @@ export function ReceiveStockModal({
         currency: cost ? currency : '',
         lot: lot.trim(),
         supplierDoc: supplierDoc.trim(),
+        supplierId: supplierId || undefined, // AP-by-supplier tag (phase 2, wave 4); 0 = untagged
         occurredAt,
         comment: comment.trim(),
         // Recording input VAT is a costing write; both fields optional, sent only when set.
@@ -263,6 +272,22 @@ export function ReceiveStockModal({
           Uncosted receipt — moving average unchanged.
         </Text>
       )}
+      {suppliers.length > 0 ? (
+        <Field label='supplier (optional — tags the payable)'>
+          <select
+            className={cell}
+            value={supplierId || 0}
+            onChange={(e) => setSupplierId(Number(e.target.value) || 0)}
+          >
+            <option value={0}>— none —</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id ?? 0}>
+                {s.name || `supplier #${s.id}`}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
       <Field label='supplier doc'>
         <input
           className={cell}

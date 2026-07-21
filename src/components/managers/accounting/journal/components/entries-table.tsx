@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { AmountCell } from '../../components/amount-cell';
 import { CaveatBadge } from '../../components/caveat-badge';
+import { Pill } from '../../components/kit';
 import { formatAcctDate, sourceTypeLabel } from '../../utils/format';
 
 type Props = {
@@ -19,31 +20,28 @@ function orderUuid(entry: AcctJournalEntry): string | undefined {
   return entry.sourceKey?.split(':')[0];
 }
 
-// Journal list table (03 §3.2): date · id · description · source · total · flags. Whole row opens
-// the shared entry-detail modal; only the order link stops propagation so it navigates instead.
+// Picker table header cell — 10px bold uppercase in labelColor over hairline rules.
+const TH = 'px-2 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-labelColor';
+
+// Journal list — the approved "Table" variant: date · description · source · total · flags ·
+// (action), hairline rows, uppercase labelColor headers. The source cell leads with an auto/manual
+// Pill (machine-written vs hand-posted) and keeps the specific sourceTypeLabel as muted text so
+// nothing is lost; the entry id lives under the date. Whole row still opens the shared
+// entry-detail modal; the "view" button is the keyboard path; only the order link stops
+// propagation so it navigates instead.
 export function EntriesTable({ entries, isLoading, onSelect }: Props) {
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse border-2 border-textInactiveColor'>
-        <thead className='h-10 bg-textInactiveColor'>
+      <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+        <thead className='bg-bgColor'>
           <tr className='border-b border-textInactiveColor'>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>date</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>id</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>description</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>source</Text>
-            </th>
-            <th className='px-2 text-right'>
-              <Text variant='uppercase'>total</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>flags</Text>
+            <th className={TH}>date</th>
+            <th className={TH}>description</th>
+            <th className={TH}>source</th>
+            <th className={`${TH} text-right`}>total</th>
+            <th className={TH}>flags</th>
+            <th className={`${TH} text-right`}>
+              <span className='sr-only'>open entry</span>
             </th>
           </tr>
         </thead>
@@ -57,48 +55,64 @@ export function EntriesTable({ entries, isLoading, onSelect }: Props) {
           ) : (
             entries.map((entry) => {
               const uuid = orderUuid(entry);
+              const manualLike = entry.sourceType === 'manual' || entry.sourceType === 'reversal';
               return (
                 <tr
                   key={entry.id}
                   onClick={() => onSelect(entry)}
-                  className='h-10 cursor-pointer border-b border-textInactiveColor last:border-b-0 hover:bg-highlightColor/20'
+                  className='cursor-pointer border-b border-textInactiveColor last:border-b-0 hover:bg-bgSecondary'
                 >
-                  <td className='whitespace-nowrap px-2'>{formatAcctDate(entry.occurredAt)}</td>
-                  <td className='whitespace-nowrap px-2 tabular-nums'>#{entry.id}</td>
-                  <td className='px-2'>{entry.description}</td>
-                  <td className='px-2'>
+                  <td className='whitespace-nowrap px-2 py-1.5 align-top'>
+                    <div>{formatAcctDate(entry.occurredAt)}</div>
+                    <div className='text-[10px] uppercase tabular-nums text-labelColor'>
+                      #{entry.id}
+                    </div>
+                  </td>
+                  <td className='px-2 py-1.5'>{entry.description}</td>
+                  <td className='px-2 py-1.5'>
                     <div className='flex flex-wrap items-center gap-1.5'>
-                      <Text size='small'>{sourceTypeLabel(entry.sourceType)}</Text>
+                      <Pill tone={manualLike ? 'warn' : 'ok'}>
+                        {manualLike ? 'manual' : 'auto'}
+                      </Pill>
+                      <span className='text-[10px] uppercase tracking-wide text-labelColor'>
+                        {sourceTypeLabel(entry.sourceType)}
+                      </span>
                       {uuid ? (
                         <Link
                           to={`${ROUTES.orders}/${uuid}`}
                           onClick={(e) => e.stopPropagation()}
-                          className='text-small text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+                          className='text-small text-labelColor underline underline-offset-2 hover:text-textColor'
                         >
                           {uuid}
                         </Link>
                       ) : entry.sourceKey ? (
-                        <Text size='small' variant='inactive'>
-                          {entry.sourceKey}
-                        </Text>
+                        <span className='text-small text-labelColor'>{entry.sourceKey}</span>
                       ) : null}
                     </div>
                   </td>
-                  <AmountCell value={entry.total} className='px-2' />
-                  <td className='px-2'>
+                  <AmountCell value={entry.total} className='px-2 py-1.5' />
+                  <td className='px-2 py-1.5'>
                     <div className='flex items-center gap-2'>
                       {entry.hasCaveat ? <CaveatBadge text={entry.caveat} /> : null}
                       {entry.reversedBy ? (
-                        <span className='whitespace-nowrap text-small uppercase text-textInactiveColor line-through'>
-                          rev
-                        </span>
+                        <Pill tone='muted' className='line-through'>
+                          reversed
+                        </Pill>
                       ) : null}
-                      {entry.reversalOf ? (
-                        <span className='whitespace-nowrap text-small uppercase text-textInactiveColor'>
-                          reversal
-                        </span>
-                      ) : null}
+                      {entry.reversalOf ? <Pill tone='muted'>reversal</Pill> : null}
                     </div>
+                  </td>
+                  <td className='px-2 py-1.5 text-right'>
+                    <button
+                      type='button'
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect(entry);
+                      }}
+                      className='underline underline-offset-2 hover:opacity-70'
+                    >
+                      <Text size='small'>view</Text>
+                    </button>
                   </td>
                 </tr>
               );

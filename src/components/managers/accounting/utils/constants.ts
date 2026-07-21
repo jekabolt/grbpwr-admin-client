@@ -7,6 +7,9 @@
 export const ACCT_SOURCE_TYPES = [
   { value: 'order_sale', label: 'order sale' },
   { value: 'order_refund', label: 'order refund' },
+  { value: 'order_prepayment', label: 'order prepayment' },
+  { value: 'order_transit', label: 'order transit' },
+  { value: 'order_delivered_sale', label: 'order delivered sale' },
   { value: 'material_receipt', label: 'material receipt' },
   { value: 'material_issue', label: 'material issue' },
   { value: 'material_return', label: 'material return' },
@@ -14,9 +17,14 @@ export const ACCT_SOURCE_TYPES = [
   { value: 'material_adjustment', label: 'material adjustment' },
   { value: 'production_receive', label: 'production receive' },
   { value: 'opex_month', label: 'opex month' },
+  { value: 'shipping_actual', label: 'shipping actual' },
+  { value: 'dev_expense', label: 'dev expense' },
+  { value: 'depreciation', label: 'depreciation' },
+  { value: 'corp_tax', label: 'corporation tax' },
+  { value: 'order_dispute', label: 'order dispute' },
   { value: 'manual', label: 'manual' },
   { value: 'reversal', label: 'reversal' },
-] as const; // = CHECK chk_acct_entry_source_type (11 values)
+] as const; // = CHECK chk_acct_entry_source_type (19 values)
 
 export type AcctSourceType = (typeof ACCT_SOURCE_TYPES)[number]['value'];
 

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { AcctJournalLineInput } from 'api/proto-http/admin';
+import { AcctJournalLineInput, googletype_Decimal } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 
 // Accounting module (backend `feature/accounting-core`; docs/plan-accounting-ui/
@@ -34,11 +34,22 @@ export const acctKeys = {
   trialBalance: (from: string, to: string) => [...acctKeys.all, 'tb', from, to] as const,
   profitLoss: (from: string, to: string) => [...acctKeys.all, 'pl', from, to] as const,
   balanceSheet: (asOf: string) => [...acctKeys.all, 'bs', asOf] as const,
+  cashFlow: (from: string, to: string) => [...acctKeys.all, 'cash-flow', from, to] as const,
+  financialHealth: (from: string, to: string) =>
+    [...acctKeys.all, 'financial-health', from, to] as const,
   ledger: (code: string, f: LedgerFilter) => [...acctKeys.all, 'ledger', code, f] as const,
   reconciliation: (from: string, to: string) => [...acctKeys.all, 'recon', from, to] as const,
   vatReturn: (month: string) => [...acctKeys.all, 'vat-return', month] as const,
   ossReturn: (q: string) => [...acctKeys.all, 'oss-return', q] as const,
+  ukVatReturn: (q: string) => [...acctKeys.all, 'uk-vat-return', q] as const,
+  frs105: (from: string, to: string) => [...acctKeys.all, 'frs105', from, to] as const,
+  fixedAssets: () => [...acctKeys.all, 'fixed-assets'] as const,
   eventsReview: () => [...acctKeys.all, 'events-review'] as const,
+  bankTxns: (state: string) => [...acctKeys.all, 'bank-txns', state] as const,
+  bankRules: () => [...acctKeys.all, 'bank-rules'] as const,
+  suppliers: () => [...acctKeys.all, 'suppliers'] as const,
+  payables: () => [...acctKeys.all, 'payables'] as const,
+  receivables: () => [...acctKeys.all, 'receivables'] as const,
 };
 
 // ---- Chart of accounts ----
@@ -113,7 +124,12 @@ export function useCreateJournalEntry() {
       occurredAt: string;
       description: string;
       lines: AcctJournalLineInput[];
-    }) => adminService.CreateJournalEntry(vars),
+      supplierId?: number;
+    }) =>
+      adminService.CreateJournalEntry({
+        ...vars,
+        supplierId: vars.supplierId, // optional AP-by-supplier tag (phase 2, wave 4)
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
   });
 }
@@ -183,6 +199,26 @@ export function useBalanceSheet(asOf: string) {
   });
 }
 
+// Indirect-method cash-flow statement over [from, to) (exclusive). Same range guard as the other
+// range reports — closing_cash / check come from the server, never recomputed here (§8.6 #6).
+export function useCashFlow(from: string, to: string) {
+  return useQuery({
+    queryKey: acctKeys.cashFlow(from, to),
+    queryFn: () => adminService.GetCashFlowStatement({ from, to }),
+    enabled: Boolean(from && to),
+  });
+}
+
+// Financial-health ratio set over [from, to). Each row carries its own value/benchmark/status, so
+// this is a straight pass-through — the client only lays the ratios out, it doesn't compute them.
+export function useFinancialHealth(from: string, to: string) {
+  return useQuery({
+    queryKey: acctKeys.financialHealth(from, to),
+    queryFn: () => adminService.GetFinancialHealth({ from, to }),
+    enabled: Boolean(from && to),
+  });
+}
+
 export function useAccountLedger(code: string, filter: LedgerFilter) {
   return useQuery({
     queryKey: acctKeys.ledger(code, filter),
@@ -223,6 +259,80 @@ export function useOssReturn(quarterStart: string) {
     queryKey: acctKeys.ossReturn(quarterStart),
     queryFn: () => adminService.GetOssReturn({ quarter: quarterStart }),
     enabled: Boolean(quarterStart),
+  });
+}
+
+// Quarterly UK VAT return (9-box MTD). Same quarter dimension as OSS; a separate UK jurisdiction.
+export function useUkVatReturn(quarterStart: string) {
+  return useQuery({
+    queryKey: acctKeys.ukVatReturn(quarterStart),
+    queryFn: () => adminService.GetUkVatReturn({ quarter: quarterStart }),
+    enabled: Boolean(quarterStart),
+  });
+}
+
+// FRS 105 UK micro-entity accounts draft over [from, to). Base-currency (a DRAFT, per the response
+// caveats); the Income Statement is the period, the SoFP is as at `to`.
+export function useFrs105Accounts(from: string, to: string) {
+  return useQuery({
+    queryKey: acctKeys.frs105(from, to),
+    queryFn: () => adminService.GetFrs105Accounts({ from, to }),
+    enabled: Boolean(from && to),
+  });
+}
+
+// ---- Fixed assets / depreciation / corporation tax (statutory completeness) ----
+// The register drives straight-line depreciation (Dr 6370 / Cr 1225) and the CT accrual closes the
+// two FRS 105 completeness gaps the response caveats flag. All three mutations invalidate acctKeys.all
+// wholesale — a depreciation charge or CT accrual moves the P&L, SoFP, ledger and the FRS 105 view.
+
+export function useFixedAssets() {
+  return useQuery({
+    queryKey: acctKeys.fixedAssets(),
+    queryFn: () => adminService.ListFixedAssets({}),
+  });
+}
+
+export function useCreateFixedAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      name: string;
+      costBase: googletype_Decimal;
+      acquiredOn: string;
+      usefulLifeMonths: number;
+    }) => adminService.CreateFixedAsset(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
+  });
+}
+
+// Posts every un-posted monthly charge up to `upTo`'s month. Owns its toast (single-click action with
+// no hosting modal); a non-zero `skipped` means closed-period months were not posted (surfaced to the
+// caller so they can reopen the period or post a manual catch-up).
+export function usePostDepreciation() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { upTo: string }) => adminService.PostDepreciation(vars),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: acctKeys.all });
+      const posted = res.posted ?? 0;
+      const skipped = res.skipped ?? 0;
+      const base = posted === 0 ? 'No depreciation due' : `Posted ${posted} depreciation charge(s)`;
+      const tail = skipped > 0 ? ` · ${skipped} skipped (closed periods)` : '';
+      showMessage(`${base}${tail}`, skipped > 0 ? 'error' : 'success');
+    },
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to post depreciation', 'error'),
+  });
+}
+
+export function useAccrueCorporationTax() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { from: string; to: string; ratePct: googletype_Decimal }) =>
+      adminService.AccrueCorporationTax(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
   });
 }
 
@@ -268,5 +378,115 @@ export function useResolveAcctEvent() {
     },
     onError: (e) =>
       showMessage(e instanceof Error ? e.message : 'Failed to resolve event', 'error'),
+  });
+}
+
+// ---- Bank inbox (phase 2, wave 4 — docs/plan-accounting-phase2/04-wave4-money.md §4.1) ----
+// The Revolut statement inbox: CSV import → parsed lines the worker couldn't auto-book → an
+// operator posts each (Dr/Cr by the signed amount against a chosen account, 1010 being the money
+// leg) or ignores it (an internal EXCHANGE leg). Import-time substring rules pre-fill the account
+// suggestion. Every mutation invalidates acctKeys.all — a posted line becomes a journal entry that
+// moves the ledger, and its inbox state flips, so both the txn list and the reports must refresh.
+
+export function useBankTxns(state: string) {
+  return useQuery({
+    // state '' means "all" — a real filter key, never disabled (the inbox is the screen's point).
+    queryKey: acctKeys.bankTxns(state),
+    queryFn: () => adminService.ListBankTxns({ state: state || undefined, limit: 200 }),
+  });
+}
+
+export function useImportBankCsv() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { source: string; csvText: string }) =>
+      adminService.ImportBankCsv({ source: vars.source || undefined, csvText: vars.csvText }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
+  });
+}
+
+export function usePostBankTxn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; accountCode: string; occurredAt?: string }) =>
+      adminService.PostBankTxn({
+        id: vars.id,
+        accountCode: vars.accountCode,
+        occurredAt: vars.occurredAt || undefined,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
+  });
+}
+
+export function useIgnoreBankTxn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; reason?: string }) =>
+      adminService.IgnoreBankTxn({ id: vars.id, reason: vars.reason || undefined }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
+  });
+}
+
+export function useBankRules() {
+  return useQuery({
+    queryKey: acctKeys.bankRules(),
+    queryFn: () => adminService.ListBankRules({}),
+  });
+}
+
+export function useCreateBankRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { pattern: string; accountCode: string }) =>
+      adminService.CreateBankRule(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.bankRules() }),
+  });
+}
+
+export function useDeleteBankRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number }) => adminService.DeleteBankRule(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.bankRules() }),
+  });
+}
+
+// ---- Suppliers + AP/AR subledgers (phase 2, wave 4 — §4.4) ----
+// Suppliers are the purchase-side catalog that tags a 2010 Accounts-Payable position; Payables
+// aggregates the open 2010 balance per supplier (accrued − paid), Receivables the open 1040 balance
+// per bank-invoice order (invoiced − received). Creating a supplier only touches the catalog, so it
+// invalidates the suppliers key alone; the AP/AR views are pure ledger reads with no mutations here.
+
+export function useSuppliers() {
+  return useQuery({
+    queryKey: acctKeys.suppliers(),
+    queryFn: () => adminService.ListSuppliers({}),
+  });
+}
+
+export function useCreateSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { name: string; vatId?: string; notes?: string }) =>
+      adminService.CreateSupplier({
+        name: vars.name,
+        vatId: vars.vatId || undefined,
+        notes: vars.notes || undefined,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.suppliers() }),
+  });
+}
+
+export function usePayables() {
+  return useQuery({
+    queryKey: acctKeys.payables(),
+    queryFn: () => adminService.GetPayables({}),
+  });
+}
+
+export function useReceivables() {
+  return useQuery({
+    queryKey: acctKeys.receivables(),
+    queryFn: () => adminService.GetReceivables({}),
   });
 }

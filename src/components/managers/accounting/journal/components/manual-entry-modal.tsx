@@ -2,7 +2,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AcctJournalLineInput } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import {
   Controller,
@@ -23,6 +22,7 @@ import ComboField from 'ui/form/fields/combo-field';
 import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
 import SegmentedField from 'ui/form/fields/segmented-field';
+import { Callout, CheckStrip, Verdict } from '../../components/kit';
 import { MANUAL_ENTRY_PRESETS, ManualEntryPreset } from '../../utils/constants';
 import { useAcctAccounts, useCreateJournalEntry } from '../../utils/hooks';
 import {
@@ -237,23 +237,32 @@ export function ManualEntryModal({ onClose }: Props) {
 
           <Form {...form}>
             <div className='flex flex-col gap-4 p-4'>
-              {/* Templates (03 §3.2): one-click prefill of the two lines, everything editable after. */}
-              <div className='flex flex-wrap items-center gap-2'>
-                <Text variant='inactive' size='small'>
-                  templates:
-                </Text>
-                {MANUAL_ENTRY_PRESETS.map((p) => (
-                  <Button
-                    key={p.label}
-                    type='button'
-                    variant='secondary'
-                    size='sm'
-                    className='px-2 py-1 uppercase'
-                    onClick={() => applyPreset(p)}
-                  >
-                    {p.label}
-                  </Button>
-                ))}
+              {/* Template-first (approved variant): the plain-English presets lead the modal
+                  (03 §3.2 — one-click prefill of the two lines, everything editable after). */}
+              <div>
+                <Verdict className='mb-2'>
+                  Pick what happened in plain words — the right accounts fill themselves in.
+                </Verdict>
+                <div className='flex flex-wrap gap-2'>
+                  {MANUAL_ENTRY_PRESETS.map((p) => (
+                    <Button
+                      key={p.label}
+                      type='button'
+                      variant='secondary'
+                      size='lg'
+                      className='uppercase'
+                      onClick={() => applyPreset(p)}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+                <Callout className='mt-3 text-small'>
+                  <span className='font-bold text-textColor'>
+                    Templates only prefill the accounts.
+                  </span>{' '}
+                  Every field stays editable — date, amounts, lines and notes are yours to change.
+                </Callout>
               </div>
 
               <div className='grid grid-cols-1 gap-4 sm:grid-cols-[1fr_2fr]'>
@@ -326,24 +335,33 @@ export function ManualEntryModal({ onClose }: Props) {
                 </button>
               </div>
 
-              {/* Live balance footer (UX 8.4). */}
-              <div className='flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-textColor pt-3'>
-                <Text size='small'>
-                  Σ debit <span className='tabular-nums'>{fmt(balance.debit)}</span>
-                </Text>
-                <Text size='small'>
-                  Σ credit <span className='tabular-nums'>{fmt(balance.credit)}</span>
-                </Text>
-                {balance.hasSrc ? (
+              {/* Live balance footer (UX 8.4) — same computed sums, now asserted as a CheckStrip
+                  when every line is base EUR; FX entries keep the server-validated note because
+                  their base value is only known after conversion. */}
+              {balance.hasSrc ? (
+                <div className='flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-textColor pt-3'>
+                  <Text size='small'>
+                    Σ debit <span className='tabular-nums'>{fmt(balance.debit)}</span>
+                  </Text>
+                  <Text size='small'>
+                    Σ credit <span className='tabular-nums'>{fmt(balance.credit)}</span>
+                  </Text>
                   <Text size='small' variant='inactive'>
                     balance validated on server (FX)
                   </Text>
-                ) : (
-                  <Text size='small' className={cn('tabular-nums', baseImbalance && 'text-error')}>
-                    difference {fmt(balance.difference)}
-                  </Text>
-                )}
-              </div>
+                </div>
+              ) : (
+                <CheckStrip
+                  tone={baseImbalance ? 'bad' : 'ok'}
+                  label={
+                    <span className='tabular-nums'>
+                      Σ debit {fmt(balance.debit)} · Σ credit {fmt(balance.credit)}
+                    </span>
+                  }
+                  value={baseImbalance ? `off by ${fmt(balance.difference)}` : 'balanced'}
+                  className='mt-0'
+                />
+              )}
 
               <div className='flex items-center justify-end gap-2'>
                 <Button type='button' variant='secondary' size='lg' onClick={requestClose}>

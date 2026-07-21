@@ -2,6 +2,9 @@ import { cn } from 'lib/utility';
 import { useSearchParams } from 'react-router-dom';
 import { AcctSectionHeader } from '../components/section-header';
 import { BalanceSheetTab } from './components/balance-sheet';
+import { CashFlowTab } from './components/cash-flow';
+import { FinancialHealthTab } from './components/financial-health';
+import { Frs105Tab } from './components/frs105';
 import { LedgerTab } from './components/ledger';
 import { ProfitLossTab } from './components/profit-loss';
 import { RangeControls, type ControlsMode } from './components/range-controls';
@@ -14,14 +17,17 @@ import { VatTab } from './components/vat';
 // not Radix Tabs). The whole selection — tab, from/to, asOf, account code — lives in searchParams,
 // so every view is a shareable link and the TB/BS/P&L drill-downs, recon and dashboard alerts can
 // deep-link into an exact report state (§8.2). searchParams contract:
-// ?tab=tb|pl|bs|ledger|recon|vat & from & to & asOf & code.
+// ?tab=tb|pl|bs|cf|ledger|recon|vat|frs105|health & from & to & asOf & code.
 const TABS = [
   { id: 'tb', label: 'trial balance' },
   { id: 'pl', label: 'p&l' },
   { id: 'bs', label: 'balance sheet' },
+  { id: 'cf', label: 'cash flow' },
   { id: 'ledger', label: 'ledger' },
   { id: 'recon', label: 'reconciliation' },
   { id: 'vat', label: 'vat' },
+  { id: 'frs105', label: 'frs 105' },
+  { id: 'health', label: 'health' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -112,9 +118,12 @@ export function AcctReportsPage() {
       {tab === 'tb' && <TrialBalanceTab from={from} to={to} onDrill={(c) => drillToLedger(c)} />}
       {tab === 'pl' && <ProfitLossTab from={from} to={to} onDrill={(c) => drillToLedger(c)} />}
       {tab === 'bs' && <BalanceSheetTab asOf={asOf} onDrill={(c) => drillToLedger(c, true)} />}
+      {tab === 'cf' && <CashFlowTab from={from} to={to} />}
       {tab === 'ledger' && <LedgerTab code={code} from={from} to={to} />}
       {tab === 'recon' && <ReconciliationTab from={from} to={to} />}
       {tab === 'vat' && <VatTab from={from} />}
+      {tab === 'frs105' && <Frs105Tab from={from} to={to} />}
+      {tab === 'health' && <FinancialHealthTab from={from} to={to} />}
     </div>
   );
 }

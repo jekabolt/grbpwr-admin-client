@@ -124,6 +124,16 @@ const AcctReports = lazy(() =>
     default: m.AcctReportsPage,
   })),
 );
+const AcctBank = lazy(() =>
+  import('components/managers/accounting/bank/page').then((m) => ({
+    default: m.AcctBankPage,
+  })),
+);
+const AcctSubledgers = lazy(() =>
+  import('components/managers/accounting/subledgers/page').then((m) => ({
+    default: m.AcctSubledgersPage,
+  })),
+);
 const AcctPeriods = lazy(() =>
   import('components/managers/accounting/periods/page').then((m) => ({
     default: m.AcctPeriodsPage,
@@ -290,6 +300,8 @@ root.render(
                     <Route path={ROUTES.accounting} element={<AcctJournal />} />
                     <Route path={ROUTES.accountingAccounts} element={<AcctAccounts />} />
                     <Route path={ROUTES.accountingReports} element={<AcctReports />} />
+                    <Route path={ROUTES.accountingBank} element={<AcctBank />} />
+                    <Route path={ROUTES.accountingSubledgers} element={<AcctSubledgers />} />
                     <Route path={ROUTES.accountingPeriods} element={<AcctPeriods />} />
                     <Route path={ROUTES.accountingEvents} element={<AcctEvents />} />
                   </Route>

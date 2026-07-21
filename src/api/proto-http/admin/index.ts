@@ -1395,6 +1395,15 @@ export type common_Order = {
   buyerEmail: string | undefined;
   buyerFirstName: string | undefined;
   buyerLastName: string | undefined;
+  // vat_regime is the VAT treatment snapshotted onto the order at accounting-posting time
+  // (customer_order.vat_regime): oss / pl_domestic / export / wdt / uk_stock_domestic / none. Empty
+  // until the order's sale event is posted. Surfaced so the invoice can print the legally-required
+  // note for zero-VAT regimes — notably wdt (intra-community B2B supply → reverse charge).
+  vatRegime: string | undefined;
+  // buyer_vat_id is the B2B buyer's EU VAT identifier (2-letter country prefix + digits), set on
+  // custom orders only; empty for B2C/storefront orders. Surfaced so a reverse-charge invoice can
+  // print the buyer's VAT number, which substantiates the zero-rated intra-community supply.
+  buyerVatId: string | undefined;
 };
 
 export type common_OrderItem = {
@@ -6462,6 +6471,7 @@ export type ReceiveMaterialStockRequest = {
   // input_vat_amount above 30% of the net line cost as a likely gross unit_cost.
   inputVatAmount: googletype_Decimal | undefined;
   inputVatRegime: string | undefined;
+  supplierId: number | undefined;
 };
 
 export type ReceiveMaterialStockResponse = {
@@ -6922,6 +6932,7 @@ export type CreateJournalEntryRequest = {
   occurredAt: string | undefined;
   description: string | undefined;
   lines: AcctJournalLineInput[] | undefined;
+  supplierId: number | undefined;
 };
 
 // AcctJournalLine is a stored journal line (read side), joined to its account's code/name.
@@ -7094,7 +7105,7 @@ export type AcctPLRow = {
   total: googletype_Decimal | undefined;
 };
 
-// AcctPLSection groups P&L rows by section, in report order (revenue, cogs, opex).
+// AcctPLSection groups P&L rows by section, in report order (revenue, cogs, opex, tax).
 export type AcctPLSection = {
   section: string | undefined;
   rows: AcctPLRow[] | undefined;
@@ -7109,15 +7120,20 @@ export type AcctPLTotals = {
   totalOpex: googletype_Decimal[] | undefined;
   operatingProfit: googletype_Decimal[] | undefined;
   netMarginPct: googletype_Decimal[] | undefined;
+  // Corporation Tax lines (phase 2, wave 3). total_tax is the period's Σ 8010 charge (manual journal
+  // only — zero until the accountant posts CT); net_profit_after_tax = operating_profit − total_tax.
+  totalTax: googletype_Decimal[] | undefined;
+  netProfitAfterTax: googletype_Decimal[] | undefined;
 };
 
 export type GetProfitLossStatementResponse = {
   months: string[] | undefined;
   sections: AcctPLSection[] | undefined;
   totals: AcctPLTotals | undefined;
-  // Phase-1 caveats: always includes "pre-tax profit (no corporate tax accrual)" and "carrier
-  // shipping cost not booked (4110 has no 6030 expense pair yet)", plus a count of entries in the
-  // period flagged has_caveat.
+  // Caveats. As of phase 2 wave 3 the two former permanent caveats are CONDITIONAL: "pre-tax profit"
+  // prints only when the period has no 8010 Corporation-Tax entry, and "carrier shipping cost not
+  // booked" only when the period has 4110 shipping income but no 6030 shipping expense. Followed by a
+  // count of entries in the period flagged has_caveat.
   caveats: string[] | undefined;
 };
 
@@ -7218,6 +7234,156 @@ export type GetAcctReconciliationResponse = {
   pending: AcctReconBlock | undefined;
   unpostedMovements: AcctReconBlock | undefined;
   vat: AcctReconBlock | undefined;
+  prepayments: AcctReconBlock | undefined;
+  shipping: AcctReconBlock | undefined;
+  bank: AcctReconBlock | undefined;
+};
+
+// AcctBankTxn is one parsed bank statement line in the inbox. amount is SIGNED (negative = outflow);
+// currency is the payment currency (Revolut is multi-currency). state is unmatched | matched | posted |
+// ignored; matched_entry_id (0 = none) links a posted line to its journal entry; suggested_account (empty
+// = none) is the rule/default hint prefilled in the post modal.
+export type AcctBankTxn = {
+  id: number | undefined;
+  source: string | undefined;
+  externalId: string | undefined;
+  bookedAt: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  fee: googletype_Decimal | undefined;
+  description: string | undefined;
+  counterparty: string | undefined;
+  state: string | undefined;
+  matchedEntryId: number | undefined;
+  suggestedAccount: string | undefined;
+  createdAt: string | undefined;
+};
+
+export type ImportBankCsvRequest = {
+  source: string | undefined;
+  csvText: string | undefined;
+};
+
+export type ImportBankCsvResponse = {
+  parsed: number | undefined;
+  imported: number | undefined;
+  skipped: number | undefined;
+};
+
+export type ListBankTxnsRequest = {
+  state: string | undefined;
+  limit: number | undefined;
+};
+
+export type ListBankTxnsResponse = {
+  txns: AcctBankTxn[] | undefined;
+};
+
+export type PostBankTxnRequest = {
+  id: number | undefined;
+  accountCode: string | undefined;
+  occurredAt: string | undefined;
+};
+
+export type PostBankTxnResponse = {
+  entry: AcctJournalEntry | undefined;
+};
+
+export type IgnoreBankTxnRequest = {
+  id: number | undefined;
+  reason: string | undefined;
+};
+
+export type IgnoreBankTxnResponse = {
+};
+
+// AcctBankRule is a substring→account suggestion applied at import.
+export type AcctBankRule = {
+  id: number | undefined;
+  pattern: string | undefined;
+  accountCode: string | undefined;
+};
+
+export type ListBankRulesRequest = {
+};
+
+export type ListBankRulesResponse = {
+  rules: AcctBankRule[] | undefined;
+};
+
+export type CreateBankRuleRequest = {
+  pattern: string | undefined;
+  accountCode: string | undefined;
+};
+
+export type CreateBankRuleResponse = {
+  rule: AcctBankRule | undefined;
+};
+
+export type DeleteBankRuleRequest = {
+  id: number | undefined;
+};
+
+export type DeleteBankRuleResponse = {
+};
+
+// Supplier is a purchase-side counterparty (the AP catalog).
+export type Supplier = {
+  id: number | undefined;
+  name: string | undefined;
+  vatId: string | undefined;
+  notes: string | undefined;
+  createdAt: string | undefined;
+};
+
+export type CreateSupplierRequest = {
+  name: string | undefined;
+  vatId: string | undefined;
+  notes: string | undefined;
+};
+
+export type CreateSupplierResponse = {
+  supplier: Supplier | undefined;
+};
+
+export type ListSuppliersRequest = {
+};
+
+export type ListSuppliersResponse = {
+  suppliers: Supplier[] | undefined;
+};
+
+// AcctPayableRow is one supplier's open Accounts-Payable (2010) position. supplier_id 0 = an untagged 2010
+// position (a 2010 entry with no supplier). balance = accrued − paid.
+export type AcctPayableRow = {
+  supplierId: number | undefined;
+  supplierName: string | undefined;
+  accrued: googletype_Decimal | undefined;
+  paid: googletype_Decimal | undefined;
+  balance: googletype_Decimal | undefined;
+};
+
+export type GetPayablesRequest = {
+};
+
+export type GetPayablesResponse = {
+  rows: AcctPayableRow[] | undefined;
+};
+
+// AcctReceivableRow is one bank-invoice order's open Accounts-Receivable (1040) position. ref is the order
+// uuid; balance = invoiced − received.
+export type AcctReceivableRow = {
+  ref: string | undefined;
+  invoiced: googletype_Decimal | undefined;
+  received: googletype_Decimal | undefined;
+  balance: googletype_Decimal | undefined;
+};
+
+export type GetReceivablesRequest = {
+};
+
+export type GetReceivablesResponse = {
+  rows: AcctReceivableRow[] | undefined;
 };
 
 export type GetVatReturnPLRequest = {
@@ -7266,6 +7432,189 @@ export type GetOssReturnResponse = {
   rows: AcctOssRow[] | undefined;
   totalNet: googletype_Decimal | undefined;
   totalVat: googletype_Decimal | undefined;
+};
+
+export type ExportJpkV7MRequest = {
+  // month: YYYY-MM-DD, any day within the target filing month (normalised to the 1st).
+  month: string | undefined;
+};
+
+export type ExportJpkV7MResponse = {
+  filename: string | undefined;
+  xmlContent: string | undefined;
+};
+
+export type ExportOssReturnRequest = {
+  // quarter: YYYY-MM-DD, any day within the target quarter (snapped to the quarter's first day).
+  quarter: string | undefined;
+};
+
+export type ExportOssReturnResponse = {
+  filename: string | undefined;
+  xmlContent: string | undefined;
+};
+
+export type GetUkVatReturnRequest = {
+  // quarter: YYYY-MM-DD, any day within the target quarter (snapped to the quarter's first day).
+  quarter: string | undefined;
+};
+
+// GetUkVatReturnResponse is the 9-box UK VAT return. Boxes 2 (EU acquisitions VAT), 8 and 9 (EU
+// supplies/acquisitions) are always zero for a post-Brexit GB return, so they are omitted here; Box 3 =
+// Box 1 and Box 5 = Box 3 − Box 4.
+export type GetUkVatReturnResponse = {
+  quarterStart: string | undefined;
+  box1OutputVat: googletype_Decimal | undefined;
+  box3TotalVatDue: googletype_Decimal | undefined;
+  box4InputVat: googletype_Decimal | undefined;
+  box5NetVat: googletype_Decimal | undefined;
+  box6NetSales: googletype_Decimal | undefined;
+  box7NetPurchases: googletype_Decimal | undefined;
+};
+
+export type GetFrs105AccountsRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// GetFrs105AccountsResponse is an FRS 105 micro-entity accounts DRAFT: the Income Statement over the
+// period and the Statement of Financial Position as at `to`, re-grouped from the ledger. Figures are
+// in `currency` (the ledger base currency); the caveats flag that a UK Ltd filing needs GBP + entity
+// isolation.
+export type GetFrs105AccountsResponse = {
+  from: string | undefined;
+  to: string | undefined;
+  currency: string | undefined;
+  turnover: googletype_Decimal | undefined;
+  costOfSales: googletype_Decimal | undefined;
+  grossProfit: googletype_Decimal | undefined;
+  administrativeExpenses: googletype_Decimal | undefined;
+  depreciation: googletype_Decimal | undefined;
+  operatingProfit: googletype_Decimal | undefined;
+  tax: googletype_Decimal | undefined;
+  profitForYear: googletype_Decimal | undefined;
+  fixedAssets: googletype_Decimal | undefined;
+  currentAssets: googletype_Decimal | undefined;
+  creditorsWithinYear: googletype_Decimal | undefined;
+  netCurrentAssets: googletype_Decimal | undefined;
+  totalAssetsLessCurrentLiab: googletype_Decimal | undefined;
+  creditorsAfterYear: googletype_Decimal | undefined;
+  netAssets: googletype_Decimal | undefined;
+  capitalAndReserves: googletype_Decimal | undefined;
+  caveats: string[] | undefined;
+};
+
+export type GetCashFlowStatementRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// AcctCashFlowLine is one cash-flow line: a label and its SIGNED cash impact (source positive, use
+// negative).
+export type AcctCashFlowLine = {
+  label: string | undefined;
+  amount: googletype_Decimal | undefined;
+};
+
+// AcctCashFlowSection groups cash-flow lines (operating | investing | financing) with the section subtotal.
+export type AcctCashFlowSection = {
+  name: string | undefined;
+  lines: AcctCashFlowLine[] | undefined;
+  subtotal: googletype_Decimal | undefined;
+};
+
+// GetCashFlowStatementResponse is the indirect-method statement over [from, to). closing_cash is derived
+// (opening_cash + net_change); closing_cash_actual is the real cash-account balance as at `to`; check =
+// closing_cash_actual − closing_cash (0 when balanced, the trust panel).
+export type GetCashFlowStatementResponse = {
+  from: string | undefined;
+  to: string | undefined;
+  currency: string | undefined;
+  operating: AcctCashFlowSection | undefined;
+  investing: AcctCashFlowSection | undefined;
+  financing: AcctCashFlowSection | undefined;
+  netChange: googletype_Decimal | undefined;
+  openingCash: googletype_Decimal | undefined;
+  closingCash: googletype_Decimal | undefined;
+  closingCashActual: googletype_Decimal | undefined;
+  check: googletype_Decimal | undefined;
+  balanced: boolean | undefined;
+  caveats: string[] | undefined;
+};
+
+export type GetFinancialHealthRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// AcctFinancialHealthRow is one ratio row: its value, the owner's benchmark string, a status
+// (ok | warn | na | track) and a display unit ("%", "x", "days", the base currency, or "").
+export type AcctFinancialHealthRow = {
+  name: string | undefined;
+  formula: string | undefined;
+  value: googletype_Decimal | undefined;
+  benchmark: string | undefined;
+  status: string | undefined;
+  unit: string | undefined;
+};
+
+export type GetFinancialHealthResponse = {
+  from: string | undefined;
+  to: string | undefined;
+  currency: string | undefined;
+  rows: AcctFinancialHealthRow[] | undefined;
+  caveats: string[] | undefined;
+};
+
+// FixedAsset is one capitalised asset, depreciated straight-line over useful_life_months from acquired_on.
+export type FixedAsset = {
+  id: number | undefined;
+  name: string | undefined;
+  costBase: googletype_Decimal | undefined;
+  acquiredOn: string | undefined;
+  usefulLifeMonths: number | undefined;
+  disposedOn: string | undefined;
+};
+
+export type CreateFixedAssetRequest = {
+  name: string | undefined;
+  costBase: googletype_Decimal | undefined;
+  acquiredOn: string | undefined;
+  usefulLifeMonths: number | undefined;
+};
+
+export type CreateFixedAssetResponse = {
+  id: number | undefined;
+};
+
+export type ListFixedAssetsRequest = {
+};
+
+export type ListFixedAssetsResponse = {
+  assets: FixedAsset[] | undefined;
+};
+
+export type PostDepreciationRequest = {
+  upTo: string | undefined;
+};
+
+export type PostDepreciationResponse = {
+  posted: number | undefined;
+  // Monthly charges NOT posted because their accounting period is already closed. Non-zero means the
+  // run was incomplete (e.g. a back-dated asset whose early months are closed) — reopen the period or
+  // post a manual catch-up; the depreciation is not otherwise recovered.
+  skipped: number | undefined;
+};
+
+export type AccrueCorporationTaxRequest = {
+  from: string | undefined;
+  to: string | undefined;
+  ratePct: googletype_Decimal | undefined;
+};
+
+export type AccrueCorporationTaxResponse = {
+  corpTax: googletype_Decimal | undefined;
+  alreadyPosted: boolean | undefined;
 };
 
 export interface AdminService {
@@ -7852,6 +8201,63 @@ export interface AdminService {
   // GetOssReturn returns the quarterly OSS aggregate: EU B2C sales (vat_regime=oss) broken down by
   // destination country with the applied rate, net and VAT.
   GetOssReturn(request: GetOssReturnRequest): Promise<GetOssReturnResponse>;
+  // ExportJpkV7M generates the official Polish JPK_V7M (JPK_VAT) XML for a month: the taxpayer header,
+  // the VAT-7 declaration, and the sales evidence register. It is the OUTPUT-SIDE filing — the
+  // accountant merges the purchase register (input VAT), so the file's ZakupWiersz is empty. Requires
+  // the JPK_* taxpayer identity to be configured; returns FailedPrecondition otherwise.
+  ExportJpkV7M(request: ExportJpkV7MRequest): Promise<ExportJpkV7MResponse>;
+  // ExportOssReturn generates the quarterly OSS (Union scheme, VIU-DO) return XML — one row per member
+  // state of consumption with its rate, taxable base and VAT — for the accountant to validate against
+  // the official schema / transcribe into the OSS portal. Requires the JPK_* taxpayer identity.
+  ExportOssReturn(request: ExportOssReturnRequest): Promise<ExportOssReturnResponse>;
+  // GetUkVatReturn returns the quarterly UK VAT return in 9-box MTD layout for the uk_stock_domestic
+  // regime (a separate jurisdiction from the Polish JPK). Boxes 2/8/9 are zero post-Brexit for a GB
+  // return; the figures are entered into MTD-compatible software / the HMRC bridge to submit.
+  GetUkVatReturn(request: GetUkVatReturnRequest): Promise<GetUkVatReturnResponse>;
+  // GetFrs105Accounts re-groups the ledger into FRS 105 UK micro-entity line items (Income Statement +
+  // Statement of Financial Position). A base-currency DRAFT: a filing-ready UK Ltd set needs GBP
+  // conversion + isolation of the UK entity's transactions — surfaced in caveats, not done here.
+  GetFrs105Accounts(request: GetFrs105AccountsRequest): Promise<GetFrs105AccountsResponse>;
+  // GetCashFlowStatement returns the indirect-method cash-flow statement over [from, to) (exclusive):
+  // net profit + depreciation add-back + balance-sheet working-capital / investing / financing deltas,
+  // with a Check that reconciles the derived closing cash to the actual 1010/1030 balance.
+  GetCashFlowStatement(request: GetCashFlowStatementRequest): Promise<GetCashFlowStatementResponse>;
+  // GetFinancialHealth returns the financial-health ratio set over [from, to) (exclusive): each row a
+  // {name, formula, value, benchmark, status} tuple. Money is ledger-derived; unit counts come from
+  // operational metrics (labelled in caveats).
+  GetFinancialHealth(request: GetFinancialHealthRequest): Promise<GetFinancialHealthResponse>;
+  // ImportBankCsv parses a bank CSV export (Revolut) into the inbox, deduplicating on the bank
+  // transaction id + payment currency; a re-imported statement is a no-op for lines already present.
+  ImportBankCsv(request: ImportBankCsvRequest): Promise<ImportBankCsvResponse>;
+  // ListBankTxns returns inbox lines, optionally filtered by state (unmatched | matched | posted | ignored).
+  ListBankTxns(request: ListBankTxnsRequest): Promise<ListBankTxnsResponse>;
+  // PostBankTxn books a manual-provenance journal entry for an inbox line (Dr/Cr by the signed amount: an
+  // inflow Dr 1010 / Cr the chosen account, an outflow reversed) and marks the line posted. A non-EUR line
+  // posts via the costing-FX fold (amount_src + currency_src).
+  PostBankTxn(request: PostBankTxnRequest): Promise<PostBankTxnResponse>;
+  // IgnoreBankTxn marks an inbox line deliberately not booked (e.g. an internal EXCHANGE leg).
+  IgnoreBankTxn(request: IgnoreBankTxnRequest): Promise<IgnoreBankTxnResponse>;
+  // ListBankRules returns the substring→account suggestion rules applied at import.
+  ListBankRules(request: ListBankRulesRequest): Promise<ListBankRulesResponse>;
+  // CreateBankRule adds a substring→account suggestion rule.
+  CreateBankRule(request: CreateBankRuleRequest): Promise<CreateBankRuleResponse>;
+  // DeleteBankRule removes a suggestion rule.
+  DeleteBankRule(request: DeleteBankRuleRequest): Promise<DeleteBankRuleResponse>;
+  // CreateSupplier adds a purchase-side supplier to the catalog (unique name).
+  CreateSupplier(request: CreateSupplierRequest): Promise<CreateSupplierResponse>;
+  // ListSuppliers returns the supplier catalog.
+  ListSuppliers(request: ListSuppliersRequest): Promise<ListSuppliersResponse>;
+  // GetPayables returns the open Accounts-Payable (2010) balance per supplier (accrued − paid).
+  GetPayables(request: GetPayablesRequest): Promise<GetPayablesResponse>;
+  // GetReceivables returns the open Accounts-Receivable (1040) balance per bank-invoice order.
+  GetReceivables(request: GetReceivablesRequest): Promise<GetReceivablesResponse>;
+  // Fixed-asset register + straight-line depreciation.
+  CreateFixedAsset(request: CreateFixedAssetRequest): Promise<CreateFixedAssetResponse>;
+  ListFixedAssets(request: ListFixedAssetsRequest): Promise<ListFixedAssetsResponse>;
+  // PostDepreciation posts every not-yet-posted monthly depreciation charge up to the given month.
+  PostDepreciation(request: PostDepreciationRequest): Promise<PostDepreciationResponse>;
+  // AccrueCorporationTax posts a corporation-tax accrual (Dr 8010 / Cr 2050) on the period's pre-tax profit.
+  AccrueCorporationTax(request: AccrueCorporationTaxRequest): Promise<AccrueCorporationTaxResponse>;
 }
 
 type RequestType = {
@@ -12837,6 +13243,396 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetOssReturn",
       }) as Promise<GetOssReturnResponse>;
+    },
+    ExportJpkV7M(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/jpk-v7m`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.month) {
+        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExportJpkV7M",
+      }) as Promise<ExportJpkV7MResponse>;
+    },
+    ExportOssReturn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/oss-export`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.quarter) {
+        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExportOssReturn",
+      }) as Promise<ExportOssReturnResponse>;
+    },
+    GetUkVatReturn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/uk-vat-return`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.quarter) {
+        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetUkVatReturn",
+      }) as Promise<GetUkVatReturnResponse>;
+    },
+    GetFrs105Accounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/frs105`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFrs105Accounts",
+      }) as Promise<GetFrs105AccountsResponse>;
+    },
+    GetCashFlowStatement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/cash-flow`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCashFlowStatement",
+      }) as Promise<GetCashFlowStatementResponse>;
+    },
+    GetFinancialHealth(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/financial-health`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFinancialHealth",
+      }) as Promise<GetFinancialHealthResponse>;
+    },
+    ImportBankCsv(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/import`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ImportBankCsv",
+      }) as Promise<ImportBankCsvResponse>;
+    },
+    ListBankTxns(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/txns`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.state) {
+        queryParams.push(`state=${encodeURIComponent(request.state.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListBankTxns",
+      }) as Promise<ListBankTxnsResponse>;
+    },
+    PostBankTxn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/post`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostBankTxn",
+      }) as Promise<PostBankTxnResponse>;
+    },
+    IgnoreBankTxn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/ignore`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "IgnoreBankTxn",
+      }) as Promise<IgnoreBankTxnResponse>;
+    },
+    ListBankRules(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/rules`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListBankRules",
+      }) as Promise<ListBankRulesResponse>;
+    },
+    CreateBankRule(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/rules`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateBankRule",
+      }) as Promise<CreateBankRuleResponse>;
+    },
+    DeleteBankRule(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/bank/rules/delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteBankRule",
+      }) as Promise<DeleteBankRuleResponse>;
+    },
+    CreateSupplier(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/suppliers`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateSupplier",
+      }) as Promise<CreateSupplierResponse>;
+    },
+    ListSuppliers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/suppliers`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSuppliers",
+      }) as Promise<ListSuppliersResponse>;
+    },
+    GetPayables(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/payables`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetPayables",
+      }) as Promise<GetPayablesResponse>;
+    },
+    GetReceivables(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/receivables`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetReceivables",
+      }) as Promise<GetReceivablesResponse>;
+    },
+    CreateFixedAsset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/fixed-assets`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateFixedAsset",
+      }) as Promise<CreateFixedAssetResponse>;
+    },
+    ListFixedAssets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/fixed-assets`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFixedAssets",
+      }) as Promise<ListFixedAssetsResponse>;
+    },
+    PostDepreciation(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/depreciation/post`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostDepreciation",
+      }) as Promise<PostDepreciationResponse>;
+    },
+    AccrueCorporationTax(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/corporation-tax/accrue`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AccrueCorporationTax",
+      }) as Promise<AccrueCorporationTaxResponse>;
     },
   };
 }
