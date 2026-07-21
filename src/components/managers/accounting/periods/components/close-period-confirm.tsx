@@ -4,9 +4,9 @@ import { addMonths, format, parseISO } from 'date-fns';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSnackBarStore } from 'lib/stores/store';
-import { cn } from 'lib/utility';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
+import { Callout, CheckRow, GroupHeader } from '../../components/kit';
 import { formatBase } from '../../utils/format';
 import { useClosePeriod, useReconciliation } from '../../utils/hooks';
 import { formatPeriodLabel } from './periods-table';
@@ -21,14 +21,15 @@ function isDeltaOk(delta?: googletype_Decimal): boolean {
   return Number.isFinite(n) && Math.abs(n) < 0.01;
 }
 
+// One pre-close signal as a checklist row: the kit's CheckRow box plus the signal's real value.
 function SignalRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
   return (
-    <div className='flex items-center justify-between gap-3 text-textBaseSize'>
-      <Text size='small'>{label}</Text>
-      <span className={cn('font-medium', ok ? 'text-success' : 'text-error')}>
-        {value} {ok ? '✓' : '✗'}
+    <CheckRow done={ok}>
+      <span className='flex items-baseline gap-2'>
+        {label}
+        <span className='tabular-nums text-labelColor'>{value}</span>
       </span>
-    </div>
+    </CheckRow>
   );
 }
 
@@ -102,10 +103,8 @@ export function ClosePeriodConfirm({ period, onOpenChange }: Props) {
           Close {label}? Closed periods reject any new postings; late events will require reopening.
         </Text>
 
-        <div className='flex flex-col gap-1.5 border border-textInactiveColor p-3'>
-          <Text variant='uppercase' size='small' className='text-textInactiveColor'>
-            pre-close check
-          </Text>
+        <div className='flex flex-col'>
+          <GroupHeader className='mt-0'>pre-close check</GroupHeader>
           {reconLoading ? (
             <Text size='small' variant='inactive'>
               checking reconciliation…
@@ -136,10 +135,10 @@ export function ClosePeriodConfirm({ period, onOpenChange }: Props) {
         </div>
 
         {notReady && (
-          <div className='flex flex-col gap-2 border border-error bg-error/10 p-3'>
-            <Text variant='uppercase' size='small' className='font-semibold text-error'>
+          <Callout tone='attention' className='flex flex-col gap-2'>
+            <span className='text-[10px] font-bold uppercase tracking-wide text-error'>
               not ready:
-            </Text>
+            </span>
             <ul className='flex flex-col gap-1 pl-4'>
               {notReady.map((reason, i) => (
                 <li key={i} className='list-disc text-textBaseSize text-error'>
@@ -153,7 +152,7 @@ export function ClosePeriodConfirm({ period, onOpenChange }: Props) {
             >
               open reconciliation →
             </Link>
-          </div>
+          </Callout>
         )}
       </div>
     </ConfirmationModal>

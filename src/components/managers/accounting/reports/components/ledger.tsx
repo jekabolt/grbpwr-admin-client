@@ -7,9 +7,22 @@ import { useAccountLedger } from '../../utils/hooks';
 import { ACCT_PAGE_SIZE } from '../../utils/constants';
 import { AmountCell } from '../../components/amount-cell';
 import { EntryDetailModal } from '../../components/entry-detail-modal';
-import { formatAcctDate, sourceTypeLabel } from '../../utils/format';
+import { StatGrid, StatTile } from '../../components/kit';
+import { formatAcctDate, formatBase, sourceTypeLabel } from '../../utils/format';
 import { CopyTableButton } from './copy-table-button';
 import { ReportState } from './report-utils';
+
+// Net change over the period = closing − opening (a display figure derived from two server-sent
+// balances; the amounts themselves are never recomputed). Per-page debit/credit sums aren't shown
+// as "money in/out" because the ledger is paginated — they'd only cover the visible page.
+function netChangeLabel(opening?: string, closing?: string): { text: string; tone?: 'up' | 'down' } {
+  const o = parseFloat(opening ?? '');
+  const c = parseFloat(closing ?? '');
+  if (!Number.isFinite(o) || !Number.isFinite(c)) return { text: '—' };
+  const d = c - o;
+  const mag = Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return { text: `${d >= 0 ? '+' : '−'}${mag}`, tone: d === 0 ? undefined : d > 0 ? 'up' : 'down' };
+}
 
 type Props = {
   code: string;
@@ -88,16 +101,18 @@ export function LedgerTab({ code, from, to }: Props) {
             <Text className='font-medium'>
               {data?.code} — {data?.name}
             </Text>
-            <div className='flex items-center gap-4'>
-              <div className='flex items-center gap-2'>
-                <Text size='small' variant='inactive'>
-                  opening balance
-                </Text>
-                <AmountCell as='span' value={data?.openingBalance} className='font-medium' />
-              </div>
-              <CopyTableButton headers={HEADERS} rows={copyRows} filename={`ledger-${code}`} />
-            </div>
+            <CopyTableButton headers={HEADERS} rows={copyRows} filename={`ledger-${code}`} />
           </div>
+
+          <StatGrid>
+            <StatTile label='Opening balance' value={formatBase(data?.openingBalance)} />
+            <StatTile
+              label='Net change (period)'
+              value={netChangeLabel(data?.openingBalance?.value, data?.closingBalance?.value).text}
+              tone={netChangeLabel(data?.openingBalance?.value, data?.closingBalance?.value).tone}
+            />
+            <StatTile label='Closing balance' value={formatBase(data?.closingBalance)} />
+          </StatGrid>
 
           <div className='overflow-x-auto'>
             <table className='w-full min-w-max border-collapse border-2 border-textInactiveColor'>

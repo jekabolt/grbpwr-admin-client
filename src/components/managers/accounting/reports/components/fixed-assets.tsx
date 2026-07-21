@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { FixedAsset } from 'api/proto-http/admin';
+import { FixedAsset, googletype_Decimal } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
@@ -17,6 +17,7 @@ import {
   useFixedAssets,
   usePostDepreciation,
 } from '../../utils/hooks';
+import { BarRow, Callout, Note, Pill, RowLine, clampPct } from '../../components/kit';
 import { formatBase } from '../../utils/format';
 import { ReportState, toISODate } from './report-utils';
 
@@ -35,6 +36,29 @@ function lastDayOfRange(to: string): string {
   const dt = new Date(y, m - 1, d);
   dt.setDate(dt.getDate() - 1);
   return toISODate(dt);
+}
+
+// ---- Display estimates for the asset cards (the register endpoint carries only cost / acquired /
+// life, so monthly charge, depreciated-to-date and NBV are derived on screen: cost ÷ life × months
+// held. Marked ≈ — the POSTED figures live in the ledger (Dr 6370 / Cr 1225), the sanctioned
+// display-proportion exception, same as the kit's bar widths.) ----
+
+function toNum(d?: googletype_Decimal): number | null {
+  const n = parseFloat(d?.value ?? '');
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtNum(n: number): string {
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Whole calendar months between two YYYY-MM-DD dates (day-of-month ignored — straight-line charges
+// post per month, so the month distance is the honest estimate of charges taken).
+function monthsBetween(fromISO: string, toISO: string): number {
+  const [y1, m1] = fromISO.split('-').map(Number);
+  const [y2, m2] = toISO.split('-').map(Number);
+  if (!y1 || !m1 || !y2 || !m2) return 0;
+  return (y2 - y1) * 12 + (m2 - m1);
 }
 
 // Fixed-asset register + the two statutory-completeness actions (Post Depreciation, Accrue Corporation
@@ -73,11 +97,11 @@ export function FixedAssetsPanel({ from, to }: Props) {
         </div>
       </div>
 
-      <Text variant='inactive' size='small'>
-        depreciation posts monthly straight-line charges up to {lastDayOfRange(to)}; corporation tax is
-        accrued on the pre-tax profit of the selected range. Both are idempotent — re-running only fills
-        gaps.
-      </Text>
+      <Note className='mt-0'>
+        depreciation posts monthly straight-line charges up to {lastDayOfRange(to)}; corporation tax
+        is accrued on the pre-tax profit of the selected range. Both are idempotent — re-running only
+        fills gaps.
+      </Note>
 
       <ReportState
         isLoading={isLoading}
@@ -86,25 +110,16 @@ export function FixedAssetsPanel({ from, to }: Props) {
         isEmpty={assets.length === 0}
         emptyHint='no fixed assets yet — add one to start depreciating'
       >
-        <div className='overflow-x-auto'>
-          <table className='w-full min-w-max border-collapse'>
-            <thead className='border-b border-textColor'>
-              <tr>
-                <th className='px-2 py-2 text-left text-textBaseSize uppercase'>asset</th>
-                <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>cost</th>
-                <th className='px-2 py-2 text-left text-textBaseSize uppercase'>acquired</th>
-                <th className='min-w-24 px-2 py-2 text-right text-textBaseSize uppercase'>
-                  life (mo)
-                </th>
-                <th className='px-2 py-2 text-left text-textBaseSize uppercase'>status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assets.map((a) => (
-                <FixedAssetRow key={a.id} asset={a} />
-              ))}
-            </tbody>
-          </table>
+        <div className='flex flex-col gap-2'>
+          <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
+            {assets.map((a) => (
+              <FixedAssetCard key={a.id} asset={a} rangeEnd={lastDayOfRange(to)} />
+            ))}
+          </div>
+          <Note>
+            monthly charge, depreciated-to-date and net book value are on-screen estimates (cost ÷
+            life × months held) — the posted figures live in the ledger (Dr 6370 / Cr 1225)
+          </Note>
         </div>
       </ReportState>
 
@@ -114,30 +129,68 @@ export function FixedAssetsPanel({ from, to }: Props) {
   );
 }
 
-function FixedAssetRow({ asset }: { asset: FixedAsset }) {
+// One asset as a card: cost, the derived straight-line monthly charge, a depreciation progress bar
+// and the estimated net book value. A disposed asset measures up to its disposal date and gets a
+// muted pill instead of the green "active" one.
+function FixedAssetCard({ asset, rangeEnd }: { asset: FixedAsset; rangeEnd: string }) {
   const disposed = !!asset.disposedOn;
+  const cost = toNum(asset.costBase);
+  const life = asset.usefulLifeMonths ?? 0;
+  const monthly = cost != null && life > 0 ? cost / life : null;
+  const measuredTo = asset.disposedOn ?? rangeEnd;
+  const monthsHeld = asset.acquiredOn
+    ? Math.max(0, Math.min(life, monthsBetween(asset.acquiredOn, measuredTo)))
+    : 0;
+  const accumulated = monthly != null ? monthly * monthsHeld : null;
+  const nbv = cost != null && accumulated != null ? cost - accumulated : null;
+  const pct = cost != null && cost > 0 && accumulated != null ? (accumulated / cost) * 100 : 0;
+
   return (
-    <tr className='border-b border-textInactiveColor'>
-      <td className='whitespace-nowrap px-2 py-1'>{asset.name}</td>
-      <td className='w-32 min-w-32 whitespace-nowrap px-2 py-1 text-right tabular-nums'>
-        {formatBase(asset.costBase)}
-      </td>
-      <td className='whitespace-nowrap px-2 py-1 tabular-nums'>{asset.acquiredOn}</td>
-      <td className='w-24 min-w-24 whitespace-nowrap px-2 py-1 text-right tabular-nums'>
-        {asset.usefulLifeMonths}
-      </td>
-      <td className='whitespace-nowrap px-2 py-1'>
-        {disposed ? (
-          <Text component='span' size='small' variant='inactive'>
-            disposed {asset.disposedOn}
-          </Text>
-        ) : (
-          <Text component='span' size='small'>
-            active
-          </Text>
-        )}
-      </td>
-    </tr>
+    <Callout className='text-textColor'>
+      <div className='mb-1 flex items-center justify-between gap-2'>
+        <span className='truncate font-bold'>{asset.name}</span>
+        <Pill tone={disposed ? 'muted' : 'ok'}>
+          {disposed ? `disposed ${asset.disposedOn}` : 'active'}
+        </Pill>
+      </div>
+      <RowLine
+        label={
+          <>
+            Cost
+            <span className='ml-1 text-[11px] text-labelColor'>(bought {asset.acquiredOn})</span>
+          </>
+        }
+        value={formatBase(asset.costBase)}
+      />
+      <RowLine
+        label={
+          <>
+            Monthly charge
+            <span className='ml-1 text-[11px] text-labelColor'>(cost spread over its life)</span>
+          </>
+        }
+        value={monthly != null ? `≈ ${fmtNum(monthly)} / mo over ${life} mo` : '—'}
+      />
+      <div className='border-b border-textInactiveColor'>
+        <BarRow
+          name='Depreciated'
+          pct={clampPct(pct)}
+          value={accumulated != null ? `≈ ${fmtNum(accumulated)}` : '—'}
+        />
+      </div>
+      <RowLine
+        label={
+          <>
+            Net book value
+            <span className='ml-1 text-[11px] font-normal text-labelColor'>
+              (what it&apos;s still worth on paper)
+            </span>
+          </>
+        }
+        value={nbv != null ? `≈ ${fmtNum(nbv)}` : '—'}
+        total
+      />
+    </Callout>
   );
 }
 

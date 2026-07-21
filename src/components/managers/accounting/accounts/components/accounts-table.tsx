@@ -2,6 +2,7 @@ import { AcctAccount } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import Text from 'ui/components/text';
 import Tooltip from 'ui/components/tooltip';
+import { Pill } from '../../components/kit';
 
 type Props = {
   accounts: AcctAccount[];
@@ -11,38 +12,27 @@ type Props = {
   onArchiveToggle: (account: AcctAccount) => void;
 };
 
-// Chart of accounts (03 §3.1) — a plain <table> like members-table.tsx (no virtualization: the
-// chart is ~34 rows, 08.8). Rows arrive pre-sorted by code from the backend; section is shown as
-// a bordered badge. Actions are gated by canWrite; for is_system accounts they are hidden
-// entirely and replaced by a tooltip, because the backend rejects rename/archive on them
-// (FailedPrecondition) — the posting rules own those rows.
+// Picker table header cell — 10px bold uppercase in labelColor over hairline rules.
+const TH = 'px-2 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-labelColor';
+
+// Chart of accounts roster (03 §3.1) — a plain <table> like members-table.tsx (no virtualization:
+// the chart is ~34 rows, 08.8), restyled to the picker's hairline look. Rows arrive pre-sorted by
+// code from the backend; section renders as a muted Pill. Actions are gated by canWrite; for
+// is_system accounts they are hidden entirely and replaced by a tooltip, because the backend
+// rejects rename/archive on them (FailedPrecondition) — the posting rules own those rows.
 export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchiveToggle }: Props) {
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse border-2 border-textInactiveColor'>
-        <thead className='h-10 bg-textInactiveColor'>
+      <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+        <thead className='bg-bgColor'>
           <tr className='border-b border-textInactiveColor'>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>code</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>name</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>section</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>statement</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>system</Text>
-            </th>
-            <th className='px-2 text-left'>
-              <Text variant='uppercase'>archived</Text>
-            </th>
-            <th className='px-2 text-right'>
-              <Text variant='uppercase'>actions</Text>
-            </th>
+            <th className={TH}>code</th>
+            <th className={TH}>name</th>
+            <th className={TH}>section</th>
+            <th className={TH}>statement</th>
+            <th className={TH}>system</th>
+            <th className={TH}>archived</th>
+            <th className={`${TH} text-right`}>actions</th>
           </tr>
         </thead>
         <tbody>
@@ -64,9 +54,7 @@ export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchi
                 <td className='whitespace-nowrap px-2 tabular-nums'>{a.code}</td>
                 <td className='px-2'>{a.name}</td>
                 <td className='px-2'>
-                  <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-small uppercase'>
-                    {a.section}
-                  </span>
+                  <Pill tone='muted'>{a.section}</Pill>
                 </td>
                 <td className='px-2 uppercase'>{a.statement}</td>
                 <td className='px-2'>

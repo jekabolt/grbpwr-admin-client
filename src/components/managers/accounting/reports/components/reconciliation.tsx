@@ -1,10 +1,12 @@
 import { AcctReconBlock, AcctReconItem, googletype_Decimal } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
+import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Text from 'ui/components/text';
-import { useReconciliation } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
+import { Note, Pill } from '../../components/kit';
+import { useReconciliation } from '../../utils/hooks';
 import { ReportState } from './report-utils';
 
 type Props = {
@@ -45,16 +47,7 @@ function isMatched(delta?: googletype_Decimal): boolean {
   return Number.isFinite(n) && Math.abs(n) < 0.01;
 }
 
-function LedgerVsOp({ label, value }: { label: string; value?: googletype_Decimal }) {
-  return (
-    <div className='flex items-center justify-between gap-2'>
-      <Text size='small' variant='inactive'>
-        {label}
-      </Text>
-      <AmountCell as='span' value={value} className='text-small' />
-    </div>
-  );
-}
+const TH = 'whitespace-nowrap px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-labelColor';
 
 // A recon item's `ref` is an operational identity. Order-bearing blocks carry the order reference
 // (always `ORD-…`; order_refund events suffix it `:seq`) — only those deep-link to the order. Every
@@ -89,63 +82,72 @@ function ReconItemRow({ item, linkOrders }: { item: AcctReconItem; linkOrders: b
   );
 }
 
-function ReconCard({
+// One area of the reconciliation table: books vs. real-life vs. difference, a status pill, and an
+// expandable drill-down row (the item sample) so every number stays clickable to its source (§8.2).
+function ReconRow({
   block,
   label,
+  blockKey,
   linkOrders,
-  isFinishedGoods,
-  isPending,
 }: {
   block?: AcctReconBlock;
   label: string;
+  blockKey: ReconKey;
   linkOrders: boolean;
-  isFinishedGoods: boolean;
-  isPending: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const items = block?.items ?? [];
   const totalCount = block?.totalCount ?? items.length;
   const moreCount = Math.max(0, totalCount - items.length);
   const matched = isMatched(block?.delta);
+  const isPending = blockKey === 'pending';
+  const isFinishedGoods = blockKey === 'finishedGoods';
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
-      <div className='flex items-center justify-between gap-2'>
-        <Text variant='uppercase' className='font-medium'>
-          {block?.name || label}
-        </Text>
-        {matched ? (
-          <span className='whitespace-nowrap text-textBaseSize uppercase text-success'>
-            matched
-          </span>
-        ) : (
-          <AmountCell as='span' value={block?.delta} className='text-error' />
-        )}
-      </div>
-
-      <div className='flex flex-col gap-1'>
-        <LedgerVsOp label='ledger' value={block?.ledger} />
-        <LedgerVsOp label='operational' value={block?.operational} />
-        <LedgerVsOp label='delta' value={block?.delta} />
-      </div>
-
-      {isFinishedGoods && (
-        <Text size='small' variant='inactive'>
-          drift is expected (live cost_price vs sale-time snapshots)
-        </Text>
-      )}
-
-      {items.length > 0 && (
-        <div className='flex flex-col gap-1'>
-          <button
-            type='button'
-            className='w-fit text-textBaseSize uppercase underline underline-offset-2 hover:opacity-70'
-            onClick={() => setOpen((o) => !o)}
-          >
-            {open ? 'hide details' : `details (${totalCount})`}
-          </button>
-          {open && (
-            <div className='flex flex-col gap-1.5 border-t border-textInactiveColor pt-2'>
+    <>
+      <tr className='border-b border-textInactiveColor align-top last:border-b-0'>
+        <td className='px-2.5 py-2'>
+          <div className='flex flex-col gap-1'>
+            <span className='whitespace-nowrap font-medium uppercase'>{block?.name || label}</span>
+            {items.length > 0 && (
+              <button
+                type='button'
+                className='w-fit whitespace-nowrap text-[10px] uppercase tracking-wide text-labelColor underline underline-offset-2 hover:text-textColor'
+                onClick={() => setOpen((o) => !o)}
+              >
+                {open ? 'hide details' : `details (${totalCount})`}
+              </button>
+            )}
+            {isPending && (
+              <Link
+                to={`${ROUTES.accounting}?new=1`}
+                className='w-fit whitespace-nowrap text-[10px] uppercase tracking-wide underline underline-offset-2 hover:opacity-70'
+              >
+                create manual entry
+              </Link>
+            )}
+          </div>
+        </td>
+        <AmountCell value={block?.ledger} className='px-2.5 py-2' />
+        <AmountCell value={block?.operational} className='px-2.5 py-2' />
+        <AmountCell
+          value={block?.delta}
+          className={cn('px-2.5 py-2', !matched && 'font-medium text-error')}
+        />
+        <td className='px-2.5 py-2 text-right'>
+          {matched ? (
+            <Pill tone='ok'>matched</Pill>
+          ) : (
+            <Pill tone='warn'>
+              {isFinishedGoods ? 'drift' : isPending ? 'to post' : 'mismatch'}
+            </Pill>
+          )}
+        </td>
+      </tr>
+      {open && items.length > 0 && (
+        <tr className='border-b border-textInactiveColor bg-bgSecondary/40 last:border-b-0'>
+          <td colSpan={5} className='px-2.5 py-2'>
+            <div className='flex flex-col gap-1.5'>
               {items.map((it, i) => (
                 <ReconItemRow key={i} item={it} linkOrders={linkOrders} />
               ))}
@@ -155,27 +157,19 @@ function ReconCard({
                 </Text>
               )}
             </div>
-          )}
-        </div>
+          </td>
+        </tr>
       )}
-
-      {isPending && (
-        <Link
-          to={`${ROUTES.accounting}?new=1`}
-          className='w-fit text-textBaseSize uppercase underline underline-offset-2 hover:opacity-70'
-        >
-          create manual entry
-        </Link>
-      )}
-    </div>
+    </>
   );
 }
 
-// 4.5 Reconciliation: the operational ritual before a month close. Seven named blocks compare the
-// ledger figure against operational truth; a non-zero delta (outside finished_goods, where drift is
-// expected) means the two diverged. Blocks are cards with drill-down items — every number stays
-// clickable to its source (§8.2). Top-of-screen link into periods; a create-manual-entry link on
-// pending routes to the journal's new-entry modal (?new=1, owned by the journal screen).
+// 4.5 Reconciliation: the operational ritual before a month close, as one table ("Table" variant) —
+// one row per area, in-the-books (ledger) vs. in-real-life (operational) vs. difference, a status
+// pill (matched / drift / to post / mismatch), and an expandable drill-down under each row. A
+// non-zero delta (outside finished_goods, where drift is expected) means the two diverged.
+// Top-of-screen link into periods; a create-manual-entry link on pending routes to the journal's
+// new-entry modal (?new=1, owned by the journal screen).
 export function ReconciliationTab({ from, to }: Props) {
   const { data, isLoading, isError, refetch } = useReconciliation(from, to);
 
@@ -200,18 +194,31 @@ export function ReconciliationTab({ from, to }: Props) {
         isEmpty={!data}
         emptyHint='no reconciliation data for this period — check the date range'
       >
-        <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
-          {BLOCKS.map(({ key, label }) => (
-            <ReconCard
-              key={key}
-              block={data?.[key]}
-              label={label}
-              linkOrders={key !== 'materials' && key !== 'unpostedMovements' && key !== 'vat'}
-              isFinishedGoods={key === 'finishedGoods'}
-              isPending={key === 'pending'}
-            />
-          ))}
+        <div className='overflow-x-auto'>
+          <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+            <thead>
+              <tr className='border-b border-textInactiveColor bg-bgSecondary'>
+                <th className={cn(TH, 'text-left')}>area</th>
+                <th className={cn(TH, 'text-right')}>in the books (ledger)</th>
+                <th className={cn(TH, 'text-right')}>in real life (operational)</th>
+                <th className={cn(TH, 'text-right')}>difference</th>
+                <th className={cn(TH, 'text-right')}>status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {BLOCKS.map(({ key, label }) => (
+                <ReconRow
+                  key={key}
+                  block={data?.[key]}
+                  label={label}
+                  blockKey={key}
+                  linkOrders={key !== 'materials' && key !== 'unpostedMovements' && key !== 'vat'}
+                />
+              ))}
+            </tbody>
+          </table>
         </div>
+        <Note>finished goods drift is expected — live cost_price vs sale-time snapshots</Note>
       </ReportState>
     </div>
   );

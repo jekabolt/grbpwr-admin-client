@@ -9,9 +9,21 @@ import { Loader } from 'ui/components/loader';
 import Text from 'ui/components/text';
 import { ToggleSwitch } from 'ui/components/toggle-switch';
 import { AcctSectionHeader } from '../components/section-header';
+import { Callout, Note, StatGrid, StatTile } from '../components/kit';
+import { ACCT_SECTIONS, AcctSection } from '../utils/constants';
 import { useAcctAccounts, useArchiveAccount } from '../utils/hooks';
 import { AccountsTable } from './components/accounts-table';
 import { UpsertAccountModal } from './components/upsert-account-modal';
+
+// Plain-language sub-label per section — the approved "Section tiles" variant's vocabulary.
+const SECTION_SUBLABEL: Record<AcctSection, string> = {
+  asset: 'things we own',
+  liability: 'what we owe',
+  equity: "owner's stake",
+  revenue: 'sales',
+  cogs: 'cost of goods',
+  opex: 'running costs',
+};
 
 // Chart of Accounts screen (03 §3.1): the reference table of accounts postings hit. Small
 // surface — a table plus create/rename/archive modals — but the source of truth the manual-entry
@@ -78,13 +90,36 @@ export function AcctAccountsPage() {
             </Button>
           </div>
         ) : (
-          <AccountsTable
-            accounts={accounts}
-            canWrite={canWriteAcct}
-            isLoading={isLoading}
-            onRename={setRenameTarget}
-            onArchiveToggle={setArchiveTarget}
-          />
+          <>
+            {/* Section tiles (approved variant): one tile per section, valued with the COUNT of
+                accounts in it — the chart carries no balances, so counts are the honest figure
+                (balances live in reports). Counts follow the show-archived toggle because the
+                list itself does. */}
+            <div>
+              <StatGrid>
+                {ACCT_SECTIONS.map((s) => (
+                  <StatTile
+                    key={s}
+                    label={s}
+                    value={accounts.filter((a) => a.section === s).length}
+                    sub={SECTION_SUBLABEL[s]}
+                  />
+                ))}
+              </StatGrid>
+              <Note>account counts per section — for balances see reports</Note>
+            </div>
+            <Callout className='text-small'>
+              <span className='font-bold text-textColor'>How the codes read:</span> 1xxx own ·
+              2xxx owe · 3xxx owner&apos;s stake · 4xxx sales · 5–6xxx costs
+            </Callout>
+            <AccountsTable
+              accounts={accounts}
+              canWrite={canWriteAcct}
+              isLoading={isLoading}
+              onRename={setRenameTarget}
+              onArchiveToggle={setArchiveTarget}
+            />
+          </>
         )}
       </div>
 
