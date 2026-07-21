@@ -99,6 +99,8 @@ export enum ROUTES {
   accounting = '/accounting',
   accountingAccounts = '/accounting/accounts',
   accountingReports = '/accounting/reports',
+  accountingBank = '/accounting/bank',
+  accountingSubledgers = '/accounting/subledgers',
   accountingPeriods = '/accounting/periods',
   accountingEvents = '/accounting/events',
   employees = '/employees',

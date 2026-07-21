@@ -8,6 +8,8 @@ const TABS: { label: string; route: string }[] = [
   { label: 'journal', route: ROUTES.accounting },
   { label: 'accounts', route: ROUTES.accountingAccounts },
   { label: 'reports', route: ROUTES.accountingReports },
+  { label: 'bank', route: ROUTES.accountingBank },
+  { label: 'ap / ar', route: ROUTES.accountingSubledgers },
   { label: 'periods', route: ROUTES.accountingPeriods },
   { label: 'events', route: ROUTES.accountingEvents },
 ];
