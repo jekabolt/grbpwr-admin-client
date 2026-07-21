@@ -20,10 +20,15 @@ import {
   techCardStageOptions,
 } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
-import { applyServerFieldErrors } from 'utils/field-errors';
+import {
+  applyServerFieldErrors,
+  errorRootKey,
+  flattenFieldErrors,
+  revealField,
+} from 'utils/field-errors';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { useForm, useWatch } from 'react-hook-form';
+import { useForm, useWatch, type FieldErrors } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -33,6 +38,7 @@ import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { BomField } from './bom-field';
 import { ColorwayRecipes } from './colorway-recipe';
+import { CollectionField } from './collection-field';
 import { CompositionEntries } from './composition-entries';
 import { ConstructionTab } from './construction-tab';
 import { CostEstimateField } from './cost-estimate-field';
@@ -258,6 +264,9 @@ export function TechCardForm({
     );
   const setActiveTab = (id: TabId) => navTo(id);
   const [conflict, setConflict] = useState(false);
+  // The field a failed save should walk the user to. `nonce` re-arms the effect when the SAME field
+  // fails twice in a row (a second Save without fixing anything must pulse again, not sit silent).
+  const [focusTarget, setFocusTarget] = useState<{ path: string; nonce: number } | null>(null);
   // bump to jump to the BOM tab and pulse the empty composition fields (from labels care-gen)
   const [bomHighlight, setBomHighlight] = useState(0);
   const goToBomComposition = () => {
@@ -360,9 +369,15 @@ export function TechCardForm({
   const filledCore = coreSections.filter(isFilled).length;
   const progressPct = Math.round((filledCore / coreSections.length) * 100);
 
-  const errorTabs = new Set(
-    Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header'),
-  );
+  // Full dotted paths, not root keys: `bomItems.3.name` used to collapse to `bomItems`, so the rail
+  // could only ever say "something on the BOM tab is wrong" and the count was always 1 per tab.
+  const flatErrors = flattenFieldErrors(form.formState.errors as FieldErrors);
+  const errorCountByTab = new Map<TabId, number>();
+  for (const e of flatErrors) {
+    const tab = ERROR_TAB[errorRootKey(e.path)] ?? 'header';
+    errorCountByTab.set(tab, (errorCountByTab.get(tab) ?? 0) + 1);
+  }
+  const errorTabs = new Set(errorCountByTab.keys());
 
   // IDEA is a "light" card (screen E): only the concept-relevant tabs show; the rest reappear when
   // the stage advances, their echoed fields untouched. Not disabled — hidden. A tab carrying a
@@ -389,6 +404,35 @@ export function TechCardForm({
     if (!isTabVisible(activeTab)) navTo('header');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isIdea, canReadCosting, isEditMode]);
+
+  // Walk the user to the field a failed save flagged. This has to run AFTER the tab switch commits
+  // (it's a router param update) and after any collapsed container that owns the field expands
+  // itself — a BomTile opens on its own error, one render later — so the target simply may not
+  // exist yet. Retry a few frames before giving up; the toast already names the path either way.
+  useEffect(() => {
+    if (!focusTarget) return;
+    const { path } = focusTarget;
+    let cancelled = false;
+    let timer = 0;
+    const attempt = (attemptsLeft: number) => {
+      if (cancelled) return;
+      try {
+        form.setFocus(path as Parameters<typeof form.setFocus>[0]);
+      } catch {
+        // Registered through a wrapper that keeps no focusable ref (Radix select, media picker).
+        // Not fatal: revealField still scrolls and pulses the row via its [data-field] anchor.
+      }
+      if (revealField(path) || attemptsLeft <= 0) return;
+      timer = window.setTimeout(() => attempt(attemptsLeft - 1), 80);
+    };
+    const raf = requestAnimationFrame(() => attempt(4));
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTarget]);
 
   async function doSubmit(data: TechCardFormData) {
     setConflict(false);
@@ -437,15 +481,26 @@ export function TechCardForm({
   }
 
   // Surface validation failures — otherwise clicking Save with an invalid field (e.g. a tab the
-  // user can't see) does nothing and looks like a broken button.
-  const onInvalid = () => {
-    const tabs = Array.from(
-      new Set(Object.keys(form.formState.errors).map((k) => ERROR_TAB[k] ?? 'header')),
-    );
-    showMessage(
-      `Проверьте поля с ошибками${tabs.length ? ` (вкладки: ${tabs.join(', ')})` : ''}`,
-      'error',
-    );
+  // user can't see) does nothing and looks like a broken button. Every errored field renders red on
+  // its own (aria-invalid, styled once in ui/form + ui/components/input); this routine additionally
+  // walks the user to the FIRST one: switch to its tab, focus it, scroll it into view, pulse it.
+  const onInvalid = (errors: FieldErrors<TechCardFormData>) => {
+    const flat = flattenFieldErrors(errors as FieldErrors);
+    if (flat.length === 0) {
+      showMessage('Проверьте поля с ошибками', 'error');
+      return;
+    }
+    const first = flat[0];
+    const tab = ERROR_TAB[errorRootKey(first.path)] ?? 'header';
+    setActiveTab(tab);
+    setFocusTarget((prev) => ({ path: first.path, nonce: (prev?.nonce ?? 0) + 1 }));
+    // The toast ALWAYS carries the concrete dotted path AND the message — never just a tab name.
+    // If the path has no reachable input (a container we forgot to open, a field behind a
+    // permission, a schema key with no control), this line is the safety net that keeps the error
+    // diagnosable instead of a dead end where Save silently does nothing.
+    const tabLabel = TABS.find((t) => t.id === tab)?.label ?? tab;
+    const more = flat.length > 1 ? ` (+${flat.length - 1})` : '';
+    showMessage(`${tabLabel} → ${first.path} — ${first.message || 'invalid'}${more}`, 'error');
   };
   const save = () => form.handleSubmit(doSubmit, onInvalid)();
   // Pass the approval override INTO the validated submit (don't mutate form state before
@@ -563,7 +618,7 @@ export function TechCardForm({
                 )}
                 {groupTabs.map((tab) => {
                   const active = activeTab === tab.id;
-                  const hasError = errorTabs.has(tab.id);
+                  const errorCount = errorCountByTab.get(tab.id) ?? 0;
                   return (
                     <button
                       key={tab.id}
@@ -581,8 +636,15 @@ export function TechCardForm({
                           {openIssues}
                         </span>
                       )}
-                      {hasError ? (
-                        <span className='size-1.5 rounded-full bg-error' aria-hidden />
+                      {errorCount > 0 ? (
+                        // How MANY fields block the save on this tab, not just "something does" —
+                        // same badge shape as the open-issues counter beside it, in the error token.
+                        <span
+                          className='border border-error px-1 text-textBaseSize leading-none text-error'
+                          title={`${errorCount} field${errorCount > 1 ? 's' : ''} blocking save`}
+                        >
+                          {errorCount}
+                        </span>
                       ) : (
                         isFilled(tab.id) && (
                           <span
@@ -695,7 +757,7 @@ export function TechCardForm({
         </div>
       )}
 
-      <form className='pt-4 pb-24' onSubmit={form.handleSubmit(doSubmit)}>
+      <form className='pt-4 pb-24' onSubmit={form.handleSubmit(doSubmit, onInvalid)}>
         <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
           {/* HEADER */}
           <div hidden={activeTab !== 'header'} className='flex flex-col gap-6'>
@@ -710,21 +772,14 @@ export function TechCardForm({
                 )}
                 <InputField name='name' label='name *' placeholder='название изделия' />
                 <SeasonField />
-                <InputField name='collection' label='collection' />
-                {/* brand + the legacy freeform `status` note are rarely touched: brand defaults to
-                    GRBPWR on the PDF when empty (list/filter still read it), and `status` has no
-                    downstream consumer. brand stays editable behind this disclosure; `status` is no
-                    longer rendered at all but its stored value round-trips — RHF keeps the field
-                    from defaultValues and the full-replace save (mapFormToTechCardInsert) sends it
-                    back verbatim. */}
-                <details>
-                  <summary className='cursor-pointer select-none text-textBaseSize uppercase text-labelColor hover:text-text'>
-                    advanced
-                  </summary>
-                  <div className='mt-3'>
-                    <InputField name='brand' label='brand' />
-                  </div>
-                </details>
+                <CollectionField />
+                {/* brand sits inline with the rest of the card's identity rather than behind a
+                    disclosure: it is pre-filled with GRBPWR (techCardDefaultData) and is almost
+                    never changed, but hiding it made it look absent rather than defaulted. The
+                    legacy freeform `status` is still not rendered — it has no downstream consumer —
+                    yet its stored value round-trips, since RHF keeps the field from defaultValues
+                    and the full-replace save (mapFormToTechCardInsert) sends it back verbatim. */}
+                <InputField name='brand' label='brand' />
               </Section>
 
               <Section title='classification' className='w-full lg:w-1/2'>

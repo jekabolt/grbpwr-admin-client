@@ -22,9 +22,9 @@ import { Form } from 'ui/form';
 import ComboField from 'ui/form/fields/combo-field';
 import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
+import SegmentedField from 'ui/form/fields/segmented-field';
 import { MANUAL_ENTRY_PRESETS, ManualEntryPreset } from '../../utils/constants';
 import { useAcctAccounts, useCreateJournalEntry } from '../../utils/hooks';
-import SegmentedField from './segmented-field';
 import {
   extractLeadingCode,
   makeManualEntrySchema,

@@ -44,6 +44,18 @@ const DEFAULT_APPROVAL_STATE: common_TechCardApprovalState = 'TECH_CARD_APPROVAL
 const DEFAULT_MEASUREMENT_UNIT: common_TechCardMeasurementUnit = 'TECH_CARD_MEASUREMENT_UNIT_MM';
 const UNSET_GENDER: common_GenderEnum = 'GENDER_ENUM_UNKNOWN';
 
+// Reads a numeric id off the WIRE. grpc-gateway serialises proto int64 as a JSON STRING while the
+// generated TS type declares it `number`, so the compiler cannot catch the mismatch and a bare
+// z.number() rejects the real payload with "Invalid input" on a field the operator cannot see or
+// fix. That broke every card with a linked BOM line (int64 material_id). int64 fields in the
+// tech-card contract today: material_id, bom_item_id, colorway_id, fusing_bom_item_id, piece_id,
+// id, size_bytes. Route EVERY wire-read id through this rather than trusting the declared type --
+// coercing a value that is already a number costs nothing, and the next int64 added upstream then
+// cannot reintroduce the bug.
+export function wireInt(value: unknown): number {
+  return Number(value) || 0;
+}
+
 function timestampToDateInput(timestamp?: string): string {
   if (!timestamp || timestamp === ZERO_TIMESTAMP) return '';
   const date = new Date(timestamp);
@@ -162,16 +174,57 @@ const pieceMaterialSchema = z.object({
   note: z.string().optional().default(''),
 });
 
-const pieceSchema = z.object({
-  name: z.string().optional().default(''),
-  piecesPerGarment: z.number().optional().default(1),
-  mirrored: z.boolean().optional().default(false),
-  grainline: z.string().optional().default(''),
-  fused: z.boolean().optional().default(false),
-  calloutNumber: z.number().optional().default(0),
-  note: z.string().optional().default(''),
-  materials: z.array(pieceMaterialSchema).default([]),
-});
+// A piece row the user added but never filled in. "Add piece" seeds a blank row, so a card can
+// legitimately hold one mid-edit; it is dropped on save rather than sent, because the server
+// requires a name (dto/techcard.go, parseTechCardPieces) and would otherwise reject the ENTIRE
+// card — season, labels, sign-offs and all — over a placeholder row on a tab the user may never
+// have opened.
+export function isBlankPiece(p: {
+  name?: string;
+  grainline?: string;
+  note?: string;
+  calloutNumber?: number;
+  fused?: boolean;
+  mirrored?: boolean;
+  piecesPerGarment?: number;
+  materials?: { bomLineKey?: string; fusingBomLineKey?: string; note?: string }[];
+}): boolean {
+  if (p.name?.trim() || p.grainline?.trim() || p.note?.trim()) return false;
+  if (p.calloutNumber || p.fused || p.mirrored) return false;
+  if ((p.piecesPerGarment ?? 1) > 1) return false;
+  return !(p.materials ?? []).some(
+    (m) => m.bomLineKey?.trim() || m.fusingBomLineKey?.trim() || m.note?.trim(),
+  );
+}
+
+const pieceSchema = z
+  .object({
+    name: z.string().optional().default(''),
+    piecesPerGarment: z.number().optional().default(1),
+    mirrored: z.boolean().optional().default(false),
+    grainline: z.string().optional().default(''),
+    fused: z.boolean().optional().default(false),
+    calloutNumber: z.number().optional().default(0),
+    note: z.string().optional().default(''),
+    materials: z.array(pieceMaterialSchema).default([]),
+    // Stable client-minted identity, same contract as a BOM line's lineKey: the store keyed-upserts
+    // pieces by it, which is what lets a colourway usage and a construction operation hold real
+    // piece FKs. Without it the client never had a durable handle on a piece, so nothing could
+    // reference one — the operation piece-picker rendered empty for exactly this reason.
+    lineKey: z.string().optional().default(''),
+  })
+  // Mirror the server's required-name rule so it surfaces HERE, on the field, with a deep-linkable
+  // path — the server raises it as a bare error with no field path and no row index, which blocks
+  // the save with nothing to point at. A wholly blank row is exempt: it is filtered out on save.
+  .superRefine((piece, ctx) => {
+    if (!isBlankPiece(piece) && !piece.name?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Piece name is required',
+        path: ['name'],
+      });
+    }
+  });
 
 const colorwaySchema = z.object({
   code: z.string().optional().default(''),
@@ -197,7 +250,7 @@ const colorwaySchema = z.object({
 // consumption live on colourway usages, not here.
 const bomItemSchema = z.object({
   section: z.string().optional().default(DEFAULT_BOM_SECTION),
-  name: z.string().min(1, 'Material name is required'),
+  name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
   supplier: z.string().optional().default(''),
   supplierRef: z.string().optional().default(''),
   color: z.string().optional().default(''), // base/reference colour (per-colourway colour is on the usage)
@@ -220,6 +273,24 @@ const bomItemSchema = z.object({
   // server keyed-reconciles by it and downstream refs (operations/pieces/usages) stay valid.
   id: z.number().optional().default(0),
   lineKey: z.string().optional().default(''),
+}).superRefine((item, ctx) => {
+  // `name` is required only on an UNLINKED line — server parity, mirroring parseTechCardBomItems,
+  // which requires a name only when material_id == 0. A LINKED line takes its identity from the
+  // catalog material: the server resolves the name by link on the read path rather than storing a
+  // copy, so requiring a form-level name here would demand a value the operator cannot edit and
+  // that the wire does not want. (A released card is unaffected either way — tech_card_release
+  // snapshots the whole enriched read model as JSON, so a frozen spec keeps the name it shipped.)
+  //
+  // It stays a superRefine rather than a plain .min(1) precisely because the rule is conditional;
+  // the issue is emitted on path ['name'] so it addresses as `bomItems.3.name` and the editor's
+  // deep-link can walk the operator straight to the offending input.
+  if ((item.materialId ?? 0) === 0 && !item.name?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Material name is required',
+      path: ['name'],
+    });
+  }
 });
 
 // One construction-description aspect (Sheet «Титул», lower block): freeform text + optional
@@ -266,8 +337,15 @@ const operationSchema = z.object({
   bomLineKey: z.string().optional().default(''),
   calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
   // garment part this operation works on; resolves its real material via the selected
-  // colourway's usage on the same part.
+  // colourway's usage on the same part. A human LABEL — pieceLineKeys below is the real reference.
   placement: z.string().optional().default(''),
+  // The cut-pieces this operation works on, by stable TechCardPiece.line_key. REPEATED, unlike the
+  // recipe's single piece per norm: an assembly operation joins as many pieces as it joins.
+  pieceLineKeys: z.array(z.string()).default([]),
+  // The off-part materials this operation consumes (thread, fusing). REPEATED for the same reason
+  // pieceLineKeys is: one operation can join several materials. The legacy single bomLineKey above
+  // stays as the first entry during the transition.
+  bomLineKeys: z.array(z.string()).default([]),
 });
 
 const labelSchema = z.object({
@@ -421,11 +499,16 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
 
 export type TechCardFormData = z.input<typeof techCardObject>;
 
+// The house brand for a new card. Every card is GRBPWR unless someone deliberately says otherwise,
+// so pre-fill it rather than making the operator type it — the field stays editable. Only NEW cards
+// are seeded: an existing card keeps whatever it stored, so opening one never rewrites its brand.
+export const DEFAULT_BRAND = 'grbpwr';
+
 export const techCardDefaultData: TechCardFormData = {
   styleNumber: '',
   styleNumberSource: 'STYLE_NUMBER_SOURCE_GENERATED',
   name: '',
-  brand: '',
+  brand: DEFAULT_BRAND,
   season: '',
   collection: '',
   status: '',
@@ -581,8 +664,12 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
         ? b.fabricDirection
         : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
     wastagePercent: decimalToInput(b.wastagePercent),
-    materialId: b.materialId ?? 0,
-    id: b.id ?? 0,
+    // material_id and id are int64 on the wire (techcard.proto), and grpc-gateway serialises int64
+    // as a STRING — the generated TS type says `number` and is wrong. Without coercing, the form
+    // holds "12" and z.number() rejects it as "Invalid input" on bomItems.N.materialId, blocking
+    // the save of any card with a linked line. Same trap as sizeBytes above.
+    materialId: wireInt(b.materialId),
+    id: wireInt(b.id),
     lineKey: b.lineKey && isUlid(b.lineKey) ? b.lineKey : ulid(),
   };
 }
@@ -638,7 +725,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       filename: p.filename || '',
       // size_bytes is int64 → arrives as a string from grpc-gateway; coerce to a real number
       // so the form value passes z.number() (a string would silently block save).
-      sizeBytes: Number(p.sizeBytes) || 0,
+      sizeBytes: wireInt(p.sizeBytes),
     })),
     // TODO(final-bump): productIds is no longer on TechCardInsert — a colourway now carries
     // its own product link.
@@ -664,7 +751,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         c.labDipStatus && c.labDipStatus !== 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN'
           ? c.labDipStatus
           : DEFAULT_LAB_DIP,
-      productId: c.productId || 0,
+      productId: wireInt(c.productId),
       comment: c.comment || '',
       pantone: c.pantone || '',
       pantoneSystem: c.pantoneSystem || '',
@@ -692,6 +779,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       })),
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
+      lineKey: p.lineKey && isUlid(p.lineKey) ? p.lineKey : ulid(),
       name: p.name || '',
       piecesPerGarment: p.piecesPerGarment ?? 1,
       mirrored: p.mirrored ?? false,
@@ -701,7 +789,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       note: p.note || '',
       materials: (p.materials ?? []).map((m) => ({
         // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
-        colorwayIndex: m.colorwayId ?? 0,
+        // colorway_id is int64 on the wire and grpc-gateway serialises int64 as a STRING, so this
+        // must be coerced or z.number() rejects it as "Invalid input" — same trap as materialId.
+        colorwayIndex: wireInt(m.colorwayId),
         bomLineKey: refKey(m.bomLineKey, m.bomItemIndex),
         fusingBomLineKey: refKey(m.fusingBomLineKey, m.fusingBomItemIndex),
         note: m.note || '',
@@ -726,6 +816,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         }
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
+      pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
+      bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
       node: o.node || '',
       description: o.description || '',
       seamType: o.seamType || '',
@@ -755,7 +847,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       attachment: l.attachment || '',
       size: l.size || '',
       note: l.note || '',
-      bomItemId: l.bomItemId || 0,
+      bomItemId: wireInt(l.bomItemId),
     })),
     packaging: insert?.packaging
       ? {
@@ -1000,7 +1092,8 @@ export function mapFormToTechCardInsert(
     })),
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
-    pieces: (data.pieces ?? []).map((p) => ({
+    pieces: (data.pieces ?? []).filter((p) => !isBlankPiece(p)).map((p) => ({
+      lineKey: isUlid(p.lineKey) ? p.lineKey : ulid(),
       name: p.name?.trim() || '',
       // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
       // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload
@@ -1014,6 +1107,10 @@ export function mapFormToTechCardInsert(
         // drop fully-empty cells (no fabric, no fusing, no note) so the map stays sparse —
         // a note-only cell (written by another client) must survive an unrelated save
         .filter((m) => !!m.bomLineKey?.trim() || !!m.fusingBomLineKey?.trim() || !!m.note?.trim())
+        // A cell whose colourway never resolved (colorwayId missing upstream -> 0) is rejected by
+        // the server with a pathless error that blocks the whole card. Drop it instead: the cell
+        // could not have addressed a real colourway anyway.
+        .filter((m) => (m.colorwayIndex ?? 0) > 0)
         .map((m) => {
           const fabric = outBomRef(m.bomLineKey);
           const fusing = outBomRef(m.fusingBomLineKey);
@@ -1066,6 +1163,10 @@ export function mapFormToTechCardInsert(
     operations: (data.operations ?? []).map((o, i) => {
       const bomRef = outBomRef(o.bomLineKey);
       return {
+        // Blanks dropped here as well as server-side: an empty key would be a field violation the
+        // operator never caused.
+        pieceLineKeys: (o.pieceLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
+        bomLineKeys: (o.bomLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
         node: o.node?.trim() || '',
         description: o.description?.trim() || '',
         seamType: o.seamType?.trim() || '',
@@ -1099,7 +1200,7 @@ export function mapFormToTechCardInsert(
       attachment: l.attachment?.trim() || '',
       size: l.size?.trim() || '',
       note: l.note?.trim() || '',
-      bomItemId: l.bomItemId || 0,
+      bomItemId: wireInt(l.bomItemId),
     })),
     packaging: mapPackagingOut(data.packaging),
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.

@@ -1,6 +1,7 @@
 import { adminService } from 'api/api';
 import { common_TechCardOperation } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
+import { ulid } from 'utils/ulid';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
@@ -33,6 +34,9 @@ import { placementOptions } from './tech-card-options';
 
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN';
+
+const cell =
+  'w-full border border-textInactiveColor bg-transparent px-2 py-1 text-textBaseSize outline-none';
 
 export const emptyOperation = {
   operationNumber: 0,
@@ -124,6 +128,108 @@ function OperationRow({
     0) as number;
   const bomLineKey = (useWatch({ control, name: `operations.${index}.bomLineKey` }) ??
     '') as string;
+  // The card's own cut pieces, live from the form — see the placement field below.
+  const formPieces = (useWatch({ control, name: 'pieces' }) ?? []) as {
+    name?: string;
+    lineKey?: string;
+  }[];
+  const pieceOptions = useMemo(
+    () => Array.from(new Set(formPieces.map((p) => p.name?.trim()).filter(Boolean) as string[])),
+    [formPieces],
+  );
+  // Every piece carries a client-minted lineKey (schema.ts), and the store keyed-upserts pieces
+  // BEFORE operations in the same save — so a piece created right here links correctly on the very
+  // first save, without a round-trip.
+  const linkablePieces = useMemo(
+    () =>
+      formPieces
+        .filter((p) => !!p.lineKey?.trim())
+        .map((p) => ({ lineKey: p.lineKey as string, name: p.name?.trim() || 'unnamed piece' })),
+    [formPieces],
+  );
+  const [newPiece, setNewPiece] = useState('');
+  // The off-part materials this operation consumes (thread / fusing). Multi, because one operation
+  // can join several. Scoped to the same sections the single picker was, so the list stays the
+  // materials an operation plausibly consumes rather than every BOM article.
+  const selectedBomKeys = (useWatch({
+    control,
+    name: `operations.${index}.bomLineKeys`,
+  }) ?? []) as string[];
+  const linkableBoms = useMemo(
+    () =>
+      bomLines.filter(
+        (b) =>
+          b.section === 'TECH_CARD_BOM_SECTION_THREAD' ||
+          b.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      ),
+    [bomLines],
+  );
+  // Thread articles actually present in this card's BOM — the only ones an operation can really
+  // consume.
+  const bomThreadOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          bomLines
+            .filter((b) => b.section === 'TECH_CARD_BOM_SECTION_THREAD')
+            .map((b) => b.name?.trim())
+            .filter(Boolean) as string[],
+        ),
+      ),
+    [bomLines],
+  );
+  const toggleBom = (key: string) => {
+    const next = selectedBomKeys.includes(key)
+      ? selectedBomKeys.filter((k) => k !== key)
+      : [...selectedBomKeys, key];
+    setValue(`operations.${index}.bomLineKeys`, next, { shouldDirty: true });
+  };
+  // Create a cut piece without leaving the operation: appends to the card's `pieces` (the PIECES tab
+  // renders the same array) and links it immediately. Sewing an operation is exactly when you
+  // discover a part you forgot to declare; making that a trip to another tab loses the thought.
+  const addPieceInline = () => {
+    const name = newPiece.trim();
+    if (!name) return;
+    const existing = formPieces.find((p) => p.name?.trim().toLowerCase() === name.toLowerCase());
+    if (existing?.lineKey) {
+      if (!selectedPieceKeys.includes(existing.lineKey)) togglePiece(existing.lineKey);
+      setNewPiece('');
+      return;
+    }
+    const lineKey = ulid();
+    setValue(
+      'pieces',
+      ([
+        ...(((getValues('pieces') ?? []) as unknown) as Record<string, unknown>[]),
+        {
+          name,
+          lineKey,
+          piecesPerGarment: 1,
+          mirrored: false,
+          grainline: '',
+          fused: false,
+          calloutNumber: 0,
+          note: '',
+          materials: [],
+        },
+      ] as unknown) as TechCardFormData['pieces'],
+      { shouldDirty: true },
+    );
+    setValue(`operations.${index}.pieceLineKeys`, [...selectedPieceKeys, lineKey], {
+      shouldDirty: true,
+    });
+    setNewPiece('');
+  };
+  const selectedPieceKeys = (useWatch({
+    control,
+    name: `operations.${index}.pieceLineKeys`,
+  }) ?? []) as string[];
+  const togglePiece = (key: string) => {
+    const next = selectedPieceKeys.includes(key)
+      ? selectedPieceKeys.filter((k) => k !== key)
+      : [...selectedPieceKeys, key];
+    setValue(`operations.${index}.pieceLineKeys`, next, { shouldDirty: true });
+  };
   const linkedMaterial = bomLineKey ? bomLines.find((b) => b.lineKey === bomLineKey) : undefined;
   const bomOutOfRange = !!bomLineKey && !linkedMaterial;
   const linked =
@@ -223,12 +329,99 @@ function OperationRow({
           placeholder='плечевые швы'
           options={nodeOptions}
         />
+        {/* The part an operation works on is a CUT PIECE. Offer the card's own pieces first so the
+            two stop diverging — an operation that says "collar" and a piece called "воротник" are
+            the same part to a human and unjoinable to anything else. Read from the FORM, not the
+            server, so a piece added moments ago on the PIECES tab is already pickable. Falls back
+            to the generic vocabulary while the card has no pieces yet.
+            NOTE: TechCardOperation has only `string placement` in the contract — there is no
+            piece_line_key/piece_id the way TechCardColorwayUsage has, so this pins the NAME, not a
+            real FK. The durable link needs a proto + backend change. */}
         <ComboField
           name={`operations.${index}.placement`}
           label='часть'
           placeholder='collar / sleeve…'
-          options={placementOptions}
+          options={pieceOptions.length > 0 ? pieceOptions : placementOptions}
         />
+        {/* Which CUT PIECES this operation joins — the real reference (server resolves each key to a
+            tech_card_piece FK). Multi-select, because an assembly operation spans as many pieces as
+            it joins; that is why this is a chip list and not the recipe's single-piece select.
+            Distinct from «мат. напрямую» below, which is the off-part material the operation itself
+            consumes (thread / fusing) — the two answered the same free-text field before. */}
+        {/* Always rendered, never gated on there being pieces already: a card with no cut pieces yet
+            is the common case, and hiding the block also hid the only way to create the first one. */}
+        <div className='col-span-2 flex flex-col gap-1 sm:col-span-3'>
+            <Text variant='label' size='small'>
+              детали кроя (сколько угодно){' '}
+              {linkablePieces.length === 0 ? '— ни одной ещё нет, создайте ниже' : ''}
+            </Text>
+            <div className='flex flex-wrap items-center gap-1.5'>
+              {linkablePieces.map((p) => {
+                const on = selectedPieceKeys.includes(p.lineKey);
+                return (
+                  <button
+                    key={p.lineKey}
+                    type='button'
+                    aria-pressed={on}
+                    onClick={() => togglePiece(p.lineKey)}
+                    className={cn(
+                      'border px-2 py-0.5 text-textBaseSize uppercase',
+                      on
+                        ? 'border-textColor bg-textColor text-bgColor'
+                        : 'border-textInactiveColor text-labelColor hover:text-text',
+                    )}
+                  >
+                    {p.name}
+                  </button>
+                );
+              })}
+              <input
+                className={cell}
+                style={{ width: '11rem' }}
+                placeholder='+ новая деталь'
+                value={newPiece}
+                onChange={(e) => setNewPiece(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    // The row lives inside the card's <form>; without this, Enter submits the whole
+                    // tech card instead of adding the piece.
+                    e.preventDefault();
+                    addPieceInline();
+                  }
+                }}
+                onBlur={addPieceInline}
+              />
+            </div>
+        </div>
+        {linkableBoms.length > 0 && (
+          <div className='col-span-2 flex flex-col gap-1 sm:col-span-3'>
+            <Text variant='label' size='small'>
+              материалы операции — нитки / клеевые (сколько угодно)
+            </Text>
+            <div className='flex flex-wrap gap-1.5'>
+              {linkableBoms.map((b) => {
+                const key = b.lineKey ?? '';
+                const on = selectedBomKeys.includes(key);
+                return (
+                  <button
+                    key={key}
+                    type='button'
+                    aria-pressed={on}
+                    onClick={() => toggleBom(key)}
+                    className={cn(
+                      'border px-2 py-0.5 text-textBaseSize uppercase',
+                      on
+                        ? 'border-textColor bg-textColor text-bgColor'
+                        : 'border-textInactiveColor text-labelColor hover:text-text',
+                    )}
+                  >
+                    {b.name?.trim() || 'unnamed'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <ComboField name={`operations.${index}.machine`} label='машина' options={machineOptions} />
         <BomLinePicker
           name={`operations.${index}.bomLineKey`}
@@ -282,7 +475,16 @@ function OperationRow({
               options={topstitchWidthOptions}
             />
             <ComboField name={`operations.${index}.needle`} label='игла' options={needleOptions} />
-            <ComboField name={`operations.${index}.thread`} label='нитки' options={threadOptions} />
+            {/* Threads are picked from the card's own BOM thread lines, not typed: a free-text
+                article is a string nothing can join on, so thread was never actually accounted for
+                anywhere. Falls back to the generic vocabulary only while the BOM has no thread
+                lines. Selecting the material itself (and so its consumption) is the chip row above;
+                this stays the per-operation article note. */}
+            <ComboField
+              name={`operations.${index}.thread`}
+              label='нитки'
+              options={bomThreadOptions.length > 0 ? bomThreadOptions : threadOptions}
+            />
             <ComboField
               name={`operations.${index}.attachment`}
               label='приспособление'

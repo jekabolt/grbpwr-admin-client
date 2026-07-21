@@ -42,11 +42,42 @@ const createStrictTranslationSchema = <T extends z.ZodType>(
 
 const announceTranslationSchema = z.object({
   languageId: z.number().min(1, 'Language is required'),
-  text: z
-    .string()
-    .min(1, 'Announcement text is required')
-    .max(110, 'Announcement text cannot exceed 110 characters'),
+  text: z.string().max(110, 'Announcement text cannot exceed 110 characters'),
 });
+
+// The announcement banner is genuinely optional: an instance that has never configured one loads
+// `translations: []`, which TranslationField then self-heals into one blank row per language. Making
+// `text` unconditionally required therefore made EVERY unrelated setting unsavable — site
+// availability, shipping prices, max order items — because the whole form is one schema and the
+// only escape was to publish a banner nobody asked for. So: all-blank is "no announcement" and is
+// valid; a partially filled announcement is the real error, and it points at the blank languages.
+const announceSchema = z
+  .object({
+    link: z.string().optional(),
+    translations: z.array(announceTranslationSchema).optional(),
+  })
+  .superRefine((announce, ctx) => {
+    const translations = announce.translations ?? [];
+    if (!translations.some((t) => t.text?.trim())) return; // no announcement at all
+    translations.forEach((t, i) => {
+      if (!t.text?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Fill the announcement in every language, or clear it everywhere',
+          path: ['translations', i, 'text'],
+        });
+      }
+    });
+    for (const id of requiredLanguageIds) {
+      if (!translations.some((t) => t.languageId === id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'All languages must be filled',
+          path: ['translations'],
+        });
+      }
+    }
+  });
 
 const paymentMethodSchema = z.object({
   allow: z.boolean().optional(),
@@ -69,12 +100,7 @@ const complimentaryPricesSchema = z
 
 export const settingsSchema = z
   .object({
-    announce: z
-      .object({
-        link: z.string().optional(),
-        translations: createStrictTranslationSchema(announceTranslationSchema, requiredLanguageIds),
-      })
-      .optional(),
+    announce: announceSchema.optional(),
     bigMenu: z.boolean().optional(),
     complimentaryShippingPrices: complimentaryPricesSchema,
     maxOrderItems: z.number().optional(),

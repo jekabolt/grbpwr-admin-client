@@ -9,11 +9,18 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Children of a category node, optionally narrowed to one tree level. The level filter matters
+// because the tree is NOT uniformly 3-deep: `dresses` hangs its types straight off the top category
+// (0001_initial_setup.sql, "Dresses types (no sub-category)"), so filtering by parentId alone hands
+// back types where a caller asked for sub-categories.
 export function getCategoriesByParentId(
   categories: common_Category[],
   parentId: number,
+  level?: string,
 ): common_Category[] {
-  return categories.filter((cat) => cat.parentId === parentId);
+  return categories.filter(
+    (cat) => cat.parentId === parentId && (level === undefined || cat.level === level),
+  );
 }
 
 function decodeParam(param: string): string {

@@ -755,6 +755,10 @@ function SampleEditor({
         <Text variant='label' size='small'>
           the first photo is this sample's thumbnail on the samples board
         </Text>
+        {/* Capped width: the gallery is a 2-column grid of 3:4 frames, so at panel width each photo
+            grew to half the viewport and pushed everything below the fold. Photos are reference
+            shots here, not the subject of the screen. */}
+        <div className='w-full max-w-sm'>
         <MediaGallerySelector
           media={mediaLinks}
           editMode={canEdit}
@@ -767,6 +771,7 @@ function SampleEditor({
           onSelect={onPick}
           onDelete={(id) => set({ mediaIds: d.mediaIds.filter((x) => x !== id) })}
         />
+        </div>
       </div>
 
       {/* fittings — this sample's 1:N link to fittings, a primary action (link a fitting). Kept
