@@ -207,6 +207,11 @@ const pieceSchema = z
     calloutNumber: z.number().optional().default(0),
     note: z.string().optional().default(''),
     materials: z.array(pieceMaterialSchema).default([]),
+    // Stable client-minted identity, same contract as a BOM line's lineKey: the store keyed-upserts
+    // pieces by it, which is what lets a colourway usage and a construction operation hold real
+    // piece FKs. Without it the client never had a durable handle on a piece, so nothing could
+    // reference one — the operation piece-picker rendered empty for exactly this reason.
+    lineKey: z.string().optional().default(''),
   })
   // Mirror the server's required-name rule so it surfaces HERE, on the field, with a deep-linkable
   // path — the server raises it as a bare error with no field path and no row index, which blocks
@@ -770,6 +775,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       })),
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
+      lineKey: p.lineKey && isUlid(p.lineKey) ? p.lineKey : ulid(),
       name: p.name || '',
       piecesPerGarment: p.piecesPerGarment ?? 1,
       mirrored: p.mirrored ?? false,
@@ -1082,6 +1088,7 @@ export function mapFormToTechCardInsert(
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
     pieces: (data.pieces ?? []).filter((p) => !isBlankPiece(p)).map((p) => ({
+      lineKey: isUlid(p.lineKey) ? p.lineKey : ulid(),
       name: p.name?.trim() || '',
       // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
       // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload

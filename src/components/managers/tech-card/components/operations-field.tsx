@@ -1,6 +1,7 @@
 import { adminService } from 'api/api';
 import { common_TechCardOperation } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
+import { ulid } from 'utils/ulid';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
@@ -33,6 +34,9 @@ import { placementOptions } from './tech-card-options';
 
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN';
+
+const cell =
+  'w-full border border-textInactiveColor bg-transparent px-2 py-1 text-textBaseSize outline-none';
 
 export const emptyOperation = {
   operationNumber: 0,
@@ -133,8 +137,9 @@ function OperationRow({
     () => Array.from(new Set(formPieces.map((p) => p.name?.trim()).filter(Boolean) as string[])),
     [formPieces],
   );
-  // Only pieces that already carry a stable line_key can be linked: the server resolves the key to
-  // a real tech_card_piece FK, and a piece minted in this session has none until the card is saved.
+  // Every piece carries a client-minted lineKey (schema.ts), and the store keyed-upserts pieces
+  // BEFORE operations in the same save — so a piece created right here links correctly on the very
+  // first save, without a round-trip.
   const linkablePieces = useMemo(
     () =>
       formPieces
@@ -142,6 +147,43 @@ function OperationRow({
         .map((p) => ({ lineKey: p.lineKey as string, name: p.name?.trim() || 'unnamed piece' })),
     [formPieces],
   );
+  const [newPiece, setNewPiece] = useState('');
+  // Create a cut piece without leaving the operation: appends to the card's `pieces` (the PIECES tab
+  // renders the same array) and links it immediately. Sewing an operation is exactly when you
+  // discover a part you forgot to declare; making that a trip to another tab loses the thought.
+  const addPieceInline = () => {
+    const name = newPiece.trim();
+    if (!name) return;
+    const existing = formPieces.find((p) => p.name?.trim().toLowerCase() === name.toLowerCase());
+    if (existing?.lineKey) {
+      if (!selectedPieceKeys.includes(existing.lineKey)) togglePiece(existing.lineKey);
+      setNewPiece('');
+      return;
+    }
+    const lineKey = ulid();
+    setValue(
+      'pieces',
+      ([
+        ...(((getValues('pieces') ?? []) as unknown) as Record<string, unknown>[]),
+        {
+          name,
+          lineKey,
+          piecesPerGarment: 1,
+          mirrored: false,
+          grainline: '',
+          fused: false,
+          calloutNumber: 0,
+          note: '',
+          materials: [],
+        },
+      ] as unknown) as TechCardFormData['pieces'],
+      { shouldDirty: true },
+    );
+    setValue(`operations.${index}.pieceLineKeys`, [...selectedPieceKeys, lineKey], {
+      shouldDirty: true,
+    });
+    setNewPiece('');
+  };
   const selectedPieceKeys = (useWatch({
     control,
     name: `operations.${index}.pieceLineKeys`,
@@ -275,7 +317,7 @@ function OperationRow({
             <Text variant='label' size='small'>
               детали кроя (сколько угодно)
             </Text>
-            <div className='flex flex-wrap gap-1.5'>
+            <div className='flex flex-wrap items-center gap-1.5'>
               {linkablePieces.map((p) => {
                 const on = selectedPieceKeys.includes(p.lineKey);
                 return (
@@ -295,6 +337,22 @@ function OperationRow({
                   </button>
                 );
               })}
+              <input
+                className={cell}
+                style={{ width: '11rem' }}
+                placeholder='+ новая деталь'
+                value={newPiece}
+                onChange={(e) => setNewPiece(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    // The row lives inside the card's <form>; without this, Enter submits the whole
+                    // tech card instead of adding the piece.
+                    e.preventDefault();
+                    addPieceInline();
+                  }
+                }}
+                onBlur={addPieceInline}
+              />
             </div>
           </div>
         )}
