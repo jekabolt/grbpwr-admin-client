@@ -7489,6 +7489,68 @@ export type GetFrs105AccountsResponse = {
   caveats: string[] | undefined;
 };
 
+export type GetCashFlowStatementRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// AcctCashFlowLine is one cash-flow line: a label and its SIGNED cash impact (source positive, use
+// negative).
+export type AcctCashFlowLine = {
+  label: string | undefined;
+  amount: googletype_Decimal | undefined;
+};
+
+// AcctCashFlowSection groups cash-flow lines (operating | investing | financing) with the section subtotal.
+export type AcctCashFlowSection = {
+  name: string | undefined;
+  lines: AcctCashFlowLine[] | undefined;
+  subtotal: googletype_Decimal | undefined;
+};
+
+// GetCashFlowStatementResponse is the indirect-method statement over [from, to). closing_cash is derived
+// (opening_cash + net_change); closing_cash_actual is the real cash-account balance as at `to`; check =
+// closing_cash_actual − closing_cash (0 when balanced, the trust panel).
+export type GetCashFlowStatementResponse = {
+  from: string | undefined;
+  to: string | undefined;
+  currency: string | undefined;
+  operating: AcctCashFlowSection | undefined;
+  investing: AcctCashFlowSection | undefined;
+  financing: AcctCashFlowSection | undefined;
+  netChange: googletype_Decimal | undefined;
+  openingCash: googletype_Decimal | undefined;
+  closingCash: googletype_Decimal | undefined;
+  closingCashActual: googletype_Decimal | undefined;
+  check: googletype_Decimal | undefined;
+  balanced: boolean | undefined;
+  caveats: string[] | undefined;
+};
+
+export type GetFinancialHealthRequest = {
+  from: string | undefined;
+  to: string | undefined;
+};
+
+// AcctFinancialHealthRow is one ratio row: its value, the owner's benchmark string, a status
+// (ok | warn | na | track) and a display unit ("%", "x", "days", the base currency, or "").
+export type AcctFinancialHealthRow = {
+  name: string | undefined;
+  formula: string | undefined;
+  value: googletype_Decimal | undefined;
+  benchmark: string | undefined;
+  status: string | undefined;
+  unit: string | undefined;
+};
+
+export type GetFinancialHealthResponse = {
+  from: string | undefined;
+  to: string | undefined;
+  currency: string | undefined;
+  rows: AcctFinancialHealthRow[] | undefined;
+  caveats: string[] | undefined;
+};
+
 // FixedAsset is one capitalised asset, depreciated straight-line over useful_life_months from acquired_on.
 export type FixedAsset = {
   id: number | undefined;
@@ -8141,6 +8203,14 @@ export interface AdminService {
   // Statement of Financial Position). A base-currency DRAFT: a filing-ready UK Ltd set needs GBP
   // conversion + isolation of the UK entity's transactions — surfaced in caveats, not done here.
   GetFrs105Accounts(request: GetFrs105AccountsRequest): Promise<GetFrs105AccountsResponse>;
+  // GetCashFlowStatement returns the indirect-method cash-flow statement over [from, to) (exclusive):
+  // net profit + depreciation add-back + balance-sheet working-capital / investing / financing deltas,
+  // with a Check that reconciles the derived closing cash to the actual 1010/1030 balance.
+  GetCashFlowStatement(request: GetCashFlowStatementRequest): Promise<GetCashFlowStatementResponse>;
+  // GetFinancialHealth returns the financial-health ratio set over [from, to) (exclusive): each row a
+  // {name, formula, value, benchmark, status} tuple. Money is ledger-derived; unit counts come from
+  // operational metrics (labelled in caveats).
+  GetFinancialHealth(request: GetFinancialHealthRequest): Promise<GetFinancialHealthResponse>;
   // ImportBankCsv parses a bank CSV export (Revolut) into the inbox, deduplicating on the bank
   // transaction id + payment currency; a re-imported statement is a no-op for lines already present.
   ImportBankCsv(request: ImportBankCsvRequest): Promise<ImportBankCsvResponse>;
@@ -13241,6 +13311,52 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetFrs105Accounts",
       }) as Promise<GetFrs105AccountsResponse>;
+    },
+    GetCashFlowStatement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/cash-flow`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCashFlowStatement",
+      }) as Promise<GetCashFlowStatementResponse>;
+    },
+    GetFinancialHealth(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/financial-health`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.from) {
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
+      }
+      if (request.to) {
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFinancialHealth",
+      }) as Promise<GetFinancialHealthResponse>;
     },
     ImportBankCsv(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/bank/import`; // eslint-disable-line quotes
