@@ -44,6 +44,18 @@ const DEFAULT_APPROVAL_STATE: common_TechCardApprovalState = 'TECH_CARD_APPROVAL
 const DEFAULT_MEASUREMENT_UNIT: common_TechCardMeasurementUnit = 'TECH_CARD_MEASUREMENT_UNIT_MM';
 const UNSET_GENDER: common_GenderEnum = 'GENDER_ENUM_UNKNOWN';
 
+// Reads a numeric id off the WIRE. grpc-gateway serialises proto int64 as a JSON STRING while the
+// generated TS type declares it `number`, so the compiler cannot catch the mismatch and a bare
+// z.number() rejects the real payload with "Invalid input" on a field the operator cannot see or
+// fix. That broke every card with a linked BOM line (int64 material_id). int64 fields in the
+// tech-card contract today: material_id, bom_item_id, colorway_id, fusing_bom_item_id, piece_id,
+// id, size_bytes. Route EVERY wire-read id through this rather than trusting the declared type --
+// coercing a value that is already a number costs nothing, and the next int64 added upstream then
+// cannot reintroduce the bug.
+export function wireInt(value: unknown): number {
+  return Number(value) || 0;
+}
+
 function timestampToDateInput(timestamp?: string): string {
   if (!timestamp || timestamp === ZERO_TIMESTAMP) return '';
   const date = new Date(timestamp);
@@ -644,8 +656,8 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     // as a STRING — the generated TS type says `number` and is wrong. Without coercing, the form
     // holds "12" and z.number() rejects it as "Invalid input" on bomItems.N.materialId, blocking
     // the save of any card with a linked line. Same trap as sizeBytes above.
-    materialId: Number(b.materialId) || 0,
-    id: Number(b.id) || 0,
+    materialId: wireInt(b.materialId),
+    id: wireInt(b.id),
     lineKey: b.lineKey && isUlid(b.lineKey) ? b.lineKey : ulid(),
   };
 }
@@ -701,7 +713,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       filename: p.filename || '',
       // size_bytes is int64 → arrives as a string from grpc-gateway; coerce to a real number
       // so the form value passes z.number() (a string would silently block save).
-      sizeBytes: Number(p.sizeBytes) || 0,
+      sizeBytes: wireInt(p.sizeBytes),
     })),
     // TODO(final-bump): productIds is no longer on TechCardInsert — a colourway now carries
     // its own product link.
@@ -727,7 +739,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         c.labDipStatus && c.labDipStatus !== 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN'
           ? c.labDipStatus
           : DEFAULT_LAB_DIP,
-      productId: c.productId || 0,
+      productId: wireInt(c.productId),
       comment: c.comment || '',
       pantone: c.pantone || '',
       pantoneSystem: c.pantoneSystem || '',
@@ -766,7 +778,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
         // colorway_id is int64 on the wire and grpc-gateway serialises int64 as a STRING, so this
         // must be coerced or z.number() rejects it as "Invalid input" — same trap as materialId.
-        colorwayIndex: Number(m.colorwayId) || 0,
+        colorwayIndex: wireInt(m.colorwayId),
         bomLineKey: refKey(m.bomLineKey, m.bomItemIndex),
         fusingBomLineKey: refKey(m.fusingBomLineKey, m.fusingBomItemIndex),
         note: m.note || '',
@@ -820,7 +832,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       attachment: l.attachment || '',
       size: l.size || '',
       note: l.note || '',
-      bomItemId: l.bomItemId || 0,
+      bomItemId: wireInt(l.bomItemId),
     })),
     packaging: insert?.packaging
       ? {
@@ -1168,7 +1180,7 @@ export function mapFormToTechCardInsert(
       attachment: l.attachment?.trim() || '',
       size: l.size?.trim() || '',
       note: l.note?.trim() || '',
-      bomItemId: l.bomItemId || 0,
+      bomItemId: wireInt(l.bomItemId),
     })),
     packaging: mapPackagingOut(data.packaging),
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.
