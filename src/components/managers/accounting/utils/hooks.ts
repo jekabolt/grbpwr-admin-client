@@ -34,6 +34,9 @@ export const acctKeys = {
   trialBalance: (from: string, to: string) => [...acctKeys.all, 'tb', from, to] as const,
   profitLoss: (from: string, to: string) => [...acctKeys.all, 'pl', from, to] as const,
   balanceSheet: (asOf: string) => [...acctKeys.all, 'bs', asOf] as const,
+  cashFlow: (from: string, to: string) => [...acctKeys.all, 'cash-flow', from, to] as const,
+  financialHealth: (from: string, to: string) =>
+    [...acctKeys.all, 'financial-health', from, to] as const,
   ledger: (code: string, f: LedgerFilter) => [...acctKeys.all, 'ledger', code, f] as const,
   reconciliation: (from: string, to: string) => [...acctKeys.all, 'recon', from, to] as const,
   vatReturn: (month: string) => [...acctKeys.all, 'vat-return', month] as const,
@@ -188,6 +191,26 @@ export function useBalanceSheet(asOf: string) {
     queryKey: acctKeys.balanceSheet(asOf),
     queryFn: () => adminService.GetBalanceSheet({ asOf }),
     enabled: Boolean(asOf),
+  });
+}
+
+// Indirect-method cash-flow statement over [from, to) (exclusive). Same range guard as the other
+// range reports — closing_cash / check come from the server, never recomputed here (§8.6 #6).
+export function useCashFlow(from: string, to: string) {
+  return useQuery({
+    queryKey: acctKeys.cashFlow(from, to),
+    queryFn: () => adminService.GetCashFlowStatement({ from, to }),
+    enabled: Boolean(from && to),
+  });
+}
+
+// Financial-health ratio set over [from, to). Each row carries its own value/benchmark/status, so
+// this is a straight pass-through — the client only lays the ratios out, it doesn't compute them.
+export function useFinancialHealth(from: string, to: string) {
+  return useQuery({
+    queryKey: acctKeys.financialHealth(from, to),
+    queryFn: () => adminService.GetFinancialHealth({ from, to }),
+    enabled: Boolean(from && to),
   });
 }
 
