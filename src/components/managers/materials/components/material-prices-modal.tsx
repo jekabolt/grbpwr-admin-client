@@ -30,12 +30,25 @@ export function MaterialPricesModal({
   );
   const add = useAddMaterialPrice();
 
-  const [form, setForm] = useState({ price: '', currency: 'EUR', validFrom: '', note: '' });
+  // valid_from is REQUIRED by the server (dto/material.go, parseMaterialPrice) but reads as
+  // optional in this grid, so a blank date produced a rejection pointing at an unlabelled box.
+  // Default it to today: "this is the price from now on" is what adding a price almost always
+  // means, and an explicit date is still one click away.
+  const [form, setForm] = useState({
+    price: '',
+    currency: 'EUR',
+    validFrom: new Date().toISOString().slice(0, 10),
+    note: '',
+  });
   const prices = data?.prices ?? [];
 
   const submit = () => {
     if (!form.price.trim()) {
       showMessage('Price is required', 'error');
+      return;
+    }
+    if (!form.validFrom) {
+      showMessage('Valid-from date is required', 'error');
       return;
     }
     add.mutate(
@@ -131,6 +144,8 @@ export function MaterialPricesModal({
                   <input
                     className={cell}
                     type='date'
+                    title='valid from (required)'
+                    aria-label='valid from'
                     value={form.validFrom}
                     onChange={(e) => setForm((f) => ({ ...f, validFrom: e.target.value }))}
                   />

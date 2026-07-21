@@ -149,6 +149,34 @@ export function errorRootKey(path: string): string {
   return path.split('.')[0] ?? '';
 }
 
+// Pulse classes are listed as literals so Tailwind's source scan emits them — they are applied
+// imperatively, not through JSX.
+const FIELD_PULSE = ['animate-pulse', 'ring-2', 'ring-error', 'motion-reduce:animate-none'];
+
+// Brings the field at a dotted RHF path into view and pulses it. `[data-field]` is stamped on every
+// FormItem (ui/form), so this resolves ANY field in ANY form from its error path — including
+// controls that register no focusable ref (Radix selects, pickers), which setFocus alone cannot
+// reach. Returns false when the path has no rendered field, so the caller can retry or fall back.
+export function revealField(path: string): boolean {
+  const el = document.querySelector<HTMLElement>(`[data-field="${CSS.escape(path)}"]`);
+  if (!el) return false;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add(...FIELD_PULSE);
+  window.setTimeout(() => el.classList.remove(...FIELD_PULSE), 2600);
+  return true;
+}
+
+// One-line description of the first blocking error, always naming a concrete path — so a field that
+// renders nowhere (or sits behind a branch the user isn't in) is still diagnosable instead of being
+// a dead Save button. `(+N)` counts the rest.
+export function firstErrorSummary(errors: FieldErrors | undefined): string {
+  const flat = flattenFieldErrors(errors);
+  if (flat.length === 0) return '';
+  const [first] = flat;
+  const rest = flat.length > 1 ? ` (+${flat.length - 1})` : '';
+  return `${first.path}${first.message ? ` — ${first.message}` : ''}${rest}`;
+}
+
 // Convenience: a single human-readable string for a caught error, preferring field violations.
 export function fieldErrorSummary(error: unknown, fallback: string): string {
   const violations = extractFieldViolations(error);
