@@ -125,11 +125,33 @@ function OperationRow({
   const bomLineKey = (useWatch({ control, name: `operations.${index}.bomLineKey` }) ??
     '') as string;
   // The card's own cut pieces, live from the form — see the placement field below.
-  const formPieces = (useWatch({ control, name: 'pieces' }) ?? []) as { name?: string }[];
+  const formPieces = (useWatch({ control, name: 'pieces' }) ?? []) as {
+    name?: string;
+    lineKey?: string;
+  }[];
   const pieceOptions = useMemo(
     () => Array.from(new Set(formPieces.map((p) => p.name?.trim()).filter(Boolean) as string[])),
     [formPieces],
   );
+  // Only pieces that already carry a stable line_key can be linked: the server resolves the key to
+  // a real tech_card_piece FK, and a piece minted in this session has none until the card is saved.
+  const linkablePieces = useMemo(
+    () =>
+      formPieces
+        .filter((p) => !!p.lineKey?.trim())
+        .map((p) => ({ lineKey: p.lineKey as string, name: p.name?.trim() || 'unnamed piece' })),
+    [formPieces],
+  );
+  const selectedPieceKeys = (useWatch({
+    control,
+    name: `operations.${index}.pieceLineKeys`,
+  }) ?? []) as string[];
+  const togglePiece = (key: string) => {
+    const next = selectedPieceKeys.includes(key)
+      ? selectedPieceKeys.filter((k) => k !== key)
+      : [...selectedPieceKeys, key];
+    setValue(`operations.${index}.pieceLineKeys`, next, { shouldDirty: true });
+  };
   const linkedMaterial = bomLineKey ? bomLines.find((b) => b.lineKey === bomLineKey) : undefined;
   const bomOutOfRange = !!bomLineKey && !linkedMaterial;
   const linked =
@@ -243,6 +265,39 @@ function OperationRow({
           placeholder='collar / sleeve…'
           options={pieceOptions.length > 0 ? pieceOptions : placementOptions}
         />
+        {/* Which CUT PIECES this operation joins — the real reference (server resolves each key to a
+            tech_card_piece FK). Multi-select, because an assembly operation spans as many pieces as
+            it joins; that is why this is a chip list and not the recipe's single-piece select.
+            Distinct from «мат. напрямую» below, which is the off-part material the operation itself
+            consumes (thread / fusing) — the two answered the same free-text field before. */}
+        {linkablePieces.length > 0 && (
+          <div className='col-span-2 flex flex-col gap-1 sm:col-span-3'>
+            <Text variant='label' size='small'>
+              детали кроя (сколько угодно)
+            </Text>
+            <div className='flex flex-wrap gap-1.5'>
+              {linkablePieces.map((p) => {
+                const on = selectedPieceKeys.includes(p.lineKey);
+                return (
+                  <button
+                    key={p.lineKey}
+                    type='button'
+                    aria-pressed={on}
+                    onClick={() => togglePiece(p.lineKey)}
+                    className={cn(
+                      'border px-2 py-0.5 text-textBaseSize uppercase',
+                      on
+                        ? 'border-textColor bg-textColor text-bgColor'
+                        : 'border-textInactiveColor text-labelColor hover:text-text',
+                    )}
+                  >
+                    {p.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <ComboField name={`operations.${index}.machine`} label='машина' options={machineOptions} />
         <BomLinePicker
           name={`operations.${index}.bomLineKey`}

@@ -332,8 +332,11 @@ const operationSchema = z.object({
   bomLineKey: z.string().optional().default(''),
   calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
   // garment part this operation works on; resolves its real material via the selected
-  // colourway's usage on the same part.
+  // colourway's usage on the same part. A human LABEL — pieceLineKeys below is the real reference.
   placement: z.string().optional().default(''),
+  // The cut-pieces this operation works on, by stable TechCardPiece.line_key. REPEATED, unlike the
+  // recipe's single piece per norm: an assembly operation joins as many pieces as it joins.
+  pieceLineKeys: z.array(z.string()).default([]),
 });
 
 const labelSchema = z.object({
@@ -803,6 +806,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         }
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
+      pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
       node: o.node || '',
       description: o.description || '',
       seamType: o.seamType || '',
@@ -1147,6 +1151,9 @@ export function mapFormToTechCardInsert(
     operations: (data.operations ?? []).map((o, i) => {
       const bomRef = outBomRef(o.bomLineKey);
       return {
+        // Blanks dropped here as well as server-side: an empty key would be a field violation the
+        // operator never caused.
+        pieceLineKeys: (o.pieceLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
         node: o.node?.trim() || '',
         description: o.description?.trim() || '',
         seamType: o.seamType?.trim() || '',
