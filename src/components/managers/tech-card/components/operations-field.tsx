@@ -334,10 +334,12 @@ function OperationRow({
             it joins; that is why this is a chip list and not the recipe's single-piece select.
             Distinct from «мат. напрямую» below, which is the off-part material the operation itself
             consumes (thread / fusing) — the two answered the same free-text field before. */}
-        {linkablePieces.length > 0 && (
-          <div className='col-span-2 flex flex-col gap-1 sm:col-span-3'>
+        {/* Always rendered, never gated on there being pieces already: a card with no cut pieces yet
+            is the common case, and hiding the block also hid the only way to create the first one. */}
+        <div className='col-span-2 flex flex-col gap-1 sm:col-span-3'>
             <Text variant='label' size='small'>
-              детали кроя (сколько угодно)
+              детали кроя (сколько угодно){' '}
+              {linkablePieces.length === 0 ? '— ни одной ещё нет, создайте ниже' : ''}
             </Text>
             <div className='flex flex-wrap items-center gap-1.5'>
               {linkablePieces.map((p) => {
@@ -376,8 +378,7 @@ function OperationRow({
                 onBlur={addPieceInline}
               />
             </div>
-          </div>
-        )}
+        </div>
         {linkableBoms.length > 0 && (
           <div className='col-span-2 flex flex-col gap-1 sm:col-span-3'>
             <Text variant='label' size='small'>
