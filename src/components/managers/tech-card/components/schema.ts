@@ -475,11 +475,16 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
 
 export type TechCardFormData = z.input<typeof techCardObject>;
 
+// The house brand for a new card. Every card is GRBPWR unless someone deliberately says otherwise,
+// so pre-fill it rather than making the operator type it — the field stays editable. Only NEW cards
+// are seeded: an existing card keeps whatever it stored, so opening one never rewrites its brand.
+export const DEFAULT_BRAND = 'grbpwr';
+
 export const techCardDefaultData: TechCardFormData = {
   styleNumber: '',
   styleNumberSource: 'STYLE_NUMBER_SOURCE_GENERATED',
   name: '',
-  brand: '',
+  brand: DEFAULT_BRAND,
   season: '',
   collection: '',
   status: '',

@@ -773,20 +773,13 @@ export function TechCardForm({
                 <InputField name='name' label='name *' placeholder='название изделия' />
                 <SeasonField />
                 <CollectionField />
-                {/* brand + the legacy freeform `status` note are rarely touched: brand defaults to
-                    GRBPWR on the PDF when empty (list/filter still read it), and `status` has no
-                    downstream consumer. brand stays editable behind this disclosure; `status` is no
-                    longer rendered at all but its stored value round-trips — RHF keeps the field
-                    from defaultValues and the full-replace save (mapFormToTechCardInsert) sends it
-                    back verbatim. */}
-                <details>
-                  <summary className='cursor-pointer select-none text-textBaseSize uppercase text-labelColor hover:text-text'>
-                    advanced
-                  </summary>
-                  <div className='mt-3'>
-                    <InputField name='brand' label='brand' />
-                  </div>
-                </details>
+                {/* brand sits inline with the rest of the card's identity rather than behind a
+                    disclosure: it is pre-filled with GRBPWR (techCardDefaultData) and is almost
+                    never changed, but hiding it made it look absent rather than defaulted. The
+                    legacy freeform `status` is still not rendered — it has no downstream consumer —
+                    yet its stored value round-trips, since RHF keeps the field from defaultValues
+                    and the full-replace save (mapFormToTechCardInsert) sends it back verbatim. */}
+                <InputField name='brand' label='brand' />
               </Section>
 
               <Section title='classification' className='w-full lg:w-1/2'>
