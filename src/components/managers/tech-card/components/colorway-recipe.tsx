@@ -475,11 +475,17 @@ function UsagePerSizeLocal({
   );
 }
 
+// A cut piece the recipe can point a norm at. line_key is the stable client-minted ULID the server
+// resolves to the real piece_id FK, so it survives reordering — unlike the positional piece_index it
+// replaces.
+type PieceRef = { lineKey: string; name: string };
+
 // One usage row = one material on one part in this colourway.
 function UsageRowEditor({
   index,
   draft,
   bomItems,
+  pieces,
   sizeIds,
   sizeQuantities,
   sizeNameById,
@@ -490,6 +496,7 @@ function UsageRowEditor({
   index: number;
   draft: UsageDraft;
   bomItems: BomLine[];
+  pieces: PieceRef[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -543,15 +550,54 @@ function UsageRowEditor({
             ))}
           </select>
         </label>
+        {/* The part a norm is about is a CUT PIECE, not a label: the contract already carries
+            piece_line_key -> a real usage.piece_id FK (RESTRICT), and the client already round-trips
+            it — there was simply no control to set it, so operators retyped part names as free text
+            that nothing could join on. Picking here writes the stable key; `placement` stays as the
+            human label (auto-filled from the piece) so the PDF and legacy rows keep reading. */}
         <label className='flex flex-col gap-1'>
           <Text size='small'>placement (part)</Text>
-          <input
-            className={cell}
-            disabled={!canEdit}
-            placeholder='outer / lining / collar…'
-            value={draft.placement}
-            onChange={(e) => onChange({ placement: e.target.value })}
-          />
+          {pieces.length > 0 ? (
+            <select
+              className={cell}
+              disabled={!canEdit}
+              value={draft.pieceLineKey}
+              onChange={(e) => {
+                const key = e.target.value;
+                const piece = pieces.find((p) => p.lineKey === key);
+                onChange({
+                  pieceLineKey: key,
+                  // Keep the label in step with the pick, but never clobber a placement the
+                  // operator typed for a norm that is not about one specific piece.
+                  placement: piece?.name?.trim()
+                    ? piece.name.trim()
+                    : key
+                      ? draft.placement
+                      : '',
+                });
+              }}
+            >
+              <option value=''>— whole garment —</option>
+              {pieces.map((p) => (
+                <option key={p.lineKey} value={p.lineKey}>
+                  {p.name?.trim() || 'unnamed piece'}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <>
+              <input
+                className={cell}
+                disabled={!canEdit}
+                placeholder='outer / lining / collar…'
+                value={draft.placement}
+                onChange={(e) => onChange({ placement: e.target.value })}
+              />
+              <Text variant='inactive' size='small'>
+                Add cut pieces on the PIECES tab to pick a real part here instead of typing one.
+              </Text>
+            </>
+          )}
         </label>
       </div>
 
@@ -789,6 +835,7 @@ function LabDipEditor({
 function ColorwayRecipeEditor({
   colorway,
   bomItems,
+  pieces,
   sizeIds,
   sizeQuantities,
   sizeNameById,
@@ -798,6 +845,7 @@ function ColorwayRecipeEditor({
 }: {
   colorway: common_AdminColorwayRef;
   bomItems: BomLine[];
+  pieces: PieceRef[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -929,6 +977,7 @@ function ColorwayRecipeEditor({
                 index={i}
                 draft={u}
                 bomItems={bomItems}
+                pieces={pieces}
                 sizeIds={sizeIds}
                 sizeQuantities={sizeQuantities}
                 sizeNameById={sizeNameById}
@@ -1129,6 +1178,16 @@ export function ColorwayRecipes({
 }) {
   const { dictionary } = useDictionary();
   const colorways = techCard?.colorways ?? [];
+  // The card's cut pieces, for the placement picker. Only pieces that already carry a stable
+  // line_key are offered: a piece minted in this session but not yet saved has none, and pointing a
+  // norm at it would resolve to nothing server-side.
+  const pieces = useMemo<PieceRef[]>(
+    () =>
+      (techCard?.techCard?.pieces ?? [])
+        .filter((p) => !!p.lineKey?.trim())
+        .map((p) => ({ lineKey: p.lineKey as string, name: p.name ?? '' })),
+    [techCard?.techCard?.pieces],
+  );
   // Enrich BOM lines with the fields the recipe editor now needs: price/wastage/unit for the run-cost
   // preview (per-size grading) and the legacy composition string for the derived-composition summary.
   const bomItems = useMemo<BomLine[]>(
@@ -1187,6 +1246,7 @@ export function ColorwayRecipes({
           key={cw.colorwayId}
           colorway={cw}
           bomItems={bomItems}
+          pieces={pieces}
           sizeIds={sizeIds}
           sizeQuantities={sizeQuantities}
           sizeNameById={sizeNameById}

@@ -124,6 +124,12 @@ function OperationRow({
     0) as number;
   const bomLineKey = (useWatch({ control, name: `operations.${index}.bomLineKey` }) ??
     '') as string;
+  // The card's own cut pieces, live from the form — see the placement field below.
+  const formPieces = (useWatch({ control, name: 'pieces' }) ?? []) as { name?: string }[];
+  const pieceOptions = useMemo(
+    () => Array.from(new Set(formPieces.map((p) => p.name?.trim()).filter(Boolean) as string[])),
+    [formPieces],
+  );
   const linkedMaterial = bomLineKey ? bomLines.find((b) => b.lineKey === bomLineKey) : undefined;
   const bomOutOfRange = !!bomLineKey && !linkedMaterial;
   const linked =
@@ -223,11 +229,19 @@ function OperationRow({
           placeholder='плечевые швы'
           options={nodeOptions}
         />
+        {/* The part an operation works on is a CUT PIECE. Offer the card's own pieces first so the
+            two stop diverging — an operation that says "collar" and a piece called "воротник" are
+            the same part to a human and unjoinable to anything else. Read from the FORM, not the
+            server, so a piece added moments ago on the PIECES tab is already pickable. Falls back
+            to the generic vocabulary while the card has no pieces yet.
+            NOTE: TechCardOperation has only `string placement` in the contract — there is no
+            piece_line_key/piece_id the way TechCardColorwayUsage has, so this pins the NAME, not a
+            real FK. The durable link needs a proto + backend change. */}
         <ComboField
           name={`operations.${index}.placement`}
           label='часть'
           placeholder='collar / sleeve…'
-          options={placementOptions}
+          options={pieceOptions.length > 0 ? pieceOptions : placementOptions}
         />
         <ComboField name={`operations.${index}.machine`} label='машина' options={machineOptions} />
         <BomLinePicker
