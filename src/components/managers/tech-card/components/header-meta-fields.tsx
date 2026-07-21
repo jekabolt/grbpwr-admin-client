@@ -6,6 +6,7 @@ import { getCategoriesByParentId } from 'lib/utility';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import Select from 'ui/components/select';
+import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
 import { TechCardFormData } from './schema';
@@ -46,8 +47,14 @@ function CategoryCascade() {
   }, [categoryId, byId]);
 
   const tops = cats.filter((c) => c.level === 'top_category');
-  const subs = path.top ? getCategoriesByParentId(cats, path.top) : [];
-  const types = path.sub ? getCategoriesByParentId(cats, path.sub) : [];
+  // Levels are matched explicitly, never by depth: `dresses` hangs its types straight off the top
+  // category (no sub_category level at all), so a parentId-only lookup would list mini/maxi/mesh in
+  // the SUB slot — and the pick would then vanish on re-render, because `path` bins by level and
+  // would put it in `type` while `sub` stayed 0.
+  const subs = path.top ? getCategoriesByParentId(cats, path.top, 'sub_category') : [];
+  // Types hang off the sub-category where there is one, off the top category where there isn't.
+  const typeParent = path.sub || (subs.length === 0 ? path.top : 0);
+  const types = typeParent ? getCategoriesByParentId(cats, typeParent, 'type') : [];
 
   // '0' is the unset sentinel (Radix Select forbids empty-string item values).
   const items = (list: common_Category[], placeholder: string) => [
@@ -70,19 +77,25 @@ function CategoryCascade() {
         />
         <Select
           name='category-sub'
-          items={items(subs, '— sub —')}
+          items={items(
+            subs,
+            path.top && subs.length === 0 ? '— no sub-category —' : '— sub (optional) —',
+          )}
           value={String(path.sub)}
-          disabled={!path.top}
+          disabled={!path.top || subs.length === 0}
           onValueChange={(v?: string) => setLeaf(Number(v) || path.top || 0)}
         />
         <Select
           name='category-type'
-          items={items(types, '— type —')}
+          items={items(types, '— type (optional) —')}
           value={String(path.type)}
-          disabled={!path.sub}
-          onValueChange={(v?: string) => setLeaf(Number(v) || path.sub || 0)}
+          disabled={types.length === 0}
+          onValueChange={(v?: string) => setLeaf(Number(v) || path.sub || path.top || 0)}
         />
       </div>
+      <Text variant='inactive' size='small'>
+        Only the top category is required — sub-category and type are optional.
+      </Text>
     </div>
   );
 }

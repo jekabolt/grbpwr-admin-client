@@ -1,4 +1,4 @@
-import type { FieldValues, Path, UseFormSetError } from 'react-hook-form';
+import type { FieldErrors, FieldValues, Path, UseFormSetError } from 'react-hook-form';
 
 // Shared parser for server-side field-tagged validation errors (PLM-rework Q1 + general).
 //
@@ -102,6 +102,51 @@ export function applyServerFieldErrors<T extends FieldValues>(
     applied.push(path);
   }
   return { applied, unmapped };
+}
+
+// ─── the other direction: RHF's own errors → a flat, addressable list ────────────────────────────
+
+export type FlatFieldError = { path: string; message: string };
+
+// RHF nests `errors` to mirror the form shape, so `Object.keys(errors)` only ever yields ROOT keys —
+// `bomItems.3.name` collapses to `bomItems`, which is why a failed save could only ever name a tab.
+// A leaf error node is `{ type, message?, ref? }`; a container is a plain object/array of nodes. The
+// discriminator is that a leaf's `type`/`message` are STRINGS — a container that happens to own a
+// field literally called `type` (labels[].type) holds an OBJECT there, so this never mis-splits.
+function isLeafError(node: unknown): node is { message?: unknown; type?: unknown } {
+  if (!node || typeof node !== 'object') return false;
+  const n = node as { message?: unknown; type?: unknown };
+  return typeof n.message === 'string' || typeof n.type === 'string';
+}
+
+// Flattens RHF FieldErrors into an ordered list of { path, message } with FULL dotted paths
+// (`bomItems.3.name`), depth-first in schema order — so the first entry is the error to deep-link to.
+// A leaf with no message still yields an entry (empty string) so a path is never silently dropped:
+// an error we can't describe is still an error we must be able to point at.
+export function flattenFieldErrors(errors: FieldErrors | undefined): FlatFieldError[] {
+  const out: FlatFieldError[] = [];
+  const walk = (node: unknown, prefix: string) => {
+    if (!node || typeof node !== 'object') return;
+    if (isLeafError(node)) {
+      const message = (node as { message?: unknown }).message;
+      out.push({ path: prefix, message: typeof message === 'string' ? message : '' });
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      const child = (node as Record<string, unknown>)[key];
+      if (child == null) continue;
+      // RHF parks array-LEVEL issues (min length, a whole-array refine) under a synthetic `root`
+      // key. There is no input registered at `x.root`, so address it as the array itself.
+      walk(child, key === 'root' ? prefix : prefix ? `${prefix}.${key}` : key);
+    }
+  };
+  walk(errors, '');
+  return out;
+}
+
+// `bomItems.3.name` → `bomItems`. The root segment is what maps to an owning tab/section.
+export function errorRootKey(path: string): string {
+  return path.split('.')[0] ?? '';
 }
 
 // Convenience: a single human-readable string for a caught error, preferring field violations.

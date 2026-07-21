@@ -38,13 +38,17 @@ export default function TextareaField({
     <FormField
       control={control}
       name={name}
-      render={({ field }) => (
+      render={({ field, fieldState }) => (
         <FormItem>
           {label && <FormLabel className={srLabel ? 'sr-only' : ''}>{label}</FormLabel>}
           <FormControl>
-            <div className='relative border border-textInactiveColor'>
+            {/* FormControl's aria-invalid lands on this wrapper (it owns the visible border, so the
+                red outline belongs here); the textarea gets its own so screen readers hear it on
+                the control the user is actually in, not just on a decorative div. */}
+            <div className='relative border border-textInactiveColor aria-[invalid=true]:border-error'>
               <Textarea
                 disabled={loading}
+                aria-invalid={!!fieldState.error || undefined}
                 {...field}
                 value={field.value || ''}
                 maxLength={maxLength}

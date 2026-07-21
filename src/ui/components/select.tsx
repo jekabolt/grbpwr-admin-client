@@ -13,6 +13,7 @@ export default function SelectComponent({
   fullWidth,
   renderValue,
   readOnly,
+  invalid,
   ...props
 }: {
   name: string;
@@ -21,6 +22,9 @@ export default function SelectComponent({
   customWidth?: number;
   fullWidth?: boolean;
   readOnly?: boolean;
+  // Set by SelectField from the field's RHF error. A Radix select has no <input> for FormControl's
+  // Slot to land aria-invalid on, so the flag is threaded down to the trigger explicitly.
+  invalid?: boolean;
   renderValue?: (
     selectedValue: string | number,
     selectedItem: { label: string; value: string | number } | undefined,
@@ -39,6 +43,7 @@ export default function SelectComponent({
         items={items}
         isOpen={open}
         readOnly={readOnly}
+        invalid={invalid}
       >
         <Arrow />
       </SelectTrigger>
@@ -82,6 +87,7 @@ export function SelectTrigger({
   isOpen,
   renderValue,
   readOnly,
+  invalid,
 }: {
   children: React.ReactNode;
   placeholder: string;
@@ -94,6 +100,7 @@ export function SelectTrigger({
   items?: { label: string; value: string | number }[];
   isOpen?: boolean;
   readOnly?: boolean;
+  invalid?: boolean;
 }) {
   let displayValue = null;
   if (renderValue && value != null && value !== '' && items) {
@@ -106,8 +113,11 @@ export function SelectTrigger({
       className={cn(
         'flex w-full items-center justify-between gap-2 border-b border-b-textInactiveColor bg-bgColor text-textBaseSize transition-colors focus:border-b-textInactiveColor focus:outline-none focus:ring-0',
         readOnly && 'cursor-default pointer-events-none opacity-90',
+        // Same red underline as a blocking <Input>, so a required select reads identically.
+        'aria-[invalid=true]:border-b-error aria-[invalid=true]:focus:border-b-error',
         className,
       )}
+      aria-invalid={invalid || undefined}
       aria-label={placeholder}
     >
       {displayValue ?? <Select.Value placeholder={placeholder} />}
