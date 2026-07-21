@@ -5336,6 +5336,13 @@ export type common_TechCardOperation = {
   // `placement` above stays the human label (PDF/legacy) and is not a join key.
   pieceLineKeys: string[] | undefined;
   pieceIds: number[] | undefined;
+  // bom_line_keys references the BOM lines this operation itself consumes -- the off-part materials
+  // (thread, fusing) it joins with -- by their stable line_key. REPEATED for the same reason
+  // piece_line_keys is: one operation can join several materials. Supersedes the single
+  // bom_line_key = 19, which stays for the transition and is read as the first entry when this is
+  // empty. Distinct from piece_line_keys: those are the parts joined, these are what joins them.
+  bomLineKeys: string[] | undefined;
+  bomItemIds: number[] | undefined;
 };
 
 // TechCardOperationType classifies an operation by its machine / stitch class

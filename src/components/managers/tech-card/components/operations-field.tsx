@@ -148,6 +148,28 @@ function OperationRow({
     [formPieces],
   );
   const [newPiece, setNewPiece] = useState('');
+  // The off-part materials this operation consumes (thread / fusing). Multi, because one operation
+  // can join several. Scoped to the same sections the single picker was, so the list stays the
+  // materials an operation plausibly consumes rather than every BOM article.
+  const selectedBomKeys = (useWatch({
+    control,
+    name: `operations.${index}.bomLineKeys`,
+  }) ?? []) as string[];
+  const linkableBoms = useMemo(
+    () =>
+      bomLines.filter(
+        (b) =>
+          b.section === 'TECH_CARD_BOM_SECTION_THREAD' ||
+          b.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      ),
+    [bomLines],
+  );
+  const toggleBom = (key: string) => {
+    const next = selectedBomKeys.includes(key)
+      ? selectedBomKeys.filter((k) => k !== key)
+      : [...selectedBomKeys, key];
+    setValue(`operations.${index}.bomLineKeys`, next, { shouldDirty: true });
+  };
   // Create a cut piece without leaving the operation: appends to the card's `pieces` (the PIECES tab
   // renders the same array) and links it immediately. Sewing an operation is exactly when you
   // discover a part you forgot to declare; making that a trip to another tab loses the thought.
@@ -353,6 +375,35 @@ function OperationRow({
                 }}
                 onBlur={addPieceInline}
               />
+            </div>
+          </div>
+        )}
+        {linkableBoms.length > 0 && (
+          <div className='col-span-2 flex flex-col gap-1 sm:col-span-3'>
+            <Text variant='label' size='small'>
+              материалы операции — нитки / клеевые (сколько угодно)
+            </Text>
+            <div className='flex flex-wrap gap-1.5'>
+              {linkableBoms.map((b) => {
+                const key = b.lineKey ?? '';
+                const on = selectedBomKeys.includes(key);
+                return (
+                  <button
+                    key={key}
+                    type='button'
+                    aria-pressed={on}
+                    onClick={() => toggleBom(key)}
+                    className={cn(
+                      'border px-2 py-0.5 text-textBaseSize uppercase',
+                      on
+                        ? 'border-textColor bg-textColor text-bgColor'
+                        : 'border-textInactiveColor text-labelColor hover:text-text',
+                    )}
+                  >
+                    {b.name?.trim() || 'unnamed'}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
