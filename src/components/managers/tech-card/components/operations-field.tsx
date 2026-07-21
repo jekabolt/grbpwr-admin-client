@@ -164,6 +164,20 @@ function OperationRow({
       ),
     [bomLines],
   );
+  // Thread articles actually present in this card's BOM — the only ones an operation can really
+  // consume.
+  const bomThreadOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          bomLines
+            .filter((b) => b.section === 'TECH_CARD_BOM_SECTION_THREAD')
+            .map((b) => b.name?.trim())
+            .filter(Boolean) as string[],
+        ),
+      ),
+    [bomLines],
+  );
   const toggleBom = (key: string) => {
     const next = selectedBomKeys.includes(key)
       ? selectedBomKeys.filter((k) => k !== key)
@@ -461,7 +475,16 @@ function OperationRow({
               options={topstitchWidthOptions}
             />
             <ComboField name={`operations.${index}.needle`} label='игла' options={needleOptions} />
-            <ComboField name={`operations.${index}.thread`} label='нитки' options={threadOptions} />
+            {/* Threads are picked from the card's own BOM thread lines, not typed: a free-text
+                article is a string nothing can join on, so thread was never actually accounted for
+                anywhere. Falls back to the generic vocabulary only while the BOM has no thread
+                lines. Selecting the material itself (and so its consumption) is the chip row above;
+                this stays the per-operation article note. */}
+            <ComboField
+              name={`operations.${index}.thread`}
+              label='нитки'
+              options={bomThreadOptions.length > 0 ? bomThreadOptions : threadOptions}
+            />
             <ComboField
               name={`operations.${index}.attachment`}
               label='приспособление'
