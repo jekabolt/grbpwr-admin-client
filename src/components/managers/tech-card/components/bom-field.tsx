@@ -24,7 +24,7 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { TechCardFormData } from './schema';
+import { TechCardFormData, wireInt } from './schema';
 import { unitOptions } from './tech-card-options';
 import { ulid } from 'utils/ulid';
 
@@ -80,7 +80,10 @@ function MaterialLinkField({ index }: { index: number }) {
   // Snapshot a catalog material's meta onto this line (S23: the line stays self-contained). Fabric
   // dims read from the typed CTI attrs, falling back to the legacy flat fields.
   const snapshotFrom = (m: common_Material) => {
-    setValue(`bomItems.${index}.materialId`, m.id ?? 0, { shouldDirty: true });
+    // Material.id is int64 -> arrives as a STRING from grpc-gateway despite the generated type
+    // saying `number`. Writing it raw put a string into the form, which z.number() then rejected
+    // as "Invalid input" on bomItems.N.materialId — an unsavable card, right after linking.
+    setValue(`bomItems.${index}.materialId`, wireInt(m.id), { shouldDirty: true });
     const put = (field: string, val?: string) => {
       if (val) setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
     };
@@ -99,7 +102,7 @@ function MaterialLinkField({ index }: { index: number }) {
   };
 
   const pick = (id: number, m?: common_Material) => {
-    setValue(`bomItems.${index}.materialId`, id, { shouldDirty: true });
+    setValue(`bomItems.${index}.materialId`, wireInt(id), { shouldDirty: true });
     if (id && m) snapshotFrom(m);
   };
 
@@ -176,7 +179,7 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
   const linked = materialId > 0;
   const { data } = useMaterials('', false);
   const linkedMaterial = linked
-    ? (data?.materials ?? []).find((m) => m.id === materialId)
+    ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
     : undefined;
 
   // Prefer the live catalog value; fall back to whatever this line already holds (the linked
@@ -387,7 +390,7 @@ function BomTile({
   const linked = (row.materialId ?? 0) > 0;
   const { data } = useMaterials('', false);
   const material = linked
-    ? (data?.materials ?? []).find((m) => m.id === row.materialId)
+    ? (data?.materials ?? []).find((m) => wireInt(m.id) === row.materialId)
     : undefined;
 
   // A red underline inside a COLLAPSED tile is invisible, so the tile itself has to carry the
