@@ -45,6 +45,11 @@ export const acctKeys = {
   frs105: (from: string, to: string) => [...acctKeys.all, 'frs105', from, to] as const,
   fixedAssets: () => [...acctKeys.all, 'fixed-assets'] as const,
   eventsReview: () => [...acctKeys.all, 'events-review'] as const,
+  bankTxns: (state: string) => [...acctKeys.all, 'bank-txns', state] as const,
+  bankRules: () => [...acctKeys.all, 'bank-rules'] as const,
+  suppliers: () => [...acctKeys.all, 'suppliers'] as const,
+  payables: () => [...acctKeys.all, 'payables'] as const,
+  receivables: () => [...acctKeys.all, 'receivables'] as const,
 };
 
 // ---- Chart of accounts ----
@@ -373,5 +378,115 @@ export function useResolveAcctEvent() {
     },
     onError: (e) =>
       showMessage(e instanceof Error ? e.message : 'Failed to resolve event', 'error'),
+  });
+}
+
+// ---- Bank inbox (phase 2, wave 4 — docs/plan-accounting-phase2/04-wave4-money.md §4.1) ----
+// The Revolut statement inbox: CSV import → parsed lines the worker couldn't auto-book → an
+// operator posts each (Dr/Cr by the signed amount against a chosen account, 1010 being the money
+// leg) or ignores it (an internal EXCHANGE leg). Import-time substring rules pre-fill the account
+// suggestion. Every mutation invalidates acctKeys.all — a posted line becomes a journal entry that
+// moves the ledger, and its inbox state flips, so both the txn list and the reports must refresh.
+
+export function useBankTxns(state: string) {
+  return useQuery({
+    // state '' means "all" — a real filter key, never disabled (the inbox is the screen's point).
+    queryKey: acctKeys.bankTxns(state),
+    queryFn: () => adminService.ListBankTxns({ state: state || undefined, limit: 200 }),
+  });
+}
+
+export function useImportBankCsv() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { source: string; csvText: string }) =>
+      adminService.ImportBankCsv({ source: vars.source || undefined, csvText: vars.csvText }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
+  });
+}
+
+export function usePostBankTxn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; accountCode: string; occurredAt?: string }) =>
+      adminService.PostBankTxn({
+        id: vars.id,
+        accountCode: vars.accountCode,
+        occurredAt: vars.occurredAt || undefined,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
+  });
+}
+
+export function useIgnoreBankTxn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; reason?: string }) =>
+      adminService.IgnoreBankTxn({ id: vars.id, reason: vars.reason || undefined }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
+  });
+}
+
+export function useBankRules() {
+  return useQuery({
+    queryKey: acctKeys.bankRules(),
+    queryFn: () => adminService.ListBankRules({}),
+  });
+}
+
+export function useCreateBankRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { pattern: string; accountCode: string }) =>
+      adminService.CreateBankRule(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.bankRules() }),
+  });
+}
+
+export function useDeleteBankRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number }) => adminService.DeleteBankRule(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.bankRules() }),
+  });
+}
+
+// ---- Suppliers + AP/AR subledgers (phase 2, wave 4 — §4.4) ----
+// Suppliers are the purchase-side catalog that tags a 2010 Accounts-Payable position; Payables
+// aggregates the open 2010 balance per supplier (accrued − paid), Receivables the open 1040 balance
+// per bank-invoice order (invoiced − received). Creating a supplier only touches the catalog, so it
+// invalidates the suppliers key alone; the AP/AR views are pure ledger reads with no mutations here.
+
+export function useSuppliers() {
+  return useQuery({
+    queryKey: acctKeys.suppliers(),
+    queryFn: () => adminService.ListSuppliers({}),
+  });
+}
+
+export function useCreateSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { name: string; vatId?: string; notes?: string }) =>
+      adminService.CreateSupplier({
+        name: vars.name,
+        vatId: vars.vatId || undefined,
+        notes: vars.notes || undefined,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.suppliers() }),
+  });
+}
+
+export function usePayables() {
+  return useQuery({
+    queryKey: acctKeys.payables(),
+    queryFn: () => adminService.GetPayables({}),
+  });
+}
+
+export function useReceivables() {
+  return useQuery({
+    queryKey: acctKeys.receivables(),
+    queryFn: () => adminService.GetReceivables({}),
   });
 }
