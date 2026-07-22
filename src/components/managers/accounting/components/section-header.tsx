@@ -37,12 +37,18 @@ export function AcctSectionHeader({ children }: Props) {
     ROUTES.accounting;
 
   return (
-    <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
-      <div className='flex flex-wrap items-center gap-6'>
-        <Text variant='uppercase' size='large'>
+    // Column on phones (title/action row, then the tab strip below); the original single inline row
+    // from md up. Without this the 7-tab <nav> was a non-wrapping ~545px flex row that ran wider than
+    // a phone viewport and scrolled the WHOLE page sideways (this header is shared by every
+    // accounting screen, so it broke all of them).
+    <div className='-mx-2.5 flex flex-col gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3 md:flex-row md:flex-wrap md:items-center md:justify-between'>
+      <div className='flex min-w-0 items-center gap-4 md:gap-6'>
+        <Text variant='uppercase' size='large' className='shrink-0'>
           accounting
         </Text>
-        <nav className='flex items-center gap-4'>
+        {/* min-w-0 lets this flex child shrink below its content width so overflow-x-auto can take
+            over and scroll the tabs, instead of the tabs forcing the page wider. */}
+        <nav className='-my-1 flex min-w-0 items-center gap-4 overflow-x-auto py-1'>
           {TABS.map((tab) => {
             const active = tab.route === activeRoute;
             return (
@@ -51,7 +57,7 @@ export function AcctSectionHeader({ children }: Props) {
                 to={tab.route}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'text-textBaseSize uppercase underline-offset-4 transition-opacity hover:opacity-70',
+                  'shrink-0 whitespace-nowrap text-textBaseSize uppercase underline-offset-4 transition-opacity hover:opacity-70',
                   active ? 'text-textColor underline' : 'text-textInactiveColor',
                 )}
               >
@@ -61,7 +67,7 @@ export function AcctSectionHeader({ children }: Props) {
           })}
         </nav>
       </div>
-      {children ? <div className='flex items-center gap-2'>{children}</div> : null}
+      {children ? <div className='flex shrink-0 items-center gap-2'>{children}</div> : null}
     </div>
   );
 }
