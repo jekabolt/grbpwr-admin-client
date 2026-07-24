@@ -122,7 +122,22 @@ function MaterialLinkField({ index }: { index: number }) {
   };
 
   return (
-    <div className='space-y-1 lg:col-span-3'>
+    <div className='space-y-2 lg:col-span-3'>
+      {/* Section is chosen FIRST so the picker below is scoped to the right family — hardware for
+          пуговицы / молнии / кнопки, trim, thread… not only fabric. Before, this select lived under
+          the required picker in the "material details" block, so the picker opened scoped to the
+          default FABRIC section and every non-fabric article (buttons included) looked unpickable.
+          Only editable while unlinked; a linked line's section is a read-only catalog fact mirrored
+          below. */}
+      {!materialId ? (
+        <div className='max-w-xs'>
+          <SelectField
+            name={`bomItems.${index}.section`}
+            label='секция *'
+            items={techCardBomSectionOptions}
+          />
+        </div>
+      ) : null}
       <Text size='small' variant='label'>
         catalog material *
       </Text>
@@ -304,12 +319,9 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
           <Text variant='uppercase' size='small'>
             material details
           </Text>
+          {/* section moved up into MaterialLinkField (chosen before the material picker) so the
+              picker is scoped to the right family from the start. */}
           <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
-            <SelectField
-              name={`bomItems.${index}.section`}
-              label='section *'
-              items={techCardBomSectionOptions}
-            />
             <InputField name={`bomItems.${index}.name`} label='name *' />
             <ComboField
               name={`bomItems.${index}.unit`}
