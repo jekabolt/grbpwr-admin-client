@@ -218,11 +218,12 @@ export function ReceiveStockModal({
       {canWriteCosting ? (
         <>
           <div className='grid grid-cols-[1fr_auto] gap-2'>
-            <Field label='unit cost (net)'>
+            <Field label='unit cost — NET, ex-VAT'>
               <input
                 className={cell}
                 inputMode='decimal'
                 placeholder='blank = uncosted'
+                title='net unit cost, WITHOUT VAT — the VAT goes in the input-VAT field below; entering the gross double-counts the tax into stock value and COGS'
                 value={unitCost}
                 onChange={(e) => setUnitCost(sanitizeDecimal(e.target.value))}
               />
@@ -266,6 +267,33 @@ export function ReceiveStockModal({
               </select>
             </Field>
           </div>
+          {/* Invoice cross-check: net line + VAT should equal the invoice's gross total. Only
+              computable when the cost is in EUR (input VAT is always base-EUR); it exists to catch
+              the classic slip of typing the GROSS into unit cost and then adding VAT on top. */}
+          {(() => {
+            const qty = parseDecimalNumber(quantity);
+            const cost = parseDecimalNumber(unitCost);
+            const vat = parseDecimalNumber(inputVat);
+            if (
+              currency !== 'EUR' ||
+              !Number.isFinite(qty) ||
+              !Number.isFinite(cost) ||
+              !Number.isFinite(vat) ||
+              qty <= 0 ||
+              cost <= 0 ||
+              vat <= 0
+            ) {
+              return null;
+            }
+            const net = qty * cost;
+            return (
+              <Text variant='inactive' size='small'>
+                check: net {net.toFixed(2)} + VAT {vat.toFixed(2)} = {(net + vat).toFixed(2)} EUR —
+                this should equal the invoice&apos;s GROSS total. if it overshoots, the unit cost
+                probably includes VAT already.
+              </Text>
+            );
+          })()}
         </>
       ) : (
         <Text variant='inactive' size='small'>
