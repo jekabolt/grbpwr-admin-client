@@ -112,11 +112,14 @@ export function useJournalEntries(filter: EntriesFilter, enabled = true) {
   });
 }
 
-// ListJournalEntries has no text-search or sort-order parameter (adding `q` + `order` server-side
-// is the clean follow-up — see docs/plan-accounting-phase2/12-audit-findings.md in the backend
-// repo). Until then, description search and oldest-first ordering fetch the whole filtered set at
-// the server's max page size (ledger.go maxListLimit = 500) and slice on the client. Capped so a
-// pathological ledger cannot pull unbounded pages; the caller surfaces `capped` to the user.
+// ListJournalEntries DOES support `q` + `order` server-side now (backend fix/accounting-audit),
+// but the GENERATED GET client enumerates its known query params explicitly, so the new params
+// cannot reach the wire until the client is regenerated (frontend `make proto` after the proto
+// mirror bump). Until then, description search and oldest-first ordering fetch the whole filtered
+// set at the server's max page size (ledger.go maxListLimit = 500) and slice on the client, capped
+// so a pathological ledger cannot pull unbounded pages (`capped` is surfaced to the user).
+// TODO(after make proto): pass q/order in useJournalEntries, delete this hook and the client-mode
+// pipeline in journal/page.tsx.
 const ACCT_FETCH_ALL_PAGE = 500;
 const ACCT_FETCH_ALL_CAP = 5000;
 
@@ -451,12 +454,23 @@ export function useImportBankCsv() {
 export function usePostBankTxn() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { id: number; accountCode: string; occurredAt?: string }) =>
-      adminService.PostBankTxn({
+    mutationFn: (vars: {
+      id: number;
+      accountCode: string;
+      occurredAt?: string;
+      supplierId?: number;
+    }) => {
+      // supplierId ships ahead of the regenerated client types: the generated POST method sends
+      // the WHOLE request object as the JSON body, so the extra field reaches the wire today.
+      // After `make proto` it becomes a first-class typed field and this widening can go.
+      const req: Parameters<typeof adminService.PostBankTxn>[0] & { supplierId?: number } = {
         id: vars.id,
         accountCode: vars.accountCode,
         occurredAt: vars.occurredAt || undefined,
-      }),
+        supplierId: vars.supplierId || undefined,
+      };
+      return adminService.PostBankTxn(req);
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: acctKeys.all }),
   });
 }
@@ -563,6 +577,9 @@ export type AcctTabAlerts = {
 // needs them. Reuses the exact queries the tabs themselves run (shared query keys + the global
 // 5-minute staleTime keep this to a handful of requests per session). Every signal fails SILENT —
 // a failed probe shows no dot rather than a false alarm; the tab itself will surface its error.
+// TODO(after make proto): the backend now exposes GetAcctAlerts (/api/admin/accounting/alerts)
+// aggregating all of this in one call — switch this hook to it once the client is regenerated
+// (a NEW method cannot be bridged: the generated client has no route for it).
 export function useAcctTabAlerts(): AcctTabAlerts {
   const pay = usePayables();
   const rec = useReceivables();

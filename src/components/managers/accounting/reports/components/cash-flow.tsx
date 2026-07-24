@@ -28,10 +28,10 @@ function signed(n: number): string {
   return `${n < 0 ? '−' : '+'}${mag}`;
 }
 
-// The backend names each line's accounts in the label ("Change in VAT (2070/2080)") — parse the
-// codes out for drill-down chips. The line messages carry no code field today; if that is ever
-// added server-side (the clean fix), swap this parser for the field. The inventory line names a
-// RANGE, so expand it to the real account set instead of only its endpoints.
+// The backend now ships an explicit `codes` field per line (AcctCashFlowLine.codes) — read it off
+// the runtime object until `make proto` regenerates the client types, and keep the label parser
+// ("Change in VAT (2070/2080)") as the fallback for a backend that predates the field. The
+// inventory label names a RANGE, so the fallback expands it to the real account set.
 const CODE_RANGE_EXPANSIONS: Record<string, string[]> = {
   '1110–1140': ['1110', '1120', '1130', '1140'],
 };
@@ -40,6 +40,10 @@ function codesFromLabel(label: string): string[] {
     if (label.includes(range)) return codes;
   }
   return Array.from(new Set(label.match(/\d{4}/g) ?? []));
+}
+function codesOfLine(l: { label?: string }, label: string): string[] {
+  const server = (l as { codes?: string[] }).codes;
+  return server && server.length > 0 ? server : codesFromLabel(label);
 }
 
 // One activity's per-line breakdown: label · account chips (each drills into that ledger for the
@@ -64,7 +68,7 @@ function SectionBreakdown({
       {lines.map((l) => {
         const label = l.label ?? '';
         const isNetProfit = label.toLowerCase().startsWith('net profit');
-        const codes = isNetProfit ? [] : codesFromLabel(label);
+        const codes = isNetProfit ? [] : codesOfLine(l, label);
         return (
           <div
             key={label}

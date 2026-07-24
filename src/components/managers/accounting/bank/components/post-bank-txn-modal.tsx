@@ -1,18 +1,17 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AcctBankTxn } from 'api/proto-http/admin';
-import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
-import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Form } from 'ui/form';
 import ComboField from 'ui/form/fields/combo-field';
 import Input from 'ui/components/input';
+import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { extractLeadingCode } from '../../journal/components/schema';
 import { formatBase, isNegative } from '../../utils/format';
-import { useAcctAccounts, usePostBankTxn } from '../../utils/hooks';
+import { useAcctAccounts, usePostBankTxn, useSuppliers } from '../../utils/hooks';
 
 type FormValues = { account: string; occurredAt: string };
 
@@ -23,6 +22,7 @@ type FormValues = { account: string; occurredAt: string };
 export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: () => void }) {
   const { showMessage } = useSnackBarStore();
   const { data, isLoading: accountsLoading } = useAcctAccounts(false);
+  const { data: suppliersData } = useSuppliers();
   const post = usePostBankTxn();
 
   const activeAccounts = useMemo(() => (data?.accounts ?? []).filter((a) => !a.archived), [data]);
@@ -51,12 +51,24 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
     if (suggestedLabel) form.setValue('account', suggestedLabel);
   }, [suggestedLabel, form]);
 
-  // PostBankTxn cannot attach a supplier (no supplier_id on its request yet), so a 2010 posting
-  // from here always lands in the anonymous "(untagged)" AP row. Warn and point to the journal
-  // path, which requires a supplier — but don't block: sometimes booking fast beats tagging.
+  // A 2010 payment is tracked per supplier (AP-by-supplier): the backend now requires
+  // supplier_id when the counter-account is 2010, so the picker appears and is enforced here
+  // before the round-trip. Other accounts need no tag.
   const watchedAccount = useWatch({ control: form.control, name: 'account' }) as string | undefined;
   const watchedCode = extractLeadingCode(watchedAccount ?? '');
   const postsToAP = watchedCode === '2010';
+  const [supplierId, setSupplierId] = useState<number | undefined>(undefined);
+  const [supplierError, setSupplierError] = useState(false);
+  const supplierOptions = useMemo(
+    () => [
+      { value: 'none', label: 'pick supplier…' },
+      ...(suppliersData?.suppliers ?? []).map((s) => ({
+        value: String(s.id ?? 0),
+        label: s.name ?? `supplier #${s.id}`,
+      })),
+    ],
+    [suppliersData],
+  );
   // Double-expense trap (audit finding 3): monthly opex and carrier costs are ACCRUED
   // (Dr 6xxx / Cr 2030) by the worker — paying that bill from the bank against a 6xxx account
   // books the same expense twice. The settlement leg of an accrued cost is 2030 (2010 for
@@ -69,8 +81,17 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
       form.setError('account', { message: 'pick an account from the chart' });
       return;
     }
+    if (code === '2010' && !supplierId) {
+      setSupplierError(true);
+      return;
+    }
     post.mutate(
-      { id: txn.id ?? 0, accountCode: code, occurredAt: values.occurredAt || undefined },
+      {
+        id: txn.id ?? 0,
+        accountCode: code,
+        occurredAt: values.occurredAt || undefined,
+        supplierId: code === '2010' ? supplierId : undefined,
+      },
       {
         onSuccess: () => {
           showMessage('Transaction posted', 'success');
@@ -136,18 +157,30 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
               />
 
               {postsToAP && (
-                <div className='border border-textInactiveColor p-3'>
-                  <Text size='small' variant='inactive'>
-                    heads up: a 2010 payment posted from the bank inbox carries NO supplier tag — it
-                    lands in the “(untagged)” row of ap / ar. to keep payables per supplier,{' '}
-                    <Link
-                      to={`${ROUTES.accounting}?new=1`}
-                      className='underline underline-offset-2 hover:opacity-70'
-                    >
-                      post it as a journal entry
-                    </Link>{' '}
-                    with the supplier picked (then ignore this line).
+                <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+                  <Text variant='inactive' size='small'>
+                    supplier — required: 2010 payables are tracked per supplier
                   </Text>
+                  <Selector
+                    label='supplier'
+                    options={supplierOptions}
+                    value={supplierId ? String(supplierId) : 'none'}
+                    onChange={(v: string) => {
+                      setSupplierId(v === 'none' ? undefined : Number(v));
+                      setSupplierError(false);
+                    }}
+                    compact
+                  />
+                  {supplierError ? (
+                    <Text size='small' className='text-error'>
+                      pick who this payment settles — without it the amount lands in the anonymous
+                      &quot;(untagged)&quot; AP row
+                    </Text>
+                  ) : (
+                    <Text size='small' variant='inactive'>
+                      shows the payment under this supplier in ap / ar (create suppliers there)
+                    </Text>
+                  )}
                 </div>
               )}
 
