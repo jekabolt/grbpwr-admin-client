@@ -42,6 +42,22 @@ export function MaterialPricesModal({
   });
   const prices = data?.prices ?? [];
 
+  // The catalog price must be NET (ex-VAT): it feeds BOM costing and, at receive time, the net
+  // goes to stock (1110) while the VAT goes to 2080 VAT Input separately. An invoice usually
+  // quotes GROSS, so give a one-step converter instead of trusting mental arithmetic — entering
+  // gross here quietly inflates every downstream cost by the VAT rate.
+  const [gross, setGross] = useState({ amount: '', ratePct: '23' });
+  const grossToNet = () => {
+    const g = parseFloat(gross.amount.replace(/,/g, '.'));
+    const r = parseFloat(gross.ratePct.replace(/,/g, '.'));
+    if (!Number.isFinite(g) || g <= 0 || !Number.isFinite(r) || r < 0) {
+      showMessage('Enter the gross amount and a VAT rate', 'error');
+      return;
+    }
+    const net = g / (1 + r / 100);
+    setForm((f) => ({ ...f, price: net.toFixed(4) }));
+  };
+
   const submit = () => {
     if (!form.price.trim()) {
       showMessage('Price is required', 'error');
@@ -118,7 +134,12 @@ export function MaterialPricesModal({
             {canWriteCosting && (
               <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
                 <Text variant='uppercase' size='small'>
-                  add price
+                  add price — NET, ex-VAT
+                </Text>
+                <Text variant='inactive' size='small'>
+                  enter the price WITHOUT VAT: net goes to stock and costing; the VAT itself is
+                  recorded on the receipt (input VAT → 2080). typing the gross here inflates every
+                  BOM estimate and COGS by the VAT rate.
                 </Text>
                 <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
                   <input
@@ -126,7 +147,8 @@ export function MaterialPricesModal({
                     type='number'
                     step='0.0001'
                     min='0'
-                    placeholder='price'
+                    placeholder='price (net, ex-VAT)'
+                    title='net unit price, ex-VAT'
                     value={form.price}
                     onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
                   />
@@ -155,6 +177,39 @@ export function MaterialPricesModal({
                     value={form.note}
                     onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
                   />
+                </div>
+                {/* Invoice-quotes-gross helper: gross ÷ (1 + rate/100) → the net field above. */}
+                <div className='flex flex-wrap items-center gap-2'>
+                  <Text variant='inactive' size='small'>
+                    invoice shows gross?
+                  </Text>
+                  <input
+                    className={`${cell} w-28`}
+                    type='number'
+                    step='0.0001'
+                    min='0'
+                    placeholder='gross'
+                    aria-label='gross amount'
+                    value={gross.amount}
+                    onChange={(e) => setGross((g) => ({ ...g, amount: e.target.value }))}
+                  />
+                  <input
+                    className={`${cell} w-16`}
+                    type='number'
+                    step='0.1'
+                    min='0'
+                    placeholder='VAT %'
+                    aria-label='VAT rate percent'
+                    value={gross.ratePct}
+                    onChange={(e) => setGross((g) => ({ ...g, ratePct: e.target.value }))}
+                  />
+                  <button
+                    type='button'
+                    onClick={grossToNet}
+                    className='underline underline-offset-2 hover:opacity-70'
+                  >
+                    <Text size='small'>→ fill net</Text>
+                  </button>
                 </div>
               </div>
             )}

@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { AmountCell } from '../components/amount-cell';
+import { InfoHint } from '../components/info-hint';
 import { Note, Pill } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';
 import { ReportState } from '../reports/components/report-utils';
@@ -130,10 +131,20 @@ function OwedOwingSection() {
                   {payRows.map((r: AcctPayableRow, i) => (
                     <tr key={r.supplierId ?? i} className='border-b border-textInactiveColor'>
                       <td className='px-2 py-1.5'>
-                        <Text size='small' className={r.supplierId ? undefined : 'italic'}>
-                          {r.supplierName ||
-                            (r.supplierId ? `supplier #${r.supplierId}` : 'untagged')}
-                        </Text>
+                        <span className='inline-flex items-center gap-1.5'>
+                          <Text size='small' className={r.supplierId ? undefined : 'italic'}>
+                            {r.supplierName ||
+                              (r.supplierId ? `supplier #${r.supplierId}` : 'untagged')}
+                          </Text>
+                          {!r.supplierId && (
+                            <InfoHint label='untagged payables'>
+                              2010 movements with no supplier tag: production-run credits (no single
+                              supplier to name) plus older manual or bank-posted payments. New
+                              manual 2010 entries now require a supplier, so this row should only
+                              shrink.
+                            </InfoHint>
+                          )}
+                        </span>
                       </td>
                       <AmountCell value={r.accrued} className='px-2 py-1.5' />
                       <AmountCell value={r.paid} className='px-2 py-1.5' />
@@ -170,9 +181,7 @@ function OwedOwingSection() {
         <section className='flex flex-col gap-2'>
           <div className='flex items-baseline justify-between gap-2 border-b border-textColor pb-1'>
             <Text className='font-bold uppercase'>owed to you</Text>
-            {recReady && (
-              <span className='font-bold tabular-nums'>€{formatBase(recTotal)}</span>
-            )}
+            {recReady && <span className='font-bold tabular-nums'>€{formatBase(recTotal)}</span>}
           </div>
           <Text variant='inactive' size='small'>
             open Accounts-Receivable balance per bank-invoice order (invoiced − received)
@@ -249,6 +258,14 @@ function OwedOwingSection() {
           </ReportState>
         </section>
       </div>
+
+      {payReady && payRows.some((r) => parseFloat(r.balance?.value ?? '0') < 0) && (
+        <Note>
+          a negative balance means more was paid to that counterparty than was ever accrued — an
+          overpayment, or a payment booked on 2010 whose matching receipt was never posted (or was
+          posted untagged). open the 2010 ledger (reports → ledger) to trace it.
+        </Note>
+      )}
 
       {payReady && recReady && (
         <Note>

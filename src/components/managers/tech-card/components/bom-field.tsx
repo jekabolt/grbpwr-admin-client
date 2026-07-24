@@ -1,8 +1,10 @@
 import { common_Material, common_TechCardBomSection } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { useSnackBarStore } from 'lib/stores/store';
 import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
 import { ReadOnlyField } from 'components/managers/product/components/read-only-field';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
@@ -70,6 +72,8 @@ function materialFabricWeight(m?: common_Material): string | undefined {
 // for free-text editing.
 function MaterialLinkField({ index }: { index: number }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
+  const { canReadCosting } = usePermissions();
+  const { showMessage } = useSnackBarStore();
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as
@@ -102,6 +106,17 @@ function MaterialLinkField({ index }: { index: number }) {
   };
 
   const pick = (id: number, m?: common_Material) => {
+    // A price-less material breaks the whole costing chain downstream (BOM estimate → style cost →
+    // COGS), so linking one is blocked — add the purchase price in materials → prices first, then
+    // link. Only enforceable when this user can SEE prices: latest_price is costing-gated, so for
+    // a non-costing user every material would look price-less and nothing could ever be linked.
+    if (id && m && canReadCosting && !m.latestPrice?.price?.value) {
+      showMessage(
+        `${m.name || 'this material'} has no purchase price — add it in materials → prices first (costing and COGS depend on it)`,
+        'error',
+      );
+      return;
+    }
     setValue(`bomItems.${index}.materialId`, wireInt(id), { shouldDirty: true });
     if (id && m) snapshotFrom(m);
   };
@@ -446,6 +461,14 @@ function BomTile({
             {hasError && (
               <Text size='small' className='truncate text-error'>
                 {rowErrors.map((e) => `! ${e.path}: ${e.message}`).join(' · ')}
+              </Text>
+            )}
+            {/* A linked line that carries no price silently zeroes the cost estimate and, from
+                there, COGS — warn on the tile (linking price-less materials is now blocked, but
+                lines linked before that guard still exist). */}
+            {linked && !price && (
+              <Text size='small' className='truncate text-warning'>
+                ! no price — add it in materials → prices (feeds costing / COGS)
               </Text>
             )}
           </span>

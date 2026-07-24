@@ -226,6 +226,17 @@ export function CatalogTab() {
                       {m.archived ? (
                         <span className={`${chip} text-textInactiveColor`}>archived</span>
                       ) : null}
+                      {/* Price is a first-class status: a price-less material cannot be linked
+                          into a BOM and silently breaks costing/COGS, so surface it on the card
+                          instead of hiding it in the prices modal. Costing-gated like the price. */}
+                      {canReadCosting && !m.archived && !m.latestPrice?.price?.value ? (
+                        <span
+                          className={`${chip} border-warning text-warning`}
+                          title='no purchase price — add one via the prices button; BOM costing and COGS depend on it'
+                        >
+                          no price
+                        </span>
+                      ) : null}
                     </div>
                     <Text variant='inactive' size='small'>
                       {sectionLabel(m.section)}

@@ -2,7 +2,7 @@ import { AcctJournalEntry } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { addMonths, format, startOfMonth } from 'date-fns';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Loader } from 'ui/components/loader';
@@ -11,7 +11,7 @@ import { AcctSectionHeader } from '../components/section-header';
 import { EntryDetailModal } from '../components/entry-detail-modal';
 import { Verdict } from '../components/kit';
 import { ACCT_PAGE_SIZE } from '../utils/constants';
-import { useAcctAccounts, useJournalEntries } from '../utils/hooks';
+import { useAcctAccounts, useAllJournalEntries, useJournalEntries } from '../utils/hooks';
 import { EntriesFilter, JournalFilterState } from './components/entries-filter';
 import { EntriesTable } from './components/entries-table';
 import { ManualEntryModal } from './components/manual-entry-modal';
@@ -31,11 +31,19 @@ function currentMonthRange(): { from: string; to: string } {
 // Journal (03 §3.2) — the accounting section's landing screen (`/accounting`). The ledger is
 // append-only and mostly machine-written (order/material/opex postings arrive from the backend
 // worker); this screen lists them, drills into an entry, reverses, and posts manual entries.
+//
+// Search & oldest-first: ListJournalEntries has no q/order params, so those two modes fetch the
+// whole filtered set (useAllJournalEntries, capped) and slice on the client; the default
+// newest-first browse keeps true server pagination.
 export function AcctJournalPage() {
   const { canWrite } = usePermissions();
   const canWriteAcct = canWrite(SECTION.accounting);
 
-  const [filters, setFilters] = useState<JournalFilterState>(() => currentMonthRange());
+  const [filters, setFilters] = useState<JournalFilterState>(() => ({
+    ...currentMonthRange(),
+    q: '',
+    order: 'desc',
+  }));
   const [debounced, setDebounced] = useState<JournalFilterState>(filters);
   const [offset, setOffset] = useState(0);
 
@@ -52,16 +60,62 @@ export function AcctJournalPage() {
   const { data: accountsData } = useAcctAccounts(false);
   const activeAccounts = (accountsData?.accounts ?? []).filter((a) => !a.archived);
 
-  const { data, isLoading, isFetching, isError, refetch } = useJournalEntries({
-    from: debounced.from,
-    to: debounced.to,
-    accountCode: debounced.accountCode,
-    sourceType: debounced.sourceType,
-    limit: ACCT_PAGE_SIZE,
-    offset,
-  });
-  const entries = data?.entries ?? [];
-  const total = data?.total ?? 0;
+  const searchTerm = (debounced.q ?? '').trim().toLowerCase();
+  const ascending = debounced.order === 'asc';
+  const clientMode = searchTerm !== '' || ascending;
+
+  const paged = useJournalEntries(
+    {
+      from: debounced.from,
+      to: debounced.to,
+      accountCode: debounced.accountCode,
+      sourceType: debounced.sourceType,
+      limit: ACCT_PAGE_SIZE,
+      offset,
+    },
+    !clientMode,
+  );
+  const all = useAllJournalEntries(
+    {
+      from: debounced.from,
+      to: debounced.to,
+      accountCode: debounced.accountCode,
+      sourceType: debounced.sourceType,
+    },
+    clientMode,
+  );
+
+  const active = clientMode ? all : paged;
+  const { isLoading, isFetching, isError } = active;
+  const refetch = active.refetch;
+
+  // Client pipeline for search/oldest-first: filter by description or #id, flip to oldest-first
+  // when asked (the server always returns newest-first), then slice the current page.
+  const { entries, total, capped } = useMemo(() => {
+    if (!clientMode) {
+      return {
+        entries: paged.data?.entries ?? [],
+        total: paged.data?.total ?? 0,
+        capped: false,
+      };
+    }
+    const src = all.data?.entries ?? [];
+    const filtered = searchTerm
+      ? src.filter((e) => {
+          const idTerm = searchTerm.startsWith('#') ? searchTerm.slice(1) : searchTerm;
+          return (
+            (e.description ?? '').toLowerCase().includes(searchTerm) ||
+            String(e.id ?? '') === idTerm
+          );
+        })
+      : src;
+    const ordered = ascending ? [...filtered].reverse() : filtered;
+    return {
+      entries: ordered.slice(offset, offset + ACCT_PAGE_SIZE),
+      total: ordered.length,
+      capped: all.data?.capped ?? false,
+    };
+  }, [clientMode, paged.data, all.data, searchTerm, ascending, offset]);
 
   const [selectedEntry, setSelectedEntry] = useState<AcctJournalEntry | null>(null);
   const [reverseEntryId, setReverseEntryId] = useState<number | null>(null);
@@ -91,11 +145,9 @@ export function AcctJournalPage() {
   const hasPrev = offset > 0;
   const hasNext = offset + ACCT_PAGE_SIZE < total;
 
-  const canReverse =
-    !!selectedEntry &&
-    canWriteAcct &&
-    !selectedEntry.reversedBy &&
-    selectedEntry.sourceType !== 'reversal';
+  const entryReversible = (entry: AcctJournalEntry) =>
+    canWriteAcct && !entry.reversedBy && entry.sourceType !== 'reversal';
+  const canReverse = !!selectedEntry && entryReversible(selectedEntry);
 
   return (
     <div className='px-2.5'>
@@ -135,7 +187,9 @@ export function AcctJournalPage() {
         ) : entries.length === 0 ? (
           <div className='flex min-h-40 flex-col items-center justify-center gap-3 border border-textInactiveColor p-6 text-center'>
             <Text variant='inactive'>
-              no entries in this period — try &quot;all time&quot; or create a manual entry
+              {searchTerm
+                ? 'nothing matches the search in this range — try "all time" or another query'
+                : 'no entries in this period — try "all time" or create a manual entry'}
             </Text>
             <div className='flex gap-2'>
               <Button variant='secondary' size='lg' onClick={handleAllTime}>
@@ -157,9 +211,36 @@ export function AcctJournalPage() {
             <Verdict className='mb-0'>
               {total} {total === 1 ? 'entry' : 'entries'}{' '}
               {debounced.from || debounced.to ? 'this period' : 'all time'}
-              {debounced.accountCode || debounced.sourceType ? ' (filtered)' : ''}.
+              {debounced.accountCode || debounced.sourceType ? ' (filtered)' : ''}
+              {searchTerm ? ` matching “${debounced.q?.trim()}”` : ''}
+              {ascending ? ', oldest first' : ''}.
+              {capped ? (
+                <span className='text-warning'>
+                  {' '}
+                  search covers only the first {all.data?.entries.length} of {all.data?.total}{' '}
+                  entries — narrow the date range for a complete match.
+                </span>
+              ) : null}
             </Verdict>
-            <EntriesTable entries={entries} isLoading={isFetching} onSelect={setSelectedEntry} />
+            <EntriesTable
+              entries={entries}
+              isLoading={isFetching}
+              onSelect={setSelectedEntry}
+              renderRowAction={(entry) =>
+                entryReversible(entry) ? (
+                  <button
+                    type='button'
+                    onClick={() => setReverseEntryId(entry.id ?? null)}
+                    className='underline underline-offset-2 hover:opacity-70'
+                    title='post the mirror entry that undoes this one'
+                  >
+                    <Text size='small' variant='inactive'>
+                      reverse
+                    </Text>
+                  </button>
+                ) : null
+              }
+            />
             <div className='flex items-center justify-between'>
               <Text variant='inactive'>
                 {from}–{to} of {total}
@@ -218,7 +299,12 @@ export function AcctJournalPage() {
         }}
       />
 
-      {manualOpen && <ManualEntryModal onClose={() => setManualOpen(false)} />}
+      {manualOpen && (
+        <ManualEntryModal
+          onClose={() => setManualOpen(false)}
+          onCreated={(entry) => setSelectedEntry(entry)}
+        />
+      )}
     </div>
   );
 }

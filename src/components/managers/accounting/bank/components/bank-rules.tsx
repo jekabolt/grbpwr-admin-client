@@ -15,9 +15,23 @@ const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text
 // → the counter-account to pre-suggest when that line imports. Purely advisory — a rule only
 // pre-fills the post modal's account, it never posts on its own. Collapsed by default so the inbox
 // stays the focus; opened when an operator wants to teach the importer a recurring counterparty.
-export function BankRules() {
+// Optionally controlled (open/onOpenChange) so a "no suggestion yet — teach a rule" nudge on an
+// inbox card can jump straight here.
+export function BankRules({
+  open: openProp,
+  onOpenChange,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+} = {}) {
   const { showMessage } = useSnackBarStore();
-  const [open, setOpen] = useState(false);
+  const [openLocal, setOpenLocal] = useState(false);
+  const open = openProp ?? openLocal;
+  const setOpen = (o: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof o === 'function' ? o(open) : o;
+    if (onOpenChange) onOpenChange(next);
+    else setOpenLocal(next);
+  };
   const { data, isLoading } = useBankRules();
   const { data: accountsData } = useAcctAccounts(false);
   const create = useCreateBankRule();
@@ -66,21 +80,22 @@ export function BankRules() {
     );
 
   return (
-    <div className='flex flex-col gap-3 border border-textInactiveColor p-3'>
+    <div id='bank-rules' className='flex flex-col gap-3 border border-textInactiveColor p-3'>
       <button
         type='button'
         className='flex w-fit items-center gap-2 text-textBaseSize uppercase underline underline-offset-4 hover:opacity-70'
         onClick={() => setOpen((o) => !o)}
       >
-        matching rules ({rules.length})
-        <span aria-hidden>{open ? '−' : '+'}</span>
+        matching rules ({rules.length})<span aria-hidden>{open ? '−' : '+'}</span>
       </button>
 
       {open && (
         <div className='flex flex-col gap-4'>
           <Text variant='inactive' size='small'>
-            a text found in a statement line's description pre-suggests the account when it imports —
-            advisory only, it never posts by itself
+            a text found in a statement line's description pre-suggests the account when it imports
+            — advisory only, it never posts by itself. rules run AT IMPORT: lines already sitting in
+            the inbox keep whatever suggestion they came in with, so a new rule kicks in from the
+            next CSV import.
           </Text>
 
           {/* Add-rule row. */}

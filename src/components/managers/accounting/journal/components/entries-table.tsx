@@ -1,5 +1,6 @@
 import { AcctJournalEntry } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
+import { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import Text from 'ui/components/text';
 import { AmountCell } from '../../components/amount-cell';
@@ -11,6 +12,9 @@ type Props = {
   entries: AcctJournalEntry[];
   isLoading: boolean;
   onSelect: (entry: AcctJournalEntry) => void;
+  // Optional extra per-row action (journal passes "reverse" for eligible entries) rendered next
+  // to "view". Return null for rows the action does not apply to.
+  renderRowAction?: (entry: AcctJournalEntry) => ReactNode;
 };
 
 // order_sale keys are a bare order uuid, order_refund keys are "uuid:seq" — split on ':' recovers
@@ -29,7 +33,7 @@ const TH = 'px-2 py-2 text-left text-[10px] font-bold uppercase tracking-wide te
 // nothing is lost; the entry id lives under the date. Whole row still opens the shared
 // entry-detail modal; the "view" button is the keyboard path; only the order link stops
 // propagation so it navigates instead.
-export function EntriesTable({ entries, isLoading, onSelect }: Props) {
+export function EntriesTable({ entries, isLoading, onSelect, renderRowAction }: Props) {
   return (
     <div className='w-full overflow-x-auto'>
       <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
@@ -103,16 +107,19 @@ export function EntriesTable({ entries, isLoading, onSelect }: Props) {
                     </div>
                   </td>
                   <td className='px-2 py-1.5 text-right'>
-                    <button
-                      type='button'
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelect(entry);
-                      }}
-                      className='underline underline-offset-2 hover:opacity-70'
+                    <div
+                      className='flex items-center justify-end gap-3'
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      <Text size='small'>view</Text>
-                    </button>
+                      {renderRowAction?.(entry)}
+                      <button
+                        type='button'
+                        onClick={() => onSelect(entry)}
+                        className='underline underline-offset-2 hover:opacity-70'
+                      >
+                        <Text size='small'>view</Text>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

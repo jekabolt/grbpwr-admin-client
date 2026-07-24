@@ -37,6 +37,12 @@ function hasEntry(t: AcctBankTxn): boolean {
   return (t.state === 'posted' || t.state === 'matched') && !!t.matchedEntryId;
 }
 
+// ignore_reason ships ahead of the regenerated client types (the backend persists + returns it —
+// migration 0202); read it off the runtime object until `make proto` adds it to AcctBankTxn.
+function ignoreReasonOf(t: AcctBankTxn): string {
+  return (t as AcctBankTxn & { ignoreReason?: string }).ignoreReason ?? '';
+}
+
 // Signed amount + its payment currency, never assuming EUR (Revolut is multi-currency). formatBase
 // keeps the wire sign; red when money left the account, matching the module's negative rule.
 function AmountWithCcy({ txn, className }: { txn: AcctBankTxn; className?: string }) {
@@ -62,11 +68,13 @@ function ToFileCard({
   busy,
   onPost,
   onIgnore,
+  onTeachRule,
 }: {
   txn: AcctBankTxn;
   busy: boolean;
   onPost: () => void;
   onIgnore: () => void;
+  onTeachRule: () => void;
 }) {
   const out = isNegative(txn.amount);
   const who = txn.counterparty || txn.description || 'no counterparty on the line';
@@ -95,14 +103,29 @@ function ToFileCard({
           {txn.suggestedAccount ? (
             <span className='font-bold tabular-nums text-textColor'>{txn.suggestedAccount}</span>
           ) : (
-            'no suggestion yet'
+            <>
+              no suggestion —{' '}
+              <button
+                type='button'
+                onClick={onTeachRule}
+                className='underline underline-offset-2 hover:opacity-70'
+                title='suggestions come from the matching rules (description substring → account), applied when a CSV imports'
+              >
+                teach a rule ↓
+              </button>
+            </>
           )}
         </span>
         <span className='flex items-center gap-2'>
           <Button variant='main' size='sm' disabled={txn.id == null || busy} onClick={onPost}>
             post
           </Button>
-          <Button variant='secondary' size='sm' disabled={txn.id == null || busy} onClick={onIgnore}>
+          <Button
+            variant='secondary'
+            size='sm'
+            disabled={txn.id == null || busy}
+            onClick={onIgnore}
+          >
             ignore
           </Button>
         </span>
@@ -125,6 +148,7 @@ function HandledRow({
 }) {
   const ignored = txn.state === 'ignored';
   const pillTone = txn.state === 'posted' ? 'ok' : ignored ? 'muted' : 'default';
+  const reason = ignored ? ignoreReasonOf(txn) : '';
   return (
     <RowLine
       className={cn(ignored && 'text-labelColor')}
@@ -135,6 +159,9 @@ function HandledRow({
             {txn.bookedAt ? formatAcctDate(txn.bookedAt) : '—'}
           </span>
           <span className='break-words'>{txn.counterparty || txn.description || '—'}</span>
+          {reason ? (
+            <span className='break-words text-[11px] italic text-labelColor'>“{reason}”</span>
+          ) : null}
         </span>
       }
       value={
@@ -174,7 +201,17 @@ export function AcctBankPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [postTxn, setPostTxn] = useState<AcctBankTxn | null>(null);
   const [ignoreTxn, setIgnoreTxn] = useState<AcctBankTxn | null>(null);
+  const [ignoreReason, setIgnoreReason] = useState('');
   const [viewEntryId, setViewEntryId] = useState<number | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+
+  const teachRule = () => {
+    setRulesOpen(true);
+    // Let the block expand before scrolling to it.
+    requestAnimationFrame(() =>
+      document.getElementById('bank-rules')?.scrollIntoView({ behavior: 'smooth' }),
+    );
+  };
 
   const txns = data?.txns ?? [];
 
@@ -190,10 +227,16 @@ export function AcctBankPage() {
     const id = ignoreTxn?.id;
     if (id == null) return;
     ignore.mutate(
-      { id },
+      { id, reason: ignoreReason.trim() || undefined },
       {
-        onSuccess: () => setIgnoreTxn(null),
-        onError: () => setIgnoreTxn(null),
+        onSuccess: () => {
+          setIgnoreTxn(null);
+          setIgnoreReason('');
+        },
+        onError: () => {
+          setIgnoreTxn(null);
+          setIgnoreReason('');
+        },
       },
     );
   };
@@ -257,8 +300,7 @@ export function AcctBankPage() {
                 <GroupHeader>to file</GroupHeader>
                 <div className='flex flex-col gap-2'>
                   {toFile.map((t) => {
-                    const busy =
-                      t.id != null && ignore.isPending && ignore.variables?.id === t.id;
+                    const busy = t.id != null && ignore.isPending && ignore.variables?.id === t.id;
                     return (
                       <ToFileCard
                         key={t.id}
@@ -266,6 +308,7 @@ export function AcctBankPage() {
                         busy={busy}
                         onPost={() => setPostTxn(t)}
                         onIgnore={() => setIgnoreTxn(t)}
+                        onTeachRule={teachRule}
                       />
                     );
                   })}
@@ -305,7 +348,7 @@ export function AcctBankPage() {
           </div>
         </ReportState>
 
-        <BankRules />
+        <BankRules open={rulesOpen} onOpenChange={setRulesOpen} />
       </div>
 
       {importOpen && <ImportCsvModal onClose={() => setImportOpen(false)} />}
@@ -314,17 +357,39 @@ export function AcctBankPage() {
 
       <ConfirmationModal
         open={ignoreTxn !== null}
-        onOpenChange={(o) => !o && setIgnoreTxn(null)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setIgnoreTxn(null);
+            setIgnoreReason('');
+          }
+        }}
         onConfirm={confirmIgnore}
         closeOnConfirm={false}
         title='Ignore this line?'
         confirmLabel={ignore.isPending ? 'ignoring…' : 'ignore'}
         confirmDisabled={ignore.isPending}
       >
-        <Text size='small'>
-          Marks the line deliberately not booked (e.g. an internal transfer leg). It stays visible
-          under the “ignored” filter.
-        </Text>
+        <div className='flex flex-col gap-3'>
+          <Text size='small'>
+            Marks the line deliberately not booked — NO journal entry is created, so this money
+            never appears in the ledger. That is exactly right for an internal move between your own
+            accounts (a Revolut EXCHANGE / transfer): ignore BOTH legs of the move, or post both —
+            never just one, or the books will show money leaving one pocket and never arriving in
+            the other. The line stays under the “ignored” filter and can still be posted later.
+          </Text>
+          <label className='flex flex-col gap-1'>
+            <Text variant='inactive' size='small'>
+              why? (saved on the line — an ignored line books nothing, so this is its only trace)
+            </Text>
+            <input
+              className='w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize'
+              value={ignoreReason}
+              maxLength={255}
+              placeholder='e.g. EXCHANGE leg — EUR side posted as #123'
+              onChange={(e) => setIgnoreReason(e.target.value)}
+            />
+          </label>
+        </div>
       </ConfirmationModal>
     </div>
   );

@@ -118,7 +118,14 @@ export function AcctReportsPage() {
       {tab === 'tb' && <TrialBalanceTab from={from} to={to} onDrill={(c) => drillToLedger(c)} />}
       {tab === 'pl' && <ProfitLossTab from={from} to={to} onDrill={(c) => drillToLedger(c)} />}
       {tab === 'bs' && <BalanceSheetTab asOf={asOf} onDrill={(c) => drillToLedger(c, true)} />}
-      {tab === 'cf' && <CashFlowTab from={from} to={to} />}
+      {tab === 'cf' && (
+        <CashFlowTab
+          from={from}
+          to={to}
+          onDrill={(c) => drillToLedger(c)}
+          onOpenPnl={() => patch({ tab: 'pl' })}
+        />
+      )}
       {tab === 'ledger' && <LedgerTab code={code} from={from} to={to} />}
       {tab === 'recon' && <ReconciliationTab from={from} to={to} />}
       {tab === 'vat' && <VatTab from={from} />}
