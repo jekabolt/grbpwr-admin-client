@@ -1001,7 +1001,7 @@ export const WIZARD_SCENARIOS: WizardScenario[] = [
         label: 'what is it',
         options: [
           { value: '1210', label: 'a refund of something we prepaid' },
-          { value: '2015', label: 'the company owes me less (repaying my loan)' },
+          { value: '2015', label: 'money I put in as a loan (the company owes me back)' },
           { value: '6390', label: 'other / not sure' },
         ],
         defaultValue: '1210',
