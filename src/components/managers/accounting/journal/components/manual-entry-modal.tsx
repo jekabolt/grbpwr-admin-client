@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { AcctJournalLineInput } from 'api/proto-http/admin';
+import { AcctJournalEntry, AcctJournalLineInput } from 'api/proto-http/admin';
+import { CreateSupplierModal } from 'components/managers/accounting/subledgers/components/create-supplier-modal';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import {
@@ -14,6 +15,7 @@ import {
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
+import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { inputToDecimal } from 'utils/decimal';
 import { applyServerFieldErrors } from 'utils/field-errors';
@@ -24,7 +26,12 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import SegmentedField from 'ui/form/fields/segmented-field';
 import { Callout, CheckStrip, Verdict } from '../../components/kit';
 import { MANUAL_ENTRY_PRESETS, ManualEntryPreset } from '../../utils/constants';
-import { useAcctAccounts, useCreateJournalEntry } from '../../utils/hooks';
+import {
+  useAcctAccounts,
+  useAcctPeriods,
+  useCreateJournalEntry,
+  useSuppliers,
+} from '../../utils/hooks';
 import {
   extractLeadingCode,
   makeManualEntrySchema,
@@ -37,6 +44,10 @@ type Props = {
   // current chart of accounts warm in the React Query cache. Close goes through onClose after the
   // dirty-guard.
   onClose: () => void;
+  // Called with the freshly created entry when the user clicks the toast's "view" action — the
+  // parent opens the detail modal, so an entry dated outside the current list range (the classic
+  // "posted into May and lost it" case) is still one click away.
+  onCreated?: (entry: AcctJournalEntry) => void;
 };
 
 const SIDE_ITEMS = [
@@ -97,9 +108,11 @@ function computeBalance(lines: ManualEntryLine[]): Balance {
   return { debit, credit, difference: debit - credit, allBase: !hasSrc, hasSrc };
 }
 
-export function ManualEntryModal({ onClose }: Props) {
+export function ManualEntryModal({ onClose, onCreated }: Props) {
   const { showMessage } = useSnackBarStore();
   const { data, isLoading: accountsLoading } = useAcctAccounts(false);
+  const { data: periodsData } = useAcctPeriods();
+  const { data: suppliersData } = useSuppliers();
   const createEntry = useCreateJournalEntry();
 
   const activeAccounts = useMemo(() => (data?.accounts ?? []).filter((a) => !a.archived), [data]);
@@ -142,7 +155,49 @@ export function ManualEntryModal({ onClose }: Props) {
     | undefined;
   const balance = computeBalance(watchedLines ?? []);
   const baseImbalance = balance.allBase && Math.abs(balance.difference) > 0.005;
-  const submitDisabled = createEntry.isPending || accountsLoading || baseImbalance;
+
+  // Period awareness for the chosen date (03 §3.2 follow-up): posting into a CLOSED month is
+  // rejected by the backend (EnsurePeriodOpen) — warn before submit instead of after a round
+  // trip. A PAST-but-open month is legal but easy to lose: the list defaults to the current
+  // month, so an entry dated in May silently "disappears" from the July view — say so upfront.
+  // Month strings compare lexicographically; both sides derive from UTC (toISOString), matching
+  // the ledger's UTC DATE semantics.
+  const watchedOccurredAt = useWatch({ control: form.control, name: 'occurredAt' }) as
+    | string
+    | undefined;
+  const monthInfo = useMemo(() => {
+    const v = watchedOccurredAt ?? '';
+    if (v.length < 7) return null;
+    const month = v.slice(0, 7);
+    const nowMonth = new Date().toISOString().slice(0, 7);
+    const period = (periodsData?.periods ?? []).find((p) => (p.period ?? '').slice(0, 7) === month);
+    return {
+      month,
+      closed: period?.status === 'closed',
+      isPast: month < nowMonth,
+    };
+  }, [watchedOccurredAt, periodsData]);
+
+  // AP discipline (wave 4): a line on 2010 Accounts Payable must carry the supplier tag, or the
+  // amount lands in GetPayables' anonymous "(untagged)" row. The backend rejects an untagged
+  // manual 2010 entry — surface the requirement in the form instead of after submit.
+  const hasAPLine = (watchedLines ?? []).some((l) => extractLeadingCode(l.account) === '2010');
+  const [supplierId, setSupplierId] = useState<number | undefined>(undefined);
+  const [supplierError, setSupplierError] = useState(false);
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  const supplierOptions = useMemo(
+    () => [
+      { value: 'none', label: 'pick supplier…' },
+      ...(suppliersData?.suppliers ?? []).map((s) => ({
+        value: String(s.id ?? 0),
+        label: s.name ?? `supplier #${s.id}`,
+      })),
+    ],
+    [suppliersData],
+  );
+
+  const submitDisabled =
+    createEntry.isPending || accountsLoading || baseImbalance || !!monthInfo?.closed;
 
   const applyPreset = (preset: ManualEntryPreset) => {
     replace(
@@ -183,6 +238,10 @@ export function ManualEntryModal({ onClose }: Props) {
   };
 
   const onSubmit: SubmitHandler<ManualEntryForm> = (formData) => {
+    if (hasAPLine && !supplierId) {
+      setSupplierError(true);
+      return;
+    }
     const lines: AcctJournalLineInput[] = formData.lines.map((l) => {
       const base = l.amountMode === 'base';
       const note = l.note && l.note.trim() ? l.note.trim() : undefined;
@@ -196,10 +255,24 @@ export function ManualEntryModal({ onClose }: Props) {
       };
     });
     createEntry.mutate(
-      { occurredAt: formData.occurredAt, description: formData.description.trim(), lines },
       {
-        onSuccess: () => {
-          showMessage('Entry created', 'success');
+        occurredAt: formData.occurredAt,
+        description: formData.description.trim(),
+        lines,
+        supplierId: hasAPLine && supplierId ? supplierId : undefined,
+      },
+      {
+        onSuccess: (res) => {
+          const entry = res.entry;
+          // Name the month when it is not the current one — that is exactly the case where the
+          // entry will NOT be visible in the list's default range, and the "view" action is the
+          // one-click way back to it.
+          const suffix = monthInfo?.isPast ? ` in ${monthInfo.month}` : '';
+          showMessage(
+            `Entry #${entry?.id ?? '?'} posted${suffix}`,
+            'success',
+            entry && onCreated ? { label: 'view', onClick: () => onCreated(entry) } : undefined,
+          );
           onClose();
         },
         onError: (e) => {
@@ -311,6 +384,60 @@ export function ManualEntryModal({ onClose }: Props) {
                 />
               </div>
 
+              {monthInfo?.closed ? (
+                <div className='border border-error p-3'>
+                  <Text size='small' className='text-error'>
+                    {monthInfo.month} is closed — the server will reject this entry. pick a date in
+                    an open month, or reopen the period first (periods tab).
+                  </Text>
+                </div>
+              ) : monthInfo?.isPast ? (
+                <div className='border border-textInactiveColor p-3'>
+                  <Text size='small' variant='inactive'>
+                    dated {monthInfo.month} (an open past month) — the list shows the current month
+                    by default, so this entry won&apos;t appear there after posting. use the
+                    toast&apos;s &quot;view&quot; or switch the list range to find it.
+                  </Text>
+                </div>
+              ) : null}
+
+              {hasAPLine && (
+                <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+                  <Text variant='inactive' size='small'>
+                    supplier — required: a line posts to 2010 accounts payable
+                  </Text>
+                  <div className='flex flex-wrap items-center gap-3'>
+                    <Selector
+                      label='supplier'
+                      options={supplierOptions}
+                      value={supplierId ? String(supplierId) : 'none'}
+                      onChange={(v: string) => {
+                        setSupplierId(v === 'none' ? undefined : Number(v));
+                        setSupplierError(false);
+                      }}
+                      compact
+                    />
+                    <button
+                      type='button'
+                      onClick={() => setSupplierModalOpen(true)}
+                      className='underline underline-offset-2 hover:opacity-70'
+                    >
+                      <Text size='small'>+ new supplier</Text>
+                    </button>
+                  </div>
+                  {supplierError ? (
+                    <Text size='small' className='text-error'>
+                      pick the supplier — without it the amount lands in the anonymous
+                      &quot;(untagged)&quot; AP row nobody can chase
+                    </Text>
+                  ) : (
+                    <Text size='small' variant='inactive'>
+                      keeps accounts payable tracked per supplier in ap / ar
+                    </Text>
+                  )}
+                </div>
+              )}
+
               <div className='flex flex-col gap-3'>
                 {fields.map((f, index) => (
                   <LineRow
@@ -394,6 +521,10 @@ export function ManualEntryModal({ onClose }: Props) {
       >
         <Text size='small'>Your changes will be lost.</Text>
       </ConfirmationModal>
+
+      {/* Inline supplier creation so an AP entry never forces a detour to ap / ar; the suppliers
+          query invalidates on create, so the new name shows up in the selector right away. */}
+      <CreateSupplierModal open={supplierModalOpen} onOpenChange={setSupplierModalOpen} />
     </DialogPrimitives.Root>
   );
 }

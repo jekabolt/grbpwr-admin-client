@@ -9,6 +9,12 @@ export type JournalFilterState = {
   to: string;
   accountCode?: string;
   sourceType?: string;
+  // Free-text search over description / #id. The API has no `q` param, so a non-empty search
+  // switches the page into fetch-all + client-filter mode (useAllJournalEntries).
+  q?: string;
+  // 'desc' (newest first) is the server's fixed order; 'asc' flips the fully-fetched set on the
+  // client for the same reason.
+  order: 'desc' | 'asc';
 };
 
 type Props = {
@@ -101,6 +107,30 @@ export function EntriesFilter({ filters, accounts, isLoading, onChange, onAllTim
           compact
         />
       </div>
+
+      <div className='flex min-w-48 flex-1 flex-col gap-1'>
+        <Text variant='inactive' size='small'>
+          search
+        </Text>
+        <Input
+          name='q'
+          value={filters.q ?? ''}
+          placeholder='description or #id'
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange({ q: e.target.value })}
+        />
+      </div>
+
+      <button
+        type='button'
+        onClick={() => onChange({ order: filters.order === 'desc' ? 'asc' : 'desc' })}
+        disabled={isLoading}
+        className='pb-1 underline underline-offset-2 hover:opacity-70 disabled:opacity-50'
+        title='flip between newest-first and oldest-first'
+      >
+        <Text variant='inactive'>
+          {filters.order === 'desc' ? 'newest first ↓' : 'oldest first ↑'}
+        </Text>
+      </button>
     </div>
   );
 }
