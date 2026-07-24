@@ -1,8 +1,10 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AcctBankTxn } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Form } from 'ui/form';
 import ComboField from 'ui/form/fields/combo-field';
@@ -48,6 +50,18 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
   useEffect(() => {
     if (suggestedLabel) form.setValue('account', suggestedLabel);
   }, [suggestedLabel, form]);
+
+  // PostBankTxn cannot attach a supplier (no supplier_id on its request yet), so a 2010 posting
+  // from here always lands in the anonymous "(untagged)" AP row. Warn and point to the journal
+  // path, which requires a supplier — but don't block: sometimes booking fast beats tagging.
+  const watchedAccount = useWatch({ control: form.control, name: 'account' }) as string | undefined;
+  const watchedCode = extractLeadingCode(watchedAccount ?? '');
+  const postsToAP = watchedCode === '2010';
+  // Double-expense trap (audit finding 3): monthly opex and carrier costs are ACCRUED
+  // (Dr 6xxx / Cr 2030) by the worker — paying that bill from the bank against a 6xxx account
+  // books the same expense twice. The settlement leg of an accrued cost is 2030 (2010 for
+  // supplier receipts); warn, don't block: a one-off un-accrued cost straight to 6xxx is fine.
+  const postsToExpense = /^6\d{3}$/.test(watchedCode);
 
   const onSubmit = (values: FormValues) => {
     const code = extractLeadingCode(values.account);
@@ -120,6 +134,34 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
                 placeholder='code or name'
                 options={accountOptions}
               />
+
+              {postsToAP && (
+                <div className='border border-textInactiveColor p-3'>
+                  <Text size='small' variant='inactive'>
+                    heads up: a 2010 payment posted from the bank inbox carries NO supplier tag — it
+                    lands in the “(untagged)” row of ap / ar. to keep payables per supplier,{' '}
+                    <Link
+                      to={`${ROUTES.accounting}?new=1`}
+                      className='underline underline-offset-2 hover:opacity-70'
+                    >
+                      post it as a journal entry
+                    </Link>{' '}
+                    with the supplier picked (then ignore this line).
+                  </Text>
+                </div>
+              )}
+
+              {postsToExpense && (
+                <div className='border border-warning p-3'>
+                  <Text size='small' className='text-warning'>
+                    careful: if this cost was already ACCRUED (monthly opex, carrier shipping — the
+                    worker books Dr 6xxx / Cr 2030), posting the payment to a 6xxx account counts
+                    the expense TWICE. paying an accrued bill = counter-account 2030 accrued
+                    expenses (supplier receipts = 2010). straight to 6xxx is right only for a cost
+                    that was never accrued.
+                  </Text>
+                </div>
+              )}
 
               <Controller
                 control={form.control}
