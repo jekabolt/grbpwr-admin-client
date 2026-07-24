@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { AcctJournalLineInput, googletype_Decimal } from 'api/proto-http/admin';
+import {
+  AcctJournalEntry,
+  AcctJournalLineInput,
+  AcctReconBlock,
+  googletype_Decimal,
+} from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 
 // Accounting module (backend `feature/accounting-core`; docs/plan-accounting-ui/
@@ -91,9 +96,10 @@ export function useArchiveAccount() {
 
 // ---- Journal ----
 
-export function useJournalEntries(filter: EntriesFilter) {
+export function useJournalEntries(filter: EntriesFilter, enabled = true) {
   return useQuery({
     queryKey: acctKeys.entries(filter),
+    enabled,
     queryFn: () =>
       adminService.ListJournalEntries({
         from: filter.from || undefined,
@@ -103,6 +109,43 @@ export function useJournalEntries(filter: EntriesFilter) {
         limit: filter.limit,
         offset: filter.offset,
       }),
+  });
+}
+
+// ListJournalEntries has no text-search or sort-order parameter (adding `q` + `order` server-side
+// is the clean follow-up — see docs/plan-accounting-phase2/12-audit-findings.md in the backend
+// repo). Until then, description search and oldest-first ordering fetch the whole filtered set at
+// the server's max page size (ledger.go maxListLimit = 500) and slice on the client. Capped so a
+// pathological ledger cannot pull unbounded pages; the caller surfaces `capped` to the user.
+const ACCT_FETCH_ALL_PAGE = 500;
+const ACCT_FETCH_ALL_CAP = 5000;
+
+export function useAllJournalEntries(f: Omit<EntriesFilter, 'limit' | 'offset'>, enabled: boolean) {
+  return useQuery({
+    queryKey: [...acctKeys.all, 'entries-all', f] as const,
+    enabled,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const entries: AcctJournalEntry[] = [];
+      let total = 0;
+      let offset = 0;
+      for (;;) {
+        const res = await adminService.ListJournalEntries({
+          from: f.from || undefined,
+          to: f.to || undefined,
+          accountCode: f.accountCode || undefined,
+          sourceType: f.sourceType || undefined,
+          limit: ACCT_FETCH_ALL_PAGE,
+          offset,
+        });
+        entries.push(...(res.entries ?? []));
+        total = res.total ?? 0;
+        offset += ACCT_FETCH_ALL_PAGE;
+        if (entries.length >= total || (res.entries ?? []).length === 0) break;
+        if (offset >= ACCT_FETCH_ALL_CAP) break;
+      }
+      return { entries, total, capped: entries.length < total };
+    },
   });
 }
 
@@ -489,4 +532,108 @@ export function useReceivables() {
     queryKey: acctKeys.receivables(),
     queryFn: () => adminService.GetReceivables({}),
   });
+}
+
+// ---- Tab alert dots (AcctSectionHeader) ----
+
+// Current calendar month as the [from, to) range the reconciliation dot watches. UTC, matching the
+// ledger's DATE semantics (same convention as the journal's currentMonthRange).
+function currentMonthRangeUTC(): { from: string; to: string } {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  return { from: fmt(new Date(Date.UTC(y, m, 1))), to: fmt(new Date(Date.UTC(y, m + 1, 1))) };
+}
+
+export type AcctTabAlerts = {
+  // ap / ar: anything is owed either way, or an AP anomaly (untagged / negative balance).
+  apar: { on: boolean; reason: string };
+  // periods: a fully-past month is still open while the current one has started.
+  periods: { on: boolean; reason: string };
+  // reports: current-month reconciliation shows a non-advisory ledger-vs-operational mismatch.
+  reports: { on: boolean; reason: string };
+  // bank: unmatched inbox lines waiting to be posted or ignored.
+  bank: { on: boolean; reason: string };
+  // events: dead-letter postings awaiting review (block period close).
+  events: { on: boolean; reason: string };
+};
+
+// Feeds the red dots on the accounting tabs so nobody has to open every tab to learn whether it
+// needs them. Reuses the exact queries the tabs themselves run (shared query keys + the global
+// 5-minute staleTime keep this to a handful of requests per session). Every signal fails SILENT —
+// a failed probe shows no dot rather than a false alarm; the tab itself will surface its error.
+export function useAcctTabAlerts(): AcctTabAlerts {
+  const pay = usePayables();
+  const rec = useReceivables();
+  const periods = useAcctPeriods();
+  const bank = useBankTxns('unmatched');
+  const events = useAcctEventsNeedingReview();
+  const range = currentMonthRangeUTC();
+  const recon = useReconciliation(range.from, range.to);
+
+  const payRows = pay.data?.rows ?? [];
+  const recRows = rec.data?.rows ?? [];
+  const anomalies = payRows.filter(
+    (r) => !r.supplierId || parseFloat(r.balance?.value ?? '0') < 0,
+  ).length;
+  const aparOn = payRows.length > 0 || recRows.length > 0;
+  const aparReason = [
+    payRows.length ? `${payRows.length} open payable${payRows.length === 1 ? '' : 's'}` : '',
+    recRows.length ? `${recRows.length} open receivable${recRows.length === 1 ? '' : 's'}` : '',
+    anomalies ? `${anomalies} untagged/negative` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const nowMonth = new Date().toISOString().slice(0, 7);
+  const openPast = (periods.data?.periods ?? []).filter(
+    (p) => p.status === 'open' && (p.period ?? '').slice(0, 7) < nowMonth,
+  );
+  const periodsReason = openPast.length
+    ? `${openPast
+        .map((p) => (p.period ?? '').slice(0, 7))
+        .sort()
+        .join(', ')} still open`
+    : '';
+
+  // finishedGoods (expected snapshot drift), pending and unpostedMovements have their own signals
+  // (bank/events dots, close checklist) — the reports dot fires only on true mismatches.
+  const r = recon.data;
+  const watched: { label: string; block: AcctReconBlock | undefined }[] = [
+    { label: 'revenue', block: r?.revenue },
+    { label: 'fees', block: r?.fees },
+    { label: 'cogs', block: r?.cogs },
+    { label: 'materials', block: r?.materials },
+    { label: 'vat', block: r?.vat },
+    { label: 'prepayments', block: r?.prepayments },
+    { label: 'shipping', block: r?.shipping },
+    { label: 'bank', block: r?.bank },
+  ];
+  const drifted = watched.filter(({ block }) => {
+    const n = parseFloat(block?.delta?.value ?? '0');
+    return Number.isFinite(n) && Math.abs(n) >= 0.01;
+  });
+
+  const unmatched = bank.data?.txns?.length ?? 0;
+  const review = events.data?.events?.length ?? 0;
+
+  return {
+    apar: { on: aparOn, reason: aparReason },
+    periods: { on: openPast.length > 0, reason: periodsReason },
+    reports: {
+      on: drifted.length > 0,
+      reason: drifted.length
+        ? `reconciliation drift: ${drifted.map((d) => d.label).join(', ')} (this month)`
+        : '',
+    },
+    bank: {
+      on: unmatched > 0,
+      reason: unmatched ? `${unmatched} unmatched bank line${unmatched === 1 ? '' : 's'}` : '',
+    },
+    events: {
+      on: review > 0,
+      reason: review ? `${review} posting${review === 1 ? '' : 's'} need review` : '',
+    },
+  };
 }
