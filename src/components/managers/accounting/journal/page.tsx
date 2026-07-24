@@ -16,6 +16,7 @@ import { EntriesFilter, JournalFilterState } from './components/entries-filter';
 import { EntriesTable } from './components/entries-table';
 import { ManualEntryModal } from './components/manual-entry-modal';
 import { ReverseConfirm } from './components/reverse-confirm';
+import { WizardModal } from './components/wizard/wizard-modal';
 
 // `to` is EXCLUSIVE: ListJournalEntries bounds occurred_at as [from, to) (backend ledger.go),
 // so "current month" must end on the 1st of the NEXT month — endOfMonth would silently drop
@@ -120,16 +121,18 @@ export function AcctJournalPage() {
   const [selectedEntry, setSelectedEntry] = useState<AcctJournalEntry | null>(null);
   const [reverseEntryId, setReverseEntryId] = useState<number | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // Bonus bridge (03 §3.2): a `?new=1` deep link (Reports agent's "create a manual entry" CTA)
-  // opens the modal on mount, then strips the param so a refresh doesn't reopen it.
+  // opens the business-case WIZARD on mount (the guided default; "manual (advanced)" is one click
+  // from inside it), then strips the param so a refresh doesn't reopen it.
   const [searchParams, setSearchParams] = useSearchParams();
   const handledNewParam = useRef(false);
   useEffect(() => {
     if (handledNewParam.current) return;
     if (searchParams.get('new') === '1' && canWriteAcct) {
       handledNewParam.current = true;
-      setManualOpen(true);
+      setWizardOpen(true);
       const next = new URLSearchParams(searchParams);
       next.delete('new');
       setSearchParams(next, { replace: true });
@@ -153,14 +156,26 @@ export function AcctJournalPage() {
     <div className='px-2.5'>
       <AcctSectionHeader>
         {canWriteAcct && (
-          <Button
-            variant='main'
-            size='lg'
-            className='uppercase'
-            onClick={() => setManualOpen(true)}
-          >
-            + new entry
-          </Button>
+          <>
+            {/* Wizard-first: "+ new entry" opens the business-case wizard; the raw line editor
+                stays one click away for off-catalog entries (FX, exotic accounts). */}
+            <Button
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => setManualOpen(true)}
+            >
+              manual (advanced)
+            </Button>
+            <Button
+              variant='main'
+              size='lg'
+              className='uppercase'
+              onClick={() => setWizardOpen(true)}
+            >
+              + new entry
+            </Button>
+          </>
         )}
       </AcctSectionHeader>
 
@@ -196,7 +211,7 @@ export function AcctJournalPage() {
                 all time
               </Button>
               {canWriteAcct && (
-                <Button variant='main' size='lg' onClick={() => setManualOpen(true)}>
+                <Button variant='main' size='lg' onClick={() => setWizardOpen(true)}>
                   new entry
                 </Button>
               )}
@@ -298,6 +313,17 @@ export function AcctJournalPage() {
           setSelectedEntry(null);
         }}
       />
+
+      {wizardOpen && (
+        <WizardModal
+          onClose={() => setWizardOpen(false)}
+          onAdvanced={() => {
+            setWizardOpen(false);
+            setManualOpen(true);
+          }}
+          onCreated={(entry) => setSelectedEntry(entry)}
+        />
+      )}
 
       {manualOpen && (
         <ManualEntryModal
