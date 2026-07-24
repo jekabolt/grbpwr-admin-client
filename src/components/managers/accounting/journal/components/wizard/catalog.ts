@@ -90,6 +90,7 @@ export const ACCOUNT_NAMES: Record<string, string> = {
   '1010': 'Cash – Bank',
   '1030': 'Payment Processor (Stripe)',
   '1040': 'Accounts Receivable',
+  '1110': 'Materials',
   '1130': 'Finished Goods',
   '1210': 'Prepaid Expenses',
   '1220': 'Equipment',
@@ -103,14 +104,21 @@ export const ACCOUNT_NAMES: Record<string, string> = {
   '2080': 'VAT Input (Recoverable)',
   '3010': "Owner's Equity",
   '3030': 'Draws / Distributions',
+  '4010': 'Sales – Retail / Popup',
+  '4040': 'Returns & Refunds',
+  '4310': 'Sales – B2B / Wholesale',
+  '5010': 'COGS',
   '5040': 'Inventory Write-offs',
+  '5090': 'Stock Adjustments',
   '6010': 'Transportation & Office Logistics',
+  '6030': 'Shipping & Fulfillment',
   '6060': 'Bank Fees',
   '6110': 'Advertising & Marketing',
   '6125': 'Production Content',
   '6210': 'Samples & Prototyping',
   '6320': 'Software & Subscriptions',
   '6350': 'Professional Services',
+  '6360': 'Taxes',
   '6390': 'Other Operating Expenses',
 };
 
@@ -121,6 +129,7 @@ const SELF_SUPPLY_VAT_HINT =
   'deducted — confirm the amount with the accountant; 0/empty = none';
 
 const G_MONEY = 'money in / out (bank)';
+const G_SALES = 'sales outside the shop';
 const G_BUY = 'buying things';
 const G_GIVE = 'product & samples given away';
 const G_FIX = 'fixes & other';
@@ -149,6 +158,13 @@ function ln(
     amount: amount.toFixed(2),
     note,
   };
+}
+
+// VAT hidden inside a VAT-inclusive gross at `rate`% (23 → gross × 23/123), rounded to 2dp the
+// same way line amounts are (toFixed) so Cr net (gross − vat) + Cr vat re-add to the gross.
+function vatFromGross(gross: number, rate: number): number {
+  if (!(rate > 0)) return 0;
+  return Number(((gross * rate) / (100 + rate)).toFixed(2));
 }
 
 function describe(id: string, title: string, ...extras: (string | undefined)[]): string {
@@ -186,6 +202,7 @@ const supplierField = (label = 'supplier', required = true): WizardField => ({
 });
 
 // A plain Dr X / Cr Y money move for a single amount — most of the "money in / out" group.
+// Optional debitNote/creditNote annotate the corresponding line on review and in the entry.
 function transfer(opts: {
   id: string;
   group: string;
@@ -195,6 +212,8 @@ function transfer(opts: {
   what: string;
   debit: string;
   credit: string;
+  debitNote?: string;
+  creditNote?: string;
   caveats?: string[];
   checklist?: string[];
 }): WizardScenario {
@@ -212,7 +231,10 @@ function transfer(opts: {
       if (!(amount > 0)) return { error: 'amount must be greater than 0' };
       return {
         description: describe(id, title, str(a, 'memo')),
-        lines: [ln(debit, 'debit', amount), ln(credit, 'credit', amount)],
+        lines: [
+          ln(debit, 'debit', amount, opts.debitNote),
+          ln(credit, 'credit', amount, opts.creditNote),
+        ],
         caveats,
         checklist,
       };
@@ -412,6 +434,450 @@ export const WIZARD_SCENARIOS: WizardScenario[] = [
     credit: '1040',
     checklist: ["mark the order paid in orders if it isn't yet"],
   }),
+  transfer({
+    id: 'salary-paid',
+    group: G_MONEY,
+    title: 'paid a salary (net, to the employee)',
+    keywords: ['зарплата', 'выплатил зарплату', 'сотрудник', 'salary', 'wypłata', 'payroll', 'net'],
+    what: 'pays the net salary OPEX already accrued — clears the accrued-expenses liability',
+    debit: '2030',
+    credit: '1010',
+    caveats: [
+      'works when the salary is entered in OPEX for that month (the accrual posts itself)',
+      "PIT/ZUS withholdings are separate — 'paid PIT / ZUS' case; agree the net-vs-gross split " +
+        'with the accountant once',
+    ],
+  }),
+  transfer({
+    id: 'bank-interest-in',
+    group: G_MONEY,
+    title: 'the bank paid us interest',
+    keywords: ['проценты', 'банк начислил', 'процентный доход', 'interest', 'bank interest'],
+    what: 'interest income lands in the bank — parked as a contra-expense until reclassed',
+    debit: '1010',
+    credit: '6390',
+    creditNote: 'bank interest income — reclass with accountant',
+    caveats: ['6390 as contra-expense is a parking spot until a proper income account exists'],
+  }),
+  transfer({
+    id: 'bank-interest-charged',
+    group: G_MONEY,
+    title: 'the bank charged interest / negative balance fee',
+    keywords: [
+      'банк списал проценты',
+      'отрицательный баланс',
+      'проценты по кредиту',
+      'interest charged',
+      'negative balance',
+      'overdraft',
+    ],
+    what: 'interest and negative-balance charges are bank fees',
+    debit: '6060',
+    credit: '1010',
+  }),
+  transfer({
+    id: 'customs-duty',
+    group: G_MONEY,
+    title: 'paid customs duty on an import',
+    keywords: ['пошлина', 'таможня', 'растаможка', 'импорт', 'customs', 'duty', 'cło', 'import'],
+    what: 'import duty is capitalised into the value of materials, not expensed',
+    debit: '1110',
+    credit: '1010',
+    debitNote: 'customs duty capitalised into materials',
+    caveats: [
+      'duty belonging to ONE specific delivery is better entered into that receipt/production ' +
+        'run cost so the unit cost is right; use this only for general duty payments',
+    ],
+  }),
+  transfer({
+    id: 'tax-penalty',
+    group: G_MONEY,
+    title: 'paid a tax penalty / interest to the tax office',
+    keywords: ['штраф', 'пеня', 'пени', 'налоговая', 'penalty', 'fine', 'odsetki', 'late fee'],
+    what: 'a penalty or late interest paid to the tax office — usually not deductible',
+    debit: '6360',
+    credit: '1010',
+    debitNote: 'penalty',
+    caveats: [
+      'penalties are usually NOT deductible for corporation tax — flag it to the accountant',
+    ],
+  }),
+  {
+    id: 'rent-deposit',
+    group: G_MONEY,
+    title: 'paid a refundable deposit (studio / office rent)',
+    keywords: [
+      'депозит',
+      'залог',
+      'обеспечительный платеж',
+      'депозит за студию',
+      'deposit',
+      'kaucja',
+      'refundable',
+    ],
+    what: 'a refundable deposit parks in prepaid expenses as an asset — not a cost',
+    fields: [
+      amountField(),
+      {
+        kind: 'select',
+        id: 'paidWith',
+        label: 'paid with',
+        options: [
+          { value: 'bank', label: 'bank now' },
+          { value: 'own', label: 'my own money' },
+        ],
+        defaultValue: 'bank',
+      },
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const amount = amt(a, 'amount');
+      if (!(amount > 0)) return { error: 'amount must be greater than 0' };
+      const credit = a.paidWith === 'own' ? '2015' : '1010';
+      return {
+        description: describe(
+          'rent-deposit',
+          'paid a refundable deposit (studio / office rent)',
+          str(a, 'memo'),
+        ),
+        lines: [ln('1210', 'debit', amount, 'refundable deposit'), ln(credit, 'credit', amount)],
+        caveats: [],
+        checklist: [
+          "when it comes back — 'other money arrived' → 'a refund of something we prepaid'",
+        ],
+      };
+    },
+  },
+  {
+    id: 'cash-withdraw-spend',
+    group: G_MONEY,
+    title: 'withdrew cash and spent it on a company cost',
+    keywords: [
+      'снял наличные',
+      'банкомат',
+      'наличка',
+      'потратил наличные',
+      'cash',
+      'atm',
+      'withdrew',
+      'gotówka',
+    ],
+    what: 'cash out of the bank goes straight to an expense — there is no petty-cash box',
+    fields: [
+      {
+        kind: 'select',
+        id: 'category',
+        label: 'category',
+        options: EXPENSE_CATEGORY_OPTIONS,
+        defaultValue: '6110',
+      },
+      amountField(),
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const amount = amt(a, 'amount');
+      if (!(amount > 0)) return { error: 'amount must be greater than 0' };
+      const category = str(a, 'category') || '6390';
+      return {
+        description: describe(
+          'cash-withdraw-spend',
+          'withdrew cash and spent it on a company cost',
+          str(a, 'memo'),
+        ),
+        lines: [ln(category, 'debit', amount), ln('1010', 'credit', amount)],
+        caveats: [
+          'there is no petty-cash account — withdraw exactly what was spent and keep the receipt',
+          'with a VAT invoice, use OPEX instead',
+        ],
+        checklist: [],
+      };
+    },
+  },
+
+  // ---- sales outside the shop ----
+  {
+    id: 'popup-cash-sale',
+    group: G_SALES,
+    title: 'sold at a popup / market (cash or card, no online order)',
+    emoji: '🛍',
+    keywords: [
+      'попап',
+      'маркет',
+      'ярмарка',
+      'продал на маркете',
+      'наличные',
+      'офлайн',
+      'popup',
+      'market',
+      'fair',
+      'cash sale',
+      'offline',
+    ],
+    what: 'an offline sale with no online order — VAT comes out of the gross, cost moves to COGS',
+    fields: [
+      {
+        kind: 'amount',
+        id: 'gross',
+        label: 'gross amount (EUR)',
+        required: true,
+        hint: AMOUNT_HINT,
+      },
+      {
+        kind: 'select',
+        id: 'vatRate',
+        label: 'VAT rate',
+        options: [
+          { value: '23', label: '23%' },
+          { value: '8', label: '8%' },
+          { value: '0', label: '0%' },
+        ],
+        defaultValue: '23',
+        hint: 'PL popup = 23%; 0% only if abroad — confirm with the accountant',
+      },
+      {
+        kind: 'amount',
+        id: 'cost',
+        label: 'cost (EUR, optional)',
+        hint: 'COST of the items sold (cost_price) — empty skips the COGS pair',
+      },
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const gross = amt(a, 'gross');
+      if (!(gross > 0)) return { error: 'gross amount must be greater than 0' };
+      const vat = vatFromGross(gross, amt(a, 'vatRate'));
+      const cost = amt(a, 'cost');
+      const lines = [ln('1010', 'debit', gross), ln('4010', 'credit', gross - vat)];
+      if (vat > 0) lines.push(ln('2070', 'credit', vat));
+      if (cost > 0) {
+        lines.push(ln('5010', 'debit', cost));
+        lines.push(ln('1130', 'credit', cost));
+      }
+      return {
+        description: describe(
+          'popup-cash-sale',
+          'sold at a popup / market (cash or card, no online order)',
+          str(a, 'memo'),
+        ),
+        lines,
+        caveats: [
+          'cash sales in PL may require a fiscal receipt (kasa fiskalna) — confirm the setup ' +
+            'with the accountant',
+          'when possible, ring it up as a normal order instead — VAT and reports then compute ' +
+            'themselves',
+        ],
+        checklist: ['remove the sold units from stock in the catalog'],
+      };
+    },
+  },
+  {
+    id: 'b2b-invoice-sale',
+    group: G_SALES,
+    title: 'sold wholesale on an invoice (outside the order system)',
+    keywords: [
+      'опт',
+      'оптом',
+      'b2b',
+      'б2б',
+      'фактура покупателю',
+      'выставил счет',
+      'wholesale',
+      'invoice sale',
+      'wdt',
+      'stockist',
+    ],
+    what: 'a wholesale invoice never entered as an order — books the receivable and B2B revenue',
+    fields: [
+      { kind: 'text', id: 'buyer', label: 'buyer', required: true, placeholder: 'company name' },
+      { kind: 'amount', id: 'net', label: 'net amount (EUR)', required: true, hint: AMOUNT_HINT },
+      {
+        kind: 'amount',
+        id: 'vat',
+        label: 'VAT amount (EUR, optional)',
+        hint: '0 for an EU B2B buyer with a VAT-ID (WDT) or a non-EU export',
+      },
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const net = amt(a, 'net');
+      if (!(net > 0)) return { error: 'net amount must be greater than 0' };
+      const vat = amt(a, 'vat');
+      const lines = [ln('1040', 'debit', net + vat), ln('4310', 'credit', net)];
+      if (vat > 0) lines.push(ln('2070', 'credit', vat));
+      return {
+        description: describe(
+          'b2b-invoice-sale',
+          'sold wholesale on an invoice (outside the order system)',
+          str(a, 'buyer'),
+          str(a, 'memo'),
+        ),
+        lines,
+        caveats: [
+          'prefer a CUSTOM ORDER — the VAT regime, JPK and VAT-UE then compute themselves; ' +
+            'this case is only for invoices that never entered the system',
+        ],
+        checklist: [
+          'EU buyer with VAT-ID → give the accountant the VAT-ID for VAT-UE',
+          "book the payment later with 'a customer paid our invoice'",
+        ],
+      };
+    },
+  },
+  transfer({
+    id: 'goodwill-refund',
+    group: G_SALES,
+    title: 'refunded / compensated a customer outside an order refund',
+    keywords: [
+      'вернул клиенту',
+      'компенсация клиенту',
+      'жест доброй воли',
+      'goodwill',
+      'refund',
+      'compensation',
+    ],
+    what: 'a goodwill payout with no order behind it — reduces revenue via returns & refunds',
+    debit: '4040',
+    credit: '1010',
+    caveats: [
+      'an ordinary order refund must go through orders → refund (posts itself + fixes VAT); ' +
+        'this is only for goodwill payouts with no order',
+    ],
+  }),
+  transfer({
+    id: 'carrier-compensation',
+    group: G_SALES,
+    title: 'a carrier compensated us for a lost/damaged parcel',
+    keywords: [
+      'перевозчик',
+      'компенсация за посылку',
+      'потерянная посылка',
+      'dhl',
+      'carrier',
+      'compensation',
+      'lost parcel',
+      'damaged',
+    ],
+    what: 'carrier money for a lost or damaged parcel offsets the shipping cost',
+    debit: '1010',
+    credit: '6030',
+    creditNote: 'carrier compensation — contra shipping cost',
+  }),
+  {
+    id: 'supplier-credit-note',
+    group: G_SALES,
+    title: 'a supplier gave us a credit note / rebate',
+    keywords: [
+      'кредит-нота',
+      'кредит нота',
+      'скидка от поставщика',
+      'возврат от поставщика',
+      'credit note',
+      'rebate',
+      'korekta',
+    ],
+    what: 'the supplier owes us back — payables drop, the value comes off materials or COGS',
+    fields: [
+      supplierField(),
+      amountField(),
+      {
+        kind: 'toggle',
+        id: 'stillInStock',
+        label: 'the materials are still in the warehouse',
+        defaultValue: true,
+      },
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const amount = amt(a, 'amount');
+      if (!(amount > 0)) return { error: 'amount must be greater than 0' };
+      if (!a.supplier)
+        return { error: 'pick the supplier — 2010 postings are tracked per supplier' };
+      return {
+        description: describe(
+          'supplier-credit-note',
+          'a supplier gave us a credit note / rebate',
+          str(a, 'supplierName'),
+          str(a, 'memo'),
+        ),
+        lines: [
+          ln('2010', 'debit', amount),
+          ln(a.stillInStock ? '1110' : '5010', 'credit', amount),
+        ],
+        supplierId: Number(a.supplier),
+        caveats: [
+          "reduce the material's remaining value only if it's really still on the shelf — " +
+            'already-consumed materials reduce COGS instead',
+        ],
+        checklist: [],
+      };
+    },
+  },
+  {
+    id: 'sold-below-cost',
+    group: G_SALES,
+    title: 'sold an item to staff / a friend below cost',
+    keywords: [
+      'сотруднику',
+      'другу со скидкой',
+      'ниже себестоимости',
+      'дешевле себестоимости',
+      'staff',
+      'friend',
+      'below cost',
+    ],
+    what: 'the cash received covers part of the cost — the rest is an owner distribution',
+    fields: [
+      {
+        kind: 'amount',
+        id: 'received',
+        label: 'received (EUR)',
+        required: true,
+        hint: AMOUNT_HINT,
+      },
+      {
+        kind: 'amount',
+        id: 'cost',
+        label: 'cost (EUR)',
+        required: true,
+        hint: "the item's cost_price",
+      },
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const received = amt(a, 'received');
+      if (!(received > 0)) return { error: 'received must be greater than 0' };
+      const cost = amt(a, 'cost');
+      if (!(cost > 0)) return { error: 'cost must be greater than 0' };
+      if (received > cost) return { error: "that's a profitable sale — use the popup sale case" };
+      const lines = [ln('1010', 'debit', received)];
+      if (cost - received > 0) {
+        lines.push(
+          ln('3030', 'debit', cost - received, 'below-cost difference — owner distribution'),
+        );
+      }
+      lines.push(ln('1130', 'credit', cost));
+      return {
+        description: describe(
+          'sold-below-cost',
+          'sold an item to staff / a friend below cost',
+          str(a, 'memo'),
+        ),
+        lines,
+        caveats: [
+          'the below-cost part is treated as an owner distribution, not an expense',
+          'PL VAT on discounted sales to related parties can be assessed on market value — ' +
+            'mention it to the accountant',
+        ],
+        checklist: ['remove the unit from stock'],
+      };
+    },
+  },
 
   // ---- buying things ----
   {
@@ -945,6 +1411,200 @@ export const WIZARD_SCENARIOS: WizardScenario[] = [
       };
     },
   },
+  {
+    id: 'fg-stock-count',
+    group: G_GIVE,
+    title: 'stock count: finished goods missing or extra',
+    keywords: [
+      'инвентаризация',
+      'недостача',
+      'излишек',
+      'пересчет',
+      'не сходится склад',
+      'stock count',
+      'stocktake',
+      'shortage',
+      'surplus',
+    ],
+    what: 'the count disagrees with the books — book the finished-goods difference at cost',
+    fields: [
+      {
+        kind: 'select',
+        id: 'kind',
+        label: 'what did the count find',
+        options: [
+          { value: 'shortage', label: 'shortage (less than the books)' },
+          { value: 'surplus', label: 'surplus (more than the books)' },
+        ],
+        defaultValue: 'shortage',
+      },
+      {
+        kind: 'amount',
+        id: 'cost',
+        label: 'cost (EUR)',
+        required: true,
+        hint: 'cost value of the counted difference',
+      },
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const cost = amt(a, 'cost');
+      if (!(cost > 0)) return { error: 'cost must be greater than 0' };
+      const surplus = str(a, 'kind') === 'surplus';
+      return {
+        description: describe(
+          'fg-stock-count',
+          'stock count: finished goods missing or extra',
+          surplus ? 'surplus' : 'shortage',
+          str(a, 'memo'),
+        ),
+        lines: surplus
+          ? [ln('1130', 'debit', cost), ln('5090', 'credit', cost)]
+          : [ln('5090', 'debit', cost), ln('1130', 'credit', cost)],
+        caveats: ['raw MATERIALS adjust in the warehouse (materials → adjust) — it posts itself'],
+        checklist: ['fix the quantities in the product catalog too'],
+      };
+    },
+  },
+  {
+    id: 'fg-writedown',
+    group: G_GIVE,
+    title: 'wrote a stale collection down to zero',
+    keywords: [
+      'уценка',
+      'обесценение',
+      'старая коллекция',
+      'списал в ноль',
+      'writedown',
+      'write down',
+      'stale',
+      'dead stock',
+    ],
+    what: 'a stale collection is written down to zero — its cost leaves inventory',
+    fields: [
+      {
+        kind: 'amount',
+        id: 'cost',
+        label: 'cost (EUR)',
+        required: true,
+        hint: 'total COST (cost_price) of the written-down items',
+      },
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const cost = amt(a, 'cost');
+      if (!(cost > 0)) return { error: 'cost must be greater than 0' };
+      return {
+        description: describe(
+          'fg-writedown',
+          'wrote a stale collection down to zero',
+          str(a, 'memo'),
+        ),
+        lines: [ln('5040', 'debit', cost), ln('1130', 'credit', cost)],
+        caveats: [
+          'a PARTIAL write-down (still sellable, just worth less) is trickier — size it with ' +
+            'the accountant',
+        ],
+        checklist: [],
+      };
+    },
+  },
+  {
+    id: 'charity-product',
+    group: G_GIVE,
+    title: 'donated product to charity',
+    keywords: [
+      'благотворительность',
+      'пожертвовал',
+      'фонд',
+      'донат',
+      'charity',
+      'donation',
+      'donated',
+      'opp',
+    ],
+    what: 'stock donated to charity — its cost becomes an other operating expense',
+    fields: [
+      { kind: 'text', id: 'what', label: 'what', required: true, placeholder: 'hoodie XL black' },
+      { kind: 'amount', id: 'cost', label: 'cost (EUR)', required: true, hint: COST_HINT },
+      {
+        kind: 'amount',
+        id: 'selfSupplyVat',
+        label: 'self-supply VAT (EUR, optional)',
+        defaultValue: '',
+        hint:
+          'donations to registered charities (OPP) can be VAT-exempt — confirm; otherwise ' +
+          'self-supply VAT applies',
+      },
+      dateField(),
+      memoField(),
+    ],
+    build: (a) => {
+      const cost = amt(a, 'cost');
+      if (!(cost > 0)) return { error: 'cost must be greater than 0' };
+      const vat = amt(a, 'selfSupplyVat');
+      const lines = [ln('6390', 'debit', cost, 'charity donation')];
+      if (vat > 0) {
+        lines.push(ln('6390', 'debit', vat, 'self-supply VAT'));
+        lines.push(ln('2070', 'credit', vat, 'self-supply VAT'));
+      }
+      lines.push(ln('1130', 'credit', cost));
+      return {
+        description: describe(
+          'charity-product',
+          'donated product to charity',
+          str(a, 'what'),
+          str(a, 'memo'),
+        ),
+        lines,
+        caveats: [],
+        checklist: ['get a donation confirmation from the charity — needed for any tax relief'],
+      };
+    },
+  },
+  transfer({
+    id: 'buyback-archive',
+    group: G_GIVE,
+    title: 'bought our own product back (archive / content)',
+    keywords: [
+      'выкупил обратно',
+      'выкуп',
+      'архив',
+      'свой товар',
+      'buyback',
+      'bought back',
+      'archive',
+    ],
+    what: 'paid to get our own piece back for the archive or content — an expense, not inventory',
+    debit: '6125',
+    credit: '1010',
+    caveats: [
+      "if it returns to SELLABLE stock, that's inventory, not an expense — talk to the " +
+        'accountant before booking',
+    ],
+  }),
+  {
+    id: 'gift-returned',
+    group: G_GIVE,
+    title: 'an influencer/shoot returned the product',
+    keywords: [
+      'вернул подарок',
+      'инфлюенсер вернул',
+      'вернули со съемки',
+      'returned',
+      'gift back',
+      'influencer return',
+    ],
+    what: 'reverse the original gift entry — the cost comes back to stock',
+    route: {
+      to: ROUTES.accounting,
+      hint:
+        'find the original gift entry ([gift-influencer] …) and REVERSE it — the cost comes ' +
+        'back to stock in the books; then add the unit back in the catalog.',
+    },
+  },
 
   // ---- fixes & other ----
   {
@@ -1028,6 +1688,93 @@ export const WIZARD_SCENARIOS: WizardScenario[] = [
             : [],
         checklist: [],
       };
+    },
+  },
+  {
+    id: 'fx-exchange',
+    group: G_FIX,
+    title: 'exchanged currency inside revolut (EUR↔PLN/GBP/USD)',
+    keywords: [
+      'обмен валюты',
+      'конвертация',
+      'обменял',
+      'курс',
+      'revolut',
+      'fx',
+      'exchange',
+      'currency',
+    ],
+    what: 'an internal currency exchange is neither income nor expense — nothing is booked',
+    route: {
+      to: ROUTES.accountingBank,
+      hint:
+        'IGNORE both legs of the exchange in the bank inbox (state the reason). The FX spread ' +
+        'is not booked yet — a known, accepted gap; never post just one leg.',
+    },
+  },
+  {
+    id: 'chargeback',
+    group: G_FIX,
+    title: 'a customer opened a stripe chargeback',
+    keywords: [
+      'чарджбек',
+      'диспут',
+      'спор по платежу',
+      'оспорил платеж',
+      'chargeback',
+      'dispute',
+      'stripe',
+    ],
+    what: 'stripe disputes post themselves from webhooks — nothing to book by hand',
+    route: {
+      to: ROUTES.accounting,
+      hint:
+        'disputes post THEMSELVES from Stripe webhooks (dispute + fee, and the reversal ' +
+        "if you win). Don't book them by hand — check the journal for the order's dispute " +
+        'entry instead.',
+    },
+  },
+  {
+    id: 'annual-prepaid',
+    group: G_FIX,
+    title: 'paid a year up front (insurance, annual subscription)',
+    keywords: [
+      'за год вперед',
+      'годовая подписка',
+      'страховка',
+      'оплата за год',
+      'annual',
+      'prepaid',
+      'insurance',
+      'yearly',
+    ],
+    what: 'a year paid up front is spread as monthly OPEX lines, not booked in one lump',
+    route: {
+      to: ROUTES.opex,
+      hint:
+        'enter it in OPEX split into monthly lines (1/12 each month it covers) so each month ' +
+        "carries its share — one big line would distort that month's profit.",
+    },
+  },
+  {
+    id: 'free-samples-in',
+    group: G_FIX,
+    title: 'a supplier sent free material samples',
+    keywords: [
+      'бесплатные образцы',
+      'сэмплы',
+      'пробники',
+      'прислали бесплатно',
+      'free samples',
+      'swatches',
+      'zero cost',
+    ],
+    what: 'free samples arrive at zero cost — there is no journal entry to make',
+    route: {
+      to: ROUTES.accounting,
+      hint:
+        'free samples have zero cost — there is NOTHING to book. If you later USE them in ' +
+        'production, receive them into the warehouse at zero cost first.',
     },
   },
 ];
