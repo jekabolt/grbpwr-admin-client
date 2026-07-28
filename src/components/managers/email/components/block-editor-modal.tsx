@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { ProductSelectionApi } from '../../hero/components/useProductSelection';
 import { BlockEditor } from './block-editor';
 import { CampaignSchema } from './schema';
 
@@ -33,6 +34,7 @@ interface BlockEditorModalProps {
   /** uid of the block being edited, or null when closed. */
   editingUid: string | null;
   onOpenChange: (open: boolean) => void;
+  featuredProducts: ProductSelectionApi;
   /** True while editing a freshly-added, unconfirmed block — cancel/close discards it. */
   isNew?: boolean;
   /** Confirm/keep the new block (leaves it in the list). */
@@ -49,6 +51,7 @@ interface BlockEditorModalProps {
 export function BlockEditorModal({
   editingUid,
   onOpenChange,
+  featuredProducts,
   isNew = false,
   onConfirm,
   onDuplicate,
@@ -101,7 +104,13 @@ export function BlockEditorModal({
               </DialogPrimitives.Close>
             </div>
             <div ref={contentRef} className='min-h-0 flex-1 overflow-y-auto'>
-              {block && index >= 0 && <BlockEditor index={index} block={block} />}
+              {block && index >= 0 && (
+                <BlockEditor
+                  prefix={`body.${index}`}
+                  block={block}
+                  featuredProducts={featuredProducts}
+                />
+              )}
             </div>
             <div className='flex shrink-0 justify-end gap-2'>
               {isNew ? (

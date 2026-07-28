@@ -22,6 +22,12 @@ import './global.css';
 const Hero = lazy(() =>
   import('components/managers/hero/components').then((m) => ({ default: m.Hero })),
 );
+const EmailCampaigns = lazy(() =>
+  import('components/managers/email').then((m) => ({ default: m.EmailCampaigns })),
+);
+const CampaignBuilder = lazy(() =>
+  import('components/managers/email/components').then((m) => ({ default: m.CampaignBuilder })),
+);
 const MediaManager = lazy(() =>
   import('components/managers/media').then((m) => ({ default: m.MediaManager })),
 );
@@ -256,6 +262,8 @@ root.render(
                   <Route path={`${ROUTES.copyProduct}/:id`} element={<Product />} />
                   <Route path={ROUTES.hero} element={<Hero />} />
                   <Route path={ROUTES.promo} element={<Promo />} />
+                  <Route path={ROUTES.emailCampaign} element={<CampaignBuilder />} />
+                  <Route path={ROUTES.emailCampaigns} element={<EmailCampaigns />} />
                   <Route path={ROUTES.settings} element={<Settings />} />
                   <Route path={ROUTES.dictionaries} element={<Dictionaries />} />
                   <Route path={ROUTES.shipping} element={<Shipping />} />

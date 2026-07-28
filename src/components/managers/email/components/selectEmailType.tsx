@@ -6,16 +6,16 @@ import {
 } from 'constants/email-campaign';
 import { cn } from 'lib/utility';
 import React, { FC, useEffect, useRef, useState } from 'react';
-import { UseFormReturn } from 'react-hook-form';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { v4 as uuidv4 } from 'uuid';
-import { CampaignSchema, makeEmptyBlock } from './schema';
+import { makeEmptyBlock } from './schema';
 
 interface SelectEmailTypeProps {
+  /** useFieldArray append for the target block list (top-level body or a column). */
   append: (value: any) => void;
-  form: UseFormReturn<CampaignSchema>;
-  entityRefs: React.MutableRefObject<{ [uid: string]: HTMLDivElement | null }>;
+  /** Optional ref map used to scroll a newly-added top-level block into view. */
+  entityRefs?: React.MutableRefObject<{ [uid: string]: HTMLDivElement | null }>;
   /** Called with the new block's uid after it is added (open its editor / close the menu). */
   onAdded?: (uid: string) => void;
   /** Block types to hide (e.g. TWO_COLUMN inside a column picker to bar nesting). */
@@ -28,16 +28,14 @@ const EMAIL_TYPE_BY_VALUE = Object.fromEntries(emailBlockTypes.map((t) => [t.val
 >;
 
 // Fork of hero/components/selectHeroType.tsx over the 12 email block types +
-// EMAIL_BLOCK_TYPE_GROUPS. Keyboard-first: type to filter, Enter adds the first
-// match. Appends a minimal-valid block (makeEmptyBlock) to the campaign body.
+// EMAIL_BLOCK_TYPE_GROUPS. Decoupled from the form so it can also drive a nested
+// TWO_COLUMN column picker (which excludes TWO_COLUMN to bar infinite nesting).
 export const SelectEmailType: FC<SelectEmailTypeProps> = ({
   append,
-  form,
   entityRefs,
   onAdded,
   excludeTypes = [],
 }) => {
-  const [addedUid, setAddedUid] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -46,23 +44,16 @@ export const SelectEmailType: FC<SelectEmailTypeProps> = ({
     return () => clearTimeout(t);
   }, []);
 
-  const body = form.watch('body');
-
   const addBlock = (type: EmailBlockType) => {
     const uid = uuidv4();
     append(makeEmptyBlock(type, uid));
-    setAddedUid(uid);
     onAdded?.(uid);
+    // Scroll a newly-added top-level block into view once it renders.
+    setTimeout(
+      () => entityRefs?.current[uid]?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      100,
+    );
   };
-
-  useEffect(() => {
-    if (addedUid !== null) {
-      setTimeout(() => {
-        entityRefs.current[addedUid]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        setAddedUid(null);
-      }, 100);
-    }
-  }, [body?.length, addedUid, entityRefs]);
 
   const q = query.trim().toLowerCase();
   const matches = (value: EmailBlockType) => {

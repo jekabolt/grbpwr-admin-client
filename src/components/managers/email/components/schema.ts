@@ -110,6 +110,9 @@ const headerMember = z.object({
   backgroundColor: z.string().optional(),
   header: z.object({
     logoMediaId: z.number().optional(),
+    // transient thumbnail url for the preview (not sent to the proto; the mapper
+    // reads logoMediaId only). Mirrors hero storing mediaLandscapeUrl in-form.
+    logoMediaUrl: z.string().optional(),
   }),
   translations: createStrictTranslationSchema(headerTranslation, requiredLanguageIds),
 });
@@ -120,6 +123,9 @@ const imageLinkMember = z.object({
   backgroundColor: z.string().optional(),
   imageLink: z.object({
     mediaId: z.number().optional(),
+    // transient image thumbnail url for the preview (distinct from `url`, the
+    // click-through link target); not sent to the proto.
+    mediaUrl: z.string().optional(),
     url: z.string().optional(),
   }),
   translations: createStrictTranslationSchema(imageLinkTranslation, requiredLanguageIds),
@@ -215,6 +221,8 @@ const videoThumbMember = z.object({
   backgroundColor: z.string().optional(),
   videoThumb: z.object({
     mediaId: z.number().optional(),
+    // transient poster thumbnail url for the preview; not sent to the proto.
+    posterUrl: z.string().optional(),
     videoUrl: z.string().optional(),
   }),
   translations: createStrictTranslationSchema(videoThumbTranslation, requiredLanguageIds),

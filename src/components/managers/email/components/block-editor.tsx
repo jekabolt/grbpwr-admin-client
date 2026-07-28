@@ -1,52 +1,64 @@
+import { common_MediaFull } from 'api/proto-http/admin';
 import {
   CTA_ALIGNMENT_OPTIONS,
   CTA_STYLE_OPTIONS,
   EMAIL_BG_COLOR_OPTIONS,
   SOCIAL_NETWORK_OPTIONS,
 } from 'constants/email-campaign';
+import { useCallback } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { HeroProductPicker } from '../../hero/components/hero-product-picker';
+import { LinkField } from '../../hero/components/link-field';
+import { ReleaseDateField } from '../../hero/components/release-date-field';
+import { ProductSelectionApi } from '../../hero/components/useProductSelection';
+import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
+import { BlockListField } from './block-list-field';
 import { CampaignSchema, EmailBlockForm } from './schema';
 
 interface BlockEditorProps {
-  index: number;
+  /** RHF path to this block, e.g. `body.3` or `body.3.twoColumn.left.0` (nested). */
+  prefix: string;
   block: EmailBlockForm;
-}
-
-// PROTO-GATED slots — media (MediaPreviewWithSelector) and product pickers
-// (ProductPickerModal / HeroProductPicker) are reused by direct import in the
-// full build, after the proto client is regenerated. Until then the foundation
-// exposes the underlying id fields so a block round-trips; the visual pickers are
-// swapped in later without changing the form shape.
-function PickerSlot({ label }: { label: string }) {
-  return (
-    <div className='border border-dashed border-textInactiveColor p-3'>
-      <Text variant='label' size='small'>
-        {label} — visual picker wired in the proto-gated follow-up
-      </Text>
-    </div>
-  );
+  featuredProducts: ProductSelectionApi;
 }
 
 /**
- * Renders one email block's editor for body[index]. Fork of the hero
- * block-editor switch, minus the TargetingFields footer. Every field writes to
- * the RHF campaign form at the positional `body.${index}` path. Media/product
- * selection is stubbed to id fields (see PickerSlot) — the rest is fully wired.
+ * Renders one email block's editor at `prefix`. Fork of the hero block-editor
+ * switch (minus the TargetingFields footer). Reuses MediaPreviewWithSelector,
+ * HeroProductPicker, LinkField and ReleaseDateField by direct import; TWO_COLUMN
+ * recurses through BlockListField (whose child picker excludes TWO_COLUMN).
  */
-export function BlockEditor({ index, block }: BlockEditorProps) {
-  const { control } = useFormContext<CampaignSchema>();
-  const prefix = `body.${index}`;
+export function BlockEditor({ prefix, block, featuredProducts }: BlockEditorProps) {
+  const { control, setValue, watch } = useFormContext<CampaignSchema>();
+  const uid = (block as any)._uid as string;
   const translationsPrefix = `${prefix}.translations`;
 
-  const socialLinks = useFieldArray({
-    control,
-    name: `${prefix}.socialLinks.links` as any,
-  });
+  const socialLinks = useFieldArray({ control, name: `${prefix}.socialLinks.links` as any });
+
+  const saveMedia = useCallback(
+    (idPath: string, urlPath: string, media: common_MediaFull[]) => {
+      if (!media.length) return;
+      setValue(idPath as any, media[0].id, { shouldDirty: true, shouldTouch: true });
+      setValue(urlPath as any, media[0].media?.thumbnail?.mediaUrl || '', {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    },
+    [setValue],
+  );
+
+  const clearMedia = useCallback(
+    (idPath: string, urlPath: string) => {
+      setValue(idPath as any, undefined, { shouldDirty: true, shouldTouch: true });
+      setValue(urlPath as any, '', { shouldDirty: true, shouldTouch: true });
+    },
+    [setValue],
+  );
 
   const bgColorField = (
     <SelectField
@@ -62,7 +74,26 @@ export function BlockEditor({ index, block }: BlockEditorProps) {
       case 'EMAIL_BLOCK_TYPE_HEADER':
         return (
           <>
-            <PickerSlot label='logo media' />
+            <div className='space-y-1'>
+              <Text size='small' variant='label'>
+                logo
+              </Text>
+              <MediaPreviewWithSelector
+                mediaUrl={watch(`${prefix}.header.logoMediaUrl` as any) || ''}
+                aspectRatio={['1:1']}
+                showVideos={false}
+                label='select logo'
+                purpose='logo'
+                alt='logo'
+                heightClass='h-24'
+                onSaveMedia={(m) =>
+                  saveMedia(`${prefix}.header.logoMediaId`, `${prefix}.header.logoMediaUrl`, m)
+                }
+                onClear={() =>
+                  clearMedia(`${prefix}.header.logoMediaId`, `${prefix}.header.logoMediaUrl`)
+                }
+              />
+            </div>
             <UnifiedTranslationFields
               fieldPrefix={translationsPrefix}
               fields={[
@@ -71,14 +102,39 @@ export function BlockEditor({ index, block }: BlockEditorProps) {
                 { name: 'subheading', label: 'subheading', required: false },
               ]}
             />
+            <div className='border border-dashed border-textInactiveColor p-2'>
+              <Text variant='label' size='small'>
+                per-language header nav links (EmailBlockTranslation.links[]) — deferred to a later
+                pass.
+              </Text>
+            </div>
           </>
         );
 
       case 'EMAIL_BLOCK_TYPE_IMAGE_LINK':
         return (
           <>
-            <PickerSlot label='image media' />
-            <InputField name={`${prefix}.imageLink.url`} label='link url' placeholder='https://' />
+            <div className='space-y-1'>
+              <Text size='small' variant='label'>
+                image
+              </Text>
+              <MediaPreviewWithSelector
+                mediaUrl={watch(`${prefix}.imageLink.mediaUrl` as any) || ''}
+                aspectRatio={['16:9']}
+                showVideos={false}
+                label='select image'
+                purpose='image'
+                alt='image'
+                heightClass='h-44'
+                onSaveMedia={(m) =>
+                  saveMedia(`${prefix}.imageLink.mediaId`, `${prefix}.imageLink.mediaUrl`, m)
+                }
+                onClear={() =>
+                  clearMedia(`${prefix}.imageLink.mediaId`, `${prefix}.imageLink.mediaUrl`)
+                }
+              />
+            </div>
+            <LinkField name={`${prefix}.imageLink.url`} label='click-through link' optional />
             <UnifiedTranslationFields
               fieldPrefix={translationsPrefix}
               fields={[
@@ -98,12 +154,51 @@ export function BlockEditor({ index, block }: BlockEditorProps) {
         );
 
       case 'EMAIL_BLOCK_TYPE_PRODUCT_CARD':
-        return <PickerSlot label='product' />;
+        return (
+          <div className='space-y-2'>
+            <Text size='small' variant='label'>
+              product
+            </Text>
+            <HeroProductPicker
+              uid={uid}
+              api={featuredProducts}
+              formPath={`${prefix}.productCard.productId`}
+              single
+              activeOnly
+            />
+            <Button
+              type='button'
+              variant='secondary'
+              className='px-2 py-1'
+              onClick={() => featuredProducts.openSelection(uid)}
+            >
+              choose product
+            </Button>
+          </div>
+        );
 
       case 'EMAIL_BLOCK_TYPE_PRODUCT_GRID':
         return (
           <>
-            <PickerSlot label='products' />
+            <div className='space-y-2'>
+              <Text size='small' variant='label'>
+                products
+              </Text>
+              <HeroProductPicker
+                uid={uid}
+                api={featuredProducts}
+                formPath={`${prefix}.productGrid.productIds`}
+                activeOnly
+              />
+              <Button
+                type='button'
+                variant='secondary'
+                className='px-2 py-1'
+                onClick={() => featuredProducts.openSelection(uid)}
+              >
+                choose products
+              </Button>
+            </div>
             <InputField
               name={`${prefix}.productGrid.columns`}
               label='columns'
@@ -167,11 +262,17 @@ export function BlockEditor({ index, block }: BlockEditorProps) {
 
       case 'EMAIL_BLOCK_TYPE_TWO_COLUMN':
         return (
-          <div className='border border-dashed border-textInactiveColor p-3'>
-            <Text variant='label' size='small'>
-              two-column child editing (BlockListField — nested left/right EmailBlock lists, child
-              picker excludes TWO_COLUMN) is wired in the proto-gated follow-up.
-            </Text>
+          <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+            <BlockListField
+              prefix={`${prefix}.twoColumn`}
+              side='left'
+              featuredProducts={featuredProducts}
+            />
+            <BlockListField
+              prefix={`${prefix}.twoColumn`}
+              side='right'
+              featuredProducts={featuredProducts}
+            />
           </div>
         );
 
@@ -221,7 +322,11 @@ export function BlockEditor({ index, block }: BlockEditorProps) {
       case 'EMAIL_BLOCK_TYPE_COUNTDOWN':
         return (
           <>
-            <PickerSlot label='ends-at (ReleaseDateField -> epoch)' />
+            <ReleaseDateField
+              name={`${prefix}.countdown.endsAt`}
+              value={watch(`${prefix}.countdown.endsAt` as any)}
+              label='ends at'
+            />
             <UnifiedTranslationFields
               fieldPrefix={translationsPrefix}
               fields={[
@@ -235,7 +340,26 @@ export function BlockEditor({ index, block }: BlockEditorProps) {
       case 'EMAIL_BLOCK_TYPE_VIDEO_THUMB':
         return (
           <>
-            <PickerSlot label='poster media' />
+            <div className='space-y-1'>
+              <Text size='small' variant='label'>
+                poster
+              </Text>
+              <MediaPreviewWithSelector
+                mediaUrl={watch(`${prefix}.videoThumb.posterUrl` as any) || ''}
+                aspectRatio={['16:9']}
+                showVideos={false}
+                label='select poster'
+                purpose='poster'
+                alt='poster'
+                heightClass='h-44'
+                onSaveMedia={(m) =>
+                  saveMedia(`${prefix}.videoThumb.mediaId`, `${prefix}.videoThumb.posterUrl`, m)
+                }
+                onClear={() =>
+                  clearMedia(`${prefix}.videoThumb.mediaId`, `${prefix}.videoThumb.posterUrl`)
+                }
+              />
+            </div>
             <InputField
               name={`${prefix}.videoThumb.videoUrl`}
               label='video url'
