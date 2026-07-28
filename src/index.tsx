@@ -28,6 +28,14 @@ const EmailCampaigns = lazy(() =>
 const CampaignBuilder = lazy(() =>
   import('components/managers/email/components').then((m) => ({ default: m.CampaignBuilder })),
 );
+const EmailSegments = lazy(() =>
+  import('components/managers/email/segments').then((m) => ({ default: m.EmailSegments })),
+);
+const SegmentEditor = lazy(() =>
+  import('components/managers/email/components/segment-builder/segment-editor').then((m) => ({
+    default: m.SegmentEditor,
+  })),
+);
 const MediaManager = lazy(() =>
   import('components/managers/media').then((m) => ({ default: m.MediaManager })),
 );
@@ -264,6 +272,8 @@ root.render(
                   <Route path={ROUTES.promo} element={<Promo />} />
                   <Route path={ROUTES.emailCampaign} element={<CampaignBuilder />} />
                   <Route path={ROUTES.emailCampaigns} element={<EmailCampaigns />} />
+                  <Route path={ROUTES.emailSegment} element={<SegmentEditor />} />
+                  <Route path={ROUTES.emailSegments} element={<EmailSegments />} />
                   <Route path={ROUTES.settings} element={<Settings />} />
                   <Route path={ROUTES.dictionaries} element={<Dictionaries />} />
                   <Route path={ROUTES.shipping} element={<Shipping />} />

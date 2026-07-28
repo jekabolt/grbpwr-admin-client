@@ -17,6 +17,9 @@ export const emailCampaignKeys = {
   details: () => [...emailCampaignKeys.all, 'detail'] as const,
   detail: (id: number) => [...emailCampaignKeys.details(), id] as const,
   segments: ['emailSegments'] as const,
+  // Segment detail nests under `segments`, so invalidating `segments` refreshes the
+  // list (campaign picker + segments page) AND every open segment detail at once.
+  segmentDetail: (id: number) => [...['emailSegments'], 'detail', id] as const,
 };
 
 const PAGE_LIMIT = 24;
@@ -149,5 +152,55 @@ export function useSegments() {
     },
     staleTime: 5 * 60 * 1000,
     retry: 0,
+  });
+}
+
+// Ф2 segment builder — load one segment (with its predicate tree) for the editor
+// route. Uses GetEmailSegment so a deep-link / refresh resolves without the list.
+export function useSegment(id: number) {
+  return useQuery({
+    queryKey: emailCampaignKeys.segmentDetail(id),
+    queryFn: async () => {
+      const res = await adminService.GetEmailSegment({ id });
+      return res?.segment ?? null;
+    },
+    enabled: id > 0,
+    staleTime: 60 * 1000,
+    retry: 1,
+  });
+}
+
+// Create (id=0) or update (id>0) a segment via UpsertEmailSegment. Request shape is
+// { id, segment: common_EmailSegment } — matches the generated client exactly.
+export function useUpsertSegment() {
+  const queryClient = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { id: number; segment: common_EmailSegment }) =>
+      adminService.UpsertEmailSegment(vars),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: emailCampaignKeys.segments });
+      if (vars.id)
+        queryClient.invalidateQueries({ queryKey: emailCampaignKeys.segmentDetail(vars.id) });
+    },
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : 'unknown error';
+      showMessage(`couldn't save segment — ${msg}`, 'error');
+    },
+  });
+}
+
+export function useDeleteSegment() {
+  const queryClient = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (id: number) => adminService.DeleteEmailSegment({ id }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: emailCampaignKeys.segments });
+    },
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : 'unknown error';
+      showMessage(`couldn't delete segment — ${msg}`, 'error');
+    },
   });
 }
