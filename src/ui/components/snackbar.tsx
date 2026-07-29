@@ -42,7 +42,10 @@ function ToastItem({
   return (
     <div
       role='status'
-      className='flex items-center gap-3 rounded-none border border-textColor bg-textColor px-4 py-3 text-bgColor'
+      // Reference bar: ink ground, white text, MICRO — a toast is a footnote about what just
+      // happened, not a headline. It carries whole field paths ("costing.cmtCost — required"), so
+      // at body size a two-clause message wraps to three lines and reads as an error page.
+      className='flex items-center gap-3 rounded-none border border-textColor bg-textColor px-4 py-3 text-micro text-bgColor'
     >
       <span
         className={cn(

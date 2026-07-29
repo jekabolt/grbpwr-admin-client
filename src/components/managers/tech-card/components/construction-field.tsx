@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { Accordion } from 'ui/components/accordion';
 import Text from 'ui/components/text';
 import ComboField from 'ui/form/fields/combo-field';
@@ -16,8 +18,24 @@ import {
 // Collapsed by default (all optional) so this isn't a wall of empty pickers — expand only when
 // the factory needs a default beyond what's set per-operation.
 export function ConstructionField() {
+  const [open, setOpen] = useState(false);
+  // Every field in here is optional, so nothing the CLIENT validates lands on them — but the SERVER
+  // can pin a field violation onto construction.* (applyServerFieldErrors → setError), and the error
+  // router switches to this tab and calls revealField. Behind a closed accordion the field is not in
+  // the DOM at all, so the reveal silently fails and the toast names a field the user cannot see.
+  // Open on error, the way BomTile does (19.8).
+  const {
+    formState: { errors },
+  } = useFormContext();
+  const hasError = !!errors.construction;
+  useEffect(() => {
+    if (hasError) setOpen(true);
+  }, [hasError]);
+
   return (
     <Accordion
+      open={open}
+      onOpenChange={setOpen}
       title={
         <Text size='control' variant='uppercase' tracking='label' component='span'>
           general — finishing &amp; defaults
