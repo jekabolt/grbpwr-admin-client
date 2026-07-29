@@ -114,7 +114,7 @@ export function BodyFields({
               <ReadOnlyField label='fit' value={titleCase(fit)} />
             </div>
             <Composition editMode={false} />
-            <Care editMode={false} />
+            <Care />
           </>
         )}
       </section>

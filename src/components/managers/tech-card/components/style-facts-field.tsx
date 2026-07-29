@@ -6,16 +6,19 @@ import {
 } from 'components/managers/product/components/care/care-picker';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
+import { useEffect, useState } from 'react';
+import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import SelectField from 'ui/form/fields/select-field';
 import { careToProse } from 'utils/care-label';
 import { TechCardFormData } from './schema';
+import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
+
+// One set of style facts per card, so one staging key.
+const STAGING_KEY = 'styleFacts';
 
 const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped', 'tailored'].map(
   (f) => ({ label: f, value: f }),
@@ -125,23 +128,34 @@ function StorefrontPreview() {
 
 // StyleFactsField edits the style catalogue facts fit / care at the tech-card level — they belong to
 // the style (shared by every colourway), so they are authored here and shown read-only on each
-// colourway card. They are stored on tech_card but written via UpdateStyle (not the tech-card write),
-// so this saves through UpdateStyle with a field mask limited to these two — the shared
-// tech_card.lock_version is read fresh right before the write, and no other style fact is touched.
+// colourway card. They are stored on tech_card but written via UpdateStyle (not the tech-card write:
+// mapFormToTechCardInsert echoes the stored values back untouched), with a field mask limited to
+// these two so no other style fact is touched.
 // Composition is NOT edited here: it is derived from the BOM's shell-fabric materials (composition_
 // entries, shown read-only on the BOM tab), never hand-entered.
 export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdit: boolean }) {
-  const { showMessage } = useSnackBarStore();
-  const { getValues } = useFormContext<TechCardFormData>();
+  const { getValues, control, resetField } = useFormContext<TechCardFormData>();
   const [saving, setSaving] = useState(false);
+  const staging = useTechCardStaging();
+  // Both fields live in the card's RHF form, so "dirty" here is exactly RHF's own answer: they moved
+  // off the loaded card's defaults. That is also what makes the header's label a FACT — it names the
+  // fields that actually changed rather than guessing "style facts".
+  const { dirtyFields } = useFormState({ control, name: ['fit', 'careInstructions'] });
+  const changed = [
+    dirtyFields.fit ? 'фасон' : '',
+    dirtyFields.careInstructions ? 'уход' : '',
+  ].filter(Boolean);
 
-  async function save() {
+  // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
+  // one save is what reports the outcome now — it needs the rejection to name this panel in a
+  // partial-failure banner and keep everything after it staged (19.3).
+  async function commitFacts() {
     if (!styleId) return;
     setSaving(true);
     try {
       // The chart read is the cheapest way to read the fresh shared lock (it echoes
-      // tech_card.lock_version); the main tech-card save shares that version, so a mount-time value
-      // could be stale.
+      // tech_card.lock_version). It has to happen HERE, right before the write: the card body
+      // commits first and bumps that version, so anything read at mount is already stale.
       const cur = await adminService.GetStyleSizeChart({ styleId });
       const expectedLockVersion = cur.chart?.lockVersion ?? 0;
       await adminService.UpdateStyle({
@@ -153,21 +167,38 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
         expectedLockVersion,
         updateMask: 'fit,careInstructions',
       });
-      showMessage('Style facts saved', 'success');
-    } catch (e) {
-      const err = e as Error & { status?: number };
-      showMessage(
-        err?.status === 409
-          ? 'This style changed since you loaded it — reload and retry.'
-          : err instanceof Error
-            ? err.message
-            : 'Failed to save style facts',
-        'error',
-      );
     } finally {
       setSaving(false);
     }
   }
+
+  // Hand the mutation to the card's one save. Re-staged whenever the changed set moves, so the
+  // header's label keeps naming the right fields; `commit` reads through getValues, so unlike the
+  // grid panels its payload cannot go stale between staging and committing.
+  useEffect(() => {
+    if (!staging || !styleId || !canEdit) return;
+    if (changed.length === 0) {
+      staging.unstage(STAGING_KEY);
+      return;
+    }
+    staging.stage({
+      key: STAGING_KEY,
+      label: `${changed.join('/')} — ${changed.length} ${changed.length === 1 ? 'field' : 'fields'}`,
+      order: COMMIT_ORDER.styleFacts,
+      commit: commitFacts,
+      // These two values ARE form fields, so the card body's own reset normally clears them first —
+      // but only when the body was dirty. Re-baselining them here keeps the header count honest on
+      // the panel's own terms instead of borrowing another panel's cleanup.
+      settle: () => {
+        const v = getValues();
+        resetField('fit', { defaultValue: v.fit });
+        resetField('careInstructions', { defaultValue: v.careInstructions });
+      },
+    });
+    // commitFacts/settle are redefined every render by design (they read current form state);
+    // depending on them here would restage on every keystroke for no gain.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staging, styleId, canEdit, dirtyFields.fit, dirtyFields.careInstructions]);
 
   if (!styleId) {
     return (
@@ -197,10 +228,13 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
             a STRUCTURED backend care field; today care round-trips as one plain string.
           </Text>
         </CalloutBox>
-        {canEdit && (
-          <Button type='button' variant='secondary' size='sm' disabled={saving} onClick={save}>
-            {saving ? 'saving…' : 'save style facts'}
-          </Button>
+        {canEdit && changed.length > 0 && (
+          <div className='flex flex-wrap items-center gap-2'>
+            <Pill tone='attention'>{saving ? 'saving…' : 'staged for save'}</Pill>
+            <Text size='micro' variant='label' component='span' className='ml-auto'>
+              included in the card’s Save
+            </Text>
+          </div>
         )}
       </div>
 

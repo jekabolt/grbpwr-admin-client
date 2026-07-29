@@ -271,7 +271,7 @@ function TechCardGallery({
 // reaching UNPINNED callouts (a callout survives its image being removed), so it announces how many
 // there are and opens itself when any exist.
 function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, formState } = useFormContext<TechCardFormData>();
   const { fields, remove } = useFieldArray({ control, name: 'callouts' });
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
   const technicalMedia = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
@@ -297,7 +297,11 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
     .map((f, index) => ({ f, index }))
     .filter(({ index }) => inView(index));
   const unpinned = visibleFields.filter(({ index }) => !callouts[index]?.mediaId).length;
-  const isOpen = open ?? unpinned > 0;
+  // An error inside a callout FORCES the disclosure open, overriding the user's own collapse: the
+  // error router switches to this tab and calls revealField, which finds nothing when the row is
+  // not in the DOM — leaving a toast that names a field nobody can see (19.8).
+  const hasCalloutError = !!formState.errors.callouts;
+  const isOpen = hasCalloutError || (open ?? unpinned > 0);
 
   const pinOptions = [
     { value: 0, label: '(unpinned)' },

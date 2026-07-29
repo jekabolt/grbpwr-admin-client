@@ -109,6 +109,8 @@ function RoleRow({
 
 // Responsible-account roles (Q5): edit-mode only — assignments are keyed to a saved tech_card_id and
 // managed via their own RPCs, so they never ride the tech-card save.
+// Phase 19 exception (19.5): this panel saves INSTANTLY on change and deliberately does NOT stage
+// into the card's one save — assigning a person is an act, not a draft edit.
 export function RolesField({ techCardId, canEdit }: { techCardId: number; canEdit: boolean }) {
   const { data, isLoading } = useRoleAssignments(techCardId);
   const assignments = data?.assignments ?? [];

@@ -1,7 +1,6 @@
 import { StyleAssemblyItem, StyleAssemblyLine } from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -21,6 +20,10 @@ import {
   useAuxTechCards,
 } from './labels-pkg-shared';
 import { useStyleAssembly, useUpsertStyleAssembly } from './useAssemblyPacking';
+import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
+
+// One bill per style, so one staging key.
+const STAGING_KEY = 'assembly';
 
 // Radix Select forbids an empty item value, so "all sizes" rides on the sentinel '0' — which is
 // also exactly what the wire means by size_id = 0.
@@ -70,6 +73,22 @@ const newRow = (): Row => ({
   positionNote: '',
   active: true,
 });
+
+// What would make this bill unsavable, in the operator's words — or null when it is fine. Computed
+// from the rows rather than checked inside the save, because the panel no longer owns a button that
+// could report it on click: it is shown next to the staged pill AND thrown from the commit, so the
+// header's partial-failure banner names the same problem.
+function assemblyProblem(rows: Row[]): string | null {
+  for (const r of rows) {
+    if (!r.componentTechCardId) return 'Every line needs a component (or remove it)';
+    const n = parseDecimalNumber(r.qty);
+    if (!r.qty.trim() || !Number.isFinite(n) || n <= 0) return 'Qty must be greater than zero';
+  }
+  const dupKey = (r: Row) => `${r.componentTechCardId}:${r.sizeId || 0}`;
+  if (new Set(rows.map(dupKey)).size !== rows.length)
+    return 'The same component/size combination appears twice — merge the lines';
+  return null;
+}
 
 // One assembly line as a card: the picked component reads as a 28px thumbnail + name + sub-type +
 // "→ output material", then the four things that vary per line (size, qty, print note, position
@@ -242,7 +261,9 @@ function AssemblyRow({
 // Style assembly bill (WS7, §2.8): the auxiliary items (labels/tags) attached on/into the garment
 // — which aux card, on which size (or all), how many, plus print/position notes for the maker.
 // UpsertStyleAssembly is a full replace, so the editor holds the whole bill in local state and
-// submits every line at once on Save — not per-keystroke.
+// submits every line at once — not per-keystroke. Phase 19: that submit is STAGED into the card's
+// one save instead of firing from a button of its own, so editing the bill and pressing the header
+// Save no longer drops it.
 export function AssemblyField({
   styleId,
   sizeIds,
@@ -252,10 +273,10 @@ export function AssemblyField({
   sizeIds: number[];
   canEdit: boolean;
 }) {
-  const { showMessage } = useSnackBarStore();
   const { data, isLoading, isError, refetch } = useStyleAssembly(styleId);
   const upsert = useUpsertStyleAssembly();
   const { dictionary } = useDictionary();
+  const staging = useTechCardStaging();
 
   const sizeById = useMemo(() => {
     const m = new Map<number, string>();
@@ -288,23 +309,14 @@ export function AssemblyField({
     setRows((prev) => prev.filter((_, idx) => idx !== i));
   };
 
-  const save = async () => {
-    for (const r of rows) {
-      if (!r.componentTechCardId) {
-        showMessage('Every line needs a component (or remove it)', 'error');
-        return;
-      }
-      const n = parseDecimalNumber(r.qty);
-      if (!r.qty.trim() || !Number.isFinite(n) || n <= 0) {
-        showMessage('Qty must be greater than zero', 'error');
-        return;
-      }
-    }
-    const dupKey = (r: Row) => `${r.componentTechCardId}:${r.sizeId || 0}`;
-    if (new Set(rows.map(dupKey)).size !== rows.length) {
-      showMessage('The same component/size combination appears twice — merge the lines', 'error');
-      return;
-    }
+  const problem = assemblyProblem(rows);
+
+  // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
+  // one save is what reports the outcome now — it needs the rejection to name this panel in a
+  // partial-failure banner and keep everything after it staged (19.3). A bill that would be rejected
+  // fails the same way, before the request goes out.
+  const commitAssembly = async () => {
+    if (problem) throw new Error(problem);
     const items: StyleAssemblyItem[] = rows.map((r) => ({
       componentTechCardId: r.componentTechCardId,
       sizeId: r.sizeId || 0,
@@ -313,14 +325,38 @@ export function AssemblyField({
       positionNote: r.positionNote,
       active: r.active,
     }));
-    try {
-      await upsert.mutateAsync({ styleId, items });
-      setDirty(false);
-      showMessage('Assembly bill saved', 'success');
-    } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save assembly bill', 'error');
-    }
+    await upsert.mutateAsync({ styleId, items });
   };
+
+  // Hand the mutation to the card's one save. Re-staged on EVERY edit because `commit` closes over
+  // this render's rows — a stale closure would write the bill as it stood one keystroke ago.
+  // Unstaged the moment the bill is pristine again, so the header count never claims work that is
+  // not there. A card with no id yet never stages: its lines have nothing to hang off (the parent
+  // shows the "save this card first" prompt instead).
+  useEffect(() => {
+    if (!staging || !styleId || !canEdit) return;
+    if (!dirty) {
+      staging.unstage(STAGING_KEY);
+      return;
+    }
+    staging.stage({
+      key: STAGING_KEY,
+      // UpsertStyleAssembly full-replaces, so the count of lines going over the wire IS what this
+      // change does — including the honest "cleared" when every line was removed.
+      label:
+        rows.length === 0
+          ? 'assembly bill — cleared'
+          : `assembly bill — ${rows.length} ${rows.length === 1 ? 'line' : 'lines'}`,
+      order: COMMIT_ORDER.assembly,
+      commit: commitAssembly,
+      // Dropping dirty re-arms the load effect, so the committed bill reloads from the server (with
+      // the line ids and resolved output-material names the local rows cannot know).
+      settle: () => setDirty(false),
+    });
+    // commitAssembly is redefined every render by design (it reads current rows); depending on it
+    // here would restage twice per keystroke for no gain, so the state it reads is the dep list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staging, styleId, canEdit, dirty, rows]);
 
   if (!styleId) {
     return (
@@ -336,25 +372,11 @@ export function AssemblyField({
         <Text size='micro' variant='label' component='span'>
           auxiliary items attached on or into the garment — per size, or all sizes
         </Text>
-        {dirty && <Pill tone='attention'>unsaved</Pill>}
         <ToolbarSpacer />
         {canEdit && (
-          <>
-            <Button type='button' variant='secondary' size='sm' onClick={addRow}>
-              + line
-            </Button>
-            {/* Distinct from the main card's header Save — this button persists to
-                UpsertStyleAssembly, a separate RPC the header Save does NOT cover. */}
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              disabled={upsert.isPending || !dirty}
-              onClick={save}
-            >
-              {upsert.isPending ? 'saving…' : 'save assembly bill'}
-            </Button>
-          </>
+          <Button type='button' variant='secondary' size='sm' onClick={addRow}>
+            + line
+          </Button>
         )}
       </Toolbar>
 
@@ -390,6 +412,22 @@ export function AssemblyField({
               onRemove={() => removeRow(i)}
             />
           ))}
+        </div>
+      )}
+
+      {canEdit && dirty && (
+        <div className='flex flex-wrap items-center gap-2'>
+          <Pill tone='attention'>{upsert.isPending ? 'saving…' : 'staged for save'}</Pill>
+          {/* Named here as well as thrown from the commit: the save button that used to report it
+              on click is gone, and finding out at save time only would be a worse trade. */}
+          {problem && (
+            <Text size='micro' variant='error' component='span'>
+              {problem}
+            </Text>
+          )}
+          <Text size='micro' variant='label' component='span' className='ml-auto'>
+            included in the card’s Save
+          </Text>
         </div>
       )}
     </div>
