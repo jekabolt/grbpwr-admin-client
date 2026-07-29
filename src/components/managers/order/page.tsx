@@ -254,7 +254,11 @@ export function OrderDetails() {
               {/* Right — customer / shipping / payment / tracking */}
               <div className='w-full space-y-4 lg:w-[360px]'>
                 <Panel title='customer'>
-                  <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
+                  <Buyer
+                    buyer={orderDetails?.buyer?.buyerInsert}
+                    locale={orderDetails?.order?.locale}
+                    isPrinting={isPrinting}
+                  />
                 </Panel>
 
                 <Panel title='payment' className='print:hidden'>

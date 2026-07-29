@@ -70,6 +70,14 @@ function Field({
 // deliberately NOT part of the product cost_price. 🔒 costing: the list is empty
 // without costing:read (the tab is hidden), and add/delete need costing:write.
 //
+// DELIBERATE — this panel does NOT stage into the card's one save (phase 19, same reasoning as
+// roles-field). It is a ledger, not a draft: the toolbar below the table is a composer, and "add"
+// IS the commit — the row appears, the totals move, the sample's composed cost changes. Staging it
+// would mean pressing "add" wrote nothing and showed nothing until the operator found the header
+// save, which is a worse card than the one phase 19 is fixing. Delete is the same in reverse, and
+// it is destructive and confirmed: nothing about it is a draft edit. Do not "fix" this into the
+// staged model.
+//
 // scopedSampleId turns this into a sample sub-panel (W3.5): the list is filtered to that
 // sample, the add-row is locked to it (kind defaults to `sample`, no picker), and the summary
 // becomes a sample-scoped subtotal instead of the whole card's dev cost.

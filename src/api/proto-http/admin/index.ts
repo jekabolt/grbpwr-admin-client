@@ -3399,11 +3399,15 @@ export type common_EmailBlockType =
   | "EMAIL_BLOCK_TYPE_VIDEO_THUMB";
 export type common_EmailHeaderBlock = {
   logoMediaId: number | undefined;
+  // logo_position controls the brand logo alignment: left | center | right (default center).
+  logoPosition: string | undefined;
 };
 
 export type common_EmailImageLinkBlock = {
   mediaId: number | undefined;
   url: string | undefined;
+  // aspect is the display aspect ratio: 16:9 | 1:1 | 4:5 (default 16:9).
+  aspect: string | undefined;
 };
 
 export type common_EmailRichTextBlock = {

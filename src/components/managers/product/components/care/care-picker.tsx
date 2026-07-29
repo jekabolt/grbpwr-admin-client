@@ -1,63 +1,25 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
-import { careInstruction } from './careInstruction';
+import { careCodes, careSelectionKey, CareSymbolView, SelectedInstructions } from './care-codes';
+import { CareSymbol } from './care-card';
 import { CareInstructions } from './careInstructions';
+import { useCareVocabulary } from './use-care-vocabulary';
 
-type SelectedInstructions = { [category: string]: string };
-type CareMethod = { code: string; img: string };
-
-// code → { name, img } across all categories (Professional Care is nested one level deeper),
-// so we can render the selected codes as their laundry symbols instead of raw text.
-function buildCodeMeta(): Record<string, { name: string; img: string }> {
-  const map: Record<string, { name: string; img: string }> = {};
-  for (const [category, methods] of Object.entries(careInstruction.care_instructions)) {
-    if (category === 'Professional Care') {
-      for (const sub of Object.values(methods as Record<string, Record<string, CareMethod>>)) {
-        for (const [name, m] of Object.entries(sub)) map[m.code] = { name, img: m.img };
-      }
-    } else {
-      for (const [name, m] of Object.entries(methods as Record<string, CareMethod>)) {
-        map[m.code] = { name, img: m.img };
-      }
-    }
-  }
-  return map;
-}
-
-// precomputed code → { name, img } map (also used by the print doc to render care symbols)
-export const CARE_CODE_META = buildCodeMeta();
-
-// parse the comma-joined codes string back into the modal's per-category selection map
-function parseSelected(value: string): SelectedInstructions {
-  const codes = value
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const out: SelectedInstructions = {};
-  for (const [category, methods] of Object.entries(careInstruction.care_instructions)) {
-    if (category === 'Professional Care') {
-      for (const [subCategory, sub] of Object.entries(
-        methods as Record<string, Record<string, CareMethod>>,
-      )) {
-        for (const m of Object.values(sub)) {
-          if (codes.includes(m.code)) out[`${category}-${subCategory}`] = m.code;
-        }
-      }
-    } else {
-      for (const m of Object.values(methods as Record<string, CareMethod>)) {
-        if (codes.includes(m.code)) out[category] = m.code;
-      }
-    }
-  }
-  return out;
-}
-
-// A name-parameterized care-instruction picker (reuses the product care modal). Stores the
-// selected codes as a comma-joined string in the given field and renders them as the actual
-// laundry SYMBOLS — far more convenient to read than the raw "MWN,DNB,…" codes.
+/**
+ * Care instructions as the ISO laundry SYMBOLS they are, not the "MWN,DNB,…" codes underneath.
+ *
+ * The field is a box like every other field since phase 02 — it used to be an underline, which read
+ * as a text input the symbols happened to be sitting in. What is stored is still the comma-joined
+ * code string; only the way it is picked and shown changed.
+ *
+ * A symbol with no chip around it would be indistinguishable from an icon button, so each selected
+ * code renders as a bordered swatch carrying its code beneath — that is the label the factory reads
+ * off the care tag, and the picture is what the operator recognises.
+ */
 export function CarePicker({
   name,
   label = 'care instructions',
@@ -68,93 +30,87 @@ export function CarePicker({
   editMode?: boolean;
 }) {
   const { setValue } = useFormContext();
+  const vocabulary = useCareVocabulary();
   const value = (useWatch({ name }) as string) || '';
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<SelectedInstructions>({});
 
-  const codeMeta = CARE_CODE_META;
-  const codes = value
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const codes = careCodes(value);
 
-  // Legacy free-text care value (pre-ISO-code data) that parseSelected can't match to any known
-  // code: the modal would otherwise open looking empty, and the operator's first pick silently
-  // overwrites this text with no warning. Surface it as a note while it's still the stored value —
-  // it disappears on its own once a real pick is written (the value then parses again).
+  // The selection is DERIVED from the field, never held alongside it. It used to be its own state
+  // synced when the modal opened, which meant any write to the field from elsewhere (a form reset,
+  // a staged value landing) left the modal showing a selection the field no longer had.
+  const selected = useMemo(() => vocabulary.parseSelected(value), [vocabulary, value]);
+
+  // Legacy free-text care value (pre-ISO-code data) that resolves to no known code: the modal would
+  // otherwise open looking empty, and the operator's first pick silently overwrites this text with
+  // no warning. Surface it as a note while it's still the stored value — it disappears on its own
+  // once a real pick is written (the value then parses again).
   const trimmedValue = value.trim();
-  const legacyValue =
-    trimmedValue && Object.keys(parseSelected(value)).length === 0 ? trimmedValue : undefined;
+  const legacyValue = trimmedValue && Object.keys(selected).length === 0 ? trimmedValue : undefined;
 
-  const write = (next: SelectedInstructions) =>
-    setValue(name, Object.values(next).join(','), { shouldDirty: true, shouldValidate: true });
-
-  const onSelect = (category: string, _method: string, code: string, subCategory?: string) => {
-    setSelected((prev) => {
-      const next = { ...prev };
-      const key =
-        category === 'Professional Care' && subCategory ? `${category}-${subCategory}` : category;
-      if (prev[key] === code) delete next[key];
-      else next[key] = code;
-      write(next);
-      return next;
+  /**
+   * Write the selection back in the dictionary's print order — wash → bleach → dry → iron →
+   * professional — which is the order the backend canonicalises to on save. Writing click order
+   * instead meant the value visibly reordered itself the first time the style was reloaded.
+   */
+  const write = (next: SelectedInstructions) => {
+    const known = new Set(vocabulary.slots.map((s) => s.key));
+    const ordered = vocabulary.slots.map((slot) => next[slot.key]).filter(Boolean);
+    // A slot the vocabulary no longer offers (its whole category archived) still holds a real code
+    // on a real style. Carry it rather than dropping it as a side effect of an unrelated pick.
+    const orphaned = Object.entries(next)
+      .filter(([key, code]) => code && !known.has(key))
+      .map(([, code]) => code);
+    setValue(name, [...ordered, ...orphaned].join(','), {
+      shouldDirty: true,
+      shouldValidate: true,
     });
   };
 
-  const openModal = () => {
-    setSelected(parseSelected(value));
-    setOpen(true);
+  const onSelect = (symbol: CareSymbolView) => {
+    const key = careSelectionKey(symbol.category, symbol.subCategory);
+    const next = { ...selected };
+    // Clicking the symbol already in a slot clears it; clicking a different one replaces it.
+    if (next[key] === symbol.code) delete next[key];
+    else next[key] = symbol.code;
+    write(next);
   };
-  const clear = () => {
-    setSelected({});
-    setValue(name, '', { shouldDirty: true, shouldValidate: true });
-  };
+
+  const clear = () => setValue(name, '', { shouldDirty: true, shouldValidate: true });
 
   return (
     <div className='space-y-1'>
       <FormLabel>{label}</FormLabel>
-      <div className='flex min-h-9 items-center gap-2 border-b border-textInactiveColor'>
-        <div className='flex flex-1 flex-wrap items-center gap-1 py-1'>
+      <div className='flex min-h-9 items-start gap-2 border border-borderColor p-1.5'>
+        <div className='flex flex-1 flex-wrap items-start gap-1.5'>
           {codes.length === 0 ? (
-            <Text variant='inactive' size='small'>
+            <Text variant='label' size='micro' className='py-1'>
               — none selected —
             </Text>
           ) : (
-            codes.map((code) => {
-              const m = codeMeta[code];
-              return m?.img ? (
-                <img key={code} src={m.img} title={m.name} alt={m.name} className='size-7' />
-              ) : (
-                <span key={code} className='text-textBaseSize'>
-                  {code}
-                </span>
-              );
-            })
+            codes.map((code) => <CareSymbol key={code} code={code} />)
           )}
         </div>
         {editMode && (
           <div className='flex shrink-0 gap-1'>
             {codes.length > 0 && (
-              <Button
-                type='button'
-                variant='simple'
-                onClick={clear}
-                className='px-2 py-1 text-textBaseSize uppercase'
-              >
+              <Button type='button' variant='simple' size='xs' onClick={clear}>
                 clear
               </Button>
             )}
-            <Button
-              type='button'
-              variant='secondary'
-              onClick={openModal}
-              className='px-2 py-1 text-textBaseSize uppercase'
-            >
+            <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
               select
             </Button>
           </div>
         )}
       </div>
+      {legacyValue && (
+        <CalloutBox tone='warning'>
+          <Text size='micro'>
+            stored as free text: “{legacyValue}” — picking a symbol replaces it
+          </Text>
+        </CalloutBox>
+      )}
       <CareInstructions
         isCareTableOpen={open}
         close={() => setOpen(false)}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { TechCardFormData } from './schema';
+import { PersistedStaging } from './useTechCardStaging';
 
 // Autosave draft (Q9b). Persists the tech-card form to localStorage as the user edits and offers to
 // restore it next time the form opens, so leaving the route (to /materials, /fitting, the product
@@ -10,7 +11,10 @@ import { TechCardFormData } from './schema';
 // lock_version (§2.12 — an autosave tick must not provoke a false optimistic-lock conflict for a
 // second editor). The optimistic lock still guards the real save.
 
-type StoredDraft = { savedAt: number; data: TechCardFormData };
+// `staging` carries the sub-panel edits that are staged but not yet committed (19.6). Optional, so
+// a draft written before phase 19 still parses — and so a panel that cannot rebuild itself from a
+// snapshot simply contributes nothing rather than blocking the restore.
+type StoredDraft = { savedAt: number; data: TechCardFormData; staging?: PersistedStaging };
 
 const PREFIX = 'plm.techcard.draft.';
 const DEBOUNCE_MS = 800;
@@ -19,6 +23,14 @@ export function useTechCardDraft(
   form: UseFormReturn<TechCardFormData>,
   key: string,
   enabled: boolean,
+  // Phase 19: sub-panels stage into the card's save instead of owning one, so their edits are
+  // unsaved work the unload guard must cover too, and the autosave has to carry them. Passed in
+  // rather than read from the staging context so this hook stays usable outside a provider.
+  hasStagedChanges = false,
+  staging?: {
+    serialize: () => PersistedStaging;
+    hydrate: (persisted: PersistedStaging | null) => void;
+  },
 ) {
   const storageKey = PREFIX + key;
   const [pending, setPending] = useState<StoredDraft | null>(null);
@@ -49,7 +61,11 @@ export function useTechCardDraft(
         try {
           localStorage.setItem(
             storageKey,
-            JSON.stringify({ savedAt: Date.now(), data: form.getValues() }),
+            JSON.stringify({
+              savedAt: Date.now(),
+              data: form.getValues(),
+              staging: staging?.serialize() ?? [],
+            }),
           );
         } catch {
           /* quota / serialization — best-effort, ignore */
@@ -60,11 +76,32 @@ export function useTechCardDraft(
       sub.unsubscribe();
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [storageKey, enabled, form]);
+  }, [storageKey, enabled, form, staging]);
+
+  // The form's watch never fires for a sub-panel edit (they live outside RHF), so a card whose ONLY
+  // unsaved work is staged would autosave nothing and the restore banner would lie about its count.
+  useEffect(() => {
+    if (!enabled || !hasStagedChanges) return;
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            savedAt: Date.now(),
+            data: form.getValues(),
+            staging: staging?.serialize() ?? [],
+          }),
+        );
+      } catch {
+        /* quota / serialization — best-effort, ignore */
+      }
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [storageKey, enabled, hasStagedChanges, form, staging]);
 
   // Warn before a hard unload (refresh / tab close) with unsaved edits. In-app route changes are
   // covered by the restore banner instead (the draft survives the navigation).
-  const isDirty = form.formState.isDirty;
+  const isDirty = form.formState.isDirty || hasStagedChanges;
   useEffect(() => {
     if (!enabled || !isDirty) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -86,7 +123,11 @@ export function useTechCardDraft(
   // Restore into the form but keep it dirty (so Save stays enabled) by preserving the loaded
   // defaults — isDirty is then computed as draft ≠ loaded card.
   const restore = () => {
-    if (pending) form.reset(pending.data, { keepDefaultValues: true });
+    if (!pending) return;
+    form.reset(pending.data, { keepDefaultValues: true });
+    // Seed the sub-panel snapshots BEFORE clearing `pending`: each panel claims its own on mount
+    // (takeSnapshot), so a panel already mounted picks it up on its next render.
+    staging?.hydrate(pending.staging ?? null);
     setPending(null);
   };
   const dismiss = () => setPending(null);

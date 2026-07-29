@@ -27,6 +27,10 @@ import {
 import { ulid } from 'utils/ulid';
 import { AuxCardPickerModal, DUST_BAG_SUBTYPE, Field, auxCardLabel } from './labels-pkg-shared';
 import { usePackagingRecipe, useUpsertPackagingRecipe } from './useAssemblyPacking';
+import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
+
+// One style-scoped recipe per card, so one staging key.
+const STAGING_KEY = 'packagingRecipe';
 
 type RecipeRow = {
   key: string; // client-only stable id (ulid) — add/remove never remaps another row's inputs
@@ -67,6 +71,26 @@ const newRow = (): RecipeRow => ({
   active: true,
   sourceLabel: '',
 });
+
+// What would make this recipe unsavable, in the operator's words — or null when it is fine. Computed
+// from the rows rather than checked inside the save, because the panel no longer owns a button that
+// could report it on click: it is shown next to the staged pill AND thrown from the commit, so the
+// header's partial-failure banner names the same problem.
+function recipeProblem(rows: RecipeRow[]): string | null {
+  for (const r of rows) {
+    if (!r.materialId) return 'Every row needs a material (or remove it)';
+    for (const q of [r.qtyPerOrder, r.qtyPerItem]) {
+      if (!q.trim()) continue;
+      const n = parseDecimalNumber(q);
+      if (!Number.isFinite(n) || n < 0) return 'Quantities must be zero or more';
+    }
+    if (!r.qtyPerOrder.trim() && !r.qtyPerItem.trim())
+      return 'Each material needs a per-order or per-item quantity';
+  }
+  if (new Set(rows.map((r) => r.materialId)).size !== rows.length)
+    return 'A material appears twice — merge the rows';
+  return null;
+}
 
 // One packaging-recipe line as a card: the material thumbnail + name up top, the material picker
 // (+ "from an aux card's output" swap) to change it, then the two quantities side by side with
@@ -217,7 +241,9 @@ function PackagingRow({
 // global (first active match wins), so the global lines are shown read-only above the editor: it's
 // what this style falls back to while its own recipe is empty (or every line here is inactive).
 // UpsertPackagingRecipe full-replaces this ONE scope target, so the editor holds this style's rows
-// in local state and submits them all at once on Save — not per-keystroke.
+// in local state and submits them all at once — not per-keystroke. Phase 19: that submit is STAGED
+// into the card's one save instead of firing from a button of its own, so editing the recipe and
+// pressing the header Save no longer drops it.
 export function PackagingRecipeField({
   techCardId,
   canEdit,
@@ -228,6 +254,7 @@ export function PackagingRecipeField({
   const { showMessage } = useSnackBarStore();
   const { data, isLoading, isError, refetch } = usePackagingRecipe();
   const upsert = useUpsertPackagingRecipe();
+  const staging = useTechCardStaging();
 
   // Unfiltered catalog: a packaging-recipe material (esp. an aux card's output) can live under any
   // section, so resolve every row's thumbnail/name from the whole catalog, not just packaging.
@@ -313,31 +340,15 @@ export function PackagingRecipeField({
     setAddPicker(null);
   };
 
-  const save = async () => {
+  const problem = recipeProblem(rows);
+
+  // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
+  // one save is what reports the outcome now — it needs the rejection to name this panel in a
+  // partial-failure banner and keep everything after it staged (19.3). A recipe that would be
+  // rejected fails the same way, before the request goes out.
+  const commitRecipe = async () => {
     if (!techCardId) return;
-    for (const r of rows) {
-      if (!r.materialId) {
-        showMessage('Every row needs a material (or remove it)', 'error');
-        return;
-      }
-      for (const q of [r.qtyPerOrder, r.qtyPerItem]) {
-        if (q.trim()) {
-          const n = parseDecimalNumber(q);
-          if (!Number.isFinite(n) || n < 0) {
-            showMessage('Quantities must be zero or more', 'error');
-            return;
-          }
-        }
-      }
-      if (!r.qtyPerOrder.trim() && !r.qtyPerItem.trim()) {
-        showMessage('Each material needs a per-order or per-item quantity', 'error');
-        return;
-      }
-    }
-    if (new Set(rows.map((r) => r.materialId)).size !== rows.length) {
-      showMessage('A material appears twice — merge the rows', 'error');
-      return;
-    }
+    if (problem) throw new Error(problem);
     const items: PackagingRecipeItem[] = rows.map((r) => ({
       materialId: r.materialId,
       qtyPerOrder: r.qtyPerOrder.trim()
@@ -346,14 +357,38 @@ export function PackagingRecipeField({
       qtyPerItem: r.qtyPerItem.trim() ? { value: normalizeDecimalInput(r.qtyPerItem) } : undefined,
       active: r.active,
     }));
-    try {
-      await upsert.mutateAsync({ scope: 'style', techCardId, productId: undefined, items });
-      setDirty(false);
-      showMessage('Packaging recipe saved', 'success');
-    } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save packaging recipe', 'error');
-    }
+    await upsert.mutateAsync({ scope: 'style', techCardId, productId: undefined, items });
   };
+
+  // Hand the mutation to the card's one save. Re-staged on EVERY edit because `commit` closes over
+  // this render's rows — a stale closure would write the recipe as it stood one keystroke ago.
+  // Unstaged the moment the recipe is pristine again, so the header count never claims work that is
+  // not there. A card with no id yet never stages: the scope target it would full-replace does not
+  // exist until the card is saved.
+  useEffect(() => {
+    if (!staging || !techCardId || !canEdit) return;
+    if (!dirty) {
+      staging.unstage(STAGING_KEY);
+      return;
+    }
+    staging.stage({
+      key: STAGING_KEY,
+      // Full replace of this style's scope target, so the count of materials going over the wire IS
+      // what this change does — and an emptied list hands the style back to the global fallback,
+      // which is worth saying out loud.
+      label:
+        rows.length === 0
+          ? 'packaging recipe — cleared (global fallback applies)'
+          : `packaging recipe — ${rows.length} ${rows.length === 1 ? 'material' : 'materials'}`,
+      order: COMMIT_ORDER.packaging,
+      commit: commitRecipe,
+      // Dropping dirty re-arms the load effect, so the committed recipe reloads from the server.
+      settle: () => setDirty(false),
+    });
+    // commitRecipe is redefined every render by design (it reads current rows); depending on it
+    // here would restage twice per keystroke for no gain, so the state it reads is the dep list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staging, techCardId, canEdit, dirty, rows]);
 
   return (
     <div className='flex flex-col gap-2'>
@@ -401,7 +436,6 @@ export function PackagingRecipeField({
         <Text size='micro' variant='label' component='span'>
           overrides the global fallback above while active
         </Text>
-        {dirty && <Pill tone='attention'>unsaved</Pill>}
         <ToolbarSpacer />
         {canEdit && (
           <>
@@ -420,17 +454,6 @@ export function PackagingRecipeField({
             </Button>
             <Button type='button' variant='secondary' size='sm' onClick={addRow}>
               ＋ material
-            </Button>
-            {/* Distinct from the main card's header Save — this persists to UpsertPackagingRecipe,
-                a separate RPC the header Save does NOT cover. */}
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              disabled={upsert.isPending || !dirty}
-              onClick={save}
-            >
-              {upsert.isPending ? 'saving…' : 'save packaging recipe'}
             </Button>
           </>
         )}
@@ -495,6 +518,22 @@ export function PackagingRecipeField({
               onRemove={() => removeRow(i)}
             />
           ))}
+        </div>
+      )}
+
+      {canEdit && dirty && (
+        <div className='flex flex-wrap items-center gap-2'>
+          <Pill tone='attention'>{upsert.isPending ? 'saving…' : 'staged for save'}</Pill>
+          {/* Named here as well as thrown from the commit: the save button that used to report it
+              on click is gone, and finding out at save time only would be a worse trade. */}
+          {problem && (
+            <Text size='micro' variant='error' component='span'>
+              {problem}
+            </Text>
+          )}
+          <Text size='micro' variant='label' component='span' className='ml-auto'>
+            included in the card’s Save
+          </Text>
         </div>
       )}
     </div>

@@ -40,8 +40,11 @@ export function TestSendModal({ open, onOpenChange, buildDraft, campaignId }: Te
       confirmDisabled={toEmails.length === 0 || testSend.isPending}
       closeOnConfirm={false}
       onConfirm={() =>
+        // SendTestEmailRequest.source is a proto oneof(draft, campaign_id): send ONLY the current
+        // draft (mirrors the preview) — passing campaignId too sets the oneof twice and the backend
+        // rejects it ("oneof source is already set").
         testSend.mutate(
-          { draft: buildDraft(), campaignId, languageId, variantId: 0, toEmails },
+          { draft: buildDraft(), languageId, variantId: 0, toEmails },
           { onSuccess: () => onOpenChange(false) },
         )
       }

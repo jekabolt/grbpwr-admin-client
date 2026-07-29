@@ -61,6 +61,24 @@ export const LANGUAGES = [
   { id: 7, name: 'korean', code: 'kr', isDefault: false },
 ];
 
+// Admin LANGUAGES use cn/kr; the backend/ISO order locale uses zh/ko. This maps
+// either spelling to a short uppercase display label (display-only — the admin
+// never sends these codes back for the email-locale feature).
+const LOCALE_DISPLAY: Record<string, string> = {
+  en: 'EN',
+  fr: 'FR',
+  de: 'DE',
+  it: 'IT',
+  ja: 'JA',
+  zh: 'ZH',
+  ko: 'KO',
+  cn: 'ZH',
+  kr: 'KO',
+};
+
+export const localeLabel = (code?: string): string =>
+  code ? (LOCALE_DISPLAY[code.toLowerCase()] ?? code.toUpperCase()) : '—';
+
 export const heroTypes: { value: common_HeroType; label: string }[] = [
   { value: 'HERO_TYPE_MAIN', label: 'main add' },
   { value: 'HERO_TYPE_SINGLE', label: 'single add' },
