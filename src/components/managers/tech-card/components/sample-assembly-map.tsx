@@ -1,0 +1,264 @@
+import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
+import { useMemo } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
+import { CalloutBox } from 'ui/components/callout-box';
+import { GroupLabel } from 'ui/components/group-label';
+import Media from 'ui/components/media';
+import { Pill } from 'ui/components/pill';
+import { Placeholder } from 'ui/components/placeholder';
+import Text from 'ui/components/text';
+import { mediaAspect } from './sample-cut-views';
+import { TechCardFormData } from './schema';
+
+// ---------------------------------------------------------------------------
+// ASSEMBLY MAP — the sketch and the operation list, joined.
+//
+// Both halves already exist and already reference each other BY NUMBER: an operation carries
+// `callout_number`, a callout carries its position on a sketch image. Nothing ever drew the join,
+// so turning a fitting complaint ("the pin by the sleeve head") into "which operation, on which
+// machine, joining which pieces" was three tab switches and a number held in your head.
+//
+// Order is real, not invented: operations are POSITIONAL — the server stamps
+// operation_number = (position + 1) × 10 on save (schema.ts), so the array order IS the assembly
+// order the factory reads. The list here is therefore in the card's order, unsorted.
+// ---------------------------------------------------------------------------
+
+type FormOperation = {
+  node?: string;
+  description?: string;
+  seamType?: string;
+  machine?: string;
+  thread?: string;
+  needle?: string;
+  stitchesPerCm?: string;
+  topstitchWidth?: string;
+  seamAllowance?: string;
+  timeNorm?: string;
+  attachment?: string;
+  placement?: string;
+  calloutNumber?: number;
+  operationNumber?: number;
+  pieceLineKeys?: string[];
+};
+
+type FormCallout = {
+  number?: number;
+  part?: string;
+  description?: string;
+  mediaId?: number;
+  posX?: string;
+  posY?: string;
+};
+type FormPiece = { name?: string; lineKey?: string };
+
+const decimalNum = (v?: string): number => {
+  const n = Number(v ?? '');
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** The spec line under an operation: only what was actually filled in, joined with · */
+function specLine(o: FormOperation, pieceNames: string[]): string {
+  return [
+    pieceNames.join(' + '),
+    o.seamType?.trim(),
+    o.machine?.trim(),
+    o.stitchesPerCm?.trim() ? `${o.stitchesPerCm.trim()} SPI` : '',
+    o.seamAllowance?.trim() ? `SA ${o.seamAllowance.trim()}` : '',
+    o.topstitchWidth?.trim() ? `topstitch ${o.topstitchWidth.trim()}` : '',
+    o.thread?.trim(),
+    o.needle?.trim(),
+    o.attachment?.trim(),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) {
+  const { control } = useFormContext<TechCardFormData>();
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as FormOperation[];
+  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
+  const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
+
+  const pieceNameByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of pieces) if (p.lineKey && p.name?.trim()) m.set(p.lineKey, p.name.trim());
+    return m;
+  }, [pieces]);
+
+  const { sketch, pins, orphanCallouts, totalTime, uncosted } = useMemo(() => {
+    const calloutByNumber = new Map<number, FormCallout>();
+    for (const c of callouts) if (c.number) calloutByNumber.set(c.number, c);
+
+    // A callout that no operation answers is an unanswered question, not a gap to hide.
+    const answered = new Set(operations.map((o) => o.calloutNumber ?? 0).filter((n) => n > 0));
+    const orphans = callouts.filter((c) => c.number && !answered.has(c.number));
+
+    // Draw whichever sketch carries the most callouts this list points at.
+    const counts = new Map<number, number>();
+    for (const n of answered) {
+      const c = calloutByNumber.get(n);
+      if (c?.mediaId) counts.set(c.mediaId, (counts.get(c.mediaId) ?? 0) + 1);
+    }
+    for (const c of orphans) {
+      if (c.mediaId) counts.set(c.mediaId, (counts.get(c.mediaId) ?? 0) + 1);
+    }
+    let bestId = 0;
+    let best = 0;
+    for (const [id, n] of counts) {
+      if (n > best) {
+        best = n;
+        bestId = id;
+      }
+    }
+    const resolved = (techCard?.resolvedTechnicalMedia ?? [])
+      .map((rm) => rm.media)
+      .filter((m): m is common_MediaFull => !!m?.id);
+    const chosen = bestId ? resolved.find((m) => m.id === bestId) : resolved[0];
+    const chosenId = chosen?.id ?? 0;
+
+    const marks = callouts
+      .filter((c) => !!c.number && c.mediaId === chosenId)
+      .map((c) => ({ c, answered: answered.has(c.number as number) }));
+
+    let time = 0;
+    let missing = 0;
+    for (const o of operations) {
+      const t = Number(o.timeNorm ?? '');
+      if (Number.isFinite(t) && t > 0) time += t;
+      else missing += 1;
+    }
+
+    return {
+      sketch: chosen,
+      pins: marks,
+      orphanCallouts: orphans,
+      totalTime: time,
+      uncosted: missing,
+    };
+  }, [operations, callouts, techCard?.resolvedTechnicalMedia]);
+
+  if (operations.length === 0 && callouts.length === 0) {
+    return (
+      <CalloutBox tone='note'>
+        <Text size='micro'>
+          nothing to map yet — pin callouts on the technical sketch and describe the operations on
+          the construction tab, and they meet here
+        </Text>
+      </CalloutBox>
+    );
+  }
+
+  const url = sketch?.media?.fullSize?.mediaUrl || sketch?.media?.thumbnail?.mediaUrl || '';
+
+  return (
+    <div className='grid grid-cols-1 items-start gap-2.5 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]'>
+      <div>
+        {url ? (
+          <div className='relative border border-borderColor'>
+            <Media src={url} alt='technical sketch' aspectRatio={mediaAspect(sketch)} fit='cover' />
+            {pins.map(({ c, answered }) => {
+              const x = decimalNum(c.posX);
+              const y = decimalNum(c.posY);
+              if (Number.isNaN(x) || Number.isNaN(y)) return null;
+              return (
+                <span
+                  key={c.number}
+                  title={c.description?.trim() || c.part?.trim() || `callout ${c.number}`}
+                  style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
+                  className={`absolute flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-nano leading-none tabular-nums ${
+                    answered
+                      ? 'border-bgColor bg-textColor text-bgColor'
+                      : 'border-error bg-bgColor text-error'
+                  }`}
+                >
+                  {c.number}
+                </span>
+              );
+            })}
+          </div>
+        ) : (
+          <Placeholder aspect='3/4' label='no technical sketch' />
+        )}
+        <Text size='nano' variant='label' className='mt-1 uppercase'>
+          filled pin = an operation answers it · hollow = nothing does
+        </Text>
+      </div>
+
+      <div>
+        <div className='mb-1 flex flex-wrap items-center gap-1.5'>
+          <Pill tone='mut'>
+            {operations.length} operation{operations.length === 1 ? '' : 's'}
+          </Pill>
+          {totalTime > 0 && <Pill tone='mut'>{Number(totalTime.toFixed(2))}′ SAM</Pill>}
+          {uncosted > 0 && <Pill tone='attention'>{uncosted} without a time norm</Pill>}
+          {orphanCallouts.length > 0 && (
+            <Pill tone='attention'>{orphanCallouts.length} callout without an operation</Pill>
+          )}
+        </div>
+
+        <GroupLabel>operations — in the card’s order</GroupLabel>
+        <div className='flex flex-col'>
+          {operations.map((o, i) => {
+            const names = (o.pieceLineKeys ?? [])
+              .map((k) => pieceNameByKey.get(k))
+              .filter((n): n is string => !!n);
+            const spec = specLine(o, names);
+            const t = Number(o.timeNorm ?? '');
+            return (
+              <div
+                key={i}
+                className='grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-2 border-b border-hairline py-1'
+              >
+                <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano leading-none tabular-nums text-bgColor'>
+                  {o.calloutNumber ? o.calloutNumber : i + 1}
+                </span>
+                <span className='min-w-0'>
+                  <Text size='micro' component='span'>
+                    {o.description?.trim() || o.node?.trim() || `operation ${i + 1}`}
+                  </Text>
+                  {spec && (
+                    <Text size='nano' variant='label' className='uppercase'>
+                      {spec}
+                    </Text>
+                  )}
+                  {!o.calloutNumber && (
+                    <Text size='nano' variant='label' className='uppercase'>
+                      not pinned to the sketch
+                    </Text>
+                  )}
+                </span>
+                <Text
+                  size='nano'
+                  variant='label'
+                  component='span'
+                  className='shrink-0 tabular-nums uppercase'
+                >
+                  {Number.isFinite(t) && t > 0 ? `${Number(t)}′` : '—'}
+                </Text>
+              </div>
+            );
+          })}
+        </div>
+
+        {orphanCallouts.length > 0 && (
+          <div className='mt-1.5'>
+            <GroupLabel>callouts nothing answers</GroupLabel>
+            {orphanCallouts.map((c) => (
+              <div
+                key={c.number}
+                className='flex items-baseline gap-2 border-b border-hairline py-1'
+              >
+                <span className='flex size-4 shrink-0 items-center justify-center border border-error text-nano leading-none tabular-nums text-error'>
+                  {c.number}
+                </span>
+                <Text size='micro' variant='error' component='span' className='min-w-0'>
+                  {c.description?.trim() || c.part?.trim() || 'no note'}
+                </Text>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

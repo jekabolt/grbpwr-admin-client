@@ -12,6 +12,7 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -20,27 +21,29 @@ import { GroupLabel } from 'ui/components/group-label';
 import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
-import { Row, RowTotal } from 'ui/components/row';
+import { Row } from 'ui/components/row';
 import { SectionHeader } from 'ui/components/section-header';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { decimalToInput } from 'utils/decimal';
 import { DevExpensesField } from './dev-expenses-field';
+import { SampleAssemblyMap } from './sample-assembly-map';
 import { SampleCreationWizard } from './sample-creation-wizard';
+import { SampleCutPieces, SampleCutTicket, SampleFabricMap } from './sample-cut-views';
 import {
   Field,
   FittingRows,
   fittingsSummary,
   openChangeRequests,
   SampleFittings,
+  SampleMaterialsRollup,
   SampleMovements,
   selectCell,
   useSampleMovementCount,
 } from './sample-panels';
 import {
-  sampleFabricSourceFieldLabel,
   sampleFabricSourceHint,
-  sampleFabricSourceLabel,
   sampleFabricSourceOptions,
   samplePurposeLabel,
   samplePurposeOptions,
@@ -51,6 +54,7 @@ import {
 } from './sample-options';
 import { SamplePicker } from './sample-picker';
 import { SampleSubstitutions, SubstitutionRows } from './sample-substitutions';
+import { TechCardFormData } from './schema';
 import {
   deleteSampleErrorMessage,
   saveSampleErrorMessage,
@@ -97,6 +101,47 @@ function statusTone(v?: string): 'ok' | 'warn' | 'attention' | 'mut' {
   if (v === 'scrapped') return 'warn';
   if (v === 'in_sewing') return 'attention';
   return 'mut';
+}
+
+// The same tone colours the Pill carries, for the control that replaces it when the account can
+// write. The design system's rule is that a thing you can click is a Chip, not a Pill — so status
+// is a real control wearing the pill's colours rather than a Pill with a hidden select behind it.
+const STATUS_TONE_CLASS: Record<string, string> = {
+  ok: 'border-success text-success',
+  warn: 'border-error text-error',
+  attention: 'border-warning text-warning',
+  mut: 'border-borderColor text-labelColor',
+};
+
+/**
+ * The sample's state, stated ONCE. It used to be a Pill in the header and a select in the facts
+ * rail — the same fact in two grammars, with nothing saying which was authoritative.
+ */
+function StatusControl({
+  value,
+  canEdit,
+  onChange,
+}: {
+  value: string;
+  canEdit: boolean;
+  onChange: (v: string) => void;
+}) {
+  const tone = statusTone(value);
+  if (!canEdit) return <Pill tone={tone}>{sampleStatusLabel(value)}</Pill>;
+  return (
+    <select
+      aria-label='sample status'
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`cursor-pointer appearance-none rounded-none border bg-bgColor px-[7px] py-px text-micro uppercase tracking-pill transition-colors focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${STATUS_TONE_CLASS[tone]}`}
+    >
+      {sampleStatusOptions.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 export function SamplesTab({
@@ -417,43 +462,106 @@ function colorwayLabel(c?: { code?: string; name?: string; id?: number }): strin
   return c.name || c.code || `колорвей #${c.id ?? '?'}`;
 }
 
-// One area of the editor's right column (10.3). The rows are ALWAYS visible — you can see there
-// are two substitutions without clicking — and `expand` reveals that area's editing controls
-// (what used to be the whole content of a collapsed <details>).
-function EditorArea({
-  title,
-  open,
-  onToggle,
-  rows,
+// ---------------------------------------------------------------------------
+// The editor's two grammars: an inline-editable fact, and the tab strip that replaced five
+// equally-weighted drawers.
+// ---------------------------------------------------------------------------
+
+// A fact that is READ a hundred times and CHANGED twice. So it renders as text — no box, no chrome
+// — and only becomes a control under the pointer. There is no edit MODE: the control is always the
+// real one, always live, just unstyled until you reach for it. Seven of these in a row read as a
+// list of facts rather than as a form somebody left open.
+const inlineCell =
+  'block min-h-[20px] w-full appearance-none truncate rounded-none border border-transparent bg-transparent px-1 py-px text-textBaseSize transition-colors hover:border-borderColor focus:border-textColor focus:bg-bgColor focus:outline-none disabled:border-transparent disabled:text-labelColor';
+
+function InlineRow({
+  label,
+  editable = true,
+  select,
+  hint,
   children,
 }: {
-  title: string;
-  open: boolean;
-  onToggle: () => void;
-  rows: React.ReactNode;
-  children?: React.ReactNode;
+  label: React.ReactNode;
+  /** Read-only accounts get the same list, minus the affordance to reach for it. */
+  editable?: boolean;
+  /** Draws the ▾ a native select loses to `appearance-none` — without it a dropdown is
+   *  indistinguishable from static text, and nobody discovers it. */
+  select?: boolean;
+  hint?: React.ReactNode;
+  children: React.ReactNode;
 }) {
   return (
-    <div>
-      <GroupLabel
-        action={
-          children ? (
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              aria-expanded={open}
-              onClick={onToggle}
-            >
-              {open ? '− collapse' : '+ expand'}
-            </Button>
-          ) : undefined
-        }
-      >
-        {title}
-      </GroupLabel>
-      <div className='flex flex-col'>{rows}</div>
-      {open && children ? <div className='mt-2 flex flex-col gap-2'>{children}</div> : null}
+    <label className='grid grid-cols-[80px_minmax(0,1fr)] items-center gap-2 border-b border-hairline py-0.5'>
+      <Text size='nano' variant='label' tracking='label' component='span' className='uppercase'>
+        {label}
+      </Text>
+      <span className={`flex min-w-0 items-center gap-1 ${editable ? '' : 'pointer-events-none'}`}>
+        <span className='min-w-0 flex-1'>{children}</span>
+        {select && editable && (
+          <Text size='nano' variant='label' component='span' aria-hidden className='shrink-0'>
+            ▾
+          </Text>
+        )}
+      </span>
+      {hint ? (
+        <Text size='nano' variant='label' className='col-start-2 uppercase'>
+          {hint}
+        </Text>
+      ) : null}
+    </label>
+  );
+}
+
+/**
+ * One area open at all times, with its count on the tab — so the panel never opens empty, and
+ * "is there anything in substitutions" is answered without opening it.
+ *
+ * Deliberately NOT the card's own tab component: this rail sits inside the card's rail, so it is
+ * drawn a step quieter (a 1px underline, not the 2px section rule) to keep the nesting readable.
+ */
+function SampleTabs({
+  tabs,
+  active,
+  onSelect,
+}: {
+  tabs: { id: string; label: string; count?: number; alert?: boolean }[];
+  active: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div
+      role='tablist'
+      aria-label='sample detail'
+      className='mb-2 flex flex-wrap items-center gap-x-1 border-b border-borderColor'
+    >
+      {tabs.map((t) => {
+        const on = t.id === active;
+        return (
+          <button
+            key={t.id}
+            type='button'
+            role='tab'
+            aria-selected={on}
+            onClick={() => onSelect(t.id)}
+            className={`-mb-px cursor-pointer whitespace-nowrap border-b-2 px-2 py-1 text-micro uppercase tracking-label transition-colors ${
+              on
+                ? 'border-textColor font-bold text-textColor'
+                : 'border-transparent text-labelColor hover:text-textColor'
+            }`}
+          >
+            {t.label}
+            {t.count != null && t.count > 0 && (
+              <span
+                className={`ml-1 border px-1 text-nano leading-none tabular-nums ${
+                  t.alert ? 'border-error text-error' : 'border-borderColor'
+                }`}
+              >
+                {t.count}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -501,9 +609,9 @@ function SampleEditor({
   // Any list refetch (a write-off, a colleague's edit) re-delivers `sample` — without the dirty
   // guard that reset silently overwrote in-progress edits with server state.
   const [dirty, setDirty] = useState(false);
-  // Which right-column areas have their editing controls revealed.
-  const [openArea, setOpenArea] = useState<Record<string, boolean>>({});
-  const toggleArea = (k: string) => setOpenArea((p) => ({ ...p, [k]: !p[k] }));
+  // Which right-column area is showing. One is always open, so the panel never opens empty and
+  // never asks for five decisions before it says anything.
+  const [tab, setTab] = useState('fittings');
   // Resolved media for display: seed from the sample's resolved photos, add freshly-picked ones.
   const [mediaById, setMediaById] = useState<Map<number, common_MediaFull>>(new Map());
   useEffect(() => {
@@ -563,9 +671,35 @@ function SampleEditor({
 
   const { bySample } = useSampleFittings(techCardId);
   const fittings = bySample.get(sampleId) ?? [];
+  const openRequests = openChangeRequests(fittings);
   const { data: subsData } = useSampleSubstitutions(sampleId);
   const subsCount = subsData?.substitutions?.length ?? 0;
   const movementCount = useSampleMovementCount(sampleId);
+  // The card's cut pieces, off the live form — the детали кроя tab counts what it will actually
+  // draw, including a piece added on the pieces tab a moment ago and not yet saved.
+  const { control: cardControl } = useFormContext<TechCardFormData>();
+  const cardPieces = (useWatch({ control: cardControl, name: 'pieces' }) ?? []) as Array<{
+    name?: string;
+  }>;
+  const pieceCount = cardPieces.filter((p) => p?.name?.trim()).length;
+
+  const tabs = useMemo(
+    () =>
+      [
+        { id: 'fittings', label: 'fittings', count: fittings.length, alert: openRequests > 0 },
+        { id: 'materials', label: 'materials', count: movementCount },
+        { id: 'subs', label: 'substitutions', count: subsCount },
+        { id: 'cut', label: 'детали кроя', count: pieceCount },
+        { id: 'fabric', label: 'fabric map' },
+        { id: 'assembly', label: 'assembly' },
+        ...(canReadCosting ? [{ id: 'dev', label: 'R&D' }] : []),
+        { id: 'lineage', label: 'lineage' },
+      ] as { id: string; label: string; count?: number; alert?: boolean }[],
+    [fittings.length, openRequests, movementCount, subsCount, pieceCount, canReadCosting],
+  );
+  // A tab that stops existing (R&D on an account without costing:read) must not leave the panel
+  // rendering nothing.
+  const activeTab = tabs.some((t) => t.id === tab) ? tab : 'fittings';
   // Same cached list the board reads — used only to name the lineage's previous sample.
   const { data: siblingsData } = useSamples(techCardId);
   const previousSample = d.previousSampleId
@@ -694,9 +828,27 @@ function SampleEditor({
       onError: (e) => showMessage(deleteSampleErrorMessage(e), 'error'),
     });
 
+  // What stands between this sample and being finished. Read off the same data the sections below
+  // show, so a blocker is always something you can go and look at — never a state the panel alone
+  // knows about. No "approve" button sits beside them: a sample has no approval action, and a
+  // disabled control for a thing that does not exist would be a worse lie than saying nothing.
+  const blockers: string[] = [];
+  if (openRequests > 0)
+    blockers.push(`${openRequests} change request${openRequests === 1 ? '' : 's'} open`);
+  const undecided = fittings.filter((f) => {
+    const v = f.fitting?.verdict;
+    return !v || v === 'FITTING_VERDICT_UNKNOWN';
+  }).length;
+  if (undecided > 0)
+    blockers.push(`${undecided} fitting${undecided === 1 ? '' : 's'} without a verdict`);
+  // Only once it exists as a garment. A `planned` sample has not been fitted because it has not
+  // been sewn — reporting that as outstanding would put a warning on every sample the day it is
+  // created, and a panel that cries wolf on day one is one nobody reads on day ten.
+  if (fittings.length === 0 && d.status === 'done') blockers.push('never fitted');
+
   return (
     <div className='flex flex-col'>
-      <div className='mb-2.5 flex flex-wrap items-center gap-2 border-b-2 border-textColor pb-1'>
+      <div className='mb-1.5 flex flex-wrap items-center gap-2 border-b-2 border-textColor pb-1'>
         {/* Going back to the board no longer risks anything: the edits are staged and counted in
             the header, and the tile they belong to says so. */}
         <Button type='button' variant='secondary' size='sm' onClick={onClose}>
@@ -706,8 +858,33 @@ function SampleEditor({
           #{sample.number ?? '?'} {samplePurposeLabel(d.purpose)} · {liveSizeName} ·{' '}
           {liveColorwayName}
         </Text>
-        <Pill tone={statusTone(d.status)}>{sampleStatusLabel(d.status)}</Pill>
         {staged ? <Pill tone='attention'>staged</Pill> : null}
+      </div>
+
+      {/* State, and what is keeping it there. The status pill used to say one word in the header
+          while a select in the rail said it again — this row is the single place the sample's state
+          is stated, and it carries its reasons. */}
+      <div className='mb-2.5 flex flex-wrap items-center gap-1.5'>
+        <StatusControl value={d.status} canEdit={canEdit} onChange={(v) => set({ status: v })} />
+        {sample.sample?.roundNumber ? (
+          <Pill tone='mut'>{sampleRoundLabel(sample.sample.roundNumber)}</Pill>
+        ) : null}
+        {blockers.length === 0 ? (
+          <Text size='micro' variant='label' component='span'>
+            nothing outstanding
+          </Text>
+        ) : (
+          <>
+            <Text size='micro' variant='label' component='span'>
+              outstanding —
+            </Text>
+            {blockers.map((b) => (
+              <Pill key={b} tone='attention'>
+                {b}
+              </Pill>
+            ))}
+          </>
+        )}
       </div>
 
       {/* 10.3 — photos + facts left, the whole activity trail right, nothing collapsed. */}
@@ -740,24 +917,12 @@ function SampleEditor({
           />
 
           <GroupLabel>facts</GroupLabel>
-          <div className='flex flex-col gap-1.5'>
-            <Field label='status'>
+          {/* No `status` row: the state line above the tabs owns it, and owning it twice is the
+              defect this panel was rebuilt to remove. */}
+          <div className='flex flex-col'>
+            <InlineRow label='purpose' editable={canEdit} select>
               <select
-                className={selectCell}
-                disabled={!canEdit}
-                value={d.status}
-                onChange={(e) => set({ status: e.target.value })}
-              >
-                {sampleStatusOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label='purpose'>
-              <select
-                className={selectCell}
+                className={inlineCell}
                 disabled={!canEdit}
                 value={d.purpose}
                 onChange={(e) => set({ purpose: e.target.value })}
@@ -768,10 +933,10 @@ function SampleEditor({
                   </option>
                 ))}
               </select>
-            </Field>
-            <Field label='size'>
+            </InlineRow>
+            <InlineRow label='size' editable={canEdit} select>
               <select
-                className={selectCell}
+                className={inlineCell}
                 disabled={!canEdit}
                 value={d.sizeId || 0}
                 onChange={(e) => set({ sizeId: Number(e.target.value) || 0 })}
@@ -783,10 +948,10 @@ function SampleEditor({
                   </option>
                 ))}
               </select>
-            </Field>
-            <Field label='colourway'>
+            </InlineRow>
+            <InlineRow label='colourway' editable={canEdit} select>
               <select
-                className={selectCell}
+                className={inlineCell}
                 disabled={!canEdit || colorways.length === 0}
                 value={d.colorwayId || 0}
                 onChange={(e) => set({ colorwayId: Number(e.target.value) || 0 })}
@@ -803,84 +968,10 @@ function SampleEditor({
                   </option>
                 ))}
               </select>
-            </Field>
-            <Field label='started'>
-              <input
-                className={selectCell}
-                type='date'
-                disabled={!canEdit}
-                value={d.startedAt}
-                onChange={(e) => set({ startedAt: e.target.value })}
-              />
-            </Field>
-            <Field label='finished'>
-              <input
-                className={selectCell}
-                type='date'
-                disabled={!canEdit}
-                value={d.finishedAt}
-                onChange={(e) => set({ finishedAt: e.target.value })}
-              />
-            </Field>
-            <Field label='notes'>
-              <input
-                className={selectCell}
-                disabled={!canEdit}
-                value={d.notes}
-                onChange={(e) => set({ notes: e.target.value })}
-              />
-            </Field>
-          </div>
-        </div>
-
-        <div className='flex min-w-0 flex-col'>
-          <EditorArea
-            title='fittings'
-            open={!!openArea.fittings}
-            onToggle={() => toggleArea('fittings')}
-            rows={<FittingRows fittings={fittings} />}
-          >
-            <SampleFittings sampleId={sampleId} techCardId={techCardId} returnTo={returnTo} />
-          </EditorArea>
-
-          <EditorArea
-            title={subsCount > 0 ? `substitutions (${subsCount})` : 'substitutions'}
-            open={!!openArea.subs}
-            onToggle={() => toggleArea('subs')}
-            rows={<SubstitutionRows sampleId={sampleId} techCard={techCard} />}
-          >
-            <SampleSubstitutions sampleId={sampleId} techCard={techCard} canEdit={canEdit} />
-          </EditorArea>
-
-          <EditorArea
-            title='materials & cost'
-            open={!!openArea.materials}
-            onToggle={() => toggleArea('materials')}
-            rows={
-              <>
-                <Row label='fabric' value={sampleFabricSourceLabel(d.fabricSource)} />
-                <Row
-                  label={`issued ${movementCount} line${movementCount === 1 ? '' : 's'}`}
-                  value={
-                    canReadCosting ? (
-                      decimalToInput(cost?.materialsBase) || <EmptyCell />
-                    ) : (
-                      <EmptyCell>hidden</EmptyCell>
-                    )
-                  }
-                />
-                {canReadCosting && cost ? (
-                  <RowTotal
-                    label={cost.hasUncosted ? 'cost (partial — some lines uncosted)' : 'cost'}
-                    value={decimalToInput(cost.totalBase) || '0'}
-                  />
-                ) : null}
-              </>
-            }
-          >
-            <Field label={sampleFabricSourceFieldLabel} hint={sampleFabricSourceHint}>
+            </InlineRow>
+            <InlineRow label='fabric' editable={canEdit} select hint={sampleFabricSourceHint}>
               <select
-                className={`${selectCell} sm:w-1/2`}
+                className={inlineCell}
                 disabled={!canEdit}
                 value={d.fabricSource}
                 onChange={(e) => set({ fabricSource: e.target.value })}
@@ -891,40 +982,133 @@ function SampleEditor({
                   </option>
                 ))}
               </select>
-            </Field>
-            {/* 10.5 — one batch sheet of BOM lines instead of pick-a-material → modal → repeat. */}
-            <SampleMovements
-              sampleId={sampleId}
-              techCard={techCard}
-              colorwayId={d.colorwayId}
-              sizeId={d.sizeId}
-              canEdit={canEdit}
-              canReadCosting={canReadCosting}
-            />
-          </EditorArea>
+            </InlineRow>
+            <InlineRow label='started' editable={canEdit}>
+              <input
+                className={inlineCell}
+                type='date'
+                disabled={!canEdit}
+                value={d.startedAt}
+                onChange={(e) => set({ startedAt: e.target.value })}
+              />
+            </InlineRow>
+            <InlineRow label='finished' editable={canEdit}>
+              <input
+                className={inlineCell}
+                type='date'
+                disabled={!canEdit}
+                value={d.finishedAt}
+                onChange={(e) => set({ finishedAt: e.target.value })}
+              />
+            </InlineRow>
+            <InlineRow label='notes' editable={canEdit}>
+              <input
+                className={inlineCell}
+                disabled={!canEdit}
+                placeholder='—'
+                value={d.notes}
+                onChange={(e) => set({ notes: e.target.value })}
+              />
+            </InlineRow>
+          </div>
 
+          {/* Cost, where the eye already is after the facts. Hidden entirely without costing:read
+              rather than left as three empty boxes where money was. */}
           {canReadCosting ? (
-            <EditorArea
-              title='dev expenses (R&D)'
-              open={!!openArea.dev}
-              onToggle={() => toggleArea('dev')}
-              rows={
-                <Row
-                  label='manual R&D entries'
-                  value={decimalToInput(cost?.manualBase) || <EmptyCell />}
+            <div className='mt-2'>
+              <StatGrid min={92}>
+                <Stat
+                  label='materials'
+                  value={decimalToInput(cost?.materialsBase) || <EmptyCell />}
+                  sub={`${movementCount} line${movementCount === 1 ? '' : 's'} issued`}
                 />
-              }
-            >
-              <DevExpensesField techCardId={techCardId} scopedSampleId={sampleId} />
-            </EditorArea>
+                <Stat
+                  label='R&D'
+                  value={decimalToInput(cost?.manualBase) || <EmptyCell />}
+                  sub='manual entries'
+                />
+                <Stat
+                  label='sample cost'
+                  value={decimalToInput(cost?.totalBase) || <EmptyCell />}
+                  sub={cost?.hasUncosted ? 'partial — some lines uncosted' : 'materials + R&D'}
+                />
+              </StatGrid>
+            </div>
           ) : null}
+        </div>
 
-          <EditorArea
-            title='lineage'
-            open={!!openArea.lineage}
-            onToggle={() => toggleArea('lineage')}
-            rows={
-              <>
+        <div className='flex min-w-0 flex-col'>
+          <SampleTabs tabs={tabs} active={activeTab} onSelect={setTab} />
+
+          {activeTab === 'fittings' && (
+            <div className='flex flex-col gap-2'>
+              <FittingRows fittings={fittings} />
+              <SampleFittings sampleId={sampleId} techCardId={techCardId} returnTo={returnTo} />
+            </div>
+          )}
+
+          {activeTab === 'materials' && (
+            <div className='flex flex-col gap-2'>
+              <GroupLabel>what it ate — by material</GroupLabel>
+              <SampleMaterialsRollup
+                sampleId={sampleId}
+                techCard={techCard}
+                colorwayId={d.colorwayId}
+                sizeId={d.sizeId}
+                canReadCosting={canReadCosting}
+              />
+              <Text size='micro' variant='label'>
+                {sampleFabricSourceHint}
+              </Text>
+              {/* 10.5 — one batch sheet of BOM lines instead of pick-a-material → modal → repeat. */}
+              <SampleMovements
+                sampleId={sampleId}
+                techCard={techCard}
+                colorwayId={d.colorwayId}
+                sizeId={d.sizeId}
+                canEdit={canEdit}
+                canReadCosting={canReadCosting}
+              />
+            </div>
+          )}
+
+          {activeTab === 'subs' && (
+            <div className='flex flex-col gap-2'>
+              <SubstitutionRows sampleId={sampleId} techCard={techCard} />
+              <SampleSubstitutions sampleId={sampleId} techCard={techCard} canEdit={canEdit} />
+            </div>
+          )}
+
+          {/* The three cut views are one topic — which pieces, out of what — so the ticket sits
+              under the cards it prints rather than on a tab of its own. */}
+          {activeTab === 'cut' && (
+            <div className='flex flex-col gap-2.5'>
+              <SampleCutPieces techCard={techCard} colorwayId={d.colorwayId} />
+              <GroupLabel>cut list — for the table</GroupLabel>
+              <SampleCutTicket
+                techCard={techCard}
+                colorwayId={d.colorwayId}
+                sampleNumber={sample.number}
+                sampleLabel={samplePurposeLabel(d.purpose)}
+                sizeName={liveSizeName}
+                colorwayName={liveColorwayName}
+              />
+            </div>
+          )}
+
+          {activeTab === 'fabric' && (
+            <SampleFabricMap techCard={techCard} colorwayId={d.colorwayId} />
+          )}
+
+          {activeTab === 'assembly' && <SampleAssemblyMap techCard={techCard} />}
+
+          {activeTab === 'dev' && canReadCosting && (
+            <DevExpensesField techCardId={techCardId} scopedSampleId={sampleId} />
+          )}
+
+          {activeTab === 'lineage' && (
+            <div className='flex flex-col gap-2'>
+              <div className='flex flex-col'>
                 <Row
                   label='round'
                   value={
@@ -934,24 +1118,6 @@ function SampleEditor({
                       <EmptyCell>not assigned yet</EmptyCell>
                     )
                   }
-                />
-                <Row
-                  label='spec release'
-                  value={
-                    d.specReleaseId ? (
-                      `Rev.${
-                        releases.find((r) => r.id === d.specReleaseId)?.releaseNumber ??
-                        d.specReleaseId
-                      }`
-                    ) : (
-                      <EmptyCell>live spec</EmptyCell>
-                    )
-                  }
-                />
-                <Row label='previous sample' value={previousSample || <EmptyCell />} />
-                <Row
-                  label='pattern (выкройка)'
-                  value={d.patternNote || d.patternUrl ? 'attached' : <EmptyCell />}
                 />
                 {fmtStamp(sample.createdAt) || sample.createdBy ? (
                   <Row
@@ -968,61 +1134,60 @@ function SampleEditor({
                     tone='label'
                   />
                 ) : null}
-              </>
-            }
-          >
-            <Text size='micro' variant='label'>
-              the round number is assigned by the server when the sample is saved
-            </Text>
-            <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-              <Field label='spec release (Rev.N)'>
-                <select
-                  className={selectCell}
-                  disabled={!canEdit}
-                  value={d.specReleaseId || 0}
-                  onChange={(e) => set({ specReleaseId: Number(e.target.value) || 0 })}
-                >
-                  <option value={0}>— none (live spec) —</option>
-                  {/* keep a saved release selectable even if the list hasn't loaded it */}
-                  {d.specReleaseId > 0 && !releases.some((r) => r.id === d.specReleaseId) ? (
-                    <option value={d.specReleaseId}>release #{d.specReleaseId}</option>
-                  ) : null}
-                  {releases.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      Rev.{r.releaseNumber ?? '—'}
-                      {r.version ? ` · ${r.version}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label='previous sample'>
-                <SamplePicker
-                  techCardId={techCardId}
-                  value={d.previousSampleId || 0}
-                  disabled={!canEdit}
-                  onChange={(id) => set({ previousSampleId: id === sampleId ? 0 : id })}
-                />
-              </Field>
-              <Field label='pattern url (выкройка snapshot)'>
-                <input
-                  className={selectCell}
-                  disabled={!canEdit}
-                  placeholder='cdn url'
-                  value={d.patternUrl}
-                  onChange={(e) => set({ patternUrl: e.target.value })}
-                />
-              </Field>
-              <Field label='pattern note'>
-                <input
-                  className={selectCell}
-                  disabled={!canEdit}
-                  placeholder='e.g. выкройка v2, размер S'
-                  value={d.patternNote}
-                  onChange={(e) => set({ patternNote: e.target.value })}
-                />
-              </Field>
+              </div>
+              <Text size='micro' variant='label'>
+                the round number is assigned by the server when the sample is saved
+              </Text>
+              <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                <Field label='spec release (Rev.N)'>
+                  <select
+                    className={selectCell}
+                    disabled={!canEdit}
+                    value={d.specReleaseId || 0}
+                    onChange={(e) => set({ specReleaseId: Number(e.target.value) || 0 })}
+                  >
+                    <option value={0}>— none (live spec) —</option>
+                    {/* keep a saved release selectable even if the list hasn't loaded it */}
+                    {d.specReleaseId > 0 && !releases.some((r) => r.id === d.specReleaseId) ? (
+                      <option value={d.specReleaseId}>release #{d.specReleaseId}</option>
+                    ) : null}
+                    {releases.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        Rev.{r.releaseNumber ?? '—'}
+                        {r.version ? ` · ${r.version}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label='previous sample'>
+                  <SamplePicker
+                    techCardId={techCardId}
+                    value={d.previousSampleId || 0}
+                    disabled={!canEdit}
+                    onChange={(id) => set({ previousSampleId: id === sampleId ? 0 : id })}
+                  />
+                </Field>
+                <Field label='pattern url (выкройка snapshot)'>
+                  <input
+                    className={selectCell}
+                    disabled={!canEdit}
+                    placeholder='cdn url'
+                    value={d.patternUrl}
+                    onChange={(e) => set({ patternUrl: e.target.value })}
+                  />
+                </Field>
+                <Field label='pattern note'>
+                  <input
+                    className={selectCell}
+                    disabled={!canEdit}
+                    placeholder='e.g. выкройка v2, размер S'
+                    value={d.patternNote}
+                    onChange={(e) => set({ patternNote: e.target.value })}
+                  />
+                </Field>
+              </div>
             </div>
-          </EditorArea>
+          )}
         </div>
       </div>
 
