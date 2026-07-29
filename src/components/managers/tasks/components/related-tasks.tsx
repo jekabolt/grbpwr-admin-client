@@ -13,11 +13,10 @@ import { STATUS_LABEL } from '../utils/meta';
  * `tasks · n` badge sits inline on the host entity; opening it lists the linked cards
  * with a deep link each and a way onto the board.
  *
- * tasks-entity-filter gap: ListTasks only filters server-side by tech_card_id and
- * product_id, which are exactly the two identities this embed accepts — so both paths
- * are a clean server-side filter with no client fallback. Other entity types (order,
- * fitting, sample, run, archive) cannot be reverse-queried yet, so this component is
- * deliberately scoped to tech-card / product and does not try to accept them.
+ * ListTasks now filters server-side by every typed task attachment — tech_card_id,
+ * product_id, order_uuid, archive_id, fitting_id, production_run_id, sample_id — so
+ * this embed accepts any one of them and each path is a clean server-side filter with
+ * no client fallback. The entity kind → id field mapping mirrors entity-configs.ts.
  */
 
 const statusTone: Record<TaskStatus, 'ok' | 'attention' | 'mut'> = {
@@ -32,14 +31,48 @@ const statusTone: Record<TaskStatus, 'ok' | 'attention' | 'mut'> = {
 export function RelatedTasks({
   techCardId,
   productId,
+  orderUuid,
+  archiveId,
+  fittingId,
+  productionRunId,
+  sampleId,
   className,
 }: {
   techCardId?: number;
   productId?: number;
+  orderUuid?: string;
+  archiveId?: number;
+  fittingId?: number;
+  productionRunId?: number;
+  sampleId?: number;
   className?: string;
 }) {
-  const filter: ListTasksFilter = techCardId ? { techCardId } : productId ? { productId } : {};
-  const enabled = !!(techCardId || productId);
+  // One embed per host entity — pick the first id present and hand the backend exactly
+  // that reverse-link filter (entity kind → id field, per entity-configs.ts).
+  const filter: ListTasksFilter = techCardId
+    ? { techCardId }
+    : productId
+      ? { productId }
+      : orderUuid
+        ? { orderUuid }
+        : archiveId
+          ? { archiveId }
+          : fittingId
+            ? { fittingId }
+            : productionRunId
+              ? { productionRunId }
+              : sampleId
+                ? { sampleId }
+                : {};
+  const enabled = !!(
+    techCardId ||
+    productId ||
+    orderUuid ||
+    archiveId ||
+    fittingId ||
+    productionRunId ||
+    sampleId
+  );
   const { data, isLoading } = useTasks(filter);
   const tasks = enabled ? (data?.tasks ?? []).filter((t) => !t.archivedAt) : [];
 

@@ -1,18 +1,20 @@
-import { common_Dictionary, common_Order } from 'api/proto-http/admin';
+import {
+  common_Dictionary,
+  common_Order,
+  GetOrdersOverviewResponse,
+  MoneyByCurrency,
+} from 'api/proto-http/admin';
 import { normalizeStatusName } from './order-status';
 import { getOrderStatusName } from './utility';
 
 /**
  * ordHead v2 — the counts strip.
  *
- * backend gap: there is no aggregate RPC for orders. `ListOrdersResponse` is
- * `{ orders: common_Order[] }` and nothing else — no `total`, no per-status counts,
- * no day revenue. Everything below is therefore derived from the pages the client has
- * actually fetched, and the strip must say so (the page renders a `Pill` carrying the
- * loaded-row count next to it). A real strip needs something like
- * `AdminService.GetOrderCounts(status[]) -> { status -> count, today: Money }`, or a
- * `total` on `ListOrdersResponse` at minimum, before any figure here can claim to
- * describe the whole table.
+ * The backend now serves an aggregate: `GetOrdersOverview` returns whole-table per-status
+ * counts + today's orders/revenue, and `ListOrdersResponse` carries a `total`. So the
+ * strip describes the WHOLE table (see overviewToCounts below). `deriveOrderCounts` is
+ * retained only as a graceful fallback for while the overview query is loading/errored —
+ * it derives from the pages actually fetched and cannot claim to be the whole table.
  */
 
 const MONEY = new Intl.NumberFormat('en-US', {
@@ -112,4 +114,57 @@ function buildTodayStat(count: number, total: number, currencies: Set<string>): 
   if (currencies.size > 1) return { value: '—', sub: `mixed currencies · ${orders}` };
   const currency = [...currencies][0];
   return { value: MONEY.format(total), sub: currency ? `${currency} · ${orders}` : orders };
+}
+
+/**
+ * Whole-table counts from the aggregate RPC. Status keys are the order_status enum
+ * NAMES the overview returns (e.g. `ORDER_STATUS_ENUM_CONFIRMED`), matching the queue
+ * filters the strip exposes. Today's cell shows revenue when a single currency is
+ * present; with several it shows the order count only and lists the currencies, since
+ * summing across currencies is meaningless (mirrors buildTodayStat's discipline).
+ */
+export function overviewToCounts(overview: GetOrdersOverviewResponse): OrderCounts {
+  const counts = overview.statusCounts ?? {};
+  const at = (name: string) => counts[name] ?? 0;
+
+  const toFulfil = at('ORDER_STATUS_ENUM_CONFIRMED');
+  const awaitingPayment = at('ORDER_STATUS_ENUM_AWAITING_PAYMENT');
+  const refundInProgress = at('ORDER_STATUS_ENUM_REFUND_IN_PROGRESS');
+
+  return {
+    toFulfil: { value: String(toFulfil), sub: 'paid, unshipped' },
+    awaitingPayment: {
+      value: String(awaitingPayment),
+      sub: awaitingPayment ? 'needs payment' : 'none waiting',
+    },
+    refundInProgress: {
+      value: String(refundInProgress),
+      sub: refundInProgress ? 'needs action' : 'clear',
+    },
+    today: buildOverviewTodayStat(overview.todayOrders ?? 0, overview.todayRevenue ?? []),
+  };
+}
+
+function buildOverviewTodayStat(count: number, revenue: MoneyByCurrency[]): OrderStat {
+  if (!count) return { value: '—', sub: 'no orders yet' };
+  const orders = `${count} order${count === 1 ? '' : 's'}`;
+  const withMoney = revenue.filter((m) => {
+    const n = Number(m.amount?.value ?? '');
+    return m.amount?.value != null && m.amount.value !== '' && Number.isFinite(n);
+  });
+
+  if (withMoney.length === 0) return { value: String(count), sub: orders };
+  if (withMoney.length > 1) {
+    const codes = withMoney
+      .map((m) => m.currency)
+      .filter(Boolean)
+      .join(' · ');
+    return { value: String(count), sub: codes ? `${codes} · ${orders}` : `mixed currencies · ${orders}` };
+  }
+
+  const only = withMoney[0];
+  return {
+    value: MONEY.format(Number(only.amount?.value)),
+    sub: only.currency ? `${only.currency} · ${orders}` : orders,
+  };
 }

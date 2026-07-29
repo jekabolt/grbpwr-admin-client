@@ -14,10 +14,10 @@ import { Pill } from 'ui/components/pill';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
-import { deriveOrderCounts, type OrderStat } from './components/order-stats';
+import { deriveOrderCounts, overviewToCounts, type OrderStat } from './components/order-stats';
 import { OrdersList } from './components/orders-list';
 import { StockChangesReport } from './components/StockChangesReport';
-import { useInfiniteOrders } from './components/useOrdersQuery';
+import { useInfiniteOrders, useOrdersOverview } from './components/useOrdersQuery';
 
 // The three queue statuses the counts strip (ordHead v2) exposes as one-click filters,
 // plus their labels. `today` is a revenue figure, not a filter, so it is not here.
@@ -30,9 +30,9 @@ const QUEUE_FILTERS: { key: keyof ReturnType<typeof deriveOrderCounts>; status: 
 /**
  * A counts-strip cell that is also a filter link. Mirrors `Stat`'s cell grammar so it
  * sits flush in the same `StatGrid`, but it is a button and inverts when its status is
- * the active filter. The three queue cells derive their figures from the loaded pages
- * only (see order-stats.ts) — there is no aggregate RPC — so nothing here claims to be
- * the whole table.
+ * the active filter. The three queue cells carry WHOLE-TABLE figures from the aggregate
+ * `GetOrdersOverview` RPC (see order-stats.ts), falling back to loaded-page derivation
+ * only while the overview query is in flight or errored.
  */
 function StatButton({
   label,
@@ -94,7 +94,19 @@ export function OrdersCatalog() {
     debouncedSearch || undefined,
   );
   const orders = useMemo(() => data?.pages.flatMap((page) => page.orders) ?? [], [data]);
-  const counts = useMemo(() => deriveOrderCounts(orders, dictionary), [orders, dictionary]);
+
+  // Counts strip is whole-table via GetOrdersOverview; deriveOrderCounts (loaded pages)
+  // is only the graceful fallback while that aggregate is loading or errored.
+  const overview = useOrdersOverview();
+  const counts = useMemo(
+    () =>
+      overview.data
+        ? overviewToCounts(overview.data)
+        : deriveOrderCounts(orders, dictionary),
+    [overview.data, orders, dictionary],
+  );
+  // Whole-table row count returned by ListOrders — same on every page.
+  const total = data?.pages?.[0]?.total;
   const busy = isLoading || isFetchingNextPage;
 
   // Infinite scroll (ordPaging v2): a sentinel below the list pulls the next page into
@@ -141,17 +153,16 @@ export function OrdersCatalog() {
 
   return (
     <div className='flex flex-col gap-4 pb-16'>
-      {/* header — identity + the loaded-row count, then the escape hatches */}
+      {/* header — identity + the whole-table order count, then the escape hatches */}
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div className='flex items-baseline gap-2'>
           <Text variant='uppercase' size='large' component='h1' className='font-bold'>
             orders
           </Text>
-          {orders.length > 0 && (
-            <Pill tone='mut'>
-              {orders.length}
-              {hasNextPage ? '+' : ''} loaded
-            </Pill>
+          {total !== undefined ? (
+            <Pill tone='mut'>{total.toLocaleString()} total</Pill>
+          ) : (
+            orders.length > 0 && <Pill tone='mut'>{orders.length} loaded</Pill>
           )}
         </div>
         <div className='flex flex-wrap items-center gap-2'>

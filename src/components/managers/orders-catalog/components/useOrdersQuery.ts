@@ -6,7 +6,22 @@ export const ordersKeys = {
   all: ['order'] as const,
   orders: (orderFactor?: string) => [...ordersKeys.all, 'orders', orderFactor] as const,
   order: (filters: { limit: number; offset: number }) => [...ordersKeys.orders(), filters] as const,
+  overview: () => [...ordersKeys.all, 'overview'] as const,
 };
+
+/**
+ * ordHead v2 — the counts strip now has a real aggregate RPC. GetOrdersOverview returns
+ * whole-table figures (per-status counts + today's orders/revenue) independent of which
+ * pages the list has loaded, so the strip no longer derives from fetched rows. Cached a
+ * couple of minutes since these move slowly relative to a browsing session.
+ */
+export function useOrdersOverview() {
+  return useQuery({
+    queryKey: ordersKeys.overview(),
+    queryFn: () => adminService.GetOrdersOverview({}),
+    staleTime: 2 * 60 * 1000,
+  });
+}
 
 export function useOrders(limit: number = 50, offset: number = 0) {
   return useQuery({
@@ -81,6 +96,9 @@ export function useInfiniteOrders(
       });
       return {
         orders: response.orders || [],
+        // Whole-table row count (ListOrdersResponse.total) — same on every page, read
+        // from page 0 for the header count. Independent of how many pages are loaded.
+        total: response.total,
         nextOffset: response.orders?.length === limit ? pageParam + limit : undefined,
       };
     },
