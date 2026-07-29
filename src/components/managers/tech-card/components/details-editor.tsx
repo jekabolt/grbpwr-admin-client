@@ -4,9 +4,12 @@ import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import Input from 'ui/components/input';
 import Media from 'ui/components/media';
 import { MediaViewer, MediaViewerItem } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
+import Textarea from 'ui/components/text-area';
+import { Toolbar } from 'ui/components/toolbar';
 import { TechCardFormData } from './schema';
 import { detailAspects, detailKeyLabel } from './tech-card-options';
 
@@ -155,50 +158,52 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
   };
 
   return (
-    <div className='space-y-4'>
-      <Text variant='inactive' size='small'>
+    <div className='space-y-2.5'>
+      <Text size='micro' variant='label'>
         Описание конструкции по аспектам: текст + референс-картинки. Показаны только заполненные —
         добавляйте нужные ниже. Пустые аспекты не сохраняются.
       </Text>
 
       {allKeys.length === 0 && (
-        <Text variant='inactive' size='small'>
+        <Text size='micro' variant='label'>
           аспекты ещё не добавлены — выберите тип ниже или впишите свой
         </Text>
       )}
 
       {allKeys.length > 0 && (
-        <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+        <div className='grid grid-cols-1 gap-1.5 lg:grid-cols-2'>
           {allKeys.map((key) => {
             const d = detailByKey(key);
             const ids = d?.mediaIds ?? [];
             return (
-              <div key={key} className='space-y-2 border border-textInactiveColor p-3'>
-                <div className='flex items-center justify-between gap-2'>
-                  <Text variant='uppercase' size='small'>
+              <div key={key} className='space-y-1 border border-borderColor p-2.5'>
+                <div className='flex items-baseline justify-between gap-2'>
+                  <Text component='span' className='font-bold'>
                     {detailKeyLabel(key)}
                   </Text>
                   <button
                     type='button'
                     aria-label='remove aspect'
                     onClick={() => removeAspect(key)}
-                    className='shrink-0 text-textBaseSize uppercase text-textInactiveColor hover:text-textColor'
+                    className='shrink-0 text-micro uppercase tracking-label text-labelColor hover:text-textColor'
                   >
-                    удалить аспект ✕
+                    удалить ✕
                   </button>
                 </div>
-                <textarea
+                <Textarea
+                  name={`detail-${key}`}
                   rows={2}
                   maxLength={2000}
                   value={d?.text ?? ''}
-                  onChange={(e) => upsert(key, { text: e.target.value })}
-                  className='w-full appearance-none rounded-none border-b border-textInactiveColor bg-bgColor text-textBaseSize focus:outline-none'
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    upsert(key, { text: e.target.value })
+                  }
                 />
-                <div className='flex flex-wrap items-center gap-2'>
+                <div className='flex flex-wrap items-center gap-1'>
                   {ids.map((id, imgIndex) => {
                     const url = urlOf(id);
                     return (
-                      <div key={id} className='relative size-12 border border-textInactiveColor'>
+                      <div key={id} className='relative size-10 border border-borderColor'>
                         <button
                           type='button'
                           onClick={() =>
@@ -211,7 +216,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                           {url ? (
                             <Media src={url} alt='ref' aspectRatio='1/1' fit='cover' />
                           ) : (
-                            <span className='flex size-full items-center justify-center text-textBaseSize'>
+                            <span className='flex size-full items-center justify-center text-nano'>
                               #{id}
                             </span>
                           )}
@@ -220,7 +225,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                           type='button'
                           aria-label='remove image'
                           onClick={() => removeImage(key, id)}
-                          className='absolute -right-1 -top-1 flex size-4 items-center justify-center border border-textInactiveColor bg-bgColor text-textBaseSize leading-none'
+                          className='absolute -right-1 -top-1 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none'
                         >
                           ✕
                         </button>
@@ -234,7 +239,11 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                     allowMultiple
                     showVideos={false}
                     saveSelectedMedia={(picked) => addImages(key, picked)}
-                    triggerClassName='px-2 py-1 uppercase'
+                    trigger={
+                      <Button type='button' variant='secondary' size='xs'>
+                        + картинка
+                      </Button>
+                    }
                   />
                 </div>
               </div>
@@ -243,36 +252,33 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
         </div>
       )}
 
-      <div className='flex flex-wrap items-end gap-3'>
+      <Toolbar>
         {remainingStandard.length > 0 && (
-          <label className='flex flex-col gap-1'>
-            <Text size='small'>+ добавить аспект</Text>
-            <select
-              value=''
-              onChange={(e) => addStandard(e.target.value)}
-              className='w-64 appearance-none rounded-none border-b border-textInactiveColor bg-bgColor text-textBaseSize focus:outline-none'
-            >
-              <option value=''>выбрать тип…</option>
-              {remainingStandard.map((a) => (
-                <option key={a.key} value={a.key}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <select
+            aria-label='добавить стандартный аспект'
+            value=''
+            onChange={(e) => addStandard(e.target.value)}
+            className='min-h-[22px] w-40 appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
+          >
+            <option value=''>выбрать тип…</option>
+            {remainingStandard.map((a) => (
+              <option key={a.key} value={a.key}>
+                {a.label}
+              </option>
+            ))}
+          </select>
         )}
-        <div className='flex items-end gap-2'>
-          <input
-            value={newAspect}
-            onChange={(e) => setNewAspect(e.target.value)}
-            placeholder='свой аспект (напр. подкладка)'
-            className='w-64 appearance-none rounded-none border-b border-textInactiveColor bg-bgColor text-textBaseSize focus:outline-none'
-          />
-          <Button type='button' className='uppercase' onClick={addCustom}>
-            + аспект
-          </Button>
-        </div>
-      </div>
+        <Input
+          name='new-aspect'
+          value={newAspect}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAspect(e.target.value)}
+          placeholder='свой аспект (напр. подкладка)'
+          className='w-48'
+        />
+        <Button type='button' variant='main' size='sm' onClick={addCustom}>
+          + аспект
+        </Button>
+      </Toolbar>
 
       {/* click-to-enlarge preview of the aspect's reference images */}
       <MediaViewer

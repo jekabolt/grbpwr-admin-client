@@ -3,6 +3,7 @@ import { adminService } from 'api/api';
 import {
   common_AdminColorwayRef,
   common_ColorwayDevelopmentInsert,
+  common_ColorwayLabDipRound,
   common_TechCard,
   common_TechCardColorwayUsage,
   common_TechCardLabDipStatus,
@@ -12,11 +13,22 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardLabDipStatusOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
+import { cn } from 'lib/utility';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, buttonVariants } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import { Chip, ChipRow } from 'ui/components/chip';
+import { DataTable, EmptyCell } from 'ui/components/data-table';
+import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
+import { Placeholder } from 'ui/components/placeholder';
+import GenericPopover from 'ui/components/popover';
+import { Row, RowTotal } from 'ui/components/row';
+import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
+import { Tile, Tiles } from 'ui/components/tiles';
+import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { PieceRef, PieceSinglePicker } from './piece-picker';
 import {
@@ -26,13 +38,24 @@ import {
   useUpdateColorwayRecipe,
 } from './useColorwayRecipe';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+// Phase-02 field metrics: a full 1px box, 3px/7px padding, 22px min height — identical to <Input>,
+// so a control in this locally-managed editor is indistinguishable from an RHF-bound one elsewhere.
+const cell =
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
 
+// Inside a DataTable variant='grid' cell the BORDER is the cell's, not the input's — an input with
+// its own box inside a bordered cell is the box-in-box the reference exists to kill.
+const gridInput =
+  'block min-h-[22px] w-full appearance-none border-0 bg-transparent text-center text-textBaseSize outline-none focus:bg-bgSecondary disabled:text-labelColor';
+
+const PENDING = 'TECH_CARD_LAB_DIP_STATUS_PENDING';
+const SUBMITTED = 'TECH_CARD_LAB_DIP_STATUS_SUBMITTED';
 const REJECTED = 'TECH_CARD_LAB_DIP_STATUS_REJECTED';
 const APPROVED = 'TECH_CARD_LAB_DIP_STATUS_APPROVED';
 const UNKNOWN_LAB_DIP = 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN';
 
-// Ink → gray fibre shades for the composition bar (grays only, per the brand palette).
+// Ink → gray fibre shades for the composition bar (grays only, per the brand palette). Inline
+// because a bar of N segments needs N distinct fills — this is a chart, not a themed surface.
 const COMP_SHADES = ['#111111', '#666666', '#aaaaaa', '#cccccc', '#dddddd'];
 
 // Measured sections cost by a rate (consumption, per metre/gram) and support per-size grading; the
@@ -74,7 +97,7 @@ type UsageDraft = {
 };
 
 // Lab-dip editing state (M8). Initialised from the colourway ref's labDip* fields and PERSISTED through
-// UpdateColorway's development submessage under LAB_DIP_UPDATE_MASK — see LabDipEditor.
+// UpdateColorway's development submessage under LAB_DIP_UPDATE_MASK — see LabDipTimeline.
 type LabDipDraft = {
   labDipStatus: string;
   labDipRound: string;
@@ -84,12 +107,18 @@ type LabDipDraft = {
   labDipRejectReason: string;
 };
 
+// What the grid tile needs to know about a recipe that is only fully known inside its editor: the
+// LIVE material count (including rows added but not yet saved) and whether anything is unsaved.
+type RecipeStatus = { count: number; dirty: boolean };
+
 // UpdateColorway is a field-masked write. This mask lists ONLY the six lab-dip leaves INSIDE `development`,
 // so a save touches exactly those columns and nothing else on the colourway. Everything else in the
 // development submessage (devCode / name / pantone / pantoneSystem / devHex / swatchMediaId / usages /
 // displayOrder) is left intact by the backend even though it is sent undefined here — that subpath mask is
 // precisely what prevents clobbering. It also means no read-merge is needed (and none is possible: no read
 // path returns those dev identity fields). `usages` stays owned by UpdateColorwayRecipe — never sent here.
+// The paths are camelCase on purpose: that is the form the server matches, so do not "correct" them to the
+// proto's snake_case — a mask it cannot match silently degrades into writing nothing.
 const LAB_DIP_UPDATE_MASK = [
   'development.labDipStatus',
   'development.labDipRound',
@@ -110,22 +139,83 @@ function dateInputToTs(v: string): string {
   if (!v) return ZERO_TS;
   return /^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00.000Z` : v;
 }
+function todayInput(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+// "2026-07-08" -> "08 jul" — the timeline reads as a date line, not an ISO stamp.
+function fmtDay(v: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return v;
+  return `${m[3]} ${MONTHS[Number(m[2]) - 1] ?? m[2]}`;
+}
 
 // Initialise the editor from the colourway ref's mirrored lab-dip fields (techCard.colorways[].labDip*),
 // instead of always starting empty. An UNKNOWN/absent status falls back to PENDING (the editor baseline).
 function fromRefLabDip(cw: common_AdminColorwayRef): LabDipDraft {
   const status = cw.labDipStatus;
   return {
-    labDipStatus:
-      status && status !== 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN'
-        ? status
-        : 'TECH_CARD_LAB_DIP_STATUS_PENDING',
+    labDipStatus: status && status !== UNKNOWN_LAB_DIP ? status : PENDING,
     labDipRound: cw.labDipRound ? String(cw.labDipRound) : '',
     labDipSubmittedAt: tsToDateInput(cw.labDipSubmittedAt),
     labDipDecidedAt: tsToDateInput(cw.labDipDecidedAt),
     labDipDecidedBy: cw.labDipDecidedBy ?? '',
     labDipRejectReason: cw.labDipRejectReason ?? '',
   };
+}
+
+// Has a round actually been submitted? The read path collapses "never submitted" and "round 1 pending"
+// onto the same PENDING baseline (fromRefLabDip), so anything that only a real submission produces —
+// a round number, a date, a decided status — is what distinguishes them.
+function hasLabDipRound(d: LabDipDraft): boolean {
+  return (
+    (parseInt(d.labDipRound, 10) || 0) > 0 ||
+    !!d.labDipSubmittedAt ||
+    !!d.labDipDecidedAt ||
+    d.labDipStatus === SUBMITTED ||
+    d.labDipStatus === APPROVED ||
+    d.labDipStatus === REJECTED
+  );
+}
+
+// One row of the timeline. `unsaved` marks the round the draft is currently editing — the only row
+// that is not straight off the server's journal.
+type TimelineRound = {
+  key: string;
+  round: number;
+  status: string;
+  submittedAt: string; // YYYY-MM-DD (input form), as fmtDay expects
+  decidedAt: string;
+  decidedBy: string;
+  rejectReason: string;
+  comment: string;
+  unsaved?: boolean;
+};
+
+function fromRecordedRound(r: common_ColorwayLabDipRound, i: number): TimelineRound {
+  const status = r.status;
+  return {
+    key: `round-${r.roundNumber ?? i}`,
+    round: r.roundNumber ?? 0,
+    status: status && status !== UNKNOWN_LAB_DIP ? status : PENDING,
+    submittedAt: tsToDateInput(r.submittedAt),
+    decidedAt: tsToDateInput(r.decidedAt),
+    decidedBy: r.decidedBy ?? '',
+    rejectReason: r.rejectReason ?? '',
+    comment: r.comment ?? '',
+  };
+}
+
+// The substance of a round's verdict, next to (never duplicating) its status pill: why it was rejected,
+// who approved it and when, or that it is still out at the dyehouse.
+function roundOutcome(r: TimelineRound): string {
+  if (r.status === REJECTED) return r.rejectReason.trim() || r.comment.trim();
+  if (r.status === APPROVED)
+    return [r.decidedBy, fmtDay(r.decidedAt)].filter(Boolean).join(' · ') || r.comment.trim();
+  return r.comment.trim() || 'awaiting decision';
 }
 
 // Build the field-masked UpdateColorway request that persists ONLY this colourway's lab-dip state. Every
@@ -176,21 +266,38 @@ const labDipStatusLabel = new Map<common_TechCardLabDipStatus, string>(
   techCardLabDipStatusOptions.map((o) => [o.value, o.label]),
 );
 
-// Lab-dip status badge (approved = green, pending = blue/warning, rejected = red). Surfaces the
-// colour-approval state on the roster row and the collapsed lab-dip line (config: LabState B).
-function LabDipBadge({ status }: { status?: string }) {
-  if (!status || status === UNKNOWN_LAB_DIP) return null;
-  const label = labDipStatusLabel.get(status as common_TechCardLabDipStatus) ?? status;
-  const cls =
-    status === APPROVED
-      ? 'border-success text-success'
-      : status === REJECTED
-        ? 'border-error text-error'
-        : 'border-warning text-warning';
+// Lab-dip status marker. Green = approved, red = rejected, blue = mid-flight (pending / submitted),
+// grey = never submitted. Read-only, so a Pill and never a Chip.
+function LabDipPill({ status }: { status?: string }) {
+  const s = status && status !== UNKNOWN_LAB_DIP ? status : '';
+  if (!s) return <Pill tone='mut'>no lab-dip</Pill>;
+  const label = labDipStatusLabel.get(s as common_TechCardLabDipStatus) ?? s;
+  const tone: 'ok' | 'warn' | 'attention' =
+    s === APPROVED ? 'ok' : s === REJECTED ? 'warn' : 'attention';
+  return <Pill tone={tone}>{label}</Pill>;
+}
+
+// The reference's `.sw`: a 12px colour square carrying a 1px ink outline. Unlike the big tile swatch
+// (where the colour is the whole content and an outline would make it read as a box), an inline
+// swatch this small needs the outline or a pale dye vanishes into the page.
+function Swatch({ hex, title }: { hex?: string; title?: string }) {
   return (
-    <span className={`shrink-0 border px-1.5 py-px text-[10px] whitespace-nowrap uppercase ${cls}`}>
-      {label}
-    </span>
+    <span
+      aria-hidden
+      title={title ?? hex ?? undefined}
+      className='inline-block size-3 shrink-0 border border-textColor'
+      style={hex ? { backgroundColor: hex } : undefined}
+    />
+  );
+}
+
+// Field label at phase-02 density: 10px uppercase grey, tight above its control. FormLabel can't be
+// reused here — it reads an RHF FieldContext this locally-managed editor doesn't have.
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Text size='micro' variant='label' component='span' className='block leading-none uppercase'>
+      {children}
+    </Text>
   );
 }
 
@@ -202,7 +309,9 @@ function labDipSaveErrorMessage(e: unknown): string {
 }
 
 // Lab-dip write: UpdateColorway under the subpath mask above. Mirrors useUpdateColorwayRecipe — invalidate
-// the tech-card detail so techCard.colorways[].labDip* (and each ref's lockVersion) refresh after a save.
+// the tech-card detail, which is the read that carries colorways[].labDip* (the latest round), each ref's
+// lockVersion AND colorways[].labDipRounds (the journal the timeline draws). A save appends to or amends
+// that journal server-side, so refetching the detail is what makes the new round appear.
 function useUpdateColorwayLabDip(techCardId: number) {
   const qc = useQueryClient();
   return useMutation({
@@ -323,9 +432,9 @@ function deriveComposition(
 }
 
 // Per-size consumption grading for one measured usage (ported from colorways-field.tsx into the
-// live local-state editor, M8/§296). A toggle switches «один на изделие» (the single consumption)
-// ↔ «по размерам» (one input per declared card size), with a live run-cost preview using the
-// referenced article's price/wastage.
+// live local-state editor, M8/§296). Two chips flip between «один на изделие» (the single
+// consumption) ↔ «по размерам» (a grid of one input per declared card size), with a live run-cost
+// preview using the referenced article's price/wastage.
 function UsagePerSizeLocal({
   draft,
   sizeIds,
@@ -392,38 +501,18 @@ function UsagePerSizeLocal({
   const hasAnyConsumption = sizeIds.some((id) => consumptionBySize.get(id)?.trim());
 
   return (
-    <div className='space-y-2'>
+    <div className='flex flex-col gap-1.5'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
-        <Text variant='uppercase' size='small'>
-          consumption{unit ? ` (${unit})` : ''}
-        </Text>
+        <FieldLabel>consumption{unit ? ` (${unit})` : ''}</FieldLabel>
         {sizeIds.length > 0 && canEdit && (
-          <div className='flex gap-1'>
-            <button
-              type='button'
-              onClick={disablePerSize}
-              className={cn(
-                'border px-2 py-1 text-textBaseSize uppercase transition-colors',
-                !perSize
-                  ? 'border-textColor bg-textColor text-bgColor'
-                  : 'border-textInactiveColor text-textColor',
-              )}
-            >
+          <ChipRow>
+            <Chip selected={!perSize} pressed={!perSize} onClick={disablePerSize}>
               один на изделие
-            </button>
-            <button
-              type='button'
-              onClick={enablePerSize}
-              className={cn(
-                'border px-2 py-1 text-textBaseSize uppercase transition-colors',
-                perSize
-                  ? 'border-textColor bg-textColor text-bgColor'
-                  : 'border-textInactiveColor text-textColor',
-              )}
-            >
+            </Chip>
+            <Chip selected={perSize} pressed={perSize} onClick={enablePerSize}>
               по размерам
-            </button>
-          </div>
+            </Chip>
+          </ChipRow>
         )}
       </div>
 
@@ -433,42 +522,74 @@ function UsagePerSizeLocal({
           inputMode='decimal'
           disabled={!canEdit}
           placeholder='per garment'
+          aria-label={`consumption per garment${unit ? ` (${unit})` : ''}`}
           value={draft.consumption}
           onChange={(e) => onChange({ consumption: sanitizeDecimal(e.target.value) })}
         />
       ) : (
-        <div className='space-y-2'>
-          <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4'>
-            {sizeIds.map((id) => (
-              <div key={id} className='space-y-1'>
-                <Text variant='uppercase' size='small'>
-                  {formatSizeName(sizeNameById.get(id) ?? `#${id}`)}
+        <div className='flex flex-col gap-1.5'>
+          <DataTable variant='grid'>
+            <thead>
+              <tr>
+                <th>size</th>
+                {sizeIds.map((id) => (
+                  <th key={id}>{formatSizeName(sizeNameById.get(id) ?? `#${id}`)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{unit ? `${unit} / garment` : 'per garment'}</td>
+                {sizeIds.map((id) => (
+                  <td key={id}>
+                    <input
+                      className={gridInput}
+                      inputMode='decimal'
+                      disabled={!canEdit}
+                      placeholder='0.00'
+                      aria-label={`consumption ${formatSizeName(sizeNameById.get(id) ?? `#${id}`)}`}
+                      value={consumptionBySize.get(id) ?? ''}
+                      onChange={(e) => setSizeCell(id, e.target.value)}
+                    />
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td>order qty</td>
+                {sizeIds.map((id) => (
+                  <td key={id} className='text-labelColor'>
+                    {orderQtyBySize.get(id) || <EmptyCell />}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </DataTable>
+
+          <RowTotal
+            label='расход на партию ≈'
+            value={preview ? `${preview} ${currency}`.trim() : '—'}
+          />
+          {draft.sizeRunTotal && (
+            <Row
+              tone='label'
+              label={
+                <Text size='micro' variant='label' component='span'>
+                  сохранённое
                 </Text>
-                <input
-                  className={cell}
-                  inputMode='decimal'
-                  disabled={!canEdit}
-                  placeholder='0.00'
-                  value={consumptionBySize.get(id) ?? ''}
-                  onChange={(e) => setSizeCell(id, e.target.value)}
-                />
-              </div>
-            ))}
-          </div>
-          <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1'>
-            <Text variant='uppercase' size='small'>
-              расход на партию ≈ {preview ? `${preview} ${currency}`.trim() : '—'}
-            </Text>
-            {draft.sizeRunTotal && (
-              <Text variant='label' size='small'>
-                сохранённое: {draft.sizeRunTotal} {currency}
-              </Text>
-            )}
-          </div>
+              }
+              value={
+                <Text size='micro' variant='label' component='span'>
+                  {draft.sizeRunTotal} {currency}
+                </Text>
+              }
+            />
+          )}
           {hasAnyConsumption && !hasOrderQty && (
-            <Text size='small' className='block text-warning'>
-              заполните тираж по размерам (patterns → size run), чтобы посчитать расход на партию
-            </Text>
+            <CalloutBox tone='warning'>
+              <Text size='micro' component='span'>
+                заполните тираж по размерам (patterns → size run), чтобы посчитать расход на партию
+              </Text>
+            </CalloutBox>
           )}
         </div>
       )}
@@ -476,13 +597,9 @@ function UsagePerSizeLocal({
   );
 }
 
-// A cut piece the recipe can point a norm at. line_key is the stable client-minted ULID the server
-// resolves to the real piece_id FK, so it survives reordering — unlike the positional piece_index it
-// replaces.
-// (PieceRef and the picker itself live in piece-picker.tsx — shared with the operations tab so a
-// piece is chosen the same way everywhere.)
-
-// One usage row = one material on one part in this colourway.
+// One usage row = one material on one part in this colourway. A bordered card per line (the
+// reference's `.surf.pad`), because the two references it carries — an article and a piece — are
+// pickers, not cells, and a table row cannot hold them at a readable density.
 function UsageRowEditor({
   index,
   draft,
@@ -513,9 +630,9 @@ function UsageRowEditor({
   const unit = article?.unit?.trim() || '';
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor p-2'>
+    <div className='flex flex-col gap-2 border border-borderColor p-2.5'>
       <div className='flex items-center justify-between gap-2'>
-        <Text variant='uppercase' size='small' className='min-w-0 truncate'>
+        <Text size='micro' variant='label' component='span' className='min-w-0 truncate uppercase'>
           {index + 1} · {article?.name?.trim() || 'new material'}
           {draft.placement.trim() ? ` · ${draft.placement.trim()}` : ''}
         </Text>
@@ -523,6 +640,7 @@ function UsageRowEditor({
           <Button
             type='button'
             variant='secondary'
+            size='xs'
             className='shrink-0'
             aria-label='remove material'
             onClick={onRemove}
@@ -531,12 +649,14 @@ function UsageRowEditor({
           </Button>
         )}
       </div>
+
       <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
         <label className='flex flex-col gap-1'>
-          <Text size='small'>BOM article *</Text>
+          <FieldLabel>BOM article *</FieldLabel>
           <select
             className={cn(cell, !draft.bomLineKey && 'border-error')}
             disabled={!canEdit}
+            aria-invalid={!draft.bomLineKey || undefined}
             value={draft.bomLineKey}
             onChange={(e) => onChange({ bomLineKey: e.target.value })}
           >
@@ -552,6 +672,7 @@ function UsageRowEditor({
             ))}
           </select>
         </label>
+
         {/* The part a norm is about is a CUT PIECE, not a label: the contract already carries
             piece_line_key -> a real usage.piece_id FK (RESTRICT), and the client already round-trips
             it — there was simply no control to set it, so operators retyped part names as free text
@@ -560,8 +681,8 @@ function UsageRowEditor({
             Single-select, unlike the operation picker: a consumption norm is about exactly one
             piece. No create affordance either — the recipe saves through UpdateColorwayRecipe and
             cannot author a piece; that belongs to the tech-card save. */}
-        <label className='flex flex-col gap-1'>
-          <Text size='small'>деталь (норма считается на неё)</Text>
+        <div className='flex flex-col gap-1'>
+          <FieldLabel>деталь (норма считается на неё)</FieldLabel>
           {pieces.length > 0 ? (
             <PieceSinglePicker
               pieces={pieces}
@@ -573,29 +694,28 @@ function UsageRowEditor({
                   pieceLineKey: key,
                   // Keep the label in step with the pick, but never clobber a placement the
                   // operator typed for a norm that is not about one specific piece.
-                  placement: piece?.name?.trim()
-                    ? piece.name.trim()
-                    : key
-                      ? draft.placement
-                      : '',
+                  placement: piece?.name?.trim() ? piece.name.trim() : key ? draft.placement : '',
                 })
               }
             />
           ) : (
+            // No cut pieces declared yet — the norm still needs a human-readable part, so the
+            // legacy free-text placement stays as the fallback rather than blocking the row.
             <>
               <input
                 className={cell}
                 disabled={!canEdit}
                 placeholder='outer / lining / collar…'
+                aria-label='placement'
                 value={draft.placement}
                 onChange={(e) => onChange({ placement: e.target.value })}
               />
-              <Text variant='inactive' size='small'>
+              <Text size='micro' variant='label'>
                 Add cut pieces on the PIECES tab to pick a real part here instead of typing one.
               </Text>
             </>
           )}
-        </label>
+        </div>
       </div>
 
       {/* measured articles cost by a rate (per-size gradable); counted ones by a flat quantity (M14) */}
@@ -611,7 +731,7 @@ function UsageRowEditor({
         />
       ) : (
         <label className='flex flex-col gap-1'>
-          <Text size='small'>quantity{unit ? ` (${unit})` : ''}</Text>
+          <FieldLabel>quantity{unit ? ` (${unit})` : ''}</FieldLabel>
           <input
             className={cell}
             inputMode='decimal'
@@ -624,7 +744,7 @@ function UsageRowEditor({
 
       {/* server-computed spend — present only with costing:read (stripped otherwise) */}
       {(draft.lineTotal || draft.sizeRunTotal) && (
-        <Text variant='label' size='small'>
+        <Text size='micro' variant='label'>
           {draft.lineTotal ? `per garment ${draft.lineTotal}` : ''}
           {draft.lineTotal && draft.sizeRunTotal ? ' · ' : ''}
           {draft.sizeRunTotal ? `run ${draft.sizeRunTotal}` : ''}
@@ -634,30 +754,47 @@ function UsageRowEditor({
   );
 }
 
-// Lab-dip approval lifecycle (M8). PERSISTED: the tech-card read model (AdminColorwayRef) now mirrors the
-// colourway's lab-dip fields + its lockVersion, and the write goes through UpdateColorway's `development`
-// submessage under LAB_DIP_UPDATE_MASK — a field mask that names ONLY the six lab-dip leaves. That subpath
-// mask is what keeps the rest of `development` (devCode / name / pantone / devHex / swatch / usages) intact,
-// so no read-merge is needed (and none is possible — no read path returns those dev identity fields). The
-// editor initialises from the ref, re-syncs on refetch while clean, and handles the 409 lock conflict.
-function LabDipEditor({
+// Lab-dip approval lifecycle (M8), rendered as the ROUND TIMELINE the process actually is: R1 rejected →
+// R2 rejected → R3 approved, mapped straight off `AdminColorwayRef.labDipRounds` (oldest first). The six
+// flat labDip* scalars are the LATEST entry of that same journal, so no row is ever reconstructed from
+// them — a colourway with no rounds has genuinely never had a swatch submitted, and the timeline says
+// exactly that rather than inventing an R1 out of a PENDING baseline.
+//
+// PERSISTENCE: its OWN save button and its OWN RPC — UpdateColorway's `development` submessage under
+// LAB_DIP_UPDATE_MASK, a field mask naming ONLY the six lab-dip leaves. That subpath mask keeps the rest
+// of `development` (devCode / name / pantone / devHex / swatch / usages) intact, so no read-merge is
+// needed (and none is possible — no read path returns those dev identity fields). That write now REACHES
+// THE DATABASE: the server used to ignore UpdateColorway's `development` entirely, so every save this
+// panel made was a no-op that still reported success. If you are wondering why the panel suddenly
+// works, that is why — nothing changed on this side. The server keys each write by round_number, so
+// saving round 3 leaves rounds 1-2 standing and the journal grows one entry per round.
+//
+// The action buttons only stage into the draft; nothing reaches the server until `save lab-dip`. Until
+// then the staged round is drawn on the timeline marked UNSAVED, so an approve or a reject is visible
+// where it will land instead of only as a pill on the toolbar.
+function LabDipTimeline({
   colorway,
   techCardId,
   lockVersion,
   canEdit,
+  swatchHex,
+  onDirtyChange,
 }: {
   colorway: common_AdminColorwayRef;
   techCardId: number;
   lockVersion: number;
   canEdit: boolean;
+  swatchHex?: string;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const { showMessage } = useSnackBarStore();
   const qc = useQueryClient();
   const save = useUpdateColorwayLabDip(techCardId);
-  const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
-  // Initialise from the ref's labDip* fields; re-sync after a save's refetch unless there are unsaved edits
-  // (mirrors the usages editor above).
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [reasonDraft, setReasonDraft] = useState('');
+  // Initialise from the ref's labDip* fields; re-sync after a save's refetch unless there are unsaved
+  // edits (mirrors the usages editor).
   const [draft, setDraft] = useState<LabDipDraft>(() => fromRefLabDip(colorway));
   useEffect(() => {
     if (dirty) return;
@@ -672,6 +809,10 @@ function LabDipEditor({
     colorway.labDipRejectReason,
     dirty,
   ]);
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+
   const set = (patch: Partial<LabDipDraft>) => {
     setDirty(true);
     setDraft((d) => ({ ...d, ...patch }));
@@ -693,142 +834,297 @@ function LabDipEditor({
     });
   };
 
-  // Compact one-line summary shown while collapsed (config: LabDeep B): round · decided-by ·
-  // decided-date (or the reject reason when rejected).
-  const labDipSummary = [
-    draft.labDipRound ? `R${draft.labDipRound}` : '',
-    draft.labDipDecidedBy,
-    draft.labDipStatus === REJECTED && draft.labDipRejectReason
-      ? `“${draft.labDipRejectReason}”`
-      : draft.labDipDecidedAt,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const recorded = useMemo<TimelineRound[]>(
+    () => (colorway.labDipRounds ?? []).map(fromRecordedRound),
+    [colorway.labDipRounds],
+  );
+  const round = parseInt(draft.labDipRound, 10) || 0;
+  const started = hasLabDipRound(draft) || recorded.length > 0;
+
+  // The server's journal, with the UNSAVED draft laid over the round it edits (or appended when the
+  // action buttons have staged a round the server has not seen yet). Only while `dirty`: an untouched
+  // draft is just a mirror of the latest recorded round, and drawing it a second time — or minting a
+  // row for a colourway that has no rounds at all — is the fabricated history this panel refuses.
+  const rounds = useMemo<TimelineRound[]>(() => {
+    if (!dirty || !hasLabDipRound(draft)) return recorded;
+    const n = round || 1;
+    const staged: TimelineRound = {
+      key: `staged-${n}`,
+      round: n,
+      status: draft.labDipStatus,
+      submittedAt: draft.labDipSubmittedAt,
+      decidedAt: draft.labDipDecidedAt,
+      decidedBy: draft.labDipDecidedBy,
+      rejectReason: draft.labDipRejectReason,
+      comment: '',
+      unsaved: true,
+    };
+    const at = recorded.findIndex((r) => r.round === n);
+    if (at < 0) return [...recorded, staged];
+    // The draft carries no comment field, so keep the recorded one rather than blanking it on screen.
+    const next = [...recorded];
+    next[at] = { ...staged, comment: recorded[at].comment };
+    return next;
+  }, [recorded, dirty, draft, round]);
+
+  const approve = () =>
+    set({ labDipStatus: APPROVED, labDipDecidedAt: todayInput(), labDipRejectReason: '' });
+  const confirmReject = () => {
+    set({
+      labDipStatus: REJECTED,
+      labDipDecidedAt: todayInput(),
+      labDipRejectReason: reasonDraft.trim(),
+    });
+    setRejectOpen(false);
+  };
+  // Highest round anyone knows about: the journal's last entry, or the draft when it runs ahead of it.
+  // A started-but-unnumbered draft (legacy rows carry a submission with round 0) still counts as R1.
+  const highestRound = recorded.reduce(
+    (m, r) => Math.max(m, r.round),
+    Math.max(round, hasLabDipRound(draft) ? 1 : 0),
+  );
+  // Opens the round after it, with no verdict yet.
+  const newRound = () =>
+    set({
+      labDipRound: String(highestRound + 1),
+      labDipStatus: SUBMITTED,
+      labDipSubmittedAt: todayInput(),
+      labDipDecidedAt: '',
+      labDipDecidedBy: '',
+      labDipRejectReason: '',
+    });
+
+  const smallBtn = buttonVariants({ variant: 'secondary', size: 'sm' });
 
   return (
-    <div className='border-t border-textColor pt-4'>
-      <button
-        type='button'
-        className='flex w-full items-center justify-between gap-2 text-left'
-        onClick={() => setOpen((o) => !o)}
-      >
-        <Text variant='uppercase' size='small' className='shrink-0'>
-          {open ? '▾' : '▸'} dye · lab-dip
+    <div className='flex flex-col gap-1.5'>
+      {rounds.length === 0 ? (
+        <Text size='micro' variant='label'>
+          лаб-дип ещё не отправляли
         </Text>
-        <span className='flex min-w-0 shrink items-center justify-end gap-2'>
-          {dirty ? (
-            <Text variant='label' size='small'>
-              unsaved
-            </Text>
-          ) : draft.labDipStatus === UNKNOWN_LAB_DIP && !labDipSummary ? (
-            <Text variant='label' size='small'>
-              —
-            </Text>
-          ) : (
-            <>
-              <LabDipBadge status={draft.labDipStatus} />
-              {labDipSummary && (
-                <Text variant='label' size='small' className='truncate'>
-                  {labDipSummary}
-                </Text>
-              )}
-            </>
-          )}
-        </span>
-      </button>
-      {open && (
-        <div className='mt-3 flex flex-col gap-3'>
-          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>status</Text>
-              <select
-                className={cell}
-                disabled={!canEdit}
-                value={draft.labDipStatus}
-                onChange={(e) => set({ labDipStatus: e.target.value })}
-              >
-                {techCardLabDipStatusOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>round</Text>
-              <input
-                className={cell}
-                type='number'
-                min='0'
-                disabled={!canEdit}
-                value={draft.labDipRound}
-                onChange={(e) => set({ labDipRound: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>submitted</Text>
-              <input
-                className={cell}
-                type='date'
-                disabled={!canEdit}
-                value={draft.labDipSubmittedAt}
-                onChange={(e) => set({ labDipSubmittedAt: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>decided</Text>
-              <input
-                className={cell}
-                type='date'
-                disabled={!canEdit}
-                value={draft.labDipDecidedAt}
-                onChange={(e) => set({ labDipDecidedAt: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>decided by</Text>
-              <input
-                className={cell}
-                disabled={!canEdit}
-                value={draft.labDipDecidedBy}
-                onChange={(e) => set({ labDipDecidedBy: e.target.value })}
-              />
-            </label>
-          </div>
-          {draft.labDipStatus === REJECTED && (
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>reject reason</Text>
+      ) : (
+        rounds.map((r, i) => {
+          const outcome = roundOutcome(r);
+          const latest = i === rounds.length - 1;
+          return (
+            <Row
+              key={r.key}
+              label={
+                <span className='flex min-w-0 items-center gap-2'>
+                  {/* The hex belongs to the COLOURWAY, not to this round, so it marks the live round
+                      only — repeated down the timeline it would read as a per-round dye. The empty
+                      slot keeps every round's text on one left edge. */}
+                  {latest ? (
+                    <Swatch hex={swatchHex} />
+                  ) : (
+                    <span aria-hidden className='inline-block size-3 shrink-0' />
+                  )}
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='truncate uppercase'
+                  >
+                    R{r.round || i + 1}
+                    {r.submittedAt ? ` · submitted ${fmtDay(r.submittedAt)}` : ''}
+                  </Text>
+                </span>
+              }
+              value={
+                <span className='flex items-center gap-1.5'>
+                  {outcome && (
+                    <Text
+                      size='micro'
+                      variant='label'
+                      component='span'
+                      className='max-w-48 truncate'
+                      title={outcome}
+                    >
+                      {outcome}
+                    </Text>
+                  )}
+                  {r.unsaved && <Pill tone='attention'>unsaved</Pill>}
+                  <LabDipPill status={r.status} />
+                </span>
+              }
+            />
+          );
+        })
+      )}
+
+      {canEdit && (
+        <div className='flex flex-wrap items-center gap-1.5 pt-1'>
+          <Button
+            type='button'
+            variant='secondary'
+            size='sm'
+            disabled={!started || draft.labDipStatus === APPROVED}
+            onClick={approve}
+          >
+            approve
+          </Button>
+
+          <GenericPopover
+            open={rejectOpen}
+            onOpenChange={(o) => {
+              if (o) setReasonDraft(draft.labDipRejectReason);
+              setRejectOpen(o);
+            }}
+            title='reject reason'
+            className='w-64'
+            triggerProps={{ className: smallBtn, disabled: !started }}
+            openElement='reject…'
+          >
+            <div className='flex flex-col gap-1.5'>
               <textarea
+                autoFocus
                 className={cell}
-                rows={2}
+                rows={3}
                 maxLength={1000}
-                disabled={!canEdit}
-                value={draft.labDipRejectReason}
-                onChange={(e) => set({ labDipRejectReason: e.target.value })}
+                placeholder='too warm, pull toward green'
+                aria-label='reject reason'
+                value={reasonDraft}
+                onChange={(e) => setReasonDraft(e.target.value)}
               />
-            </label>
-          )}
-          {canEdit && (
-            <div className='flex items-center justify-end'>
-              <Button
-                type='button'
-                variant='main'
-                size='lg'
-                className='uppercase'
-                disabled={save.isPending || !dirty}
-                loading={save.isPending}
-                onClick={submit}
-              >
-                save lab-dip
-              </Button>
+              <div className='flex justify-end gap-1.5'>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  onClick={() => setRejectOpen(false)}
+                >
+                  cancel
+                </Button>
+                <Button type='button' variant='main' size='sm' onClick={confirmReject}>
+                  reject
+                </Button>
+              </div>
             </div>
-          )}
+          </GenericPopover>
+
+          {/* The scalars the timeline derives but cannot express — a corrected date, who decided, or
+              a status the three actions don't produce. Kept reachable so nothing the old form could
+              set became unreachable. */}
+          <GenericPopover
+            title='round details'
+            className='w-64'
+            triggerProps={{ className: smallBtn, 'aria-label': 'round details' }}
+            openElement='⋯'
+          >
+            <div className='flex flex-col gap-1.5'>
+              <label className='flex flex-col gap-1'>
+                <FieldLabel>status</FieldLabel>
+                <select
+                  className={cell}
+                  value={draft.labDipStatus}
+                  onChange={(e) => set({ labDipStatus: e.target.value })}
+                >
+                  {techCardLabDipStatusOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className='flex flex-col gap-1'>
+                <FieldLabel>round</FieldLabel>
+                <input
+                  className={cell}
+                  type='number'
+                  min='0'
+                  value={draft.labDipRound}
+                  onChange={(e) => set({ labDipRound: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <FieldLabel>submitted</FieldLabel>
+                <input
+                  className={cell}
+                  type='date'
+                  value={draft.labDipSubmittedAt}
+                  onChange={(e) => set({ labDipSubmittedAt: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <FieldLabel>decided</FieldLabel>
+                <input
+                  className={cell}
+                  type='date'
+                  value={draft.labDipDecidedAt}
+                  onChange={(e) => set({ labDipDecidedAt: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <FieldLabel>decided by</FieldLabel>
+                <input
+                  className={cell}
+                  value={draft.labDipDecidedBy}
+                  onChange={(e) => set({ labDipDecidedBy: e.target.value })}
+                />
+              </label>
+            </div>
+          </GenericPopover>
+
+          <div className='ml-auto flex items-center gap-1.5'>
+            {/* Only when the timeline is not already carrying the marker on the round being edited —
+                two `unsaved` pills side by side say nothing the first one did not. */}
+            {dirty && !rounds.some((r) => r.unsaved) && <Pill tone='attention'>unsaved</Pill>}
+            <Button type='button' variant='secondary' size='sm' onClick={newRound}>
+              + new round
+            </Button>
+            {/* Lab-dip keeps its OWN save + RPC, separate from the recipe's. */}
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              disabled={save.isPending || !dirty}
+              loading={save.isPending}
+              onClick={submit}
+            >
+              save lab-dip
+            </Button>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
+// #29 derived composition — approximate, parsed from BOM free-text, weighted by consumption.
+function CompositionBar({ fibers, skipped }: ReturnType<typeof deriveComposition>) {
+  if (fibers.length === 0) return null;
+  return (
+    <div className='flex flex-col gap-1'>
+      <GroupLabel>derived composition (approx · from BOM)</GroupLabel>
+      <div className='flex h-4 w-full overflow-hidden border border-borderColor'>
+        {fibers.map((f, i) => (
+          <div
+            key={`${f.name}-${i}`}
+            className='flex items-center justify-center overflow-hidden px-1 text-nano whitespace-nowrap'
+            style={{
+              width: `${f.percent}%`,
+              backgroundColor: COMP_SHADES[i % COMP_SHADES.length],
+              color: i < 2 ? '#fff' : '#000',
+            }}
+            title={`${f.name} ${f.percent}%`}
+          >
+            {f.percent >= 12 ? `${f.name} ${f.percent}%` : ''}
+          </div>
+        ))}
+      </div>
+      <Text size='micro' variant='label'>
+        {fibers.map((f) => `${f.percent}% ${f.name}`).join(' · ')} · weighted by consumption
+        {skipped > 0
+          ? ` · ${skipped} article${skipped > 1 ? 's' : ''} excluded (no readable composition)`
+          : ''}
+      </Text>
+    </div>
+  );
+}
+
+// One colourway's recipe, rendered BELOW the swatch grid rather than inside an accordion, so the
+// grid stays on screen while you edit and you can hop between colourways. Every editor stays mounted
+// (the caller only hides the inactive ones) — an unsaved draft must survive that hop.
 function ColorwayRecipeEditor({
   colorway,
   bomItems,
@@ -836,9 +1132,11 @@ function ColorwayRecipeEditor({
   sizeIds,
   sizeQuantities,
   sizeNameById,
+  swatchHex,
   lockVersion,
   techCardId,
   canEdit,
+  onStatus,
 }: {
   colorway: common_AdminColorwayRef;
   bomItems: BomLine[];
@@ -846,20 +1144,16 @@ function ColorwayRecipeEditor({
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
+  swatchHex?: string;
   lockVersion: number;
   techCardId: number;
   canEdit: boolean;
+  onStatus: (colorwayId: number, status: RecipeStatus) => void;
 }) {
   const { showMessage } = useSnackBarStore();
   const save = useUpdateColorwayRecipe(techCardId);
-  const { dictionary } = useDictionary();
-  // Resolve the colourway's own dictionary colour once, for the swatch tile in the accordion header.
-  const colorwayColor = useMemo(
-    () => (dictionary?.colors ?? []).find((c) => c.code === colorway.colorCode),
-    [dictionary?.colors, colorway.colorCode],
-  );
-  const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [labDipDirty, setLabDipDirty] = useState(false);
   // CRITICAL (full-replace): initialise from the LIVE read (colorway.usages), never from empty. Re-sync
   // when the read changes (after a save's refetch) unless the user has unsaved edits.
   const [usages, setUsages] = useState<UsageDraft[]>(() =>
@@ -870,6 +1164,12 @@ function ColorwayRecipeEditor({
     setUsages((colorway.usages ?? []).map((u) => fromRead(u, bomItems)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [colorway.usages, dirty]);
+
+  // Feed the grid tile: the live material count and whether anything here is unsaved.
+  const colorwayId = colorway.colorwayId ?? 0;
+  useEffect(() => {
+    onStatus(colorwayId, { count: usages.length, dirty: dirty || labDipDirty });
+  }, [colorwayId, usages.length, dirty, labDipDirty, onStatus]);
 
   const setRow = (i: number, patch: Partial<UsageDraft>) => {
     setDirty(true);
@@ -928,168 +1228,164 @@ function ColorwayRecipeEditor({
     );
   };
 
-  const title = `${colorway.colorCode?.trim() || colorway.baseSku?.trim() || `#${colorway.colorwayId}`}`;
-  const swatchHex = colorwayColor?.hex;
+  const title = colorway.colorCode?.trim() || colorway.baseSku?.trim() || `#${colorway.colorwayId}`;
   const derived = useMemo(() => deriveComposition(usages, bomItems), [usages, bomItems]);
 
   return (
-    <div className='border border-textInactiveColor'>
-      <button
-        type='button'
-        className='flex w-full items-center justify-between gap-2 p-3 text-left'
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className='flex min-w-0 items-center gap-2'>
-          {/* P2: swatch tile in the collapsed row, not only once expanded */}
-          <span
-            className='size-3.5 shrink-0 border border-textInactiveColor'
-            style={swatchHex ? { backgroundColor: swatchHex } : undefined}
-            title={swatchHex || undefined}
-            aria-hidden
-          />
-          <Text variant='uppercase' size='small' className='truncate'>
-            {open ? '▾' : '▸'} {title}
-            {colorway.baseSku ? ` · ${colorway.baseSku}` : ''}
-          </Text>
-        </span>
-        <span className='flex shrink-0 items-center gap-2'>
-          <LabDipBadge status={colorway.labDipStatus} />
-          <Text variant='label' size='small'>
-            {usages.length} material{usages.length === 1 ? '' : 's'}
-            {dirty ? ' · unsaved' : ''}
-          </Text>
-        </span>
-      </button>
+    <div className='flex flex-col gap-2'>
+      <SectionHeader
+        title={`${title} · рецепт`}
+        question={[colorway.baseSku, `${usages.length} material${usages.length === 1 ? '' : 's'}`]
+          .filter(Boolean)
+          .join(' · ')}
+        action={dirty ? <Pill tone='attention'>unsaved</Pill> : undefined}
+      />
 
-      {open && (
-        <div className='flex flex-col gap-3 border-t border-textInactiveColor p-3'>
-          {usages.length === 0 ? (
-            <Text variant='label' size='small'>
-              no materials in this colourway’s recipe yet
-            </Text>
-          ) : (
-            usages.map((u, i) => (
-              <UsageRowEditor
-                key={i}
-                index={i}
-                draft={u}
-                bomItems={bomItems}
-                pieces={pieces}
-                sizeIds={sizeIds}
-                sizeQuantities={sizeQuantities}
-                sizeNameById={sizeNameById}
-                canEdit={canEdit}
-                onChange={(patch) => setRow(i, patch)}
-                onRemove={() => removeRow(i)}
-              />
-            ))
-          )}
+      {usages.length === 0 ? (
+        <Text size='micro' variant='label'>
+          no materials in this colourway’s recipe yet
+        </Text>
+      ) : (
+        <div className='flex flex-col gap-1.5'>
+          {usages.map((u, i) => (
+            <UsageRowEditor
+              key={i}
+              index={i}
+              draft={u}
+              bomItems={bomItems}
+              pieces={pieces}
+              sizeIds={sizeIds}
+              sizeQuantities={sizeQuantities}
+              sizeNameById={sizeNameById}
+              canEdit={canEdit}
+              onChange={(patch) => setRow(i, patch)}
+              onRemove={() => removeRow(i)}
+            />
+          ))}
+        </div>
+      )}
 
-          {/* #29 derived composition — approximate, parsed from BOM free-text, weighted by
-              consumption. Shown as a fibre bar (config: Recipe A + composition bar from BOM). */}
-          {derived.fibers.length > 0 && (
-            <div className='border border-textInactiveColor p-2'>
-              <Text variant='uppercase' size='small'>
-                derived composition (approx · from BOM)
-              </Text>
-              <div className='mt-1.5 flex h-4 w-full overflow-hidden border border-textInactiveColor'>
-                {derived.fibers.map((f, i) => (
-                  <div
-                    key={`${f.name}-${i}`}
-                    className='flex items-center justify-center overflow-hidden px-1 text-[10px] whitespace-nowrap'
-                    style={{
-                      width: `${f.percent}%`,
-                      backgroundColor: COMP_SHADES[i % COMP_SHADES.length],
-                      color: i < 2 ? '#fff' : '#000',
-                    }}
-                    title={`${f.name} ${f.percent}%`}
-                  >
-                    {f.percent >= 12 ? `${f.name} ${f.percent}%` : ''}
-                  </div>
-                ))}
-              </div>
-              <Text variant='label' size='small' className='mt-1 block'>
-                {derived.fibers.map((f) => `${f.percent}% ${f.name}`).join(' · ')} · weighted by
-                consumption
-                {derived.skipped > 0
-                  ? ` · ${derived.skipped} article${derived.skipped > 1 ? 's' : ''} excluded (no readable composition)`
-                  : ''}
-              </Text>
-            </div>
-          )}
+      <CompositionBar {...derived} />
 
-          {canEdit && (
-            <div className='flex items-center justify-between'>
-              <Button
-                type='button'
-                variant='secondary'
-                className='uppercase'
-                disabled={bomItems.length === 0}
-                onClick={addRow}
-              >
-                + material
-              </Button>
-              <Button
-                type='button'
-                variant='main'
-                size='lg'
-                className='uppercase'
-                disabled={save.isPending || !dirty}
-                loading={save.isPending}
-                onClick={submit}
-              >
-                save recipe
-              </Button>
-            </div>
-          )}
-          {canEdit && bomItems.length === 0 && (
-            <Text variant='label' size='small'>
+      {canEdit && (
+        <Toolbar>
+          <Button
+            type='button'
+            variant='secondary'
+            size='sm'
+            disabled={bomItems.length === 0}
+            onClick={addRow}
+          >
+            + material
+          </Button>
+          {bomItems.length === 0 && (
+            <Text size='micro' variant='label' component='span'>
               add BOM articles first — then pick them here for each part of the garment
             </Text>
           )}
-
-          {/* Dye approval is a SEPARATE concern from the material recipe — kept below a hard divider,
-              persisted on its own via UpdateColorway under LAB_DIP_UPDATE_MASK (not this recipe save). */}
-          <LabDipEditor
-            colorway={colorway}
-            techCardId={techCardId}
-            lockVersion={lockVersion}
-            canEdit={canEdit}
-          />
-        </div>
+          <ToolbarSpacer />
+          {/* The recipe keeps its OWN save + RPC (UpdateColorwayRecipe), separate from lab-dip's. */}
+          <Button
+            type='button'
+            variant='main'
+            size='sm'
+            disabled={save.isPending || !dirty}
+            loading={save.isPending}
+            onClick={submit}
+          >
+            save recipe
+          </Button>
+        </Toolbar>
       )}
+
+      {/* Dye approval is a SEPARATE concern from the material recipe — its own group, its own save. */}
+      <GroupLabel>dye · lab-dip</GroupLabel>
+      <LabDipTimeline
+        colorway={colorway}
+        techCardId={techCardId}
+        lockVersion={lockVersion}
+        canEdit={canEdit}
+        swatchHex={swatchHex}
+        onDirtyChange={setLabDipDirty}
+      />
     </div>
   );
 }
 
-// #35: inline "create colourway" — until now the recipe editor could only edit EXISTING colourways
-// (techCard.colorways); making a new one meant leaving for the product manager and coming back
-// (ping-pong). This spins up a minimal DRAFT (colour only, via CreateColorway) without leaving the
-// tech card; onCreated (the caller's query invalidation) refreshes techCard.colorways so the new
-// colourway's recipe editor appears in the list immediately.
-function CreateColorwayInline({
+// One colourway in the swatch grid. The swatch IS the content: full-bleed colour, no outline — an
+// outline around a colour reads as a box rather than as the colour itself.
+function ColorwayTile({
+  colorway,
+  hex,
+  bomCount,
+  status,
+  selected,
+  onSelect,
+}: {
+  colorway: common_AdminColorwayRef;
+  hex?: string;
+  bomCount: number;
+  status?: RecipeStatus;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const code = colorway.colorCode?.trim() || colorway.baseSku?.trim() || `#${colorway.colorwayId}`;
+  const count = status?.count ?? colorway.usages?.length ?? 0;
+  const completeness = bomCount > 0 ? `${count}/${bomCount}` : String(count);
+
+  return (
+    <Tile
+      selected={selected}
+      onClick={onSelect}
+      name={code}
+      media={
+        hex ? (
+          <div className='aspect-square w-full' style={{ backgroundColor: hex }} aria-hidden />
+        ) : (
+          <Placeholder aspect='square' label='no hex' />
+        )
+      }
+    >
+      <div className='mt-1 flex flex-wrap items-center gap-1'>
+        <LabDipPill status={colorway.labDipStatus} />
+        {/* A colourway with no recipe is red right here in the grid — you should never have to open
+            one to find out it is empty. */}
+        {count === 0 ? (
+          <Pill tone='warn'>{completeness}</Pill>
+        ) : (
+          <Text size='micro' variant='label' component='span' className='tabular-nums'>
+            {completeness}
+          </Text>
+        )}
+        {status?.dirty && <Pill tone='attention'>unsaved</Pill>}
+      </div>
+    </Tile>
+  );
+}
+
+// #35 — inline "create colourway": until this existed the recipe editor could only edit EXISTING
+// colourways (techCard.colorways), so making a new one meant leaving for the product manager and
+// coming back (ping-pong). This spins up a minimal DRAFT (colour only, via CreateColorway) without
+// leaving the tech card. It occupies the SAME slot below the grid as a recipe, opened from the
+// dashed `+ colourway` tile.
+function CreateColorwayForm({
   techCardId,
   usedCodes,
-  canEdit,
+  onCancel,
+  onCreated,
 }: {
   techCardId: number;
   usedCodes: Set<string>;
-  canEdit: boolean;
+  onCancel: () => void;
+  onCreated: (colorwayId?: number) => void;
 }) {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
   const create = useCreateColorway(techCardId);
-  const [open, setOpen] = useState(false);
   const [colorCode, setColorCode] = useState('');
 
-  if (!canEdit) return null;
-
   const availableColors = (dictionary?.colors ?? []).filter((c) => !c.archived && c.code);
-
-  const close = () => {
-    setOpen(false);
-    setColorCode('');
-  };
+  const picked = availableColors.find((c) => c.code === colorCode);
 
   const submit = () => {
     if (!colorCode) {
@@ -1097,73 +1393,74 @@ function CreateColorwayInline({
       return;
     }
     create.mutate(colorCode, {
-      onSuccess: () => {
+      onSuccess: (res) => {
         showMessage('Draft colourway created', 'success');
-        close();
+        setColorCode('');
+        onCreated(res?.colorwayId);
       },
       onError: (e) => showMessage(createColorwayErrorMessage(e), 'error'),
     });
   };
 
-  if (!open) {
-    return (
-      <Button type='button' variant='secondary' className='uppercase' onClick={() => setOpen(true)}>
-        + create colourway
-      </Button>
-    );
-  }
-
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
-      <Text variant='uppercase' size='small'>
-        new colourway
-      </Text>
+    <div className='flex flex-col gap-2'>
+      <SectionHeader
+        title='новый колорвей'
+        question='a DRAFT colourway — colour only, so its recipe can be edited here; media, price and the rest come from the product manager afterwards'
+      />
       {availableColors.length === 0 ? (
-        <Text variant='label' size='small'>
-          no colours in the dictionary yet — add them under settings › colors
-        </Text>
+        <CalloutBox tone='note'>
+          <Text size='micro' component='span'>
+            no colours in the dictionary yet — add them under <b>settings › colors</b>
+          </Text>
+        </CalloutBox>
       ) : (
-        <div className='flex flex-wrap items-end gap-2'>
+        <Toolbar>
           <label className='flex flex-col gap-1'>
-            <Text size='small'>colour</Text>
-            <select
-              className={cell}
-              value={colorCode}
-              onChange={(e) => setColorCode(e.target.value)}
-            >
-              <option value=''>— select colour —</option>
-              {availableColors.map((c) => (
-                <option key={c.code} value={c.code} disabled={usedCodes.has(c.code ?? '')}>
-                  {c.code} · {c.name}
-                  {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
-                </option>
-              ))}
-            </select>
+            <FieldLabel>colour</FieldLabel>
+            <span className='flex items-center gap-2'>
+              <Swatch hex={picked?.hex} title={picked?.name ?? undefined} />
+              <select
+                className={cn(cell, 'w-56')}
+                value={colorCode}
+                onChange={(e) => setColorCode(e.target.value)}
+              >
+                <option value=''>— select colour —</option>
+                {availableColors.map((c) => (
+                  <option key={c.code} value={c.code} disabled={usedCodes.has(c.code ?? '')}>
+                    {c.code} · {c.name}
+                    {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
+                  </option>
+                ))}
+              </select>
+            </span>
           </label>
+          <ToolbarSpacer />
+          <Button type='button' variant='secondary' size='sm' onClick={onCancel}>
+            cancel
+          </Button>
           <Button
             type='button'
             variant='main'
+            size='sm'
             disabled={create.isPending || !colorCode}
             loading={create.isPending}
             onClick={submit}
           >
             create
           </Button>
-          <Button type='button' variant='secondary' onClick={close}>
-            cancel
-          </Button>
-        </div>
+        </Toolbar>
       )}
-      <Text variant='label' size='small'>
-        Creates a DRAFT colourway (colour only) so its recipe can be edited below — add media, price
-        and the rest from the product manager afterwards.
-      </Text>
     </div>
   );
 }
 
 // Colourway recipes (H1/§2.3): the constructor view of each colourway's material recipe, now that the
 // read-path surfaces usages. Edited per colourway and saved via UpdateColorwayRecipe (full-replace).
+//
+// Colour is the subject here, so the roster leads with the swatch: a grid of tiles that STAYS ON
+// SCREEN while a recipe is edited underneath it — the accordion this replaced hid every sibling the
+// moment you opened one, which is exactly wrong for a job that is comparing colourways.
 export function ColorwayRecipes({
   techCard,
   techCardId,
@@ -1214,45 +1511,106 @@ export function ColorwayRecipes({
     for (const s of dictionary?.sizes ?? []) if (s.id != null) m.set(s.id, s.name ?? `#${s.id}`);
     return m;
   }, [dictionary?.sizes]);
+  // Each colourway's dictionary colour, for the tile swatch and the lab-dip round marker.
+  const hexByCode = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of dictionary?.colors ?? []) if (c.code && c.hex) m.set(c.code, c.hex);
+    return m;
+  }, [dictionary?.colors]);
   const lockVersion = techCard?.lockVersion ?? 0;
   const usedCodes = useMemo(
     () => new Set(colorways.map((c) => c.colorCode ?? '').filter(Boolean)),
     [colorways],
   );
 
-  if (colorways.length === 0) {
-    return (
-      <div className='flex flex-col gap-3'>
-        <Text variant='label' size='small'>
-          no colourways yet — a colourway is a product. Create a draft below, or from the product
-          manager, then its material recipe is edited here.
-        </Text>
-        <CreateColorwayInline techCardId={techCardId} usedCodes={usedCodes} canEdit={canEdit} />
-      </div>
-    );
-  }
+  // Which tile owns the slot below the grid: a colourway id, the create form, or nothing (which
+  // falls back to the first colourway so the tab is never a grid over dead space).
+  const [selected, setSelected] = useState<number | 'new' | null>(null);
+  const activeId = selected === 'new' ? null : selected ?? colorways[0]?.colorwayId ?? null;
+
+  // Live per-colourway recipe state, reported up by each editor so the grid can badge it.
+  const [statuses, setStatuses] = useState<Record<number, RecipeStatus>>({});
+  const reportStatus = useCallback((colorwayId: number, next: RecipeStatus) => {
+    setStatuses((prev) => {
+      const cur = prev[colorwayId];
+      if (cur && cur.count === next.count && cur.dirty === next.dirty) return prev;
+      return { ...prev, [colorwayId]: next };
+    });
+  }, []);
 
   return (
-    <div className='flex flex-col gap-3'>
-      <Text variant='label' size='small'>
+    <div className='flex flex-col gap-2.5'>
+      <Text size='micro' variant='label'>
         Which catalog article goes on each part, and how much. Saved per colourway, separately from
         the tech-card save.
       </Text>
+
+      <Tiles min={120}>
+        {colorways.map((cw) => (
+          <ColorwayTile
+            key={cw.colorwayId}
+            colorway={cw}
+            hex={hexByCode.get(cw.colorCode ?? '')}
+            bomCount={bomItems.length}
+            status={statuses[cw.colorwayId ?? 0]}
+            selected={activeId === cw.colorwayId}
+            onSelect={() => setSelected(cw.colorwayId ?? null)}
+          />
+        ))}
+        {canEdit && (
+          <Tile
+            dashed
+            selected={selected === 'new'}
+            name='colourway'
+            onClick={() => setSelected('new')}
+            media={
+              <div className='flex aspect-square w-full items-center justify-center border border-dashed border-borderColor'>
+                <Text size='stat' variant='label' component='span'>
+                  +
+                </Text>
+              </div>
+            }
+          />
+        )}
+      </Tiles>
+
+      {colorways.length === 0 && (
+        <Text size='micro' variant='label'>
+          no colourways yet — a colourway is a product. Create a draft from the tile above, or from
+          the product manager, then its material recipe is edited here.
+        </Text>
+      )}
+
+      {/* The slot. Every editor stays MOUNTED and merely hidden, so an unsaved recipe survives a hop
+          to another colourway and back — losing a draft to a tile click would be worse than the
+          accordion this replaced. */}
       {colorways.map((cw) => (
-        <ColorwayRecipeEditor
-          key={cw.colorwayId}
-          colorway={cw}
-          bomItems={bomItems}
-          pieces={pieces}
-          sizeIds={sizeIds}
-          sizeQuantities={sizeQuantities}
-          sizeNameById={sizeNameById}
-          lockVersion={lockVersion}
-          techCardId={techCardId}
-          canEdit={canEdit}
-        />
+        <div key={cw.colorwayId} hidden={activeId !== cw.colorwayId}>
+          <ColorwayRecipeEditor
+            colorway={cw}
+            bomItems={bomItems}
+            pieces={pieces}
+            sizeIds={sizeIds}
+            sizeQuantities={sizeQuantities}
+            sizeNameById={sizeNameById}
+            swatchHex={hexByCode.get(cw.colorCode ?? '')}
+            lockVersion={lockVersion}
+            techCardId={techCardId}
+            canEdit={canEdit}
+            onStatus={reportStatus}
+          />
+        </div>
       ))}
-      <CreateColorwayInline techCardId={techCardId} usedCodes={usedCodes} canEdit={canEdit} />
+
+      {canEdit && selected === 'new' && (
+        <CreateColorwayForm
+          techCardId={techCardId}
+          usedCodes={usedCodes}
+          onCancel={() => setSelected(null)}
+          // Land on the colourway that was just created — its recipe is why you made it.
+          onCreated={(id) => setSelected(id ?? null)}
+        />
+      )}
     </div>
   );
 }

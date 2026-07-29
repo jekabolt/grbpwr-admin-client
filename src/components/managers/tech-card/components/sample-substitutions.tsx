@@ -4,20 +4,71 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { EmptyCell } from 'ui/components/data-table';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { fieldErrorSummary } from 'utils/field-errors';
+import { Field, selectCell } from './sample-panels';
 import {
   useAddSampleSubstitution,
   useDeleteSampleSubstitution,
   useSampleSubstitutions,
 } from './useSamples';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
-
 // Sample substitutions (§2.7): a dev-time deviation from the spec BOM — a line sewn with a different
 // material. Documentation only (Q2: never COGS; the authoritative spend stays in the stock ledger +
 // the BOM plan). Pick the BOM line, see its original (spec) material, record what was used instead.
+
+// Shared naming so the always-visible rows and the editor read a substitution identically.
+function useSubstitutionNaming(techCard?: common_TechCard) {
+  const { data: materialsData } = useMaterials('', true);
+  const bomItems = useMemo(
+    () => (techCard?.techCard?.bomItems ?? []).filter((b) => (b.id ?? 0) > 0),
+    [techCard],
+  );
+  const materialName = (id?: number) =>
+    id ? materialsData?.materials?.find((m) => m.id === id)?.name || `#${id}` : '—';
+  const bomName = (id?: number) => {
+    const b = bomItems.find((x) => x.id === id);
+    return b?.name?.trim() || (id ? `#${id}` : '—');
+  };
+  return { bomItems, materialName, bomName };
+}
+
+/**
+ * The SUBSTITUTIONS area's always-visible rows (10.3): you can SEE there are two
+ * substitutions without expanding anything.
+ */
+export function SubstitutionRows({
+  sampleId,
+  techCard,
+}: {
+  sampleId: number;
+  techCard?: common_TechCard;
+}) {
+  const { data } = useSampleSubstitutions(sampleId);
+  const { materialName, bomName } = useSubstitutionNaming(techCard);
+  const substitutions = data?.substitutions ?? [];
+
+  if (!substitutions.length) {
+    return <Row label='sewn exactly to the spec BOM' tone='label' value={<EmptyCell />} />;
+  }
+  return (
+    <>
+      {substitutions.map((s) => (
+        <Row
+          key={s.id}
+          label={`${bomName(s.bomItemId)}: ${materialName(s.originalMaterialId)} → ${materialName(
+            s.substitutedMaterialId,
+          )}`}
+          value={decimalToInput(s.actualQty) || decimalToInput(s.plannedQty) || <EmptyCell />}
+        />
+      ))}
+    </>
+  );
+}
+
 export function SampleSubstitutions({
   sampleId,
   techCard,
@@ -31,19 +82,9 @@ export function SampleSubstitutions({
   const { data } = useSampleSubstitutions(sampleId);
   const add = useAddSampleSubstitution(sampleId);
   const del = useDeleteSampleSubstitution(sampleId);
-  const { data: materialsData } = useMaterials('', true);
+  const { bomItems, materialName, bomName } = useSubstitutionNaming(techCard);
 
   const substitutions = data?.substitutions ?? [];
-  const bomItems = useMemo(
-    () => (techCard?.techCard?.bomItems ?? []).filter((b) => (b.id ?? 0) > 0),
-    [techCard],
-  );
-  const materialName = (id?: number) =>
-    id ? materialsData?.materials?.find((m) => m.id === id)?.name || `#${id}` : '—';
-  const bomName = (id?: number) => {
-    const b = bomItems.find((x) => x.id === id);
-    return b?.name?.trim() || (id ? `#${id}` : '—');
-  };
 
   const [bomItemId, setBomItemId] = useState(0);
   const [substitutedMaterialId, setSubstitutedMaterialId] = useState(0);
@@ -89,60 +130,67 @@ export function SampleSubstitutions({
 
   return (
     <div className='flex flex-col gap-2'>
-      {substitutions.length === 0 ? (
-        <Text variant='label' size='small'>
-          no substitutions — this sample was sewn exactly to the spec BOM
-        </Text>
-      ) : (
-        <div className='flex flex-col gap-1'>
+      <Text size='micro' variant='label'>
+        dev-time deviations from the spec BOM — documentation only, never COGS
+      </Text>
+
+      {substitutions.length > 0 && (
+        <div className='flex flex-col'>
           {substitutions.map((s) => (
-            <div
+            <Row
               key={s.id}
-              className='flex flex-wrap items-start justify-between gap-2 border border-textInactiveColor p-2'
-            >
-              <div className='flex flex-col gap-0.5'>
-                <Text size='small' className='font-semibold uppercase'>
-                  {bomName(s.bomItemId)}
-                </Text>
-                <Text size='small'>
-                  {materialName(s.originalMaterialId)}
-                  <span className='px-1 text-textInactiveColor'>→</span>
-                  {materialName(s.substitutedMaterialId)}
-                </Text>
-                <Text variant='label' size='small'>
-                  {s.reason || 'no reason given'}
-                  {s.plannedQty?.value ? ` · plan ${decimalToInput(s.plannedQty)}` : ''}
-                  {s.actualQty?.value ? ` · actual ${decimalToInput(s.actualQty)}` : ''}
-                </Text>
-              </div>
-              {canEdit && (
-                <Button
-                  type='button'
-                  variant='secondary'
-                  aria-label='remove substitution'
-                  onClick={() =>
-                    s.id &&
-                    del.mutate(s.id, {
-                      onSuccess: () => showMessage('Substitution removed', 'success'),
-                      onError: (e) => showMessage(fieldErrorSummary(e, 'Failed'), 'error'),
-                    })
-                  }
-                >
-                  ✕
-                </Button>
-              )}
-            </div>
+              label={
+                <span className='flex min-w-0 flex-col'>
+                  <Text size='micro' className='font-bold uppercase'>
+                    {bomName(s.bomItemId)}
+                  </Text>
+                  <Text size='micro'>
+                    {materialName(s.originalMaterialId)}
+                    <span className='px-1 text-labelColor'>→</span>
+                    {materialName(s.substitutedMaterialId)}
+                  </Text>
+                  <Text size='nano' variant='label'>
+                    {s.reason || 'no reason given'}
+                    {s.plannedQty?.value ? ` · plan ${decimalToInput(s.plannedQty)}` : ''}
+                    {s.actualQty?.value ? ` · actual ${decimalToInput(s.actualQty)}` : ''}
+                  </Text>
+                </span>
+              }
+              value={
+                canEdit ? (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    aria-label='remove substitution'
+                    onClick={() =>
+                      s.id &&
+                      del.mutate(s.id, {
+                        onSuccess: () => showMessage('Substitution removed', 'success'),
+                        onError: (e) => showMessage(fieldErrorSummary(e, 'Failed'), 'error'),
+                      })
+                    }
+                  >
+                    ✕
+                  </Button>
+                ) : undefined
+              }
+            />
           ))}
         </div>
       )}
 
       {canEdit && (
-        <div className='flex flex-col gap-2 border border-textInactiveColor p-2'>
+        <div className='flex flex-col gap-2 border border-borderColor p-2'>
           <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>BOM line (spec)</Text>
+            <Field
+              label='BOM line (spec)'
+              hint={
+                bomItemId > 0 ? `spec material: ${materialName(originalMaterialId)}` : undefined
+              }
+            >
               <select
-                className={cell}
+                className={selectCell}
                 value={bomItemId || 0}
                 onChange={(e) => setBomItemId(Number(e.target.value) || 0)}
               >
@@ -153,57 +201,47 @@ export function SampleSubstitutions({
                   </option>
                 ))}
               </select>
-              {bomItemId > 0 && (
-                <Text variant='label' size='small'>
-                  spec material: {materialName(originalMaterialId)}
-                </Text>
-              )}
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>material used instead</Text>
+            </Field>
+            <Field label='material used instead'>
               <MaterialPicker
                 value={substitutedMaterialId}
                 onChange={(id) => setSubstitutedMaterialId(id)}
                 includeArchived
                 placeholder='search material'
               />
-            </label>
+            </Field>
           </div>
           <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>reason</Text>
+            <Field label='reason'>
               <input
-                className={cell}
+                className={selectCell}
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder='out of stock, trial…'
               />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>planned qty</Text>
+            </Field>
+            <Field label='planned qty'>
               <input
-                className={cell}
+                className={selectCell}
                 inputMode='decimal'
                 value={plannedQty}
                 onChange={(e) => setPlannedQty(sanitizeDecimal(e.target.value))}
               />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small'>actual qty</Text>
+            </Field>
+            <Field label='actual qty'>
               <input
-                className={cell}
+                className={selectCell}
                 inputMode='decimal'
                 value={actualQty}
                 onChange={(e) => setActualQty(sanitizeDecimal(e.target.value))}
               />
-            </label>
+            </Field>
           </div>
           <div className='flex justify-end'>
             <Button
               type='button'
               variant='secondary'
-              size='lg'
-              className='uppercase'
+              size='sm'
               disabled={add.isPending}
               onClick={submit}
             >

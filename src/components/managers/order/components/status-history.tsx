@@ -7,14 +7,10 @@ import Text from 'ui/components/text';
 export function StatusHistory({ orderDetails }: { orderDetails?: common_OrderFull }) {
   return (
     <GenericPopover
-      variant='default'
-      contentProps={{
-        align: 'start',
-        sideOffset: 10,
-      }}
-      className='p-5 bg-bgColor text-textColor'
+      contentProps={{ align: 'start' }}
+      className='w-auto'
       openElement={() => (
-        <Button className='border border-textInactiveColor rounded-none px-1 cursor-pointer'>
+        <Button size='xs' variant='secondary'>
           i
         </Button>
       )}

@@ -1,26 +1,116 @@
-import { common_Category } from 'api/proto-http/admin';
-import { formatSizeName } from 'components/managers/product/utility/sizes';
+import { common_Category, common_SizeSkuSystem } from 'api/proto-http/admin';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
+import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { getCategoriesByParentId } from 'lib/utility';
-import { useMemo } from 'react';
+import { cn, getCategoriesByParentId } from 'lib/utility';
+import { useCallback, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import Select from 'ui/components/select';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { GroupLabel } from 'ui/components/group-label';
+import GenericPopover from 'ui/components/popover';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
+import { permittedSizeSystems } from 'utils/size-systems';
 import { TechCardFormData } from './schema';
 
 const UNSET = { value: 0, label: '— unset —' };
 
-// 3-level category cascade (top → sub → type) over a SINGLE stored leaf id (`categoryId`).
-// categoryId is the source of truth: the path is derived by walking parents, and picking a
-// level writes the deepest selected id. Clearing a deeper level falls back to its parent.
-function CategoryCascade() {
-  const { setValue } = useFormContext<TechCardFormData>();
+// One row of a browser column. Not a `Row`: this one is a full-width target that fills with ink
+// when it is the selected node, so its label has to inherit the row's colour rather than carry
+// its own.
+function BrowserRow({
+  label,
+  selected,
+  hasChildren,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  hasChildren?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      aria-pressed={selected}
+      className={cn(
+        'flex w-full items-center justify-between gap-1.5 border-b border-hairline px-1.5 py-0.5 text-left last:border-b-0',
+        selected ? 'bg-textColor text-bgColor' : 'text-textColor hover:bg-bgZebra',
+      )}
+    >
+      {/* option-label size (11px), not the 10px label size — these are the choices themselves */}
+      <span className='truncate text-control'>{label}</span>
+      {hasChildren && (
+        <span aria-hidden className='shrink-0 text-control'>
+          ›
+        </span>
+      )}
+    </button>
+  );
+}
+
+function BrowserColumn({
+  title,
+  items,
+  selectedId,
+  hasChildren,
+  empty,
+  onPick,
+  className,
+}: {
+  title: string;
+  items: common_Category[];
+  selectedId: number;
+  hasChildren?: (c: common_Category) => boolean;
+  empty: string;
+  onPick: (id: number) => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn('min-w-0', className)}>
+      <GroupLabel flush className='px-1.5'>
+        {title}
+      </GroupLabel>
+      <div className='max-h-[240px] overflow-y-auto'>
+        {items.length === 0 ? (
+          <Text size='micro' variant='label' className='px-1.5 py-0.5'>
+            {empty}
+          </Text>
+        ) : (
+          items.map((c) => (
+            <BrowserRow
+              key={c.id}
+              label={c.name ?? `#${c.id}`}
+              selected={(c.id ?? 0) === selectedId}
+              hasChildren={hasChildren?.(c)}
+              onClick={() => onPick(c.id ?? 0)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The category tree over a SINGLE stored leaf id (`categoryId`). categoryId is the source of truth:
+// the path is derived by walking parents, and picking a level writes the deepest selected id.
+//
+// One trigger showing the whole path opens a Finder-style three-column browser (the tree is already
+// in the dictionary — no request). Clicking a level-1 row re-parents levels 2–3, same for 2 → 3.
+// Sub and type stay optional: a level-1-only selection is valid and the trigger reads «outerwear».
+function CategoryBrowser() {
+  const { control, setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
-  const categoryId = (useWatch({ name: 'categoryId' }) as number | undefined) ?? 0;
-  const cats = dictionary?.categories ?? [];
+  const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
+  const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const cats = useMemo(() => dictionary?.categories ?? [], [dictionary?.categories]);
+
+  const [open, setOpen] = useState(false);
+  // A category change that would move the size run's goalposts is confirmed first (see below).
+  const [pending, setPending] = useState<number | null>(null);
 
   const byId = useMemo(() => {
     const m = new Map<number, common_Category>();
@@ -28,74 +118,164 @@ function CategoryCascade() {
     return m;
   }, [cats]);
 
-  // walk the stored leaf up to its top ancestor → { top, sub, type } ids
-  const path = useMemo(() => {
-    const out: { top: number; sub: number; type: number } = { top: 0, sub: 0, type: 0 };
-    const chain: common_Category[] = [];
-    let cur = categoryId ? byId.get(categoryId) : undefined;
-    let guard = 0;
-    while (cur && guard++ < 8) {
-      chain.unshift(cur);
-      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-    }
-    for (const c of chain) {
-      if (c.level === 'top_category') out.top = c.id ?? 0;
-      else if (c.level === 'sub_category') out.sub = c.id ?? 0;
-      else out.type = c.id ?? 0;
-    }
-    return out;
-  }, [categoryId, byId]);
+  // walk a leaf up to its top ancestor → { top, sub, type } ids (+ the names, in path order)
+  const resolve = useCallback(
+    (leaf: number) => {
+      const out = { top: 0, sub: 0, type: 0, names: [] as string[] };
+      const chain: common_Category[] = [];
+      let cur = leaf ? byId.get(leaf) : undefined;
+      let guard = 0;
+      while (cur && guard++ < 8) {
+        chain.unshift(cur);
+        cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+      }
+      for (const c of chain) {
+        if (c.level === 'top_category') out.top = c.id ?? 0;
+        else if (c.level === 'sub_category') out.sub = c.id ?? 0;
+        else out.type = c.id ?? 0;
+        out.names.push(c.name ?? `#${c.id}`);
+      }
+      return out;
+    },
+    [byId],
+  );
+
+  const path = useMemo(() => resolve(categoryId), [resolve, categoryId]);
 
   const tops = cats.filter((c) => c.level === 'top_category');
   // Levels are matched explicitly, never by depth: `dresses` hangs its types straight off the top
   // category (no sub_category level at all), so a parentId-only lookup would list mini/maxi/mesh in
-  // the SUB slot — and the pick would then vanish on re-render, because `path` bins by level and
+  // the SUB column — and the pick would then vanish on re-render, because `path` bins by level and
   // would put it in `type` while `sub` stayed 0.
   const subs = path.top ? getCategoriesByParentId(cats, path.top, 'sub_category') : [];
   // Types hang off the sub-category where there is one, off the top category where there isn't.
   const typeParent = path.sub || (subs.length === 0 ? path.top : 0);
   const types = typeParent ? getCategoriesByParentId(cats, typeParent, 'type') : [];
 
-  // '0' is the unset sentinel (Radix Select forbids empty-string item values).
-  const items = (list: common_Category[], placeholder: string) => [
-    { value: '0', label: placeholder },
-    ...list.map((c) => ({ value: String(c.id ?? 0), label: c.name ?? `#${c.id}` })),
-  ];
+  const hasSubsOrTypes = (c: common_Category) =>
+    getCategoriesByParentId(cats, c.id ?? 0).length > 0;
 
-  // write the deepest selected id as the leaf; clearing a level falls back to its parent
-  const setLeaf = (id: number) => setValue('categoryId', id || 0, { shouldDirty: true });
+  const systemsOf = (id: number) =>
+    permittedSizeSystems(dictionary?.categories, dictionary?.categorySizeSystems, id);
+  const sameSystems = (a?: common_SizeSkuSystem[], b?: common_SizeSkuSystem[]) =>
+    [...(a ?? [])].sort().join(',') === [...(b ?? [])].sort().join(',');
+
+  // Sizes already in the run that the candidate category would no longer offer. `useSizeSystems`
+  // never hides an already-selected size, so nothing is silently dropped — but the run stops
+  // agreeing with the category, and that is worth naming out loud before it happens.
+  const outsideCount = (candidate: number) => {
+    const allow = systemsOf(candidate);
+    if (!allow) return 0;
+    const permitted = new Set(allow);
+    const sizeById = new Map((dictionary?.sizes ?? []).map((s) => [s.id ?? 0, s] as const));
+    return sizeIds.filter(
+      (id) => !permitted.has(sizeById.get(id)?.skuSystem ?? 'SIZE_SKU_SYSTEM_UNKNOWN'),
+    ).length;
+  };
+
+  const applyLeaf = (id: number) => setValue('categoryId', id || 0, { shouldDirty: true });
+
+  // Category drives the permitted size systems AND the measurement columns of the size chart, so a
+  // change under a filled size run is confirmed the same way removing a size is. Refining deeper
+  // inside the same top category with the same systems is not a change of goalposts — it does not
+  // ask, or drilling top → sub → type would need three confirmations.
+  const pick = (id: number) => {
+    const next = id || 0;
+    if (next === categoryId) return;
+    const changesGoalposts =
+      resolve(next).top !== path.top || !sameSystems(systemsOf(next), systemsOf(categoryId));
+    if (sizeIds.length > 0 && categoryId > 0 && changesGoalposts) {
+      setPending(next);
+      return;
+    }
+    applyLeaf(next);
+  };
+
+  const triggerLabel = path.names.length ? path.names.join(' › ') : '— category —';
+  const pendingLabel = pending != null ? resolve(pending).names.join(' › ') : '';
 
   return (
-    <div className='space-y-1'>
+    <div className='space-y-px'>
       <FormLabel>category</FormLabel>
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
-        <Select
-          name='category-top'
-          items={items(tops, '— category —')}
-          value={String(path.top)}
-          onValueChange={(v?: string) => setLeaf(Number(v) || 0)}
-        />
-        <Select
-          name='category-sub'
-          items={items(
-            subs,
-            path.top && subs.length === 0 ? '— no sub-category —' : '— sub (optional) —',
-          )}
-          value={String(path.sub)}
-          disabled={!path.top || subs.length === 0}
-          onValueChange={(v?: string) => setLeaf(Number(v) || path.top || 0)}
-        />
-        <Select
-          name='category-type'
-          items={items(types, '— type (optional) —')}
-          value={String(path.type)}
-          disabled={types.length === 0}
-          onValueChange={(v?: string) => setLeaf(Number(v) || path.sub || path.top || 0)}
-        />
-      </div>
-      <Text variant='inactive' size='small'>
-        Only the top category is required — sub-category and type are optional.
+      <GenericPopover
+        open={open}
+        onOpenChange={setOpen}
+        title='category'
+        // Anchored flush under the field it replaces, so no tail (combobox grammar).
+        noTail
+        contentProps={{ align: 'start' }}
+        triggerProps={{ className: 'flex w-full items-center' }}
+        className='w-[460px] max-w-[calc(100vw-1.5rem)]'
+        openElement={
+          <span className='flex min-h-[22px] w-full items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left hover:border-textColor'>
+            <span className='min-w-0 flex-1 truncate text-textBaseSize'>{triggerLabel}</span>
+            <Text size='micro' variant='label' component='span' aria-hidden>
+              ▾
+            </Text>
+          </span>
+        }
+      >
+        <div className='grid grid-cols-3'>
+          <BrowserColumn
+            title='category'
+            className='border-r border-hairline pr-1'
+            items={tops}
+            selectedId={path.top}
+            hasChildren={hasSubsOrTypes}
+            empty='— dictionary empty —'
+            onPick={pick}
+          />
+          <BrowserColumn
+            title='sub · optional'
+            className='border-r border-hairline px-1'
+            items={subs}
+            selectedId={path.sub}
+            hasChildren={hasSubsOrTypes}
+            empty={path.top ? 'no sub-categories' : 'pick a category'}
+            onPick={pick}
+          />
+          <BrowserColumn
+            title='type · optional'
+            className='pl-1'
+            items={types}
+            selectedId={path.type}
+            empty={typeParent ? 'no types' : 'pick a sub-category'}
+            onPick={pick}
+          />
+        </div>
+      </GenericPopover>
+      <Text size='micro' variant='label'>
+        only the top category is required — sub-category and type are optional
       </Text>
+
+      <ConfirmationModal
+        open={pending != null}
+        width='sm'
+        title='сменить категорию?'
+        confirmLabel='сменить категорию'
+        cancelLabel='отмена'
+        onOpenChange={(o) => {
+          if (!o) setPending(null);
+        }}
+        onConfirm={() => {
+          if (pending != null) applyLeaf(pending);
+          setPending(null);
+        }}
+      >
+        <Text size='micro' variant='label' className='mb-2'>
+          Категория задаёт разрешённые размерные системы и колонки мерок в таблице размеров. Смена
+          на «{pendingLabel}» затронет уже собранный ряд:
+        </Text>
+        <Row label='размеров в ряду' value={sizeIds.length} />
+        <Row
+          label='из них вне систем новой категории'
+          value={pending != null ? outsideCount(pending) : 0}
+        />
+        <Text size='micro' variant='label' className='mt-2'>
+          размеры не удаляются — но ряд перестанет соответствовать категории, а колонки мерок в size
+          chart пересчитаются под новую.
+        </Text>
+      </ConfirmationModal>
     </div>
   );
 }
@@ -132,16 +312,16 @@ export function HeaderMetaFields() {
   ];
 
   return (
-    <div className='space-y-3'>
-      <CategoryCascade />
+    <div className='space-y-2.5'>
+      <CategoryBrowser />
       {/* base model / base sample size are optional provenance FKs — both still print to the spec,
           so they stay mounted (values round-trip) but sit behind a disclosure to keep the header
           leading with category. Expand to set them. */}
       <details>
-        <summary className='cursor-pointer select-none text-textBaseSize uppercase text-labelColor hover:text-text'>
+        <summary className='cursor-pointer select-none text-micro uppercase tracking-label text-labelColor hover:text-textColor'>
           base model & sample size — optional
         </summary>
-        <div className='mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2'>
+        <div className='mt-2.5 grid grid-cols-1 gap-2.5 lg:grid-cols-2'>
           <SelectField
             name='baseModelId'
             label='base model'

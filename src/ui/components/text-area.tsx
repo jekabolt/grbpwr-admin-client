@@ -15,7 +15,11 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         id={name}
         ref={ref}
         className={cn(
-          'mb-10 min-h-56 w-full resize-none appearance-none rounded-none bg-bgColor px-4 pt-2.5 text-textBaseSize focus:outline-none',
+          // Same box as Input. It used to be min-h-56 (224px) with a 40px bottom
+          // margin and no border, which is why every notes field dominated its section.
+          'block min-h-[44px] w-full resize-y appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none',
+          'aria-[invalid=true]:border-error aria-[invalid=true]:focus:border-error',
+          'placeholder:text-textInactiveColor disabled:bg-bgZebra disabled:text-labelColor',
           {
             'border-textInactiveColor': variant === 'secondary',
           },

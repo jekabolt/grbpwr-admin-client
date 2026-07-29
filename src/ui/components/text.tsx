@@ -24,13 +24,28 @@ const textVariants = cva('', {
         'lg:leading-tight',
         'whitespace-nowrap',
       ],
+      /** @deprecated alias of `default` — kept so existing size='small' compiles. */
       small: ['text-small'],
+      control: ['text-control'], // 11px — chips, buttons, tabs, option labels
+      micro: ['text-micro'], // 10px — labels, pills, table headers, hints
+      nano: ['text-nano'], // 9px — badges, pin numbers, band labels
+      stat: ['text-stat', 'font-bold', 'tabular-nums'],
+      statBig: ['text-statBig', 'font-bold', 'tabular-nums'],
       large: ['text-lg'],
+    },
+    // Pairs with variant='uppercase'. Never set letter-spacing by hand in a screen.
+    tracking: {
+      none: [],
+      pill: ['tracking-pill'],
+      label: ['tracking-label'],
+      group: ['tracking-group'],
+      section: ['tracking-section'],
     },
   },
   defaultVariants: {
     size: 'default',
     variant: 'default',
+    tracking: 'none',
   },
 });
 
@@ -46,12 +61,16 @@ export default function Text({
   children,
   className,
   variant,
+  tracking,
   component = 'p',
   ...props
 }: Props) {
   const Component = component;
   return (
-    <Component {...props} className={textVariants({ variant, size, className })}>
+    // `tracking` must be destructured AND passed through: left in ...props it would
+    // leak onto the DOM node as an unknown attribute and the variant would be dead
+    // code, so no uppercase label in the app would get its letter-spacing.
+    <Component {...props} className={textVariants({ variant, size, tracking, className })}>
       {children}
     </Component>
   );

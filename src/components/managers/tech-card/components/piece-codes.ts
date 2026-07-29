@@ -31,3 +31,20 @@ export const pieceModifiers: Array<{ mod: string; name: string }> = [
 
 // Datalist suggestions for piece-code fields (modifiers are typed onto the base code).
 export const pieceCodeOptions = pieceBaseCodes.map((p) => p.code);
+
+// Grainline is free text (a factory may write «долевая», "straight", "lengthwise" for the same
+// thing), so the suggestions stay open. These are the canonical three.
+export const grainlineOptions = ['lengthwise', 'crosswise', 'bias'];
+
+// Grainline is a DIRECTION, and a direction is read faster as an arrow than as a word — the pieces
+// table shows the glyph beside the typed value so a mis-set grain is spotted at a glance instead of
+// by reading a column of near-identical strings. Unrecognised text renders no arrow rather than a
+// wrong one: guessing here would be worse than staying quiet.
+export function grainlineArrow(grainline?: string): string {
+  const g = (grainline ?? '').trim().toLowerCase();
+  if (!g) return '';
+  if (/^(lengthwise|straight|warp|долев)/.test(g)) return '↑';
+  if (/^(crosswise|cross|weft|попереч|уток)/.test(g)) return '→';
+  if (/^(bias|коса|под углом|45)/.test(g)) return '↗';
+  return '';
+}

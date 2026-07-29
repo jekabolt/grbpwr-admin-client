@@ -26,14 +26,11 @@ export function CollectionField({ readOnly }: { readOnly?: boolean }) {
     // dictionary) keeps its value selectable — otherwise opening the card would silently blank a
     // field the user never touched, and the full-replace save would persist that blank.
     if (collection && !names.includes(collection)) names.unshift(collection);
-    return [
-      { value: NONE, label: '— none —' },
-      ...names.map((n) => ({ value: n, label: n })),
-    ];
+    return [{ value: NONE, label: '— none —' }, ...names.map((n) => ({ value: n, label: n }))];
   }, [dictionary?.collections, collection]);
 
   return (
-    <div className='space-y-1'>
+    <div className='space-y-px'>
       <FormLabel>collection</FormLabel>
       <Select
         name='collection'

@@ -1,118 +1,109 @@
-import { common_TechCardStage } from 'api/proto-http/admin';
+import {
+  common_Category,
+  common_SeasonEnum,
+  common_SkuSeason,
+  common_TechCardListItem,
+  common_TechCardStage,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { techCardPurposeOptions, techCardStageOptions } from 'constants/filter';
+import { SEASON_OPTIONS, techCardPurposeOptions, techCardStageOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { getCategoriesByParentId } from 'lib/utility';
+import { useEffect, useMemo, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
-import Select from 'ui/components/select';
+import { Pill } from 'ui/components/pill';
+import GenericPopover from 'ui/components/popover';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
-import { AuxBadge } from './aux-badge';
-import { approvalStateLabel, formatTechCardDate, stageLabel } from './utils';
-import { useDeleteTechCard, useInfiniteTechCards } from './useTechCardQuery';
+import { Tiles } from 'ui/components/tiles';
+import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { seasonLabel, seasonParam, TechCardTile } from './tech-card-tile';
+import { stageLabel } from './utils';
+import { useDeleteTechCard, useInfiniteTechCards, useTechCard } from './useTechCardQuery';
 
 const LIMIT = 30;
 const ALL_STAGES = 'TECH_CARD_STAGE_UNKNOWN';
 const DEFAULT_PURPOSE = 'sellable';
 
-const stageFilterItems = [{ value: ALL_STAGES, label: 'all stages' }, ...techCardStageOptions];
-
-const GENDER_LABEL: Record<string, string> = {
-  GENDER_ENUM_MALE: 'men',
-  GENDER_ENUM_FEMALE: 'women',
-  GENDER_ENUM_UNISEX: 'unisex',
-};
-function genderLabel(g?: string): string {
-  return (g && GENDER_LABEL[g]) || '—';
+// ?season=FW-2026. Parsed strictly — a mangled value is dropped rather than filtering to nothing.
+function parseSeason(raw: string | null): common_SkuSeason | undefined {
+  if (!raw) return undefined;
+  const [code, year] = raw.split('-');
+  const enumCode = `SEASON_ENUM_${(code ?? '').toUpperCase()}` as common_SeasonEnum;
+  if (!SEASON_OPTIONS.some((o) => o.value === enumCode)) return undefined;
+  const parsedYear = Number(year);
+  if (!Number.isInteger(parsedYear) || parsedYear <= 0) return undefined;
+  return { code: enumCode, year: parsedYear };
 }
-
-const AUX_SUBTYPE_LABEL: Record<string, string> = {
-  TECH_CARD_AUX_SUBTYPE_BRAND_LABEL: 'brand label',
-  TECH_CARD_AUX_SUBTYPE_CARE_LABEL: 'care label',
-  TECH_CARD_AUX_SUBTYPE_SIZE_LABEL: 'size label',
-  TECH_CARD_AUX_SUBTYPE_HANGTAG: 'hangtag',
-  TECH_CARD_AUX_SUBTYPE_STICKER: 'sticker',
-  TECH_CARD_AUX_SUBTYPE_DUST_BAG: 'dust bag',
-  TECH_CARD_AUX_SUBTYPE_BOX: 'box',
-  TECH_CARD_AUX_SUBTYPE_INSERT: 'insert',
-  TECH_CARD_AUX_SUBTYPE_HANGER: 'hanger',
-  TECH_CARD_AUX_SUBTYPE_OTHER: 'other',
-};
-function auxSubtypeLabel(s?: string): string {
-  return (s && AUX_SUBTYPE_LABEL[s]) || '—';
-}
-
-const COLUMNS = [
-  '',
-  'style #',
-  'name',
-  'brand',
-  'season',
-  'stage',
-  'approval',
-  'gender',
-  'updated',
-  '',
-];
 
 export function TechCardList() {
-  const navigate = useNavigate();
   const { showMessage } = useSnackBarStore();
   const deleteTechCard = useDeleteTechCard();
   const canEdit = usePermissions().canWrite(SECTION.techCards);
+  // The category tree is already in memory (DictionaryProvider loads it once at startup).
+  const { dictionary } = useDictionary();
 
-  // The stage filter lives in the URL (R-1): the board's "see all" hand-off lands pre-filtered,
-  // the Select writes back, and a reload/share reproduces the same view. Validated — a mangled
-  // ?stage= must not be sent to the API (it would return nothing and read as an empty list).
+  // Every filter lives in the URL (R-1): the board's "see all" hand-off lands pre-filtered, the
+  // chips write back, and a reload/share reproduces the same view. Validated — a mangled ?stage=
+  // must not be sent to the API (it would return nothing and read as an empty list).
   const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState('');
+
+  const setParam = (key: string, next: string | undefined) =>
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next) p.set(key, next);
+        else p.delete(key);
+        return p;
+      },
+      { replace: true },
+    );
+
   const stageParam = searchParams.get('stage');
   const stage: common_TechCardStage = techCardStageOptions.some((o) => o.value === stageParam)
     ? (stageParam as common_TechCardStage)
     : ALL_STAGES;
-  const setStage = (next: string) =>
-    setSearchParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        if (next && next !== ALL_STAGES) p.set('stage', next);
-        else p.delete('stage');
-        return p;
-      },
-      { replace: true },
-    );
 
-  // Purpose (sellable | auxiliary) lives in the URL the same way as stage, so a shared/reloaded
-  // link reproduces the same tab. Defaults to sellable so auxiliary items (dust bags, shoppers…)
-  // stay out of the main list.
+  // Purpose (sellable | auxiliary) defaults to sellable so auxiliary items (dust bags, shoppers…)
+  // stay out of the main list. There is no "all" value on the RPC, so it is a two-state toggle
+  // rather than a removable filter — the chip opens a picker instead of carrying a ✕.
   const purposeParam = searchParams.get('purpose');
   const purpose: string = techCardPurposeOptions.some((o) => o.value === purposeParam)
     ? (purposeParam as string)
     : DEFAULT_PURPOSE;
-  const setPurpose = (next: string) =>
-    setSearchParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        if (next && next !== DEFAULT_PURPOSE) p.set('purpose', next);
-        else p.delete('purpose');
-        return p;
-      },
-      { replace: true },
-    );
+
+  const season = useMemo(() => parseSeason(searchParams.get('season')), [searchParams]);
+
+  // ?category=<id>, validated as a positive integer only — NOT against the dictionary. On a shared
+  // link the dictionary is often still in flight, and rejecting a well-formed id because its name
+  // has not arrived yet would silently widen the list instead of narrowing it.
+  const categoryId = useMemo(() => {
+    const id = Number(searchParams.get('category'));
+    return Number.isInteger(id) && id > 0 ? id : undefined;
+  }, [searchParams]);
+
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteTechCards(
       {
         name: name.trim() || undefined,
         stage: stage === ALL_STAGES ? undefined : stage,
         purpose,
+        skuSeason: season,
+        // One id whatever level it came from: the server matches category_id OR top/sub/type.
+        categoryIds: categoryId ? [categoryId] : undefined,
       },
       LIMIT,
     );
   const { ref, inView } = useInView({ rootMargin: '200px' });
-  const [pendingDelete, setPendingDelete] = useState<{ id: number } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: number; label: string } | null>(null);
 
   useEffect(() => {
     if (inView && hasNextPage && !isFetchingNextPage) {
@@ -120,8 +111,71 @@ export function TechCardList() {
     }
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const techCards = data?.pages.flatMap((page) => page.techCards) ?? [];
+  // Every filter is now server-side, so `total` is the true matching count and this reads
+  // "loaded of matching".
+  const techCards = useMemo(() => data?.pages.flatMap((page) => page.techCards) ?? [], [data]);
   const total = data?.pages[0]?.total ?? techCards.length;
+
+  // The facet is "seasons seen so far", not "every season on file" — there is no list-seasons RPC,
+  // so the only source is the rows that have come back. It must accumulate ACROSS filter changes
+  // precisely because the query is server-filtered: once a season is picked the pages carry only
+  // that season, and a pool rebuilt from them would collapse to the one option already chosen.
+  const [seasonPool, setSeasonPool] = useState<common_SkuSeason[]>([]);
+  useEffect(() => {
+    const found = techCards
+      .map((tc) => tc.skuSeason)
+      .filter((s): s is common_SkuSeason => !!s?.code && !!s?.year);
+    if (found.length === 0) return;
+    setSeasonPool((prev) => {
+      const seen = new Map<string, common_SkuSeason>(prev.map((s) => [seasonParam(s), s]));
+      let changed = false;
+      for (const s of found) {
+        const key = seasonParam(s);
+        if (!seen.has(key)) {
+          seen.set(key, s);
+          changed = true;
+        }
+      }
+      if (!changed) return prev;
+      return [...seen.values()].sort(
+        (a, b) => (b.year ?? 0) - (a.year ?? 0) || String(a.code).localeCompare(String(b.code)),
+      );
+    });
+  }, [techCards]);
+
+  const seasonOptions = useMemo(() => {
+    const pool = [...seasonPool];
+    if (season && !pool.some((s) => seasonParam(s) === seasonParam(season))) pool.unshift(season);
+    return pool.map((s) => ({ value: seasonParam(s), label: seasonLabel(s) }));
+  }, [seasonPool, season]);
+
+  // The whole tree is offerable because category_ids matches at ANY level — "outerwear" (top) and
+  // "parka" (type) are both single-id picks, so the client never has to expand a branch. Walked
+  // depth-first so the popover reads as the tree it is; the depth cap also stops a cyclic parentId.
+  const categoryOptions = useMemo(() => {
+    const cats = dictionary?.categories ?? [];
+    const out: PickerOption[] = [];
+    const walk = (c: common_Category, depth: number) => {
+      const id = c.id ?? 0;
+      out.push({ value: String(id), label: c.name ?? `#${id}`, depth });
+      if (!id || depth >= 2) return;
+      for (const child of getCategoriesByParentId(cats, id)) walk(child, depth + 1);
+    };
+    for (const c of cats) if (c.level === 'top_category') walk(c, 0);
+    return out;
+  }, [dictionary?.categories]);
+
+  const categoryLabel = useMemo(
+    () => (dictionary?.categories ?? []).find((c) => c.id === categoryId)?.name,
+    [dictionary?.categories, categoryId],
+  );
+
+  // Purpose is a two-state toggle with no "all", so it never counts as narrowing.
+  const narrowed = !!season || !!categoryId || stage !== ALL_STAGES || !!name.trim();
+
+  // One request, on an explicitly destructive action: the cascade counts come off the full card.
+  const pendingCard = useTechCard(pendingDelete?.id);
+  const cascade = pendingCard.data?.techCard;
 
   function confirmDelete() {
     if (!pendingDelete) return;
@@ -133,186 +187,251 @@ export function TechCardList() {
     setPendingDelete(null);
   }
 
-  const toggle = 'border px-3 py-1.5 text-textBaseSize uppercase transition-colors';
-
   return (
-    <div className='flex flex-col gap-4'>
-      <div className='flex items-center'>
-        {techCardPurposeOptions.map((o, i) => (
-          <button
-            key={o.value}
-            type='button'
-            onClick={() => setPurpose(o.value)}
-            className={`${toggle} ${i > 0 ? '-ml-px' : ''} ${
-              purpose === o.value
-                ? 'border-textColor text-textColor'
-                : 'border-textInactiveColor text-textInactiveColor hover:text-textColor'
-            }`}
-          >
-            {o.value}
-          </button>
-        ))}
-      </div>
-
-      <div className='flex flex-wrap items-end justify-between gap-3'>
-        <div className='flex flex-wrap items-end gap-3'>
-          <div className='w-56'>
-            <Input
-              name='name'
-              value={name}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-              placeholder='search name / style number'
-            />
-          </div>
-          <div className='w-44'>
-            <Select
-              name='stage'
-              value={stage}
-              items={stageFilterItems}
-              onValueChange={(val: string) => setStage(val ?? ALL_STAGES)}
-            />
-          </div>
+    <div className='flex flex-col gap-2.5'>
+      {/* 6.4 — one chip bar. Every filter is a chip; what is narrowing the list is literally
+          readable, and an active one is removable in a single click. */}
+      <Toolbar>
+        <div className='min-w-[150px] flex-1'>
+          <Input
+            name='name'
+            value={name}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+            placeholder='search name / style №'
+            aria-label='search tech cards'
+          />
         </div>
-        <Text variant='inactive' size='small'>
+        <ChipRow>
+          <PickerChip
+            title='purpose'
+            label={purpose}
+            selected
+            options={techCardPurposeOptions.map((o) => ({ value: o.value, label: o.label }))}
+            onSelect={(v) => setParam('purpose', v === DEFAULT_PURPOSE ? undefined : v)}
+          />
+          {stage === ALL_STAGES ? (
+            <PickerChip
+              title='stage'
+              label='+ stage'
+              options={techCardStageOptions.map((o) => ({ value: o.value, label: o.label }))}
+              onSelect={(v) => setParam('stage', v)}
+            />
+          ) : (
+            <Chip selected onRemove={() => setParam('stage', undefined)}>
+              {stageLabel(stage)}
+            </Chip>
+          )}
+          {!season ? (
+            seasonOptions.length > 0 && (
+              <PickerChip
+                title='season'
+                label='+ season'
+                options={seasonOptions}
+                onSelect={(v) => setParam('season', v)}
+              />
+            )
+          ) : (
+            <Chip selected onRemove={() => setParam('season', undefined)}>
+              {seasonLabel(season)}
+            </Chip>
+          )}
+          {!categoryId ? (
+            categoryOptions.length > 0 && (
+              <PickerChip
+                title='category'
+                label='+ category'
+                options={categoryOptions}
+                onSelect={(v) => setParam('category', v)}
+              />
+            )
+          ) : (
+            <Chip selected onRemove={() => setParam('category', undefined)}>
+              {categoryLabel || `#${categoryId}`}
+            </Chip>
+          )}
+        </ChipRow>
+        <ToolbarSpacer />
+        <Text size='micro' variant='label' className='tabular-nums'>
           {techCards.length} of {total}
         </Text>
-      </div>
+      </Toolbar>
 
       {isLoading ? (
         <div className='flex justify-center py-20'>
-          <Text variant='inactive' className='animate-pulse'>
+          <Text variant='label' className='animate-pulse uppercase'>
             loading tech cards…
           </Text>
         </div>
       ) : isError ? (
         <div className='flex justify-center py-20'>
-          <Text variant='inactive' className='uppercase'>
+          <Text variant='label' className='uppercase'>
             failed to load tech cards — refresh to retry
           </Text>
         </div>
       ) : techCards.length === 0 ? (
         <div className='flex justify-center py-20'>
-          <Text variant='inactive' className='uppercase'>
-            no tech cards
+          <Text variant='label' className='uppercase'>
+            {narrowed ? 'nothing matches these filters' : 'no tech cards'}
           </Text>
         </div>
       ) : (
-        <div className='overflow-x-auto border border-textInactiveColor'>
-          <table className='w-full min-w-max border-collapse text-textBaseSize'>
-            <thead>
-              <tr className='border-b border-textInactiveColor bg-textInactiveColor/20'>
-                {COLUMNS.map((h, i) => (
-                  <th key={i} className='px-2 py-2 text-left'>
-                    <Text variant='uppercase' size='small'>
-                      {h}
-                    </Text>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {techCards.map((tc) => {
-                const id = tc.id ?? 0;
-                return (
-                  <tr
-                    key={id}
-                    role='button'
-                    tabIndex={0}
-                    onClick={() => navigate(`/tech-cards/${id}`)}
-                    onKeyDown={(e) => e.key === 'Enter' && navigate(`/tech-cards/${id}`)}
-                    className='cursor-pointer border-b border-textInactiveColor transition-colors last:border-b-0 hover:bg-highlightColor/5'
-                  >
-                    <td className='px-2 py-2'>
-                      <div className='size-12 shrink-0 overflow-hidden border border-textInactiveColor bg-textInactiveColor/10'>
-                        {tc.previewUrl ? (
-                          <img
-                            src={tc.previewUrl}
-                            alt=''
-                            className='size-full object-cover'
-                            loading='lazy'
-                          />
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className='px-2 py-2'>
-                      <Text variant='uppercase'>{tc.styleNumber || '—'}</Text>
-                    </td>
-                    <td className='px-2 py-2'>
-                      <div className='flex items-center gap-2'>
-                        <Text>{tc.name || '—'}</Text>
-                        <AuxBadge purpose={tc.purpose} />
-                        {purpose === 'auxiliary' && (
-                          <Text variant='inactive' size='small'>
-                            {auxSubtypeLabel(tc.auxSubtype)}
-                          </Text>
-                        )}
-                      </div>
-                    </td>
-                    <td className='px-2 py-2'>
-                      <Text variant='inactive'>{tc.brand || '—'}</Text>
-                    </td>
-                    <td className='px-2 py-2'>
-                      <Text variant='inactive'>
-                        {tc.skuSeason?.code
-                          ? `${tc.skuSeason.code.replace('SEASON_ENUM_', '')}${
-                              tc.skuSeason.year ? ` ${tc.skuSeason.year}` : ''
-                            }`
-                          : '—'}
-                      </Text>
-                    </td>
-                    <td className='px-2 py-2'>
-                      <Text variant='inactive'>{stageLabel(tc.stage)}</Text>
-                    </td>
-                    <td className='px-2 py-2'>
-                      <Text variant='inactive'>{approvalStateLabel(tc.approvalState)}</Text>
-                    </td>
-                    <td className='px-2 py-2'>
-                      <Text variant='inactive'>{genderLabel(tc.targetGender)}</Text>
-                    </td>
-                    <td className='whitespace-nowrap px-2 py-2'>
-                      <Text variant='inactive' size='small'>
-                        {formatTechCardDate(tc.updatedAt)}
-                      </Text>
-                    </td>
-                    <td className='px-2 py-2'>
-                      {canEdit && (
-                        <Button
-                          type='button'
-                          aria-label='delete tech card'
-                          onClick={(e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            setPendingDelete({ id });
-                          }}
-                          className='border border-textInactiveColor bg-bgColor px-1.5 leading-none'
-                        >
-                          ✕
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        // 6.1 — thumbnail cards. A style with no sketch still gets a tile; the striped
+        // placeholder is the point.
+        <Tiles min={140}>
+          {techCards.map((tc) => {
+            const id = tc.id ?? 0;
+            return (
+              <TechCardTile
+                key={id}
+                card={tc}
+                action={
+                  <div className='flex items-center gap-1'>
+                    <ColorwayBadge card={tc} />
+                    {canEdit ? (
+                      <Button
+                        type='button'
+                        size='xs'
+                        variant='secondary'
+                        aria-label='delete tech card'
+                        className='bg-bgColor'
+                        onClick={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          setPendingDelete({
+                            id,
+                            label: tc.styleNumber || tc.name || '',
+                          });
+                        }}
+                      >
+                        ✕
+                      </Button>
+                    ) : null}
+                  </div>
+                }
+              />
+            );
+          })}
+        </Tiles>
       )}
 
       {hasNextPage && (
         <div ref={ref} className='flex justify-center py-4'>
-          {isFetchingNextPage && <Text variant='inactive'>loading more…</Text>}
+          {isFetchingNextPage && (
+            <Text size='micro' variant='label' className='uppercase'>
+              loading more…
+            </Text>
+          )}
         </div>
       )}
 
-      <ConfirmationModal
-        open={!!pendingDelete}
-        onOpenChange={(open) => !open && setPendingDelete(null)}
-        onConfirm={confirmDelete}
-        title='delete tech card'
-        confirmLabel='delete'
-        cancelLabel='cancel'
-      >
-        <Text>delete this tech card? all its sections cascade and this cannot be undone.</Text>
-      </ConfirmationModal>
+      {/* 6.5 — show exactly what dies, then make the hand type the style number. Slow on purpose. */}
+      {pendingDelete && (
+        <ConfirmationModal
+          open
+          width='sm'
+          onOpenChange={(open) => !open && setPendingDelete(null)}
+          onConfirm={confirmDelete}
+          title={pendingDelete.label ? `delete ${pendingDelete.label}?` : 'delete tech card'}
+          confirmLabel='delete'
+          cancelLabel='cancel'
+          typeToConfirm={pendingDelete.label || undefined}
+        >
+          {pendingCard.isLoading ? (
+            <Text size='micro' variant='label' className='uppercase'>
+              loading what this deletes…
+            </Text>
+          ) : pendingCard.isError ? (
+            <Text size='micro' variant='label' className='uppercase'>
+              could not read the card contents — everything under it still cascades
+            </Text>
+          ) : (
+            <>
+              <Row label='BOM articles' value={cascade?.bomItems?.length ?? 0} />
+              <Row label='colourways & recipes' value={pendingCard.data?.colorways?.length ?? 0} />
+              <Row
+                label='sign-offs · issues'
+                value={`${cascade?.signoffs?.length ?? 0} · ${cascade?.issues?.length ?? 0}`}
+              />
+            </>
+          )}
+          <Text size='micro' variant='label' className='mt-2 uppercase'>
+            all of it cascades and this cannot be undone
+          </Text>
+        </ConfirmationModal>
+      )}
     </div>
+  );
+}
+
+// Live colourway count, off the list row (batched server-side, no N+1). Zero is a real fact — an
+// un-coloured style cannot be sampled or sold — so it is shown, not hidden; `mut` like every other
+// neutral classification keeps it from shouting. Suppressed for auxiliary items (dust bags,
+// shoppers), which have no colourways at all, so "0" there would be noise rather than a state.
+function ColorwayBadge({ card }: { card: common_TechCardListItem }) {
+  if (card.purpose === 'TECH_CARD_PURPOSE_AUXILIARY') return null;
+  // proto3 omits a zero on the wire, so absent and 0 are the same fact.
+  const count = card.colorwayCount ?? 0;
+  return (
+    <Pill tone='mut' title='live colourways' className='pointer-events-none bg-bgColor'>
+      {count} cw
+    </Pill>
+  );
+}
+
+/** `depth` indents a tree level in the popover (category); flat facets leave it unset. */
+type PickerOption = { value: string; label: string; depth?: number };
+
+const OPTION_INDENT = ['', 'pl-2', 'pl-4'];
+
+/**
+ * An inactive facet (`+ stage`) or a fixed-value one (purpose) — a chip that opens a small popover
+ * of values. The chip itself is a non-interactive `span` so it can sit inside the popover's own
+ * trigger button; an ACTIVE removable filter is a plain `Chip … onRemove` instead, never this.
+ */
+function PickerChip({
+  title,
+  label,
+  selected,
+  options,
+  onSelect,
+}: {
+  title: string;
+  label: string;
+  selected?: boolean;
+  options: PickerOption[];
+  onSelect: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      title={title}
+      triggerProps={{ 'aria-label': `filter by ${title}` }}
+      openElement={
+        <Chip selected={selected} dashed={!selected}>
+          {label}
+        </Chip>
+      }
+    >
+      <div className='flex flex-col'>
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type='button'
+            onClick={() => {
+              onSelect(o.value);
+              setOpen(false);
+            }}
+            className={`w-full border-b border-hairline py-1 text-left last:border-b-0 ${
+              OPTION_INDENT[o.depth ?? 0] ?? ''
+            }`}
+          >
+            <Text size='control' component='span' className='uppercase'>
+              {o.label}
+            </Text>
+          </button>
+        ))}
+      </div>
+    </GenericPopover>
   );
 }

@@ -1,9 +1,40 @@
 import { common_Category } from 'api/proto-http/admin';
 import clsx, { ClassValue } from 'clsx';
 import { GENDER_MAP } from 'constants/constants';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
 
 const VALID_GENDERS = Object.keys(GENDER_MAP);
+
+/**
+ * tailwind-merge has no idea about our custom `--text-*` tokens, so out of the box it
+ * classifies `text-micro`, `text-nano`, `text-stat`… as text *colours*. That makes
+ * `cn('text-micro text-labelColor', 'text-error')` silently drop the font size — the
+ * class survives in the source and vanishes in the DOM, which is close to impossible
+ * to spot by reading code.
+ *
+ * Registering them in the `font-size` group fixes it globally: a size and a colour can
+ * now be passed through `cn` together, which every screen in the app does.
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [
+        {
+          text: [
+            'textBaseSize',
+            'small',
+            'control',
+            'micro',
+            'nano',
+            'stat',
+            'statBig',
+            'giantSmall',
+          ],
+        },
+      ],
+    },
+  },
+});
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

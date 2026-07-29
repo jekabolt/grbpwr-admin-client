@@ -108,6 +108,8 @@ export function useJournalEntries(filter: EntriesFilter, enabled = true) {
         sourceType: filter.sourceType || undefined,
         limit: filter.limit,
         offset: filter.offset,
+        q: undefined,
+        order: undefined,
       }),
   });
 }
@@ -140,6 +142,8 @@ export function useAllJournalEntries(f: Omit<EntriesFilter, 'limit' | 'offset'>,
           sourceType: f.sourceType || undefined,
           limit: ACCT_FETCH_ALL_PAGE,
           offset,
+          q: undefined,
+          order: undefined,
         });
         entries.push(...(res.entries ?? []));
         total = res.total ?? 0;

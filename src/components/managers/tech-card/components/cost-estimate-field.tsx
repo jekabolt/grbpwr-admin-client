@@ -9,22 +9,29 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { useState } from 'react';
+import { Accordion } from 'ui/components/accordion';
+import { BarRow } from 'ui/components/bar-row';
+import { CalloutBox } from 'ui/components/callout-box';
+import { DataTable, EmptyCell } from 'ui/components/data-table';
+import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
+import Select from 'ui/components/select';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
-import { decimalToInput } from 'utils/decimal';
+import { Toolbar } from 'ui/components/toolbar';
+import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { useStyleCostEstimate } from './useStyleReadViews';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
-const th = `${cell} text-left uppercase`;
-const thRight = `${cell} text-right uppercase`;
-const td = cell;
-const tdRight = `${cell} text-right`;
-const badge = 'inline-block w-fit shrink-0 border px-1 text-textBaseSize uppercase leading-tight';
+const num = (s?: string) => {
+  const n = parseDecimalNumber(s);
+  return Number.isFinite(n) ? n : 0;
+};
 
 const sectionLabel = (v?: string) =>
   techCardBomSectionOptions.find((o) => o.value === v)?.label ?? v ?? '—';
 
 // Provenance badge for a material line's price (Q4 transparency): which rung of the price ladder
-// it resolved to. NONE is a real gap (no price found anywhere) so it reads as a warning, not just
+// it resolved to. NONE is a real gap (no price found anywhere) so it reads red, not just as
 // another neutral state.
 const PRICE_SOURCE_LABEL: Partial<Record<StyleCostPriceSource, string>> = {
   STYLE_COST_PRICE_SOURCE_BOM_SNAPSHOT: 'plan (snapshot)',
@@ -34,34 +41,18 @@ const PRICE_SOURCE_LABEL: Partial<Record<StyleCostPriceSource, string>> = {
 
 function PriceSourceBadge({ source }: { source?: StyleCostPriceSource }) {
   const label = source ? PRICE_SOURCE_LABEL[source] : undefined;
-  if (!label)
-    return (
-      <Text variant='inactive' size='small'>
-        —
-      </Text>
-    );
-  const warn = source === 'STYLE_COST_PRICE_SOURCE_NONE';
-  return (
-    <span
-      className={`${badge} ${warn ? 'border-warning text-warning' : 'border-textInactiveColor text-textInactiveColor'}`}
-    >
-      {label}
-    </span>
-  );
+  if (!label) return <EmptyCell />;
+  return <Pill tone={source === 'STYLE_COST_PRICE_SOURCE_NONE' ? 'warn' : 'mut'}>{label}</Pill>;
 }
 
 // A base-currency amount that couldn't be folded (hasBase === false, e.g. a currency with no FX
-// rate) — show the raw figure (may be empty) plus an explicit warning, never a silently-wrong 0.
+// rate) — show the raw figure (may be empty) plus an explicit flag, never a silently-wrong 0.
 function BaseAmount({ value, hasBase }: { value: string; hasBase?: boolean }) {
   return (
-    <div className='flex flex-col items-end gap-0.5'>
-      <Text size='small'>{value || '—'}</Text>
-      {hasBase === false && (
-        <Text size='small' className='text-warning'>
-          ⚠ no base rate
-        </Text>
-      )}
-    </div>
+    <span className='flex flex-col items-end gap-0.5'>
+      <span>{value || '—'}</span>
+      {hasBase === false && <Pill tone='warn'>no base rate</Pill>}
+    </span>
   );
 }
 
@@ -74,59 +65,57 @@ function MaterialsTable({
 }) {
   if (materials.length === 0) {
     return (
-      <Text variant='label' size='small'>
+      <Text size='micro' variant='label'>
         no BOM materials
       </Text>
     );
   }
   return (
-    <div className='overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse'>
-        <thead>
-          <tr>
-            <th className={th}>material</th>
-            <th className={th}>section</th>
-            <th className={thRight}>consumption</th>
-            <th className={thRight}>unit price</th>
-            <th className={th}>source</th>
-            <th className={thRight}>wastage %</th>
-            <th className={thRight}>line total ({baseCurrency || 'base'})</th>
+    <DataTable>
+      <thead>
+        <tr>
+          <th>material</th>
+          <th>section</th>
+          <th>consumption</th>
+          <th>unit price</th>
+          <th>source</th>
+          <th>wastage %</th>
+          <th>line total ({baseCurrency || 'base'})</th>
+        </tr>
+      </thead>
+      <tbody>
+        {materials.map((m, i) => (
+          <tr key={m.bomItemId || i}>
+            <td>{m.materialName || `#${m.bomItemId}`}</td>
+            <td>{sectionLabel(m.section)}</td>
+            <td>
+              {decimalToInput(m.consumption) || '—'} {m.unit || ''}
+            </td>
+            <td>
+              {decimalToInput(m.unitPrice) || '—'} {m.currency || ''}
+            </td>
+            <td>
+              <span className='flex flex-col items-end gap-0.5'>
+                <PriceSourceBadge source={m.priceSource} />
+                {m.priceDate && (
+                  <Text size='micro' variant='label' component='span'>
+                    {String(m.priceDate).slice(0, 10)}
+                  </Text>
+                )}
+              </span>
+            </td>
+            <td>{decimalToInput(m.wastagePct) || <EmptyCell />}</td>
+            <td>
+              <BaseAmount value={decimalToInput(m.lineTotalBase)} hasBase={m.hasBase} />
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {materials.map((m, i) => (
-            <tr key={m.bomItemId || i}>
-              <td className={td}>{m.materialName || `#${m.bomItemId}`}</td>
-              <td className={td}>{sectionLabel(m.section)}</td>
-              <td className={tdRight}>
-                {decimalToInput(m.consumption) || '—'} {m.unit || ''}
-              </td>
-              <td className={tdRight}>
-                {decimalToInput(m.unitPrice) || '—'} {m.currency || ''}
-              </td>
-              <td className={td}>
-                <div className='flex flex-col items-start gap-0.5'>
-                  <PriceSourceBadge source={m.priceSource} />
-                  {m.priceDate && (
-                    <Text variant='label' size='small'>
-                      {String(m.priceDate).slice(0, 10)}
-                    </Text>
-                  )}
-                </div>
-              </td>
-              <td className={tdRight}>{decimalToInput(m.wastagePct) || '—'}</td>
-              <td className={tdRight}>
-                <BaseAmount value={decimalToInput(m.lineTotalBase)} hasBase={m.hasBase} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+        ))}
+      </tbody>
+    </DataTable>
   );
 }
 
-function ArticlesList({
+function ArticlesTable({
   articles,
   baseCurrency,
 }: {
@@ -135,101 +124,34 @@ function ArticlesList({
 }) {
   if (articles.length === 0) {
     return (
-      <Text variant='label' size='small'>
+      <Text size='micro' variant='label'>
         no cost articles
       </Text>
     );
   }
   return (
-    <div className='overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse'>
-        <thead>
-          <tr>
-            <th className={th}>kind</th>
-            <th className={thRight}>amount</th>
-            <th className={thRight}>amount ({baseCurrency || 'base'})</th>
+    <DataTable>
+      <thead>
+        <tr>
+          <th>kind</th>
+          <th>amount</th>
+          <th>amount ({baseCurrency || 'base'})</th>
+        </tr>
+      </thead>
+      <tbody>
+        {articles.map((a, i) => (
+          <tr key={i}>
+            <td>{a.kind || '—'}</td>
+            <td>
+              {decimalToInput(a.amount) || '—'} {a.currency || ''}
+            </td>
+            <td>
+              <BaseAmount value={decimalToInput(a.amountBase)} hasBase={a.hasBase} />
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {articles.map((a, i) => (
-            <tr key={i}>
-              <td className={td}>{a.kind || '—'}</td>
-              <td className={tdRight}>
-                {decimalToInput(a.amount) || '—'} {a.currency || ''}
-              </td>
-              <td className={tdRight}>
-                <BaseAmount value={decimalToInput(a.amountBase)} hasBase={a.hasBase} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export function StatCell({
-  label,
-  value,
-  sub,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={`flex flex-col gap-0.5 border p-2 ${
-        highlight ? 'border-textColor' : 'border-textInactiveColor'
-      }`}
-    >
-      <Text variant='label' size='small' className='uppercase'>
-        {label}
-      </Text>
-      <Text size={highlight ? 'large' : 'small'} className='font-bold'>
-        {value}
-      </Text>
-      {sub && (
-        <Text variant='label' size='small'>
-          {sub}
-        </Text>
-      )}
-    </div>
-  );
-}
-
-// The default comparison is deliberately just two figures: the plan estimate vs the production
-// actual. The booked-snapshot reconciliation and the per-kind variance are a level of detail most
-// reads don't need, so they move into the cost-breakdown disclosure below.
-function EstimateVsActual({ comparison, cur }: { comparison?: StyleCostComparison; cur: string }) {
-  if (!comparison) return null;
-  return (
-    <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
-      <Text variant='uppercase' size='small'>
-        estimate vs actual
-      </Text>
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-        <StatCell
-          label='estimate (plan)'
-          value={`${decimalToInput(comparison.estimateUnitCostBase) || '—'} ${cur}`}
-        />
-        {comparison.hasActual ? (
-          <StatCell
-            label='actual (production)'
-            value={`${decimalToInput(comparison.actualUnitCostBase) || '—'} ${cur}`}
-            sub={
-              comparison.estimateVsActual?.value
-                ? `Δ vs estimate ${decimalToInput(comparison.estimateVsActual)}`
-                : undefined
-            }
-          />
-        ) : (
-          <StatCell label='actual (production)' value='—' sub='no production actuals yet' />
-        )}
-      </div>
-    </div>
+        ))}
+      </tbody>
+    </DataTable>
   );
 }
 
@@ -244,12 +166,10 @@ function SnapshotReconciliation({
 }) {
   if (!comparison?.hasSnapshot) return null;
   return (
-    <div className='flex flex-col gap-2'>
-      <Text variant='uppercase' size='small'>
-        booked snapshot
-      </Text>
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-        <StatCell
+    <>
+      <GroupLabel>booked snapshot</GroupLabel>
+      <StatGrid min={130}>
+        <Stat
           label={`snapshot${comparison.snapshotSource ? ` · ${comparison.snapshotSource}` : ''}`}
           value={`${decimalToInput(comparison.snapshotCostBase) || '—'} ${cur}`}
           sub={
@@ -259,152 +179,163 @@ function SnapshotReconciliation({
           }
         />
         {comparison.hasActual && (
-          <StatCell
+          <Stat
             label='actual vs snapshot Δ'
             value={decimalToInput(comparison.actualVsSnapshot) || '—'}
           />
         )}
-      </div>
-    </div>
+      </StatGrid>
+    </>
   );
 }
 
-// Per-cost-kind estimate/actual variance. Detail-level; breakdown-only.
+/**
+ * Per-cost-kind variance, drawn as bars off the biggest mover — the one part of this accordion
+ * people actually read (spec 16.3). Two seconds to see that trims, not fabric, are the problem.
+ *
+ * The delta is computed here from estimate/actual rather than read off `variance`: the field's
+ * sign convention is undocumented, and a flipped sign would paint an overspend green.
+ * With no production actuals there is nothing to vary, so the same bars show where the PLAN
+ * cost sits instead (ink, not a fake zero variance).
+ */
 function VarianceByKind({ comparison, cur }: { comparison?: StyleCostComparison; cur: string }) {
   const byKind = comparison?.byKind ?? [];
   if (byKind.length === 0) return null;
+  const hasActual = !!comparison?.hasActual;
+
+  const rows = byKind.map((k) => {
+    const estimate = num(decimalToInput(k.estimateBase));
+    const actual = num(decimalToInput(k.actualBase));
+    const delta = k.hasActual ? actual - estimate : 0;
+    return { kind: k.kind || '—', estimate, delta, lineHasActual: !!k.hasActual };
+  });
+
+  const moved = rows.filter((r) => r.lineHasActual && Math.abs(r.delta) >= 0.005);
+  const shown = hasActual ? moved : rows.filter((r) => r.estimate > 0);
+  const measure = (r: (typeof rows)[number]) => (hasActual ? Math.abs(r.delta) : r.estimate);
+  const max = Math.max(...shown.map(measure), 0);
+  const sorted = [...shown].sort((a, b) => measure(b) - measure(a));
+
   return (
-    <div className='flex flex-col gap-2'>
-      <Text variant='uppercase' size='small'>
-        variance by cost kind
-      </Text>
-      <div className='overflow-x-auto'>
-        <table className='w-full min-w-max border-collapse'>
-          <thead>
-            <tr>
-              <th className={th}>kind</th>
-              <th className={thRight}>estimate ({cur})</th>
-              {comparison?.hasActual && <th className={thRight}>actual ({cur})</th>}
-              {comparison?.hasActual && <th className={thRight}>variance</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {byKind.map((k, i) => (
-              <tr key={i}>
-                <td className={td}>{k.kind || '—'}</td>
-                <td className={tdRight}>{decimalToInput(k.estimateBase) || '—'}</td>
-                {comparison?.hasActual && (
-                  <td className={tdRight}>
-                    {k.hasActual ? decimalToInput(k.actualBase) || '—' : '—'}
-                  </td>
-                )}
-                {comparison?.hasActual && (
-                  <td className={tdRight}>
-                    {k.hasActual ? decimalToInput(k.variance) || '—' : '—'}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <>
+      <GroupLabel>{hasActual ? 'variance by cost kind' : 'plan by cost kind'}</GroupLabel>
+      {sorted.length === 0 ? (
+        <Text size='micro' variant='label'>
+          {hasActual ? 'every kind came in on plan' : 'no per-kind figures'}
+        </Text>
+      ) : (
+        <div className='flex flex-col'>
+          {sorted.map((r) => (
+            <BarRow
+              key={r.kind}
+              name={r.kind}
+              pct={max > 0 ? (measure(r) / max) * 100 : 0}
+              tone={hasActual ? (r.delta > 0 ? 'down' : 'up') : 'ink'}
+              value={
+                hasActual
+                  ? `${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta).toFixed(2)}`
+                  : `${r.estimate.toFixed(2)} ${cur}`
+              }
+            />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
 function EstimateBody({ estimate }: { estimate: StyleCostEstimate }) {
   const baseCurrency = estimate.baseCurrency || '';
-  const cur = baseCurrency || '';
-  // Progressive disclosure: only the headline cost + plan-vs-actual show by default. The booked
-  // snapshot, per-kind variance, defect %, and the raw material / article rows are one click away
-  // (#72 "too much data, where to start").
-  const [showBreakdown, setShowBreakdown] = useState(false);
+  const cur = baseCurrency;
   const materials = estimate.materials ?? [];
   const articles = estimate.articles ?? [];
   const comparison = estimate.comparison;
 
+  // Computed locally (not read off `estimateVsActual`) so the sign is unambiguous: positive =
+  // over plan = red.
+  const planUnit = num(decimalToInput(comparison?.estimateUnitCostBase));
+  const actualUnit = num(decimalToInput(comparison?.actualUnitCostBase));
+  const hasActual = !!comparison?.hasActual;
+  const delta = hasActual ? actualUnit - planUnit : 0;
+  const deltaPct = hasActual && planUnit > 0 ? (delta / planUnit) * 100 : undefined;
+
   return (
-    <div className='flex flex-col gap-4'>
-      {/* Summary-first: the "what does this cost" headline before any comparison or raw rows. */}
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
-        <StatCell
-          label='unit cost'
+    <div className='flex flex-col gap-3'>
+      {/* Summary-first: what it costs, what it actually cost, and how big the run is. */}
+      <StatGrid min={130}>
+        <Stat
+          label='plan'
+          big
           value={`${decimalToInput(estimate.unitCostBase) || '—'} ${cur}`}
-          highlight
+          sub='per garment'
         />
-        <StatCell
+        <Stat
+          label='actual'
+          value={
+            hasActual ? `${decimalToInput(comparison?.actualUnitCostBase) || '—'} ${cur}` : '—'
+          }
+          tone={!hasActual || Math.abs(delta) < 0.005 ? undefined : delta > 0 ? 'down' : 'up'}
+          sub={
+            !hasActual
+              ? 'no production actuals yet'
+              : deltaPct != null
+                ? `${delta > 0 ? '+' : '−'}${Math.abs(deltaPct).toFixed(1)}% vs plan`
+                : undefined
+          }
+        />
+        <Stat
           label='order cost'
           value={`${decimalToInput(estimate.orderCostBase) || '—'} ${cur}`}
           sub={`qty ${estimate.orderQty ?? 0}`}
         />
-        <StatCell
+        <Stat
           label='materials / unit'
           value={`${decimalToInput(estimate.materialsPerUnitBase) || '—'} ${cur}`}
         />
-      </div>
+        <Stat label='defect %' value={decimalToInput(estimate.defectPct) || '—'} />
+      </StatGrid>
 
-      {/* The comparison this tab exists for, reduced to the two figures that matter. */}
-      <EstimateVsActual comparison={comparison} cur={cur} />
-
-      {comparison?.caveat && (
-        <Text variant='label' size='small'>
-          {comparison.caveat}
-        </Text>
-      )}
-
-      <Text variant='label' size='small'>
-        all amounts in {baseCurrency || 'the style base currency'}, folded via costing FX rates.
+      <Text size='micro' variant='label'>
+        all amounts in {baseCurrency || 'the style base currency'}, folded via the costing FX rates.
+        An estimate is not an actual is not the booked COGS snapshot — the three figures are
+        deliberately kept apart.
       </Text>
 
       {estimate.caveat && (
-        <Text variant='label' size='small'>
-          {estimate.caveat}
-        </Text>
+        <CalloutBox tone='note'>
+          <Text size='micro'>{estimate.caveat}</Text>
+        </CalloutBox>
+      )}
+      {comparison?.caveat && (
+        <CalloutBox tone='note'>
+          <Text size='micro'>{comparison.caveat}</Text>
+        </CalloutBox>
       )}
 
-      <div className='flex flex-col gap-4 border-t border-textInactiveColor pt-3'>
-        <button
-          type='button'
-          onClick={() => setShowBreakdown((v) => !v)}
-          aria-expanded={showBreakdown}
-          className='flex w-fit items-center gap-1 uppercase text-labelColor hover:text-textColor'
-        >
-          <Text size='small'>
-            {showBreakdown ? '▾' : '▸'} cost breakdown ({materials.length} materials ·{' '}
-            {articles.length} articles)
+      {/* Progressive disclosure: the evidence is one click from the headline (#72 "too much
+          data, where to start"). */}
+      <Accordion
+        title={
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
+            cost breakdown ({materials.length} materials · {articles.length} articles)
           </Text>
-        </button>
-        {showBreakdown && (
-          <>
-            <SnapshotReconciliation comparison={comparison} cur={cur} />
-            <VarianceByKind comparison={comparison} cur={cur} />
-
-            <div className='flex flex-col gap-2'>
-              <Text variant='uppercase' size='small'>
-                materials
-              </Text>
-              <MaterialsTable materials={materials} baseCurrency={baseCurrency} />
-            </div>
-
-            <div className='flex flex-col gap-2'>
-              <Text variant='uppercase' size='small'>
-                cost articles
-              </Text>
-              <ArticlesList articles={articles} baseCurrency={baseCurrency} />
-            </div>
-
-            {/* Non-cost % echo — deprioritised into the breakdown per the costing simplification. */}
-            <div className='flex flex-col gap-2'>
-              <Text variant='uppercase' size='small'>
-                quality
-              </Text>
-              <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
-                <StatCell label='defect %' value={decimalToInput(estimate.defectPct) || '—'} />
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+        }
+      >
+        <div className='flex flex-col gap-2'>
+          <VarianceByKind comparison={comparison} cur={cur} />
+          <SnapshotReconciliation comparison={comparison} cur={cur} />
+          <GroupLabel>materials</GroupLabel>
+          <MaterialsTable materials={materials} baseCurrency={baseCurrency} />
+          <GroupLabel>cost articles</GroupLabel>
+          <ArticlesTable articles={articles} baseCurrency={baseCurrency} />
+        </div>
+      </Accordion>
     </div>
   );
 }
@@ -433,7 +364,7 @@ export function CostEstimateField({
 
   if (!canReadCosting) {
     return (
-      <Text variant='label' size='small'>
+      <Text size='micro' variant='label'>
         costing access required
       </Text>
     );
@@ -441,7 +372,7 @@ export function CostEstimateField({
 
   if (colorways.length === 0) {
     return (
-      <Text variant='label' size='small'>
+      <Text size='micro' variant='label'>
         no colourways yet; add one before estimating cost
       </Text>
     );
@@ -450,37 +381,51 @@ export function CostEstimateField({
   const forbidden = isError && (error as { status?: number } | null)?.status === 403;
   const estimate = data?.estimate;
 
+  const colorwayItems = colorways.map((c) => ({
+    value: String(c.colorwayId),
+    label: `${c.baseSku || `#${c.colorwayId}`}${c.colorCode ? ` / ${c.colorCode}` : ''}`,
+  }));
+
   return (
-    <div className='flex flex-col gap-4'>
-      <label className='flex flex-col gap-1 sm:w-72'>
-        <Text size='small'>colourway</Text>
-        <select
-          className={cell}
-          value={colorwayId}
-          onChange={(e) => setColorwayId(Number(e.target.value) || 0)}
-        >
-          <option value={0}>— select —</option>
-          {colorways.map((c) => (
-            <option key={c.colorwayId} value={c.colorwayId}>
-              {c.baseSku || `#${c.colorwayId}`}
-              {c.colorCode ? ` / ${c.colorCode}` : ''}
-            </option>
-          ))}
-        </select>
-      </label>
+    <div className='flex flex-col gap-3'>
+      {/* Scope: this view is per colourway — a style's colourways are its products, and their
+          material cost differs. Kept as an explicit picker, never defaulted silently. */}
+      <Toolbar className='items-end'>
+        <label className='flex w-[220px] flex-col gap-0.5'>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
+            colourway
+          </Text>
+          <Select
+            name='cost-estimate-colorway'
+            items={colorwayItems}
+            // Radix rejects an item with value '', but '' as the ROOT value is its documented
+            // "cleared" state — which is how the placeholder shows for the unpicked case.
+            value={colorwayId ? String(colorwayId) : ''}
+            onValueChange={(v: string) => setColorwayId(Number(v) || 0)}
+            placeholder='— select —'
+            fullWidth
+          />
+        </label>
+      </Toolbar>
 
       {colorwayId === 0 ? (
-        <Text variant='label' size='small'>
+        <Text size='micro' variant='label'>
           pick a colourway to see its cost estimate
         </Text>
       ) : isLoading ? (
-        <Text size='small'>loading…</Text>
+        <Text size='micro'>loading…</Text>
       ) : forbidden ? (
-        <Text variant='label' size='small'>
+        <Text size='micro' variant='label'>
           costing access required
         </Text>
       ) : isError || !estimate ? (
-        <Text variant='label' size='small'>
+        <Text size='micro' variant='label'>
           estimate unavailable
         </Text>
       ) : (

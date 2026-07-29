@@ -111,10 +111,12 @@ export function SelectTrigger({
   return (
     <Select.Trigger
       className={cn(
-        'flex w-full items-center justify-between gap-2 border-b border-b-textInactiveColor bg-bgColor text-textBaseSize transition-colors focus:border-b-textInactiveColor focus:outline-none focus:ring-0',
-        readOnly && 'cursor-default pointer-events-none opacity-90',
-        // Same red underline as a blocking <Input>, so a required select reads identically.
-        'aria-[invalid=true]:border-b-error aria-[invalid=true]:focus:border-b-error',
+        // Same box as <Input> — a select must be indistinguishable from a text field
+        // until you click it. Was an underline; see tmp/ui-redesign/02-primitives-inline.md.
+        'flex min-h-[22px] w-full items-center justify-between gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none focus:ring-0',
+        readOnly && 'pointer-events-none cursor-default opacity-90',
+        // Same red box as a blocking <Input>, so a required select reads identically.
+        'aria-[invalid=true]:border-error aria-[invalid=true]:focus:border-error',
         className,
       )}
       aria-invalid={invalid || undefined}

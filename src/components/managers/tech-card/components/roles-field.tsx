@@ -1,9 +1,15 @@
 import { common_TechCardRole, common_TechCardRoleAssignment } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
+import { Chip, ChipRow } from 'ui/components/chip';
+import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { useAdmins, useAssignRole, useRemoveRoleAssignment, useRoleAssignments } from './useRoles';
+
+// DELIBERATE: every control in here writes through its own RPC the moment it changes — assignments
+// are keyed to a saved tech_card_id and are not part of the card's draft. Naming who is responsible
+// is not a draft edit, so it is not staged behind the card's save button and never rides its
+// payload. Do not "fix" this into the form.
 
 // The four responsible roles that replace the removed free-text designer/constructor/technologist/
 // approved_by header fields (Q5). Multi per role (an assignment table, not a single name).
@@ -14,7 +20,10 @@ const ROLES: { role: common_TechCardRole; label: string }[] = [
   { role: 'TECH_CARD_ROLE_APPROVER', label: 'approver' },
 ];
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+// Radix Select forbids an empty-string item value, so the "pick someone" row needs the same '0'
+// sentinel the category browser uses — and re-pinning the value to it after every pick keeps the
+// control reading as an action ("+ add designer…") rather than as a filled field.
+const NONE = '0';
 
 function RoleRow({
   techCardId,
@@ -53,51 +62,46 @@ function RoleRow({
     });
   };
 
+  const items = [
+    { value: NONE, label: `+ add ${label}…` },
+    ...available.map((a) => ({ value: String(a.id), label: a.username || `#${a.id}` })),
+  ];
+
   return (
-    <div className='flex flex-col gap-1.5 border-b border-textInactiveColor pb-3 last:border-b-0 last:pb-0'>
-      <Text variant='label' size='small'>
+    <div className='space-y-px border-b border-hairline pb-2 last:border-b-0 last:pb-0'>
+      {/* same 10px uppercase field label the form fields render, without the form plumbing */}
+      <Text size='micro' variant='label' tracking='label' className='uppercase leading-none'>
         {label}
       </Text>
-      <div className='flex flex-wrap items-center gap-1.5'>
+      <div className='flex flex-wrap items-center gap-1'>
         {mine.length === 0 && (
-          <Text variant='inactive' size='small'>
+          <Text size='micro' variant='label' component='span'>
             — none —
           </Text>
         )}
-        {mine.map((a) => (
-          <span
-            key={a.id}
-            className='flex items-center gap-1 border border-textInactiveColor px-2 py-0.5 text-textBaseSize'
-            title={a.assignedBy ? `assigned by ${a.assignedBy}` : undefined}
-          >
-            {a.adminUsername || `#${a.adminId}`}
-            {canEdit && (
-              <button
-                type='button'
-                aria-label={`remove ${label}`}
-                className='text-textInactiveColor hover:text-textColor'
-                onClick={() => drop(a.id)}
-              >
-                ✕
-              </button>
-            )}
-          </span>
-        ))}
+        <ChipRow>
+          {mine.map((a) => (
+            <Chip
+              key={a.id}
+              selected
+              title={a.assignedBy ? `assigned by ${a.assignedBy}` : undefined}
+              onRemove={canEdit ? () => drop(a.id) : undefined}
+            >
+              {a.adminUsername || `#${a.adminId}`}
+            </Chip>
+          ))}
+        </ChipRow>
       </div>
       {canEdit && available.length > 0 && (
-        <select
-          className={`${cell} max-w-xs`}
-          value={0}
+        <Select
+          name={`role-${role}`}
+          className='max-w-[220px]'
+          items={items}
+          value={NONE}
+          placeholder={`+ add ${label}…`}
           disabled={assign.isPending}
-          onChange={(e) => add(Number(e.target.value) || 0)}
-        >
-          <option value={0}>+ add {label}…</option>
-          {available.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.username || `#${a.id}`}
-            </option>
-          ))}
-        </select>
+          onValueChange={(v?: string) => add(Number(v) || 0)}
+        />
       )}
     </div>
   );
@@ -109,10 +113,15 @@ export function RolesField({ techCardId, canEdit }: { techCardId: number; canEdi
   const { data, isLoading } = useRoleAssignments(techCardId);
   const assignments = data?.assignments ?? [];
 
-  if (isLoading) return <Text size='small'>loading…</Text>;
+  if (isLoading)
+    return (
+      <Text size='micro' variant='label'>
+        loading…
+      </Text>
+    );
 
   return (
-    <div className='flex flex-col gap-3'>
+    <div className='flex flex-col gap-2'>
       {ROLES.map((r) => (
         <RoleRow
           key={r.role}

@@ -11,7 +11,13 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import { GroupLabel } from 'ui/components/group-label';
+import Input from 'ui/components/input';
+import { Pill } from 'ui/components/pill';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
+import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import {
   decimalToInput,
   normalizeDecimalInput,
@@ -19,12 +25,10 @@ import {
   sanitizeDecimal,
 } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
-import { AuxCardTilePicker, DUST_BAG_SUBTYPE, auxCardLabel } from './labels-pkg-shared';
+import { AuxCardPickerModal, DUST_BAG_SUBTYPE, Field, auxCardLabel } from './labels-pkg-shared';
 import { usePackagingRecipe, useUpsertPackagingRecipe } from './useAssemblyPacking';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
-
-type Row = {
+type RecipeRow = {
   key: string; // client-only stable id (ulid) — add/remove never remaps another row's inputs
   materialId: number;
   materialName: string;
@@ -40,9 +44,9 @@ type Row = {
 
 // The fields resolveAux resolves an aux card's output into (fed to a row as if MaterialPicker
 // had picked it directly).
-type AuxResolved = Pick<Row, 'materialId' | 'materialName' | 'materialUnit' | 'sourceLabel'>;
+type AuxResolved = Pick<RecipeRow, 'materialId' | 'materialName' | 'materialUnit' | 'sourceLabel'>;
 
-const rowFrom = (i: PackagingRecipeLine): Row => ({
+const rowFrom = (i: PackagingRecipeLine): RecipeRow => ({
   key: ulid(),
   materialId: i.materialId ?? 0,
   materialName: i.materialName ?? '',
@@ -53,7 +57,7 @@ const rowFrom = (i: PackagingRecipeLine): Row => ({
   sourceLabel: '',
 });
 
-const newRow = (): Row => ({
+const newRow = (): RecipeRow => ({
   key: ulid(),
   materialId: 0,
   materialName: '',
@@ -64,12 +68,11 @@ const newRow = (): Row => ({
   sourceLabel: '',
 });
 
-// One packaging-recipe line as a scannable card (#70): a prominent material thumbnail + name up
-// top, the material picker (+ "from an aux card's output" swap) to change it, then the two
-// quantities side by side with their meaning spelled out, and active + remove always in place.
+// One packaging-recipe line as a card: the material thumbnail + name up top, the material picker
+// (+ "from an aux card's output" swap) to change it, then the two quantities side by side with
+// their meaning spelled out, and active + remove always in place.
 function PackagingRow({
   row,
-  index,
   canEdit,
   material,
   resolveAux,
@@ -77,143 +80,133 @@ function PackagingRow({
   onPatch,
   onRemove,
 }: {
-  row: Row;
-  index: number;
+  row: RecipeRow;
   canEdit: boolean;
   material?: common_Material; // resolved from the catalog for the thumbnail (id-only rows)
   resolveAux: (card: common_TechCardListItem) => Promise<AuxResolved | null>;
   resolvingId: number | null;
-  onPatch: (patch: Partial<Row>) => void;
+  onPatch: (patch: Partial<RecipeRow>) => void;
   onRemove: () => void;
 }) {
   const [auxOpen, setAuxOpen] = useState(false);
 
   return (
-    <div className='space-y-3 border border-textInactiveColor p-3'>
-      <div className='flex items-start gap-3'>
-        <MaterialThumb material={material} size='md' />
-        <div className='min-w-0 flex-1 space-y-0.5'>
-          <Text variant='uppercase' size='small'>
-            material {index + 1}
-          </Text>
-          <Text size='small' className='truncate'>
+    <div className='border border-borderColor p-2'>
+      <div className='flex items-center gap-2'>
+        <MaterialThumb material={material} size='sm' />
+        <div className='min-w-0 flex-1'>
+          <Text size='control' component='span' className='block truncate font-bold uppercase'>
             {row.materialName || (row.materialId ? `#${row.materialId}` : '— not set —')}
           </Text>
           {row.sourceLabel && (
-            <Text variant='inactive' size='small' className='truncate'>
+            <Text size='micro' variant='label' className='truncate'>
               via {row.sourceLabel}
             </Text>
           )}
         </div>
+        {!row.active && <Pill tone='mut'>inactive</Pill>}
         {canEdit && (
-          <Button type='button' variant='secondary' aria-label='remove material' onClick={onRemove}>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            aria-label='remove material'
+            onClick={onRemove}
+          >
             ✕
           </Button>
         )}
       </div>
 
       {canEdit && (
-        <div className='space-y-1'>
-          <MaterialPicker
-            value={row.materialId}
-            section='TECH_CARD_BOM_SECTION_PACKAGING'
-            onChange={(materialId, picked) =>
-              onPatch({
-                materialId,
-                materialName: picked?.name ?? '',
-                materialUnit: picked?.unit ?? '',
-                sourceLabel: '', // picked directly — no longer "via" an aux card
-              })
-            }
-          />
-          {auxOpen ? (
-            <AuxCardTilePicker
-              title="from an aux card's output"
-              hint='resolves the chosen auxiliary card’s output material into this row'
-              busyId={resolvingId}
-              onCancel={() => setAuxOpen(false)}
-              onPick={async (card) => {
-                const r = await resolveAux(card);
-                if (r) {
-                  onPatch(r);
-                  setAuxOpen(false);
-                }
-              }}
+        <div className='mt-1.5 flex flex-wrap items-center gap-1.5'>
+          <div className='min-w-40 flex-1'>
+            <MaterialPicker
+              value={row.materialId}
+              section='TECH_CARD_BOM_SECTION_PACKAGING'
+              onChange={(materialId, picked) =>
+                onPatch({
+                  materialId,
+                  materialName: picked?.name ?? '',
+                  materialUnit: picked?.unit ?? '',
+                  sourceLabel: '', // picked directly — no longer "via" an aux card
+                })
+              }
             />
-          ) : (
-            <button
-              type='button'
-              className='text-left text-[11px] uppercase text-labelColor underline'
-              onClick={() => setAuxOpen(true)}
-            >
-              or pick from an aux card's output ▸
-            </button>
-          )}
+          </div>
+          <Button type='button' variant='secondary' size='xs' onClick={() => setAuxOpen(true)}>
+            from an aux card
+          </Button>
         </div>
       )}
 
-      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
-        <div className='space-y-1'>
-          <Text size='small' variant='label'>
-            qty / order
-          </Text>
-          <Text variant='inactive' size='small'>
+      <div className='mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2'>
+        <Field label={`qty / order${row.materialUnit ? ` (${row.materialUnit})` : ''}`}>
+          {canEdit ? (
+            <Input
+              name={`pkg-per-order-${row.key}`}
+              inputMode='decimal'
+              value={row.qtyPerOrder}
+              className='text-right'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                onPatch({ qtyPerOrder: sanitizeDecimal(e.target.value) })
+              }
+            />
+          ) : (
+            <Text size='control'>{row.qtyPerOrder || '—'}</Text>
+          )}
+          <Text size='micro' variant='label'>
             once per shipment — a branded box, a filler
           </Text>
+        </Field>
+        <Field label={`qty / item${row.materialUnit ? ` (${row.materialUnit})` : ''}`}>
           {canEdit ? (
-            <div className='flex items-center gap-1'>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={row.qtyPerOrder}
-                onChange={(e) => onPatch({ qtyPerOrder: sanitizeDecimal(e.target.value) })}
-              />
-              <Text variant='inactive' size='small'>
-                {row.materialUnit}
-              </Text>
-            </div>
+            <Input
+              name={`pkg-per-item-${row.key}`}
+              inputMode='decimal'
+              value={row.qtyPerItem}
+              className='text-right'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                onPatch({ qtyPerItem: sanitizeDecimal(e.target.value) })
+              }
+            />
           ) : (
-            <Text size='small'>
-              {row.qtyPerOrder || '—'} {row.materialUnit}
-            </Text>
+            <Text size='control'>{row.qtyPerItem || '—'}</Text>
           )}
-        </div>
-        <div className='space-y-1'>
-          <Text size='small' variant='label'>
-            qty / item
-          </Text>
-          <Text variant='inactive' size='small'>
+          <Text size='micro' variant='label'>
             × every unit of this style — a dust bag, a hangtag
           </Text>
-          {canEdit ? (
-            <div className='flex items-center gap-1'>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={row.qtyPerItem}
-                onChange={(e) => onPatch({ qtyPerItem: sanitizeDecimal(e.target.value) })}
-              />
-              <Text variant='inactive' size='small'>
-                {row.materialUnit}
-              </Text>
-            </div>
-          ) : (
-            <Text size='small'>
-              {row.qtyPerItem || '—'} {row.materialUnit}
-            </Text>
-          )}
-        </div>
+        </Field>
       </div>
 
-      <label className='flex items-center gap-2'>
+      <label className='mt-1.5 flex items-center gap-1.5'>
         <input
           type='checkbox'
           disabled={!canEdit}
           checked={row.active}
           onChange={(e) => onPatch({ active: e.target.checked })}
         />
-        <Text size='small'>active</Text>
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          active
+        </Text>
       </label>
+
+      {canEdit && auxOpen && (
+        <AuxCardPickerModal
+          open
+          onOpenChange={(o) => !o && setAuxOpen(false)}
+          title="from an aux card's output"
+          hint='resolves the chosen auxiliary card’s output material into this row'
+          busyId={resolvingId}
+          onPick={async (card) => {
+            const r = await resolveAux(card);
+            if (r) {
+              onPatch(r);
+              setAuxOpen(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -252,7 +245,7 @@ export function PackagingRecipeField({
     [allItems, techCardId],
   );
 
-  const [rows, setRows] = useState<Row[]>([]);
+  const [rows, setRows] = useState<RecipeRow[]>([]);
   // A background refetch (e.g. right after save) must not clobber unsaved edits mid-flow.
   const [dirty, setDirty] = useState(false);
   // Top-level aux picker: 'dust' (the common пыльник case, pre-filtered) or 'aux' (any output).
@@ -264,7 +257,7 @@ export function PackagingRecipeField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, dirty, techCardId]);
 
-  const patch = (i: number, p: Partial<Row>) => {
+  const patch = (i: number, p: Partial<RecipeRow>) => {
     setDirty(true);
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
   };
@@ -286,7 +279,7 @@ export function PackagingRecipeField({
     if (!card.id || resolvingId != null) return null;
     setResolvingId(card.id);
     try {
-      const res = await adminService.GetTechCard({ id: card.id });
+      const res = await adminService.GetTechCard({ id: card.id, vatCountryCode: undefined });
       const materialId = res.techCard?.techCard?.outputMaterialId ?? 0;
       if (!materialId) {
         showMessage(`${auxCardLabel(card)} has no output material set yet`, 'error');
@@ -363,149 +356,137 @@ export function PackagingRecipeField({
   };
 
   return (
-    <div className='flex flex-col gap-4'>
-      <div className='space-y-2 border border-textInactiveColor bg-textInactiveColor/10 p-3'>
-        <Text variant='uppercase' size='small'>
-          inherited global fallback
-        </Text>
-        <Text variant='inactive' size='small'>
-          used at order time only while this style has no active recipe of its own (below). Edit the
-          global list from materials → packaging BOM.
+    <div className='flex flex-col gap-2'>
+      {/* Context, not content: what this style falls back to at order time while it has no active
+          recipe of its own. A note box, so it never reads as something you edit here. */}
+      <CalloutBox tone='note'>
+        <Text size='micro' component='span'>
+          <b>inherited global fallback</b> — used at order time only while this style has no active
+          recipe of its own. Edit the global list from materials → packaging BOM.
         </Text>
         {isLoading ? (
-          <Text variant='inactive' size='small'>
+          <Text size='micro' className='mt-1'>
             loading…
           </Text>
         ) : globalLines.length === 0 ? (
-          <Text variant='inactive' size='small'>
+          <Text size='micro' className='mt-1'>
             no global packaging recipe
           </Text>
         ) : (
-          <ul className='flex flex-col gap-2'>
+          <div className='mt-1'>
             {globalLines.map((l) => (
-              <li key={l.id} className='flex items-center gap-2'>
-                <MaterialThumb material={materialsById.get(l.materialId ?? 0)} size='sm' />
-                <div className='flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-3 text-textBaseSize'>
-                  <span className='truncate'>
-                    {l.materialName || `#${l.materialId}`}
-                    {l.active === false ? ' (inactive)' : ''}
+              <Row
+                key={l.id}
+                label={
+                  <span className='flex min-w-0 items-center gap-1.5'>
+                    <MaterialThumb material={materialsById.get(l.materialId ?? 0)} size='sm' />
+                    <span className='truncate'>
+                      {l.materialName || `#${l.materialId}`}
+                      {l.active === false ? ' (inactive)' : ''}
+                    </span>
                   </span>
-                  <span className='text-textInactiveColor'>
-                    {decimalToInput(l.qtyPerOrder) || '—'} / order ·{' '}
-                    {decimalToInput(l.qtyPerItem) || '—'} / item {l.materialUnit}
-                  </span>
-                </div>
-              </li>
+                }
+                value={`${decimalToInput(l.qtyPerOrder) || '—'} / order · ${
+                  decimalToInput(l.qtyPerItem) || '—'
+                } / item ${l.materialUnit ?? ''}`}
+              />
             ))}
-          </ul>
+          </div>
         )}
-      </div>
+      </CalloutBox>
 
-      <div className='flex flex-col gap-3'>
-        <Text variant='inactive' size='small'>
-          this style's own packaging recipe — overrides the global fallback above while active.
-          {dirty ? <span className='ml-2 text-labelColor'>· unsaved</span> : null}
+      <GroupLabel>this style's own recipe</GroupLabel>
+
+      <Toolbar>
+        <Text size='micro' variant='label' component='span'>
+          overrides the global fallback above while active
         </Text>
+        {dirty && <Pill tone='attention'>unsaved</Pill>}
+        <ToolbarSpacer />
         {canEdit && (
-          <div className='flex flex-wrap items-center gap-2'>
+          <>
             {/* The common case, surfaced as an obvious action (#43): the garment ships inside an
                 aux fabric dust bag (пыльник) — same aux-output mechanism, one prominent button. */}
             <Button
               type='button'
+              variant='secondary'
+              size='sm'
+              onClick={() => setAddPicker('dust')}
+            >
+              ＋ dust bag (aux)
+            </Button>
+            <Button type='button' variant='secondary' size='sm' onClick={() => setAddPicker('aux')}>
+              ＋ from an aux card
+            </Button>
+            <Button type='button' variant='secondary' size='sm' onClick={addRow}>
+              ＋ material
+            </Button>
+            {/* Distinct from the main card's header Save — this persists to UpsertPackagingRecipe,
+                a separate RPC the header Save does NOT cover. */}
+            <Button
+              type='button'
               variant='main'
-              size='lg'
-              className='uppercase'
-              onClick={() => setAddPicker((p) => (p === 'dust' ? null : 'dust'))}
-            >
-              ＋ goes in a dust bag (aux)
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={() => setAddPicker((p) => (p === 'aux' ? null : 'aux'))}
-            >
-              ＋ from an aux card's output
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={addRow}
-            >
-              ＋ add material
-            </Button>
-            {/* Distinct from the main card's header Save (variant='main' above) — this persists to
-                UpsertPackagingRecipe, a separate RPC the header Save does NOT cover. */}
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
+              size='sm'
               disabled={upsert.isPending || !dirty}
               onClick={save}
             >
               {upsert.isPending ? 'saving…' : 'save packaging recipe'}
             </Button>
-          </div>
+          </>
         )}
+      </Toolbar>
 
-        {addPicker && canEdit && (
-          <AuxCardTilePicker
-            // Remount when the mode flips (dust ↔ aux) so the sub-type filter re-initialises
-            // instead of keeping the previous mode's stale value.
-            key={addPicker}
-            initialSubtype={addPicker === 'dust' ? DUST_BAG_SUBTYPE : undefined}
-            title={
-              addPicker === 'dust'
-                ? 'pick the dust bag (пыльник) this style ships in'
-                : 'pick an aux card — its output material fills a new row'
-            }
-            hint={
-              addPicker === 'dust'
-                ? 'the garment ships inside this aux fabric bag — adds a per-item packaging line (1 / item)'
-                : 'resolves the chosen auxiliary card’s output material into a new row'
-            }
-            busyId={resolvingId}
-            onCancel={() => setAddPicker(null)}
-            onPick={(card) => addFromAux(card, addPicker === 'dust')}
-          />
-        )}
-      </div>
+      {addPicker && canEdit && (
+        <AuxCardPickerModal
+          // Remount when the mode flips (dust ↔ aux) so the sub-type filter re-initialises
+          // instead of keeping the previous mode's stale value.
+          key={addPicker}
+          open
+          onOpenChange={(o) => !o && setAddPicker(null)}
+          initialSubtype={addPicker === 'dust' ? DUST_BAG_SUBTYPE : undefined}
+          title={
+            addPicker === 'dust'
+              ? 'pick the dust bag (пыльник) this style ships in'
+              : 'pick an aux card — its output material fills a new row'
+          }
+          hint={
+            addPicker === 'dust'
+              ? 'the garment ships inside this aux fabric bag — adds a per-item packaging line (1 / item)'
+              : 'resolves the chosen auxiliary card’s output material into a new row'
+          }
+          busyId={resolvingId}
+          onPick={(card) => addFromAux(card, addPicker === 'dust')}
+        />
+      )}
 
       {isLoading ? (
-        <Text variant='inactive' size='small'>
+        <Text size='micro' variant='label'>
           loading…
         </Text>
       ) : isError ? (
-        <div className='flex items-center gap-3'>
-          <Text variant='error' size='small'>
-            failed to load packaging recipe
-          </Text>
-          <button
-            type='button'
-            className='text-textBaseSize uppercase underline'
-            onClick={() => refetch()}
-          >
-            retry
-          </button>
-        </div>
+        <CalloutBox tone='error'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text size='micro' component='span'>
+              <b>failed to load the packaging recipe</b>
+            </Text>
+            <Button type='button' variant='secondary' size='xs' onClick={() => refetch()}>
+              retry
+            </Button>
+          </div>
+        </CalloutBox>
       ) : rows.length === 0 ? (
-        <Text variant='inactive' size='small'>
+        <Text size='micro' variant='label'>
           no style-specific packaging yet
           {canEdit
             ? ' — add a dust bag, an aux output, or a material to override the global fallback'
             : ''}
         </Text>
       ) : (
-        <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+        <div className='grid grid-cols-1 gap-1.5 lg:grid-cols-2'>
           {rows.map((r, i) => (
             <PackagingRow
               key={r.key}
               row={r}
-              index={i}
               canEdit={canEdit}
               material={materialsById.get(r.materialId)}
               resolveAux={resolveAux}

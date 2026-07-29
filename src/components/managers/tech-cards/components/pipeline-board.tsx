@@ -1,16 +1,22 @@
 import { common_TechCardListItem, common_TechCardStage } from 'api/proto-http/admin';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Accordion } from 'ui/components/accordion';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { AuxBadge } from './aux-badge';
-import { approvalStateLabel } from './utils';
+import { TechCardTile } from './tech-card-tile';
+import { ZERO_TIMESTAMP } from './utils';
 import { useStylePipeline } from './useTechCardQuery';
 
-// Style pipeline board (screen D2 / gap-01): one column per lifecycle stage with its total count
-// and a few preview cards, loaded in a single GetStylePipeline call. Informational — a card jumps
-// to the editor; a column's "see all" hands off to the list view pre-filtered by that stage.
+// Style pipeline board (screen D2 / gap-01): the season at a glance — where is everything piling
+// up. Loaded in a single GetStylePipeline call. Informational: a card jumps to the editor, a lane's
+// "see all" hands off to the list view pre-filtered by that stage.
+//
+// 6.2 — stages are ROWS, not columns. Six columns forced the whole page sideways on a laptop; a
+// swimlane scrolls its own strip instead and leaves room for the per-stage count and age.
 
-// Column order + labels are board-local: IDEA isn't in techCardStageOptions yet (added in W4), so
-// stageLabel() would blank it. This fixes the left-to-right flow regardless of server order.
+// Lane order + labels are board-local so the top-to-bottom flow is fixed regardless of the order
+// the server returns the columns in.
 const STAGE_ORDER: { value: common_TechCardStage; label: string }[] = [
   { value: 'TECH_CARD_STAGE_IDEA', label: 'idea' },
   { value: 'TECH_CARD_STAGE_PROTO', label: 'proto' },
@@ -25,13 +31,48 @@ const stageRank = (s?: string) => {
 };
 const stageLabelOf = (s?: string) => STAGE_ORDER.find((o) => o.value === s)?.label ?? '—';
 
+const DAY = 86_400_000;
+const STUCK_DAYS = 14;
+const COLLAPSED_KEY = 'techCards.board.collapsed';
+
+function ageDays(timestamp?: string): number {
+  if (!timestamp || timestamp === ZERO_TIMESTAMP) return 0;
+  const t = new Date(timestamp).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.floor((Date.now() - t) / DAY);
+}
+
+// Collapse state is a UI preference, not data — localStorage, not the URL.
+function readCollapsed(): string[] {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export function PipelineBoard() {
   const { data, isLoading, isError } = useStylePipeline(6);
+  const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
+
+  const toggle = (stage: string, open: boolean) => {
+    setCollapsed((prev) => {
+      const next = open ? prev.filter((s) => s !== stage) : [...new Set([...prev, stage])];
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next));
+      } catch {
+        // a private-mode / quota failure must not take the board down
+      }
+      return next;
+    });
+  };
 
   if (isLoading) {
     return (
       <div className='flex justify-center py-20'>
-        <Text variant='inactive' className='animate-pulse'>
+        <Text variant='label' className='animate-pulse uppercase'>
           loading pipeline…
         </Text>
       </div>
@@ -41,7 +82,7 @@ export function PipelineBoard() {
   if (isError) {
     return (
       <div className='flex justify-center py-20'>
-        <Text variant='inactive' className='uppercase'>
+        <Text variant='label' className='uppercase'>
           failed to load the pipeline — refresh to retry
         </Text>
       </div>
@@ -54,7 +95,7 @@ export function PipelineBoard() {
   if (columns.length === 0) {
     return (
       <div className='flex justify-center py-20'>
-        <Text variant='inactive' className='uppercase'>
+        <Text variant='label' className='uppercase'>
           no tech cards
         </Text>
       </div>
@@ -62,80 +103,79 @@ export function PipelineBoard() {
   }
 
   return (
-    <div className='flex gap-3 overflow-x-auto pb-2'>
-      {columns.map((col) => {
+    // Lanes stack into ONE box: -mt-px collapses each lane's top border into the one above it, so
+    // the board reads as a single ruled surface rather than six stacked cards.
+    <div className='flex flex-col'>
+      {columns.map((col, index) => {
         const cards = col.cards ?? [];
         const count = col.count ?? cards.length;
         const more = count - cards.length;
+        const stage = col.stage ?? '';
+        // Age is read off the cards this call returned (a per-stage preview, not the whole lane),
+        // so it is a floor: "at least these have not moved in N days", never an overstatement.
+        const ages = cards.map((c) => ageDays(c.updatedAt));
+        const oldest = ages.length ? Math.max(...ages) : 0;
+        const stuck = ages.filter((d) => d >= STUCK_DAYS).length;
+
         return (
-          <div
-            key={col.stage}
-            className='flex w-64 shrink-0 flex-col border border-textInactiveColor'
-          >
-            <div className='flex items-center justify-between border-b border-textInactiveColor bg-textInactiveColor/20 px-2 py-2'>
-              <Text variant='uppercase' size='small'>
+          <Accordion
+            key={stage}
+            className={index > 0 ? '-mt-px' : undefined}
+            open={!collapsed.includes(stage)}
+            onOpenChange={(open) => toggle(stage, open)}
+            title={
+              <Text
+                size='micro'
+                component='span'
+                variant='uppercase'
+                tracking='group'
+                className='font-bold'
+              >
                 {stageLabelOf(col.stage)}
               </Text>
-              <Text variant='inactive' size='small'>
-                {count}
-              </Text>
-            </div>
-            <div className='flex flex-col gap-2 p-2'>
-              {cards.length === 0 ? (
-                <Text variant='inactive' size='small'>
-                  empty
-                </Text>
-              ) : (
-                cards.map((c) => <PipelineCard key={c.id} card={c} />)
-              )}
-              {more > 0 && (
-                <Link
-                  to={`/tech-cards?view=list&stage=${col.stage}`}
-                  className='text-textInactiveColor underline hover:text-textColor'
-                >
-                  <Text variant='inactive' size='small'>
-                    see all {count} →
+            }
+            meta={
+              <>
+                <Pill tone='mut'>{count}</Pill>
+                {stuck > 0 ? (
+                  <Pill tone='warn'>
+                    {stuck} stuck {oldest} d
+                  </Pill>
+                ) : oldest > 0 ? (
+                  <Text size='micro' variant='label' component='span'>
+                    oldest {oldest} d
                   </Text>
-                </Link>
-              )}
-            </div>
-          </div>
+                ) : null}
+              </>
+            }
+          >
+            {cards.length === 0 ? (
+              <Text size='micro' variant='label' className='uppercase'>
+                empty
+              </Text>
+            ) : (
+              <div className='flex gap-1.5 overflow-x-auto'>
+                {cards.map((card: common_TechCardListItem) => (
+                  <TechCardTile
+                    key={card.id}
+                    card={card}
+                    compact
+                    className='w-[110px] shrink-0 grow-0'
+                  />
+                ))}
+                {more > 0 && (
+                  <Link
+                    to={`/tech-cards?view=list&stage=${stage}`}
+                    className='flex shrink-0 items-center px-2 whitespace-nowrap text-micro tracking-label text-labelColor uppercase underline hover:text-textColor'
+                  >
+                    see all {count} →
+                  </Link>
+                )}
+              </div>
+            )}
+          </Accordion>
         );
       })}
-    </div>
-  );
-}
-
-function PipelineCard({ card }: { card: common_TechCardListItem }) {
-  const navigate = useNavigate();
-  const id = card.id ?? 0;
-  return (
-    <div
-      role='button'
-      tabIndex={0}
-      onClick={() => navigate(`/tech-cards/${id}`)}
-      onKeyDown={(e) => e.key === 'Enter' && navigate(`/tech-cards/${id}`)}
-      className='flex cursor-pointer gap-2 border border-textInactiveColor p-1.5 transition-colors hover:bg-highlightColor/5'
-    >
-      <div className='size-12 shrink-0 overflow-hidden border border-textInactiveColor bg-textInactiveColor/10'>
-        {card.previewUrl ? (
-          <img src={card.previewUrl} alt='' className='size-full object-cover' loading='lazy' />
-        ) : null}
-      </div>
-      <div className='flex min-w-0 flex-col'>
-        <div className='flex items-center gap-1.5'>
-          <Text variant='uppercase' size='small' className='truncate'>
-            {card.styleNumber || '—'}
-          </Text>
-          <AuxBadge purpose={card.purpose} />
-        </div>
-        <Text variant='inactive' size='small' className='truncate'>
-          {card.name || '—'}
-        </Text>
-        <Text variant='inactive' size='small'>
-          {approvalStateLabel(card.approvalState)}
-        </Text>
-      </div>
     </div>
   );
 }

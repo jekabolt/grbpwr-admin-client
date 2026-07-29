@@ -76,7 +76,7 @@ const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-neutral-1
 function Sheet({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className='mb-5'>
-      <h2 className='mb-2 break-after-avoid bg-black px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-white'>
+      <h2 className='mb-2 break-after-avoid bg-black px-2 py-1 text-control font-bold uppercase tracking-[0.12em] text-white'>
         {title}
       </h2>
       {children}
@@ -87,7 +87,7 @@ function Sheet({ title, children }: { title: string; children: ReactNode }) {
 function KV({ k, v }: { k: string; v?: ReactNode }) {
   const empty = v == null || v === '' || v === '—';
   return (
-    <div className='flex gap-2 break-inside-avoid border-b border-textInactiveColor py-0.5 text-[11px] leading-tight'>
+    <div className='flex gap-2 break-inside-avoid border-b border-textInactiveColor py-0.5 text-control leading-tight'>
       <span className='w-36 shrink-0 uppercase tracking-wide text-labelColor'>{k}</span>
       <span className='font-medium'>{empty ? '—' : v}</span>
     </div>
@@ -245,7 +245,7 @@ export function TechPackDocument({
           <div className='flex items-start gap-3'>
             <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-black' />
             <div>
-              <div className='text-[10px] uppercase tracking-[0.2em] text-labelColor'>
+              <div className='text-micro uppercase tracking-[0.2em] text-labelColor'>
                 {tc.brand || 'GRBPWR'} · tech pack
               </div>
               <div className='text-2xl font-bold uppercase leading-tight'>
@@ -258,7 +258,7 @@ export function TechPackDocument({
               </div>
             </div>
           </div>
-          <div className='text-right text-[11px] leading-tight'>
+          <div className='text-right text-control leading-tight'>
             <div className='font-semibold uppercase'>{stageLabel(tc.stage)}</div>
             <div>{approvalStateLabel(tc.approvalState)}</div>
             {/* Proof of which frozen snapshot (if any) this printout matches — so a printed
@@ -357,7 +357,7 @@ export function TechPackDocument({
                       );
                     })}
                   </div>
-                  <figcaption className='mt-1 text-[10px] uppercase text-labelColor'>
+                  <figcaption className='mt-1 text-micro uppercase text-labelColor'>
                     {mediaKindL[meta?.kind ?? ''] ?? 'view'}
                     {meta?.caption ? ` · ${meta.caption}` : ''}
                   </figcaption>
@@ -367,7 +367,7 @@ export function TechPackDocument({
           </div>
 
           {has(tc.callouts) && (
-            <table className='mt-3 w-full border-collapse text-[10px]'>
+            <table className='mt-3 w-full border-collapse text-micro'>
               <thead>
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
@@ -407,7 +407,7 @@ export function TechPackDocument({
                     alt=''
                     className='block max-h-[240px] w-auto border border-black'
                   />
-                  <figcaption className='mt-1 text-[10px] uppercase text-labelColor'>
+                  <figcaption className='mt-1 text-micro uppercase text-labelColor'>
                     {mediaKindL[meta?.kind ?? ''] ?? 'reference'}
                     {meta?.caption ? ` · ${meta.caption}` : ''}
                   </figcaption>
@@ -421,7 +421,7 @@ export function TechPackDocument({
       {/* SIZE QUANTITIES */}
       {has(tc.sizeQuantities) && (
         <Sheet title='size run'>
-          <table className='w-full border-collapse text-[11px]'>
+          <table className='w-full border-collapse text-control'>
             <thead>
               <tr>
                 {(tc.sizeQuantities ?? []).map((sq, i) => (
@@ -452,7 +452,7 @@ export function TechPackDocument({
           standard artifact of a garment tech pack; previously never fetched/printed. */}
       {has(sizeIds) && measurements.length > 0 && (
         <Sheet title={`measurements (${unitAbbr})`}>
-          <table className='w-full border-collapse text-[10px]'>
+          <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={`${TH} w-16`}>size</th>
@@ -488,7 +488,7 @@ export function TechPackDocument({
               .map((p, i) => (
                 <figure key={i} className='break-inside-avoid border border-black p-2 text-center'>
                   <PatternQR value={p.url ?? ''} />
-                  <figcaption className='mt-1 text-[10px] uppercase'>
+                  <figcaption className='mt-1 text-micro uppercase'>
                     <div className='font-semibold'>{sizeName(p.sizeId)}</div>
                     {p.filename && (
                       <div className='max-w-[120px] truncate text-labelColor'>{p.filename}</div>
@@ -497,7 +497,7 @@ export function TechPackDocument({
                 </figure>
               ))}
           </div>
-          <p className='mt-2 text-[9px] text-labelColor'>
+          <p className='mt-2 text-nano text-labelColor'>
             наведите камеру на QR, чтобы открыть PDF-выкройку этого размера
           </p>
         </Sheet>
@@ -506,7 +506,7 @@ export function TechPackDocument({
       {/* BILL OF MATERIALS — article catalog (recipe/consumption is per colourway below) */}
       {has(tc.bomItems) && (
         <Sheet title='bill of materials (article catalog)'>
-          <table className='w-full border-collapse text-[10px]'>
+          <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={`${TH} w-6`}>#</th>
@@ -561,7 +561,7 @@ export function TechPackDocument({
           Sat unrendered right alongside the BOM/colourways data it references (task: M10). */}
       {has(tc.pieces) && (
         <Sheet title='cut pieces'>
-          <table className='w-full border-collapse text-[10px]'>
+          <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={`${TH} w-6`}>#</th>
@@ -628,7 +628,7 @@ export function TechPackDocument({
               const dictColor = c.colorCode ? colorByCode.get(c.colorCode) : undefined;
               return (
                 <div key={c.colorwayId ?? i} className='break-inside-avoid'>
-                  <div className='mb-1 flex items-center gap-2 border-b border-black pb-1 text-[11px]'>
+                  <div className='mb-1 flex items-center gap-2 border-b border-black pb-1 text-control'>
                     {dictColor?.hex && (
                       <span
                         className='inline-block size-4 border border-black'
@@ -641,9 +641,9 @@ export function TechPackDocument({
                     <span className='ml-auto text-labelColor'>{lifecycleLabel(c.status)}</span>
                   </div>
                   {usages.length === 0 ? (
-                    <p className='text-[10px] text-labelColor'>нет материалов</p>
+                    <p className='text-micro text-labelColor'>нет материалов</p>
                   ) : (
-                    <table className='w-full border-collapse text-[10px]'>
+                    <table className='w-full border-collapse text-micro'>
                       <thead>
                         <tr>
                           <th className={TH}>part</th>
@@ -706,7 +706,7 @@ export function TechPackDocument({
             </div>
           )}
           {has(tc.operations) && (
-            <table className='w-full border-collapse text-[10px]'>
+            <table className='w-full border-collapse text-micro'>
               <thead>
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
@@ -761,7 +761,7 @@ export function TechPackDocument({
       {(has(tc.labels) || tc.packaging) && (
         <Sheet title='labels & packaging'>
           {has(tc.labels) && (
-            <table className='mb-3 w-full border-collapse text-[10px]'>
+            <table className='mb-3 w-full border-collapse text-micro'>
               <thead>
                 <tr>
                   <th className={TH}>type</th>
@@ -846,7 +846,7 @@ export function TechPackDocument({
           was structurally impossible to render regardless of what this component did. */}
       {has(activeAssembly) && (
         <Sheet title='assembly — on-garment items'>
-          <table className='w-full border-collapse text-[10px]'>
+          <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={TH}>component</th>
@@ -886,11 +886,11 @@ export function TechPackDocument({
       {packagingRows.length > 0 && (
         <Sheet title='packaging recipe'>
           {packagingIsFallback && (
-            <p className='mb-1 text-[9px] text-labelColor'>
+            <p className='mb-1 text-nano text-labelColor'>
               no style-specific recipe — showing the inherited global fallback
             </p>
           )}
-          <table className='w-full border-collapse text-[10px]'>
+          <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={TH}>material</th>
@@ -941,7 +941,7 @@ export function TechPackDocument({
 
           {/* per-colourway material cost */}
           {has(tc.costing.colorwayCosts) && (
-            <table className='mt-3 w-full border-collapse text-[10px]'>
+            <table className='mt-3 w-full border-collapse text-micro'>
               <thead>
                 <tr>
                   <th className={TH}>colourway</th>
@@ -988,7 +988,7 @@ export function TechPackDocument({
             </span>
           </div>
           {tc.costing.hasUnconvertedCurrencies && (
-            <p className='mt-1 text-[10px] text-labelColor'>
+            <p className='mt-1 text-micro text-labelColor'>
               ⚠ contains unconverted currencies — totals are per-currency, not summed
             </p>
           )}
@@ -998,7 +998,7 @@ export function TechPackDocument({
       {/* ISSUES */}
       {has(tc.issues) && (
         <Sheet title='issues'>
-          <table className='w-full border-collapse text-[10px]'>
+          <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={TH}>severity</th>
@@ -1033,7 +1033,7 @@ export function TechPackDocument({
       {/* SIGN-OFFS */}
       {has(tc.signoffs) && (
         <Sheet title='sign-off'>
-          <table className='w-full border-collapse text-[10px]'>
+          <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={TH}>section</th>
@@ -1058,7 +1058,7 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      <footer className='mt-6 border-t border-textInactiveColor pt-2 text-[9px] uppercase tracking-wide text-labelColor'>
+      <footer className='mt-6 border-t border-textInactiveColor pt-2 text-nano uppercase tracking-wide text-labelColor'>
         {tc.brand || 'GRBPWR'} · {tc.styleNumber || ''} · {tc.name || ''} · generated{' '}
         {formatTechCardDate(techCard.updatedAt)}
       </footer>

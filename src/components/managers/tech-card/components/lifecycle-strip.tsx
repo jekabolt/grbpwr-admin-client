@@ -1,163 +1,163 @@
-import { common_Fitting, common_TechCardStage } from 'api/proto-http/admin';
+import { common_TechCardStage } from 'api/proto-http/admin';
+import { useTechCardReadiness } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardApprovalStateOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
-import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
-import { useTechCardFittings } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useLocation, Link } from 'react-router-dom';
+import { cn } from 'lib/utility';
+import { Link, useLocation } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
+import { Placeholder } from 'ui/components/placeholder';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { useSamples } from './useSamples';
 
 // Lifecycle spine (screen D / R-7 / R-8). A hub strip under the tech-card header: a read-only stage
-// stepper (a progress display — stage/approval are edited in the header selects it used to
-// duplicate), a row of counters that link to the samples tab / fittings block / runs list, and the
-// stage's single next-step action (its rationale in the button tooltip). Counts come from
-// already-cheap, cached queries — the spine adds no heavy fetches.
+// stepper (a progress display — stage/approval are edited in the header selects), followed by a
+// CHECKLIST of what the card still needs to enter its NEXT stage.
+//
+// The checklist is the SERVER's (GetTechCardReadiness): which conditions exist, whether each is met,
+// and the factual reason an unmet one failed all arrive over the wire, scored against the saved card.
+// This file used to carry that table itself, guessing at rules the backend did not model; the only
+// opinion left here is WHERE a row gets fixed, which is navigation and can never come from the API.
+//
+// The RPC is advisory and so is this strip: nothing here disables the stage select or blocks a save.
+// The checklist is scored against the SAVED stage, so an unsaved stage change can leave the stepper
+// one step ahead of it — that is what the `unsaved` pill is for.
 
 const SPINE_STAGES: { value: common_TechCardStage; label: string }[] = [
   { value: 'TECH_CARD_STAGE_IDEA', label: 'idea' },
   { value: 'TECH_CARD_STAGE_PROTO', label: 'proto' },
   { value: 'TECH_CARD_STAGE_FIT', label: 'fit' },
   { value: 'TECH_CARD_STAGE_SMS', label: 'sms' },
-  { value: 'TECH_CARD_STAGE_PP', label: 'pp' },
-  { value: 'TECH_CARD_STAGE_PROD', label: 'prod' },
+  { value: 'TECH_CARD_STAGE_PP', label: 'pre-prod' },
+  { value: 'TECH_CARD_STAGE_PROD', label: 'production' },
 ];
 
-// The quick actions that actually matter at each stage, primary first: early stages don't plan
-// production runs, late stages don't book fittings. The strip surfaces only the ONE next step,
-// instead of parking all three buttons on every card (screen D clutter).
-type ActionKey = 'sample' | 'fitting' | 'run';
+// The quick actions that actually matter, primary first: early stages don't plan production runs,
+// late stages don't book fittings. The strip surfaces only the ONE next step, instead of parking
+// all three buttons on every card (screen D clutter).
+type ActionKey = 'sample' | 'fitting' | 'fittings-unresolved' | 'run';
 
-function stageActions(stage: string, samplesCount: number): ActionKey[] {
-  switch (stage) {
-    case 'TECH_CARD_STAGE_IDEA':
-      return ['sample'];
-    case 'TECH_CARD_STAGE_PROTO':
-      return samplesCount === 0 ? ['sample', 'fitting'] : ['fitting', 'sample'];
-    case 'TECH_CARD_STAGE_FIT':
-      return ['fitting', 'sample'];
-    case 'TECH_CARD_STAGE_SMS':
-      return ['sample'];
-    case 'TECH_CARD_STAGE_PP':
-      return ['sample', 'run'];
-    case 'TECH_CARD_STAGE_PROD':
-      return ['run'];
-    default:
-      return ['sample'];
-  }
-}
+// Where a requirement gets fixed, keyed by the server's stable `key`. The backend names the
+// condition and judges it; which button or tab clears it is this admin's navigation, so the mapping
+// stays client-side. A key with no entry renders as a plain row — a requirement added server-side
+// later shows up as advice with no affordance, never as a crash or a blank line.
+const REQ_ACTION: Record<string, ActionKey> = {
+  first_sample: 'sample',
+  sms_sample: 'sample',
+  pp_sample: 'sample',
+  fitting_recorded: 'fitting',
+  fit_approved: 'fitting',
+  fittings_resolved: 'fittings-unresolved',
+  run_planned: 'run',
+};
 
-function nextHint(
-  stage: string,
-  samplesCount: number,
-  fittings: common_Fitting[],
-  runsCount: number,
-  unresolved: number,
-): string {
-  const latest = fittings[0]?.fitting;
-  switch (stage) {
-    case 'TECH_CARD_STAGE_IDEA':
-      return 'sketch the concept, then sew a proto';
-    case 'TECH_CARD_STAGE_PROTO':
-      return samplesCount === 0 ? 'sew a proto sample' : 'book a fitting for the proto';
-    case 'TECH_CARD_STAGE_FIT':
-      if (unresolved > 0)
-        return `resolve ${unresolved} fitting change${unresolved === 1 ? '' : 's'}`;
-      if (!latest) return 'record a fit-sample fitting';
-      if (latest.outcome === 'new_round') {
-        const rn = latest.roundNumber ?? 0;
-        return rn ? `fitting round ${rn + 1}` : 'another fitting round';
-      }
-      if (latest.outcome === 'approved') return 'grade sizes & build the tech card';
-      return 'log the fitting verdict';
-    case 'TECH_CARD_STAGE_SMS':
-      return 'prepare the salesman sample';
-    case 'TECH_CARD_STAGE_PP':
-      return 'sew a PP sample from production fabric';
-    case 'TECH_CARD_STAGE_PROD':
-      return runsCount === 0 ? 'plan a production run' : 'receive the run into stock';
-    default:
-      return '';
-  }
+const REQ_TAB: Record<string, string> = {
+  style_number: 'header',
+  bom_fabric: 'bom',
+  bom_linked: 'bom',
+  colorway_linked: 'colorways',
+  patterns: 'patterns',
+  size_range: 'patterns',
+  costing: 'costing',
+};
+
+const APPROVAL_TONE: Record<string, 'ok' | 'attention' | 'mut' | 'warn'> = {
+  TECH_CARD_APPROVAL_STATE_DRAFT: 'mut',
+  TECH_CARD_APPROVAL_STATE_IN_REVIEW: 'attention',
+  TECH_CARD_APPROVAL_STATE_APPROVED: 'ok',
+  TECH_CARD_APPROVAL_STATE_RELEASED: 'ok',
+  TECH_CARD_APPROVAL_STATE_OBSOLETE: 'warn',
+};
+
+// The reference's 14px `.check-box`: a 1px ink square, filled ink with a white tick once met.
+// No primitive carries this shape (`Chip` is a pill, the form checkbox is a whole field), so it
+// lives here. Decorative — the row states done/to-do in text for screen readers.
+//
+// Concatenated, NOT run through `cn`: `cn` is twMerge, which does not know `text-nano` is a size
+// token and would discard it as a losing text-colour next to `text-bgColor`.
+const CHECKBOX_BASE =
+  'flex size-3.5 shrink-0 items-center justify-center border border-textColor text-nano leading-none';
+
+function CheckBox({ done }: { done: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`${CHECKBOX_BASE} ${done ? 'bg-textColor text-bgColor' : 'text-transparent'}`}
+    >
+      ✓
+    </span>
+  );
 }
 
 export function LifecycleStrip({
   techCardId,
   stage,
   approvalState,
-  productCount,
   canEdit,
   unsaved,
   planRunDisabled,
   planRunDisabledReason,
-  onGoSamples,
+  isAuxiliary,
   onAddSample,
   onGoFittings,
+  onGoTab,
 }: {
   techCardId: number;
   stage: string;
   approvalState: string;
-  productCount: number;
   canEdit: boolean;
   // Stage is edited via the header select; the displayed stage can be an unsaved form value, so
-  // flag it — the stepper reads as "not yet persisted" next to the server-derived counters.
+  // flag it — the stepper reads as "not yet persisted" next to the server-scored checklist.
   unsaved?: boolean;
   planRunDisabled?: boolean;
   planRunDisabledReason?: string;
-  onGoSamples: () => void;
+  /** NF-07 auxiliary card: produces a material, links no products — hides the colourway row. */
+  isAuxiliary?: boolean;
   onAddSample: () => void;
   onGoFittings: (unresolvedOnly: boolean) => void;
+  /** Optional deep-link for rows fixed on a tab rather than by a one-click action. */
+  onGoTab?: (tab: string) => void;
 }) {
   const { pathname, search } = useLocation();
   const returnTo = pathname + search;
 
-  const { data: samplesData } = useSamples(techCardId);
-  const { data: fittings } = useTechCardFittings(techCardId);
-  const { data: runsData } = useProductionRuns(techCardId, '');
+  const { data: readiness, isPending, isError } = useTechCardReadiness(techCardId);
 
-  const samplesCount = samplesData?.samples?.length ?? 0;
-  const fittingList = fittings ?? [];
-  const fittingsCount = fittingList.length;
-  const runsCount = runsData?.total ?? runsData?.runs?.length ?? 0;
-  const unresolved = fittingList.reduce(
-    (n, f) => n + (f.fitting?.changeRequests ?? []).filter((cr) => !cr.resolved).length,
-    0,
+  // A next stage of UNKNOWN means the card is at the END of the lifecycle, not that the server is
+  // undecided — and an empty checklist reads as met, so the server sends `nextStageReady: true`
+  // there too. Gate the checklist on a REAL next stage, never on that boolean alone.
+  const nextStage = readiness?.nextStage;
+  const hasNextStage = !!nextStage && nextStage !== 'TECH_CARD_STAGE_UNKNOWN';
+  const nextLabel = SPINE_STAGES.find((s) => s.value === nextStage)?.label;
+
+  const rows = (readiness?.nextStageRequirements ?? []).filter(
+    // The one fact the readiness RPC cannot know: an NF-07 auxiliary card produces a packaging
+    // material and links no products BY DESIGN, so its colourway row would sit permanently unmet.
+    // The facts query has no notion of `purpose`; until it does, that row is dropped, not failed.
+    (r) => !(isAuxiliary && r.key === 'colorway_linked'),
   );
+  // Counted off the VISIBLE rows rather than read from `nextStageReady`: the aux filter above can
+  // drop a row, and a summary line that disagrees with the list under it is worse than no summary.
+  const openCount = rows.filter((r) => !r.met).length;
+  const firstOpenKey = rows.find((r) => !r.met)?.key;
 
   const approvalLabel =
     techCardApprovalStateOptions.find((o) => o.value === approvalState)?.label ?? '—';
-  const hint = nextHint(stage, samplesCount, fittingList, runsCount, unresolved);
-  const actions = canEdit ? stageActions(stage, samplesCount) : [];
+  const activeIndex = SPINE_STAGES.findIndex((s) => s.value === stage);
 
-  // The stage's single next step — one solid primary button. Its rationale (the former inline
-  // "next: …" sentence) rides in the tooltip, so the strip stays quiet while the action is one click
-  // away. A disabled plan-run keeps its own reason in the tooltip instead.
-  const renderAction = (key: ActionKey, title?: string) => {
+  // The stage's single next step, attached to the row that wants it. A disabled plan-run keeps its
+  // own reason — as visible text on the row, not a tooltip nobody reads.
+  const renderAction = (key: ActionKey) => {
     if (key === 'sample') {
       return (
-        <Button
-          key='sample'
-          type='button'
-          variant='secondary'
-          size='lg'
-          className='uppercase'
-          title={title}
-          onClick={onAddSample}
-        >
+        <Button type='button' variant='underline' size='xs' onClick={onAddSample}>
           + sample
         </Button>
       );
     }
     if (key === 'fitting') {
       return (
-        <Button
-          key='fitting'
-          asChild
-          variant='secondary'
-          size='lg'
-          className='uppercase'
-          title={title}
-        >
+        <Button asChild variant='underline' size='xs'>
           <Link
             to={`${ROUTES.addFitting}?techCardId=${techCardId}&returnTo=${encodeURIComponent(
               returnTo,
@@ -168,99 +168,143 @@ export function LifecycleStrip({
         </Button>
       );
     }
+    if (key === 'fittings-unresolved') {
+      return (
+        <Button type='button' variant='underline' size='xs' onClick={() => onGoFittings(true)}>
+          resolve →
+        </Button>
+      );
+    }
     if (planRunDisabled) {
       return (
-        <Button
-          key='run'
-          type='button'
-          variant='secondary'
-          size='lg'
-          className='uppercase'
-          disabled
-          title={planRunDisabledReason}
-        >
+        <Button type='button' variant='underline' size='xs' disabled>
           plan run
         </Button>
       );
     }
     return (
-      <Button key='run' asChild variant='secondary' size='lg' className='uppercase' title={title}>
+      <Button asChild variant='underline' size='xs'>
         <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>plan run</Link>
       </Button>
     );
   };
 
-  const counter = 'text-textInactiveColor underline hover:text-textColor';
-
   return (
-    <div className='-mx-2.5 flex flex-col gap-1.5 border-b border-textInactiveColor bg-bgColor px-2.5 py-2'>
+    <div className='-mx-2.5 flex flex-col gap-1.5 border-b border-borderColor bg-bgColor px-2.5 py-2'>
       {/* Stage stepper — a READ-ONLY progress display of where the card sits in its lifecycle.
           Stage/approval are edited in the header selects (which write the form); this only reflects
           them, so it no longer duplicates that control. */}
-      <div className='flex flex-wrap items-center gap-1'>
+      <div className='flex flex-wrap items-center gap-1.5'>
         {SPINE_STAGES.map((s, i) => {
-          const active = s.value === stage;
+          const active = i === activeIndex;
+          const passed = activeIndex >= 0 && i < activeIndex;
           return (
-            <div key={s.value} className='flex items-center'>
-              {i > 0 && <span className='mx-0.5 text-textInactiveColor'>─</span>}
-              <span
+            <div key={s.value} className='flex items-center gap-1.5'>
+              {i > 0 && (
+                <span aria-hidden className='text-borderColor'>
+                  →
+                </span>
+              )}
+              <Text
+                component='span'
+                size='micro'
+                tracking='label'
                 aria-current={active ? 'step' : undefined}
-                className={`border px-2 py-0.5 text-textBaseSize uppercase ${
+                className={cn(
+                  'uppercase',
                   active
-                    ? 'border-textColor text-textColor'
-                    : 'border-transparent text-textInactiveColor'
-                }`}
+                    ? 'border-b-2 border-textColor font-bold text-textColor'
+                    : passed
+                      ? 'text-textColor'
+                      : 'text-labelColor',
+                )}
               >
-                {s.label}
-              </span>
+                {passed ? `${s.label} ✓` : s.label}
+              </Text>
             </div>
           );
         })}
-        <span className='ml-2 text-textInactiveColor'>·</span>
-        <Text variant='inactive' size='small' className='uppercase'>
-          approval: {approvalLabel}
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          tracking='label'
+          className='ml-2 uppercase'
+        >
+          approval
         </Text>
-        {unsaved ? (
-          <Text variant='inactive' size='small' className='uppercase'>
-            · unsaved — save the card to keep the stage
-          </Text>
-        ) : null}
+        <Pill tone={APPROVAL_TONE[approvalState] ?? 'mut'}>{approvalLabel}</Pill>
+        {unsaved ? <Pill tone='attention'>unsaved — save to keep the stage</Pill> : null}
       </div>
 
-      {/* Counters — each links to the section that owns the entity. */}
-      <div className='flex flex-wrap items-center gap-x-2 gap-y-1 text-textBaseSize'>
-        <button type='button' className={counter} onClick={onGoSamples}>
-          samples {samplesCount}
-        </button>
-        <span className='text-textInactiveColor'>·</span>
-        <button type='button' className={counter} onClick={() => onGoFittings(false)}>
-          fittings {fittingsCount}
-        </button>
-        {unresolved > 0 && (
-          <button
-            type='button'
-            className='text-error underline hover:opacity-80'
-            onClick={() => onGoFittings(true)}
-            title='unresolved fitting change requests — the fix work list'
+      {/* Stage checklist — the server's answer to "why can't I advance", so it is asked on the spot
+          and answered by the same rules the backend reads. A failed or in-flight call shows its own
+          state: an all-unmet list would read as real advice and send someone fixing nothing. */}
+      {isError ? (
+        <Placeholder label='stage checklist could not be loaded' className='h-8' />
+      ) : isPending ? (
+        <Placeholder label='checking what this stage still needs' className='h-8' />
+      ) : hasNextStage ? (
+        <div>
+          <GroupLabel
+            flush
+            action={
+              openCount > 0 ? (
+                <Text size='micro' variant='label' component='span'>
+                  {openCount} open
+                </Text>
+              ) : null
+            }
           >
-            ({unresolved} unresolved change{unresolved === 1 ? '' : 's'})
-          </button>
-        )}
-        <span className='text-textInactiveColor'>·</span>
-        <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}`} className={counter}>
-          runs {runsCount}
-        </Link>
-        <span className='text-textInactiveColor'>·</span>
-        <Text variant='inactive' size='small'>
-          products {productCount}
-        </Text>
-      </div>
-
-      {/* The stage's single next step. The former always-on "next: …" sentence is demoted to this
-          button's tooltip, so the strip stays quiet while the action stays one click away. */}
-      {actions.length > 0 && (
-        <div className='flex justify-end'>{renderAction(actions[0], hint)}</div>
-      )}
+            {`to reach ${nextLabel ?? 'the next stage'}`}
+          </GroupLabel>
+          {rows.map((r) => {
+            const isFirstOpen = !r.met && r.key === firstOpenKey;
+            // Only the first unmet row carries an action — exactly the ONE next step the strip has
+            // always offered, now attached to the requirement that explains it.
+            const reqAction = REQ_ACTION[r.key ?? ''];
+            const action = isFirstOpen && canEdit ? reqAction : undefined;
+            const tab = isFirstOpen && !reqAction ? REQ_TAB[r.key ?? ''] : undefined;
+            // `detail` is the server's factual reason the row failed ("3 of 7 BOM lines have no
+            // catalog material") and is sent only when unmet. A blocked plan-run REPLACES it: why
+            // you can't act beats why it's unmet, and both at once reads as two problems.
+            const why =
+              action === 'run' && planRunDisabled ? planRunDisabledReason : r.met ? '' : r.detail;
+            return (
+              <div key={r.key} className='flex flex-wrap items-center gap-2 py-0.5'>
+                <CheckBox done={!!r.met} />
+                <span className='sr-only'>{r.met ? 'done' : 'to do'}</span>
+                <Text component='span' className='min-w-0'>
+                  {r.label}
+                </Text>
+                {why ? (
+                  <Text size='micro' variant='label' component='span' className='min-w-0'>
+                    — {why}
+                  </Text>
+                ) : null}
+                <span className='ml-auto flex shrink-0 items-center gap-2'>
+                  {action && renderAction(action)}
+                  {tab && onGoTab && (
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      onClick={() => onGoTab(tab)}
+                    >
+                      → {tab}
+                    </Button>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+          {openCount === 0 && (
+            <Text size='micro' variant='label' className='py-0.5'>
+              nothing left on this stage — advance it in the header select.
+            </Text>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -3,16 +3,22 @@ import { adminService } from 'api/api';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { Link } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Chip } from 'ui/components/chip';
+import GenericPopover from 'ui/components/popover';
+import { Row } from 'ui/components/row';
 
 const DAY = 86_400_000;
 const ageDays = (ts?: string) => (ts ? (Date.now() - new Date(ts).getTime()) / DAY : 0);
 
 // "What needs attention" across the flow, surfaced where the styles live (R-6): materials below
 // their min stock, production runs sitting too long, and fittings due this week. Each fragment is a
-// deep link and only shows when its count is > 0; the whole strip disappears when all clear. Every
-// fragment is gated on the account's read access to its section (and its query only fires then).
-export function AttentionStrip() {
+// deep link and only shows when its count is > 0; the badge disappears entirely when all clear.
+// Every fragment is gated on the account's read access to its section (and its query only fires
+// then).
+//
+// 6.3 — nothing sits above the list any more. The counter rides in the page title row and opens a
+// popover with the detail, so the room you enter first opens on the styles themselves.
+export function AttentionBadge() {
   const { canRead } = usePermissions();
   const canStock = canRead(SECTION.techCards);
   const canRuns = canRead(SECTION.production);
@@ -31,12 +37,12 @@ export function AttentionStrip() {
   });
   const belowMinCount = belowMin.data?.rows?.length ?? 0;
 
-  const alerts = useQuery({
+  const alertSettings = useQuery({
     queryKey: ['attention', 'alertSettings'],
     queryFn: () => adminService.GetAlertSettings({}),
     enabled: canRuns,
   });
-  const staleDays = alerts.data?.settings?.productionRunStaleDays || 14;
+  const staleDays = alertSettings.data?.settings?.productionRunStaleDays || 14;
 
   // #10: one server-side stale query — stale_days returns only the non-terminal runs sitting at
   // least that long, so the 200-row cap no longer drops exactly the old runs we're counting. Wait
@@ -52,7 +58,7 @@ export function AttentionStrip() {
         offset: 0,
         staleDays,
       }),
-    enabled: canRuns && !alerts.isLoading,
+    enabled: canRuns && !alertSettings.isLoading,
   });
   const staleRuns = staleRunsQuery.data?.total ?? staleRunsQuery.data?.runs?.length ?? 0;
 
@@ -72,46 +78,52 @@ export function AttentionStrip() {
   const fittingsThisWeek = (fittings.data?.fittings ?? []).filter((f) => {
     if (f.fitting?.status !== 'FITTING_STATUS_PLANNED') return false;
     const d = ageDays(f.fitting?.fittingDate); // negative = in the future
-    // d < 1 (not <= 0): a fitting planned for this morning must not drop off the strip
+    // d < 1 (not <= 0): a fitting planned for this morning must not drop off the badge
     // mid-day just because its timestamp is now a few hours in the past.
     return d < 1 && d > -7;
   }).length;
 
-  const fragments: { key: string; label: string; to: string }[] = [];
+  const alerts: { key: string; label: string; count: number; to: string }[] = [];
   if (belowMinCount > 0)
-    fragments.push({
+    alerts.push({
       key: 'belowMin',
-      label: `${belowMinCount} material${belowMinCount > 1 ? 's' : ''} below min`,
+      label: 'materials below min',
+      count: belowMinCount,
       to: `${ROUTES.materials}?tab=stock&belowMin=1`,
     });
   if (staleRuns > 0)
-    fragments.push({
+    alerts.push({
       key: 'runs',
-      label: `${staleRuns} run${staleRuns > 1 ? 's' : ''} stale ${staleDays}d+`,
+      label: `runs stale ${staleDays}d+`,
+      count: staleRuns,
       // ?stale=<days> — the runs list runs the same server-side stale_days query, so the link
       // shows exactly the counted runs instead of the full unfiltered list.
       to: `${ROUTES.productionRuns}?stale=${staleDays}`,
     });
   if (fittingsThisWeek > 0)
-    fragments.push({
+    alerts.push({
       key: 'fittings',
-      label: `${fittingsThisWeek} fitting${fittingsThisWeek > 1 ? 's' : ''} this week`,
+      label: 'fittings this week',
+      count: fittingsThisWeek,
       to: ROUTES.fittings,
     });
 
-  if (fragments.length === 0) return null;
+  if (alerts.length === 0) return null;
+
+  const total = alerts.reduce((sum, a) => sum + a.count, 0);
 
   return (
-    <div className='flex flex-wrap items-center gap-x-2 gap-y-1 border border-textInactiveColor px-3 py-2'>
-      <Text size='small'>!</Text>
-      {fragments.map((f, i) => (
-        <span key={f.key} className='flex items-center gap-2'>
-          {i > 0 ? <span className='text-textInactiveColor'>·</span> : null}
-          <Link to={f.to} className='underline'>
-            <Text size='small'>{f.label}</Text>
-          </Link>
-        </span>
+    <GenericPopover
+      title='needs attention'
+      className='w-[270px]'
+      triggerProps={{ 'aria-label': `${total} things need attention` }}
+      openElement={<Chip tone='error'>⚠ {total}</Chip>}
+    >
+      {alerts.map((a) => (
+        <Link key={a.key} to={a.to} className='block hover:text-textColor'>
+          <Row label={a.label} value={a.count} />
+        </Link>
       ))}
-    </div>
+    </GenericPopover>
   );
 }

@@ -77,6 +77,12 @@ export function LineFormModal({
       amount: { value: normalizeDecimalInput(d.amount) },
       currency: d.currency,
       note: d.note.trim(),
+      vatAmount: undefined,
+      vatRegime: undefined,
+      docNumber: undefined,
+      docDate: undefined,
+      supplierVatId: undefined,
+      supplierName: undefined,
     };
     // The server upserts by (month, category, label): refuse to silently clobber a
     // different existing line — a worker-owned ⟳ line especially — under the same key.

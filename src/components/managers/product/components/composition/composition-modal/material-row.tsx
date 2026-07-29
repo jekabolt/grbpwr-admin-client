@@ -1,57 +1,51 @@
-import { cn } from 'lib/utility';
+import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
+import { fibreName } from './utils';
 
-interface MaterialRowProps {
-  materialKey: string;
-  materialCode: string;
-  isSelected: boolean;
-  percentage: number;
-  onToggle: () => void;
-  onPercentageChange: (value: string) => void;
+interface FibreRowProps {
+  code: string;
+  percent: number;
+  onPercentChange: (value: string) => void;
+  onRemove: () => void;
 }
 
-export function MaterialRow({
-  materialKey,
-  materialCode,
-  isSelected,
-  percentage,
-  onToggle,
-  onPercentageChange,
-}: MaterialRowProps) {
+// One fibre of the selected garment part: name · code · percent · remove. Rows are keyed by CODE,
+// so a fibre stays editable after the operator switches the browse category underneath it.
+export function FibreRow({ code, percent, onPercentChange, onRemove }: FibreRowProps) {
+  const name = fibreName(code);
   return (
-    <div
-      role='button'
-      tabIndex={0}
-      className={cn(
-        'border border-text w-full h-16 flex gap-4 p-4 items-center flex-nowrap justify-between hover:cursor-pointer',
-        { 'border-2 border-success': isSelected },
-      )}
-      onClick={onToggle}
-      onKeyDown={(e) => e.key === 'Enter' && onToggle()}
-    >
-      <div className='flex items-center gap-2 flex-nowrap'>
-        <Text className='whitespace-nowrap'>{materialKey.toUpperCase()}</Text>
-        <Text variant='inactive'>({materialCode})</Text>
+    <div className='flex items-center gap-1.5 border-b border-hairline py-1'>
+      <Text component='span' className='min-w-0 flex-1 truncate'>
+        {name}
+      </Text>
+      <Text component='span' variant='label' size='micro' className='shrink-0'>
+        {code}
+      </Text>
+      <div className='w-14 shrink-0'>
+        <Input
+          name={`fibre-${code}`}
+          type='number'
+          min={0}
+          max={100}
+          aria-label={`${name} percent`}
+          value={percent}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onPercentChange(e.target.value)}
+        />
       </div>
-      {isSelected && (
-        <div
-          className='flex items-center'
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          <Input
-            name={materialKey}
-            type='number'
-            value={percentage}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              onPercentageChange(e.target.value)
-            }
-            className='w-10 border-none'
-          />
-          <span>%</span>
-        </div>
-      )}
+      <Text component='span' variant='label' size='micro' className='shrink-0'>
+        %
+      </Text>
+      <Button
+        type='button'
+        size='xs'
+        variant='secondary'
+        className='shrink-0'
+        aria-label={`remove ${name}`}
+        onClick={onRemove}
+      >
+        ✕
+      </Button>
     </div>
   );
 }

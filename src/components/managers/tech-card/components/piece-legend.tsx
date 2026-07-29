@@ -1,52 +1,58 @@
-import { useState } from 'react';
+import { Accordion } from 'ui/components/accordion';
+import { GroupLabel } from 'ui/components/group-label';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { pieceBaseCodes, pieceModifiers } from './piece-codes';
 
 // Collapsible glossary of the pattern-piece abbreviation system, so codes written on the
 // flat and referenced in operations read the same to everyone. Static reference (the
-// modifiers are universal; the base codes are the brand's standard set).
+// modifiers are universal; the base codes are the brand's standard set). Shown on both the
+// PIECES tab (beside the table you type codes into) and the CONSTRUCTION tab (beside the
+// operations that reference them) — the same component, so the vocabulary cannot drift.
 export function PieceLegend() {
-  const [open, setOpen] = useState(false);
-
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <button
-        type='button'
-        onClick={() => setOpen((o) => !o)}
-        className='flex w-full items-center justify-between'
-        aria-expanded={open}
-      >
-        <Text variant='uppercase' size='large'>
+    <Accordion
+      title={
+        <Text size='control' variant='uppercase' tracking='label' component='span'>
           обозначения деталей
         </Text>
-        <Text>{open ? '▴' : '▾'}</Text>
-      </button>
+      }
+      meta={
+        <Text size='micro' variant='label' component='span'>
+          {pieceBaseCodes.length} кодов
+        </Text>
+      }
+    >
+      <div className='grid gap-x-2.5 sm:grid-cols-2'>
+        {pieceBaseCodes.map((p) => (
+          <Row
+            key={p.code}
+            label={<span className='font-bold'>{p.code}</span>}
+            value={
+              <Text size='micro' variant='label' component='span'>
+                {p.name}
+              </Text>
+            }
+          />
+        ))}
+      </div>
 
-      {open && (
-        <div className='mt-4 space-y-3'>
-          <div className='grid grid-cols-2 gap-x-4 gap-y-1'>
-            {pieceBaseCodes.map((p) => (
-              <div key={p.code} className='flex items-baseline gap-2 text-textBaseSize'>
-                <span className='font-mono'>{p.code}</span>
-                <span className='truncate text-textInactiveColor'>{p.name}</span>
-              </div>
-            ))}
-          </div>
+      <GroupLabel>модификаторы</GroupLabel>
+      {pieceModifiers.map((m) => (
+        <Row
+          key={m.mod}
+          label={<span className='font-bold'>{m.mod}</span>}
+          value={
+            <Text size='micro' variant='label' component='span'>
+              {m.name}
+            </Text>
+          }
+        />
+      ))}
 
-          <div className='space-y-1 border-t border-textInactiveColor pt-2'>
-            {pieceModifiers.map((m) => (
-              <div key={m.mod} className='flex items-baseline gap-2 text-textBaseSize'>
-                <span className='font-mono'>{m.mod}</span>
-                <span className='text-textInactiveColor'>{m.name}</span>
-              </div>
-            ))}
-          </div>
-
-          <Text variant='inactive' size='small'>
-            {'коды комбинируются: FP_R_1 · PCK_f · BP_L<M>'}
-          </Text>
-        </div>
-      )}
-    </div>
+      <Text size='micro' variant='label' className='mt-1.5'>
+        {'коды комбинируются: FP_R_1 · PCK_f · BP_L<M>'}
+      </Text>
+    </Accordion>
   );
 }

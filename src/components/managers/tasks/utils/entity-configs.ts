@@ -44,11 +44,15 @@ export const techCardConfig: EntityConfig = {
       purpose: undefined,
       skuSeason: undefined,
       productId: undefined,
+      categoryIds: undefined,
     });
     return (r.techCards ?? []).map(techCardOption);
   },
   resolve: async (value) => {
-    const r: any = await adminService.GetTechCard({ id: value as number });
+    const r: any = await adminService.GetTechCard({
+      id: value as number,
+      vatCountryCode: undefined,
+    });
     const h = r?.techCard?.techCard;
     if (!h) return null;
     return {

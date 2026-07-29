@@ -94,6 +94,7 @@ export function ProductionRunModal({
         purpose: undefined,
         skuSeason: undefined,
         productId: undefined,
+        categoryIds: undefined,
       }),
     enabled: open,
     staleTime: 5 * 60 * 1000,

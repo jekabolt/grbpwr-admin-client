@@ -60,7 +60,8 @@ export function useTechCardsByIds(ids: number[]) {
   const results = useQueries({
     queries: unique.map((id) => ({
       queryKey: techCardKeys.detail(id),
-      queryFn: async () => (await adminService.GetTechCard({ id })).techCard ?? null,
+      queryFn: async () =>
+        (await adminService.GetTechCard({ id, vatCountryCode: undefined })).techCard ?? null,
       staleTime: 5 * 60 * 1000,
     })),
   });

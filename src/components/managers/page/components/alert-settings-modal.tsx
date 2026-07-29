@@ -19,6 +19,7 @@ type Draft = {
   ga4CoverageWarnPct: string;
   productionRunStaleDays: string;
   acctPostingLagHours: string;
+  targetMarginPct: string;
 };
 
 const FIELDS: { key: keyof Draft; label: string; hint: string; step?: string }[] = [
@@ -60,6 +61,11 @@ const FIELDS: { key: keyof Draft; label: string; hint: string; step?: string }[]
     hint: 'warn when the accounting posting backlog is older than this',
     step: '1',
   },
+  {
+    key: 'targetMarginPct',
+    label: 'House target margin %',
+    hint: "house default gross-margin target; a style's own costing target overrides it",
+  },
 ];
 
 const numOrUndef = (s: string) => (s.trim() === '' ? undefined : Number(s));
@@ -85,6 +91,7 @@ export function AlertSettingsModal({
     ga4CoverageWarnPct: '',
     productionRunStaleDays: '',
     acctPostingLagHours: '',
+    targetMarginPct: '',
   });
 
   const { data, isLoading } = useQuery({
@@ -105,6 +112,7 @@ export function AlertSettingsModal({
       productionRunStaleDays:
         s?.productionRunStaleDays != null ? String(s.productionRunStaleDays) : '',
       acctPostingLagHours: s?.acctPostingLagHours != null ? String(s.acctPostingLagHours) : '',
+      targetMarginPct: s?.targetMarginPct != null ? String(s.targetMarginPct) : '',
     });
   }, [data, open]);
 
@@ -128,6 +136,7 @@ export function AlertSettingsModal({
       ga4CoverageWarnPct: numOrUndef(d.ga4CoverageWarnPct),
       productionRunStaleDays: numOrUndef(d.productionRunStaleDays),
       acctPostingLagHours: numOrUndef(d.acctPostingLagHours),
+      targetMarginPct: numOrUndef(d.targetMarginPct),
     });
 
   return (

@@ -1,47 +1,30 @@
-import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Pill } from 'ui/components/pill';
 
 interface CompositionSummaryProps {
-  selectedPart: string;
   totalPercentage: number;
   currentPartItemsCount: number;
   onAutoAdjust: () => void;
 }
 
+// The live total for the selected part. A part either has no fibres at all (legal — grey) or must
+// sum to exactly 100 (green), and anything else is red AND blocks save in the modal footer, so the
+// operator never has to hunt for why the dialog won't close.
 export function CompositionSummary({
-  selectedPart,
   totalPercentage,
   currentPartItemsCount,
   onAutoAdjust,
 }: CompositionSummaryProps) {
-  const isInvalid = totalPercentage > 100 || (currentPartItemsCount > 0 && totalPercentage !== 100);
-  const isComplete = totalPercentage === 100;
-  const isPartial = totalPercentage > 0 && totalPercentage < 100;
-
+  if (currentPartItemsCount === 0) return <Pill tone='mut'>not set</Pill>;
+  const complete = totalPercentage === 100;
   return (
-    <div className='flex justify-between items-center'>
-      <div className='flex items-center gap-4'>
-        <Text
-          className={cn('uppercase', {
-            'text-error': isInvalid,
-            'text-success': isComplete,
-            'text-warning': isPartial,
-          })}
-        >
-          {selectedPart}: {totalPercentage}%
-        </Text>
-        {currentPartItemsCount > 0 && totalPercentage !== 100 && (
-          <>
-            <Text variant='uppercase' className='text-error'>
-              must equal 100%
-            </Text>
-            <Button className='uppercase' onClick={onAutoAdjust}>
-              auto-adjust to 100%
-            </Button>
-          </>
-        )}
-      </div>
+    <div className='flex items-center gap-1.5'>
+      {!complete && (
+        <Button type='button' size='xs' variant='secondary' onClick={onAutoAdjust}>
+          auto 100
+        </Button>
+      )}
+      <Pill tone={complete ? 'ok' : 'warn'}>{totalPercentage}%</Pill>
     </div>
   );
 }

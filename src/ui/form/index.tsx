@@ -85,7 +85,7 @@ function FormItem({
   return (
     <FormItemContext.Provider value={{ id }}>
       <div
-        className={cn('space-y-2', className)}
+        className={cn('space-y-px', className)}
         data-field={fieldContext?.name}
         ref={ref}
         {...props}
@@ -109,7 +109,8 @@ function FormLabel({
 
   return (
     <Label ref={ref} className={cn('leading-none', className)} htmlFor={formItemId} {...props}>
-      <Text className='leading-none lowercase'>
+      {/* Reference field label: 10px, uppercase, grey, tight above the control. */}
+      <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
         {typeof props.children === 'string' ? props.children : null}
       </Text>
     </Label>
@@ -159,6 +160,7 @@ function FormMessage({ className, children, ref, ...props }: any) {
   return (
     <Text
       ref={ref}
+      size='micro'
       id={formMessageId}
       className={cn('', className, {
         'text-error': error,

@@ -2,19 +2,25 @@ import { adminService } from 'api/api';
 import { common_TechCardOperation } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { useParams } from 'react-router-dom';
+import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { Accordion } from 'ui/components/accordion';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import { Chip, ChipRow } from 'ui/components/chip';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { decimalToInput } from 'utils/decimal';
-import { fieldErrorSummary } from 'utils/field-errors';
-import { BomLinePicker } from './bom-line-picker';
-import { PieceMultiPicker, useCreatePiece, useFormPieces } from './piece-picker';
+import { fieldErrorSummary, revealField } from 'utils/field-errors';
 import {
   OPERATION_TYPE_PRESETS,
   attachmentOptions,
@@ -29,10 +35,17 @@ import {
   topstitchWidthOptions,
   zoneOptions,
 } from './operation-options';
+import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData } from './schema';
 
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN';
+
+// Drag payload for the piece tray. A private MIME type so a stray text drop from elsewhere can
+// never be mistaken for a piece reference; the plain-text mirror (prefixed) is only a fallback for
+// browsers that drop custom types, and every drop is validated against the declared pieces anyway.
+const PIECE_DND_TYPE = 'application/x-grbpwr-piece';
+const PIECE_DND_PREFIX = 'grbpwr-piece:';
 
 export const emptyOperation = {
   operationNumber: 0,
@@ -80,7 +93,7 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     // field would otherwise lose its material link the moment it was accepted.
     bomLineKeys: o.bomLineKeys?.length
       ? o.bomLineKeys.filter(Boolean)
-      : [o.bomLineKey?.trim()].filter(Boolean) as string[],
+      : ([o.bomLineKey?.trim()].filter(Boolean) as string[]),
     pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
     calloutNumber: o.calloutNumber || 0,
     seamType: o.seamType?.trim() || '',
@@ -100,34 +113,123 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
 type PickerOption = { value: number; label: string };
 type BomLine = { lineKey?: string; name?: string; section?: string };
 
-// One assembly operation. The compact line reads like a sentence (verb · node · part ·
-// machine · material · pin); the rare/industrial fields hide behind «детали». The op number
-// is positional (оп. 10/20/30 — server-assigned), shown read-only.
+// ── piece tray ───────────────────────────────────────────────────────────────────────────────
+// Wiring 14 operations to their pieces used to mean opening 14 popovers. The tray puts every
+// DECLARED piece on one sticky strip: drag a chip onto an operation, or — the keyboard and touch
+// path, which is not optional — click it and it lands on the operation currently targeted.
+function TrayChip({ piece, onAdd }: { piece: PieceRef; onAdd: () => void }) {
+  return (
+    <span
+      role='button'
+      tabIndex={0}
+      draggable
+      aria-label={`добавить деталь ${piece.name} к выбранной операции`}
+      onDragStart={(e: React.DragEvent) => {
+        e.dataTransfer.setData(PIECE_DND_TYPE, piece.lineKey);
+        e.dataTransfer.setData('text/plain', `${PIECE_DND_PREFIX}${piece.lineKey}`);
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
+      onClick={onAdd}
+      onKeyDown={(e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onAdd();
+        }
+      }}
+      className='inline-flex cursor-grab focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor active:cursor-grabbing'
+    >
+      <Chip>{piece.name}</Chip>
+    </span>
+  );
+}
+
+function PieceDropTarget({
+  targeted,
+  onDropKey,
+  onActivate,
+}: {
+  targeted: boolean;
+  onDropKey: (lineKey: string) => void;
+  onActivate: () => void;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    <span
+      onDragEnter={(e: React.DragEvent) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragOver={(e: React.DragEvent) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e: React.DragEvent) => {
+        e.preventDefault();
+        setOver(false);
+        const raw = e.dataTransfer.getData(PIECE_DND_TYPE) || e.dataTransfer.getData('text/plain');
+        const key = raw.startsWith(PIECE_DND_PREFIX) ? raw.slice(PIECE_DND_PREFIX.length) : raw;
+        if (key) onDropKey(key);
+      }}
+      className='inline-flex'
+    >
+      <Chip
+        dashed
+        selected={over}
+        onClick={onActivate}
+        title='перетащите деталь из лотка сюда — или нажмите, чтобы выбрать эту операцию, и кликните деталь в лотке'
+      >
+        {targeted ? '↑ выберите деталь в лотке' : 'drop here'}
+      </Chip>
+    </span>
+  );
+}
+
+// One assembly operation. Closed, the card reads like the assembly order — number · node · the
+// pieces it joins · SAM. Open («детали»), it is the full sewing spec. The piece chips and the drop
+// target stay on the header precisely so the tray can wire a whole card list without opening one.
 function OperationRow({
   index,
   onRemove,
   pinOptions,
   bomLines,
+  pieces,
   activePin,
   onActivePinChange,
   activeBom,
   onActiveBomChange,
+  targeted,
+  onTarget,
 }: {
   index: number;
   onRemove: () => void;
   pinOptions: PickerOption[];
   bomLines: BomLine[];
+  pieces: PieceRef[];
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
   activeBom?: string | null;
   onActiveBomChange?: (k: string | null) => void;
+  targeted: boolean;
+  onTarget: () => void;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const [open, setOpen] = useState(false);
   const opNumber = (index + 1) * 10;
   const opType = useWatch({ control, name: `operations.${index}.operationType` }) as string;
+  const node = (useWatch({ control, name: `operations.${index}.node` }) ?? '') as string;
+  const timeNorm = (useWatch({ control, name: `operations.${index}.timeNorm` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
     0) as number;
+
+  // A blocking error must never hide behind a collapsed card (`node` is required), so the row
+  // opens itself when its own subtree reports one — and a brand-new row opens because it is empty.
+  const { errors } = useFormState({ control, name: `operations.${index}` as never });
+  const rowError = !!(errors.operations as unknown as unknown[] | undefined)?.[index];
+  const [open, setOpen] = useState(() => !node.trim());
+  useEffect(() => {
+    if (rowError) setOpen(true);
+  }, [rowError]);
+
   // The off-part materials this operation consumes (thread / fusing). Multi, because one operation
   // can join several. Scoped to the same sections the single picker was, so the list stays the
   // materials an operation plausibly consumes rather than every BOM article.
@@ -164,41 +266,51 @@ function OperationRow({
       : [...selectedBomKeys, key];
     setValue(`operations.${index}.bomLineKeys`, next, { shouldDirty: true });
   };
+
   const selectedPieceKeys = (useWatch({
     control,
     name: `operations.${index}.pieceLineKeys`,
   }) ?? []) as string[];
-  const setPieceKeys = (next: string[]) =>
-    setValue(`operations.${index}.pieceLineKeys`, next, { shouldDirty: true });
+  const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
+  const chosenPieces = selectedPieceKeys.filter((k) => byKey.has(k));
+  // A key that no longer resolves (its piece was deleted on the PIECES tab, or an older card
+  // invented one through the removed picker) is SURFACED, not silently dropped — the save would
+  // unlink it and nobody would know which operation lost a part.
+  const danglingPieces = selectedPieceKeys.filter((k) => !byKey.has(k));
+  const removePieceKey = (lineKey: string) =>
+    setValue(
+      `operations.${index}.pieceLineKeys`,
+      selectedPieceKeys.filter((k) => k !== lineKey),
+      { shouldDirty: true },
+    );
+
   // `placement` is the legacy human label the printed sheet and older rows still read. It is now
   // DERIVED from the linked pieces rather than typed: a hand-typed "воротник" next to a piece called
   // "collar" is exactly what made the operation list and the cut list name the same part
   // differently. Kept in an effect (not in the setter) so it also follows a piece being renamed on
-  // the PIECES tab, and so a piece created inside the picker — which lands in form state in the same
-  // tick as the link — still makes it into the label.
-  const pieces = useFormPieces();
-  const createPiece = useCreatePiece();
-  const derivedPlacement = selectedPieceKeys
-    .map((k) => pieces.find((p) => p.lineKey === k)?.name)
+  // the PIECES tab.
+  const derivedPlacement = chosenPieces
+    .map((k) => byKey.get(k)?.name)
     .filter(Boolean)
     .join(' + ');
   const firstPlacementRun = useRef(true);
   useEffect(() => {
     // Only ever overwrite a label this rule owns: an operation with no linked pieces keeps whatever
     // free text it was saved with (older cards, AI drafts), so nothing is silently erased.
-    if (!selectedPieceKeys.length) {
+    if (!chosenPieces.length) {
       firstPlacementRun.current = false;
       return;
     }
     if (getValues(`operations.${index}.placement`) !== derivedPlacement) {
       // On mount, reconcile a stale stored label WITHOUT dirtying: opening a card must not report
-      // unsaved changes the user never made (same discipline as the operation-type presets above).
+      // unsaved changes the user never made (same discipline as the operation-type presets below).
       setValue(`operations.${index}.placement`, derivedPlacement, {
         shouldDirty: !firstPlacementRun.current,
       });
     }
     firstPlacementRun.current = false;
-  }, [derivedPlacement, selectedPieceKeys.length, index, getValues, setValue]);
+  }, [derivedPlacement, chosenPieces.length, index, getValues, setValue]);
+
   // The legacy single `bomLineKey` is no longer edited: it duplicated the chip row below («мат.
   // напрямую» asked the same question with room for one answer), and the operation genuinely takes
   // several materials. It is still WRITTEN on save, as the first of bomLineKeys, so the older
@@ -210,6 +322,17 @@ function OperationRow({
   const linked =
     (!!activePin && activePin > 0 && calloutNumber === activePin) ||
     (activeBom != null && selectedBomKeys.includes(activeBom));
+
+  // A pin that no longer resolves (its callout was deleted on the sketch tab) keeps a visible,
+  // re-selectable option instead of reading as «— пин —» — the same defensive fallback the issues
+  // list uses for a removed operation.
+  const rowPinOptions = useMemo(() => {
+    if (!calloutNumber || pinOptions.some((o) => o.value === calloutNumber)) return pinOptions;
+    return [
+      ...pinOptions,
+      { value: calloutNumber, label: `#${calloutNumber} — not found (removed?)` },
+    ];
+  }, [pinOptions, calloutNumber]);
 
   // Apply the verb's machine / stitch defaults on a real change (skip the initial mount so
   // loading an existing card never auto-dirties the form), filling only blank fields.
@@ -248,6 +371,13 @@ function OperationRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBomKeys.join(','), index, getValues, setValue]);
 
+  const addPieceKey = (lineKey: string) => {
+    if (!byKey.has(lineKey) || selectedPieceKeys.includes(lineKey)) return;
+    setValue(`operations.${index}.pieceLineKeys`, [...selectedPieceKeys, lineKey], {
+      shouldDirty: true,
+    });
+  };
+
   return (
     <div
       onMouseEnter={() => {
@@ -258,29 +388,57 @@ function OperationRow({
         onActivePinChange?.(null);
         onActiveBomChange?.(null);
       }}
+      onFocusCapture={onTarget}
       className={cn(
-        'space-y-4 border p-4 transition-colors',
-        linked ? 'border-textInactiveColor ring-1 ring-textColor' : 'border-textInactiveColor',
+        'border bg-bgColor transition-colors',
+        // the cross-highlight mirrors the sketch pin (which fills error-red when active); the
+        // tray's current target carries the ink border, so a click in the tray is never a guess
+        linked ? 'border-error' : targeted ? 'border-textColor' : 'border-borderColor',
       )}
     >
-      <div className='flex items-center justify-between gap-2'>
-        <div className='flex min-w-0 items-center gap-2'>
-          <Text variant='uppercase' size='small'>
-            операция {index + 1} · оп. {opNumber}
+      {/* header — the assembly order at a glance, and the tray's drop zone */}
+      <div
+        onClick={onTarget}
+        className='flex flex-wrap items-center gap-1.5 border-b border-hairline bg-bgZebra px-2 py-1.5'
+      >
+        <Text size='control' component='span' className='font-bold tabular-nums'>
+          {opNumber}
+        </Text>
+        <Text size='control' component='span' className='min-w-0 truncate'>
+          {node.trim() || <span className='text-labelColor'>— узел не задан —</span>}
+        </Text>
+
+        <ChipRow>
+          {chosenPieces.map((k) => (
+            <Chip key={k} selected onRemove={() => removePieceKey(k)}>
+              {byKey.get(k)?.name}
+            </Chip>
+          ))}
+          {danglingPieces.map((k) => (
+            <Chip key={k} tone='error' onRemove={() => removePieceKey(k)} title={k}>
+              {`#${k.slice(-6)} — not found`}
+            </Chip>
+          ))}
+          <PieceDropTarget targeted={targeted} onDropKey={addPieceKey} onActivate={onTarget} />
+        </ChipRow>
+
+        <div className='ml-auto flex shrink-0 items-center gap-1.5'>
+          {linkedMaterials.map((b) => (
+            <Pill key={b.lineKey} tone='mut'>
+              {b.name?.trim() || 'unnamed'}
+            </Pill>
+          ))}
+          {calloutNumber > 0 && <Pill tone='ink'>{`пин ${calloutNumber}`}</Pill>}
+          <Text size='micro' variant='label' component='span' className='tabular-nums'>
+            {timeNorm.trim() ? `${timeNorm} мин` : '— мин'}
           </Text>
-          {linkedMaterials.length > 0 && (
-            <Text variant='inactive' size='small' className='truncate lowercase'>
-              · 🧵 {linkedMaterials.map((b) => b.name?.trim() || 'unnamed').join(', ')}
-            </Text>
-          )}
-        </div>
-        <div className='flex gap-2'>
-          <Button type='button' variant='secondary' onClick={() => setOpen((o) => !o)}>
+          <Button type='button' variant='secondary' size='xs' onClick={() => setOpen((o) => !o)}>
             {open ? 'детали ▴' : 'детали ▾'}
           </Button>
           <Button
             type='button'
             variant='secondary'
+            size='xs'
             aria-label='remove operation'
             onClick={onRemove}
           >
@@ -289,95 +447,31 @@ function OperationRow({
         </div>
       </div>
 
-      {/* compact line — the operation «sentence»: what · where · with-what.
-          Two rows of three (equal width) so nothing gets crushed in the narrow column. */}
-      <div className='grid grid-cols-2 items-end gap-x-3 gap-y-4 sm:grid-cols-3'>
-        <SelectField
-          name={`operations.${index}.operationType`}
-          label='операция *'
-          items={operationTypeOptions}
-        />
-        <ComboField
-          name={`operations.${index}.node`}
-          label='узел / что *'
-          placeholder='плечевые швы'
-          options={nodeOptions}
-        />
-        {/* Which CUT PIECES this operation joins — the real reference (the server resolves each key
-            to a tech_card_piece FK). Multi, because an assembly operation IS the joining of several
-            parts: a shoulder seam takes the front and the back. That is why this is a picker over a
-            set and not the recipe's single-piece select. Distinct from «мат. напрямую» below, which
-            is the off-part material the operation itself consumes (thread / fusing) — the two used
-            to answer the same free-text field. Always rendered, never gated on pieces existing: a
-            card with no cut pieces yet is the common case, and the picker is where you create the
-            first one. */}
-        <div className='col-span-2 sm:col-span-3'>
-          <PieceMultiPicker
-            pieces={pieces}
-            onCreate={createPiece}
-            value={selectedPieceKeys}
-            onChange={setPieceKeys}
-            label='детали, которые соединяет операция'
-            hint='одна операция может соединять несколько деталей — отметьте все; можно создать новую прямо здесь'
-          />
-        </div>
-        <div className='col-span-2 flex flex-col gap-1 sm:col-span-3'>
-            <Text variant='label' size='small'>
-              материалы операции — нитки / клеевые
-            </Text>
-            {linkableBoms.length === 0 ? (
-              <Text variant='inactive' size='small'>
-                в BOM ещё нет ниток и клеевых — добавьте их на вкладке BOM, и они появятся здесь
-              </Text>
-            ) : (
-            <div className='flex flex-wrap gap-1.5'>
-              {linkableBoms.map((b) => {
-                const key = b.lineKey ?? '';
-                const on = selectedBomKeys.includes(key);
-                return (
-                  <button
-                    key={key}
-                    type='button'
-                    aria-pressed={on}
-                    onClick={() => toggleBom(key)}
-                    className={cn(
-                      'border px-2 py-0.5 text-textBaseSize uppercase',
-                      on
-                        ? 'border-textColor bg-textColor text-bgColor'
-                        : 'border-textInactiveColor text-labelColor hover:text-text',
-                    )}
-                  >
-                    {b.name?.trim() || 'unnamed'}
-                  </button>
-                );
-              })}
-            </div>
-            )}
-        </div>
-        <ComboField name={`operations.${index}.machine`} label='машина' options={machineOptions} />
-        <SelectField
-          name={`operations.${index}.calloutNumber`}
-          label='пин'
-          items={pinOptions}
-          valueAsNumber
-        />
-      </div>
-
-      <Text variant='inactive' size='small'>
-        «детали» — что операция соединяет (реальная ссылка на детали кроя; подпись на листе
-        собирается из их названий). «материалы операции» — артикулы, которые тратит сама операция, а
-        не деталь: нитки и клеевые.
-      </Text>
-
-      {bomOutOfRange && (
-        <Text size='small' className='text-error'>
-          материал был удалён или перемещён — перевыберите его
-        </Text>
-      )}
-
       {open && (
-        <div className='space-y-4 border-t border-textInactiveColor pt-4'>
-          <div className='grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 lg:grid-cols-4'>
+        <div className='space-y-2 p-2'>
+          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'>
+            <SelectField
+              name={`operations.${index}.operationType`}
+              label='операция *'
+              items={operationTypeOptions}
+            />
+            <ComboField
+              name={`operations.${index}.node`}
+              label='узел / что *'
+              placeholder='плечевые швы'
+              options={nodeOptions}
+            />
+            <ComboField
+              name={`operations.${index}.machine`}
+              label='машина'
+              options={machineOptions}
+            />
+            <SelectField
+              name={`operations.${index}.calloutNumber`}
+              label='пин'
+              items={rowPinOptions}
+              valueAsNumber
+            />
             <SelectField name={`operations.${index}.zone`} label='зона' items={zoneOptions} />
             <ComboField
               name={`operations.${index}.seamType`}
@@ -403,7 +497,7 @@ function OperationRow({
             {/* Threads are picked from the card's own BOM thread lines, not typed: a free-text
                 article is a string nothing can join on, so thread was never actually accounted for
                 anywhere. Falls back to the generic vocabulary only while the BOM has no thread
-                lines. Selecting the material itself (and so its consumption) is the chip row above;
+                lines. Selecting the material itself (and so its consumption) is the chip row below;
                 this stays the per-operation article note. */}
             <ComboField
               name={`operations.${index}.thread`}
@@ -421,6 +515,32 @@ function OperationRow({
               placeholder='1.8'
             />
           </div>
+
+          <GroupLabel>материалы операции — нитки / клеевые</GroupLabel>
+          {linkableBoms.length === 0 ? (
+            <Text size='micro' variant='label'>
+              в BOM ещё нет ниток и клеевых — добавьте их на вкладке BOM, и они появятся здесь
+            </Text>
+          ) : (
+            <ChipRow>
+              {linkableBoms.map((b) => {
+                const key = b.lineKey ?? '';
+                const on = selectedBomKeys.includes(key);
+                return (
+                  <Chip key={key} selected={on} pressed={on} onClick={() => toggleBom(key)}>
+                    {b.name?.trim() || 'unnamed'}
+                  </Chip>
+                );
+              })}
+            </ChipRow>
+          )}
+
+          {bomOutOfRange && (
+            <Text size='micro' variant='error'>
+              материал был удалён или перемещён — перевыберите его
+            </Text>
+          )}
+
           <TextareaField
             name={`operations.${index}.description`}
             label='описание'
@@ -439,25 +559,34 @@ function OperationRow({
   );
 }
 
+type ReplaceImpact = { operations: number; sam: number; pieceLinks: number };
+
 // #66: draft assembly operations from a plain-language description — «мы описываем все операции
 // словами (у нас есть знания о деталях/BOM), через OpenRouter генерируем структурированные
 // операции, технолог проверит». Collapsed by default: an optional accelerant next to the manual
 // «+ операция» flow, not a replacement for it. Never persists on its own — a successful generation
 // only stages a DRAFT for review; the technologist explicitly appends or replaces it into the
 // real (editable) operations list below, then saves through the normal tech-card save.
+//
+// «заменить весь список» now states its price before it is paid: the pick kept this panel, it did
+// not ask to keep it dangerous.
 function GenerateOperationsPanel({
   techCardId,
   hasExistingOperations,
+  readReplaceImpact,
   onAccept,
 }: {
   techCardId?: number;
   hasExistingOperations: boolean;
+  // Counted at the moment the button is pressed rather than watched continuously — this panel does
+  // not need to re-render on every keystroke in the 14 operations above it.
+  readReplaceImpact: () => ReplaceImpact;
   onAccept: (operations: common_TechCardOperation[], mode: 'append' | 'replace') => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [description, setDescription] = useState('');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
+  const [impact, setImpact] = useState<ReplaceImpact | null>(null);
   const [draft, setDraft] = useState<{
     operations: common_TechCardOperation[];
     model?: string;
@@ -497,30 +626,35 @@ function GenerateOperationsPanel({
     onAccept(draft.operations, mode);
     setDraft(null);
     setDescription('');
-    setOpen(false);
   };
 
   return (
-    <div className='space-y-3 border border-textInactiveColor p-4'>
-      <div className='flex items-center justify-between gap-2'>
-        <Text variant='uppercase' size='small'>
-          generate operations from description (ai)
-        </Text>
-        <Button type='button' variant='secondary' onClick={() => setOpen((o) => !o)}>
-          {open ? 'свернуть ▴' : 'развернуть ▾'}
-        </Button>
-      </div>
-
-      {open && (
-        <div className='space-y-3'>
-          <Text variant='inactive' size='small'>
+    <>
+      <Accordion
+        title={
+          <Text size='control' variant='uppercase' tracking='label' component='span'>
+            generate operations from description (ai)
+          </Text>
+        }
+        meta={
+          draft ? (
+            <Pill tone='attention'>{`draft: ${draft.operations.length}`}</Pill>
+          ) : (
+            <Text size='micro' variant='label' component='span'>
+              черновик
+            </Text>
+          )
+        }
+      >
+        <div className='space-y-2'>
+          <Text size='micro' variant='label'>
             Опишите конструкцию своими словами — узлы, детали, материалы, порядок сборки. AI
             предложит структурированные операции по этому описанию и данным карты (детали, BOM) —
             это ЧЕРНОВИК, технолог должен проверить его перед сохранением.
           </Text>
 
           {!techCardId ? (
-            <Text variant='inactive' size='small'>
+            <Text size='micro' variant='label'>
               сначала сохраните тех.карту — генерация использует уже сохранённые детали и BOM как
               контекст
             </Text>
@@ -530,7 +664,7 @@ function GenerateOperationsPanel({
                 name='ai-operations-description'
                 variant='secondary'
                 placeholder='например: втачать рукав в открытую пройму, боковые швы стачать оверлоком 4 нитки, низ подогнуть 2 см и настрочить в край…'
-                className='mb-0 min-h-24 border border-textInactiveColor'
+                className='mb-0 min-h-24 border border-borderColor'
                 maxLength={4000}
                 value={description}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
@@ -541,7 +675,7 @@ function GenerateOperationsPanel({
               <Button
                 type='button'
                 variant='main'
-                className='uppercase'
+                size='sm'
                 loading={generating}
                 disabled={generating || !description.trim()}
                 onClick={generate}
@@ -552,67 +686,91 @@ function GenerateOperationsPanel({
           )}
 
           {error && (
-            <Text size='small' className='text-error'>
+            <Text size='micro' variant='error'>
               {error}
             </Text>
           )}
 
           {draft && (
-            <div className='space-y-2 border-t border-textInactiveColor pt-3'>
-              <div className='flex flex-wrap items-center gap-x-2'>
-                <Text variant='uppercase' size='small' className='text-warning'>
-                  AI draft — review before saving
-                </Text>
-                <Text variant='inactive' size='small'>
-                  операций: {draft.operations.length}
-                  {draft.model ? ` · ${draft.model}` : ''}
-                </Text>
-              </div>
+            <div className='space-y-1.5 border-t border-hairline pt-2'>
+              <GroupLabel
+                action={
+                  <Text size='micro' variant='label' component='span'>
+                    операций: {draft.operations.length}
+                    {draft.model ? ` · ${draft.model}` : ''}
+                  </Text>
+                }
+              >
+                ai draft — review before saving
+              </GroupLabel>
               {draft.notes?.trim() && (
-                <Text variant='inactive' size='small'>
+                <Text size='micro' variant='label'>
                   {draft.notes.trim()}
                 </Text>
               )}
-              <ol className='max-h-64 space-y-1 overflow-y-auto'>
+              <div className='max-h-64 overflow-y-auto'>
                 {draft.operations.map((o, i) => (
-                  <li key={i} className='border border-textInactiveColor/50 px-2 py-1'>
-                    <Text size='small'>
-                      <span className='text-textInactiveColor'>{(i + 1) * 10}.</span>{' '}
-                      {o.node?.trim() || '—'}
-                      {o.machine?.trim() ? ` · ${o.machine.trim()}` : ''}
-                      {o.description?.trim() ? ` — ${o.description.trim()}` : ''}
-                    </Text>
-                  </li>
+                  <Row
+                    key={i}
+                    label={
+                      <span>
+                        <span className='text-labelColor tabular-nums'>{(i + 1) * 10}.</span>{' '}
+                        {o.node?.trim() || '—'}
+                        {o.description?.trim() ? ` — ${o.description.trim()}` : ''}
+                      </span>
+                    }
+                    value={o.machine?.trim() || '—'}
+                  />
                 ))}
-              </ol>
-              <div className='flex flex-wrap gap-2'>
+              </div>
+              <div className='flex flex-wrap gap-1.5'>
                 {hasExistingOperations && (
-                  <Button
-                    type='button'
-                    variant='main'
-                    className='uppercase'
-                    onClick={() => accept('append')}
-                  >
+                  <Button type='button' variant='main' size='sm' onClick={() => accept('append')}>
                     добавить к списку
                   </Button>
                 )}
                 <Button
                   type='button'
                   variant={hasExistingOperations ? 'secondary' : 'main'}
-                  className='uppercase'
-                  onClick={() => accept(hasExistingOperations ? 'replace' : 'append')}
+                  size='sm'
+                  onClick={() =>
+                    hasExistingOperations ? setImpact(readReplaceImpact()) : accept('append')
+                  }
                 >
                   {hasExistingOperations ? 'заменить весь список' : 'принять в список'}
                 </Button>
-                <Button type='button' variant='secondary' onClick={() => setDraft(null)}>
+                <Button type='button' variant='secondary' size='sm' onClick={() => setDraft(null)}>
                   отклонить черновик
                 </Button>
               </div>
             </div>
           )}
         </div>
-      )}
-    </div>
+      </Accordion>
+
+      <ConfirmationModal
+        open={impact != null}
+        onOpenChange={(next) => !next && setImpact(null)}
+        title='заменить весь список операций'
+        width='sm'
+        confirmLabel='заменить'
+        cancelLabel='отмена'
+        onConfirm={() => accept('replace')}
+      >
+        <div className='space-y-1.5'>
+          <CalloutBox tone='error'>
+            <Text size='micro'>
+              будет удалено <b>{impact?.operations ?? 0}</b> операций: SAM у{' '}
+              <b>{impact?.sam ?? 0}</b> из них и привязки деталей у <b>{impact?.pieceLinks ?? 0}</b>
+              . Ссылки дефектов на номера операций тоже будут сброшены.
+            </Text>
+          </CalloutBox>
+          <Text size='micro' variant='label'>
+            вместо этого можно «добавить к списку» — черновик встанет после существующих операций.
+          </Text>
+        </div>
+      </ConfirmationModal>
+    </>
   );
 }
 
@@ -643,6 +801,7 @@ export function OperationsField({
   // shows a "save first" hint instead of the generator in that case.
   const { id: routeId } = useParams<{ id: string }>();
   const techCardId = routeId ? parseInt(routeId, 10) : undefined;
+  const [params, setParams] = useSearchParams();
 
   // append here (this field array owns the rendered list) when the panel requests it
   useEffect(() => {
@@ -693,11 +852,29 @@ export function OperationsField({
     }
   };
 
+  // What «заменить весь список» would destroy, read at press time off form state — watching the
+  // whole operations array here would re-render every card on every keystroke.
+  const readReplaceImpact = (): ReplaceImpact => {
+    const ops = (getValues('operations') ?? []) as {
+      timeNorm?: string;
+      pieceLineKeys?: string[];
+    }[];
+    return {
+      operations: ops.length,
+      sam: ops.filter((o) => (o.timeNorm ?? '').trim()).length,
+      pieceLinks: ops.filter((o) => (o.pieceLineKeys ?? []).length > 0).length,
+    };
+  };
+
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLine[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
     number?: number;
     part?: string;
   }>;
+  // Only DECLARED pieces reach the tray. Inventing a piece from inside an operation is what
+  // produced dangling codes in the first place, so that path is gone: «+ new piece» walks to the
+  // PIECES tab, where a piece also gets its cut data instead of just a name.
+  const pieces = useFormPieces();
 
   const pinOptions = useMemo<PickerOption[]>(
     () => [
@@ -712,20 +889,66 @@ export function OperationsField({
     [callouts],
   );
 
+  // Which operation a tray click lands on. Defaults to the first row so the click path never
+  // dead-ends; the tray always names the target, and the targeted card carries an ink border.
+  const [targetIndex, setTargetIndex] = useState(0);
+  const effectiveTarget = fields.length === 0 ? -1 : Math.min(targetIndex, fields.length - 1);
+
+  const addPieceToOperation = (index: number, lineKey: string) => {
+    if (index < 0) return;
+    const cur = (getValues(`operations.${index}.pieceLineKeys`) ?? []) as string[];
+    if (cur.includes(lineKey)) return;
+    setValue(`operations.${index}.pieceLineKeys`, [...cur, lineKey], { shouldDirty: true });
+  };
+
+  const goToPiecesTab = () => {
+    const next = new URLSearchParams(params);
+    next.set('tab', 'pieces');
+    setParams(next, { replace: true });
+    // the pieces tab is a sibling `hidden` panel, so it is already mounted — one frame is enough
+    window.setTimeout(() => revealField('pieces.add'), 120);
+  };
+
   return (
-    <div className='space-y-3'>
-      <Text variant='inactive' size='small'>
+    <div className='space-y-2.5'>
+      <Text size='micro' variant='label'>
         Шаги сборки по порядку (оп. 10/20/30 — нумеруются автоматически по позиции). Выберите тип
-        операции — машина и плотность подставятся автоматически. «часть» — где на изделии
-        (справочно), «материал» — прямая ссылка на артикул, «пин» — номер выноски с эскиза.
+        операции — машина и плотность подставятся автоматически. «пин» — номер выноски с эскиза.
       </Text>
 
+      {/* piece tray — drag onto an operation, or click to add it to the targeted one */}
+      <Toolbar sticky className='z-[var(--z-sticky)] lg:sticky lg:top-36'>
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          детали:
+        </Text>
+        {pieces.length === 0 ? (
+          <Text size='micro' variant='label' component='span'>
+            деталей ещё нет
+          </Text>
+        ) : (
+          pieces.map((p) => (
+            <TrayChip
+              key={p.lineKey}
+              piece={p}
+              onAdd={() => addPieceToOperation(effectiveTarget, p.lineKey)}
+            />
+          ))
+        )}
+        <Chip dashed onClick={goToPiecesTab} title='создать деталь на вкладке PIECES'>
+          + new piece
+        </Chip>
+        <ToolbarSpacer />
+        <Text size='micro' variant='label' component='span'>
+          {effectiveTarget >= 0 ? `→ оп. ${(effectiveTarget + 1) * 10}` : 'нет операций'}
+        </Text>
+      </Toolbar>
+
       {fields.length === 0 ? (
-        <Text variant='inactive' size='small'>
+        <Text size='micro' variant='label'>
           пока нет операций — добавьте первую
         </Text>
       ) : (
-        <div className='space-y-3'>
+        <div className='space-y-1.5'>
           {fields.map((f, index) => (
             <OperationRow
               key={f.id}
@@ -733,10 +956,13 @@ export function OperationsField({
               onRemove={() => removeOperation(index)}
               pinOptions={pinOptions}
               bomLines={bomItems}
+              pieces={pieces}
               activePin={activePin}
               onActivePinChange={onActivePinChange}
               activeBom={activeBom}
               onActiveBomChange={onActiveBomChange}
+              targeted={index === effectiveTarget}
+              onTarget={() => setTargetIndex(index)}
             />
           ))}
         </div>
@@ -745,14 +971,18 @@ export function OperationsField({
       <GenerateOperationsPanel
         techCardId={techCardId}
         hasExistingOperations={fields.length > 0}
+        readReplaceImpact={readReplaceImpact}
         onAccept={acceptGeneratedOperations}
       />
 
       <Button
         type='button'
         variant='main'
-        className='uppercase'
-        onClick={() => append({ ...emptyOperation })}
+        size='sm'
+        onClick={() => {
+          append({ ...emptyOperation });
+          setTargetIndex(fields.length);
+        }}
       >
         + операция
       </Button>

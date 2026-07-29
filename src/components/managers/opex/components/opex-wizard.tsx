@@ -212,6 +212,12 @@ export function OpexWizard({
             amount: { value: normalizeDecimalInput(d.amount) },
             currency: d.currency,
             note: d.note.trim(),
+            vatAmount: undefined,
+            vatRegime: undefined,
+            docNumber: undefined,
+            docDate: undefined,
+            supplierVatId: undefined,
+            supplierName: undefined,
           },
         ]);
         showMessage('One-off expense added', 'success');

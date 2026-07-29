@@ -1,10 +1,12 @@
-import * as Popover from '@radix-ui/react-popover';
 import { common_Sample } from 'api/proto-http/admin';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useState } from 'react';
 import Media from 'ui/components/media';
+import { Placeholder } from 'ui/components/placeholder';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
+import { Tile, Tiles } from 'ui/components/tiles';
 import { samplePurposeLabel, sampleRoundLabel, sampleThumbUrl } from './sample-options';
 import { useSamples } from './useSamples';
 
@@ -15,29 +17,22 @@ export function sampleLabel(s: common_Sample, sizeName?: string): string {
   return `#${s.number ?? '?'} ${p}${sizeName ? ` · ${sizeName}` : ''}`;
 }
 
-// Small square thumbnail shared by the trigger and the option rows — a plain dash placeholder
-// when the sample has no photo (a picker option shouldn't wait on one).
-function SampleThumb({ url, size = 'size-8' }: { url?: string; size?: string }) {
+// Square thumbnail shared by the trigger and the mini cards — the striped Placeholder when the
+// sample has no photo (a picker option shouldn't wait on one).
+function SampleThumb({ url, className }: { url?: string; className?: string }) {
+  if (!url) return <Placeholder aspect='square' className={className} />;
   return (
-    <span
-      className={`flex ${size} shrink-0 items-center justify-center overflow-hidden border border-textInactiveColor bg-bgColor`}
-    >
-      {url ? (
-        <Media src={url} alt='' aspectRatio='1/1' fit='cover' />
-      ) : (
-        <Text variant='inactive' size='small'>
-          —
-        </Text>
-      )}
+    <span className={`block overflow-hidden border border-borderColor ${className ?? ''}`}>
+      <Media src={url} alt='' aspectRatio='1/1' fit='cover' />
     </span>
   );
 }
 
-// Sample picker (previous sample / dev-expense attribution) — was a plain native <select> whose
-// options were a wall of same-shaped text rows, easy to mispick in a card with several samples.
-// Same visual language as the sample board: a thumbnail + label trigger opens a popover of mini
-// sample cards (thumbnail, number/purpose/size, round) to click — one glance beats reading a list
-// of "#3 fit · M" strings.
+// Sample picker (previous sample / dev-expense attribution). A popover of mini sample cards to
+// click — one glance beats reading a list of "#3 fit · M" strings — with the "— no sample —"
+// escape as the first row (10.4: the shape is kept, only the shell and the tiles are restyled).
+// Controlled open state rather than `Popover.Close asChild`: `Tile` is a plain component that does
+// not forward refs, so Radix's Slot could not drive it.
 export function SamplePicker({
   techCardId,
   value,
@@ -51,6 +46,7 @@ export function SamplePicker({
 }) {
   const { dictionary } = useDictionary();
   const { data, isLoading } = useSamples(techCardId);
+  const [open, setOpen] = useState(false);
   const samples = data?.samples ?? [];
   const picked = samples.find((s) => s.id === value);
   const isDisabled = disabled || !techCardId;
@@ -66,71 +62,74 @@ export function SamplePicker({
       ? sampleLabel(picked, sizeNameFor(picked))
       : '— no sample —';
 
+  const pick = (id: number) => {
+    onChange(id);
+    setOpen(false);
+  };
+
   return (
     <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
       title='pick a sample'
-      contentProps={{ align: 'start', sideOffset: 6 }}
+      // Anchored flush under the field it replaces, so no tail (phase-04 combobox grammar).
+      noTail
+      contentProps={{ align: 'start' }}
       // Explicit width + full-width flex so the trigger always matches the sibling form
       // fields it sits next to, instead of shrink-wrapping to the label text.
       triggerProps={{ disabled: isDisabled, className: 'flex w-full items-center' }}
-      // GenericPopover's content defaults to w-full; unconstrained inside a floating
-      // (position: absolute, off-flow) popper that resolves to a huge/viewport-driven box
-      // instead of a compact card. Pin it to a fixed, phone-safe width so the mini-card
-      // grid below reads as an actual grid, not a stretched single column.
-      className='w-[19rem] max-w-[calc(100vw-1.5rem)]'
+      // Pinned width: inside a floating popper an unconstrained panel resolves to a
+      // viewport-driven box instead of a compact card, and the mini-card grid below stops
+      // reading as a grid. 240px is exactly two 96px tiles wide.
+      className='w-[240px] max-w-[calc(100vw-1.5rem)]'
       openElement={
         <span
-          className={`flex w-full items-center gap-2 border border-textInactiveColor bg-bgColor px-2 py-1.5 text-left ${
-            isDisabled ? 'opacity-50' : 'hover:bg-highlightColor/5'
+          className={`flex min-h-[22px] w-full items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left ${
+            isDisabled ? 'bg-bgZebra text-labelColor' : 'hover:border-textColor'
           }`}
         >
-          <SampleThumb url={picked ? sampleThumbUrl(picked) : undefined} size='size-6' />
-          <Text size='small' className='min-w-0 flex-1 truncate'>
+          <SampleThumb url={picked ? sampleThumbUrl(picked) : undefined} className='size-5' />
+          <Text size='micro' className='min-w-0 flex-1 truncate'>
             {triggerLabel}
+          </Text>
+          <Text size='micro' variant='label' component='span' aria-hidden>
+            ▾
           </Text>
         </span>
       }
     >
-      <div className='flex flex-col gap-2'>
-        <Popover.Close asChild>
-          <button
-            type='button'
-            className='flex items-center gap-2 border border-textInactiveColor p-1.5 text-left hover:bg-highlightColor/5'
-            onClick={() => onChange(0)}
-          >
-            <Text variant='inactive' size='small'>
-              — no sample —
+      <div className='flex flex-col gap-1'>
+        <button
+          type='button'
+          className='flex justify-between gap-2.5 border-b border-hairline py-1 text-left'
+          onClick={() => pick(0)}
+        >
+          <Text size='micro' variant='label' component='span'>
+            — no sample —
+          </Text>
+          {value === 0 ? (
+            <Text size='micro' component='span' aria-hidden>
+              ✓
             </Text>
-          </button>
-        </Popover.Close>
+          ) : null}
+        </button>
         {samples.length === 0 ? (
-          <Text variant='inactive' size='small' className='p-1.5'>
+          <Text size='micro' variant='label' className='py-1'>
             {isLoading ? 'loading…' : 'no samples on this card yet'}
           </Text>
         ) : (
-          <div className='grid grid-cols-2 gap-1.5'>
+          <Tiles>
             {samples.map((s) => (
-              <Popover.Close asChild key={s.id}>
-                <button
-                  type='button'
-                  className={`flex min-w-0 items-center gap-1.5 border p-1.5 text-left hover:bg-highlightColor/5 ${
-                    s.id === value ? 'border-textColor' : 'border-textInactiveColor'
-                  }`}
-                  onClick={() => s.id && onChange(s.id)}
-                >
-                  <SampleThumb url={sampleThumbUrl(s)} />
-                  <span className='flex min-w-0 flex-col'>
-                    <Text size='small' className='truncate'>
-                      {sampleLabel(s, sizeNameFor(s))}
-                    </Text>
-                    <Text variant='inactive' size='small' className='truncate'>
-                      {sampleRoundLabel(s.sample?.roundNumber)}
-                    </Text>
-                  </span>
-                </button>
-              </Popover.Close>
+              <Tile
+                key={s.id}
+                selected={s.id === value}
+                onClick={() => pick(s.id ?? 0)}
+                media={<SampleThumb url={sampleThumbUrl(s)} />}
+                name={sampleLabel(s, sizeNameFor(s))}
+                sub={sampleRoundLabel(s.sample?.roundNumber)}
+              />
             ))}
-          </div>
+          </Tiles>
         )}
       </div>
     </GenericPopover>

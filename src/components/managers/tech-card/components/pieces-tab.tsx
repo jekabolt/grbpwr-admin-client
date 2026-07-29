@@ -1,19 +1,21 @@
-import { common_TechCard } from 'api/proto-http/admin';
-import { useMemo } from 'react';
+import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
+import { useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { Canvas, Pin } from 'ui/components/canvas';
+import { DataTable } from 'ui/components/data-table';
+import Input from 'ui/components/input';
+import { Pill } from 'ui/components/pill';
+import GenericPopover from 'ui/components/popover';
+import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { BomLineSelect } from './bom-line-picker';
-import { pieceCodeOptions } from './piece-codes';
+import { grainlineArrow, grainlineOptions, pieceCodeOptions } from './piece-codes';
+import { PieceLegend } from './piece-legend';
 import { normalizePieceName } from './piece-picker';
 import { TechCardFormData } from './schema';
-
-const cell =
-  'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize aria-[invalid=true]:border-error';
-const th =
-  'border border-textInactiveColor bg-textInactiveColor/20 px-2 py-1 text-left text-textBaseSize uppercase';
-const td = 'border border-textInactiveColor px-1 py-1 align-top';
+import { useCrossHighlight } from './useCrossHighlight';
 
 // Cut-piece detail = one pattern part (деталь кроя). The fabric map's cells reference BOM lines from
 // the body-fabric sections; fusing draws from interlining.
@@ -24,10 +26,171 @@ const FABRIC_SECTIONS = [
   'TECH_CARD_BOM_SECTION_INSULATION',
 ];
 const FUSING_SECTIONS = ['TECH_CARD_BOM_SECTION_INTERLINING'];
-const grainlineOptions = ['lengthwise', 'crosswise', 'bias'];
 
 type FormPiece = NonNullable<TechCardFormData['pieces']>[number];
 type FormMaterial = NonNullable<FormPiece['materials']>[number];
+type FormCallout = {
+  number?: number;
+  mediaId?: number;
+  part?: string;
+  posX?: string;
+  posY?: string;
+};
+
+const colorwayLabel = (c: { colorwayId?: number; colorCode?: string; baseSku?: string }) =>
+  c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId ?? 0}`;
+
+// The marker diagram beside the table (13.1). Grainline and mirroring are GEOMETRY — a picture
+// verifies them faster than a column of words — so the callout number each piece already carries is
+// drawn where the sketch says it lives. Pins are positioned against the image's own box (not a
+// fixed-aspect frame) because callout posX/posY are fractions OF THE IMAGE: letterboxing a
+// 4:3 sketch inside a 3:4 frame would slide every pin off the part it names.
+function PieceDiagram({
+  techCard,
+  pinnedNumbers,
+  labelForPin,
+  activePin,
+  onActivePinChange,
+}: {
+  techCard?: common_TechCard;
+  pinnedNumbers: Set<number>;
+  labelForPin: (n: number) => string;
+  activePin: number | null;
+  onActivePinChange: (n: number | null) => void;
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
+
+  const mediaById = useMemo(() => {
+    const m = new Map<number, common_MediaFull>();
+    for (const rm of techCard?.resolvedTechnicalMedia ?? []) {
+      if (rm.media?.id != null) m.set(rm.media.id, rm.media);
+    }
+    return m;
+  }, [techCard?.resolvedTechnicalMedia]);
+
+  const urlFor = (mediaId: number) => {
+    const f = mediaById.get(mediaId);
+    return f?.media?.fullSize?.mediaUrl || f?.media?.thumbnail?.mediaUrl || '';
+  };
+
+  // Only callouts a piece actually points at are drawn — an unreferenced pin belongs to the sketch
+  // tab, not to the cut list. The view shown is whichever technical sketch hosts the most of them.
+  const drawable = callouts.filter((c) => {
+    const n = c.number ?? 0;
+    if (n <= 0 || !pinnedNumbers.has(n)) return false;
+    if (!urlFor(c.mediaId ?? 0)) return false;
+    return !Number.isNaN(parseFloat(c.posX ?? '')) && !Number.isNaN(parseFloat(c.posY ?? ''));
+  });
+
+  const bestMediaId = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const c of drawable) {
+      const id = c.mediaId ?? 0;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    let best = 0;
+    let bestN = 0;
+    for (const [id, n] of counts) if (n > bestN) [best, bestN] = [id, n];
+    return best;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawable.map((c) => `${c.mediaId}:${c.number}`).join(',')]);
+
+  const shown = drawable.filter((c) => (c.mediaId ?? 0) === bestMediaId);
+  const url = bestMediaId ? urlFor(bestMediaId) : '';
+
+  if (!url || shown.length === 0) {
+    return (
+      <div className='flex flex-col gap-1'>
+        <Canvas aspect='3/4' className='flex items-center justify-center'>
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            className='px-2 text-center uppercase'
+          >
+            нет выносок
+          </Text>
+        </Canvas>
+        <Text size='micro' variant='label'>
+          проставьте callout # у детали и расставьте выноски на вкладке sketch
+        </Text>
+      </div>
+    );
+  }
+
+  return (
+    <div className='flex flex-col gap-1'>
+      <div className='relative w-full border border-borderColor'>
+        <img src={url} alt='piece diagram' draggable={false} className='block w-full select-none' />
+        {shown.map((c) => {
+          const n = c.number as number;
+          return (
+            <Pin
+              key={`${c.mediaId}-${n}`}
+              x={parseFloat(c.posX ?? '0') * 100}
+              y={parseFloat(c.posY ?? '0') * 100}
+              label={n}
+              title={labelForPin(n)}
+              highlighted={activePin === n}
+              onMouseEnter={() => onActivePinChange(n)}
+              onMouseLeave={() => onActivePinChange(null)}
+            />
+          );
+        })}
+      </div>
+      <Text size='micro' variant='label'>
+        наведите на строку — её пин подсветится
+      </Text>
+    </div>
+  );
+}
+
+// A colourway column's «copy from ▾»: fills this colourway's whole fabric map from another one.
+// 12 pieces × 3 colourways is 36 dropdowns to click through, and the second and third colourway are
+// almost always the first one with a different shell — so this removes most of that clicking
+// without changing what the matrix means.
+function CopyColumnMenu({
+  target,
+  sources,
+  onCopy,
+}: {
+  target: string;
+  sources: { id: number; label: string }[];
+  onCopy: (fromId: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      noTail
+      title={`copy into ${target}`}
+      triggerProps={{ 'aria-label': `copy the fabric map of another colourway into ${target}` }}
+      openElement={
+        <Text size='nano' variant='label' component='span' className='uppercase underline'>
+          copy from ▾
+        </Text>
+      }
+    >
+      <div className='flex flex-col'>
+        {sources.map((s) => (
+          <button
+            key={s.id}
+            type='button'
+            onClick={() => {
+              onCopy(s.id);
+              setOpen(false);
+            }}
+            className='px-1 py-1 text-left text-control uppercase hover:bg-bgZebra'
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </GenericPopover>
+  );
+}
 
 // Cut-piece details (детали кроя) + the piece × colourway fabric map (NF-05). Pieces are positional.
 // The map stores a sparse materials list keyed by the colourway id (pieceMaterial.colorwayIndex holds
@@ -46,6 +209,9 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     section?: string;
   }>;
 
+  // Row ↔ pin cross-highlight, the same hook the construction tab drives its sketch with.
+  const pin = useCrossHighlight<number>();
+
   // Fabric-map cell read/write, keyed by the real colourway id (nf05-01: resolve to the id, never a
   // positional index — the cell must stay attached to the colourway that was picked, not whatever
   // sits at that array position). materials is sparse — a colourway with no entry is unmapped.
@@ -61,6 +227,27 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     const next =
       at >= 0 ? materials.map((m, i) => (i === at ? nextEntry : m)) : [...materials, nextEntry];
     setValue(`pieces.${pi}.materials`, next, { shouldDirty: true });
+  };
+
+  // Column copy: per ROW setValue on `pieces.N.materials`, never a whole-array setValue — replacing
+  // the array root desyncs useFieldArray's keys and re-mounts every input mid-edit.
+  const copyColumn = (fromId: number, toId: number) => {
+    if (fromId === toId) return;
+    const all = (getValues('pieces') ?? []) as FormPiece[];
+    all.forEach((p, pi) => {
+      const materials = (p.materials ?? []) as FormMaterial[];
+      const src = materials.find((m) => (m.colorwayIndex ?? 0) === fromId);
+      const at = materials.findIndex((m) => (m.colorwayIndex ?? 0) === toId);
+      const patch = {
+        bomLineKey: src?.bomLineKey ?? '',
+        fusingBomLineKey: src?.fusingBomLineKey ?? '',
+      };
+      const nextEntry: FormMaterial =
+        at >= 0 ? { ...materials[at], ...patch } : { colorwayIndex: toId, note: '', ...patch };
+      const next =
+        at >= 0 ? materials.map((m, i) => (i === at ? nextEntry : m)) : [...materials, nextEntry];
+      setValue(`pieces.${pi}.materials`, next, { shouldDirty: true });
+    });
   };
 
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
@@ -85,6 +272,17 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     );
   }, [pieces]);
 
+  // Which callout numbers the pieces reference, and what to call each pin in its tooltip.
+  const pinnedNumbers = useMemo(
+    () => new Set(pieces.map((p) => p.calloutNumber || 0).filter((n) => n > 0)),
+    [pieces],
+  );
+  const labelForPin = (n: number) =>
+    pieces
+      .filter((p) => (p.calloutNumber || 0) === n)
+      .map((p) => p.name?.trim() || 'без названия')
+      .join(' · ') || `#${n}`;
+
   // A new row is minted with its stable lineKey up front, NOT left for the save mapper: the
   // operation and recipe pickers can only offer a piece that already has one, so without it a part
   // added here stayed unlinkable until the card had been saved and reloaded.
@@ -102,7 +300,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     });
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex flex-col gap-3.5'>
       <datalist id='piece-code-suggestions'>
         {pieceCodeOptions.map((c) => (
           <option key={c} value={c} />
@@ -114,130 +312,161 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
         ))}
       </datalist>
 
-      {/* PIECES table */}
-      <section className='flex flex-col gap-2 border border-textInactiveColor p-4'>
-        <div className='flex items-center justify-between'>
-          <Text variant='uppercase' size='large'>
-            pieces (детали кроя)
-          </Text>
-          <Button type='button' variant='main' size='lg' className='uppercase' onClick={addPiece}>
-            + piece
-          </Button>
-        </div>
+      {/* CUT PIECES — table + mini diagram */}
+      <section>
+        <SectionHeader
+          title='детали кроя'
+          question='— code, name, per garment, mirrored, grainline, fused, callout number'
+          action={
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              data-field='pieces.add'
+              onClick={addPiece}
+            >
+              + piece
+            </Button>
+          }
+        />
         {fields.length === 0 ? (
-          <Text variant='inactive' size='small'>
+          <Text size='micro' variant='label'>
             no pieces yet — add the pattern parts that get cut (front, back, collar…)
           </Text>
         ) : (
-          <div className='overflow-x-auto'>
-            <table className='w-full min-w-max border-collapse'>
+          <div className='grid gap-2.5 lg:grid-cols-[1fr_160px]'>
+            <DataTable>
               <thead>
                 <tr>
-                  <th className={th}>code / name</th>
-                  <th className={th}>per garment</th>
-                  <th className={th}>mirrored</th>
-                  <th className={th}>grainline</th>
-                  <th className={th}>fused</th>
-                  <th className={th}>callout #</th>
-                  <th className={th}>note</th>
-                  <th className={th} />
+                  <th>code / name</th>
+                  <th>×</th>
+                  <th>mirror</th>
+                  <th>grain</th>
+                  <th>fused</th>
+                  <th>callout</th>
+                  <th>note</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
                 {fields.map((f, pi) => {
                   const p = pieces[pi] ?? {};
+                  const callout = p.calloutNumber || 0;
+                  const arrow = grainlineArrow(p.grainline);
                   return (
-                    <tr key={f.id}>
-                      <td className={td}>
-                        <input
-                          className={`${cell} w-40`}
+                    <tr
+                      key={f.id}
+                      {...pin.bind(callout > 0 ? callout : null)}
+                      className={pin.isActive(callout) ? 'bg-bgZebra' : undefined}
+                    >
+                      <td>
+                        <Input
+                          className='w-40'
                           data-field={`pieces.${pi}.name`}
                           aria-invalid={duplicateRows.has(pi)}
                           list='piece-code-suggestions'
                           value={p.name ?? ''}
-                          onChange={(e) =>
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                             setValue(`pieces.${pi}.name`, e.target.value, { shouldDirty: true })
                           }
                           placeholder='FP front piece'
                         />
                         {duplicateRows.has(pi) && (
-                          <Text size='small' className='text-error'>
+                          <Text size='micro' variant='error'>
                             такая деталь уже есть — имя должно быть уникальным
                           </Text>
                         )}
                       </td>
-                      <td className={td}>
-                        <input
-                          className={`${cell} w-20`}
+                      <td>
+                        <Input
+                          className='w-14'
                           type='number'
                           min='1'
                           value={p.piecesPerGarment ?? 1}
-                          onChange={(e) =>
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                             setValue(`pieces.${pi}.piecesPerGarment`, Number(e.target.value) || 1, {
                               shouldDirty: true,
                             })
                           }
                         />
                       </td>
-                      <td className={`${td} text-center`}>
-                        <input
-                          type='checkbox'
-                          checked={!!p.mirrored}
-                          onChange={(e) =>
-                            setValue(`pieces.${pi}.mirrored`, e.target.checked, {
-                              shouldDirty: true,
-                            })
-                          }
-                        />
+                      <td>
+                        {/* the resulting multiplier is shown inline so the cut list is predictable */}
+                        <div className='flex items-center justify-center gap-1'>
+                          <input
+                            type='checkbox'
+                            aria-label='mirrored pair'
+                            checked={!!p.mirrored}
+                            onChange={(e) =>
+                              setValue(`pieces.${pi}.mirrored`, e.target.checked, {
+                                shouldDirty: true,
+                              })
+                            }
+                          />
+                          <Text size='micro' variant='label' component='span'>
+                            {p.mirrored ? `×${(p.piecesPerGarment ?? 1) * 2}` : ''}
+                          </Text>
+                        </div>
                       </td>
-                      <td className={td}>
-                        <input
-                          className={`${cell} w-28`}
-                          list='grainline-suggestions'
-                          value={p.grainline ?? ''}
-                          onChange={(e) =>
-                            setValue(`pieces.${pi}.grainline`, e.target.value, {
-                              shouldDirty: true,
-                            })
-                          }
-                          placeholder='lengthwise'
-                        />
+                      <td>
+                        <div className='flex items-center gap-1'>
+                          <Input
+                            className='w-24'
+                            list='grainline-suggestions'
+                            value={p.grainline ?? ''}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setValue(`pieces.${pi}.grainline`, e.target.value, {
+                                shouldDirty: true,
+                              })
+                            }
+                            placeholder='lengthwise'
+                          />
+                          <span aria-hidden className='shrink-0'>
+                            {arrow}
+                          </span>
+                        </div>
                       </td>
-                      <td className={`${td} text-center`}>
-                        <input
-                          type='checkbox'
-                          checked={!!p.fused}
-                          onChange={(e) =>
-                            setValue(`pieces.${pi}.fused`, e.target.checked, { shouldDirty: true })
-                          }
-                        />
+                      <td>
+                        <div className='flex justify-center'>
+                          <input
+                            type='checkbox'
+                            aria-label='fused'
+                            checked={!!p.fused}
+                            onChange={(e) =>
+                              setValue(`pieces.${pi}.fused`, e.target.checked, {
+                                shouldDirty: true,
+                              })
+                            }
+                          />
+                        </div>
                       </td>
-                      <td className={td}>
-                        <input
-                          className={`${cell} w-16`}
+                      <td>
+                        <Input
+                          className='w-14'
                           type='number'
                           min='0'
                           value={p.calloutNumber || 0}
-                          onChange={(e) =>
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                             setValue(`pieces.${pi}.calloutNumber`, Number(e.target.value) || 0, {
                               shouldDirty: true,
                             })
                           }
                         />
                       </td>
-                      <td className={td}>
-                        <input
-                          className={`${cell} w-48`}
+                      <td>
+                        <Input
+                          className='w-40'
                           value={p.note ?? ''}
-                          onChange={(e) =>
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                             setValue(`pieces.${pi}.note`, e.target.value, { shouldDirty: true })
                           }
                         />
                       </td>
-                      <td className={`${td} text-center`}>
+                      <td>
                         <Button
                           type='button'
                           variant='secondary'
+                          size='xs'
                           aria-label='remove piece'
                           onClick={() => removePiece(pi)}
                         >
@@ -248,91 +477,121 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                   );
                 })}
               </tbody>
-            </table>
+            </DataTable>
+
+            <PieceDiagram
+              techCard={techCard}
+              pinnedNumbers={pinnedNumbers}
+              labelForPin={labelForPin}
+              activePin={pin.active}
+              onActivePinChange={pin.setActive}
+            />
           </div>
         )}
       </section>
 
-      {/* FABRIC MAP */}
-      <section className='flex flex-col gap-2 border border-textInactiveColor p-4'>
-        <Text variant='uppercase' size='large'>
-          fabric map (piece × colourway)
-        </Text>
+      {/* FABRIC MAP — piece × colourway matrix */}
+      <section>
+        <SectionHeader
+          title='fabric map'
+          question='— which fabric on which piece, per colourway; a fused piece carries a second “fusing” choice'
+        />
         {fields.length === 0 ? (
-          <Text variant='inactive' size='small'>
+          <Text size='micro' variant='label'>
             add pieces above to map their fabrics
           </Text>
         ) : colorways.length === 0 ? (
-          <Text variant='inactive' size='small'>
+          <Text size='micro' variant='label'>
             add colourways (colorways tab) to map fabrics per colour
           </Text>
         ) : bomItems.length === 0 ? (
-          <Text variant='inactive' size='small'>
+          <Text size='micro' variant='label'>
             add fabric / lining articles (BOM tab) to pick from
           </Text>
         ) : (
-          <div className='overflow-x-auto'>
-            <table className='w-full min-w-max border-collapse'>
-              <thead>
-                <tr>
-                  <th className={th}>piece</th>
-                  {colorways.map((c) => (
-                    <th key={c.colorwayId} className={th}>
-                      {c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId}`}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {fields.map((f, pi) => {
-                  const p = pieces[pi] ?? {};
+          <DataTable variant='grid'>
+            <thead>
+              <tr>
+                <th>piece</th>
+                {colorways.map((c) => {
+                  const cwId = c.colorwayId ?? 0;
+                  const label = colorwayLabel(c);
                   return (
-                    <tr key={f.id}>
-                      <td className={`${td} whitespace-nowrap`}>
-                        <Text size='small'>{p.name?.trim() || `piece ${pi + 1}`}</Text>
-                      </td>
-                      {colorways.map((cw) => {
-                        const cwId = cw.colorwayId ?? 0;
-                        const c = cellFor(pi, cwId);
-                        const fabricVal = c?.bomLineKey ?? '';
-                        const fusingVal = c?.fusingBomLineKey ?? '';
-                        const missingFusing = !!p.fused && !fusingVal;
-                        return (
-                          <td key={cwId} className={td}>
-                            <div className='flex flex-col gap-1'>
+                    <th key={cwId}>
+                      <div className='flex flex-col items-center gap-0.5'>
+                        <span>{label}</span>
+                        {colorways.length > 1 && (
+                          <CopyColumnMenu
+                            target={label}
+                            sources={colorways
+                              .filter((o) => (o.colorwayId ?? 0) !== cwId)
+                              .map((o) => ({ id: o.colorwayId ?? 0, label: colorwayLabel(o) }))}
+                            onCopy={(fromId) => copyColumn(fromId, cwId)}
+                          />
+                        )}
+                      </div>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {fields.map((f, pi) => {
+                const p = pieces[pi] ?? {};
+                return (
+                  <tr key={f.id}>
+                    <td className='whitespace-nowrap'>
+                      <span className='inline-flex items-center gap-1.5'>
+                        {p.name?.trim() || `piece ${pi + 1}`}
+                        {p.fused && <Pill tone='mut'>fused</Pill>}
+                      </span>
+                    </td>
+                    {colorways.map((cw) => {
+                      const cwId = cw.colorwayId ?? 0;
+                      const c = cellFor(pi, cwId);
+                      const fabricVal = c?.bomLineKey ?? '';
+                      const fusingVal = c?.fusingBomLineKey ?? '';
+                      const missingFusing = !!p.fused && !fusingVal;
+                      return (
+                        <td key={cwId}>
+                          <div className='flex flex-col gap-1'>
+                            {/* an unset cell reads «— fabric —» in label grey, never blank */}
+                            <div className={fabricVal ? undefined : '[&_select]:text-labelColor'}>
                               <BomLineSelect
                                 value={fabricVal}
                                 onChange={(lk) => setCell(pi, cwId, { bomLineKey: lk })}
                                 sections={FABRIC_SECTIONS}
                                 noneLabel='— fabric —'
                               />
-                              {p.fused && (
-                                <div className='flex items-center gap-1'>
-                                  <BomLineSelect
-                                    value={fusingVal}
-                                    onChange={(lk) => setCell(pi, cwId, { fusingBomLineKey: lk })}
-                                    sections={FUSING_SECTIONS}
-                                    noneLabel='— fusing —'
-                                  />
-                                  {missingFusing && (
-                                    <span className='text-error' title='fused piece needs a fusing'>
-                                      !
-                                    </span>
-                                  )}
-                                </div>
-                              )}
                             </div>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                            {p.fused && (
+                              <div className={fusingVal ? undefined : '[&_select]:text-labelColor'}>
+                                <BomLineSelect
+                                  value={fusingVal}
+                                  onChange={(lk) => setCell(pi, cwId, { fusingBomLineKey: lk })}
+                                  sections={FUSING_SECTIONS}
+                                  noneLabel='— fusing —'
+                                />
+                                {missingFusing && (
+                                  <Text size='micro' variant='error'>
+                                    ! no fusing
+                                  </Text>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </DataTable>
         )}
       </section>
+
+      <PieceLegend />
     </div>
   );
 }

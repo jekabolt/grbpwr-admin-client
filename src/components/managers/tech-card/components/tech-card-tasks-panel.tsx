@@ -50,14 +50,14 @@ function TaskTile({ task }: { task: Task }) {
       <div className='flex items-center justify-between gap-2'>
         <span
           className={cn(
-            'border px-1.5 py-px text-[10px] uppercase leading-4',
+            'border px-1.5 py-px text-micro uppercase leading-4',
             STATUS_STYLE[task.status],
           )}
         >
           {STATUS_LABEL[task.status]}
         </span>
         {t.priority !== 'TASK_PRIORITY_UNKNOWN' && (
-          <span className='shrink-0 text-[10px] uppercase text-labelColor'>
+          <span className='shrink-0 text-micro uppercase text-labelColor'>
             {PRIORITY_LABEL[t.priority]}
           </span>
         )}
@@ -67,7 +67,7 @@ function TaskTile({ task }: { task: Task }) {
         {t.title || 'untitled task'}
       </Text>
 
-      <div className='flex items-center justify-between gap-2 text-[10px] uppercase text-labelColor'>
+      <div className='flex items-center justify-between gap-2 text-micro uppercase text-labelColor'>
         <span className='truncate'>{t.assignee || 'unassigned'}</span>
         {due.state !== 'none' && (
           <span
@@ -86,7 +86,7 @@ function TaskTile({ task }: { task: Task }) {
       </div>
 
       {checkTotal > 0 && (
-        <span className='text-[10px] uppercase text-labelColor'>
+        <span className='text-micro uppercase text-labelColor'>
           ✓ {checkDone}/{checkTotal}
         </span>
       )}

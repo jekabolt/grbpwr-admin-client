@@ -1,9 +1,12 @@
 import { CarePicker } from 'components/managers/product/components/care/care-picker';
 import { techCardLabelTypeOptions } from 'constants/filter';
 import { useSnackBarStore } from 'lib/stores/store';
+import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
+import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { TooltipProvider } from 'ui/components/tooltip';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
@@ -27,7 +30,7 @@ const emptyLabel = {
 };
 
 // Labels carry no image, so the "thumbnail" is a typographic square badge of the label type — it
-// keeps the tile/card look scannable at a glance (which kind of label this card is).
+// keeps the card scannable at a glance (which kind of label this card is).
 const LABEL_TYPE_BADGE: Record<string, string> = {
   TECH_CARD_LABEL_TYPE_MAIN: 'main',
   TECH_CARD_LABEL_TYPE_SIZE: 'size',
@@ -39,16 +42,6 @@ const LABEL_TYPE_BADGE: Record<string, string> = {
   TECH_CARD_LABEL_TYPE_SPECIAL: 'spec',
 };
 
-function LabelTypeTile({ type }: { type: string }) {
-  return (
-    <div className='flex aspect-square w-16 shrink-0 items-center justify-center border border-textInactiveColor bg-textColor/5 p-1 text-center'>
-      <Text variant='uppercase' size='small'>
-        {LABEL_TYPE_BADGE[type] ?? 'lbl'}
-      </Text>
-    </div>
-  );
-}
-
 // One label card. A CARE label gets the care-instruction picker for its content (laundry
 // symbols); the composition text lives in its note. Other types use a free-text content.
 function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) {
@@ -59,26 +52,31 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
   const isCare = labelType === CARE;
 
   return (
-    <div className='space-y-3 border border-textInactiveColor p-3'>
-      <div className='flex items-start gap-3'>
-        <LabelTypeTile type={labelType} />
-        <div className='min-w-0 flex-1 space-y-2'>
-          <div className='flex items-center justify-between gap-2'>
-            <Text variant='uppercase' size='small'>
-              label {index + 1}
-            </Text>
-            <Button type='button' variant='secondary' aria-label='remove label' onClick={onRemove}>
-              ✕
-            </Button>
-          </div>
-          <SelectField
-            name={`labels.${index}.labelType`}
-            label='type *'
-            items={techCardLabelTypeOptions}
-          />
-        </div>
+    <div id={`label-row-${index}`} className='border border-borderColor p-2'>
+      <div className='mb-1.5 flex items-center gap-2'>
+        <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
+          label {index + 1}
+        </Text>
+        <Pill tone='ink'>{LABEL_TYPE_BADGE[labelType] ?? 'lbl'}</Pill>
+        <span className='ml-auto'>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            aria-label='remove label'
+            onClick={onRemove}
+          >
+            ✕
+          </Button>
+        </span>
       </div>
-      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+
+      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+        <SelectField
+          name={`labels.${index}.labelType`}
+          label='type *'
+          items={techCardLabelTypeOptions}
+        />
         {isCare ? (
           <div className='sm:col-span-2'>
             <CarePicker name={`labels.${index}.content`} label='care symbols' />
@@ -86,7 +84,7 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         ) : (
           <InputField name={`labels.${index}.content`} label='content / ref' />
         )}
-        <div className='flex items-end gap-2'>
+        <div className='flex items-end gap-1.5'>
           <div className='min-w-0 flex-1'>
             <ComboField
               name={`labels.${index}.placement`}
@@ -95,7 +93,7 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
             />
           </div>
           {/* Pictogram of WHERE this label sits on the garment + a glyph for how it's attached —
-              hover/focus for the enlarged view (mirrors the measurement pictograms). */}
+              hover/focus for the enlarged view (the per-row twin of the garment map above). */}
           <LabelPlacementBadge placement={placement} attachment={attachment} />
         </div>
         <ComboField
@@ -117,6 +115,37 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'labels' });
   const { showMessage } = useSnackBarStore();
+
+  // Which row the checklist just sent us to. `nonce` re-arms the effect when the SAME row is asked
+  // for twice, so a second click scrolls again instead of sitting silent.
+  const [jump, setJump] = useState<{ index: number; nonce: number } | null>(null);
+  useEffect(() => {
+    if (!jump) return;
+    const frame = requestAnimationFrame(() => {
+      const el = document.getElementById(`label-row-${jump.index}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.querySelector<HTMLElement>('input, select, [role="combobox"], button')?.focus?.();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [jump]);
+
+  // The checklist's one-click fix: reuse an existing row of that type if there is one (a blank
+  // "main" row already waiting), otherwise append a fresh one — then walk to it either way.
+  const addLabel = (labelType: string) => {
+    const rows = (getValues('labels') ?? []) as Array<{ labelType?: string }>;
+    const existing = rows.findIndex((l) => l.labelType === labelType);
+    const index = existing >= 0 ? existing : rows.length;
+    if (existing < 0) append({ ...emptyLabel, labelType });
+    setJump((prev) => ({ index, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
+
+  // The three packaging-derived checklist rows aren't labels — walk to the packaging spec, which
+  // owns the anchor (packaging-field.tsx).
+  const openPackaging = () => {
+    document
+      .getElementById('packaging-spec')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 
   const generateCare = () => {
     const bomItems = (getValues('bomItems') ?? []) as Array<{
@@ -154,40 +183,34 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
 
   return (
     <TooltipProvider delayDuration={200} skipDelayDuration={150}>
-      <div className='space-y-4'>
-        <LabelsChecklist />
-        <div className='space-y-3'>
-          <div className='space-y-1'>
-            <Button type='button' variant='secondary' className='uppercase' onClick={generateCare}>
-              сгенерировать состав / уход
-            </Button>
-            <Text variant='inactive' size='small'>
-              собирает состав из BOM (composition) → пишет в этикетку «care». Символы стирки/глажки
-              выбираются пикером «care symbols». Страна — из этикетки «origin», если есть.
-            </Text>
-          </div>
+      <div className='flex flex-col gap-3'>
+        <LabelsChecklist onAddLabel={addLabel} onOpenPackaging={openPackaging} />
 
-          {fields.length === 0 ? (
-            <Text variant='inactive' size='small'>
-              no labels
-            </Text>
-          ) : (
-            <div className='space-y-3'>
-              {fields.map((f, index) => (
-                <LabelRow key={f.id} index={index} onRemove={() => remove(index)} />
-              ))}
-            </div>
-          )}
-
-          <Button
-            type='button'
-            variant='main'
-            className='uppercase'
-            onClick={() => append({ ...emptyLabel })}
-          >
-            add label
+        <Toolbar>
+          <Button type='button' variant='secondary' size='sm' onClick={generateCare}>
+            сгенерировать состав / уход
           </Button>
-        </div>
+          <ToolbarSpacer />
+          <Button type='button' variant='main' size='sm' onClick={() => append({ ...emptyLabel })}>
+            + label
+          </Button>
+        </Toolbar>
+        <Text size='micro' variant='label'>
+          собирает состав из BOM (composition) → пишет в этикетку «care». Символы стирки/глажки
+          выбираются пикером «care symbols». Страна — из этикетки «origin», если есть.
+        </Text>
+
+        {fields.length === 0 ? (
+          <Text size='micro' variant='label'>
+            no labels
+          </Text>
+        ) : (
+          <div className='flex flex-col gap-1.5'>
+            {fields.map((f, index) => (
+              <LabelRow key={f.id} index={index} onRemove={() => remove(index)} />
+            ))}
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );
