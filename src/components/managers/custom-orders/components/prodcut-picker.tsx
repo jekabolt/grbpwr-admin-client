@@ -1,16 +1,30 @@
-import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { common_Colorway } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
+import Media from 'ui/components/media';
+import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
-import { getProductPickerColumns } from '../utility/product-picker-columns';
-import type { ProductListProps } from './mobile-product-items';
-import { MobileProductItems } from './mobile-product-items';
+import { Tile, Tiles } from 'ui/components/tiles';
 
+/**
+ * custPicker v2 — thumbnail grid + basket.
+ *
+ * The table-in-a-dialog is gone: products are now a `Tiles` grid you pick by looking at, with a
+ * live basket beside it that shows what is staged. Clicking a tile toggles it into the basket;
+ * saving commits the basket to the order. The dialog is the app's one modal shell
+ * (`ConfirmationModal`, width lg) instead of a hand-rolled Radix dialog. The external props
+ * contract is unchanged, so the custom-order form (its only caller) needs no changes.
+ *
+ * The name/SKU filter and infinite scroll are preserved: `filterConditions` still has no text field
+ * server-side (admin/index.ts common_FilterConditions — price/gender/category/type/size/preorder/
+ * tag/collection/season/colour only), so we filter client-side over the loaded pages while the
+ * scroll sentinel keeps paging the catalogue in.
+ */
 interface ProductPickerProps {
   products: common_Colorway[];
   selectedProducts: common_Colorway[];
@@ -51,11 +65,6 @@ export function ProductPicker({
     }
   }, [open, selectedProducts]);
 
-  // NOTE: GetColorwaysPagedRequest.filterConditions (common_FilterConditions, admin/index.ts)
-  // has no name/SKU field today — only price range, gender/category/type/size ids, preorder,
-  // byTag, collections, seasons, colorCodes. A true server-side text search needs a proto change.
-  // Until then, filter client-side over whatever page(s) are already loaded; the infinite-scroll
-  // sentinel below keeps paging in more of the catalog while a search narrows the visible rows.
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return products;
@@ -70,153 +79,145 @@ export function ProductPicker({
     (product: common_Colorway) => {
       setPendingSelection((prev) => {
         const isSelected = prev.some((p) => p.id === product.id);
-        if (isSelected) {
-          return prev.filter((p) => p.id !== product.id);
-        }
+        if (isSelected) return prev.filter((p) => p.id !== product.id);
         return singleSelect ? [product] : [...prev, product];
       });
     },
     [singleSelect],
   );
 
-  const handleSave = () => {
-    handleSaveProducts(pendingSelection);
-    setOpen(false);
-  };
+  const removePending = (id?: number) =>
+    setPendingSelection((prev) => prev.filter((p) => p.id !== id));
 
-  const columns = useMemo(
-    () => getProductPickerColumns({ categories: dictionary?.categories }),
+  const categoryName = useCallback(
+    (product: common_Colorway) => {
+      const categoryId = product.display?.merchandising?.topCategoryId;
+      const category = dictionary?.categories?.find((c) => c.id === categoryId);
+      return category ? category.name?.replace('CATEGORY_ENUM_', '') : undefined;
+    },
     [dictionary?.categories],
   );
 
-  const productListProps = useMemo<ProductListProps>(
-    () => ({
-      products: filteredProducts,
-      pendingSelection,
-      togglePending,
-      categories: dictionary?.categories,
-    }),
-    [filteredProducts, pendingSelection, togglePending, dictionary?.categories],
-  );
+  const handleSave = () => handleSaveProducts(pendingSelection);
 
   return (
-    <DialogPrimitives.Root open={open} onOpenChange={setOpen}>
-      <DialogPrimitives.Trigger asChild>
-        <Button variant='main' size='lg' type='button' className={triggerClassName}>
-          {singleSelect ? 'select product' : 'select products'}
-        </Button>
-      </DialogPrimitives.Trigger>
-      <DialogPrimitives.Portal>
-        <DialogPrimitives.Overlay className='fixed inset-0 z-50 h-screen bg-overlay' />
-        <DialogPrimitives.Content
-          className={cn(
-            'fixed z-50 flex flex-col border border-textInactiveColor bg-bgColor text-textColor',
-            'inset-x-2 bottom-2 top-2 px-2.5 pb-4 pt-5',
-            'lg:inset-x-auto lg:left-1/2 lg:top-1/2 lg:bottom-auto lg:h-[min(85vh,600px)] lg:w-[min(90vw,900px)] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-2.5',
-          )}
-        >
-          <DialogPrimitives.Title className='sr-only'>
-            {singleSelect ? 'Select product' : 'Select products'}
-          </DialogPrimitives.Title>
-          <DialogPrimitives.Description className='sr-only'>
-            {singleSelect ? 'Pick a product' : 'Pick products for custom order'}
-          </DialogPrimitives.Description>
-          <div className='flex shrink-0 items-center justify-between'>
-            <Text variant='uppercase'>{singleSelect ? 'select product' : 'select products'}</Text>
-            <DialogPrimitives.Close asChild>
-              <Button>[x]</Button>
-            </DialogPrimitives.Close>
-          </div>
-          <div className='shrink-0 mt-3'>
-            <Input
-              name='product-picker-search'
-              type='text'
-              placeholder='search by name or SKU'
-              value={search}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
-            />
-          </div>
-          <div className='min-h-0 flex-1 overflow-y-auto mt-2'>
-            <div className='hidden lg:block w-full overflow-x-auto'>
-              <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
-                <thead className='bg-textInactiveColor h-10'>
-                  <tr className='border-b border-textInactiveColor'>
-                    {columns.map((col) => (
-                      <th
-                        key={col.label}
-                        className={cn(
-                          'sticky top-0 z-10 bg-textInactiveColor text-center w-auto lg:min-w-26 border border-r border-textInactiveColor px-2',
-                          col.className,
-                        )}
-                      >
-                        <Text variant='uppercase' className='leading-none'>
-                          {col.label}
-                        </Text>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredProducts.length === 0 ? (
-                    <tr>
-                      <td colSpan={columns.length} className='text-center py-8'>
-                        <Text variant='uppercase'>
-                          {search ? 'no products match your search' : 'no products found'}
-                        </Text>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredProducts.map((product) => {
-                      const isSelected = pendingSelection.some((p) => p.id === product.id);
-                      return (
-                        <tr
-                          key={product.id}
-                          role='button'
-                          tabIndex={0}
-                          onClick={() => togglePending(product)}
-                          onKeyDown={(e) => e.key === 'Enter' && togglePending(product)}
-                          className={cn(
-                            'border-b border-text last:border-b-0 lg:w-24 cursor-pointer transition-colors',
-                            { 'bg-textInactiveColor': isSelected },
-                          )}
-                        >
-                          {columns.map((col) => {
-                            const isThumbnail = col.label === 'THUMBNAIL';
-                            const cellContent = col.accessor(product);
-                            return (
-                              <td
-                                key={col.label}
-                                className={cn(
-                                  'border border-textInactiveColor text-center px-2 w-16 lg:w-auto',
-                                  col.className,
-                                )}
-                              >
-                                {isThumbnail ? cellContent : <Text>{cellContent}</Text>}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+    <>
+      <Button
+        variant='main'
+        size='lg'
+        type='button'
+        className={triggerClassName}
+        onClick={() => setOpen(true)}
+      >
+        {singleSelect ? 'select product' : 'add products'}
+      </Button>
+
+      <ConfirmationModal
+        open={open}
+        onOpenChange={setOpen}
+        onConfirm={handleSave}
+        title={singleSelect ? 'select product' : 'add products'}
+        confirmLabel={
+          singleSelect
+            ? 'select'
+            : `add${pendingSelection.length ? ` ${pendingSelection.length}` : ''} to order`
+        }
+        width='lg'
+      >
+        <div className='flex flex-col gap-2.5'>
+          <Input
+            name='product-picker-search'
+            type='text'
+            placeholder='search by name or SKU'
+            value={search}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+          />
+
+          <div className='grid gap-3 lg:grid-cols-[1fr_15rem]'>
+            {/* grid pane — its own scroll region so the basket stays put; sentinel pages the catalog */}
+            <div className='max-h-[58vh] min-h-0 overflow-y-auto pr-0.5'>
+              {filteredProducts.length === 0 ? (
+                <Placeholder
+                  label={search ? 'no products match your search' : 'no products found'}
+                  className='py-12'
+                />
+              ) : (
+                <Tiles min={104}>
+                  {filteredProducts.map((product) => (
+                    <Tile
+                      key={product.id}
+                      selected={pendingSelection.some((p) => p.id === product.id)}
+                      onClick={() => togglePending(product)}
+                      name={product.display?.translations?.[0]?.name}
+                      sub={categoryName(product)}
+                      media={
+                        <Media
+                          src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+                          alt={product.display?.translations?.[0]?.name || 'product'}
+                          aspectRatio='1/1'
+                          fit='contain'
+                        />
+                      }
+                    />
+                  ))}
+                </Tiles>
+              )}
+              {hasMore && <div ref={ref} className='h-4 shrink-0' />}
             </div>
-            <MobileProductItems {...productListProps} />
-            {hasMore && <div ref={ref} className='h-4 shrink-0' />}
+
+            {/* basket pane — what is staged for the order */}
+            <aside className='flex max-h-[58vh] flex-col gap-2 border border-borderColor bg-bgSecondary p-2'>
+              <GroupLabel flush>basket · {pendingSelection.length}</GroupLabel>
+              {pendingSelection.length === 0 ? (
+                <Text size='micro' variant='label' component='span'>
+                  nothing selected yet — tap a product to add it
+                </Text>
+              ) : (
+                <div className='flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto'>
+                  {pendingSelection.map((product) => (
+                    <div
+                      key={product.id}
+                      className='flex items-center gap-1.5 border border-borderColor bg-bgColor p-1'
+                    >
+                      <div className='h-9 w-9 shrink-0'>
+                        <Media
+                          src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
+                          alt={product.display?.translations?.[0]?.name || 'product'}
+                          aspectRatio='1/1'
+                          fit='contain'
+                        />
+                      </div>
+                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate uppercase'>
+                        {product.display?.translations?.[0]?.name || `#${product.id}`}
+                      </Text>
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        type='button'
+                        title='remove'
+                        onClick={() => removePending(product.id)}
+                      >
+                        remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {pendingSelection.length > 0 && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  type='button'
+                  className='self-start'
+                  onClick={() => setPendingSelection([])}
+                >
+                  clear all
+                </Button>
+              )}
+            </aside>
           </div>
-          <div className='flex shrink-0 justify-end gap-3 mt-3 pt-3 border-t border-textInactiveColor'>
-            <DialogPrimitives.Close asChild>
-              <Button variant='secondary' size='lg' type='button'>
-                cancel
-              </Button>
-            </DialogPrimitives.Close>
-            <Button variant='main' size='lg' type='button' onClick={handleSave}>
-              save
-            </Button>
-          </div>
-        </DialogPrimitives.Content>
-      </DialogPrimitives.Portal>
-    </DialogPrimitives.Root>
+        </div>
+      </ConfirmationModal>
+    </>
   );
 }

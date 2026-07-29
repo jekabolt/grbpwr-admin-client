@@ -76,18 +76,28 @@ const sameAddress = (a?: common_AddressInsert, b?: common_AddressInsert) =>
   a.country === b.country &&
   a.state === b.state;
 
-// Full printable commercial invoice for one order. Pure presentational, self-contained
-// black-on-white so it prints/PDFs identically regardless of app theme — same document
-// language as the tech pack (see tech-pack-document). Rendered by invoice-page under the
-// layout-less print route.
+// invDoc v2 — the A4 sheet, now driven by invPage's options rail. Still pure presentational,
+// self-contained black-on-white so it prints/PDFs identically regardless of app theme (same
+// document language as the tech pack, see tech-pack-document). Three operator toggles ride in as
+// props: hide unit prices for a lump-sum sheet, suppress the reverse-charge note, and pick the
+// dictionary language for product names. Everything else is derived from the order.
 export function InvoiceDocument({
   orderDetails,
   orderStatus,
   dictionary,
+  showUnitPrices = true,
+  showVatNote = true,
+  languageId,
 }: {
   orderDetails?: common_OrderFull;
   orderStatus?: string;
   dictionary?: common_Dictionary;
+  /** invPage rail toggle — drop the per-unit column for a flat amount-only sheet. */
+  showUnitPrices?: boolean;
+  /** invPage rail toggle — print the legal reverse-charge/VAT note (only shown when one exists). */
+  showVatNote?: boolean;
+  /** Pick product-name translations in this dictionary language; falls back to the first. */
+  languageId?: number;
 }) {
   const order = orderDetails?.order;
   if (!order) return null;
@@ -109,6 +119,17 @@ export function InvoiceDocument({
 
   const carrierName = dictionary?.shipmentCarriers?.find((c) => c.id === shipment?.carrierId)
     ?.shipmentCarrier?.carrier;
+
+  // Product names are translated per dictionary language. The rail lets the operator print the
+  // sheet in any active language; with none chosen we keep the first translation (today's default).
+  const pickName = (translations?: { languageId?: number; name?: string }[]): string | undefined => {
+    if (!translations?.length) return undefined;
+    if (languageId != null) {
+      const match = translations.find((t) => t.languageId === languageId)?.name;
+      if (match) return match;
+    }
+    return translations[0]?.name;
+  };
 
   const items = orderDetails?.orderItems ?? [];
   const rows = items.map((item) => {
@@ -238,7 +259,7 @@ export function InvoiceDocument({
               <th className={TH}>sku</th>
               <th className={TH}>product</th>
               <th className={`${TH} text-center`}>size</th>
-              <th className={`${TH} text-right`}>unit price</th>
+              {showUnitPrices && <th className={`${TH} text-right`}>unit price</th>}
               <th className={`${TH} text-center`}>qty</th>
               <th className={`${TH} text-right`}>amount</th>
             </tr>
@@ -246,7 +267,7 @@ export function InvoiceDocument({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td className={`${TD} text-center`} colSpan={7}>
+                <td className={`${TD} text-center`} colSpan={showUnitPrices ? 7 : 6}>
                   no items
                 </td>
               </tr>
@@ -258,19 +279,21 @@ export function InvoiceDocument({
                     <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
                     <td className={`${TD} whitespace-nowrap`}>{r.item.variantSkuSnapshot || '—'}</td>
                     <td className={TD}>
-                      <div className='font-medium'>{r.item.translations?.[0]?.name || '—'}</div>
+                      <div className='font-medium'>{pickName(r.item.translations) || '—'}</div>
                       <div className='text-labelColor'>
                         {[r.item.productBrand, r.item.color].filter(Boolean).join(' · ')}
                         {refunded ? ' · refunded' : ''}
                       </div>
                     </td>
                     <td className={`${TD} text-center`}>{r.item.sizeNameSnapshot || '—'}</td>
-                    <td className={`${TD} whitespace-nowrap text-right`}>
-                      {money(r.unit)}
-                      {r.sale > 0 && (
-                        <div className='text-labelColor line-through'>{money(r.base)}</div>
-                      )}
-                    </td>
+                    {showUnitPrices && (
+                      <td className={`${TD} whitespace-nowrap text-right`}>
+                        {money(r.unit)}
+                        {r.sale > 0 && (
+                          <div className='text-labelColor line-through'>{money(r.base)}</div>
+                        )}
+                      </td>
+                    )}
                     <td className={`${TD} text-center`}>{r.qty}</td>
                     <td className={`${TD} whitespace-nowrap text-right font-medium`}>
                       {money(r.line)}
@@ -316,7 +339,7 @@ export function InvoiceDocument({
       </div>
 
       {/* VAT / REVERSE CHARGE NOTE */}
-      {reverseChargeNote && (
+      {showVatNote && reverseChargeNote && (
         <div className='mb-5 break-inside-avoid border border-black px-3 py-2 text-[10px] leading-snug'>
           <div className='mb-0.5 font-bold uppercase tracking-[0.12em]'>vat — reverse charge</div>
           <div>{reverseChargeNote}</div>
