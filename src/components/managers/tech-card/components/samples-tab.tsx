@@ -115,10 +115,10 @@ export function SamplesTab({
   const { data, isLoading } = useSamples(techCardId);
   const samples = data?.samples ?? [];
   const expanded = params.get('sample') ?? '';
-  const staging = useTechCardStaging();
+  // The board only READS what is staged (the editor does the staging), so it subscribes to the list
+  // alone — edits staged on a sample the user has since closed live only in the header count
+  // otherwise, and the board is where they would look for them.
   const stagedChanges = useStagedChanges();
-  // Edits staged on a sample the user has since closed live only in the header count — the board is
-  // where they would look for them, so the tile says so too.
   const stagedSampleIds = useMemo(() => {
     const ids = new Set<number>();
     for (const c of stagedChanges)
@@ -534,6 +534,9 @@ function SampleEditor({
     setD(snap.draft);
     setMediaById(new Map((snap.media ?? []).filter((m) => m.id).map((m) => [m.id!, m])));
     setDirty(true);
+    // stagedSnapshot is a new reader on every stage; the ref guard already makes this a once-per-
+    // mount claim, and depending on it would re-run the effect for nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staging, sampleId, stagingKey]);
 
   const set = (patch: Partial<Draft>) => {
@@ -649,7 +652,10 @@ function SampleEditor({
   useEffect(() => {
     if (!staging || !sampleId || !canEdit) return;
     if (changed.length === 0) {
-      staging.unstage(stagingKey);
+      // Only an editor that has been touched may unstage. A freshly mounted one has not adopted the
+      // snapshot yet (that lands a render later), and unstaging on the strength of a draft it is
+      // about to replace would drop the very edits it was opened to show.
+      if (dirty) staging.unstage(stagingKey);
       return;
     }
     staging.stage({
@@ -668,7 +674,7 @@ function SampleEditor({
     // commitSample is redefined every render by design (it reads the current draft); depending on
     // it here would restage twice per keystroke for no gain, so the state it reads is the dep list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staging, sampleId, stagingKey, canEdit, changed, d, sample.number]);
+  }, [staging, sampleId, stagingKey, canEdit, dirty, changed, d, mediaById, sample.number]);
 
   // Staged edits are not lost work — they ride the card's Save — but the operator still needs a way
   // to say "forget these". Dropping dirty re-arms the load effect, which restores the server's copy.
