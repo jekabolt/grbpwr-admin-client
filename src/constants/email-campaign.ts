@@ -157,6 +157,57 @@ export const CTA_ALIGNMENT_OPTIONS: { value: string; label: string }[] = [
   { value: 'right', label: 'right' },
 ];
 
+// ── A/B testing (ABConfig) ─────────────────────────────────────────────────────
+// ABDimension enum members (subject vs. content); UNKNOWN is not offerable.
+export type ABDimension = 'AB_DIMENSION_SUBJECT' | 'AB_DIMENSION_CONTENT';
+
+export const AB_DIMENSION_OPTIONS: { value: ABDimension; label: string }[] = [
+  { value: 'AB_DIMENSION_SUBJECT', label: 'subject line' },
+  { value: 'AB_DIMENSION_CONTENT', label: 'content (body)' },
+];
+
+// The backend rejects a decision window outside 30 min … 7 days (10080 min) and a
+// test % outside 1…100. Mirror those bounds client-side so the form rejects early.
+export const AB_DECISION_MIN_MINUTES = 30;
+export const AB_DECISION_MAX_MINUTES = 10080;
+export const AB_TEST_PCT_MIN = 1;
+export const AB_TEST_PCT_MAX = 100;
+
+// ── dispatch ledger labels (EmailCampaignRecipientStatus / EmailCampaignCohort) ──
+export const RECIPIENT_STATUS_LABELS: Record<string, string> = {
+  EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN: 'unknown',
+  EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING: 'pending',
+  EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT: 'sent',
+  EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED: 'failed',
+  EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED: 'skipped',
+};
+
+// Sentinel for the "no filter" option — a Radix Select.Item can't take an empty
+// string value, so the un-filtered choice uses this and the table maps it to null.
+export const RECIPIENT_FILTER_ALL = '__all__';
+
+// Filter options for the recipients table (client-side over loaded rows — the
+// GetCampaignRecipients RPC takes only id/afterId/limit, no server-side filters).
+export const RECIPIENT_STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: RECIPIENT_FILTER_ALL, label: 'all statuses' },
+  { value: 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING', label: 'pending' },
+  { value: 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT', label: 'sent' },
+  { value: 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED', label: 'failed' },
+  { value: 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED', label: 'skipped' },
+];
+
+export const COHORT_LABELS: Record<string, string> = {
+  EMAIL_CAMPAIGN_COHORT_UNKNOWN: '—',
+  EMAIL_CAMPAIGN_COHORT_AB: 'A/B test',
+  EMAIL_CAMPAIGN_COHORT_REMAINDER: 'remainder',
+};
+
+export const COHORT_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: RECIPIENT_FILTER_ALL, label: 'all cohorts' },
+  { value: 'EMAIL_CAMPAIGN_COHORT_AB', label: 'A/B test' },
+  { value: 'EMAIL_CAMPAIGN_COHORT_REMAINDER', label: 'remainder' },
+];
+
 // Networks offered by the SOCIAL_LINKS block (map to EmailSocialLink.network).
 export const SOCIAL_NETWORK_OPTIONS: { value: string; label: string }[] = [
   { value: 'instagram', label: 'instagram' },

@@ -28,6 +28,7 @@ import { BlockEditorModal } from './block-editor-modal';
 import { BlockRail } from './block-rail';
 import { CampaignMetrics } from './campaign-metrics';
 import { CampaignPreviewPanel } from './campaign-preview-panel';
+import { DispatchPanel } from './dispatch-panel';
 import { mapCampaignFullToForm, mapFormToCampaignInsert } from './map-schema-to-campaign';
 import { campaignSchema, CampaignSchema, defaultCampaign } from './schema';
 import { SegmentPanel } from './segment-builder';
@@ -256,6 +257,13 @@ export function CampaignBuilder() {
           </div>
         )}
 
+        {/* ── dispatch lifecycle + status (saved campaigns only) ───────────── */}
+        {routeId > 0 && (
+          <div className='mb-6'>
+            <DispatchPanel campaign={campaignData} canOperate={canWrite(SECTION.marketing)} />
+          </div>
+        )}
+
         <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
           <div className='max-h-[50vh] shrink-0 overflow-y-auto lg:max-h-none lg:overflow-visible lg:sticky lg:top-20 lg:w-[260px]'>
             <BlockRail
@@ -309,8 +317,14 @@ export function CampaignBuilder() {
                   label='schedule at (optional)'
                 />
               </div>
-              <ABPanel />
-              {routeId > 0 && currentStatus !== 'EMAIL_CAMPAIGN_STATUS_DRAFT' && <CampaignMetrics />}
+              <ABPanel campaign={campaignData} />
+              {routeId > 0 && (
+                <CampaignMetrics
+                  campaignId={routeId}
+                  status={currentStatus}
+                  winnerVariantId={campaignData?.abConfig?.winnerVariantId}
+                />
+              )}
             </div>
 
             {/* ── live preview ─────────────────────────────────────────── */}

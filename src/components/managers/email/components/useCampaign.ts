@@ -1,7 +1,10 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
+  common_CampaignMetrics,
+  common_EmailCampaignDispatchStatus,
   common_EmailCampaignInsert,
+  common_EmailCampaignRecipient,
   common_EmailCampaignStatus,
   common_EmailCampaignTopic,
   common_EmailSegment,
@@ -20,6 +23,10 @@ export const emailCampaignKeys = {
   // Segment detail nests under `segments`, so invalidating `segments` refreshes the
   // list (campaign picker + segments page) AND every open segment detail at once.
   segmentDetail: (id: number) => [...['emailSegments'], 'detail', id] as const,
+  // Ф3/Ф4 dispatch surfaces.
+  dispatch: (id: number) => [...emailCampaignKeys.detail(id), 'dispatch'] as const,
+  metrics: (id: number) => [...emailCampaignKeys.detail(id), 'metrics'] as const,
+  recipients: (id: number) => [...emailCampaignKeys.detail(id), 'recipients'] as const,
 };
 
 const PAGE_LIMIT = 24;
@@ -133,6 +140,137 @@ export function useTestSend() {
       showMessage(`test send failed — ${msg}`, 'error');
     },
   });
+}
+
+// ─── Ф3 dispatch lifecycle + status ───────────────────────────────────────────
+
+const DISPATCH_POLL_MS = 4000;
+
+// GetCampaignDispatchStatus -> { status: EmailCampaignDispatchStatus }. Polls while
+// the dispatch is fanning out (status === SENDING) so the operator sees live
+// progress; goes quiet once terminal.
+export function useDispatchStatus(id: number, enabled = true) {
+  return useQuery({
+    queryKey: emailCampaignKeys.dispatch(id),
+    queryFn: async (): Promise<common_EmailCampaignDispatchStatus | null> => {
+      const res = await adminService.GetCampaignDispatchStatus({ id });
+      return res?.status ?? null;
+    },
+    enabled: enabled && id > 0,
+    staleTime: 0,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'EMAIL_CAMPAIGN_STATUS_SENDING' ? DISPATCH_POLL_MS : false,
+    retry: 1,
+  });
+}
+
+// GetCampaignMetrics -> { metrics: CampaignMetrics }. Compute-on-read aggregates;
+// refetch on a slow cadence while sending so open/click rates trend in near-real time.
+export function useCampaignMetrics(id: number, enabled = true) {
+  return useQuery({
+    queryKey: emailCampaignKeys.metrics(id),
+    queryFn: async (): Promise<common_CampaignMetrics | null> => {
+      const res = await adminService.GetCampaignMetrics({ campaignId: id });
+      return res?.metrics ?? null;
+    },
+    enabled: enabled && id > 0,
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
+// GetCampaignRecipients — keyset pagination via afterId/nextId. The generated
+// request carries only { id, afterId, limit } (no server-side status/cohort/variant
+// filters), so the table filters loaded rows client-side.
+export const RECIPIENTS_PAGE_LIMIT = 100; // backend caps at 250.
+
+export function useRecipients(id: number, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: emailCampaignKeys.recipients(id),
+    queryFn: async ({ pageParam }) => {
+      const res = await adminService.GetCampaignRecipients({
+        id,
+        afterId: (pageParam as number) || 0,
+        limit: RECIPIENTS_PAGE_LIMIT,
+      });
+      return {
+        recipients: res?.recipients ?? ([] as common_EmailCampaignRecipient[]),
+        nextId: res?.nextId ?? 0,
+      };
+    },
+    initialPageParam: 0,
+    getNextPageParam: (last) =>
+      last.nextId && last.recipients.length === RECIPIENTS_PAGE_LIMIT ? last.nextId : undefined,
+    enabled: enabled && id > 0,
+    staleTime: 30 * 1000,
+  });
+}
+
+// Shared onSuccess for the lifecycle mutations: refetch the campaign detail + its
+// dispatch status (the source of truth for which controls are valid next) and the
+// list so status chips update, then surface a toast.
+function useLifecycleMutation<TVars extends { id: number }>(
+  fn: (vars: TVars) => Promise<unknown>,
+  successMsg: string,
+  errPrefix: string,
+) {
+  const queryClient = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: async (_res, vars) => {
+      showMessage(successMsg, 'success');
+      queryClient.invalidateQueries({ queryKey: emailCampaignKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: emailCampaignKeys.detail(vars.id) });
+      // Refetch dispatch status so the control set reflects the new state immediately.
+      await queryClient.refetchQueries({ queryKey: emailCampaignKeys.dispatch(vars.id) });
+    },
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : 'unknown error';
+      showMessage(`${errPrefix} — ${msg}`, 'error');
+    },
+  });
+}
+
+export function useSendCampaignNow() {
+  return useLifecycleMutation(
+    (vars: { id: number }) => adminService.SendCampaignNow({ id: vars.id }),
+    'campaign sending now',
+    "couldn't start send",
+  );
+}
+
+export function useScheduleCampaign() {
+  return useLifecycleMutation(
+    (vars: { id: number; scheduleAt: number }) =>
+      adminService.ScheduleCampaign({ id: vars.id, scheduleAt: vars.scheduleAt }),
+    'campaign scheduled',
+    "couldn't schedule",
+  );
+}
+
+export function usePauseCampaign() {
+  return useLifecycleMutation(
+    (vars: { id: number }) => adminService.PauseCampaign({ id: vars.id }),
+    'campaign paused',
+    "couldn't pause",
+  );
+}
+
+export function useResumeCampaign() {
+  return useLifecycleMutation(
+    (vars: { id: number }) => adminService.ResumeCampaign({ id: vars.id }),
+    'campaign resumed',
+    "couldn't resume",
+  );
+}
+
+export function useCancelCampaign() {
+  return useLifecycleMutation(
+    (vars: { id: number }) => adminService.CancelCampaign({ id: vars.id }),
+    'campaign cancelled',
+    "couldn't cancel",
+  );
 }
 
 // Ф2 (segment builder) is deferred — the SegmentNode tree editor is not built yet.

@@ -149,11 +149,46 @@ function toAbConfig(a: any): common_ABConfig | undefined {
   };
 }
 
-// The subject copy lives on variant[0].subject_i18n (Ф4 adds more variants).
+// The subject copy lives on variant[0].subject_i18n. When A/B is enabled a second
+// variant (B) is emitted so the campaign carries ≥2 variants (the backend requires
+// it, and for the SUBJECT dimension the subjects must differ). Content-dimension B
+// shares A's subject and inherits the campaign body (empty body = inherit).
 export function mapFormToCampaignInsert(
   f: CampaignSchema,
   status: common_EmailCampaignStatus = 'EMAIL_CAMPAIGN_STATUS_DRAFT',
 ): common_EmailCampaignInsert {
+  const abEnabled = !!f.abConfig?.enabled;
+  const subjectDimension = f.abConfig?.dimension === 'AB_DIMENSION_SUBJECT';
+
+  const subjectA = (f.subjectI18n || []).map((t) => ({
+    languageId: t.languageId,
+    subject: t.subject,
+  }));
+  const subjectB = subjectDimension
+    ? (f.variantB || []).map((t) => ({ languageId: t.languageId, subject: t.subject || '' }))
+    : // content A/B keeps the subject; only the body differs (authored server-side /
+      // future body-B editor). Share A's subject so both variants are valid.
+      subjectA.map((t) => ({ ...t }));
+
+  const variants = [
+    {
+      id: 0,
+      label: abEnabled ? 'A' : 'default',
+      subjectI18n: subjectA,
+      body: [],
+      isWinner: !abEnabled, // undecided while A/B is running; backend sets the winner.
+    },
+  ];
+  if (abEnabled) {
+    variants.push({
+      id: 0,
+      label: 'B',
+      subjectI18n: subjectB,
+      body: [],
+      isWinner: false,
+    });
+  }
+
   return {
     name: f.name,
     topic: f.topic,
@@ -164,18 +199,7 @@ export function mapFormToCampaignInsert(
     replyTo: f.replyTo || '',
     scheduleAt: rfc3339ToEpochSeconds(f.scheduleAt),
     abConfig: toAbConfig(f.abConfig),
-    variants: [
-      {
-        id: 0,
-        label: 'default',
-        subjectI18n: (f.subjectI18n || []).map((t) => ({
-          languageId: t.languageId,
-          subject: t.subject,
-        })),
-        body: [],
-        isWinner: true,
-      },
-    ],
+    variants,
     status,
     segmentId: f.segmentId || 0,
   };
@@ -318,6 +342,12 @@ export function mapCampaignFullToForm(c?: common_EmailCampaignFull): CampaignFor
     return { languageId: l.id, subject: s?.subject || '' };
   });
 
+  const variant1 = (c.variants || [])[1];
+  const variantB = LANGUAGES.map((l) => {
+    const s = (variant1?.subjectI18n || []).find((x: any) => x?.languageId === l.id);
+    return { languageId: l.id, subject: s?.subject || '' };
+  });
+
   return {
     name: c.name || '',
     topic:
@@ -331,6 +361,7 @@ export function mapCampaignFullToForm(c?: common_EmailCampaignFull): CampaignFor
     segmentId: c.segmentId || undefined,
     scheduleAt: epochSecondsToRfc3339(c.scheduleAt),
     subjectI18n,
+    variantB,
     body: (c.body || []).map((b: any) => readBlock(b, productIdsByBlockUid)),
     abConfig: c.abConfig
       ? {

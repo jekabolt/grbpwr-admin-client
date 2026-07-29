@@ -1,6 +1,15 @@
 import { LANGUAGES } from 'constants/constants';
-import { EmailBlockType, EmailCampaignTopic } from 'constants/email-campaign';
+import {
+  AB_DECISION_MAX_MINUTES,
+  AB_DECISION_MIN_MINUTES,
+  AB_TEST_PCT_MAX,
+  AB_TEST_PCT_MIN,
+  EmailBlockType,
+  EmailCampaignTopic,
+} from 'constants/email-campaign';
 import { z } from 'zod';
+
+const DEFAULT_LANGUAGE_ID = LANGUAGES.find((l) => l.isDefault)?.id ?? LANGUAGES[0].id;
 
 // PROTO-INDEPENDENT local form-model for the email-campaign builder. Field
 // names/shapes match the committed backend proto
@@ -302,6 +311,15 @@ const subjectTranslation = z.object({
   subject: z.string().min(1, 'Subject is required'),
 });
 
+// Variant B subject copy (EmailCampaignVariant[1].subject_i18n). Only meaningful
+// when A/B is enabled on the SUBJECT dimension; the per-field required/distinct
+// checks are enforced in the campaign-level superRefine (below) so a plain draft
+// with A/B off never trips them.
+const variantBSubjectTranslation = z.object({
+  languageId: z.number().min(1, 'Language is required'),
+  subject: z.string().optional(),
+});
+
 // ── ABConfig (Ф4; disabled panel in Ф1, but the shape is modelled now) ─────────
 export const abConfigSchema = z.object({
   enabled: z.boolean().default(false),
@@ -316,7 +334,7 @@ export const abConfigSchema = z.object({
 export type ABConfigForm = z.infer<typeof abConfigSchema>;
 
 // ── campaign envelope ─────────────────────────────────────────────────────────
-export const campaignSchema = z.object({
+const campaignBaseSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   topic: z.enum([
     'EMAIL_CAMPAIGN_TOPIC_NEWSLETTER',
@@ -336,11 +354,72 @@ export const campaignSchema = z.object({
   // this TS client). '' / undefined => send immediately / unscheduled.
   scheduleAt: z.string().optional(),
   subjectI18n: createStrictTranslationSchema(subjectTranslation, requiredLanguageIds),
+  // Variant B subject copy (all languages present; only validated when A/B subject
+  // is enabled). Empty per-language strings are fine for a plain (A/B off) draft.
+  variantB: z.array(variantBSubjectTranslation).optional(),
   body: z.array(emailBlockSchema).default([]),
   abConfig: abConfigSchema.optional(),
 });
 
-export type CampaignSchema = z.infer<typeof campaignSchema>;
+// A/B rules mirror the backend send/schedule gate so the form rejects early:
+//  · dimension must be picked (subject | content)
+//  · test % in 1…100
+//  · decision window in 30…10080 minutes (a 0 silently breaks A/B — reject loudly)
+//  · A/B needs ≥2 variants; for the SUBJECT dimension variant B's default-language
+//    subject is required AND must differ from variant A.
+export const campaignSchema = campaignBaseSchema.superRefine((val, ctx) => {
+  const ab = val.abConfig;
+  if (!ab?.enabled) return;
+
+  if (!ab.dimension || ab.dimension === 'AB_DIMENSION_UNKNOWN') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['abConfig', 'dimension'],
+      message: 'Pick a test dimension (subject or content)',
+    });
+  }
+
+  const pct = ab.testPct ?? 0;
+  if (pct < AB_TEST_PCT_MIN || pct > AB_TEST_PCT_MAX) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['abConfig', 'testPct'],
+      message: `Test % must be between ${AB_TEST_PCT_MIN} and ${AB_TEST_PCT_MAX}`,
+    });
+  }
+
+  const dm = ab.decisionAfterMinutes ?? 0;
+  if (dm < AB_DECISION_MIN_MINUTES || dm > AB_DECISION_MAX_MINUTES) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['abConfig', 'decisionAfterMinutes'],
+      message: `Decision window must be ${AB_DECISION_MIN_MINUTES}–${AB_DECISION_MAX_MINUTES} minutes (30 min to 7 days)`,
+    });
+  }
+
+  if (ab.dimension === 'AB_DIMENSION_SUBJECT') {
+    const bIdx = (val.variantB || []).findIndex((t) => t.languageId === DEFAULT_LANGUAGE_ID);
+    const aSubj =
+      (val.subjectI18n || []).find((t: any) => t.languageId === DEFAULT_LANGUAGE_ID)?.subject ?? '';
+    const bSubj = bIdx >= 0 ? val.variantB?.[bIdx]?.subject ?? '' : '';
+    const path = ['variantB', bIdx >= 0 ? bIdx : 0, 'subject'] as (string | number)[];
+    if (bSubj.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message: 'Variant B subject is required for a subject A/B test',
+      });
+    } else if (aSubj.trim() !== '' && aSubj.trim() === bSubj.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message: 'Variant B subject must differ from variant A',
+      });
+    }
+  }
+});
+
+export type CampaignSchema = z.infer<typeof campaignBaseSchema>;
 
 // Empty-campaign default for a fresh builder form.
 export const defaultCampaign: CampaignSchema = {
@@ -353,6 +432,7 @@ export const defaultCampaign: CampaignSchema = {
   segmentId: undefined,
   scheduleAt: '',
   subjectI18n: LANGUAGES.map((l) => ({ languageId: l.id, subject: '' })),
+  variantB: LANGUAGES.map((l) => ({ languageId: l.id, subject: '' })),
   body: [],
   abConfig: { enabled: false },
 };
