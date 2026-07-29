@@ -7,12 +7,16 @@ import { useFieldArray, useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
+import { RichTextField } from 'ui/form/fields/rich-text-field';
 import { LanguageButtons } from '../../components/language-buttons';
 
 type FieldConfig = {
   name: string;
   label: string;
-  type?: 'input' | 'textarea';
+  // 'richtext' renders the email-safe tiptap editor (RichTextField), which writes
+  // its HTML string straight to the RHF path — additive, existing callers using
+  // 'input' | 'textarea' are unaffected.
+  type?: 'input' | 'textarea' | 'richtext';
   placeholder?: string;
   rows?: number;
   /** Show a live character counter and flag overflow. */
@@ -153,10 +157,14 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
   const handleCopyToAll = () => {
     const source: Record<string, string> = {};
     fields.forEach((field) => {
+      // richtext writes straight to RHF (not the local fieldValues cache), so read
+      // its current HTML off the form; plain fields keep the original precedence.
       source[field.name] =
-        fieldValues[field.name] ??
-        watch(`${fieldPrefix}.${actualTranslationIndex}.${field.name}`) ??
-        '';
+        field.type === 'richtext'
+          ? watch(`${fieldPrefix}.${actualTranslationIndex}.${field.name}`) ?? ''
+          : fieldValues[field.name] ??
+            watch(`${fieldPrefix}.${actualTranslationIndex}.${field.name}`) ??
+            '';
     });
     translations.forEach((t: any, i: number) => {
       if (t?.languageId === selectedLanguageId) return;
@@ -172,7 +180,11 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     const fieldsToTranslate = fields.map((f) => ({
       name: f.name,
       value:
-        fieldValues[f.name] ?? watch(`${fieldPrefix}.${actualTranslationIndex}.${f.name}`) ?? '',
+        f.type === 'richtext'
+          ? watch(`${fieldPrefix}.${actualTranslationIndex}.${f.name}`) ?? ''
+          : fieldValues[f.name] ??
+            watch(`${fieldPrefix}.${actualTranslationIndex}.${f.name}`) ??
+            '',
       maxLength: f.maxLength,
     }));
 
@@ -202,7 +214,13 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     }
   };
 
-  const hasAnyValue = fields.some((f) => (fieldValues[f.name] || '').trim().length > 0);
+  const hasAnyValue = fields.some((f) => {
+    const v =
+      f.type === 'richtext'
+        ? watch(`${fieldPrefix}.${actualTranslationIndex}.${f.name}`)
+        : fieldValues[f.name];
+    return (v || '').trim().length > 0;
+  });
 
   const getFieldError = (fieldName: string) => {
     const fieldPath = `${fieldPrefix}.${actualTranslationIndex}.${fieldName}`;
@@ -278,6 +296,18 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
               )}
             </div>
           );
+
+          if (field.type === 'richtext') {
+            return (
+              <div key={field.name} className='space-y-1'>
+                {labelRow}
+                <RichTextField
+                  name={`${fieldPrefix}.${actualTranslationIndex}.${field.name}`}
+                  disabled={!editMode}
+                />
+              </div>
+            );
+          }
 
           if (field.type === 'textarea') {
             return (

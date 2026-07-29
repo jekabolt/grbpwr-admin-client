@@ -3183,6 +3183,480 @@ export type common_NavFeaturedEntityInsertTranslation = {
 export type AddHeroResponse = {
 };
 
+export type UpsertEmailSegmentRequest = {
+  id: number | undefined;
+  segment: common_EmailSegment | undefined;
+};
+
+export type common_EmailSegment = {
+  id: number | undefined;
+  name: string | undefined;
+  description: string | undefined;
+  predicate: common_SegmentPredicate | undefined;
+  lastCount: number | undefined;
+  lastCountAt: number | undefined;
+};
+
+export type common_SegmentPredicate = {
+  root: common_SegmentNode | undefined;
+};
+
+// SegmentNode is either a branch (op + children) or a leaf (field/operator/values).
+export type common_SegmentNode = {
+  op: common_SegmentOp | undefined;
+  children: common_SegmentNode[] | undefined;
+  field: string | undefined;
+  operator: string | undefined;
+  values: string[] | undefined;
+};
+
+export type common_SegmentOp =
+  | "SEGMENT_OP_UNKNOWN"
+  | "SEGMENT_OP_AND"
+  | "SEGMENT_OP_OR";
+export type UpsertEmailSegmentResponse = {
+  id: number | undefined;
+};
+
+export type GetEmailSegmentRequest = {
+  id: number | undefined;
+};
+
+export type GetEmailSegmentResponse = {
+  segment: common_EmailSegment | undefined;
+};
+
+export type ListEmailSegmentsRequest = {
+};
+
+export type ListEmailSegmentsResponse = {
+  segments: common_EmailSegment[] | undefined;
+};
+
+export type DeleteEmailSegmentRequest = {
+  id: number | undefined;
+};
+
+export type DeleteEmailSegmentResponse = {
+};
+
+export type PreviewEmailSegmentRequest = {
+  segment: common_EmailSegment | undefined;
+};
+
+export type PreviewEmailSegmentResponse = {
+  count: number | undefined;
+};
+
+export type UpsertEmailCampaignRequest = {
+  id: number | undefined;
+  campaign: common_EmailCampaignInsert | undefined;
+};
+
+export type common_EmailCampaignInsert = {
+  name: string | undefined;
+  topic: common_EmailCampaignTopic | undefined;
+  body: common_EmailBlock[] | undefined;
+  backgroundColor: string | undefined;
+  fromName: string | undefined;
+  fromEmail: string | undefined;
+  replyTo: string | undefined;
+  scheduleAt: number | undefined;
+  abConfig: common_ABConfig | undefined;
+  variants: common_EmailCampaignVariant[] | undefined;
+  status: common_EmailCampaignStatus | undefined;
+  segmentId: number | undefined;
+};
+
+export type common_EmailCampaignTopic =
+  | "EMAIL_CAMPAIGN_TOPIC_UNKNOWN"
+  | "EMAIL_CAMPAIGN_TOPIC_NEWSLETTER"
+  | "EMAIL_CAMPAIGN_TOPIC_NEW_ARRIVALS"
+  | "EMAIL_CAMPAIGN_TOPIC_EVENTS";
+// EmailBlock is an ordered, typed campaign-body block. Exactly the payload that
+// corresponds to type should be populated.
+export type common_EmailBlock = {
+  type: common_EmailBlockType | undefined;
+  header: common_EmailHeaderBlock | undefined;
+  imageLink: common_EmailImageLinkBlock | undefined;
+  richText: common_EmailRichTextBlock | undefined;
+  productCard: common_EmailProductCardBlock | undefined;
+  productGrid: common_EmailProductGridBlock | undefined;
+  ctaButton: common_EmailCTAButtonBlock | undefined;
+  divider: common_EmailDividerBlock | undefined;
+  spacer: common_EmailSpacerBlock | undefined;
+  twoColumn: common_EmailTwoColumnBlock | undefined;
+  socialLinks: common_EmailSocialLinksBlock | undefined;
+  countdown: common_EmailCountdownBlock | undefined;
+  videoThumb: common_EmailVideoThumbBlock | undefined;
+  backgroundColor: string | undefined;
+  translations: common_EmailBlockTranslation[] | undefined;
+};
+
+// EmailBlockType identifies the payload carried by an EmailBlock.
+export type common_EmailBlockType =
+  | "EMAIL_BLOCK_TYPE_UNKNOWN"
+  | "EMAIL_BLOCK_TYPE_HEADER"
+  | "EMAIL_BLOCK_TYPE_IMAGE_LINK"
+  | "EMAIL_BLOCK_TYPE_RICH_TEXT"
+  | "EMAIL_BLOCK_TYPE_PRODUCT_CARD"
+  | "EMAIL_BLOCK_TYPE_PRODUCT_GRID"
+  | "EMAIL_BLOCK_TYPE_CTA_BUTTON"
+  | "EMAIL_BLOCK_TYPE_DIVIDER"
+  | "EMAIL_BLOCK_TYPE_SPACER"
+  | "EMAIL_BLOCK_TYPE_TWO_COLUMN"
+  | "EMAIL_BLOCK_TYPE_SOCIAL_LINKS"
+  | "EMAIL_BLOCK_TYPE_COUNTDOWN"
+  | "EMAIL_BLOCK_TYPE_VIDEO_THUMB";
+export type common_EmailHeaderBlock = {
+  logoMediaId: number | undefined;
+};
+
+export type common_EmailImageLinkBlock = {
+  mediaId: number | undefined;
+  url: string | undefined;
+};
+
+export type common_EmailRichTextBlock = {
+};
+
+export type common_EmailProductCardBlock = {
+  productId: number | undefined;
+};
+
+export type common_EmailProductGridBlock = {
+  productIds: number[] | undefined;
+  columns: number | undefined;
+};
+
+export type common_EmailCTAButtonBlock = {
+  style: string | undefined;
+  alignment: string | undefined;
+};
+
+export type common_EmailDividerBlock = {
+  color: string | undefined;
+  height: number | undefined;
+};
+
+export type common_EmailSpacerBlock = {
+  height: number | undefined;
+};
+
+export type common_EmailTwoColumnBlock = {
+  left: common_EmailBlock[] | undefined;
+  right: common_EmailBlock[] | undefined;
+};
+
+export type common_EmailSocialLinksBlock = {
+  links: common_EmailSocialLink[] | undefined;
+};
+
+export type common_EmailSocialLink = {
+  network: string | undefined;
+  url: string | undefined;
+};
+
+export type common_EmailCountdownBlock = {
+  endsAt: number | undefined;
+};
+
+export type common_EmailVideoThumbBlock = {
+  mediaId: number | undefined;
+  videoUrl: string | undefined;
+};
+
+// EmailBlockTranslation is the shared translation superset for every block.
+// Each block type consumes only the fields it needs.
+export type common_EmailBlockTranslation = {
+  languageId: number | undefined;
+  heading: string | undefined;
+  subheading: string | undefined;
+  body: string | undefined;
+  caption: string | undefined;
+  ctaLabel: string | undefined;
+  ctaUrl: string | undefined;
+  altText: string | undefined;
+  preheader: string | undefined;
+  links: common_EmailLink[] | undefined;
+};
+
+// EmailLink is localized link copy used by header-style blocks.
+export type common_EmailLink = {
+  label: string | undefined;
+  url: string | undefined;
+};
+
+export type common_ABConfig = {
+  enabled: boolean | undefined;
+  dimension: common_ABDimension | undefined;
+  testPct: number | undefined;
+  decisionAfterMinutes: number | undefined;
+  winnerVariantId: number | undefined;
+};
+
+export type common_ABDimension =
+  | "AB_DIMENSION_UNKNOWN"
+  | "AB_DIMENSION_SUBJECT"
+  | "AB_DIMENSION_CONTENT";
+export type common_EmailCampaignVariant = {
+  id: number | undefined;
+  label: string | undefined;
+  subjectI18n: common_SubjectTranslation[] | undefined;
+  // Empty means inherit the campaign-level body.
+  body: common_EmailBlock[] | undefined;
+  isWinner: boolean | undefined;
+};
+
+export type common_SubjectTranslation = {
+  languageId: number | undefined;
+  subject: string | undefined;
+};
+
+export type common_EmailCampaignStatus =
+  | "EMAIL_CAMPAIGN_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_STATUS_DRAFT"
+  | "EMAIL_CAMPAIGN_STATUS_SCHEDULED"
+  | "EMAIL_CAMPAIGN_STATUS_SENDING"
+  | "EMAIL_CAMPAIGN_STATUS_PAUSED"
+  | "EMAIL_CAMPAIGN_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_STATUS_CANCELLED";
+export type UpsertEmailCampaignResponse = {
+  id: number | undefined;
+};
+
+export type GetEmailCampaignRequest = {
+  id: number | undefined;
+};
+
+export type GetEmailCampaignResponse = {
+  campaign: common_EmailCampaignFull | undefined;
+};
+
+export type common_EmailCampaignFull = {
+  id: number | undefined;
+  name: string | undefined;
+  topic: common_EmailCampaignTopic | undefined;
+  body: common_EmailBlock[] | undefined;
+  backgroundColor: string | undefined;
+  fromName: string | undefined;
+  fromEmail: string | undefined;
+  replyTo: string | undefined;
+  scheduleAt: number | undefined;
+  abConfig: common_ABConfig | undefined;
+  variants: common_EmailCampaignVariant[] | undefined;
+  status: common_EmailCampaignStatus | undefined;
+  segmentId: number | undefined;
+  createdBy: string | undefined;
+  createdAt: number | undefined;
+  updatedAt: number | undefined;
+  sendingStartedAt: number | undefined;
+  sentAt: number | undefined;
+  audienceSnapshotAt: number | undefined;
+  fanoutMaxAccountId: number | undefined;
+  fanoutCursorAccountId: number | undefined;
+  audienceMaterializedAt: number | undefined;
+  recipientCount: number | undefined;
+  dispatchError: string | undefined;
+};
+
+export type ListEmailCampaignsPagedRequest = {
+  limit: number | undefined;
+  offset: number | undefined;
+  status: common_EmailCampaignStatus | undefined;
+  topic: common_EmailCampaignTopic | undefined;
+};
+
+export type ListEmailCampaignsPagedResponse = {
+  campaigns: common_EmailCampaignFull[] | undefined;
+  total: number | undefined;
+};
+
+export type DeleteEmailCampaignRequest = {
+  id: number | undefined;
+};
+
+export type DeleteEmailCampaignResponse = {
+};
+
+export type RenderCampaignPreviewRequest = {
+  campaignId?: number;
+  draft?: common_EmailCampaignInsert;
+  languageId: number | undefined;
+  variantId: number | undefined;
+  device: string | undefined;
+};
+
+export type RenderCampaignPreviewResponse = {
+  html: string | undefined;
+  text: string | undefined;
+  subject: string | undefined;
+  warnings: common_RenderWarning[] | undefined;
+};
+
+export type common_RenderWarning = {
+  blockIndex: number | undefined;
+  reason: string | undefined;
+};
+
+export type SendTestEmailRequest = {
+  campaignId?: number;
+  draft?: common_EmailCampaignInsert;
+  languageId: number | undefined;
+  variantId: number | undefined;
+  toEmails: string[] | undefined;
+};
+
+export type SendTestEmailResponse = {
+};
+
+export type SendCampaignNowRequest = {
+  id: number | undefined;
+};
+
+export type SendCampaignNowResponse = {
+};
+
+export type ScheduleCampaignRequest = {
+  id: number | undefined;
+  scheduleAt: number | undefined;
+};
+
+export type ScheduleCampaignResponse = {
+};
+
+export type PauseCampaignRequest = {
+  id: number | undefined;
+};
+
+export type PauseCampaignResponse = {
+};
+
+export type ResumeCampaignRequest = {
+  id: number | undefined;
+};
+
+export type ResumeCampaignResponse = {
+};
+
+export type CancelCampaignRequest = {
+  id: number | undefined;
+};
+
+export type CancelCampaignResponse = {
+};
+
+export type GetCampaignDispatchStatusRequest = {
+  id: number | undefined;
+};
+
+export type GetCampaignDispatchStatusResponse = {
+  status: common_EmailCampaignDispatchStatus | undefined;
+};
+
+export type common_EmailCampaignDispatchStatus = {
+  campaignId: number | undefined;
+  status: common_EmailCampaignStatus | undefined;
+  audienceMaterializedAt: number | undefined;
+  dispatchError: string | undefined;
+  recipientCount: number | undefined;
+  pending: number | undefined;
+  accepted: number | undefined;
+  failed: number | undefined;
+  skipped: number | undefined;
+};
+
+export type GetCampaignMetricsRequest = {
+  campaignId: number | undefined;
+};
+
+export type GetCampaignMetricsResponse = {
+  metrics: common_CampaignMetrics | undefined;
+};
+
+// Read-only compute-on-read aggregates over email_campaign_recipient.
+export type common_CampaignMetrics = {
+  campaignId: number | undefined;
+  counts: common_CampaignMetricCounts | undefined;
+  rates: common_CampaignMetricRates | undefined;
+  variants: common_CampaignVariantMetrics[] | undefined;
+};
+
+export type common_CampaignMetricCounts = {
+  total: number | undefined;
+  pending: number | undefined;
+  sent: number | undefined;
+  failed: number | undefined;
+  skipped: number | undefined;
+  delivered: number | undefined;
+  uniqueOpened: number | undefined;
+  totalOpens: number | undefined;
+  uniqueClicked: number | undefined;
+  totalClicks: number | undefined;
+  bounced: number | undefined;
+  complained: number | undefined;
+  unsubscribed: number | undefined;
+};
+
+export type common_CampaignMetricRates = {
+  deliveryRate: number | undefined;
+  openRate: number | undefined;
+  clickRate: number | undefined;
+  clickToOpenRate: number | undefined;
+  bounceRate: number | undefined;
+  complaintRate: number | undefined;
+};
+
+export type common_CampaignVariantMetrics = {
+  variantId: number | undefined;
+  label: string | undefined;
+  counts: common_CampaignMetricCounts | undefined;
+  rates: common_CampaignMetricRates | undefined;
+};
+
+export type GetCampaignRecipientsRequest = {
+  id: number | undefined;
+  afterId: number | undefined;
+  limit: number | undefined;
+};
+
+export type GetCampaignRecipientsResponse = {
+  recipients: common_EmailCampaignRecipient[] | undefined;
+  nextId: number | undefined;
+};
+
+// Public admin ledger projection. Provider idempotency/claim/hash/render
+// internals are deliberately absent.
+export type common_EmailCampaignRecipient = {
+  id: number | undefined;
+  campaignId: number | undefined;
+  accountId: number | undefined;
+  email: string | undefined;
+  languageId: number | undefined;
+  variantId: number | undefined;
+  cohort: common_EmailCampaignCohort | undefined;
+  status: common_EmailCampaignRecipientStatus | undefined;
+  attemptCount: number | undefined;
+  resendEmailId: string | undefined;
+  errorCode: string | undefined;
+  lastError: string | undefined;
+  nextAttemptAt: number | undefined;
+  sentAt: number | undefined;
+  completedAt: number | undefined;
+  createdAt: number | undefined;
+  updatedAt: number | undefined;
+};
+
+export type common_EmailCampaignCohort =
+  | "EMAIL_CAMPAIGN_COHORT_UNKNOWN"
+  | "EMAIL_CAMPAIGN_COHORT_AB"
+  | "EMAIL_CAMPAIGN_COHORT_REMAINDER";
+export type common_EmailCampaignRecipientStatus =
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED";
 export type AddArchiveRequest = {
   archiveInsert: common_ArchiveInsert | undefined;
 };
@@ -8132,6 +8606,27 @@ export interface AdminService {
   CreateCustomOrder(request: CreateCustomOrderRequest): Promise<CreateCustomOrderResponse>;
   // Adds a new hero
   AddHero(request: AddHeroRequest): Promise<AddHeroResponse>;
+  UpsertEmailSegment(request: UpsertEmailSegmentRequest): Promise<UpsertEmailSegmentResponse>;
+  GetEmailSegment(request: GetEmailSegmentRequest): Promise<GetEmailSegmentResponse>;
+  DeleteEmailSegment(request: DeleteEmailSegmentRequest): Promise<DeleteEmailSegmentResponse>;
+  // Declared after the /{id} GET so grpc-gateway gives the literal route priority.
+  ListEmailSegments(request: ListEmailSegmentsRequest): Promise<ListEmailSegmentsResponse>;
+  PreviewEmailSegment(request: PreviewEmailSegmentRequest): Promise<PreviewEmailSegmentResponse>;
+  UpsertEmailCampaign(request: UpsertEmailCampaignRequest): Promise<UpsertEmailCampaignResponse>;
+  GetEmailCampaign(request: GetEmailCampaignRequest): Promise<GetEmailCampaignResponse>;
+  DeleteEmailCampaign(request: DeleteEmailCampaignRequest): Promise<DeleteEmailCampaignResponse>;
+  // Declared after the /{id} GET so grpc-gateway gives the literal route priority.
+  ListEmailCampaignsPaged(request: ListEmailCampaignsPagedRequest): Promise<ListEmailCampaignsPagedResponse>;
+  RenderCampaignPreview(request: RenderCampaignPreviewRequest): Promise<RenderCampaignPreviewResponse>;
+  SendTestEmail(request: SendTestEmailRequest): Promise<SendTestEmailResponse>;
+  SendCampaignNow(request: SendCampaignNowRequest): Promise<SendCampaignNowResponse>;
+  ScheduleCampaign(request: ScheduleCampaignRequest): Promise<ScheduleCampaignResponse>;
+  PauseCampaign(request: PauseCampaignRequest): Promise<PauseCampaignResponse>;
+  ResumeCampaign(request: ResumeCampaignRequest): Promise<ResumeCampaignResponse>;
+  CancelCampaign(request: CancelCampaignRequest): Promise<CancelCampaignResponse>;
+  GetCampaignDispatchStatus(request: GetCampaignDispatchStatusRequest): Promise<GetCampaignDispatchStatusResponse>;
+  GetCampaignMetrics(request: GetCampaignMetricsRequest): Promise<GetCampaignMetricsResponse>;
+  GetCampaignRecipients(request: GetCampaignRecipientsRequest): Promise<GetCampaignRecipientsResponse>;
   // AddArchive creates a new archive.
   AddArchive(request: AddArchiveRequest): Promise<AddArchiveResponse>;
   UpdateArchive(request: UpdateArchiveRequest): Promise<UpdateArchiveResponse>;
@@ -10224,6 +10719,383 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AddHero",
       }) as Promise<AddHeroResponse>;
+    },
+    UpsertEmailSegment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/email-segments`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertEmailSegment",
+      }) as Promise<UpsertEmailSegmentResponse>;
+    },
+    GetEmailSegment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-segments/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetEmailSegment",
+      }) as Promise<GetEmailSegmentResponse>;
+    },
+    DeleteEmailSegment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-segments/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteEmailSegment",
+      }) as Promise<DeleteEmailSegmentResponse>;
+    },
+    ListEmailSegments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/email-segments`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListEmailSegments",
+      }) as Promise<ListEmailSegmentsResponse>;
+    },
+    PreviewEmailSegment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/email-segments/preview`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PreviewEmailSegment",
+      }) as Promise<PreviewEmailSegmentResponse>;
+    },
+    UpsertEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/email-campaigns`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertEmailCampaign",
+      }) as Promise<UpsertEmailCampaignResponse>;
+    },
+    GetEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetEmailCampaign",
+      }) as Promise<GetEmailCampaignResponse>;
+    },
+    DeleteEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteEmailCampaign",
+      }) as Promise<DeleteEmailCampaignResponse>;
+    },
+    ListEmailCampaignsPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/email-campaigns/paged`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.status) {
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
+      }
+      if (request.topic) {
+        queryParams.push(`topic=${encodeURIComponent(request.topic.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListEmailCampaignsPaged",
+      }) as Promise<ListEmailCampaignsPagedResponse>;
+    },
+    RenderCampaignPreview(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/email-campaigns/render-preview`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RenderCampaignPreview",
+      }) as Promise<RenderCampaignPreviewResponse>;
+    },
+    SendTestEmail(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/email-campaigns/test-send`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SendTestEmail",
+      }) as Promise<SendTestEmailResponse>;
+    },
+    SendCampaignNow(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/send`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SendCampaignNow",
+      }) as Promise<SendCampaignNowResponse>;
+    },
+    ScheduleCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/schedule`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ScheduleCampaign",
+      }) as Promise<ScheduleCampaignResponse>;
+    },
+    PauseCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/pause`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PauseCampaign",
+      }) as Promise<PauseCampaignResponse>;
+    },
+    ResumeCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/resume`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ResumeCampaign",
+      }) as Promise<ResumeCampaignResponse>;
+    },
+    CancelCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/cancel`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CancelCampaign",
+      }) as Promise<CancelCampaignResponse>;
+    },
+    GetCampaignDispatchStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/dispatch-status`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCampaignDispatchStatus",
+      }) as Promise<GetCampaignDispatchStatusResponse>;
+    },
+    GetCampaignMetrics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.campaignId) {
+        throw new Error("missing required field request.campaign_id");
+      }
+      const path = `api/admin/email-campaigns/${request.campaignId}/metrics`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCampaignMetrics",
+      }) as Promise<GetCampaignMetricsResponse>;
+    },
+    GetCampaignRecipients(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/recipients`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.afterId) {
+        queryParams.push(`afterId=${encodeURIComponent(request.afterId.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCampaignRecipients",
+      }) as Promise<GetCampaignRecipientsResponse>;
     },
     AddArchive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/archive/add`; // eslint-disable-line quotes

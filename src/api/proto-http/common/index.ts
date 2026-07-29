@@ -1062,6 +1062,316 @@ export type SortFactors = {
   name: string | undefined;
 };
 
+// EmailBlockType identifies the payload carried by an EmailBlock.
+export type EmailBlockType =
+  | "EMAIL_BLOCK_TYPE_UNKNOWN"
+  | "EMAIL_BLOCK_TYPE_HEADER"
+  | "EMAIL_BLOCK_TYPE_IMAGE_LINK"
+  | "EMAIL_BLOCK_TYPE_RICH_TEXT"
+  | "EMAIL_BLOCK_TYPE_PRODUCT_CARD"
+  | "EMAIL_BLOCK_TYPE_PRODUCT_GRID"
+  | "EMAIL_BLOCK_TYPE_CTA_BUTTON"
+  | "EMAIL_BLOCK_TYPE_DIVIDER"
+  | "EMAIL_BLOCK_TYPE_SPACER"
+  | "EMAIL_BLOCK_TYPE_TWO_COLUMN"
+  | "EMAIL_BLOCK_TYPE_SOCIAL_LINKS"
+  | "EMAIL_BLOCK_TYPE_COUNTDOWN"
+  | "EMAIL_BLOCK_TYPE_VIDEO_THUMB";
+export type EmailCampaignTopic =
+  | "EMAIL_CAMPAIGN_TOPIC_UNKNOWN"
+  | "EMAIL_CAMPAIGN_TOPIC_NEWSLETTER"
+  | "EMAIL_CAMPAIGN_TOPIC_NEW_ARRIVALS"
+  | "EMAIL_CAMPAIGN_TOPIC_EVENTS";
+export type EmailCampaignStatus =
+  | "EMAIL_CAMPAIGN_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_STATUS_DRAFT"
+  | "EMAIL_CAMPAIGN_STATUS_SCHEDULED"
+  | "EMAIL_CAMPAIGN_STATUS_SENDING"
+  | "EMAIL_CAMPAIGN_STATUS_PAUSED"
+  | "EMAIL_CAMPAIGN_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_STATUS_CANCELLED";
+export type ABDimension =
+  | "AB_DIMENSION_UNKNOWN"
+  | "AB_DIMENSION_SUBJECT"
+  | "AB_DIMENSION_CONTENT";
+export type EmailCampaignRecipientStatus =
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED";
+export type EmailCampaignCohort =
+  | "EMAIL_CAMPAIGN_COHORT_UNKNOWN"
+  | "EMAIL_CAMPAIGN_COHORT_AB"
+  | "EMAIL_CAMPAIGN_COHORT_REMAINDER";
+export type SegmentOp =
+  | "SEGMENT_OP_UNKNOWN"
+  | "SEGMENT_OP_AND"
+  | "SEGMENT_OP_OR";
+// EmailLink is localized link copy used by header-style blocks.
+export type EmailLink = {
+  label: string | undefined;
+  url: string | undefined;
+};
+
+// EmailBlockTranslation is the shared translation superset for every block.
+// Each block type consumes only the fields it needs.
+export type EmailBlockTranslation = {
+  languageId: number | undefined;
+  heading: string | undefined;
+  subheading: string | undefined;
+  body: string | undefined;
+  caption: string | undefined;
+  ctaLabel: string | undefined;
+  ctaUrl: string | undefined;
+  altText: string | undefined;
+  preheader: string | undefined;
+  links: EmailLink[] | undefined;
+};
+
+export type EmailHeaderBlock = {
+  logoMediaId: number | undefined;
+};
+
+export type EmailImageLinkBlock = {
+  mediaId: number | undefined;
+  url: string | undefined;
+};
+
+export type EmailRichTextBlock = {
+};
+
+export type EmailProductCardBlock = {
+  productId: number | undefined;
+};
+
+export type EmailProductGridBlock = {
+  productIds: number[] | undefined;
+  columns: number | undefined;
+};
+
+export type EmailCTAButtonBlock = {
+  style: string | undefined;
+  alignment: string | undefined;
+};
+
+export type EmailDividerBlock = {
+  color: string | undefined;
+  height: number | undefined;
+};
+
+export type EmailSpacerBlock = {
+  height: number | undefined;
+};
+
+export type EmailTwoColumnBlock = {
+  left: EmailBlock[] | undefined;
+  right: EmailBlock[] | undefined;
+};
+
+// EmailBlock is an ordered, typed campaign-body block. Exactly the payload that
+// corresponds to type should be populated.
+export type EmailBlock = {
+  type: EmailBlockType | undefined;
+  header: EmailHeaderBlock | undefined;
+  imageLink: EmailImageLinkBlock | undefined;
+  richText: EmailRichTextBlock | undefined;
+  productCard: EmailProductCardBlock | undefined;
+  productGrid: EmailProductGridBlock | undefined;
+  ctaButton: EmailCTAButtonBlock | undefined;
+  divider: EmailDividerBlock | undefined;
+  spacer: EmailSpacerBlock | undefined;
+  twoColumn: EmailTwoColumnBlock | undefined;
+  socialLinks: EmailSocialLinksBlock | undefined;
+  countdown: EmailCountdownBlock | undefined;
+  videoThumb: EmailVideoThumbBlock | undefined;
+  backgroundColor: string | undefined;
+  translations: EmailBlockTranslation[] | undefined;
+};
+
+export type EmailSocialLinksBlock = {
+  links: EmailSocialLink[] | undefined;
+};
+
+export type EmailSocialLink = {
+  network: string | undefined;
+  url: string | undefined;
+};
+
+export type EmailCountdownBlock = {
+  endsAt: number | undefined;
+};
+
+export type EmailVideoThumbBlock = {
+  mediaId: number | undefined;
+  videoUrl: string | undefined;
+};
+
+export type ABConfig = {
+  enabled: boolean | undefined;
+  dimension: ABDimension | undefined;
+  testPct: number | undefined;
+  decisionAfterMinutes: number | undefined;
+  winnerVariantId: number | undefined;
+};
+
+export type SubjectTranslation = {
+  languageId: number | undefined;
+  subject: string | undefined;
+};
+
+export type EmailCampaignVariant = {
+  id: number | undefined;
+  label: string | undefined;
+  subjectI18n: SubjectTranslation[] | undefined;
+  // Empty means inherit the campaign-level body.
+  body: EmailBlock[] | undefined;
+  isWinner: boolean | undefined;
+};
+
+export type EmailCampaignInsert = {
+  name: string | undefined;
+  topic: EmailCampaignTopic | undefined;
+  body: EmailBlock[] | undefined;
+  backgroundColor: string | undefined;
+  fromName: string | undefined;
+  fromEmail: string | undefined;
+  replyTo: string | undefined;
+  scheduleAt: number | undefined;
+  abConfig: ABConfig | undefined;
+  variants: EmailCampaignVariant[] | undefined;
+  status: EmailCampaignStatus | undefined;
+  segmentId: number | undefined;
+};
+
+export type EmailCampaignFull = {
+  id: number | undefined;
+  name: string | undefined;
+  topic: EmailCampaignTopic | undefined;
+  body: EmailBlock[] | undefined;
+  backgroundColor: string | undefined;
+  fromName: string | undefined;
+  fromEmail: string | undefined;
+  replyTo: string | undefined;
+  scheduleAt: number | undefined;
+  abConfig: ABConfig | undefined;
+  variants: EmailCampaignVariant[] | undefined;
+  status: EmailCampaignStatus | undefined;
+  segmentId: number | undefined;
+  createdBy: string | undefined;
+  createdAt: number | undefined;
+  updatedAt: number | undefined;
+  sendingStartedAt: number | undefined;
+  sentAt: number | undefined;
+  audienceSnapshotAt: number | undefined;
+  fanoutMaxAccountId: number | undefined;
+  fanoutCursorAccountId: number | undefined;
+  audienceMaterializedAt: number | undefined;
+  recipientCount: number | undefined;
+  dispatchError: string | undefined;
+};
+
+export type EmailCampaignDispatchStatus = {
+  campaignId: number | undefined;
+  status: EmailCampaignStatus | undefined;
+  audienceMaterializedAt: number | undefined;
+  dispatchError: string | undefined;
+  recipientCount: number | undefined;
+  pending: number | undefined;
+  accepted: number | undefined;
+  failed: number | undefined;
+  skipped: number | undefined;
+};
+
+export type CampaignMetricCounts = {
+  total: number | undefined;
+  pending: number | undefined;
+  sent: number | undefined;
+  failed: number | undefined;
+  skipped: number | undefined;
+  delivered: number | undefined;
+  uniqueOpened: number | undefined;
+  totalOpens: number | undefined;
+  uniqueClicked: number | undefined;
+  totalClicks: number | undefined;
+  bounced: number | undefined;
+  complained: number | undefined;
+  unsubscribed: number | undefined;
+};
+
+export type CampaignMetricRates = {
+  deliveryRate: number | undefined;
+  openRate: number | undefined;
+  clickRate: number | undefined;
+  clickToOpenRate: number | undefined;
+  bounceRate: number | undefined;
+  complaintRate: number | undefined;
+};
+
+export type CampaignVariantMetrics = {
+  variantId: number | undefined;
+  label: string | undefined;
+  counts: CampaignMetricCounts | undefined;
+  rates: CampaignMetricRates | undefined;
+};
+
+// Read-only compute-on-read aggregates over email_campaign_recipient.
+export type CampaignMetrics = {
+  campaignId: number | undefined;
+  counts: CampaignMetricCounts | undefined;
+  rates: CampaignMetricRates | undefined;
+  variants: CampaignVariantMetrics[] | undefined;
+};
+
+// Public admin ledger projection. Provider idempotency/claim/hash/render
+// internals are deliberately absent.
+export type EmailCampaignRecipient = {
+  id: number | undefined;
+  campaignId: number | undefined;
+  accountId: number | undefined;
+  email: string | undefined;
+  languageId: number | undefined;
+  variantId: number | undefined;
+  cohort: EmailCampaignCohort | undefined;
+  status: EmailCampaignRecipientStatus | undefined;
+  attemptCount: number | undefined;
+  resendEmailId: string | undefined;
+  errorCode: string | undefined;
+  lastError: string | undefined;
+  nextAttemptAt: number | undefined;
+  sentAt: number | undefined;
+  completedAt: number | undefined;
+  createdAt: number | undefined;
+  updatedAt: number | undefined;
+};
+
+// SegmentNode is either a branch (op + children) or a leaf (field/operator/values).
+export type SegmentNode = {
+  op: SegmentOp | undefined;
+  children: SegmentNode[] | undefined;
+  field: string | undefined;
+  operator: string | undefined;
+  values: string[] | undefined;
+};
+
+export type SegmentPredicate = {
+  root: SegmentNode | undefined;
+};
+
+export type EmailSegment = {
+  id: number | undefined;
+  name: string | undefined;
+  description: string | undefined;
+  predicate: SegmentPredicate | undefined;
+  lastCount: number | undefined;
+  lastCountAt: number | undefined;
+};
+
+export type RenderWarning = {
+  blockIndex: number | undefined;
+  reason: string | undefined;
+};
+
 // FittingStatus is the lifecycle state of a fitting session.
 export type FittingStatus =
   | "FITTING_STATUS_UNKNOWN"
