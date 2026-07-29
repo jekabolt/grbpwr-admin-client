@@ -2,7 +2,11 @@
 
 39 laundry symbols, one per care code, drawn as a single family: 24×24 viewBox,
 2px stroke, round caps and joins, `#000`. Filenames are the care CODE, which is
-also the key in `careInstruction.ts` and the value that prints on the sewn tag.
+also the key in `care-artwork.ts` and the value that prints on the sewn tag.
+
+The codes themselves are not defined here or in `care-artwork.ts` — they are
+backend data (`care_symbol`, served in `GetDictionary().careSymbols`). This
+directory only answers "what does that code look like".
 
 They replaced a set assembled from four different sources, which had five
 coordinate systems (375, 120, 122, 20157 and 512 units), seven stroke weights,

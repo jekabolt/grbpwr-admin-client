@@ -134,6 +134,7 @@ export type common_Dictionary = {
   skuContractVersion: string | undefined;
   revisions: common_DictionaryRevision[] | undefined;
   categorySizeSystems: common_CategorySizeSystem[] | undefined;
+  careSymbols: common_CareSymbol[] | undefined;
 };
 
 // Category represents a hierarchical category structure
@@ -370,6 +371,37 @@ export type common_CategorySizeSystem = {
   categoryId: number | undefined;
   typeId: number | undefined;
   skuSystem: common_SizeSkuSystem | undefined;
+};
+
+// CareSymbol is one entry of the controlled ISO 3758 care vocabulary — the dictionary a style's
+// stored care code string resolves against, exactly as Fiber backs the composition model.
+// The CODE is what is stored on the style, what the label generator consumes and what prints on the
+// sewn tag; everything else here is display data. name is the admin picker's label; short_prose is
+// the customer-facing wording ("machine wash 30°"). Both arrive in the caller's language when a
+// translation exists, falling back to English otherwise.
+// Symbol ARTWORK is deliberately not here: it is a client asset keyed by code, so a renderer picks
+// its own drawing. These are not the trademarked GINETEX glyphs.
+export type common_CareSymbol = {
+  code: string | undefined;
+  category: string | undefined;
+  subCategory: string | undefined;
+  name: string | undefined;
+  shortProse: string | undefined;
+  sortOrder: number | undefined;
+  archived: boolean | undefined;
+  // Customer wording per language, for the storefront to render care in the buyer's language. The
+  // full set travels with the dictionary and the client picks, exactly as ColorwayInsertTranslation
+  // does -- rather than the server resolving one language per read.
+  translations: common_CareSymbolTranslation[] | undefined;
+};
+
+// CareSymbolTranslation is one language's customer-facing wording for a care symbol. name is
+// optional: the admin picker is English-only, so most rows carry prose alone and fall back to
+// CareSymbol.name.
+export type common_CareSymbolTranslation = {
+  languageId: number | undefined;
+  name: string | undefined;
+  shortProse: string | undefined;
 };
 
 export type UploadContentImageRequest = {
@@ -767,6 +799,11 @@ export type common_ColorwayMerchandising = {
   modelWearsSizeId: number | undefined;
   careInstructions: string | undefined;
   composition: string | undefined;
+  // care_entries is the STRUCTURED projection of care_instructions above, resolved against the
+  // care_symbol dictionary and always in canonical print order. care_instructions keeps holding the
+  // raw comma-joined codes; render entries when present and fall back to the string for rows that
+  // still hold pre-ISO free text. OUTPUT-ONLY — care is written as the code string.
+  careEntries: common_CareEntry[] | undefined;
   targetGender: common_GenderEnum | undefined;
   season: common_SeasonEnum | undefined;
   collection: string | undefined;
@@ -775,6 +812,24 @@ export type common_ColorwayMerchandising = {
   colorCode: string | undefined;
   dictionaryColor: common_Color | undefined;
   countryCode: string | undefined;
+};
+
+// CareEntry is one resolved care symbol — the TYPED projection of the stored care code string, and
+// the direct analogue of CompositionEntry above.
+// Same contract, for the same reason: `care_instructions` on the wire stays the raw comma-joined
+// code string ALWAYS ("MW30,DNB,DNTD,IL"), because that is what the label generator consumes and
+// what prints on the tag; care_entries is the structured projection resolved against the care_symbol
+// dictionary. A client renders care_entries when present and falls back to the plain string
+// otherwise, which is what keeps rows written before the vocabulary existed — free text like
+// "Machine wash cold at 30, do not tumble dry" — readable rather than blank.
+// Entries always arrive in canonical print order (wash, bleach, dry, iron, professional), whatever
+// order the codes were stored in, so the same selection always reads the same way.
+export type common_CareEntry = {
+  code: string | undefined;
+  category: string | undefined;
+  subCategory: string | undefined;
+  name: string | undefined;
+  shortProse: string | undefined;
 };
 
 export type common_ColorwayPrice = {
@@ -1427,6 +1482,9 @@ export type common_Order = {
   // custom orders only; empty for B2C/storefront orders. Surfaced so a reverse-charge invoice can
   // print the buyer's VAT number, which substantiates the zero-rated intra-community supply.
   buyerVatId: string | undefined;
+  // locale is the storefront site locale captured at purchase (ISO-639-1). Surfaced for the
+  // admin order view. Empty on pre-feature orders and admin custom orders.
+  locale: string | undefined;
 };
 
 export type common_OrderItem = {
@@ -3515,6 +3573,17 @@ export type SendCampaignNowRequest = {
 };
 
 export type SendCampaignNowResponse = {
+};
+
+export type AutoTranslateEmailCampaignRequest = {
+  id: number | undefined;
+  // overwrite re-translates all locales/fields; false (default) fills only what's missing.
+  overwrite: boolean | undefined;
+};
+
+export type AutoTranslateEmailCampaignResponse = {
+  // translated_count is the number of strings translated across all locales.
+  translatedCount: number | undefined;
 };
 
 export type ScheduleCampaignRequest = {
@@ -6307,6 +6376,11 @@ export type common_TechCard = {
   fit: string | undefined;
   composition: string | undefined;
   careInstructions: string | undefined;
+  // care_entries is the STRUCTURED projection of care_instructions above, resolved against the
+  // care_symbol dictionary and always in canonical print order. care_instructions keeps holding the
+  // raw comma-joined codes; render entries when present and fall back to the string for rows that
+  // still hold pre-ISO free text. OUTPUT-ONLY — care is written as the code string.
+  careEntries: common_CareEntry[] | undefined;
   // section_digests is the CURRENT fingerprint of each sign-off section's content, recomputed on
   // every read. Compare an entry against the matching TechCardSignoff.signed_digest to tell whether
   // an approved section has been edited since it was signed. OUTPUT-ONLY.
@@ -8625,6 +8699,10 @@ export interface AdminService {
   RenderCampaignPreview(request: RenderCampaignPreviewRequest): Promise<RenderCampaignPreviewResponse>;
   SendTestEmail(request: SendTestEmailRequest): Promise<SendTestEmailResponse>;
   SendCampaignNow(request: SendCampaignNowRequest): Promise<SendCampaignNowResponse>;
+  // AutoTranslateEmailCampaign fills the non-English locales' subject + block translations from
+  // the English source via an LLM, for the admin to review before launch. overwrite=false only
+  // fills what's missing; true re-translates everything.
+  AutoTranslateEmailCampaign(request: AutoTranslateEmailCampaignRequest): Promise<AutoTranslateEmailCampaignResponse>;
   ScheduleCampaign(request: ScheduleCampaignRequest): Promise<ScheduleCampaignResponse>;
   PauseCampaign(request: PauseCampaignRequest): Promise<PauseCampaignResponse>;
   ResumeCampaign(request: ResumeCampaignRequest): Promise<ResumeCampaignResponse>;
@@ -10955,6 +11033,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SendCampaignNow",
       }) as Promise<SendCampaignNowResponse>;
+    },
+    AutoTranslateEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/auto-translate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AutoTranslateEmailCampaign",
+      }) as Promise<AutoTranslateEmailCampaignResponse>;
     },
     ScheduleCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {

@@ -1,9 +1,7 @@
 import { adminService } from 'api/api';
 import { useModel } from 'components/managers/models/components/useModelQuery';
-import {
-  CARE_CODE_META,
-  CarePicker,
-} from 'components/managers/product/components/care/care-picker';
+import { CarePicker } from 'components/managers/product/components/care/care-picker';
+import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useState } from 'react';
@@ -13,7 +11,6 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import SelectField from 'ui/form/fields/select-field';
-import { careToProse } from 'utils/care-label';
 import { TechCardFormData } from './schema';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
@@ -30,6 +27,7 @@ const HEIGHT = 'BODY_MEASUREMENT_NAME_HEIGHT';
 // Render the picked care codes as symbol + text chips (the "symbols + text" view the wizard
 // produces), so the constructor reads the actual instructions, not a raw "MWN,DNB" code string.
 function CareSummary({ name }: { name: string }) {
+  const vocabulary = useCareVocabulary();
   const value = (useWatch({ name }) as string) || '';
   const codes = value
     .split(',')
@@ -39,7 +37,7 @@ function CareSummary({ name }: { name: string }) {
   return (
     <div className='flex flex-wrap gap-1'>
       {codes.map((code) => {
-        const m = CARE_CODE_META[code];
+        const m = vocabulary.byCode[code];
         return (
           <span key={code} className='flex items-center gap-1 border border-borderColor px-1.5'>
             {m?.img ? <img src={m.img} alt='' className='size-5' /> : null}
@@ -54,8 +52,8 @@ function CareSummary({ name }: { name: string }) {
 }
 
 // What the storefront will actually print from these fields. It is the same copy, built from the
-// same values — the care line goes through `careToProse` so the product page and the printed care
-// label can never word the same symbols differently.
+// same values — the care line is worded by the care dictionary, the same rows the storefront
+// resolves the stored codes against, so the product page and this preview cannot disagree.
 //
 // Two of the four lines are not authored here and are shown read-only, at their real source:
 // model height comes from the BASE MODEL (header, «base model & sample size»), country of origin
@@ -63,6 +61,7 @@ function CareSummary({ name }: { name: string }) {
 function StorefrontPreview() {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
+  const vocabulary = useCareVocabulary();
 
   const name = (useWatch({ control, name: 'name' }) as string) || '';
   const fit = (useWatch({ control, name: 'fit' }) as string) || '';
@@ -84,7 +83,7 @@ function StorefrontPreview() {
   const sampleSize = sizeName ? formatSizeName(sizeName) : '';
 
   const origin = labels.find((l) => l.labelType === ORIGIN_LABEL)?.content?.trim() ?? '';
-  const careLine = careToProse(care);
+  const careLine = vocabulary.prose(care);
 
   const modelLine = [
     heightCm ? `model is ${heightCm} cm` : '',
