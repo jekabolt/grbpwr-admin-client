@@ -1,16 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
-import { careCodes, careSelectionKey, parseSelectedCare, SelectedInstructions } from './care-codes';
+import { careCodes, careSelectionKey, CareSymbolView, SelectedInstructions } from './care-codes';
 import { CareSymbol } from './care-card';
 import { CareInstructions } from './careInstructions';
-
-// CARE_CODE_META is re-exported for the print doc and the style-facts field, which have imported it
-// from here since before it moved into care-codes.
-export { CARE_CODE_META } from './care-codes';
+import { useCareVocabulary } from './use-care-vocabulary';
 
 /**
  * Care instructions as the ISO laundry SYMBOLS they are, not the "MWN,DNB,…" codes underneath.
@@ -33,42 +30,53 @@ export function CarePicker({
   editMode?: boolean;
 }) {
   const { setValue } = useFormContext();
+  const vocabulary = useCareVocabulary();
   const value = (useWatch({ name }) as string) || '';
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<SelectedInstructions>({});
 
   const codes = careCodes(value);
 
-  // Legacy free-text care value (pre-ISO-code data) that parseSelected can't match to any known
-  // code: the modal would otherwise open looking empty, and the operator's first pick silently
-  // overwrites this text with no warning. Surface it as a note while it's still the stored value —
-  // it disappears on its own once a real pick is written (the value then parses again).
+  // The selection is DERIVED from the field, never held alongside it. It used to be its own state
+  // synced when the modal opened, which meant any write to the field from elsewhere (a form reset,
+  // a staged value landing) left the modal showing a selection the field no longer had.
+  const selected = useMemo(() => vocabulary.parseSelected(value), [vocabulary, value]);
+
+  // Legacy free-text care value (pre-ISO-code data) that resolves to no known code: the modal would
+  // otherwise open looking empty, and the operator's first pick silently overwrites this text with
+  // no warning. Surface it as a note while it's still the stored value — it disappears on its own
+  // once a real pick is written (the value then parses again).
   const trimmedValue = value.trim();
-  const legacyValue =
-    trimmedValue && Object.keys(parseSelectedCare(value)).length === 0 ? trimmedValue : undefined;
+  const legacyValue = trimmedValue && Object.keys(selected).length === 0 ? trimmedValue : undefined;
 
-  const write = (next: SelectedInstructions) =>
-    setValue(name, Object.values(next).join(','), { shouldDirty: true, shouldValidate: true });
-
-  const onSelect = (category: string, _method: string, code: string, subCategory?: string) => {
-    setSelected((prev) => {
-      const next = { ...prev };
-      const key = careSelectionKey(category, subCategory);
-      if (prev[key] === code) delete next[key];
-      else next[key] = code;
-      write(next);
-      return next;
+  /**
+   * Write the selection back in the dictionary's print order — wash → bleach → dry → iron →
+   * professional — which is the order the backend canonicalises to on save. Writing click order
+   * instead meant the value visibly reordered itself the first time the style was reloaded.
+   */
+  const write = (next: SelectedInstructions) => {
+    const known = new Set(vocabulary.slots.map((s) => s.key));
+    const ordered = vocabulary.slots.map((slot) => next[slot.key]).filter(Boolean);
+    // A slot the vocabulary no longer offers (its whole category archived) still holds a real code
+    // on a real style. Carry it rather than dropping it as a side effect of an unrelated pick.
+    const orphaned = Object.entries(next)
+      .filter(([key, code]) => code && !known.has(key))
+      .map(([, code]) => code);
+    setValue(name, [...ordered, ...orphaned].join(','), {
+      shouldDirty: true,
+      shouldValidate: true,
     });
   };
 
-  const openModal = () => {
-    setSelected(parseSelectedCare(value));
-    setOpen(true);
+  const onSelect = (symbol: CareSymbolView) => {
+    const key = careSelectionKey(symbol.category, symbol.subCategory);
+    const next = { ...selected };
+    // Clicking the symbol already in a slot clears it; clicking a different one replaces it.
+    if (next[key] === symbol.code) delete next[key];
+    else next[key] = symbol.code;
+    write(next);
   };
-  const clear = () => {
-    setSelected({});
-    setValue(name, '', { shouldDirty: true, shouldValidate: true });
-  };
+
+  const clear = () => setValue(name, '', { shouldDirty: true, shouldValidate: true });
 
   return (
     <div className='space-y-1'>
@@ -90,7 +98,7 @@ export function CarePicker({
                 clear
               </Button>
             )}
-            <Button type='button' variant='secondary' size='xs' onClick={openModal}>
+            <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
               select
             </Button>
           </div>

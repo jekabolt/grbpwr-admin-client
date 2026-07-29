@@ -32,7 +32,7 @@ import {
   techCardSignoffSectionOptions,
   techCardSignoffStateOptions,
 } from 'constants/filter';
-import { CARE_CODE_META } from 'components/managers/product/components/care/care-picker';
+import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useMemo } from 'react';
@@ -110,6 +110,7 @@ export function TechPackDocument({
 }) {
   const tc = techCard.techCard;
   const { dictionary } = useDictionary();
+  const careVocabulary = useCareVocabulary();
   const { data: models } = useAllModels();
   // Rev.N (task: header proof-of-version) — techCard.id === styleId (R1), same call ReleasesField
   // already makes; free once the constructor tab warmed the cache.
@@ -787,7 +788,7 @@ export function TechPackDocument({
                         {isCare && careCodes.length > 0 ? (
                           <div className='flex flex-wrap items-center gap-1'>
                             {careCodes.map((code, k) => {
-                              const m = CARE_CODE_META[code];
+                              const m = careVocabulary.byCode[code];
                               return m?.img ? (
                                 <img
                                   key={k}
