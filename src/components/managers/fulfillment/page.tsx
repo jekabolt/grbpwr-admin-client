@@ -2,34 +2,51 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { cn } from 'lib/utility';
+import { AvatarPicker } from 'ui/components/avatar';
+import { Board, BoardColumn } from 'ui/components/board';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
+import { SectionHeader } from 'ui/components/section-header';
+import { SkeletonBlocks } from 'ui/components/skeleton';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
+import { Toolbar } from 'ui/components/toolbar';
 import { FulfillmentCard } from './api/types';
 import { FulfillmentBoard } from './components/fulfillment-board';
 import { PickupModal } from './components/pickup-modal';
 import { ShipLabelModal } from './components/ship-label-modal';
 import { useFulfillmentBoard, useMarkFulfillmentDelivered } from './hooks/useFulfillment';
+import {
+  AGING_DAYS,
+  COLUMN_LABEL,
+  isOverdue,
+  PRIMARY_WIDTH,
+  SIDE_COLUMNS,
+  SIDE_WIDTH,
+} from './utils/meta';
 
 function BoardSkeleton() {
   return (
-    <div className='flex gap-4 overflow-hidden'>
-      {[0, 1, 2].map((c) => (
-        <div key={c} className='flex w-72 shrink-0 flex-col gap-2'>
-          <div className='h-5 w-24 animate-pulse bg-textInactiveColor' />
-          {[0, 1, 2].map((i) => (
-            <div key={i} className='h-24 animate-pulse border border-textInactiveColor' />
-          ))}
+    <Board>
+      <BoardColumn title={COLUMN_LABEL.FULFILLMENT_COLUMN_TO_FULFILL} width={PRIMARY_WIDTH}>
+        <div className='p-2'>
+          <SkeletonBlocks count={4} height={72} />
         </div>
+      </BoardColumn>
+      {SIDE_COLUMNS.map((col) => (
+        <BoardColumn key={col} title={COLUMN_LABEL[col]} width={SIDE_WIDTH}>
+          <div className='p-2'>
+            <SkeletonBlocks count={2} height={72} />
+          </div>
+        </BoardColumn>
       ))}
-    </div>
+    </Board>
   );
 }
 
 export function Fulfillment() {
-  const { account, canRead, canWrite, resolved } = usePermissions();
+  const { canRead, canWrite, resolved } = usePermissions();
   const navigate = useNavigate();
 
   const canView = !resolved || canRead(SECTION.fulfillment);
@@ -43,28 +60,61 @@ export function Fulfillment() {
   const [delivering, setDelivering] = useState<FulfillmentCard | null>(null);
   const [pickupOpen, setPickupOpen] = useState(false);
 
-  // Client-side board filters. Assignee is the whole point of the annotation —
-  // "mine" makes a shared queue workable when several people pack orders.
-  const [search, setSearch] = useState('');
-  const [mine, setMine] = useState(false);
-  const username = account?.username;
-  const filtersActive = search.trim() !== '' || mine;
+  // ffFilters v3 — the only board filter is an assignee avatar row. `undefined` = no
+  // filter; `''` = the unassigned pile. Faces + counts are derived from the board.
+  const [assignee, setAssignee] = useState<string | undefined>(undefined);
+  const filtersActive = assignee !== undefined;
+
+  const byColumn = useMemo(() => {
+    const m = new Map<string, FulfillmentCard[]>();
+    for (const col of columns) m.set(col.column, col.cards);
+    return m;
+  }, [columns]);
+
+  // ffKpi v2 — four tiles derived from the columns the client already holds (there
+  // is no aggregate RPC). Every figure is honest: to-pack / in-transit / delivered
+  // are lane counts, overdue is the aged subset of to-pack. Gap note (ff-board-kpi):
+  // "shipped today" is NOT derivable — the card has no ship timestamp, only `placed`
+  // — so the fourth tile is `delivered (recent)` from the delivered lane instead.
+  const kpi = useMemo(() => {
+    const toPack = byColumn.get('FULFILLMENT_COLUMN_TO_FULFILL') ?? [];
+    const shipped = byColumn.get('FULFILLMENT_COLUMN_SHIPPED') ?? [];
+    const delivered = byColumn.get('FULFILLMENT_COLUMN_DELIVERED') ?? [];
+    return {
+      toPack: toPack.length,
+      shipped: shipped.length,
+      delivered: delivered.length,
+      overdue: toPack.filter((c) => isOverdue(c.placed)).length,
+      unassigned: toPack.filter((c) => !c.assignee).length,
+    };
+  }, [byColumn]);
+
+  // Assignee faces: every owner across the board with their pile count, busiest
+  // first, the unassigned pile ('') last.
+  const people = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const col of columns)
+      for (const c of col.cards) {
+        const k = c.assignee || '';
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+    const named = [...counts.entries()]
+      .filter(([k]) => k !== '')
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+    const unassigned = counts.get('') ?? 0;
+    return unassigned > 0 ? [...named, { name: '', count: unassigned }] : named;
+  }, [columns]);
 
   const filteredColumns = useMemo(() => {
-    const q = search.trim().toLowerCase();
     if (!filtersActive) return columns;
     return columns.map((col) => ({
       ...col,
-      cards: col.cards.filter((c) => {
-        if (mine && c.assignee !== username) return false;
-        if (q && !`#${c.orderId} ${c.orderUuid}`.toLowerCase().includes(q)) return false;
-        return true;
-      }),
+      cards: col.cards.filter((c) => (c.assignee || '') === assignee),
     }));
-  }, [columns, search, mine, username, filtersActive]);
+  }, [columns, assignee, filtersActive]);
 
   const noneVisible = filtersActive && filteredColumns.every((col) => col.cards.length === 0);
-
   const actingUuid = deliver.isPending ? deliver.variables : undefined;
 
   function confirmDeliver() {
@@ -74,115 +124,110 @@ export function Fulfillment() {
 
   if (!canView) {
     return (
-      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textInactiveColor p-10 text-center'>
-        <Text variant='uppercase' size='large'>
-          fulfillment
-        </Text>
-        <Text variant='label' size='small'>
-          You don’t have access to this section. Ask a super admin to grant it.
-        </Text>
+      <div className='flex flex-col gap-2.5 pb-16'>
+        <SectionHeader title='fulfillment' question='orders to pack, ship and close out' />
+        <CalloutBox tone='note'>
+          <Text size='micro' variant='label' component='span'>
+            You don’t have access to this section — ask a super admin to grant it.
+          </Text>
+        </CalloutBox>
       </div>
     );
   }
 
   return (
-    <div className='flex w-full flex-col gap-4 pb-10'>
-      <div className='flex flex-col gap-1 border-b border-textInactiveColor pb-3'>
-        <Text variant='uppercase' size='large'>
-          fulfillment
-        </Text>
-        <Text variant='label' size='small'>
-          Orders to pack and ship, oldest first. Ship generates a carrier label (or records a
-          tracking code) and notifies the customer; delivered closes it out.
-        </Text>
-      </div>
+    <div className='flex flex-col gap-4 pb-16'>
+      <SectionHeader
+        title='fulfillment'
+        question='what is paid and waiting to ship — and what is already on its way?'
+        action={
+          writable && (
+            <Button type='button' variant='secondary' size='sm' onClick={() => setPickupOpen(true)}>
+              schedule pickup
+            </Button>
+          )
+        }
+      />
 
       {isLoading ? (
         <BoardSkeleton />
       ) : isError ? (
-        <div className='flex flex-col items-start gap-2 border border-textInactiveColor p-4'>
-          <Text variant='error' size='small'>
-            {error instanceof Error ? error.message : 'Failed to load the fulfillment board'}
+        <CalloutBox tone='error' className='flex flex-wrap items-center gap-3'>
+          <Text size='micro' variant='error' tracking='label' component='span'>
+            {error instanceof Error ? error.message : 'failed to load the fulfillment board'}
           </Text>
-          <Button variant='secondary' size='lg' onClick={() => refetch()}>
+          <Button variant='underline' size='xs' onClick={() => refetch()}>
             retry
           </Button>
-        </div>
+        </CalloutBox>
       ) : (
         <>
-          <div className='flex flex-wrap items-center gap-2'>
-            <Input
-              name='fulfillment-search'
-              placeholder='search order #…'
-              className='w-full sm:w-48'
-              value={search}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+          <StatGrid min={150}>
+            <Stat
+              label='to pack'
+              value={String(kpi.toPack)}
+              sub={kpi.unassigned > 0 ? `${kpi.unassigned} unassigned` : 'all assigned'}
+              tone={kpi.unassigned > 0 ? 'down' : undefined}
             />
-            {username && (
-              <button
-                type='button'
-                onClick={() => setMine((v) => !v)}
-                aria-pressed={mine}
-                className={cn(
-                  'border px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                  mine
-                    ? 'border-textColor bg-textColor text-bgColor'
-                    : 'border-textInactiveColor text-labelColor hover:border-textInactiveColor hover:text-textColor',
-                )}
-              >
-                assigned to me
-              </button>
-            )}
-            {filtersActive && (
-              <button
-                type='button'
-                onClick={() => {
-                  setSearch('');
-                  setMine(false);
-                }}
-                className='px-2 text-textBaseSize uppercase text-labelColor underline hover:text-textColor'
-              >
-                clear
-              </button>
-            )}
-            {writable && (
-              <Button
-                variant='secondary'
-                size='lg'
-                className='ml-auto'
-                onClick={() => setPickupOpen(true)}
-              >
-                schedule pickup
-              </Button>
-            )}
-          </div>
+            <Stat
+              label='overdue'
+              value={String(kpi.overdue)}
+              sub={`aged > ${AGING_DAYS}d in queue`}
+              tone={kpi.overdue > 0 ? 'down' : undefined}
+            />
+            <Stat label='in transit' value={String(kpi.shipped)} sub='shipped, not delivered' />
+            <Stat label='delivered' value={String(kpi.delivered)} sub='recently completed' />
+          </StatGrid>
 
-          {noneVisible && (
-            <div className='flex flex-wrap items-center gap-3 border border-textInactiveColor p-3'>
-              <Text variant='label' size='small'>
-                No orders match your filters.
-              </Text>
-              <button
-                type='button'
-                onClick={() => {
-                  setSearch('');
-                  setMine(false);
-                }}
-                className='text-textBaseSize uppercase underline hover:text-textColor'
+          {people.length > 0 && (
+            <Toolbar>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
               >
-                clear filters
-              </button>
-            </div>
+                assignee
+              </Text>
+              <AvatarPicker people={people} selected={assignee} onSelect={setAssignee} />
+              {filtersActive && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='ml-auto'
+                  onClick={() => setAssignee(undefined)}
+                >
+                  clear filter
+                </Button>
+              )}
+            </Toolbar>
           )}
 
-          <FulfillmentBoard
-            columns={filteredColumns}
-            canWrite={writable}
-            actingUuid={actingUuid}
-            onOpen={(uuid) => navigate(`${ROUTES.fulfillment}/${uuid}`)}
-            onShip={(card) => setShipping(card)}
-            onDeliver={(card) => setDelivering(card)}
-          />
+          {noneVisible ? (
+            <CalloutBox className='flex flex-wrap items-center gap-3'>
+              <Text size='micro' variant='label' component='span'>
+                no orders assigned to {assignee ? assignee : 'nobody'}
+              </Text>
+              <Button
+                variant='underline'
+                size='xs'
+                className='ml-auto'
+                onClick={() => setAssignee(undefined)}
+              >
+                clear filter
+              </Button>
+            </CalloutBox>
+          ) : (
+            <FulfillmentBoard
+              columns={filteredColumns}
+              canWrite={writable}
+              actingUuid={actingUuid}
+              onOpen={(uuid) => navigate(`${ROUTES.fulfillment}/${uuid}`)}
+              onShip={(card) => setShipping(card)}
+              onDeliver={(card) => setDelivering(card)}
+            />
+          )}
         </>
       )}
 
@@ -193,17 +238,23 @@ export function Fulfillment() {
         orderLabel={shipping ? `#${shipping.orderId}` : ''}
       />
 
-      <PickupModal open={pickupOpen} onOpenChange={setPickupOpen} />
+      <PickupModal
+        open={pickupOpen}
+        onOpenChange={setPickupOpen}
+        defaultQuantity={kpi.shipped || 1}
+      />
 
       <ConfirmationModal
         open={!!delivering}
         onOpenChange={(o) => !o && setDelivering(null)}
         onConfirm={confirmDeliver}
         confirmDisabled={deliver.isPending}
-        title='mark delivered'
+        closeOnConfirm={false}
+        title='mark delivered?'
         confirmLabel='mark delivered'
+        width='sm'
       >
-        <Text size='small'>
+        <Text size='micro' variant='label' component='span'>
           Mark order {delivering ? `#${delivering.orderId}` : ''} as delivered? This closes out
           fulfillment for the order.
         </Text>
