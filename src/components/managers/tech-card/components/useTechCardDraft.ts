@@ -19,6 +19,10 @@ export function useTechCardDraft(
   form: UseFormReturn<TechCardFormData>,
   key: string,
   enabled: boolean,
+  // Phase 19: sub-panels stage into the card's save instead of owning one, so their edits are
+  // unsaved work the unload guard must cover too. Passed in rather than read from the staging
+  // context so this hook stays usable outside a provider.
+  hasStagedChanges = false,
 ) {
   const storageKey = PREFIX + key;
   const [pending, setPending] = useState<StoredDraft | null>(null);
@@ -64,7 +68,7 @@ export function useTechCardDraft(
 
   // Warn before a hard unload (refresh / tab close) with unsaved edits. In-app route changes are
   // covered by the restore banner instead (the draft survives the navigation).
-  const isDirty = form.formState.isDirty;
+  const isDirty = form.formState.isDirty || hasStagedChanges;
   useEffect(() => {
     if (!enabled || !isDirty) return;
     const handler = (e: BeforeUnloadEvent) => {

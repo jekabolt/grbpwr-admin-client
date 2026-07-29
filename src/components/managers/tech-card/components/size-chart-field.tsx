@@ -11,11 +11,9 @@ import {
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
 import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
@@ -23,6 +21,10 @@ import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { TechCardFormData } from './schema';
+import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
+
+// One chart per style, so one staging key.
+const STAGING_KEY = 'sizeChart';
 
 // Accepts "114", "1.5", "+4", "-2" — a grade step is signed, a measurement is not.
 const NUMERIC = /^-?\d*\.?\d*$/;
@@ -101,7 +103,6 @@ function ruleOverrides(
 // a stored flag.
 export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit: boolean }) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const { control } = useFormContext<TechCardFormData>();
 
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
@@ -142,10 +143,14 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
   const [overrides, setOverrides] = useState<Set<string>>(new Set());
   const [pickedBase, setPickedBase] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  // This grid lives outside react-hook-form and saves through its own RPC, so the card's shared
-  // isDirty / beforeunload guard (useTechCardDraft) never sees these edits. Track dirtiness here
-  // and run a self-contained unload guard so measurements can't be silently lost on refresh/close.
+  const staging = useTechCardStaging();
+  // This grid lives outside react-hook-form, so the card's shared isDirty never sees these edits.
+  // Phase 19: instead of owning a save button, it STAGES into the card's one save — `touched` is
+  // what makes the header's "размерная таблица — 6 cells" a fact rather than a guess.
   const [dirty, setDirty] = useState(false);
+  const [touched, setTouched] = useState<Set<string>>(new Set());
+  const markTouched = (key: string) =>
+    setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
 
   // The stored base is still resolved against the live range: a base removed from the size range
   // must not linger as a dangling id, and a chart with no rule grades from the middle of the run.
@@ -200,18 +205,6 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
     setOverrides((prev) => (sameKeys(prev, next) ? prev : next));
   }, [dirty, cells, steps, ordered, baseSizeId]);
 
-  // Mirror useTechCardDraft's unload guard for this out-of-form grid: warn on refresh/tab close
-  // while measurements are unsaved. In-app navigation is covered by the visible "unsaved" badge.
-  useEffect(() => {
-    if (!dirty || !canEdit) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [dirty, canEdit]);
-
   const stored = (sizeId: number, nameId: number) => cells.get(sizeId)?.get(nameId) ?? '';
 
   // A cell follows the rule when it is not the base, its row has a usable step, the base cell has
@@ -232,6 +225,7 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
 
   const setCell = (sizeId: number, nameId: number, value: string) => {
     setDirty(true);
+    markTouched(cellKey(sizeId, nameId));
     setCells((prev) => {
       const next = new Map(prev);
       const row = new Map(next.get(sizeId) ?? []);
@@ -260,6 +254,7 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
 
   const releaseCell = (sizeId: number, nameId: number) => {
     setDirty(true);
+    markTouched(cellKey(sizeId, nameId));
     setOverrides((prev) => {
       const next = new Set(prev);
       next.delete(cellKey(sizeId, nameId));
@@ -269,6 +264,9 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
 
   const setStep = (nameId: number, value: string) => {
     setDirty(true);
+    // A step re-derives a whole row, so it counts as one change against its measurement rather
+    // than silently rewriting N cells the operator never typed in.
+    markTouched(`step:${nameId}`);
     setSteps((prev) => {
       const next = new Map(prev);
       next.set(nameId, value);
@@ -276,7 +274,10 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
     });
   };
 
-  async function save() {
+  // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
+  // one save is what reports the outcome now — it needs the rejection to name this panel in a
+  // partial-failure banner and keep everything after it staged (19.3).
+  async function commitChart() {
     if (!styleId) return;
     setSaving(true);
     try {
@@ -326,22 +327,36 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
         gradeBaseSizeId: rule ? baseSizeId : 0,
         gradeSteps: rule ? gradeSteps : [],
       });
-      showMessage('Size chart saved', 'success');
       loadChart();
-    } catch (e) {
-      const err = e as Error & { status?: number };
-      showMessage(
-        err?.status === 409
-          ? 'This style changed since you loaded it — reload and retry.'
-          : err instanceof Error
-            ? err.message
-            : 'Failed to save size chart',
-        'error',
-      );
     } finally {
       setSaving(false);
     }
   }
+
+  // Hand the mutation to the card's one save. Re-staged on EVERY edit because `commit` closes over
+  // this render's cells/steps/base — a stale closure would write the edit before last. Unstaged the
+  // moment the grid is pristine again, so the header count never claims work that is not there.
+  useEffect(() => {
+    if (!staging || !styleId || !canEdit) return;
+    if (!dirty) {
+      staging.unstage(STAGING_KEY);
+      return;
+    }
+    const cells = touched.size;
+    staging.stage({
+      key: STAGING_KEY,
+      label: `размерная таблица — ${cells} ${cells === 1 ? 'cell' : 'cells'}`,
+      order: COMMIT_ORDER.sizeChart,
+      commit: commitChart,
+      settle: () => {
+        setDirty(false);
+        setTouched(new Set());
+      },
+    });
+    // commitChart is redefined every render by design (it reads current state); depending on it
+    // here would restage on every keystroke for no gain, so the state it reads is the dep list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staging, styleId, canEdit, dirty, touched, cells, steps, overrides, baseSizeId, ordered]);
 
   if (!styleId) {
     return (
@@ -387,6 +402,7 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
           onValueChange={(v: string) => {
             setPickedBase(Number(v));
             setDirty(true);
+            markTouched('base');
           }}
           disabled={!canEdit}
           items={ordered.map((id) => ({
@@ -493,25 +509,12 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
         cells still follow it.
       </Text>
 
-      {canEdit && (
+      {canEdit && dirty && (
         <div className='flex flex-wrap items-center gap-2'>
-          {dirty && <Pill tone='attention'>unsaved measurements</Pill>}
-          <div className='ml-auto flex items-center gap-2'>
-            {dirty && (
-              <Text size='micro' variant='label' component='span'>
-                this grid saves separately from the card’s Save
-              </Text>
-            )}
-            <Button
-              type='button'
-              variant={dirty ? 'main' : 'secondary'}
-              size='sm'
-              disabled={saving}
-              onClick={save}
-            >
-              {saving ? 'saving…' : 'save size chart'}
-            </Button>
-          </div>
+          <Pill tone='attention'>{saving ? 'saving…' : 'staged for save'}</Pill>
+          <Text size='micro' variant='label' component='span' className='ml-auto'>
+            included in the card’s Save
+          </Text>
         </div>
       )}
     </div>

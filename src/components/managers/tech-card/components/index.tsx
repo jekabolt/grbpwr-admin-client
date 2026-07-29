@@ -87,6 +87,8 @@ import { SizeChartField } from './size-chart-field';
 import { StyleFactsField } from './style-facts-field';
 import { TechCardFittings } from './tech-card-fittings';
 import { useTechCardDraft } from './useTechCardDraft';
+import { StagedChangesChip } from './staged-changes-chip';
+import { useTechCardStagingRequired } from './useTechCardStaging';
 
 const TABS = [
   { id: 'header', label: 'header' },
@@ -247,6 +249,12 @@ export function TechCardForm({
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
+  // Sub-panels stage their mutation here instead of firing it; the header's one save commits the
+  // card body and then this queue (phase 19).
+  const staging = useTechCardStagingRequired();
+  // A partial failure is a fact about a save that already half-happened, so it stays on screen
+  // until the next save rather than passing through a toast.
+  const [stagingError, setStagingError] = useState<string | null>(null);
 
   const numId = id ? parseInt(id, 10) : undefined;
 
@@ -394,7 +402,12 @@ export function TechCardForm({
   // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
   // the product manager) or a hard refresh no longer loses unsaved edits — restore on return.
   const draftKey = isEditMode ? `edit.${numId ?? id ?? '0'}` : 'new';
-  const draft = useTechCardDraft(form, draftKey, canWrite(SECTION.techCards) && !frozen);
+  const draft = useTechCardDraft(
+    form,
+    draftKey,
+    canWrite(SECTION.techCards) && !frozen,
+    staging.changes.length > 0,
+  );
 
   // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.
   const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
@@ -488,17 +501,40 @@ export function TechCardForm({
 
   async function doSubmit(data: TechCardFormData) {
     setConflict(false);
+    setStagingError(null);
     const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting);
     try {
       if (isEditMode) {
-        await updateTechCard.mutateAsync({
-          id: parseInt(id || '0', 10),
-          techCard: techCardInsert,
-          expectedLockVersion: techCard?.lockVersion ?? 0,
-        });
-        showMessage('tech card updated', 'success');
+        // Count what this run intends to write BEFORE anything moves, so a partial-failure banner
+        // can say "2 of 4" and mean it.
+        const bodyDirty = form.formState.isDirty;
+        const planned = (bodyDirty ? 1 : 0) + staging.changes.length;
+
+        // The card body goes FIRST: it carries expectedLockVersion, so a 409 here must abort before
+        // any child panel writes. Committing a recipe against a card body someone else has already
+        // moved is how orphan references are made (19.4). The catch below handles that.
+        if (bodyDirty) {
+          await updateTechCard.mutateAsync({
+            id: parseInt(id || '0', 10),
+            techCard: techCardInsert,
+            expectedLockVersion: techCard?.lockVersion ?? 0,
+          });
+          form.reset(data);
+        }
+        // Then the staged sub-panels, in commit order. These are separate RPCs — there is NO
+        // transaction, and the banner below deliberately does not pretend otherwise.
+        const outcome = await staging.commitAll();
+        if (outcome.failed) {
+          const { change, error } = outcome.failed;
+          const done = (bodyDirty ? 1 : 0) + outcome.committed.length;
+          setStagingError(
+            `saved ${done} of ${planned} — «${change.label}» failed: ${techCardErrorMessage(error, 'unknown error')}. Everything not yet saved is still staged.`,
+          );
+          showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
+          return;
+        }
+        showMessage(planned > 1 ? `saved ${planned} changes` : 'tech card updated', 'success');
         draft.clear();
-        form.reset(data);
       } else {
         const created = await createTechCard.mutateAsync(techCardInsert);
         showMessage('tech card created', 'success');
@@ -617,6 +653,9 @@ export function TechCardForm({
                 </Button>
               </>
             )}
+            {canWrite(SECTION.techCards) && !frozen && isEditMode && (
+              <StagedChangesChip changes={staging.changes} cardBodyDirty={form.formState.isDirty} />
+            )}
             {canWrite(SECTION.techCards) &&
               (frozen ? (
                 <Button
@@ -635,7 +674,10 @@ export function TechCardForm({
                   variant='main'
                   size='lg'
                   className='uppercase'
-                  disabled={(isEditMode && !form.formState.isDirty) || saving}
+                  disabled={
+                    (isEditMode && !form.formState.isDirty && staging.changes.length === 0) ||
+                    saving
+                  }
                   loading={saving}
                   onClick={save}
                 >
@@ -770,6 +812,24 @@ export function TechCardForm({
           discards your unsaved changes; keeping yours will overwrite theirs on the next save.
         </Text>
       </ConfirmationModal>
+
+      {/* A partial save is not a toast: some of it landed, some of it did not, and the operator has
+          to decide what to do about the half that failed. It stays until the next save attempt. */}
+      {stagingError && (
+        <CalloutBox tone='error' className='mt-2.5 flex flex-wrap items-center gap-2'>
+          <Text size='micro'>{stagingError}</Text>
+          <div className='ml-auto'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              onClick={() => setStagingError(null)}
+            >
+              dismiss
+            </Button>
+          </div>
+        </CalloutBox>
+      )}
 
       {/* Draft and frozen stay inline — they are context, not decisions. */}
       {draft.pending && (

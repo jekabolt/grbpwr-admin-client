@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { TechCardForm } from './components';
+import { TechCardStagingProvider } from './components/useTechCardStaging';
 
 export function TechCard() {
   const { id } = useParams<{ id: string }>();
@@ -36,9 +37,14 @@ export function TechCard() {
   }
 
   return (
-    <div className='flex flex-col gap-6'>
-      <TechCardForm isEditMode={isEditMode} id={id} techCard={data} />
-      {numId ? <RelatedTasks techCardId={numId} /> : null}
-    </div>
+    // Staging is scoped to THIS card (phase 19): sub-panels hand their mutation to the header's one
+    // save instead of firing it themselves. Keyed by route id so navigating between two cards starts
+    // clean — two cards must never share a staging queue.
+    <TechCardStagingProvider key={id ?? 'new'}>
+      <div className='flex flex-col gap-6'>
+        <TechCardForm isEditMode={isEditMode} id={id} techCard={data} />
+        {numId ? <RelatedTasks techCardId={numId} /> : null}
+      </div>
+    </TechCardStagingProvider>
   );
 }
