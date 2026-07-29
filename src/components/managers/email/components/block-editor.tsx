@@ -3,7 +3,10 @@ import {
   CTA_ALIGNMENT_OPTIONS,
   CTA_STYLE_OPTIONS,
   EMAIL_BG_COLOR_OPTIONS,
+  IMAGE_ASPECT_OPTIONS,
+  LOGO_POSITION_OPTIONS,
   SOCIAL_NETWORK_OPTIONS,
+  SPACER_HEIGHT_OPTIONS,
 } from 'constants/email-campaign';
 import { useCallback } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
@@ -78,22 +81,16 @@ export function BlockEditor({ prefix, block, featuredProducts }: BlockEditorProp
               <Text size='small' variant='label'>
                 logo
               </Text>
-              <MediaPreviewWithSelector
-                mediaUrl={watch(`${prefix}.header.logoMediaUrl` as any) || ''}
-                aspectRatio={['1:1']}
-                showVideos={false}
-                label='select logo'
-                purpose='logo'
-                alt='logo'
-                heightClass='h-24'
-                onSaveMedia={(m) =>
-                  saveMedia(`${prefix}.header.logoMediaId`, `${prefix}.header.logoMediaUrl`, m)
-                }
-                onClear={() =>
-                  clearMedia(`${prefix}.header.logoMediaId`, `${prefix}.header.logoMediaUrl`)
-                }
-              />
+              <Text variant='inactive' size='small'>
+                the GRBPWR brand logo is used automatically — only its position is adjustable.
+              </Text>
             </div>
+            <SelectField
+              name={`${prefix}.header.logoPosition`}
+              label='logo position'
+              items={LOGO_POSITION_OPTIONS}
+              placeholder='center'
+            />
             <UnifiedTranslationFields
               fieldPrefix={translationsPrefix}
               fields={[
@@ -111,16 +108,23 @@ export function BlockEditor({ prefix, block, featuredProducts }: BlockEditorProp
           </>
         );
 
-      case 'EMAIL_BLOCK_TYPE_IMAGE_LINK':
+      case 'EMAIL_BLOCK_TYPE_IMAGE_LINK': {
+        const imageAspect = (watch(`${prefix}.imageLink.aspect` as any) as string) || '16:9';
         return (
           <>
+            <SelectField
+              name={`${prefix}.imageLink.aspect`}
+              label='aspect ratio'
+              items={IMAGE_ASPECT_OPTIONS}
+              placeholder='horizontal (16:9)'
+            />
             <div className='space-y-1'>
               <Text size='small' variant='label'>
                 image
               </Text>
               <MediaPreviewWithSelector
                 mediaUrl={watch(`${prefix}.imageLink.mediaUrl` as any) || ''}
-                aspectRatio={['16:9']}
+                aspectRatio={[imageAspect]}
                 showVideos={false}
                 label='select image'
                 purpose='image'
@@ -144,6 +148,7 @@ export function BlockEditor({ prefix, block, featuredProducts }: BlockEditorProp
             />
           </>
         );
+      }
 
       case 'EMAIL_BLOCK_TYPE_RICH_TEXT':
         return (
@@ -252,11 +257,12 @@ export function BlockEditor({ prefix, block, featuredProducts }: BlockEditorProp
 
       case 'EMAIL_BLOCK_TYPE_SPACER':
         return (
-          <InputField
+          <SelectField
             name={`${prefix}.spacer.height`}
-            label='height (px)'
-            type='number'
+            label='height'
+            items={SPACER_HEIGHT_OPTIONS}
             valueAsNumber
+            placeholder='medium (32px)'
           />
         );
 

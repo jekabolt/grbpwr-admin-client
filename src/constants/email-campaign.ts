@@ -161,6 +161,31 @@ export const CTA_ALIGNMENT_OPTIONS: { value: string; label: string }[] = [
   { value: 'right', label: 'right' },
 ];
 
+// Header logo alignment (EmailHeaderBlock.logoPosition). The logo itself is the
+// locked brand default — only its position is authorable.
+export const LOGO_POSITION_OPTIONS: { value: string; label: string }[] = [
+  { value: 'left', label: 'left' },
+  { value: 'center', label: 'center' },
+  { value: 'right', label: 'right' },
+];
+
+// Image block display aspect ratio (EmailImageLinkBlock.aspect). Drives both the
+// media-picker crop target and the rendered max-width.
+export const IMAGE_ASPECT_OPTIONS: { value: string; label: string }[] = [
+  { value: '16:9', label: 'horizontal (16:9)' },
+  { value: '1:1', label: 'square (1:1)' },
+  { value: '4:5', label: 'vertical (4:5)' },
+];
+
+// Spacer presets (EmailSpacerBlock.height in px) — a few sizes instead of a raw
+// number input.
+export const SPACER_HEIGHT_OPTIONS: { value: number; label: string }[] = [
+  { value: 16, label: 'small (16px)' },
+  { value: 32, label: 'medium (32px)' },
+  { value: 56, label: 'large (56px)' },
+  { value: 80, label: 'x-large (80px)' },
+];
+
 // ── A/B testing (ABConfig) ─────────────────────────────────────────────────────
 // ABDimension enum members (subject vs. content); UNKNOWN is not offerable.
 export type ABDimension = 'AB_DIMENSION_SUBJECT' | 'AB_DIMENSION_CONTENT';
