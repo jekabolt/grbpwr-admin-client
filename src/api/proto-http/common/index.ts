@@ -1094,6 +1094,16 @@ export type ABDimension =
   | "AB_DIMENSION_UNKNOWN"
   | "AB_DIMENSION_SUBJECT"
   | "AB_DIMENSION_CONTENT";
+export type EmailCampaignRecipientStatus =
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED";
+export type EmailCampaignCohort =
+  | "EMAIL_CAMPAIGN_COHORT_UNKNOWN"
+  | "EMAIL_CAMPAIGN_COHORT_AB"
+  | "EMAIL_CAMPAIGN_COHORT_REMAINDER";
 export type SegmentOp =
   | "SEGMENT_OP_UNKNOWN"
   | "SEGMENT_OP_AND"
@@ -1253,6 +1263,86 @@ export type EmailCampaignFull = {
   updatedAt: number | undefined;
   sendingStartedAt: number | undefined;
   sentAt: number | undefined;
+  audienceSnapshotAt: number | undefined;
+  fanoutMaxAccountId: number | undefined;
+  fanoutCursorAccountId: number | undefined;
+  audienceMaterializedAt: number | undefined;
+  recipientCount: number | undefined;
+  dispatchError: string | undefined;
+};
+
+export type EmailCampaignDispatchStatus = {
+  campaignId: number | undefined;
+  status: EmailCampaignStatus | undefined;
+  audienceMaterializedAt: number | undefined;
+  dispatchError: string | undefined;
+  recipientCount: number | undefined;
+  pending: number | undefined;
+  accepted: number | undefined;
+  failed: number | undefined;
+  skipped: number | undefined;
+};
+
+export type CampaignMetricCounts = {
+  total: number | undefined;
+  pending: number | undefined;
+  sent: number | undefined;
+  failed: number | undefined;
+  skipped: number | undefined;
+  delivered: number | undefined;
+  uniqueOpened: number | undefined;
+  totalOpens: number | undefined;
+  uniqueClicked: number | undefined;
+  totalClicks: number | undefined;
+  bounced: number | undefined;
+  complained: number | undefined;
+  unsubscribed: number | undefined;
+};
+
+export type CampaignMetricRates = {
+  deliveryRate: number | undefined;
+  openRate: number | undefined;
+  clickRate: number | undefined;
+  clickToOpenRate: number | undefined;
+  bounceRate: number | undefined;
+  complaintRate: number | undefined;
+};
+
+export type CampaignVariantMetrics = {
+  variantId: number | undefined;
+  label: string | undefined;
+  counts: CampaignMetricCounts | undefined;
+  rates: CampaignMetricRates | undefined;
+};
+
+// Read-only compute-on-read aggregates over email_campaign_recipient.
+export type CampaignMetrics = {
+  campaignId: number | undefined;
+  counts: CampaignMetricCounts | undefined;
+  rates: CampaignMetricRates | undefined;
+  variants: CampaignVariantMetrics[] | undefined;
+};
+
+// Public admin ledger projection. Provider idempotency/claim/hash/render
+// internals are deliberately absent.
+export type EmailCampaignRecipient = {
+  id: number | undefined;
+  campaignId: number | undefined;
+  accountId: number | undefined;
+  email: string | undefined;
+  languageId: number | undefined;
+  variantId: number | undefined;
+  cohort: EmailCampaignCohort | undefined;
+  status: EmailCampaignRecipientStatus | undefined;
+  attemptCount: number | undefined;
+  resendEmailId: string | undefined;
+  errorCode: string | undefined;
+  lastError: string | undefined;
+  nextAttemptAt: number | undefined;
+  sentAt: number | undefined;
+  completedAt: number | undefined;
+  createdAt: number | undefined;
+  updatedAt: number | undefined;
 };
 
 // SegmentNode is either a branch (op + children) or a leaf (field/operator/values).
