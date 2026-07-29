@@ -831,6 +831,10 @@ export type OrderNew = {
   shipmentCarrierId: number | undefined;
   promoCode: string | undefined;
   currency: string | undefined;
+  // locale is the storefront site locale at purchase time (ISO-639-1: en/fr/de/it/ja/zh/ko).
+  // Used to localize the order's transactional emails when the buyer has no explicit account
+  // language. Empty on the admin custom-order path.
+  locale: string | undefined;
 };
 
 export type OrderItemInsert = {
@@ -879,6 +883,9 @@ export type Order = {
   // custom orders only; empty for B2C/storefront orders. Surfaced so a reverse-charge invoice can
   // print the buyer's VAT number, which substantiates the zero-rated intra-community supply.
   buyerVatId: string | undefined;
+  // locale is the storefront site locale captured at purchase (ISO-639-1). Surfaced for the
+  // admin order view. Empty on pre-feature orders and admin custom orders.
+  locale: string | undefined;
 };
 
 export type OrderItem = {
