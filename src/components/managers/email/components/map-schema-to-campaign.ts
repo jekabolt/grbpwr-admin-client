@@ -8,8 +8,15 @@ import {
   common_EmailCampaignStatus,
 } from 'api/proto-http/admin';
 import { LANGUAGES } from 'constants/constants';
+import { EMAIL_BG_DEFAULT } from 'constants/email-campaign';
 import { v4 as uuidv4 } from 'uuid';
 import { CampaignSchema, defaultCampaign, EmailBlockForm } from './schema';
+
+// background-color <-> proto boundary. The Select uses EMAIL_BG_DEFAULT for the
+// "default" (no background) option (Radix forbids an empty-string item value);
+// the proto uses '' for default. Convert at every crossing.
+const bgToProto = (v?: string): string => (!v || v === EMAIL_BG_DEFAULT ? '' : v);
+const bgToForm = (v?: string): string => (v ? v : EMAIL_BG_DEFAULT);
 
 // ─── int64 epoch coercion ─────────────────────────────────────────────────────
 // This TS client types int64 fields (schedule_at / ends_at / *_at) as `number`,
@@ -74,7 +81,7 @@ function emptyBlock(type: any): common_EmailBlock {
 
 function toBlock(b: any): common_EmailBlock {
   const base = emptyBlock(b.type);
-  base.backgroundColor = b.backgroundColor || undefined;
+  base.backgroundColor = bgToProto(b.backgroundColor) || undefined;
   base.translations = Array.isArray(b.translations)
     ? b.translations.map(toBlockTranslation)
     : undefined;
@@ -193,7 +200,7 @@ export function mapFormToCampaignInsert(
     name: f.name,
     topic: f.topic,
     body: (f.body || []).map(toBlock),
-    backgroundColor: f.backgroundColor || '',
+    backgroundColor: bgToProto(f.backgroundColor),
     fromName: f.fromName,
     fromEmail: f.fromEmail,
     replyTo: f.replyTo || '',
@@ -241,7 +248,7 @@ export type ProductIdsByBlockUid = Record<string, number[]>;
 function readBlock(b: any, productIdsByUid: ProductIdsByBlockUid): EmailBlockForm {
   const uid = uuidv4();
   const translations = readTranslations(b.translations);
-  const base: any = { _uid: uid, backgroundColor: b.backgroundColor || '' };
+  const base: any = { _uid: uid, backgroundColor: bgToForm(b.backgroundColor) };
 
   switch (b.type) {
     case 'EMAIL_BLOCK_TYPE_HEADER':
@@ -357,7 +364,7 @@ export function mapCampaignFullToForm(c?: common_EmailCampaignFull): CampaignFor
     fromName: c.fromName || '',
     fromEmail: c.fromEmail || '',
     replyTo: c.replyTo || '',
-    backgroundColor: c.backgroundColor || '',
+    backgroundColor: bgToForm(c.backgroundColor),
     segmentId: c.segmentId || undefined,
     scheduleAt: epochSecondsToRfc3339(c.scheduleAt),
     subjectI18n,

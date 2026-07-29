@@ -136,8 +136,12 @@ export const EMAIL_TOPIC_OPTIONS: { value: EmailCampaignTopic; label: string }[]
 
 // Brand-only background tokens (grbpwr admin colour rule: brand tokens only — no
 // coral/pastel washes; grays / black / white are fine). Empty = engine default.
+// Radix Select forbids an empty-string item value (it reserves '' for clearing),
+// so "default" (= no background, engine default) uses a non-empty sentinel that
+// the schema<->proto mapper converts to/from '' at the boundary.
+export const EMAIL_BG_DEFAULT = '__default__';
 export const EMAIL_BG_COLOR_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'default' },
+  { value: EMAIL_BG_DEFAULT, label: 'default' },
   { value: '#ffffff', label: 'white' },
   { value: '#f5f5f5', label: 'light gray' },
   { value: '#e5e5e5', label: 'gray' },
