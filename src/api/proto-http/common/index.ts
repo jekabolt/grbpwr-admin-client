@@ -283,6 +283,11 @@ export type ColorwayMerchandising = {
   modelWearsSizeId: number | undefined;
   careInstructions: string | undefined;
   composition: string | undefined;
+  // care_entries is the STRUCTURED projection of care_instructions above, resolved against the
+  // care_symbol dictionary and always in canonical print order. care_instructions keeps holding the
+  // raw comma-joined codes; render entries when present and fall back to the string for rows that
+  // still hold pre-ISO free text. OUTPUT-ONLY — care is written as the code string.
+  careEntries: CareEntry[] | undefined;
   targetGender: GenderEnum | undefined;
   season: SeasonEnum | undefined;
   collection: string | undefined;
@@ -345,6 +350,24 @@ export type googletype_Decimal = {
   // Services **should** error with `400 Bad Request` (`INVALID_ARGUMENT` in
   // gRPC) if the service receives a value outside of the supported range.
   value: string | undefined;
+};
+
+// CareEntry is one resolved care symbol — the TYPED projection of the stored care code string, and
+// the direct analogue of CompositionEntry above.
+// Same contract, for the same reason: `care_instructions` on the wire stays the raw comma-joined
+// code string ALWAYS ("MW30,DNB,DNTD,IL"), because that is what the label generator consumes and
+// what prints on the tag; care_entries is the structured projection resolved against the care_symbol
+// dictionary. A client renders care_entries when present and falls back to the plain string
+// otherwise, which is what keeps rows written before the vocabulary existed — free text like
+// "Machine wash cold at 30, do not tumble dry" — readable rather than blank.
+// Entries always arrive in canonical print order (wash, bleach, dry, iron, professional), whatever
+// order the codes were stored in, so the same selection always reads the same way.
+export type CareEntry = {
+  code: string | undefined;
+  category: string | undefined;
+  subCategory: string | undefined;
+  name: string | undefined;
+  shortProse: string | undefined;
 };
 
 export type ColorwayPrice = {
@@ -1010,6 +1033,7 @@ export type Dictionary = {
   skuContractVersion: string | undefined;
   revisions: DictionaryRevision[] | undefined;
   categorySizeSystems: CategorySizeSystem[] | undefined;
+  careSymbols: CareSymbol[] | undefined;
 };
 
 export type Collection = {
@@ -1052,6 +1076,37 @@ export type DictionaryRevision = {
   namespace: string | undefined;
   revision: number | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+};
+
+// CareSymbol is one entry of the controlled ISO 3758 care vocabulary — the dictionary a style's
+// stored care code string resolves against, exactly as Fiber backs the composition model.
+// The CODE is what is stored on the style, what the label generator consumes and what prints on the
+// sewn tag; everything else here is display data. name is the admin picker's label; short_prose is
+// the customer-facing wording ("machine wash 30°"). Both arrive in the caller's language when a
+// translation exists, falling back to English otherwise.
+// Symbol ARTWORK is deliberately not here: it is a client asset keyed by code, so a renderer picks
+// its own drawing. These are not the trademarked GINETEX glyphs.
+export type CareSymbol = {
+  code: string | undefined;
+  category: string | undefined;
+  subCategory: string | undefined;
+  name: string | undefined;
+  shortProse: string | undefined;
+  sortOrder: number | undefined;
+  archived: boolean | undefined;
+  // Customer wording per language, for the storefront to render care in the buyer's language. The
+  // full set travels with the dictionary and the client picks, exactly as ColorwayInsertTranslation
+  // does -- rather than the server resolving one language per read.
+  translations: CareSymbolTranslation[] | undefined;
+};
+
+// CareSymbolTranslation is one language's customer-facing wording for a care symbol. name is
+// optional: the admin picker is English-only, so most rows carry prose alone and fall back to
+// CareSymbol.name.
+export type CareSymbolTranslation = {
+  languageId: number | undefined;
+  name: string | undefined;
+  shortProse: string | undefined;
 };
 
 export type Genders = {
@@ -2954,6 +3009,11 @@ export type TechCard = {
   fit: string | undefined;
   composition: string | undefined;
   careInstructions: string | undefined;
+  // care_entries is the STRUCTURED projection of care_instructions above, resolved against the
+  // care_symbol dictionary and always in canonical print order. care_instructions keeps holding the
+  // raw comma-joined codes; render entries when present and fall back to the string for rows that
+  // still hold pre-ISO free text. OUTPUT-ONLY — care is written as the code string.
+  careEntries: CareEntry[] | undefined;
   // section_digests is the CURRENT fingerprint of each sign-off section's content, recomputed on
   // every read. Compare an entry against the matching TechCardSignoff.signed_digest to tell whether
   // an approved section has been edited since it was signed. OUTPUT-ONLY.

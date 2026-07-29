@@ -1,74 +1,41 @@
-import { careInstruction } from './careInstruction';
-
-type CareMethod = { code: string; img: string };
-export type SelectedInstructions = { [category: string]: string };
-
-// The care taxonomy is flat except for Professional Care, which nests one level (dry / wet). Every
-// walker in here has to special-case that, so the name is spelled once.
-const PROFESSIONAL_CARE = 'Professional Care';
-
-// code → { name, img } across all categories, so a stored "MWN,DNB,…" string can be rendered as the
-// laundry SYMBOLS it stands for.
-function buildCodeMeta(): Record<string, { name: string; img: string }> {
-  const map: Record<string, { name: string; img: string }> = {};
-  for (const [category, methods] of Object.entries(careInstruction.care_instructions)) {
-    if (category === PROFESSIONAL_CARE) {
-      for (const sub of Object.values(methods as Record<string, Record<string, CareMethod>>)) {
-        for (const [name, m] of Object.entries(sub)) map[m.code] = { name, img: m.img };
-      }
-    } else {
-      for (const [name, m] of Object.entries(methods as Record<string, CareMethod>)) {
-        map[m.code] = { name, img: m.img };
-      }
-    }
-  }
-  return map;
-}
+import { common_CareSymbol } from 'api/proto-http/admin';
+import { CARE_ARTWORK } from './care-artwork';
 
 /**
- * Precomputed code → { name, img }. Lives in its own module rather than beside the picker because
- * both the picker and the symbol component need it, and having one import the other made a cycle —
- * which ESM resolves by handing whichever module loaded second an uninitialised binding.
+ * The care vocabulary, read from the backend dictionary.
+ *
+ * It used to live here as a hand-maintained TypeScript object, duplicated a third time in
+ * `utils/care-label.ts` for the storefront wording. That made the client the only place that knew
+ * what "MW30" meant — so the backend could not render care on the storefront, could not reject a
+ * typo on write, and could not translate a care tag. The vocabulary now comes from
+ * `GetDictionary().careSymbols` (the `care_symbol` table), exactly as fibers back composition.
+ *
+ * What stayed client-side is the ARTWORK (`care-artwork.ts`, keyed by code) and the 44px slot
+ * labels below — assets and layout, not data.
  */
-export const CARE_CODE_META = buildCodeMeta();
 
-/** Parse the stored comma-joined codes back into the picker's per-category selection map. */
-export function parseSelectedCare(value: string): SelectedInstructions {
-  const codes = value
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const out: SelectedInstructions = {};
-  for (const [category, methods] of Object.entries(careInstruction.care_instructions)) {
-    if (category === PROFESSIONAL_CARE) {
-      for (const [subCategory, sub] of Object.entries(
-        methods as Record<string, Record<string, CareMethod>>,
-      )) {
-        for (const m of Object.values(sub)) {
-          if (codes.includes(m.code)) out[`${category}-${subCategory}`] = m.code;
-        }
-      }
-    } else {
-      for (const m of Object.values(methods as Record<string, CareMethod>)) {
-        if (codes.includes(m.code)) out[category] = m.code;
-      }
-    }
-  }
-  return out;
-}
+/** A stored care selection, keyed by slot: category, or `category-subCategory` where it nests. */
+export type SelectedInstructions = { [slotKey: string]: string };
 
-/**
- * A short name for a slot, for when there is 44px to say which one is empty.
- * Falls back to the first word of the category, so a new category still labels
- * itself rather than rendering blank.
- */
-const SLOT_LABEL: Record<string, string> = {
-  Washing: 'wash',
-  Bleaching: 'bleach',
-  Drying: 'dry',
-  Ironing: 'iron',
-  [`${PROFESSIONAL_CARE}-Dry Cleaning`]: 'dry cl',
-  [`${PROFESSIONAL_CARE}-Wet Cleaning`]: 'wet cl',
+/** One symbol as the UI needs it: dictionary data with its picture attached. */
+export type CareSymbolView = {
+  code: string;
+  name: string;
+  category: string;
+  /** Only Professional Care nests today; anything the dictionary nests behaves the same way. */
+  subCategory?: string;
+  /** Customer-facing wording ("machine wash 30°"), which is what the storefront prints. */
+  shortProse: string;
+  sortOrder: number;
+  archived: boolean;
+  /** Undefined when this deployment ships no drawing for the code — the code still renders. */
+  img?: string;
+};
+
+/** One tab of the picker: a category, and the one or more grids it holds. */
+export type CareGroup = {
+  category: string;
+  sections: Array<{ subCategory?: string; symbols: CareSymbolView[] }>;
 };
 
 export type CareSlot = {
@@ -81,37 +48,35 @@ export type CareSlot = {
   name: string;
 };
 
+export type CareVocabulary = {
+  /** False until the dictionary has loaded, or if this backend serves no care vocabulary. */
+  loaded: boolean;
+  /** Everything the picker may offer, in print order. Archived symbols are excluded. */
+  symbols: CareSymbolView[];
+  /** Lookup by code, INCLUDING archived ones: a style already carrying a retired code must render. */
+  byCode: Record<string, CareSymbolView>;
+  /** The picker's tabs, in print order. */
+  groups: CareGroup[];
+  /** Every pick a tag can hold, in print order — one per category, plus one per sub-category. */
+  slots: CareSlot[];
+  /** Parse a stored `"MW30,DNB"` value into the picker's per-slot selection map. */
+  parseSelected(value: string): SelectedInstructions;
+  /** Render a stored value as the sentence a customer reads. */
+  prose(value: string): string;
+};
+
 /**
- * Every pick the tag can hold, in the order the codes are stored — one per
- * category, except Professional Care which holds one dry and one wet.
- *
- * This is what lets the picker show the tag as a SET: a category with no pick is
- * an empty slot in a known position, not an absence you have to notice.
+ * A short name for a slot, for when there is 44px to say which one is empty. Presentation, not
+ * taxonomy — a category the dictionary adds gets the first word of its name rather than nothing.
  */
-export const CARE_SLOTS: CareSlot[] = Object.entries(careInstruction.care_instructions).flatMap(
-  ([category, methods]) => {
-    if (category !== PROFESSIONAL_CARE) {
-      return [
-        {
-          key: category,
-          category,
-          label: SLOT_LABEL[category] ?? category.split(' ')[0].toLowerCase(),
-          name: category.toLowerCase(),
-        },
-      ];
-    }
-    return Object.keys(methods as Record<string, unknown>).map((subCategory) => {
-      const key = `${category}-${subCategory}`;
-      return {
-        key,
-        category,
-        subCategory,
-        label: SLOT_LABEL[key] ?? subCategory.split(' ')[0].toLowerCase(),
-        name: subCategory.toLowerCase(),
-      };
-    });
-  },
-);
+const SLOT_LABEL: Record<string, string> = {
+  Washing: 'wash',
+  Bleaching: 'bleach',
+  Drying: 'dry',
+  Ironing: 'iron',
+  'Professional Care-Dry Cleaning': 'dry cl',
+  'Professional Care-Wet Cleaning': 'wet cl',
+};
 
 /** Split a stored care value into its codes. Empty and whitespace-only both yield []. */
 export function careCodes(value: string): string[] {
@@ -122,9 +87,119 @@ export function careCodes(value: string): string[] {
 }
 
 /**
- * The selection key a pick is stored under: Professional Care is scoped to its sub-category (you
- * may pick one dry AND one wet), everything else to the category.
+ * The slot a pick is stored under: a symbol with a sub-category is scoped to it (you may pick one
+ * dry-clean AND one wet-clean), everything else to its category.
  */
 export function careSelectionKey(category: string, subCategory?: string): string {
-  return category === PROFESSIONAL_CARE && subCategory ? `${category}-${subCategory}` : category;
+  return subCategory ? `${category}-${subCategory}` : category;
+}
+
+function shortLabel(text: string): string {
+  return text.split(' ')[0].toLowerCase();
+}
+
+/**
+ * Build the vocabulary from the dictionary payload. Pure, so it memoises cleanly and so a test or a
+ * story can hand it a fixture; `useCareVocabulary` is the hook that feeds it the real dictionary.
+ */
+export function buildCareVocabulary(dictionarySymbols?: common_CareSymbol[]): CareVocabulary {
+  const all: CareSymbolView[] = (dictionarySymbols ?? [])
+    .filter((s): s is common_CareSymbol & { code: string } => !!s.code)
+    .map((s) => ({
+      code: s.code,
+      name: s.name || s.code,
+      category: s.category || '',
+      subCategory: s.subCategory || undefined,
+      shortProse: s.shortProse || '',
+      sortOrder: s.sortOrder ?? 0,
+      archived: !!s.archived,
+      img: CARE_ARTWORK[s.code],
+    }))
+    // The server already sorts by sort_order; sorting again means the print order survives any
+    // transport that does not preserve array order.
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const byCode: Record<string, CareSymbolView> = {};
+  for (const s of all) byCode[s.code] = s;
+
+  const symbols = all.filter((s) => !s.archived);
+
+  // Categories, sub-categories and sections all come out in first-seen order, which is print order
+  // because `all` is already sorted.
+  const groups: CareGroup[] = [];
+  const groupIndex = new Map<string, CareGroup>();
+  const sectionIndex = new Map<string, { subCategory?: string; symbols: CareSymbolView[] }>();
+  for (const s of symbols) {
+    let group = groupIndex.get(s.category);
+    if (!group) {
+      group = { category: s.category, sections: [] };
+      groupIndex.set(s.category, group);
+      groups.push(group);
+    }
+    const sectionKey = careSelectionKey(s.category, s.subCategory);
+    let section = sectionIndex.get(sectionKey);
+    if (!section) {
+      section = { subCategory: s.subCategory, symbols: [] };
+      sectionIndex.set(sectionKey, section);
+      group.sections.push(section);
+    }
+    section.symbols.push(s);
+  }
+
+  const slots: CareSlot[] = Array.from(sectionIndex.entries()).map(([key, section]) => {
+    const category = section.symbols[0].category;
+    const spoken = section.subCategory ?? category;
+    return {
+      key,
+      category,
+      subCategory: section.subCategory,
+      label: SLOT_LABEL[key] ?? shortLabel(spoken),
+      name: spoken.toLowerCase(),
+    };
+  });
+
+  return {
+    loaded: all.length > 0,
+    symbols,
+    byCode,
+    groups,
+    slots,
+
+    parseSelected(value: string) {
+      const out: SelectedInstructions = {};
+      for (const code of careCodes(value)) {
+        const symbol = byCode[code];
+        // Unknown tokens — legacy free text, or a code this backend has never heard of — are not a
+        // selection. `CarePicker` shows them as the raw value it is about to replace.
+        if (symbol) out[careSelectionKey(symbol.category, symbol.subCategory)] = code;
+      }
+      return out;
+    },
+
+    /**
+     * `"IL,DNB,MW30"` → `machine wash 30°, do not bleach, iron low`.
+     *
+     * Always in the dictionary's print order, so the same selection reads the same regardless of
+     * the order it was clicked in — which is also the order the backend canonicalises to, so this
+     * preview and the stored value can never disagree. Unknown tokens keep their position and pass
+     * through verbatim, which is what makes a legacy free-text value render as itself.
+     */
+    prose(value: string) {
+      const codes = careCodes(value);
+      const unique = codes.filter((c, i) => codes.indexOf(c) === i);
+      return unique
+        .map((code, i) => ({ code, i }))
+        .sort((a, b) => {
+          const oa = byCode[a.code]?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+          const ob = byCode[b.code]?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+          return oa - ob || a.i - b.i;
+        })
+        .map(({ code }) => {
+          const symbol = byCode[code];
+          if (!symbol) return code;
+          return symbol.shortProse || symbol.name.toLowerCase();
+        })
+        .join(', ');
+    },
+  };
 }

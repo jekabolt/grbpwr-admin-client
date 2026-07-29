@@ -4,7 +4,8 @@ import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { cn } from 'lib/utility';
-import { CARE_CODE_META } from './care-codes';
+import { CareGroup, CareSymbolView } from './care-codes';
+import { useCareVocabulary } from './use-care-vocabulary';
 
 // One swatch footprint, shared by a filled symbol and an empty slot so a gap in the tag lines up
 // with the picks around it instead of being a differently-sized hole.
@@ -19,15 +20,16 @@ const SWATCH = 'flex w-11 flex-col items-center justify-center gap-0.5 border p-
  * checked against, the picture is what a person actually reads.
  */
 export function CareSymbol({ code, onRemove }: { code: string; onRemove?: () => void }) {
-  const meta = CARE_CODE_META[code];
+  const vocabulary = useCareVocabulary();
+  const meta = vocabulary.byCode[code];
   const label = meta?.name ?? code;
   const symbol = (
     <>
       {meta?.img ? (
         <img src={meta.img} alt={meta.name} className='size-6' />
       ) : (
-        // A code with no symbol is real data — from before the symbol set, or a code retired since.
-        // Show it rather than dropping it silently.
+        // A code with no symbol is real data — from before the symbol set, a code retired since, or
+        // simply the dictionary not loaded yet. Show it rather than dropping it silently.
         <span className='flex size-6 items-center justify-center text-nano'>?</span>
       )}
       <Text component='span' size='nano' variant='label' className='truncate uppercase'>
@@ -81,18 +83,9 @@ export function CareSlotEmpty({ label, name }: { label: string; name: string }) 
 }
 
 interface CareCardProps {
-  method: string;
-  code: string;
-  img: string;
+  symbol: CareSymbolView;
   isSelected: boolean;
-  selectedCare: string;
-  subCategory?: string;
-  onSelectCareInstruction: (
-    category: string,
-    method: string,
-    code: string,
-    subCategory?: string,
-  ) => void;
+  onSelect: (symbol: CareSymbolView) => void;
 }
 
 /**
@@ -103,95 +96,71 @@ interface CareCardProps {
  * so reading back what you had picked meant deselecting it — and the code is the thing that ends up
  * on the tag, so hiding it until selection had it backwards.
  */
-export const CareCard: FC<CareCardProps> = ({
-  method,
-  code,
-  img,
-  isSelected,
-  onSelectCareInstruction,
-  selectedCare,
-  subCategory,
-}) => (
+export const CareCard: FC<CareCardProps> = ({ symbol, isSelected, onSelect }) => (
   <Tile
     selected={isSelected}
-    onClick={() => onSelectCareInstruction(selectedCare, method, code, subCategory)}
+    onClick={() => onSelect(symbol)}
     media={
       <div className='bg-bgZebra p-1'>
-        <Media src={img} alt={method} aspectRatio='1/1' fit='contain' />
+        {symbol.img ? (
+          <Media src={symbol.img} alt={symbol.name} aspectRatio='1/1' fit='contain' />
+        ) : (
+          // The dictionary offers a code this build has no drawing for. Offering it anyway beats
+          // hiding a valid pick, so the tile falls back to its code.
+          <div className='flex aspect-square items-center justify-center'>
+            <Text size='micro' variant='label' component='span'>
+              {symbol.code}
+            </Text>
+          </div>
+        )}
       </div>
     }
-    name={method}
-    sub={code}
+    name={symbol.name}
+    sub={symbol.code}
     className={isSelected ? 'bg-bgZebra' : undefined}
   />
 );
 
 interface CareMethodsListProps {
-  methods: Record<string, unknown>;
-  selectedCare: string;
+  group: CareGroup;
   selectedInstructions: Record<string, string>;
-  subCategory?: string;
-  onSelectCareInstruction: (
-    category: string,
-    method: string,
-    code: string,
-    subCategory?: string,
-  ) => void;
+  onSelect: (symbol: CareSymbolView) => void;
 }
 
 /**
- * A category's symbols. Flat categories render as one grid; Professional Care nests one level
- * (dry / wet), and each sub-category gets its own labelled grid because a pick there is scoped to
- * the sub-category, not to the category.
+ * One category's symbols. A flat category renders as a single grid; a nesting one (Professional
+ * Care → dry / wet) gets a labelled grid per sub-category, because a pick there is scoped to the
+ * sub-category rather than to the category.
  */
 export const CareMethodsList: FC<CareMethodsListProps> = ({
-  methods,
-  selectedCare,
+  group,
   selectedInstructions,
-  subCategory,
-  onSelectCareInstruction,
-}) => {
-  const entries = Object.entries(methods).filter(
-    ([, v]) => typeof v === 'object' && v !== null,
-  ) as Array<[string, Record<string, unknown>]>;
-
-  const leaves = entries.filter(([, v]) => 'code' in v || 'img' in v);
-  const groups = entries.filter(([, v]) => !('code' in v) && !('img' in v));
-
-  return (
-    <>
-      {leaves.length > 0 && (
+  onSelect,
+}) => (
+  <>
+    {group.sections.map((section) => {
+      const selectionKey = section.subCategory
+        ? `${group.category}-${section.subCategory}`
+        : group.category;
+      const grid = (
         <Tiles min={104}>
-          {leaves.map(([method, v]) => {
-            const { code, img } = v as unknown as { code: string; img: string };
-            const selectionKey = subCategory ? `${selectedCare}-${subCategory}` : selectedCare;
-            return (
-              <CareCard
-                key={`${method}-${code}`}
-                method={method}
-                code={code}
-                img={img}
-                isSelected={selectedInstructions[selectionKey] === code}
-                selectedCare={selectedCare}
-                subCategory={subCategory}
-                onSelectCareInstruction={onSelectCareInstruction}
-              />
-            );
-          })}
+          {section.symbols.map((symbol) => (
+            <CareCard
+              key={symbol.code}
+              symbol={symbol}
+              isSelected={selectedInstructions[selectionKey] === symbol.code}
+              onSelect={onSelect}
+            />
+          ))}
         </Tiles>
-      )}
-      {groups.map(([group, sub]) => (
-        <div key={`subcategory-${group}`} className='flex flex-col gap-1.5'>
-          <GroupLabel>{group}</GroupLabel>
-          <CareMethodsList
-            methods={sub}
-            selectedCare={selectedCare}
-            selectedInstructions={selectedInstructions}
-            subCategory={group}
-            onSelectCareInstruction={onSelectCareInstruction}
-          />
+      );
+      if (!section.subCategory) return <div key={selectionKey}>{grid}</div>;
+      return (
+        <div key={selectionKey} className='flex flex-col gap-1.5'>
+          <GroupLabel>{section.subCategory}</GroupLabel>
+          {grid}
         </div>
-      ))}
-    </>
-  );
-};
+      );
+    })}
+  </>
+);
