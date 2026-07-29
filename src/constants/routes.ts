@@ -135,7 +135,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'hero', route: ROUTES.hero, section: SECTION.hero },
       { label: 'promo', route: ROUTES.promo, section: SECTION.promo },
       { label: 'email', route: ROUTES.emailCampaigns, section: SECTION.marketing },
-      { label: 'segments', route: ROUTES.emailSegments, section: SECTION.marketing },
       { label: 'timeline', route: ROUTES.archives, section: SECTION.archive },
     ],
   },
