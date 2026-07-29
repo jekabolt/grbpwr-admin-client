@@ -161,137 +161,139 @@ export function OrderDetails() {
         {isLoading && !order ? (
           <Placeholder label='loading order…' className='py-20' />
         ) : (
-          <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
-            {/* Left — items + summary + comment */}
-            <div className='w-full space-y-4 lg:flex-1'>
-              <Panel title='items'>
-                {canPartialRefund && (
-                  <Text size='micro' variant='label' className='uppercase print:hidden'>
-                    select units to refund, or leave all unselected to refund the whole order
-                    {selectedUnits > 0 ? ` · ${selectedUnits} selected` : ''}
-                  </Text>
-                )}
-                <OrderItems
-                  orderDetails={orderDetails}
-                  currency={currency}
-                  showRefundSelection={canPartialRefund}
-                  selectedUnitKeys={selectedUnitKeys}
-                  onToggleOrderItems={toggleOrderItemsSelection}
-                />
-              </Panel>
-
-              {/* ordSummary v2 — charged (what the customer paid) vs settled (our costs) */}
-              <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-                <Panel title='charged'>
-                  <SummaryRow
-                    label='items + shipping'
-                    value={
-                      order?.totalPrice?.value
-                        ? money(toNum(order.totalPrice.value), currency)
-                        : '—'
-                    }
-                    strong
-                  />
-                  <SummaryRow
-                    label='shipping'
-                    value={
-                      orderDetails?.shipment?.cost?.value
-                        ? money(toNum(orderDetails.shipment.cost.value), currency)
-                        : '—'
-                    }
-                  />
-                  <div className='flex items-baseline justify-between gap-4 print:hidden'>
-                    <Text size='micro' variant='label' component='span' className='uppercase'>
-                      promo
+          <>
+            <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
+              {/* Left — items + summary + comment */}
+              <div className='w-full space-y-4 lg:flex-1'>
+                <Panel title='items'>
+                  {canPartialRefund && (
+                    <Text size='micro' variant='label' className='uppercase print:hidden'>
+                      select units to refund, or leave all unselected to refund the whole order
+                      {selectedUnits > 0 ? ` · ${selectedUnits} selected` : ''}
                     </Text>
-                    <PromoApplied orderDetails={orderDetails} />
-                  </div>
-                  {isRefunded && (
-                    <SummaryRow
-                      label='refunded'
-                      value={money(toNum(order?.refundedAmount?.value), currency)}
-                    />
                   )}
-                  {order?.refundReason && (
-                    <SummaryRow label='refund reason' value={order.refundReason} />
-                  )}
+                  <OrderItems
+                    orderDetails={orderDetails}
+                    currency={currency}
+                    showRefundSelection={canPartialRefund}
+                    selectedUnitKeys={selectedUnitKeys}
+                    onToggleOrderItems={toggleOrderItemsSelection}
+                  />
                 </Panel>
 
-                {canReadCosting && (
-                  <Panel title={`settled · carrier (${baseCurrency})`} className='print:hidden'>
+                {/* ordSummary v2 — charged (what the customer paid) vs settled (our costs) */}
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+                  <Panel title='charged'>
                     <SummaryRow
-                      label='actual carrier cost'
+                      label='items + shipping'
                       value={
-                        actualShipmentCost ? money(toNum(actualShipmentCost), baseCurrency) : '—'
+                        order?.totalPrice?.value
+                          ? money(toNum(order.totalPrice.value), currency)
+                          : '—'
                       }
+                      strong
                     />
                     <SummaryRow
-                      label='return'
+                      label='shipping'
                       value={
-                        returnShipmentCost ? money(toNum(returnShipmentCost), baseCurrency) : '—'
+                        orderDetails?.shipment?.cost?.value
+                          ? money(toNum(orderDetails.shipment.cost.value), currency)
+                          : '—'
                       }
                     />
-                    {canEditOrder && (
-                      <Button
-                        variant='underline'
-                        size='xs'
-                        onClick={() => setIsShipCostOpen(true)}
-                        className='mt-1'
-                      >
-                        {actualShipmentCost ? 'edit carrier cost' : 'record carrier cost'}
-                      </Button>
+                    <div className='flex items-baseline justify-between gap-4 print:hidden'>
+                      <Text size='micro' variant='label' component='span' className='uppercase'>
+                        promo
+                      </Text>
+                      <PromoApplied orderDetails={orderDetails} />
+                    </div>
+                    {isRefunded && (
+                      <SummaryRow
+                        label='refunded'
+                        value={money(toNum(order?.refundedAmount?.value), currency)}
+                      />
                     )}
+                    {order?.refundReason && (
+                      <SummaryRow label='refund reason' value={order.refundReason} />
+                    )}
+                  </Panel>
+
+                  {canReadCosting && (
+                    <Panel title={`settled · carrier (${baseCurrency})`} className='print:hidden'>
+                      <SummaryRow
+                        label='actual carrier cost'
+                        value={
+                          actualShipmentCost ? money(toNum(actualShipmentCost), baseCurrency) : '—'
+                        }
+                      />
+                      <SummaryRow
+                        label='return'
+                        value={
+                          returnShipmentCost ? money(toNum(returnShipmentCost), baseCurrency) : '—'
+                        }
+                      />
+                      {canEditOrder && (
+                        <Button
+                          variant='underline'
+                          size='xs'
+                          onClick={() => setIsShipCostOpen(true)}
+                          className='mt-1'
+                        >
+                          {actualShipmentCost ? 'edit carrier cost' : 'record carrier cost'}
+                        </Button>
+                      )}
+                    </Panel>
+                  )}
+                </div>
+
+                <Panel title='comment' className='print:hidden'>
+                  <Comment orderDetails={orderDetails} canEdit={canEditOrder} />
+                </Panel>
+              </div>
+
+              {/* Right — customer / shipping / payment / tracking */}
+              <div className='w-full space-y-4 lg:w-[360px]'>
+                <Panel title='customer'>
+                  <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
+                </Panel>
+
+                <Panel title='payment' className='print:hidden'>
+                  <Payment
+                    orderDetails={orderDetails}
+                    stripeDetails={stripeDetails}
+                    showSettlement={canReadCosting}
+                    isRefunded={isRefunded}
+                    isPrinting={isPrinting}
+                  />
+                </Panel>
+
+                {canEditOrder && !orderDetails?.shipment?.trackingCode && (
+                  <Panel title='tracking' className='print:hidden'>
+                    <NewTrackCode
+                      isPrinting={isPrinting}
+                      trackingNumber={trackingNumber}
+                      handleTrackingNumberChange={handleTrackingNumberChange}
+                      saveTrackingNumber={saveTrackingNumber}
+                    />
                   </Panel>
                 )}
               </div>
-
-              <Panel title='comment' className='print:hidden'>
-                <Comment orderDetails={orderDetails} canEdit={canEditOrder} />
-              </Panel>
             </div>
 
-            {/* Right — customer / shipping / payment / tracking */}
-            <div className='w-full space-y-4 lg:w-[360px]'>
-              <Panel title='customer'>
-                <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
-              </Panel>
-
-              <Panel title='shipping & billing'>
-                <ShippingBillingToggle
-                  orderDetails={orderDetails}
-                  isPrinting={isPrinting}
-                  orderStatus={orderStatus}
-                  isEdit={isEdit}
-                  canEdit={canEditOrder}
-                  trackingNumber={trackingNumber}
-                  toggleTrackNumber={toggleTrackNumber}
-                  handleTrackingNumberChange={handleTrackingNumberChange}
-                  saveTrackingNumber={saveTrackingNumber}
-                />
-              </Panel>
-
-              <Panel title='payment' className='print:hidden'>
-                <Payment
-                  orderDetails={orderDetails}
-                  stripeDetails={stripeDetails}
-                  showSettlement={canReadCosting}
-                  isRefunded={isRefunded}
-                  isPrinting={isPrinting}
-                />
-              </Panel>
-
-              {canEditOrder && !orderDetails?.shipment?.trackingCode && (
-                <Panel title='tracking' className='print:hidden'>
-                  <NewTrackCode
-                    isPrinting={isPrinting}
-                    trackingNumber={trackingNumber}
-                    handleTrackingNumberChange={handleTrackingNumberChange}
-                    saveTrackingNumber={saveTrackingNumber}
-                  />
-                </Panel>
-              )}
-            </div>
-          </div>
+            <Panel title='shipping & billing'>
+              <ShippingBillingToggle
+                orderDetails={orderDetails}
+                isPrinting={isPrinting}
+                orderStatus={orderStatus}
+                isEdit={isEdit}
+                canEdit={canEditOrder}
+                trackingNumber={trackingNumber}
+                toggleTrackNumber={toggleTrackNumber}
+                handleTrackingNumberChange={handleTrackingNumberChange}
+                saveTrackingNumber={saveTrackingNumber}
+              />
+            </Panel>
+          </>
         )}
 
         <OrderPackingSpec orderUuid={uuid || ''} />
