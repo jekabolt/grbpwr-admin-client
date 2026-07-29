@@ -407,6 +407,7 @@ export function TechCardForm({
     draftKey,
     canWrite(SECTION.techCards) && !frozen,
     staging.changes.length > 0,
+    staging,
   );
 
   // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.

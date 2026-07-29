@@ -26,6 +26,15 @@ import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 // One chart per style, so one staging key.
 const STAGING_KEY = 'sizeChart';
 
+// What this grid needs to rebuild itself after a refresh. Maps go over as entry arrays because
+// localStorage speaks JSON and a Map serializes to `{}`.
+type ChartSnapshot = {
+  cells: Array<[number, Array<[number, string]>]>;
+  steps: Array<[number, string]>;
+  base: number | null;
+  touched: string[];
+};
+
 // Accepts "114", "1.5", "+4", "-2" — a grade step is signed, a measurement is not.
 const NUMERIC = /^-?\d*\.?\d*$/;
 const MEASURE = /^\d*\.?\d*$/;
@@ -194,6 +203,21 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
     loadChart();
   }, [loadChart]);
 
+  // Claim any edits this panel had staged when the tab was refreshed (19.6). Runs after loadChart so
+  // the restored grid wins over the server's — that is the whole point — and claims exactly once,
+  // because takeSnapshot removes it. A card with no draft, or one whose draft the user discarded,
+  // gets nothing here and simply shows what the server returned.
+  useEffect(() => {
+    if (!staging || !styleId) return;
+    const snap = staging.takeSnapshot(STAGING_KEY) as ChartSnapshot | undefined;
+    if (!snap) return;
+    setCells(new Map(snap.cells.map(([sizeId, row]) => [sizeId, new Map(row)])));
+    setSteps(new Map(snap.steps));
+    setPickedBase(snap.base ?? null);
+    setTouched(new Set(snap.touched));
+    setDirty(true);
+  }, [staging, styleId]);
+
   // Seed the override set by recomputation, not from a stored flag (there is none — see the header
   // note). While the grid is untouched, `cells` and `steps` are exactly what the server returned, so
   // this also self-corrects when the size dictionary lands after the chart and the run reorders.
@@ -342,16 +366,24 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
       staging.unstage(STAGING_KEY);
       return;
     }
-    const cells = touched.size;
+    const edited = touched.size;
     staging.stage({
       key: STAGING_KEY,
-      label: `размерная таблица — ${cells} ${cells === 1 ? 'cell' : 'cells'}`,
+      label: `размерная таблица — ${edited} ${edited === 1 ? 'cell' : 'cells'}`,
       order: COMMIT_ORDER.sizeChart,
       commit: commitChart,
       settle: () => {
         setDirty(false);
         setTouched(new Set());
       },
+      snapshot: {
+        cells: [...cells].map(
+          ([sizeId, row]) => [sizeId, [...row]] as [number, Array<[number, string]>],
+        ),
+        steps: [...steps],
+        base: pickedBase,
+        touched: [...touched],
+      } satisfies ChartSnapshot,
     });
     // commitChart is redefined every render by design (it reads current state); depending on it
     // here would restage on every keystroke for no gain, so the state it reads is the dep list.
