@@ -5,9 +5,10 @@ import { opexCategorySelectOptions, opexCurrencyOptions } from '../utils/options
 // Shared OPEX form primitives, used by both the creation wizard and the edit modals so the two
 // creation/edit paths can never drift (same category set, same currency list, same styling).
 
-// Square, high-contrast control matching the rest of the OPEX admin.
+// Square control on the page canvas — same box grammar as ui/Input (1px borderColor, focus goes
+// ink). Tokens only: no textInactiveColor.
 export const fieldCls =
-  'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize text-textColor focus:border-textColor focus:outline-none';
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize text-textColor transition-colors focus:border-textColor focus:outline-none';
 
 export function Field({
   label,
@@ -22,16 +23,16 @@ export function Field({
 }) {
   return (
     <label className='flex flex-col gap-1'>
-      <Text size='small' variant='label'>
+      <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         {label}
       </Text>
       {children}
       {error ? (
-        <Text variant='error' size='small'>
+        <Text variant='error' size='micro' component='span'>
           {error}
         </Text>
       ) : hint ? (
-        <Text variant='inactive' size='small'>
+        <Text variant='label' size='micro' component='span'>
           {hint}
         </Text>
       ) : null}
