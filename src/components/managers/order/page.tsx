@@ -1,20 +1,19 @@
-import {
-  formatDateShort,
-  getStatusColor,
-} from 'components/managers/orders-catalog/components/utility';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { ROUTES, SECTION } from 'constants/routes';
+import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
+import { GroupLabel } from 'ui/components/group-label';
+import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Buyer } from './components/buyer';
 import { Comment } from './components/comment';
-import { OrderTable } from './components/order-table';
+import { LifecycleStrip } from './components/lifecycle-strip';
+import { OrderHeader } from './components/order-header';
+import { OrderItems } from './components/order-items';
 import { OrderPackingSpec } from './components/packing-spec';
 import { Payment } from './components/payment';
 import { PromoApplied } from './components/promo-applied';
@@ -22,7 +21,7 @@ import { RefundConfirmation } from './components/refund-confirmation';
 import { ShipmentCostModal } from './components/shipment-cost-modal';
 import { ShippingBillingToggle } from './components/shipping-billing-toggle';
 import { NewTrackCode } from './components/shipping-information/new-track-code';
-import { StatusHistory } from './components/status-history';
+import { money, toNum } from './money';
 import { useOrderDetails } from './utility';
 
 const DISPLAY_REFUND_BUTTON_STATUSES = [
@@ -32,35 +31,41 @@ const DISPLAY_REFUND_BUTTON_STATUSES = [
   'REFUND IN PROGRESS',
 ];
 
-function Section({
+/** A bordered panel with an uppercase group label — the redesign's section grammar. */
+function Panel({
   title,
   className,
   children,
 }: {
-  title: string;
+  title?: string;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section
-      className={cn(
-        'space-y-3 border border-textInactiveColor p-4 print:border-0 print:p-0',
-        className,
-      )}
-    >
-      <Text variant='uppercase' size='large' className='print:hidden'>
-        {title}
-      </Text>
+    <section className={cn('space-y-2 border border-borderColor bg-bgColor p-3', className)}>
+      {title && <GroupLabel>{title}</GroupLabel>}
       {children}
     </section>
   );
 }
 
-function SummaryRow({ label, value }: { label: string; value: React.ReactNode }) {
+function SummaryRow({
+  label,
+  value,
+  strong,
+}: {
+  label: React.ReactNode;
+  value: React.ReactNode;
+  strong?: boolean;
+}) {
   return (
-    <div className='flex items-center justify-between gap-4'>
-      <Text variant='inactive'>{label}</Text>
-      <Text variant='uppercase'>{value}</Text>
+    <div className='flex items-baseline justify-between gap-4'>
+      <Text size='micro' variant='label' component='span' className='uppercase'>
+        {label}
+      </Text>
+      <Text component='span' className={cn('tabular-nums', strong && 'font-bold')}>
+        {value}
+      </Text>
     </div>
   );
 }
@@ -81,6 +86,7 @@ export function OrderDetails() {
     handleTrackingNumberChange,
     saveTrackingNumber,
     markAsDelivered,
+    cancelOrder,
     refundOrder,
     setShipmentActualCost,
     toggleOrderItemsSelection,
@@ -111,11 +117,6 @@ export function OrderDetails() {
     defaultValues: { refundReason: '', notes: '' },
   });
 
-  const handleRefundClick = () => setIsRefundModalOpen(true);
-  const handleRefundConfirm = (payload: { reason: string; refundShipping?: boolean }) => {
-    refundOrder(payload);
-  };
-
   const handleShipmentCostSubmit = async (actualCost: string, returnShippingCost?: string) => {
     const ok = await setShipmentActualCost(actualCost, returnShippingCost);
     if (!ok) return;
@@ -135,137 +136,127 @@ export function OrderDetails() {
     shipmentCostOverride?.actualCost ?? orderDetails?.shipment?.actualCost?.value;
   const returnShipmentCost =
     shipmentCostOverride?.returnShippingCost ?? orderDetails?.shipment?.returnShippingCost?.value;
-  const hasShipmentCost = !!actualShipmentCost;
-  const statusColor = getStatusColor(orderStatus);
-  const orderPlaced = formatDateShort(order?.placed, true);
   const isRefunded = orderStatus === 'PARTIALLY REFUNDED' || orderStatus === 'REFUNDED';
-  const showDeliver = orderStatus === 'SHIPPED';
   const showRefund = DISPLAY_REFUND_BUTTON_STATUSES.includes(orderStatus || '');
   const canPartialRefund = showRefund && orderStatus !== 'CONFIRMED';
   const selectedUnits = selectedUnitKeys.length;
 
   return (
     <FormProvider {...form}>
-      <div className='flex w-full flex-col gap-6 pb-24'>
-        {/* Screen header */}
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3 print:hidden'>
-          <div className='flex flex-wrap items-center gap-3'>
-            <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.orders}>← orders</Link>
-            </Button>
-            <Text variant='uppercase' size='large'>
-              order #{order?.id ?? ''}
-            </Text>
-            {orderStatus && (
-              <span className={cn('px-1.5 py-0.5', statusColor)}>
-                <Text variant='uppercase'>{orderStatus}</Text>
-              </span>
-            )}
-            <StatusHistory orderDetails={orderDetails} />
-          </div>
-          <div className='flex flex-wrap items-center gap-3'>
-            <span className='flex items-center gap-1'>
-              <Text variant='inactive' size='small'>
-                ref
-              </Text>
-              <CopyToClipboard text={order?.uuid || ''} />
-            </span>
-            <Text variant='inactive' size='small'>
-              placed {orderPlaced}
-            </Text>
-            <Button asChild variant='secondary' size='lg' className='uppercase'>
-              <Link to={`/orders/${uuid}/invoice`}>invoice</Link>
-            </Button>
-          </div>
-        </div>
+      <div className='flex w-full flex-col gap-4 pb-16'>
+        {/* ordHdr v2 + ordActions v2 — identity, state row and the actions, no floating bar */}
+        <OrderHeader
+          orderDetails={orderDetails}
+          orderStatus={orderStatus}
+          canEditOrder={canEditOrder}
+          selectedUnits={selectedUnits}
+          onRefund={() => setIsRefundModalOpen(true)}
+          onMarkDelivered={markAsDelivered}
+          onCancelOrder={cancelOrder}
+        />
+
+        {/* ordHist v3 — the lifecycle as a permanent strip with dwell time */}
+        <LifecycleStrip orderDetails={orderDetails} orderStatus={orderStatus} />
 
         {isLoading && !order ? (
-          <div className='flex justify-center py-20'>
-            <Text variant='inactive' className='animate-pulse'>
-              loading order…
-            </Text>
-          </div>
+          <Placeholder label='loading order…' className='py-20' />
         ) : (
-          <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
-            {/* Left — items + summary */}
-            <div className='w-full space-y-6 lg:flex-1'>
-              <Section title='items'>
+          <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
+            {/* Left — items + summary + comment */}
+            <div className='w-full space-y-4 lg:flex-1'>
+              <Panel title='items'>
                 {canPartialRefund && (
-                  <Text variant='inactive' size='small' className='print:hidden'>
+                  <Text size='micro' variant='label' className='uppercase print:hidden'>
                     select units to refund, or leave all unselected to refund the whole order
                     {selectedUnits > 0 ? ` · ${selectedUnits} selected` : ''}
                   </Text>
                 )}
-                <OrderTable
+                <OrderItems
                   orderDetails={orderDetails}
-                  isPrinting={isPrinting}
+                  currency={currency}
                   showRefundSelection={canPartialRefund}
                   selectedUnitKeys={selectedUnitKeys}
                   onToggleOrderItems={toggleOrderItemsSelection}
                 />
-              </Section>
+              </Panel>
 
-              <Section title='summary'>
-                <div className='space-y-1'>
+              {/* ordSummary v2 — charged (what the customer paid) vs settled (our costs) */}
+              <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+                <Panel title='charged'>
                   <SummaryRow
-                    label='customer paid'
+                    label='items + shipping'
+                    value={
+                      order?.totalPrice?.value
+                        ? money(toNum(order.totalPrice.value), currency)
+                        : '—'
+                    }
+                    strong
+                  />
+                  <SummaryRow
+                    label='shipping'
                     value={
                       orderDetails?.shipment?.cost?.value
-                        ? `${orderDetails.shipment.cost.value} ${currency}`
+                        ? money(toNum(orderDetails.shipment.cost.value), currency)
                         : '—'
                     }
                   />
-                  {canReadCosting && (
-                    <div className='space-y-1 border-t border-textInactiveColor pt-2 print:hidden'>
-                      <Text variant='label' size='small' className='uppercase'>
-                        carrier cost ({baseCurrency})
-                      </Text>
-                      <SummaryRow
-                        label='actual carrier cost'
-                        value={actualShipmentCost ? `${actualShipmentCost} ${baseCurrency}` : '—'}
-                      />
-                      <SummaryRow
-                        label='return'
-                        value={returnShipmentCost ? `${returnShipmentCost} ${baseCurrency}` : '—'}
-                      />
-                    </div>
-                  )}
-                  <div className='flex items-center justify-between gap-4 print:hidden'>
-                    <Text variant='inactive'>promo</Text>
+                  <div className='flex items-baseline justify-between gap-4 print:hidden'>
+                    <Text size='micro' variant='label' component='span' className='uppercase'>
+                      promo
+                    </Text>
                     <PromoApplied orderDetails={orderDetails} />
                   </div>
                   {isRefunded && (
                     <SummaryRow
-                      label='refunded amount'
-                      value={`${order?.refundedAmount?.value ?? '-'} ${currency}`}
+                      label='refunded'
+                      value={money(toNum(order?.refundedAmount?.value), currency)}
                     />
                   )}
                   {order?.refundReason && (
                     <SummaryRow label='refund reason' value={order.refundReason} />
                   )}
-                  <div className='mt-2 flex items-center justify-between gap-4 border-t border-textInactiveColor pt-2'>
-                    <Text variant='uppercase' className='font-bold'>
-                      total
-                    </Text>
-                    <Text variant='uppercase' className='font-bold'>
-                      {order?.totalPrice?.value} {currency}
-                    </Text>
-                  </div>
-                </div>
-              </Section>
+                </Panel>
 
-              <Section title='comment' className='print:hidden'>
+                {canReadCosting && (
+                  <Panel title={`settled · carrier (${baseCurrency})`} className='print:hidden'>
+                    <SummaryRow
+                      label='actual carrier cost'
+                      value={
+                        actualShipmentCost ? money(toNum(actualShipmentCost), baseCurrency) : '—'
+                      }
+                    />
+                    <SummaryRow
+                      label='return'
+                      value={
+                        returnShipmentCost ? money(toNum(returnShipmentCost), baseCurrency) : '—'
+                      }
+                    />
+                    {canEditOrder && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        onClick={() => setIsShipCostOpen(true)}
+                        className='mt-1'
+                      >
+                        {actualShipmentCost ? 'edit carrier cost' : 'record carrier cost'}
+                      </Button>
+                    )}
+                  </Panel>
+                )}
+              </div>
+
+              <Panel title='comment' className='print:hidden'>
                 <Comment orderDetails={orderDetails} canEdit={canEditOrder} />
-              </Section>
+              </Panel>
             </div>
 
-            {/* Right — customer / shipping / payment / comment */}
-            <div className='w-full space-y-6 lg:w-[360px]'>
-              <Section title='customer'>
+            {/* Right — customer / shipping / payment / tracking */}
+            <div className='w-full space-y-4 lg:w-[360px]'>
+              <Panel title='customer'>
                 <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
-              </Section>
+              </Panel>
 
-              <Section title='shipping & billing'>
+              <Panel title='shipping & billing'>
                 <ShippingBillingToggle
                   orderDetails={orderDetails}
                   isPrinting={isPrinting}
@@ -277,9 +268,9 @@ export function OrderDetails() {
                   handleTrackingNumberChange={handleTrackingNumberChange}
                   saveTrackingNumber={saveTrackingNumber}
                 />
-              </Section>
+              </Panel>
 
-              <Section title='payment' className='print:hidden'>
+              <Panel title='payment' className='print:hidden'>
                 <Payment
                   orderDetails={orderDetails}
                   stripeDetails={stripeDetails}
@@ -287,48 +278,23 @@ export function OrderDetails() {
                   isRefunded={isRefunded}
                   isPrinting={isPrinting}
                 />
-              </Section>
+              </Panel>
 
               {canEditOrder && !orderDetails?.shipment?.trackingCode && (
-                <Section title='tracking' className='print:hidden'>
+                <Panel title='tracking' className='print:hidden'>
                   <NewTrackCode
                     isPrinting={isPrinting}
                     trackingNumber={trackingNumber}
                     handleTrackingNumberChange={handleTrackingNumberChange}
                     saveTrackingNumber={saveTrackingNumber}
                   />
-                </Section>
+                </Panel>
               )}
             </div>
           </div>
         )}
 
         <OrderPackingSpec orderUuid={uuid || ''} />
-
-        {canEditOrder && (
-          <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>
-            <Button
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={() => setIsShipCostOpen(true)}
-            >
-              {hasShipmentCost ? 'edit shipping cost' : 'record shipping cost'}
-            </Button>
-            {showDeliver && (
-              <Button variant='main' size='lg' className='uppercase' onClick={markAsDelivered}>
-                mark as delivered
-              </Button>
-            )}
-            {showRefund && (
-              <Button variant='main' size='lg' className='uppercase' onClick={handleRefundClick}>
-                {selectedUnits > 0
-                  ? `refund ${selectedUnits} unit${selectedUnits === 1 ? '' : 's'}`
-                  : 'refund order'}
-              </Button>
-            )}
-          </div>
-        )}
 
         <ShipmentCostModal
           open={isShipCostOpen}
@@ -343,7 +309,7 @@ export function OrderDetails() {
           open={isRefundModalOpen}
           selectedUnitKeys={selectedUnitKeys}
           onOpenChange={setIsRefundModalOpen}
-          refundOrder={handleRefundConfirm}
+          refundOrder={refundOrder}
         />
       </div>
     </FormProvider>

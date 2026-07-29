@@ -37,39 +37,24 @@ export function getOrderStatusName(
   if (!orderStatusId) {
     return undefined;
   }
-  return dictionary?.orderStatuses
-    ?.find((x) => x.id === orderStatusId)
-    ?.name?.replace('ORDER_STATUS_ENUM_', '')
-    .replace('_', ' ');
+  return (
+    dictionary?.orderStatuses
+      ?.find((x) => x.id === orderStatusId)
+      ?.name?.replace('ORDER_STATUS_ENUM_', '')
+      // /_/g, not '_': a plain replace only swaps the FIRST underscore, so
+      // REFUND_IN_PROGRESS came out as "REFUND IN_PROGRESS" and never matched the
+      // "REFUND IN PROGRESS" literals the order card compares against (the refund
+      // button was silently missing on exactly those orders).
+      .replace(/_/g, ' ')
+  );
 }
 
-export function getStatusColor(status: string | undefined): string {
-  const key = status?.replace('ORDER_STATUS_ENUM_', '').replace(/_/g, ' ').toUpperCase().trim();
-  switch (key) {
-    case 'PLACED':
-      return 'bg-white';
-    case 'AWAITING PAYMENT':
-      return 'bg-sky-500';
-    case 'CONFIRMED':
-      return 'bg-blue-500';
-    case 'SHIPPED':
-      return 'bg-teal-500';
-    case 'DELIVERED':
-      return 'bg-green-500';
-    case 'CANCELLED':
-      return 'bg-red-500';
-    case 'REFUNDED':
-      return 'bg-gray-500';
-    case 'PENDING RETURN':
-      return 'bg-yellow-500';
-    case 'REFUND IN PROGRESS':
-      return 'bg-gray-500';
-    case 'PARTIALLY REFUNDED':
-      return 'bg-white-500';
-    default:
-      return 'bg-white';
-  }
-}
+/**
+ * Status is expressed by `OrderStatus` (ui/components/stepper + Pill), not by a fill
+ * colour — see ./order-status.tsx. The old `getStatusColor` map lived here and handed
+ * out ten unranked Tailwind palette hues, one of which (`bg-white-500`, for
+ * PARTIALLY REFUNDED) was not a real class and rendered as nothing at all.
+ */
 
 export function formatDateShort(value: string | undefined, withTime = false): string {
   if (!value) {

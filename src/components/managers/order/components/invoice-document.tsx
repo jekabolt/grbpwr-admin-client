@@ -7,7 +7,7 @@ import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 
 const TD = 'border border-black px-1.5 py-1 align-top';
-const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-neutral-100 uppercase';
+const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-bgZebra uppercase';
 
 // GRBPWR seller identity printed as the invoice "from" party. Contact only — no legal
 // entity address is carried in the client, so we surface what we know. vatId is GRBPWR's
