@@ -262,7 +262,11 @@ export function OrderDetails() {
             {/* Right — customer / shipping / payment / comment */}
             <div className='w-full space-y-6 lg:w-[360px]'>
               <Section title='customer'>
-                <Buyer buyer={orderDetails?.buyer?.buyerInsert} isPrinting={isPrinting} />
+                <Buyer
+                  buyer={orderDetails?.buyer?.buyerInsert}
+                  locale={orderDetails?.order?.locale}
+                  isPrinting={isPrinting}
+                />
               </Section>
 
               <Section title='shipping & billing'>

@@ -1,3 +1,4 @@
+import { localeLabel } from 'constants/constants';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
@@ -94,6 +95,14 @@ export function OrdersTable({ orders, orderFactor, isLoading, onToggleSort }: Or
                           <Text size='small' variant='inactive' className='truncate'>
                             {buyerEmail}
                           </Text>
+                        ) : null}
+                        {o.locale ? (
+                          <span
+                            className='mt-0.5 inline-block border border-textInactiveColor px-1 text-[10px] uppercase leading-tight'
+                            title='email locale at purchase'
+                          >
+                            {localeLabel(o.locale)}
+                          </span>
                         ) : null}
                       </div>
                     ) : null}
