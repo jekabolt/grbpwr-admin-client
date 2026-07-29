@@ -1,10 +1,12 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { MediaViewer, useMediaViewer } from 'ui/components/media-viewer';
+import Text from 'ui/components/text';
 import { rememberMedia, resolveMedia } from '../api/tasksService';
 
 // Attach reference images/files from the existing media bucket. Stores media ids
 // on the task; the MediaSelector (same one tech cards use) handles the gallery.
+// The first attachment also becomes the card cover (tskCard v3).
 export function MediaAttachments({
   value,
   onChange,
@@ -47,7 +49,7 @@ export function MediaAttachments({
             const m = resolved.find((x) => x.id === id);
             const viewIndex = viewable.indexOf(m as NonNullable<typeof m>);
             return (
-              <div key={id} className='relative h-16 w-16 border border-textInactiveColor'>
+              <div key={id} className='relative h-16 w-16 border border-borderColor'>
                 {m?.thumbnail ? (
                   <button
                     type='button'
@@ -58,15 +60,17 @@ export function MediaAttachments({
                     <img src={m.thumbnail} alt='' className='h-full w-full object-cover' />
                   </button>
                 ) : (
-                  <div className='flex h-full w-full items-center justify-center text-[10px] text-labelColor'>
-                    #{id}
+                  <div className='flex h-full w-full items-center justify-center'>
+                    <Text size='nano' variant='label' component='span'>
+                      #{id}
+                    </Text>
                   </div>
                 )}
                 <button
                   type='button'
                   aria-label='remove attachment'
                   onClick={() => onChange(value.filter((v) => v !== id))}
-                  className='absolute -right-1 -top-1 z-10 flex h-4 w-4 items-center justify-center bg-textColor text-[10px] leading-none text-bgColor'
+                  className='absolute -right-1 -top-1 z-10 flex h-4 w-4 items-center justify-center bg-textColor text-nano leading-none text-bgColor'
                 >
                   ×
                 </button>
@@ -83,7 +87,7 @@ export function MediaAttachments({
         allowMultiple
         showVideos
         saveSelectedMedia={handleAdd}
-        triggerClassName='self-start uppercase px-3 py-1 text-textBaseSize'
+        triggerClassName='self-start uppercase px-2.5 py-1 text-micro tracking-label'
       />
 
       <MediaViewer items={viewerItems} {...viewer} />

@@ -4,13 +4,17 @@ import { format } from 'date-fns';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
+import { Avatar } from 'ui/components/avatar';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { MediaGallery } from 'ui/components/media-gallery';
+import { Pill } from 'ui/components/pill';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { TaskBoard, TaskFormValues, TaskStatus } from '../api/types';
 import { LinkChip } from '../components/link-chip';
+import { PriorityTag } from '../components/task-card';
 import { TaskChecklist } from '../components/task-checklist';
 import { TaskComments } from '../components/task-comments';
 import { TaskFormModal } from '../components/task-form-modal';
@@ -23,27 +27,34 @@ import {
   useUpdateTask,
 } from '../hooks/useTasks';
 import { taskLinks } from '../utils/links';
-import {
-  BOARD_LABEL,
-  BOARDS,
-  dueMeta,
-  PRIORITY_LABEL,
-  STATUS_LABEL,
-  STATUSES,
-  toOptions,
-} from '../utils/meta';
+import { BOARD_LABEL, BOARDS, dueMeta, STATUS_LABEL, STATUSES, toOptions } from '../utils/meta';
+
+/**
+ * tskDetail v2 — two columns. The LEFT reads the task (description / checklist /
+ * links / media); the RIGHT is the working rail: the facts (placement, priority,
+ * assignee, dates) over the activity (tskComments v1). Placement stays inline-editable
+ * so a move never needs the full editor. All off-system greys traded for tokens.
+ */
 
 const boardOptions = toOptions(BOARDS, BOARD_LABEL);
 const statusOptions = toOptions(STATUSES, STATUS_LABEL);
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className='flex items-start justify-between gap-3 py-2'>
-      <Text variant='label' size='small' component='span'>
+    <div className='flex items-start justify-between gap-3 py-1.5'>
+      <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         {label}
       </Text>
-      <span className='text-right text-textBaseSize'>{children}</span>
+      <span className='text-right'>{children}</span>
     </div>
+  );
+}
+
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Text size='micro' variant='label' tracking='group' component='span' className='font-bold uppercase'>
+      {children}
+    </Text>
   );
 }
 
@@ -119,7 +130,7 @@ export function TaskDetail() {
         <Text variant='uppercase' size='large'>
           task not found
         </Text>
-        <Text variant='label' size='small'>
+        <Text size='micro' variant='label'>
           It may have been deleted, or the link is wrong.
         </Text>
         <Button asChild variant='main' size='lg'>
@@ -139,30 +150,30 @@ export function TaskDetail() {
   return (
     <div className='mx-auto flex w-full max-w-5xl flex-col gap-5 pb-10'>
       {/* Header */}
-      <div className='flex flex-col gap-3 border-b border-textInactiveColor pb-3'>
+      <div className='flex flex-col gap-3 border-b border-borderColor pb-3'>
         <Link
           to={ROUTES.tasks}
-          className='w-fit text-textBaseSize lowercase text-labelColor underline hover:text-textColor'
+          className='w-fit text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
         >
           ← board
         </Link>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-col gap-1'>
-            <Text variant='uppercase' size='small' className='text-labelColor'>
+            <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
               {BOARD_LABEL[task.board]} · {STATUS_LABEL[task.status]}
             </Text>
             <h1 className='text-lg leading-tight'>{t.title}</h1>
           </div>
           {canWrite && (
             <div className='flex shrink-0 flex-wrap justify-end gap-2'>
-              <Button type='button' variant='secondary' size='lg' onClick={() => setEditing(true)}>
+              <Button type='button' variant='secondary' size='sm' onClick={() => setEditing(true)}>
                 edit
               </Button>
               {isArchived ? (
                 <Button
                   type='button'
                   variant='secondary'
-                  size='lg'
+                  size='sm'
                   loading={archiveBusy}
                   onClick={() => unarchiveTask.mutate(task.id)}
                 >
@@ -172,7 +183,7 @@ export function TaskDetail() {
                 <Button
                   type='button'
                   variant='secondary'
-                  size='lg'
+                  size='sm'
                   loading={archiveBusy}
                   onClick={() => archiveTask.mutate(task.id)}
                 >
@@ -182,7 +193,7 @@ export function TaskDetail() {
               <Button
                 type='button'
                 variant='secondary'
-                size='lg'
+                size='sm'
                 className='text-error'
                 onClick={() => setDeleting(true)}
               >
@@ -193,31 +204,29 @@ export function TaskDetail() {
         </div>
 
         {isArchived && (
-          <div className='flex flex-wrap items-center justify-between gap-2 border border-textInactiveColor px-3 py-2'>
-            <Text size='small' className='uppercase'>
+          <CalloutBox tone='note' className='flex flex-wrap items-center justify-between gap-2'>
+            <Text size='micro' component='span' className='uppercase tracking-label'>
               archived{task.archivedAt ? ` · ${format(new Date(task.archivedAt), 'PP')}` : ''}
             </Text>
-            <Text variant='label' size='small'>
+            <Text size='micro' variant='label' component='span'>
               Hidden from the board. Restore to make it active again.
             </Text>
-          </div>
+          </CalloutBox>
         )}
       </div>
 
       {/* Body */}
-      <div className='grid grid-cols-1 gap-6 md:grid-cols-[1fr_18rem]'>
-        {/* Main */}
-        <div className='flex min-w-0 flex-col gap-6 md:order-1'>
+      <div className='grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]'>
+        {/* Left — reading the task */}
+        <div className='flex min-w-0 flex-col gap-6'>
           <section className='flex flex-col gap-2'>
-            <Text variant='uppercase' size='small' className='text-labelColor'>
-              description
-            </Text>
+            <GroupLabel>description</GroupLabel>
             {t.description ? (
-              <Text size='small' className='whitespace-pre-wrap break-words'>
+              <Text size='micro' component='span' className='whitespace-pre-wrap break-words'>
                 {t.description}
               </Text>
             ) : (
-              <Text variant='label' size='small'>
+              <Text size='micro' variant='label' component='span'>
                 No description.
               </Text>
             )}
@@ -225,11 +234,20 @@ export function TaskDetail() {
 
           <TaskChecklist taskId={task.id} items={task.checklist} canWrite={canWrite} />
 
+          {links.length > 0 && (
+            <section className='flex flex-col gap-2'>
+              <GroupLabel>links</GroupLabel>
+              <div className='flex flex-wrap gap-2'>
+                {links.map((l) => (
+                  <LinkChip key={`${l.kind}-${l.to}`} link={l} />
+                ))}
+              </div>
+            </section>
+          )}
+
           {task.media.length > 0 && (
             <section className='flex flex-col gap-2'>
-              <Text variant='uppercase' size='small' className='text-labelColor'>
-                attachments · {task.media.length}
-              </Text>
+              <GroupLabel>attachments · {task.media.length}</GroupLabel>
               <MediaGallery
                 items={task.media.map((m) => ({
                   src: m.fullSize || m.thumbnail || '',
@@ -240,12 +258,12 @@ export function TaskDetail() {
           )}
         </div>
 
-        {/* Aside */}
-        <aside className='flex flex-col gap-4 border border-textInactiveColor p-4 md:order-2 md:h-fit'>
-          {/* Placement — inline move without opening the editor */}
+        {/* Right — facts + activity */}
+        <aside className='flex flex-col gap-5 lg:border-l lg:border-borderColor lg:pl-5'>
           <div className='flex flex-col gap-3'>
+            {/* Placement — inline move without opening the editor */}
             <label className='flex flex-col gap-1'>
-              <Text variant='label' size='small' component='span'>
+              <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
                 board
               </Text>
               <SelectComponent
@@ -255,19 +273,14 @@ export function TaskDetail() {
                 onValueChange={(v: string) =>
                   canWrite &&
                   v !== task.board &&
-                  move.mutate({
-                    id: task.id,
-                    board: v as TaskBoard,
-                    status: task.status,
-                    position: 0,
-                  })
+                  move.mutate({ id: task.id, board: v as TaskBoard, status: task.status, position: 0 })
                 }
                 readOnly={!canWrite}
                 fullWidth
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text variant='label' size='small' component='span'>
+              <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
                 column
               </Text>
               <SelectComponent
@@ -277,12 +290,7 @@ export function TaskDetail() {
                 onValueChange={(v: string) =>
                   canWrite &&
                   v !== task.status &&
-                  move.mutate({
-                    id: task.id,
-                    board: task.board,
-                    status: v as TaskStatus,
-                    position: 0,
-                  })
+                  move.mutate({ id: task.id, board: task.board, status: v as TaskStatus, position: 0 })
                 }
                 readOnly={!canWrite}
                 fullWidth
@@ -290,70 +298,62 @@ export function TaskDetail() {
             </label>
           </div>
 
-          <div className='flex flex-col divide-y divide-textInactiveColor border-t border-textInactiveColor'>
-            <Row label='priority'>{PRIORITY_LABEL[t.priority]}</Row>
-            <Row label='assignee'>
-              {t.assignee ? (
-                <span className={cn(isMine && 'font-bold')}>{t.assignee}</span>
+          <div className='flex flex-col divide-y divide-borderColor border-t border-borderColor'>
+            <Row label='priority'>
+              {t.priority !== 'TASK_PRIORITY_UNKNOWN' ? (
+                <PriorityTag priority={t.priority} />
               ) : (
-                <span className='text-labelColor'>unassigned</span>
+                <Text size='micro' variant='label' component='span'>
+                  none
+                </Text>
               )}
             </Row>
-            <Row label='planned start'>
-              <span className={cn(!t.startDate && 'text-labelColor')}>
-                {t.startDate ? format(new Date(t.startDate), 'PPP') : '—'}
+            <Row label='assignee'>
+              <span className='flex items-center justify-end gap-1.5'>
+                <Avatar name={t.assignee} />
+                <Text size='micro' component='span' className={cn(!t.assignee && 'text-labelColor', isMine && 'font-bold')}>
+                  {t.assignee || 'unassigned'}
+                </Text>
               </span>
+            </Row>
+            <Row label='planned start'>
+              <Text size='micro' component='span' className={cn(!t.startDate && 'text-labelColor')}>
+                {t.startDate ? format(new Date(t.startDate), 'PP') : '—'}
+              </Text>
             </Row>
             <Row label='due'>
-              <span className={cn(due.state === 'overdue' && 'text-error')}>
-                {t.dueDate ? format(new Date(t.dueDate), 'PPP') : '—'}
-              </span>
+              <Text size='micro' component='span' className={cn(due.state === 'overdue' && 'text-error')}>
+                {t.dueDate ? format(new Date(t.dueDate), 'PP') : '—'}
+              </Text>
             </Row>
             <Row label='started'>
-              <span className='text-labelColor'>
+              <Text size='micro' variant='label' component='span'>
                 {task.startedAt ? format(new Date(task.startedAt), 'PP') : 'not started'}
-              </span>
+              </Text>
             </Row>
             <Row label='created'>
-              <span className='text-labelColor'>
+              <Text size='micro' variant='label' component='span'>
                 {task.createdBy ? `${task.createdBy} · ` : ''}
                 {task.createdAt ? format(new Date(task.createdAt), 'PP') : '—'}
-              </span>
+              </Text>
             </Row>
           </div>
 
           {t.labels.length > 0 && (
             <div className='flex flex-wrap gap-1'>
               {t.labels.map((l) => (
-                <span
-                  key={l}
-                  className='border border-textInactiveColor px-1.5 py-px text-textBaseSize uppercase text-labelColor'
-                >
+                <Pill key={l} tone='mut'>
                   {l}
-                </span>
+                </Pill>
               ))}
             </div>
           )}
 
-          {links.length > 0 && (
-            <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
-              <Text variant='uppercase' size='small' className='text-labelColor'>
-                links
-              </Text>
-              <div className='flex flex-wrap gap-2'>
-                {links.map((l) => (
-                  <LinkChip key={`${l.kind}-${l.to}`} link={l} />
-                ))}
-              </div>
-            </div>
-          )}
+          <div className='border-t border-borderColor pt-4'>
+            <TaskComments taskId={task.id} />
+          </div>
         </aside>
       </div>
-
-      {/* Comments — full width, below the fold on mobile */}
-      <section className='max-w-3xl border-t border-textInactiveColor pt-4'>
-        <TaskComments taskId={task.id} />
-      </section>
 
       {initial && (
         <TaskFormModal
@@ -372,8 +372,11 @@ export function TaskDetail() {
         onConfirm={confirmDelete}
         title='delete task'
         confirmLabel='delete'
+        width='sm'
       >
-        <Text size='small'>Delete “{t.title}”? This can’t be undone.</Text>
+        <Text size='micro' component='span'>
+          Delete “{t.title}”? This can’t be undone.
+        </Text>
       </ConfirmationModal>
     </div>
   );
