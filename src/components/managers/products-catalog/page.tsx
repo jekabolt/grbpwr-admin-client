@@ -21,6 +21,7 @@ export default function ProductsCatalog() {
   const [products, setProducts] = useState<common_Colorway[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
+  const [error, setError] = useState<string | undefined>(undefined);
   const [count, setCount] = useState({ loaded: 0, hasMore: false });
   const { dictionary } = useDictionary();
   const baseCurrency = dictionary?.baseCurrency || 'USD';
@@ -52,6 +53,13 @@ export default function ProductsCatalog() {
           ...getProductPagedParans({ ...params, currency: baseCurrency }),
         });
         setProducts(response.colorways || []);
+        setError(undefined);
+      } catch (e) {
+        // A failed request is NOT an empty catalogue. Without this the list fell through to
+        // "no products found — try adjusting the filters", which sent the last 500 on this
+        // endpoint hunting through filters for products that were there all along.
+        setProducts([]);
+        setError(e instanceof Error ? e.message : 'failed to load products');
       } finally {
         setIsFetching(false);
       }
@@ -124,6 +132,7 @@ export default function ProductsCatalog() {
       <InfinityScroll
         firstItems={products}
         initialLoading={isFetching}
+        error={error}
         onCountChange={handleCountChange}
       />
     </div>
