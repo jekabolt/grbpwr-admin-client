@@ -4,11 +4,17 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import Input from 'ui/components/input';
+import { Pill } from 'ui/components/pill';
+import Select from 'ui/components/select';
 import Text from 'ui/components/text';
+import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import {
-  AuxCardTilePicker,
+  AuxCardPickerModal,
+  Field,
   Thumb,
   auxCardThumbUrl,
   auxSubtypeLabel,
@@ -16,7 +22,9 @@ import {
 } from './labels-pkg-shared';
 import { useStyleAssembly, useUpsertStyleAssembly } from './useAssemblyPacking';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+// Radix Select forbids an empty item value, so "all sizes" rides on the sentinel '0' — which is
+// also exactly what the wire means by size_id = 0.
+const ALL_SIZES = '0';
 
 type Row = {
   key: string; // client-only stable id (ulid) — add/remove never remaps another row's inputs
@@ -63,6 +71,9 @@ const newRow = (): Row => ({
   active: true,
 });
 
+// One assembly line as a card: the picked component reads as a 28px thumbnail + name + sub-type +
+// "→ output material", then the four things that vary per line (size, qty, print note, position
+// note) sit side by side, then active + remove.
 function AssemblyRow({
   row,
   index,
@@ -86,17 +97,58 @@ function AssemblyRow({
     [auxData, row.componentTechCardId],
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const picked = row.componentTechCardId > 0;
+
+  const sizeItems = useMemo(() => {
+    const items = [
+      { value: ALL_SIZES, label: 'all sizes' },
+      ...sizeOptions.map((o) => ({ value: String(o.id), label: o.name })),
+    ];
+    // An out-of-range size (the card's size run changed after this line was saved) still has to
+    // read as itself rather than silently snapping back to "all sizes".
+    if (!knownSize)
+      items.push({ value: String(row.sizeId), label: row.sizeName || `#${row.sizeId}` });
+    return items;
+  }, [sizeOptions, knownSize, row.sizeId, row.sizeName]);
 
   return (
-    <div className='space-y-3 border border-textInactiveColor p-3'>
-      <div className='flex items-center justify-between'>
-        <Text variant='uppercase' size='small'>
-          line {index + 1}
-        </Text>
+    <div className='border border-borderColor p-2'>
+      <div className='flex items-center gap-2'>
+        <Thumb
+          url={auxCardThumbUrl(selectedCard)}
+          alt={row.componentName || 'aux card'}
+          className='size-7'
+          placeholder='—'
+        />
+        <div className='min-w-0 flex-1'>
+          {picked ? (
+            <>
+              <Text size='control' component='span' className='block truncate font-bold uppercase'>
+                {row.componentName || `#${row.componentTechCardId}`}
+              </Text>
+              <Text size='micro' variant='label' className='truncate'>
+                {[resolvedSubtype, row.outputMaterialName ? `→ ${row.outputMaterialName}` : '']
+                  .filter(Boolean)
+                  .join(' · ') || 'output material resolves on save'}
+              </Text>
+            </>
+          ) : (
+            <Text size='micro' variant='label'>
+              line {index + 1} — no component picked
+            </Text>
+          )}
+        </div>
+        {!row.active && <Pill tone='mut'>inactive</Pill>}
+        {canEdit && (
+          <Button type='button' variant='secondary' size='xs' onClick={() => setPickerOpen(true)}>
+            {picked ? 'change' : '+ pick component'}
+          </Button>
+        )}
         {canEdit && (
           <Button
             type='button'
             variant='secondary'
+            size='xs'
             aria-label='remove assembly line'
             onClick={onRemove}
           >
@@ -105,143 +157,84 @@ function AssemblyRow({
         )}
       </div>
 
-      {/* component (aux card) — a scannable square-card pick (#70), thumbnail + name + sub-type,
-          instead of the old search-box + native <select>. */}
-      <div className='space-y-2'>
-        <Text size='small' variant='label'>
-          component (auxiliary card)
-        </Text>
-        {row.componentTechCardId > 0 ? (
-          <div className='flex items-center gap-3 border border-textInactiveColor p-2'>
-            <Thumb
-              url={auxCardThumbUrl(selectedCard)}
-              alt={row.componentName || 'aux card'}
-              className='h-16 w-16'
-              placeholder='no image'
-            />
-            <div className='min-w-0 flex-1 space-y-0.5'>
-              <Text size='small' className='truncate'>
-                {row.componentName || `#${row.componentTechCardId}`}
-              </Text>
-              {resolvedSubtype ? (
-                <span className='inline-block border border-textInactiveColor px-1 text-textBaseSize uppercase leading-tight text-labelColor'>
-                  {resolvedSubtype}
-                </span>
-              ) : null}
-              {row.outputMaterialName ? (
-                <Text variant='inactive' size='small' className='truncate'>
-                  → {row.outputMaterialName}
-                </Text>
-              ) : null}
-            </div>
-            {canEdit && (
-              <Button type='button' variant='secondary' onClick={() => setPickerOpen((o) => !o)}>
-                {pickerOpen ? 'close' : 'change'}
-              </Button>
-            )}
-          </div>
-        ) : canEdit ? (
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='w-full uppercase'
-            onClick={() => setPickerOpen(true)}
-          >
-            + pick component
-          </Button>
-        ) : (
-          <Text variant='inactive' size='small'>
-            —
-          </Text>
-        )}
-        {pickerOpen && canEdit && (
-          <AuxCardTilePicker
-            selectedId={row.componentTechCardId}
-            title='pick the on-garment auxiliary item'
-            onCancel={() => setPickerOpen(false)}
-            onPick={(card) => {
-              onPatch({
-                componentTechCardId: card.id ?? 0,
-                componentName: card.name ?? '',
-                componentAuxSubtype: card.auxSubtype ?? 'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
-                outputMaterialName: '', // unknown until saved + reloaded
-              });
-              setPickerOpen(false);
-            }}
+      <div className='mt-1.5 grid grid-cols-2 gap-2 lg:grid-cols-4'>
+        <Field label='size'>
+          <Select
+            name={`assembly-size-${row.key}`}
+            placeholder='all sizes'
+            items={sizeItems}
+            fullWidth
+            readOnly={!canEdit}
+            value={String(row.sizeId || 0)}
+            onValueChange={(v: string) => onPatch({ sizeId: Number(v) || 0 })}
           />
-        )}
-      </div>
-
-      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
-        <div className='space-y-1'>
-          <Text size='small' variant='label'>
-            size
-          </Text>
-          <select
-            className={cell}
-            value={row.sizeId || 0}
-            disabled={!canEdit}
-            onChange={(e) => onPatch({ sizeId: Number(e.target.value) || 0 })}
-          >
-            <option value={0}>all sizes</option>
-            {sizeOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-            {!knownSize && <option value={row.sizeId}>{row.sizeName || `#${row.sizeId}`}</option>}
-          </select>
-        </div>
-
-        <div className='space-y-1'>
-          <Text size='small' variant='label'>
-            qty
-          </Text>
-          <input
-            className={cell}
+        </Field>
+        <Field label='qty'>
+          <Input
+            name={`assembly-qty-${row.key}`}
             inputMode='decimal'
             value={row.qty}
             disabled={!canEdit}
-            onChange={(e) => onPatch({ qty: sanitizeDecimal(e.target.value) })}
+            className='text-right'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              onPatch({ qty: sanitizeDecimal(e.target.value) })
+            }
           />
-        </div>
-      </div>
-
-      <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
-        <div className='space-y-1'>
-          <Text size='small' variant='label'>
-            print note
-          </Text>
-          <input
-            className={cell}
+        </Field>
+        <Field label='print note'>
+          <Input
+            name={`assembly-print-${row.key}`}
             value={row.printNote}
             disabled={!canEdit}
-            onChange={(e) => onPatch({ printNote: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              onPatch({ printNote: e.target.value })
+            }
           />
-        </div>
-        <div className='space-y-1'>
-          <Text size='small' variant='label'>
-            position note
-          </Text>
-          <input
-            className={cell}
+        </Field>
+        <Field label='position note'>
+          <Input
+            name={`assembly-position-${row.key}`}
             value={row.positionNote}
             disabled={!canEdit}
-            onChange={(e) => onPatch({ positionNote: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              onPatch({ positionNote: e.target.value })
+            }
           />
-        </div>
+        </Field>
       </div>
 
-      <label className='flex items-center gap-2'>
+      <label className='mt-1.5 flex items-center gap-1.5'>
         <input
           type='checkbox'
           checked={row.active}
           disabled={!canEdit}
           onChange={(e) => onPatch({ active: e.target.checked })}
         />
-        <Text size='small'>active</Text>
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          active
+        </Text>
       </label>
+
+      {/* Mounted only while open: one dialog per line would otherwise sit in the tree of every
+          row at once. */}
+      {canEdit && pickerOpen && (
+        <AuxCardPickerModal
+          open
+          onOpenChange={setPickerOpen}
+          selectedId={row.componentTechCardId}
+          title='pick the on-garment auxiliary item'
+          hint='labels, tags and any other auxiliary card that ships attached to the garment'
+          onPick={(card) => {
+            onPatch({
+              componentTechCardId: card.id ?? 0,
+              componentName: card.name ?? '',
+              componentAuxSubtype: card.auxSubtype ?? 'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
+              outputMaterialName: '', // unknown until saved + reloaded
+            });
+            setPickerOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -331,71 +324,61 @@ export function AssemblyField({
 
   if (!styleId) {
     return (
-      <Text variant='inactive' size='small'>
+      <Text size='micro' variant='label'>
         save this tech card first, then you can define its assembly bill
       </Text>
     );
   }
 
   return (
-    <div className='flex flex-col gap-4'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <Text variant='inactive' size='small'>
-          auxiliary items (labels/tags) attached on or into the garment — per size, or all sizes.
-          {dirty ? <span className='ml-2 text-labelColor'>· unsaved</span> : null}
+    <div className='flex flex-col gap-2'>
+      <Toolbar>
+        <Text size='micro' variant='label' component='span'>
+          auxiliary items attached on or into the garment — per size, or all sizes
         </Text>
+        {dirty && <Pill tone='attention'>unsaved</Pill>}
+        <ToolbarSpacer />
         {canEdit && (
-          <div className='flex items-center gap-2'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={addRow}
-            >
+          <>
+            <Button type='button' variant='secondary' size='sm' onClick={addRow}>
               + line
             </Button>
-            {/* Distinct from the main card's header Save (variant='main') — this button persists
-                to UpsertStyleAssembly, a separate RPC the header Save does NOT cover. secondary +
-                an explicit label (mirrors style-facts-field.tsx's own sub-panel save) so it's
-                never mistaken for "save the whole tech card". */}
+            {/* Distinct from the main card's header Save — this button persists to
+                UpsertStyleAssembly, a separate RPC the header Save does NOT cover. */}
             <Button
               type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
+              variant='main'
+              size='sm'
               disabled={upsert.isPending || !dirty}
               onClick={save}
             >
               {upsert.isPending ? 'saving…' : 'save assembly bill'}
             </Button>
-          </div>
+          </>
         )}
-      </div>
+      </Toolbar>
 
       {isLoading ? (
-        <Text variant='inactive' size='small'>
+        <Text size='micro' variant='label'>
           loading…
         </Text>
       ) : isError ? (
-        <div className='flex items-center gap-3'>
-          <Text variant='error' size='small'>
-            failed to load assembly bill
-          </Text>
-          <button
-            type='button'
-            className='text-textBaseSize uppercase underline'
-            onClick={() => refetch()}
-          >
-            retry
-          </button>
-        </div>
+        <CalloutBox tone='error'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text size='micro' component='span'>
+              <b>failed to load the assembly bill</b>
+            </Text>
+            <Button type='button' variant='secondary' size='xs' onClick={() => refetch()}>
+              retry
+            </Button>
+          </div>
+        </CalloutBox>
       ) : rows.length === 0 ? (
-        <Text variant='inactive' size='small'>
+        <Text size='micro' variant='label'>
           no assembly lines yet{canEdit ? ' — add one to define what ships on this garment' : ''}
         </Text>
       ) : (
-        <div className='space-y-3'>
+        <div className='flex flex-col gap-1.5'>
           {rows.map((row, i) => (
             <AssemblyRow
               key={row.key}

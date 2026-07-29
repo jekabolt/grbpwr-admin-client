@@ -94,6 +94,12 @@ export function MonthlyTab() {
         amount: { value: decimalToInput(l.amount) },
         currency: l.currency ?? 'EUR',
         note: l.note ?? '',
+        vatAmount: undefined,
+        vatRegime: undefined,
+        docNumber: undefined,
+        docDate: undefined,
+        supplierVatId: undefined,
+        supplierName: undefined,
       }));
     const skipped = prevManual.length - clones.length;
     if (!clones.length) {

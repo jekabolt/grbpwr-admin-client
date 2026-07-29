@@ -1,19 +1,28 @@
 import { adminService } from 'api/api';
+import { useModel } from 'components/managers/models/components/useModelQuery';
 import {
   CARE_CODE_META,
   CarePicker,
 } from 'components/managers/product/components/care/care-picker';
+import { formatSizeName } from 'components/managers/product/utility/sizes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import SelectField from 'ui/form/fields/select-field';
+import { careToProse } from 'utils/care-label';
 import { TechCardFormData } from './schema';
 
 const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped', 'tailored'].map(
   (f) => ({ label: f, value: f }),
 );
+
+const ORIGIN_LABEL = 'TECH_CARD_LABEL_TYPE_ORIGIN';
+const HEIGHT = 'BODY_MEASUREMENT_NAME_HEIGHT';
 
 // Render the picked care codes as symbol + text chips (the "symbols + text" view the wizard
 // produces), so the constructor reads the actual instructions, not a raw "MWN,DNB" code string.
@@ -25,19 +34,91 @@ function CareSummary({ name }: { name: string }) {
     .filter(Boolean);
   if (codes.length === 0) return null;
   return (
-    <div className='flex flex-wrap gap-1.5'>
+    <div className='flex flex-wrap gap-1'>
       {codes.map((code) => {
         const m = CARE_CODE_META[code];
         return (
-          <span
-            key={code}
-            className='flex items-center gap-1 border border-textInactiveColor px-1.5 py-0.5'
-          >
+          <span key={code} className='flex items-center gap-1 border border-borderColor px-1.5'>
             {m?.img ? <img src={m.img} alt='' className='size-5' /> : null}
-            <Text size='small'>{m?.name ?? code}</Text>
+            <Text size='micro' component='span'>
+              {m?.name ?? code}
+            </Text>
           </span>
         );
       })}
+    </div>
+  );
+}
+
+// What the storefront will actually print from these fields. It is the same copy, built from the
+// same values — the care line goes through `careToProse` so the product page and the printed care
+// label can never word the same symbols differently.
+//
+// Two of the four lines are not authored here and are shown read-only, at their real source:
+// model height comes from the BASE MODEL (header, «base model & sample size»), country of origin
+// from the «origin» label on the labels tab — the same place generateCareLabel reads it.
+function StorefrontPreview() {
+  const { control } = useFormContext<TechCardFormData>();
+  const { dictionary } = useDictionary();
+
+  const name = (useWatch({ control, name: 'name' }) as string) || '';
+  const fit = (useWatch({ control, name: 'fit' }) as string) || '';
+  const care = (useWatch({ control, name: 'careInstructions' }) as string) || '';
+  const baseModelId = (useWatch({ control, name: 'baseModelId' }) as number | undefined) ?? 0;
+  const baseSampleSizeId =
+    (useWatch({ control, name: 'baseSampleSizeId' }) as number | undefined) ?? 0;
+  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
+    labelType?: string;
+    content?: string;
+  }>;
+
+  const { data: model } = useModel(baseModelId || undefined);
+  const heightMm = (model?.model?.measurements ?? []).find((m) => m.name === HEIGHT)?.valueMm ?? 0;
+  const heightCm = heightMm ? Math.round(heightMm / 10) : 0;
+
+  // no dictionary entry → no "wears M" clause; a raw "#12" is not storefront copy
+  const sizeName = (dictionary?.sizes ?? []).find((s) => s.id === baseSampleSizeId)?.name ?? '';
+  const sampleSize = sizeName ? formatSizeName(sizeName) : '';
+
+  const origin = labels.find((l) => l.labelType === ORIGIN_LABEL)?.content?.trim() ?? '';
+  const careLine = careToProse(care);
+
+  const modelLine = [
+    heightCm ? `model is ${heightCm} cm` : '',
+    sampleSize ? `wears ${sampleSize}` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+  const fitLine = [fit ? `${fit} fit` : '', modelLine].filter(Boolean).join(' · ');
+
+  return (
+    <div className='border border-borderColor p-2.5'>
+      <GroupLabel flush>product page · preview</GroupLabel>
+      <Text className='font-bold uppercase'>{name || '— style name —'}</Text>
+      {fitLine && (
+        <Text size='micro' variant='label'>
+          {fitLine}
+        </Text>
+      )}
+      {careLine && (
+        <Text size='micro' variant='label'>
+          {careLine}
+        </Text>
+      )}
+      {origin && (
+        <Text size='micro' variant='label'>
+          made in {origin}
+        </Text>
+      )}
+      {!fitLine && !careLine && !origin && (
+        <Text size='micro' variant='label'>
+          — nothing else to show yet —
+        </Text>
+      )}
+      <Text size='micro' variant='label' className='mt-2 border-t border-hairline pt-1'>
+        model height comes from the base model, origin from the «origin» label — set them there,
+        this only reads them.
+      </Text>
     </div>
   );
 }
@@ -90,45 +171,40 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
 
   if (!styleId) {
     return (
-      <Text variant='inactive' size='small'>
+      <Text size='micro' variant='label'>
         Save the tech card first, then enter fit / care here.
       </Text>
     );
   }
 
   return (
-    <div className='space-y-3'>
-      <Text variant='inactive' size='small'>
-        Fit and care are style facts shared by every colourway. Composition is not entered here — it
-        is derived from the BOM’s shell-fabric materials (see the composition on the BOM tab).
-      </Text>
-      <SelectField name='fit' label='fit' items={FIT_OPTIONS} readOnly={!canEdit} />
-      <div className='space-y-2'>
+    <div className='grid grid-cols-1 items-start gap-2.5 lg:grid-cols-2'>
+      <div className='space-y-2.5'>
+        <Text size='micro' variant='label'>
+          Fit and care are style facts shared by every colourway. Composition is not entered here —
+          it is derived from the BOM’s shell-fabric materials (see the composition on the BOM tab).
+        </Text>
+        <SelectField name='fit' label='fit' items={FIT_OPTIONS} readOnly={!canEdit} />
         {/* Structured care wizard (ISO 3758: washing / bleaching / tumble-dry / ironing /
             professional care) — reuses the app's CarePicker instead of a free-form textarea, so
             care is pickable symbols that render on labels and the storefront, not typed prose. */}
         <CarePicker name='careInstructions' label='care instructions' editMode={canEdit} />
         <CareSummary name='careInstructions' />
-        <div className='border border-textInactiveColor p-2'>
-          <Text variant='inactive' size='small'>
+        <CalloutBox tone='note'>
+          <Text size='micro' variant='label'>
             Saved as a canonical ISO-3758 code string (e.g. “MWN,DNB,TDL”) — this already feeds the
-            care-label generator. Backend gap: symbol-accurate labels & storefront care need a
-            STRUCTURED backend care field; today care round-trips as one plain string.
+            care-label generator. <b>Backend gap:</b> symbol-accurate labels & storefront care need
+            a STRUCTURED backend care field; today care round-trips as one plain string.
           </Text>
-        </div>
+        </CalloutBox>
+        {canEdit && (
+          <Button type='button' variant='secondary' size='sm' disabled={saving} onClick={save}>
+            {saving ? 'saving…' : 'save style facts'}
+          </Button>
+        )}
       </div>
-      {canEdit && (
-        <Button
-          type='button'
-          variant='secondary'
-          size='lg'
-          className='uppercase'
-          disabled={saving}
-          onClick={save}
-        >
-          {saving ? 'saving…' : 'save style facts'}
-        </Button>
-      )}
+
+      <StorefrontPreview />
     </div>
   );
 }

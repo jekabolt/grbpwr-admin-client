@@ -32,12 +32,6 @@ export function useCompositionForm(
     return currentPartItems.some((item) => item.code === code);
   };
 
-  const getPercentageForMaterial = (materialKey: string): number => {
-    const code = compositionGarment.find(([key]) => key === materialKey)?.[1];
-    if (!code) return 0;
-    return currentPartItems.find((item) => item.code === code)?.percent || 0;
-  };
-
   const updatePart = (updater: (part: CompositionItem[]) => CompositionItem[]) => {
     setLocalComposition((prev) => {
       const newComposition = { ...prev };
@@ -50,22 +44,14 @@ export function useCompositionForm(
     });
   };
 
-  const handlePercentageChange = (materialKey: string, value: string) => {
-    const percentage = parseInt(value) || 0;
-    if (percentage < 0 || percentage > 100) return;
-
-    const code = compositionGarment.find(([key]) => key === materialKey)?.[1];
+  // Keyed by CODE, not by the dictionary display key: a part's selected fibres are edited as rows
+  // regardless of which category is currently being browsed, and a code is the only identity that
+  // survives switching categories. Over-100 is no longer blocked with an alert() — the live total
+  // pill turns red and the modal's save button is disabled until the part sums to exactly 100.
+  const handlePercentageByCode = (code: string, value: string) => {
     if (!code) return;
-
-    const currentItem = currentPartItems.find((item) => item.code === code);
-    const currentPercent = currentItem?.percent || 0;
-    const newTotal = totalPercentage - currentPercent + percentage;
-
-    if (newTotal > 100) {
-      alert('Total percentage cannot exceed 100');
-      return;
-    }
-
+    const parsed = parseInt(value, 10);
+    const percentage = Math.max(0, Math.min(100, Number.isFinite(parsed) ? parsed : 0));
     updatePart((part) =>
       part.map((item) => (item.code === code ? { ...item, percent: percentage } : item)),
     );
@@ -128,8 +114,7 @@ export function useCompositionForm(
     currentPartItems,
     totalPercentage,
     isSelected,
-    getPercentageForMaterial,
-    handlePercentageChange,
+    handlePercentageByCode,
     handleToggleMaterial,
     handleRemovePart,
     handleAutoAdjust,

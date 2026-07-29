@@ -1,79 +1,95 @@
 import { useQuery } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import {
   common_TechCardBomItem,
   common_TechCardConstruction,
   common_TechCardOperation,
+  common_TechCardReleaseMeta,
 } from 'api/proto-http/admin';
-import { adminService } from 'api/api';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { techCardBomSectionOptions } from 'constants/filter';
-import { ReactNode, useState } from 'react';
+import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
+import { techCardBomSectionOptions, techCardStageOptions } from 'constants/filter';
+import { cn } from 'lib/utility';
+import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import { DataTable, EmptyCell } from 'ui/components/data-table';
+import { GroupLabel } from 'ui/components/group-label';
+import { Row, RowTotal } from 'ui/components/row';
+import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
-
-const snapCell = 'border border-textInactiveColor px-2 py-1 text-textBaseSize align-top';
+import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
 
 const bomSectionLabel = (v?: string) =>
   techCardBomSectionOptions.find((o) => o.value === v)?.label ?? v ?? '—';
+const stageLabel = (v?: string) => techCardStageOptions.find((o) => o.value === v)?.label ?? '—';
 
-function TitledSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className='flex flex-col gap-1 border-t border-textInactiveColor pt-2'>
-      <Text variant='uppercase' size='small'>
-        {title}
-      </Text>
-      {children}
-    </div>
-  );
-}
+/**
+ * What the `create release` button needs from the owner of the form. Optional: without it this
+ * component is the read-only history it has always been, and the caller keeps its own button.
+ * With it, the button lives here and shares the header's blocker gate — it is never a dead grey
+ * button, it opens the blockers modal instead.
+ */
+export type ReleaseGate = {
+  /** Reasons the card can't be released, with the tab that fixes each. Empty = ready. */
+  blockers: ReleaseBlocker[];
+  /** Freeze the current spec — the caller's `submitWithApproval(RELEASED)`. */
+  onRelease: () => void;
+  onGoToTab: (tab: string) => void;
+  saving?: boolean;
+};
 
 // The frozen BOM the factory reads — the whole point of a release snapshot, previously shown only
 // as a line count.
 function SnapshotBom({ items }: { items: common_TechCardBomItem[] }) {
-  return (
-    <TitledSection title='BOM (frozen)'>
-      {items.length === 0 ? (
-        <Text variant='inactive' size='small'>
+  if (items.length === 0) {
+    return (
+      <>
+        <GroupLabel>BOM (frozen)</GroupLabel>
+        <Text size='micro' variant='label'>
           no BOM lines
         </Text>
-      ) : (
-        <div className='overflow-x-auto'>
-          <table className='w-full min-w-max border-collapse'>
-            <thead>
-              <tr>
-                <th className={`${snapCell} text-left uppercase`}>section</th>
-                <th className={`${snapCell} text-left uppercase`}>material</th>
-                <th className={`${snapCell} text-left uppercase`}>composition</th>
-                <th className={`${snapCell} text-left uppercase`}>spec</th>
-                <th className={`${snapCell} text-left uppercase`}>supplier</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((b, i) => (
-                <tr key={b.id ?? b.lineKey ?? i}>
-                  <td className={snapCell}>{bomSectionLabel(b.section)}</td>
-                  <td className={snapCell}>
-                    {b.name || '—'}
-                    {b.color ? ` · ${b.color}` : ''}
-                  </td>
-                  <td className={snapCell}>{b.composition || '—'}</td>
-                  <td className={snapCell}>
-                    {b.spec || '—'}
-                    {b.unit ? ` (${b.unit})` : ''}
-                  </td>
-                  <td className={snapCell}>
-                    {b.supplier || '—'}
-                    {b.supplierRef ? ` · ${b.supplierRef}` : ''}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </TitledSection>
+      </>
+    );
+  }
+  return (
+    <>
+      <GroupLabel>BOM (frozen) · {items.length}</GroupLabel>
+      <DataTable>
+        <thead>
+          <tr>
+            <th>section</th>
+            <th>material</th>
+            <th>composition</th>
+            <th>spec</th>
+            <th>supplier</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((b, i) => (
+            <tr key={b.id ?? b.lineKey ?? i}>
+              <td>{bomSectionLabel(b.section)}</td>
+              <td>
+                {b.name || <EmptyCell />}
+                {b.color ? ` · ${b.color}` : ''}
+              </td>
+              <td>{b.composition || <EmptyCell />}</td>
+              <td>
+                {b.spec || <EmptyCell />}
+                {b.unit ? ` (${b.unit})` : ''}
+              </td>
+              <td>
+                {b.supplier || <EmptyCell />}
+                {b.supplierRef ? ` · ${b.supplierRef}` : ''}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </DataTable>
+    </>
   );
 }
 
@@ -93,110 +109,55 @@ function SnapshotConstruction({ c }: { c?: common_TechCardConstruction }) {
   ).filter((r): r is [string, string] => !!r[1]?.trim());
   if (rows.length === 0) return null;
   return (
-    <TitledSection title='construction (frozen)'>
+    <>
+      <GroupLabel>construction (frozen)</GroupLabel>
       {rows.map(([k, v]) => (
-        <Text key={k} variant='inactive' size='small'>
-          {k}: {v}
-        </Text>
+        <Row key={k} label={k} value={v} />
       ))}
-    </TitledSection>
+    </>
   );
 }
 
 function SnapshotOperations({ ops }: { ops: common_TechCardOperation[] }) {
   if (ops.length === 0) return null;
   return (
-    <TitledSection title={`operations (frozen) · ${ops.length}`}>
+    <>
+      <GroupLabel>operations (frozen) · {ops.length}</GroupLabel>
       {ops.map((o, i) => (
-        <Text key={i} variant='inactive' size='small'>
-          {o.operationNumber != null ? `#${o.operationNumber} ` : ''}
-          {o.node || '—'}
-          {o.description ? ` — ${o.description}` : ''}
-          {o.machine ? ` · ${o.machine}` : ''}
-        </Text>
+        <Row
+          key={i}
+          label={
+            <Text size='micro' component='span'>
+              {o.operationNumber != null ? `#${o.operationNumber} ` : ''}
+              {o.node || '—'}
+              {o.description ? ` — ${o.description}` : ''}
+            </Text>
+          }
+          value={
+            o.machine ? (
+              <Text size='micro' variant='label' component='span'>
+                {o.machine}
+              </Text>
+            ) : undefined
+          }
+        />
       ))}
-    </TitledSection>
+    </>
   );
 }
 
-// Immutable release snapshots (task 11): the frozen factory spec captured each time the
-// card is saved in `released`. Read-only history; unit_cost is 🔒 costing.
-export function ReleasesField({ techCardId }: { techCardId: number }) {
-  const { canReadCosting } = usePermissions();
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['techCardReleases', techCardId],
-    queryFn: () => adminService.ListTechCardReleases({ techCardId }),
-  });
-
-  if (selectedId != null) {
-    return (
-      <ReleaseDetail
-        id={selectedId}
-        techCardId={techCardId}
-        canReadCosting={canReadCosting}
-        onBack={() => setSelectedId(null)}
-      />
-    );
-  }
-
-  if (isLoading) return <Text size='small'>loading…</Text>;
-  const releases = data?.releases ?? [];
-  if (releases.length === 0) {
-    return (
-      <Text variant='inactive' size='small'>
-        no releases yet — a frozen Rev.N snapshot is created automatically when the card is saved as
-        “released”.
-      </Text>
-    );
-  }
-
-  return (
-    <div className='flex flex-col gap-1'>
-      {releases.map((r) => (
-        <div
-          key={r.id}
-          className='flex flex-wrap items-center justify-between gap-2 border border-textInactiveColor p-2'
-        >
-          <div className='flex flex-col'>
-            <Text size='small'>
-              Rev.{r.releaseNumber ?? '—'}
-              {r.version ? ` · ${r.version}` : ''}
-            </Text>
-            <Text variant='inactive' size='small'>
-              by {r.releasedBy || '—'}
-              {r.createdAt ? ` · ${new Date(r.createdAt).toLocaleDateString()}` : ''}
-              {canReadCosting && r.unitCost?.value
-                ? ` · unit cost ${decimalToInput(r.unitCost)} ${r.currency || ''}`
-                : ''}
-            </Text>
-          </div>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase'
-            onClick={() => r.id != null && setSelectedId(r.id)}
-          >
-            view snapshot
-          </Button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ReleaseDetail({
+// The right pane: one frozen snapshot, read as GroupLabel + Row sections. Keyed by release id from
+// the caller so switching selection remounts (and re-queries) cleanly.
+function ReleaseSnapshot({
   id,
+  meta,
   techCardId,
   canReadCosting,
-  onBack,
 }: {
   id: number;
+  meta?: common_TechCardReleaseMeta;
   techCardId: number;
   canReadCosting: boolean;
-  onBack: () => void;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['techCardRelease', id],
@@ -209,85 +170,209 @@ function ReleaseDetail({
   const { data: techCard } = useTechCard(techCardId || undefined);
   const colorwayCount = techCard?.colorways?.length ?? 0;
 
-  const meta = data?.release;
+  // The list row we were handed already carries the header; use it until the detail lands so the
+  // pane never flashes empty on selection.
+  const head = data?.release ?? meta;
   const snap = data?.snapshot?.techCard;
   const err = data?.snapshotError;
 
   return (
-    <div className='flex flex-col gap-3'>
-      <Button
-        type='button'
-        variant='secondary'
-        size='lg'
-        className='self-start uppercase'
-        onClick={onBack}
-      >
-        ← back to releases
-      </Button>
+    <div className='border border-borderColor p-2'>
+      <GroupLabel className='mt-0'>
+        Rev.{head?.releaseNumber ?? '—'}
+        {head?.version ? ` · ${head.version}` : ''} · frozen {formatTechCardDate(head?.createdAt)} ·{' '}
+        {head?.releasedBy || '—'}
+      </GroupLabel>
 
       {isLoading ? (
-        <Text size='small'>loading…</Text>
-      ) : (
+        <Text size='micro' variant='label'>
+          loading…
+        </Text>
+      ) : err ? (
+        /* hero-v2 degradation: an old blob that no longer parses → say so, don't crash */
+        <CalloutBox tone='warning'>
+          <Text size='micro'>
+            This snapshot is incompatible with the current schema and can’t be shown ({err}). The
+            release metadata above is still valid.
+          </Text>
+        </CalloutBox>
+      ) : snap ? (
         <>
-          <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
-            <Text size='small'>
-              frozen release · Rev.{meta?.releaseNumber ?? '—'}
-              {meta?.version ? ` · ${meta.version}` : ''}
-            </Text>
-            <Text variant='inactive' size='small'>
-              by {meta?.releasedBy || '—'}
-              {meta?.createdAt ? ` · ${new Date(meta.createdAt).toLocaleDateString()}` : ''}
-              {canReadCosting && meta?.unitCost?.value
-                ? ` · unit cost ${decimalToInput(meta.unitCost)} ${meta.currency || ''}`
-                : ''}
-            </Text>
+          <Row label='style' value={`${snap.styleNumber || '—'} · ${snap.name || '—'}`} />
+          <Row label='stage' value={stageLabel(snap.stage)} />
+          <Row label='BOM' value={`${(snap.bomItems ?? []).length} articles`} />
+          <Row label='operations' value={(snap.operations ?? []).length} />
+          <Row label='sizes' value={(snap.sizeIds ?? []).length} />
+          <Row label='colourways (current)' value={colorwayCount} />
+          {/* 🔒 costing: the planned unit cost is only ever rendered with costing:read. */}
+          {canReadCosting && (head?.unitCost?.value || snap.costing?.unitCost?.value) ? (
+            <RowTotal
+              label='unit cost'
+              value={
+                head?.unitCost?.value
+                  ? `${decimalToInput(head.unitCost)} ${head.currency || ''}`.trim()
+                  : `${decimalToInput(snap.costing?.unitCost)} ${
+                      snap.costing?.currency || ''
+                    }`.trim()
+              }
+            />
+          ) : null}
+
+          <SnapshotBom items={snap.bomItems ?? []} />
+          <SnapshotConstruction c={snap.construction} />
+          <SnapshotOperations ops={snap.operations ?? []} />
+
+          <Text size='micro' variant='label' className='mt-2'>
+            Colourways aren’t part of the frozen snapshot (they’re live products) — the count
+            reflects the style’s current {colorwayCount} colourway
+            {colorwayCount === 1 ? '' : 's'}.
+          </Text>
+        </>
+      ) : (
+        <Text size='micro' variant='label'>
+          no snapshot payload
+        </Text>
+      )}
+    </div>
+  );
+}
+
+// Immutable release snapshots (task 11): the frozen factory spec captured each time the card is
+// saved in `released`. Read-only history; unit_cost is 🔒 costing.
+//
+// Two panes rather than a list that swaps itself for a detail screen: you keep your place in the
+// list while you read, so comparing Rev.2 against Rev.1 is two clicks and no back button. The
+// selection lives in the URL (?rev=N) so a specific snapshot is linkable.
+export function ReleasesField({ techCardId, gate }: { techCardId: number; gate?: ReleaseGate }) {
+  const { canReadCosting } = usePermissions();
+  const [params, setParams] = useSearchParams();
+  const [blockersOpen, setBlockersOpen] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['techCardReleases', techCardId],
+    queryFn: () => adminService.ListTechCardReleases({ techCardId }),
+  });
+
+  const releases = data?.releases ?? [];
+  const revParam = params.get('rev');
+  // ?rev= carries the human release NUMBER (Rev.2), not the row id — that is what the UI shows and
+  // what someone pasting a link means. An unknown/absent value falls back to the newest release
+  // rather than an empty pane.
+  const selected = releases.find((r) => String(r.releaseNumber ?? '') === revParam) ?? releases[0];
+
+  const select = (rev?: number) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (rev != null) p.set('rev', String(rev));
+        else p.delete('rev');
+        return p;
+      },
+      { replace: true },
+    );
+
+  const blockers = gate?.blockers ?? [];
+  const onCreate = () => {
+    if (!gate) return;
+    if (blockers.length > 0) {
+      setBlockersOpen(true);
+      return;
+    }
+    gate.onRelease();
+  };
+
+  return (
+    <div className='flex flex-col'>
+      <SectionHeader
+        title='frozen snapshots the factory reads'
+        question='— each release freezes the whole spec; the factory may be building from Rev.2 while you edit Rev.3'
+        action={
+          gate ? (
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              disabled={gate.saving}
+              loading={gate.saving}
+              onClick={onCreate}
+            >
+              create release
+            </Button>
+          ) : undefined
+        }
+      />
+      {gate && (
+        <Text size='micro' variant='label' className='mb-1.5'>
+          freezes the current spec as the next immutable Rev.N snapshot the factory reads
+          {blockers.length > 0
+            ? ` — ${blockers.length} thing${blockers.length > 1 ? 's' : ''} still in the way`
+            : ''}
+        </Text>
+      )}
+
+      {isLoading ? (
+        <Text size='micro' variant='label'>
+          loading…
+        </Text>
+      ) : releases.length === 0 ? (
+        <Text size='micro' variant='label'>
+          no releases yet — a frozen Rev.N snapshot is created automatically when the card is saved
+          as “released”.
+        </Text>
+      ) : (
+        <div className='grid grid-cols-1 gap-2.5 sm:grid-cols-[140px_1fr]'>
+          <div className='border border-borderColor'>
+            {releases.map((r) => {
+              const active = r.id != null && r.id === selected?.id;
+              return (
+                <button
+                  key={r.id}
+                  type='button'
+                  aria-current={active ? 'true' : undefined}
+                  onClick={() => select(r.releaseNumber)}
+                  className={cn(
+                    'flex w-full flex-col gap-0.5 border-b border-hairline px-2 py-1.5 text-left last:border-b-0',
+                    active ? 'bg-textColor text-bgColor' : 'hover:bg-bgZebra',
+                  )}
+                >
+                  <Text size='micro' component='span' className='font-bold uppercase'>
+                    Rev.{r.releaseNumber ?? '—'}
+                  </Text>
+                  <Text
+                    size='nano'
+                    component='span'
+                    className={active ? undefined : 'text-labelColor'}
+                  >
+                    {formatTechCardDate(r.createdAt)}
+                  </Text>
+                </button>
+              );
+            })}
           </div>
 
-          {/* hero-v2 degradation: old blob that no longer parses → show a banner, don't crash */}
-          {err ? (
-            <div className='border border-warning p-3'>
-              <Text size='small' className='block text-warning'>
-                This snapshot is incompatible with the current schema and can’t be shown ({err}).
-                The release metadata above is still valid.
-              </Text>
-            </div>
-          ) : snap ? (
-            <div className='flex flex-col gap-3 border border-textInactiveColor p-3'>
-              <div className='flex flex-col gap-1'>
-                <Text variant='uppercase' size='small'>
-                  frozen spec
-                </Text>
-                <Text variant='inactive' size='small'>
-                  {snap.styleNumber || '—'} · {snap.name || '—'} · stage {snap.stage || '—'}
-                </Text>
-                <Text variant='inactive' size='small'>
-                  {(snap.bomItems ?? []).length} BOM lines · {colorwayCount} colourways ·{' '}
-                  {(snap.sizeIds ?? []).length} sizes · {(snap.operations ?? []).length} operations
-                </Text>
-                {canReadCosting && snap.costing?.unitCost?.value && (
-                  <Text variant='inactive' size='small'>
-                    costing unit cost: {decimalToInput(snap.costing.unitCost)}{' '}
-                    {snap.costing.currency || ''}
-                  </Text>
-                )}
-              </div>
-
-              <SnapshotBom items={snap.bomItems ?? []} />
-              <SnapshotConstruction c={snap.construction} />
-              <SnapshotOperations ops={snap.operations ?? []} />
-
-              <Text variant='inactive' size='small'>
-                Colourways aren’t part of the frozen snapshot (they’re live products) — the count
-                reflects the style’s current {colorwayCount} colourway
-                {colorwayCount === 1 ? '' : 's'}.
-              </Text>
-            </div>
+          {selected?.id != null ? (
+            <ReleaseSnapshot
+              key={selected.id}
+              id={selected.id}
+              meta={selected}
+              techCardId={techCardId}
+              canReadCosting={canReadCosting}
+            />
           ) : (
-            <Text variant='inactive' size='small'>
-              no snapshot payload
+            <Text size='micro' variant='label'>
+              pick a release to read its frozen spec
             </Text>
           )}
-        </>
+        </div>
+      )}
+
+      {gate && (
+        <ReleaseBlockersModal
+          blockers={blockers}
+          open={blockersOpen}
+          onOpenChange={setBlockersOpen}
+          onGoToTab={gate.onGoToTab}
+        />
       )}
     </div>
   );

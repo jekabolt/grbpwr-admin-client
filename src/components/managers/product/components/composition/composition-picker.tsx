@@ -2,7 +2,7 @@ import { composition as dict, CompositionStructure } from 'constants/garment-com
 import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
+import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import { CompositionModal } from './composition-modal/composition-modal';
 
@@ -77,29 +77,37 @@ export function CompositionPicker({
   return (
     <div className='space-y-1'>
       <FormLabel>{label}</FormLabel>
-      <div className='flex items-center gap-2 border-b border-textInactiveColor'>
-        <Input value={display} readOnly placeholder='—' className='flex-1 border-none' />
+      <div className='flex items-center gap-1.5'>
+        {/* The value is composed in the dialog, never typed — so it is a read-only PLATE, not an
+            input that merely refuses keystrokes. */}
+        <div className='min-h-[22px] min-w-0 flex-1 border border-borderColor bg-bgZebra px-[7px] py-[3px]'>
+          <Text className={display ? 'truncate' : 'truncate text-textInactiveColor'}>
+            {display || '—'}
+          </Text>
+        </div>
         {editMode && (
-          <div className='flex gap-1'>
+          <>
             {raw && (
               <Button
                 type='button'
-                variant='simple'
+                size='xs'
+                variant='secondary'
+                className='shrink-0'
                 onClick={() => selectComposition({})}
-                className='px-2 py-1 text-textBaseSize uppercase'
               >
                 clear
               </Button>
             )}
             <Button
               type='button'
+              size='sm'
               variant='secondary'
+              className='shrink-0'
               onClick={() => setOpen(true)}
-              className='px-2 py-1 text-textBaseSize uppercase'
             >
               select
             </Button>
-          </div>
+          </>
         )}
       </div>
       <CompositionModal

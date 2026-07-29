@@ -1,7 +1,8 @@
-import * as Popover from '@radix-ui/react-popover';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { Chip, ChipRow } from 'ui/components/chip';
+import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { TechCardFormData } from './schema';
@@ -48,8 +49,8 @@ export function useCreatePiece(): (name: string) => string {
     const lineKey = ulid();
     setValue(
       'pieces',
-      ([
-        ...((pieces as unknown) as Record<string, unknown>[]),
+      [
+        ...(pieces as unknown as Record<string, unknown>[]),
         {
           name: trimmed,
           lineKey,
@@ -61,19 +62,22 @@ export function useCreatePiece(): (name: string) => string {
           note: '',
           materials: [],
         },
-      ] as unknown) as TechCardFormData['pieces'],
+      ] as unknown as TechCardFormData['pieces'],
       { shouldDirty: true },
     );
     return lineKey;
   };
 }
 
-const inputCls =
-  'w-full border border-textInactiveColor bg-transparent px-2 py-1 text-textBaseSize outline-none';
+// Phase-02 field metrics — the picker's search box and its trigger must be indistinguishable from
+// any other control on the card (1px box, 3px/7px padding, 22px min height).
+const searchCls =
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize placeholder:text-textInactiveColor focus:border-textColor focus:outline-none';
 
 // The picker body: search + the card's pieces as a selectable list + a create row for a name that
 // isn't there yet. Shared by the single and multi variants so "выбрать или создать" behaves
-// identically everywhere a piece is chosen.
+// identically everywhere a piece is chosen. Width and chrome belong to the popover shell — this
+// renders content only.
 function PieceList({
   pieces,
   selected,
@@ -102,11 +106,11 @@ function PieceList({
   };
 
   return (
-    <div className='flex w-64 flex-col gap-2'>
+    <div className='flex flex-col gap-1.5'>
       <input
         autoFocus
-        className={inputCls}
-        placeholder='найти или создать деталь'
+        className={searchCls}
+        placeholder={allowCreate ? 'найти или создать деталь' : 'найти деталь'}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
@@ -118,9 +122,10 @@ function PieceList({
           }
         }}
       />
+      {/* The list owns the scroll, not the shell, so the search field stays pinned above it. */}
       <div className='flex max-h-56 flex-col overflow-y-auto'>
         {matches.length === 0 && !canCreate && (
-          <Text variant='inactive' size='small'>
+          <Text size='micro' variant='label'>
             {pieces.length === 0 ? 'деталей ещё нет — введите название выше' : 'ничего не найдено'}
           </Text>
         )}
@@ -133,11 +138,13 @@ function PieceList({
               aria-pressed={on}
               onClick={() => onToggle(p.lineKey)}
               className={cn(
-                'flex items-center gap-2 px-1 py-1 text-left text-textBaseSize hover:bg-textInactiveColor/20',
-                on ? 'text-text' : 'text-labelColor',
+                'flex items-center gap-2 border-b border-hairline py-1 text-left text-textBaseSize last:border-b-0 hover:bg-bgZebra',
+                on ? 'text-textColor' : 'text-labelColor',
               )}
             >
-              <span className='w-4 shrink-0'>{on ? (multiple ? '☑' : '●') : multiple ? '☐' : '○'}</span>
+              <span aria-hidden className='w-3 shrink-0'>
+                {on ? (multiple ? '☑' : '●') : multiple ? '☐' : '○'}
+              </span>
               <span className='truncate uppercase'>{p.name}</span>
             </button>
           );
@@ -147,7 +154,7 @@ function PieceList({
         <button
           type='button'
           onClick={create}
-          className='border border-textInactiveColor px-2 py-1 text-left text-textBaseSize uppercase hover:bg-textInactiveColor/20'
+          className='border border-dashed border-borderColor px-[7px] py-[3px] text-left text-micro tracking-label text-labelColor uppercase hover:border-textColor hover:text-textColor'
         >
           + создать «{query.trim()}»
         </button>
@@ -183,69 +190,49 @@ export function PieceMultiPicker({
   const dangling = value.filter((k) => !byKey.has(k));
 
   const toggle = (lineKey: string) =>
-    onChange(
-      value.includes(lineKey) ? value.filter((k) => k !== lineKey) : [...value, lineKey],
-    );
+    onChange(value.includes(lineKey) ? value.filter((k) => k !== lineKey) : [...value, lineKey]);
 
   const summary = chosen.map((k) => byKey.get(k)?.name).join(' + ');
 
   return (
     <div className='flex flex-col gap-1'>
       {label && (
-        <Text variant='label' size='small'>
+        <Text size='micro' variant='label' component='span' className='uppercase'>
           {label}
         </Text>
       )}
-      <div className='flex flex-wrap items-center gap-1.5'>
+      <ChipRow>
         {chosen.map((k) => (
-          <span
-            key={k}
-            className='flex items-center gap-1 border border-textColor bg-textColor px-2 py-0.5 text-textBaseSize uppercase text-bgColor'
-          >
+          <Chip key={k} selected onRemove={() => toggle(k)}>
             {byKey.get(k)?.name}
-            <button
-              type='button'
-              aria-label={`убрать ${byKey.get(k)?.name}`}
-              onClick={() => toggle(k)}
-              className='leading-none'
-            >
-              ✕
-            </button>
-          </span>
+          </Chip>
         ))}
-        <Popover.Root>
-          <Popover.Trigger className='border border-textInactiveColor px-2 py-0.5 text-textBaseSize uppercase text-labelColor hover:text-text'>
-            {chosen.length === 0 ? '+ выбрать детали' : '+ ещё'}
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content
-              side='bottom'
-              align='start'
-              sideOffset={4}
-              className='z-30 border border-textInactiveColor bg-bgColor p-2'
-            >
-              <PieceList
-                pieces={pieces}
-                selected={value}
-                onToggle={toggle}
-                allowCreate={!!onCreate}
-                multiple
-                onCreate={(name) => {
-                  const key = onCreate?.(name);
-                  if (key && !value.includes(key)) onChange([...value, key]);
-                }}
-              />
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
-      </div>
+        <GenericPopover
+          title='детали'
+          className='w-64'
+          triggerProps={{ className: 'flex items-center' }}
+          openElement={<Chip dashed>{chosen.length === 0 ? '+ выбрать детали' : '+ ещё'}</Chip>}
+        >
+          <PieceList
+            pieces={pieces}
+            selected={value}
+            onToggle={toggle}
+            allowCreate={!!onCreate}
+            multiple
+            onCreate={(name) => {
+              const key = onCreate?.(name);
+              if (key && !value.includes(key)) onChange([...value, key]);
+            }}
+          />
+        </GenericPopover>
+      </ChipRow>
       {dangling.length > 0 && (
-        <Text size='small' className='text-error'>
+        <Text size='micro' className='text-error'>
           {dangling.length} деталь(и) удалены с вкладки PIECES — выберите заново
         </Text>
       )}
       {hint && (
-        <Text variant='inactive' size='small'>
+        <Text size='micro' variant='label'>
           {chosen.length > 1 ? `соединяет: ${summary}` : hint}
         </Text>
       )}
@@ -255,18 +242,19 @@ export function PieceMultiPicker({
 
 // Single-select piece picker — the shape a consumption norm needs: a norm is about exactly one
 // piece (1:1, unlike an operation), so this replaces the selection instead of adding to it.
+//
+// Deliberately has NO create affordance: the colourway recipe saves through UpdateColorwayRecipe,
+// which cannot author a piece — offering "+ создать" here would mint a key the save silently drops.
 export function PieceSinglePicker({
   pieces,
   value,
   onChange,
-  onCreate,
   placeholder = '— деталь —',
   disabled,
 }: {
   pieces: PieceRef[];
   value: string;
   onChange: (lineKey: string, piece?: PieceRef) => void;
-  onCreate?: (name: string) => string;
   placeholder?: string;
   disabled?: boolean;
 }) {
@@ -276,42 +264,48 @@ export function PieceSinglePicker({
   const pick = (lineKey: string) => {
     // Clicking the current selection clears it — the norm goes back to "whole garment".
     const next = lineKey === value ? '' : lineKey;
-    onChange(next, pieces.find((p) => p.lineKey === next));
+    onChange(
+      next,
+      pieces.find((p) => p.lineKey === next),
+    );
     setOpen(false);
   };
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger
-        disabled={disabled}
-        className={cn(
-          'w-full border border-textInactiveColor px-2 py-1 text-left text-textBaseSize uppercase',
-          current ? 'text-text' : 'text-labelColor',
-          disabled && 'opacity-50',
-        )}
-      >
-        {current?.name ?? (value ? 'деталь удалена — выберите заново' : placeholder)}
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          side='bottom'
-          align='start'
-          sideOffset={4}
-          className='z-30 border border-textInactiveColor bg-bgColor p-2'
-        >
-          <PieceList
-            pieces={pieces}
-            selected={value ? [value] : []}
-            onToggle={pick}
-            allowCreate={!!onCreate}
-            multiple={false}
-            onCreate={(name) => {
-              const key = onCreate?.(name);
-              if (key) pick(key);
-            }}
-          />
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      // A combobox anchored flush under its own field: a tail there reads as a mistake.
+      noTail
+      className='w-64'
+      triggerProps={{
+        disabled,
+        className: cn(
+          'flex min-h-[22px] w-full items-center justify-between gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left text-textBaseSize uppercase transition-colors focus:border-textColor focus:outline-none',
+          current ? 'text-textColor' : 'text-labelColor',
+          disabled && 'bg-bgZebra text-labelColor',
+          !current && !!value && 'border-error text-error',
+        ),
+      }}
+      openElement={
+        <>
+          <span className='truncate'>
+            {current?.name ?? (value ? 'деталь удалена — выберите заново' : placeholder)}
+          </span>
+          <span aria-hidden className='shrink-0 text-labelColor'>
+            ▾
+          </span>
+        </>
+      }
+    >
+      <PieceList
+        pieces={pieces}
+        selected={value ? [value] : []}
+        onToggle={pick}
+        allowCreate={false}
+        multiple={false}
+        onCreate={() => undefined}
+      />
+    </GenericPopover>
   );
 }

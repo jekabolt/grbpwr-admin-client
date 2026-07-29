@@ -85,7 +85,7 @@ export default function Selector({
         <Select.Trigger
           className={`inline-flex items-center justify-between w-full px-2 ${
             compact ? 'py-0.5 text-textBaseSize' : 'py-2'
-          } bg-bgColor border border-textInactiveColor shadow-sm focus:outline-none disabled:bg-textInactiveColor/20 disabled:text-labelColor`}
+          } bg-bgColor border border-textInactiveColor focus:outline-none disabled:bg-textInactiveColor/20 disabled:text-labelColor`}
         >
           <Select.Value placeholder={placeholder}>
             <Text>{getDisplayValue()}</Text>

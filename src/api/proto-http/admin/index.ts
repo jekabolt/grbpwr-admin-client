@@ -982,6 +982,15 @@ export type common_StyleSizeChart = {
   styleId: number | undefined;
   lockVersion: number | undefined;
   cells: common_StyleSizeChartCell[] | undefined;
+  // The GRADE RULE the expanded `cells` grid was authored from:
+  // value(size) = base + step × (position(size) − position(base))
+  // `cells` stays the source of truth — the factory reads the expanded grid, and a cell the grader
+  // overtyped keeps its typed value. The rule is stored so reopening a card can show WHICH cells
+  // still follow it (recompute and compare: a cell that differs was overtyped) instead of
+  // presenting 40 numbers with no structure. Both fields are optional: an unset rule (base 0 /
+  // empty steps) means the chart was typed cell by cell, which is what every pre-existing chart is.
+  gradeBaseSizeId: number | undefined;
+  gradeSteps: common_StyleSizeChartGradeStep[] | undefined;
 };
 
 // StyleSizeChart is the style-owned size chart (R5). Written full-replace under the shared
@@ -992,10 +1001,23 @@ export type common_StyleSizeChartCell = {
   value: googletype_Decimal | undefined;
 };
 
+// StyleSizeChartGradeStep is one measurement's grade increment — the per-size-position step the
+// expanded chart was authored from (PLM gap 4). See StyleSizeChart.grade_steps.
+export type common_StyleSizeChartGradeStep = {
+  measurementNameId: number | undefined;
+  step: googletype_Decimal | undefined;
+};
+
 export type UpdateStyleSizeChartRequest = {
   styleId: number | undefined;
   expectedLockVersion: number | undefined;
   cells: common_StyleSizeChartCell[] | undefined;
+  // The grade rule the grid was authored from (PLM gap 4). Full-replace like `cells`: sending
+  // grade_base_size_id = 0 with no grade_steps clears the rule and leaves the expanded chart alone.
+  // grade_base_size_id must be one of the style's size_ids; every grade step's measurement must
+  // appear in `cells` (a step for a measurement the chart does not carry is meaningless).
+  gradeBaseSizeId: number | undefined;
+  gradeSteps: common_StyleSizeChartGradeStep[] | undefined;
 };
 
 export type UpdateStyleSizeChartResponse = {
@@ -2828,6 +2850,10 @@ export type AlertSettings = {
   ga4CoverageWarnPct: number | undefined;
   productionRunStaleDays: number | undefined;
   acctPostingLagHours: number | undefined;
+  // House gross-margin target, 0..100 — the default a style's costing measures itself against when
+  // it sets no target of its own (common.TechCardCosting.target_margin_pct). Read back resolved on
+  // TechCardCosting.effective_target_margin_pct, so the costing tab does not need this RPC.
+  targetMarginPct: number | undefined;
 };
 
 export type GetAlertSettingsRequest = {
@@ -5194,6 +5220,21 @@ export type OpexLineInsert = {
   amount: googletype_Decimal | undefined;
   currency: string | undefined;
   note: string | undefined;
+  // Recoverable input VAT on the invoice behind this line (same currency as `amount`), with the
+  // regime classifying it on the VAT return (domestic_pl | domestic_uk). Both optional; when
+  // vat_amount is set the regime is required. The monthly accrual then books Dr 6xxx net +
+  // Dr 2080 VAT / Cr 2030 gross, mirroring material receipts — without it the VAT is silently
+  // lost inside the expense.
+  vatAmount: googletype_Decimal | undefined;
+  vatRegime: string | undefined;
+  // Invoice identity for the VAT purchase register (JPK ewidencja zakupu): number, issue date
+  // (YYYY-MM-DD), supplier VAT id and name. A line with vat_amount but no doc identity is still
+  // deducted in the app summary but EXCLUDED from the generated JPK (no register row possible) —
+  // surfaced as a caveat.
+  docNumber: string | undefined;
+  docDate: string | undefined;
+  supplierVatId: string | undefined;
+  supplierName: string | undefined;
 };
 
 // OpexLine is a stored OPEX line item.
@@ -5208,6 +5249,13 @@ export type OpexLine = {
   costed: boolean | undefined;
   recurringId: number | undefined;
   note: string | undefined;
+  vatAmount: googletype_Decimal | undefined;
+  vatAmountBase: googletype_Decimal | undefined;
+  vatRegime: string | undefined;
+  docNumber: string | undefined;
+  docDate: string | undefined;
+  supplierVatId: string | undefined;
+  supplierName: string | undefined;
 };
 
 export type UpsertOpexLinesRequest = {
@@ -5912,6 +5960,11 @@ export type common_TechCardCosting = {
   defectPercent: googletype_Decimal | undefined;
   currency: string | undefined;
   notes: string | undefined;
+  // target_margin_pct is the gross margin this STYLE is expected to make, 0..100. It is the number
+  // the costing waterfall measures the achieved margin against; without it the admin had to carry a
+  // hard-coded house constant. 0 / unset = fall back to the house default (alert_setting
+  // `target_margin_pct`), which is what effective_target_margin_pct below resolves to.
+  targetMarginPct: googletype_Decimal | undefined;
   // OUTPUT-ONLY computed rollup (ignored on write). Root figures are the PRIMARY colourway
   // (colorways index 0); per-colourway figures are in colorway_costs. Materials come from the
   // BOM via each colourway's usages, normalised to a PER-GARMENT figure (a usage graded only
@@ -5933,6 +5986,18 @@ export type common_TechCardCosting = {
   unitCostBase: googletype_Decimal | undefined;
   orderCostBase: googletype_Decimal | undefined;
   baseCurrency: string | undefined;
+  // OUTPUT-ONLY: the target margin actually in force for this style — target_margin_pct above when
+  // set, otherwise the house default from alert_setting. Resolved here so the costing tab needs one
+  // read (already gated by costing:read) instead of a second, analytics-gated settings call.
+  effectiveTargetMarginPct: googletype_Decimal | undefined;
+  // OUTPUT-ONLY VAT context for the margin on this read: which country's rate the colourway
+  // net_prices were computed at, and what that rate is. Surfaced so the tab can SAY which market it
+  // is showing a margin for instead of presenting one number as if it were universal.
+  // The rate comes from the same `vat_rate` table the order snapshot, the accounting VAT engine and
+  // the margin-by-style report read — deliberately not a second, costing-owned copy that could drift
+  // from them. vat_rate_pct is unset when the country has no rate on file (export: nothing to net).
+  vatCountryCode: string | undefined;
+  vatRatePct: googletype_Decimal | undefined;
 };
 
 // TechCardCostLine is one currency bucket of the materials rollup.
@@ -5993,6 +6058,21 @@ export type common_TechCardSignoff = {
   signedBy: string | undefined;
   signedAt: wellKnownTimestamp | undefined;
   note: string | undefined;
+  // signed_digest is the fingerprint of THIS SECTION's content at the moment it was signed, so
+  // "changed since sign-off" survives a page reload. Compare it against the matching entry in
+  // TechCard.section_digests: equal = the sheet still says what was approved; different = it was
+  // edited afterwards and the sign-off is stale.
+  // Server-COMPUTED, but the caller controls WHEN. Send it back as you read it on an ordinary save
+  // and it is carried through untouched, so an approval keeps pointing at the content it actually
+  // covered. Send it EMPTY to mean "I am approving this now" — the server then fingerprints the
+  // payload being written, which is the only moment it can be sure the digest describes what the
+  // approver looked at. That is also how a re-approval after review clears a stale flag.
+  // The server never simply re-stamps on every save: doing so would let a save that edits the BOM
+  // silently re-bless the materials sign-off against its own new content, which is precisely the
+  // failure this field exists to catch. A pending or rejected section carries no digest.
+  // Deliberately per-section, not the card's lock_version: a costing edit must not invalidate the
+  // design sign-off, and a lock_version comparison cannot tell those apart.
+  signedDigest: string | undefined;
 };
 
 // TechCardInsert is the writable payload for a tech card. Nested lists are full
@@ -6022,6 +6102,14 @@ export type common_TechCardSizePattern = {
   url: string | undefined;
   filename: string | undefined;
   sizeBytes: number | undefined;
+  // version is the sheet's revision within its (style, size) — the "v3" the admin used to scrape out
+  // of the filename. Send 0 and the server assigns MAX+1 for a url it has not seen on this card
+  // before, and preserves the number for one it has; send a number to pin the factory's own.
+  version: number | undefined;
+  // uploaded_at is when this PDF was first attached to the card. SERVER-OWNED (ignored on write):
+  // patterns are a full-replace child, so the row is deleted and reinserted on every card save — the
+  // server carries the original timestamp forward by matching the url rather than resetting it.
+  uploadedAt: wellKnownTimestamp | undefined;
 };
 
 // TechCardDetail is one aspect of the construction description (Sheet «Титул», lower block)
@@ -6173,6 +6261,11 @@ export type ListAdminsResponse = {
 
 export type GetTechCardRequest = {
   id: number | undefined;
+  // vat_country_code models the margin for a specific market: the colourway net_prices and the
+  // costing VAT context are computed at THAT country's rate. Empty = the company's domestic VAT
+  // country, which is what a studio pricing a style means by "the margin" unless it says otherwise.
+  // An ISO 3166-1 alpha-2 code with no rate on file nets nothing (export) rather than erroring.
+  vatCountryCode: string | undefined;
 };
 
 export type GetTechCardResponse = {
@@ -6214,6 +6307,10 @@ export type common_TechCard = {
   fit: string | undefined;
   composition: string | undefined;
   careInstructions: string | undefined;
+  // section_digests is the CURRENT fingerprint of each sign-off section's content, recomputed on
+  // every read. Compare an entry against the matching TechCardSignoff.signed_digest to tell whether
+  // an approved section has been edited since it was signed. OUTPUT-ONLY.
+  sectionDigests: common_TechCardSectionDigest[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -6264,6 +6361,54 @@ export type common_AdminColorwayRef = {
   // (ABORTED). Surfaced on the ref so a per-colourway lab-dip edit is optimistically locked straight
   // from here, without the caller reaching up to the tech-card's top-level lock_version.
   lockVersion: number | undefined;
+  // lab_dip_rounds is the full round history behind the scalars above (oldest first), so the
+  // colourways tab can draw the real timeline instead of the single current round. OUTPUT-ONLY.
+  labDipRounds: common_ColorwayLabDipRound[] | undefined;
+  // Per-colourway COGS (product.cost_price) and its provenance. Costing is otherwise style-level, so
+  // without this the tab could not say that the black colourway costs more than the ecru one. Money:
+  // stripped for an account without costing:read, like the rest of the tech-card read.
+  costPrice: googletype_Decimal | undefined;
+  costPriceSource: string | undefined;
+  costPriceUpdatedAt: wellKnownTimestamp | undefined;
+  // prices is this colourway's retail price list (product_price), one entry per currency. Pricing
+  // lives on the published product, so the costing tab used to reconstruct a retail figure by fanning
+  // out GetColorwayByID over every linked colourway and only trusting it when all of them agreed.
+  // Surfaced here so a margin can be drawn from one read, per colourway, without that guesswork.
+  // These are the catalogue prices AS ENTERED, and the whole system already treats those as
+  // VAT-INCLUSIVE: the order snapshot extracts vat_amount = total × rate/(100+rate) (migration 0094),
+  // accounting derives output VAT the same way, and the realised sales margin divides revenue by
+  // (1 + rate) before comparing it to cost. A margin drawn against `prices` therefore overstates
+  // itself by roughly the VAT rate — which is exactly what the costing tab was doing while the
+  // margin-by-style report next to it did not. Use net_prices below.
+  prices: common_ColorwayPrice[] | undefined;
+  // net_prices is `prices` with VAT removed at the rate of the read's VAT country (see
+  // TechCardCosting.vat_country_code / vat_rate_pct), paired by currency. This is the figure a margin
+  // must be drawn against, because unit_cost carries no VAT.
+  // It is a SCENARIO, not a fact: one gross price is sold into as many rates as there are
+  // destinations, so "the" net retail does not exist until someone names a market. The server nets at
+  // the company's domestic rate by default and honours GetTechCardRequest.vat_country_code to model
+  // another. Empty when no rate is known for that country (an export destination nets to itself, and
+  // silently returning the gross price under a "net" name would be the same lie in a new place).
+  netPrices: common_ColorwayPrice[] | undefined;
+};
+
+// ColorwayLabDipRound is ONE round of the lab-dip approval loop, as it actually happens: a dyehouse
+// submits a swatch, the studio approves or rejects it, and a rejection starts the next round. The flat
+// lab_dip_* scalars on ColorwayDevelopmentInsert describe only the CURRENT round; this is the history
+// behind them, so a timeline can show R1 rejected → R2 rejected → R3 approved instead of one row.
+// OUTPUT-ONLY. Rounds are not written directly: the server derives them from the lab-dip write path
+// (UpdateColorway's development.*), keyed by round_number — writing round 2 leaves round 1 intact.
+// That keeps one source of truth (the current round is still the scalars) and cannot drift from it.
+export type common_ColorwayLabDipRound = {
+  roundNumber: number | undefined;
+  status: common_TechCardLabDipStatus | undefined;
+  submittedAt: wellKnownTimestamp | undefined;
+  decidedAt: wellKnownTimestamp | undefined;
+  decidedBy: string | undefined;
+  rejectReason: string | undefined;
+  comment: string | undefined;
+  swatchMediaId: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 // CompositionEntry is one fibre share of a style's structured composition (S17), resolved with its
@@ -6277,6 +6422,13 @@ export type common_CompositionEntry = {
   fiberCode: string | undefined;
   name: string | undefined;
   percent: googletype_Decimal | undefined;
+};
+
+// TechCardSectionDigest is the current fingerprint of one sign-off section's content (see
+// TechCardSignoff.signed_digest). OUTPUT-ONLY, recomputed on every read.
+export type common_TechCardSectionDigest = {
+  section: common_TechCardSignoffSection | undefined;
+  digest: string | undefined;
 };
 
 export type UpdateTechCardRequest = {
@@ -6324,6 +6476,11 @@ export type ListTechCardsRequest = {
   purpose: string | undefined;
   // product-linking picker passes "sellable" to hide auxiliary/packaging cards.
   skuSeason: common_SkuSeason | undefined;
+  // category_ids narrows to styles under ANY of the given category nodes, at any level: an id
+  // matches a card whose category_id, top_category_id, sub_category_id or type_id equals it. So a
+  // category browser can pass whichever node the operator picked — "outerwear" (a top category) or
+  // "parka" (a type) — without the client having to expand the tree itself. Empty = no filter.
+  categoryIds: number[] | undefined;
 };
 
 export type ListTechCardsResponse = {
@@ -6354,6 +6511,55 @@ export type common_TechCardListItem = {
   skuSeason: common_SkuSeason | undefined;
   // WS7: auxiliary sub-type badge for list views (UNKNOWN=unset), mirroring purpose above.
   auxSubtype: common_TechCardAuxSubtype | undefined;
+  // Category of the style, so a list/board can group and label by category without an N+1
+  // GetTechCard. category_id is the leaf tag; the top/sub/type triple is the derived taxonomy path
+  // (0 = unset) — the same columns ListTechCardsRequest.category_ids filters on.
+  categoryId: number | undefined;
+  topCategoryId: number | undefined;
+  subCategoryId: number | undefined;
+  typeId: number | undefined;
+  // colorway_count is how many LIVE (non-archived) colourways the style has — the number a list row
+  // shows next to a style. Resolved server-side in one batched query for the page, never N+1.
+  // NOTE: unrelated to MarginByStyleRow.colorway_count, which counts SKUs that SOLD.
+  colorwayCount: number | undefined;
+  // Auxiliary output material (NF-07): the warehouse material an auxiliary card's run receipts into,
+  // plus its name and on-hand balance. Zero/empty for a sellable card. Present so an aux picker can
+  // show "820 on hand" beside a dust bag from the list alone — it previously needed one GetTechCard
+  // per card plus a warehouse read.
+  outputMaterialId: number | undefined;
+  outputMaterialName: string | undefined;
+  outputMaterialOnHand: googletype_Decimal | undefined;
+};
+
+// TechCardReadinessRequirement is ONE condition on a style's progress, evaluated server-side against
+// the real data. `key` is the stable machine name (switch on it); `label` is the sentence to show.
+export type TechCardReadinessRequirement = {
+  key: string | undefined;
+  label: string | undefined;
+  met: boolean | undefined;
+  detail: string | undefined;
+};
+
+// GetTechCardReadiness answers "what is missing before this style can move on" — the checklist the
+// admin used to keep as a client-side table with no way to know if it matched the backend.
+// ADVISORY, NOT A GATE. Stage and approval_state remain free-standing fields on UpdateTechCard: this
+// RPC reports, it does not authorise, and nothing here blocks a save. The only stage rule the server
+// ENFORCES is still the backward one (a style with samples/releases/colourways cannot regress).
+export type GetTechCardReadinessRequest = {
+  techCardId: number | undefined;
+};
+
+export type GetTechCardReadinessResponse = {
+  currentStage: common_TechCardStage | undefined;
+  nextStage: common_TechCardStage | undefined;
+  // Conditions for entering next_stage, in the order they should be shown. Empty when there is no
+  // next stage.
+  nextStageRequirements: TechCardReadinessRequirement[] | undefined;
+  nextStageReady: boolean | undefined;
+  // Conditions for releasing the card to the factory (approval_state = RELEASED). Independent of the
+  // stage checklist: a card can be sampling-complete and still un-releasable.
+  releaseRequirements: TechCardReadinessRequirement[] | undefined;
+  releaseReady: boolean | undefined;
 };
 
 // GetStylePipeline is the development board: one column per lifecycle stage
@@ -7019,6 +7225,33 @@ export type AdjustMaterialStockResponse = {
   movement: common_MaterialMovement | undefined;
 };
 
+// BatchIssueMaterialStockLine is one material of a batch issue. The target, direction and date are on
+// the request — a batch is one act ("this sample was cut"), not a bag of unrelated movements.
+export type BatchIssueMaterialStockLine = {
+  materialId: number | undefined;
+  quantity: googletype_Decimal | undefined;
+  lotId: number | undefined;
+  comment: string | undefined;
+};
+
+export type BatchIssueMaterialStockRequest = {
+  lines: BatchIssueMaterialStockLine[] | undefined;
+  // exactly one target must be set (> 0) — the same rule as IssueMaterialStock
+  productionRunId: number | undefined;
+  sampleId: number | undefined;
+  isReturn: boolean | undefined;
+  occurredAt: string | undefined;
+  comment: string | undefined;
+  productId: number | undefined;
+};
+
+// BatchIssueMaterialStockResponse returns the movements in the order the lines were sent. The call is
+// ATOMIC: on any failure NOTHING is written and the error names the offending line, so a caller never
+// has to reconcile a half-applied write-off.
+export type BatchIssueMaterialStockResponse = {
+  movements: common_MaterialMovement[] | undefined;
+};
+
 export type GetMaterialStockRequest = {
   materialId: number | undefined;
 };
@@ -7461,6 +7694,11 @@ export type ListJournalEntriesRequest = {
   sourceType: string | undefined;
   limit: number | undefined;
   offset: number | undefined;
+  // Free-text filter: a case-insensitive substring of description, or a bare entry id ("123").
+  // Empty = no text filter.
+  q: string | undefined;
+  // occurred_at ordering: "desc" (default, newest first) | "asc" (oldest first).
+  order: string | undefined;
 };
 
 export type ListJournalEntriesResponse = {
@@ -7712,6 +7950,9 @@ export type GetAcctReconciliationResponse = {
   prepayments: AcctReconBlock | undefined;
   shipping: AcctReconBlock | undefined;
   bank: AcctReconBlock | undefined;
+  // 1030 Payment Processor (Stripe): informational — no external balance feed asserts a delta,
+  // but the balance is surfaced so a missed payout post cannot drift invisibly.
+  stripe: AcctReconBlock | undefined;
 };
 
 // AcctBankTxn is one parsed bank statement line in the inbox. amount is SIGNED (negative = outflow);
@@ -7731,6 +7972,10 @@ export type AcctBankTxn = {
   state: string | undefined;
   matchedEntryId: number | undefined;
   suggestedAccount: string | undefined;
+  // Why the line was deliberately not booked (set by IgnoreBankTxn); empty when none. Keeps every
+  // deliberate omission reviewable — an ignored line books NOTHING, so the reason is its only trace.
+  // 14: created_at already holds 13.
+  ignoreReason: string | undefined;
   createdAt: string | undefined;
 };
 
@@ -7758,6 +8003,9 @@ export type PostBankTxnRequest = {
   id: number | undefined;
   accountCode: string | undefined;
   occurredAt: string | undefined;
+  // Tags the entry with the supplier it settles, so a 2010 Accounts-Payable payment lands in
+  // GetPayables under that supplier instead of the anonymous "(untagged)" row. 0 = untagged.
+  supplierId: number | undefined;
 };
 
 export type PostBankTxnResponse = {
@@ -7861,6 +8109,22 @@ export type GetReceivablesResponse = {
   rows: AcctReceivableRow[] | undefined;
 };
 
+// GetAcctAlerts: the section's attention flags (the tab dots), aggregated server-side.
+export type GetAcctAlertsRequest = {
+};
+
+export type GetAcctAlertsResponse = {
+  openPayables: number | undefined;
+  openReceivables: number | undefined;
+  apAnomalies: number | undefined;
+  openPastMonths: string[] | undefined;
+  // Current-month reconciliation blocks off by >= 0.01, non-advisory only (finished-goods drift,
+  // pending and unposted-movement backlogs have their own signals).
+  reconMismatch: string[] | undefined;
+  bankUnmatched: number | undefined;
+  eventsNeedReview: number | undefined;
+};
+
 export type GetVatReturnPLRequest = {
   // month: YYYY-MM-DD, any day within the target filing month (normalised to the 1st).
   month: string | undefined;
@@ -7907,6 +8171,39 @@ export type GetOssReturnResponse = {
   rows: AcctOssRow[] | undefined;
   totalNet: googletype_Decimal | undefined;
   totalVat: googletype_Decimal | undefined;
+  // Refunds of sales made in EARLIER quarters, grouped by that original quarter + country. OSS
+  // (post-2021) requires these as correction lines referencing the original period, not netted
+  // into the current quarter; rows above contain only current-quarter sales net of SAME-quarter
+  // refunds.
+  corrections: AcctOssCorrection[] | undefined;
+};
+
+// AcctOssCorrection is one OSS correction line: the original period being corrected and the
+// (negative) net/vat delta for one consumption country.
+export type AcctOssCorrection = {
+  period: string | undefined;
+  country: string | undefined;
+  net: googletype_Decimal | undefined;
+  vat: googletype_Decimal | undefined;
+};
+
+// VAT-UE recapitulative statement (monthly, PLN).
+export type GetVatUeRequest = {
+  month: string | undefined;
+};
+
+export type AcctVatUeRow = {
+  counterpartyVatId: string | undefined;
+  counterpartyName: string | undefined;
+  country: string | undefined;
+  netPln: googletype_Decimal | undefined;
+};
+
+export type GetVatUeResponse = {
+  month: string | undefined;
+  wdt: AcctVatUeRow[] | undefined;
+  wnt: AcctVatUeRow[] | undefined;
+  caveats: string[] | undefined;
 };
 
 export type ExportJpkV7MRequest = {
@@ -7945,6 +8242,11 @@ export type GetUkVatReturnResponse = {
   box5NetVat: googletype_Decimal | undefined;
   box6NetSales: googletype_Decimal | undefined;
   box7NetPurchases: googletype_Decimal | undefined;
+  // "GBP" — every figure above is converted per transaction at the daily reference rate effective
+  // on the day preceding its tax point (HMRC filing currency). "EUR" would mean an older backend
+  // that did not convert.
+  currency: string | undefined;
+  caveats: string[] | undefined;
 };
 
 export type GetFrs105AccountsRequest = {
@@ -7977,6 +8279,9 @@ export type GetFrs105AccountsResponse = {
   netAssets: googletype_Decimal | undefined;
   capitalAndReserves: googletype_Decimal | undefined;
   caveats: string[] | undefined;
+  // FRS 105 SoFP requires "Called up share capital" as its own line (account 3005); the remainder
+  // of equity stays in capital_and_reserves.
+  calledUpShareCapital: googletype_Decimal | undefined;
 };
 
 export type GetCashFlowStatementRequest = {
@@ -7989,6 +8294,10 @@ export type GetCashFlowStatementRequest = {
 export type AcctCashFlowLine = {
   label: string | undefined;
   amount: googletype_Decimal | undefined;
+  // Chart-of-accounts codes the line aggregates, for drill-down into the ledger (e.g. the
+  // inventory delta carries 1110/1120/1130/1140). Empty for derived lines (net profit), whose
+  // story is the P&L, not one ledger.
+  codes: string[] | undefined;
 };
 
 // AcctCashFlowSection groups cash-flow lines (operating | investing | financing) with the section subtotal.
@@ -8482,6 +8791,10 @@ export interface AdminService {
   ListTechCards(request: ListTechCardsRequest): Promise<ListTechCardsResponse>;
   // GetStylePipeline returns the development board: per-stage counts + a few light cards per column
   // (gap-01), so the idea→prod pipeline loads in one call.
+  // GetTechCardReadiness reports what is missing before a style can advance a stage or be released.
+  // Advisory only — it never blocks a write. Declared before /tech-card/{id} for the same
+  // first-match-wins mux reason as ListTechCards.
+  GetTechCardReadiness(request: GetTechCardReadinessRequest): Promise<GetTechCardReadinessResponse>;
   GetStylePipeline(request: GetStylePipelineRequest): Promise<GetStylePipelineResponse>;
   // GenerateTechCardOperations drafts structured sewing operations from a plain-language
   // description via OpenRouter, grounded in the card's pieces + BOM + type. It only PROPOSES a
@@ -8524,6 +8837,10 @@ export interface AdminService {
   ReceiveMaterialStock(request: ReceiveMaterialStockRequest): Promise<ReceiveMaterialStockResponse>;
   IssueMaterialStock(request: IssueMaterialStockRequest): Promise<IssueMaterialStockResponse>;
   AdjustMaterialStock(request: AdjustMaterialStockRequest): Promise<AdjustMaterialStockResponse>;
+  // BatchIssueMaterialStock issues (or returns) SEVERAL materials to one target in ONE transaction.
+  // Sewing a sample takes the whole BOM out of the warehouse at once; looping IssueMaterialStock
+  // per line meant a mid-loop shortage left the stock half-drawn with no way back. All or nothing.
+  BatchIssueMaterialStock(request: BatchIssueMaterialStockRequest): Promise<BatchIssueMaterialStockResponse>;
   GetMaterialStock(request: GetMaterialStockRequest): Promise<GetMaterialStockResponse>;
   ListMaterialStock(request: ListMaterialStockRequest): Promise<ListMaterialStockResponse>;
   ListMaterialMovements(request: ListMaterialMovementsRequest): Promise<ListMaterialMovementsResponse>;
@@ -8710,6 +9027,11 @@ export interface AdminService {
   // regime (a separate jurisdiction from the Polish JPK). Boxes 2/8/9 are zero post-Brexit for a GB
   // return; the figures are entered into MTD-compatible software / the HMRC bridge to submit.
   GetUkVatReturn(request: GetUkVatReturnRequest): Promise<GetUkVatReturnResponse>;
+  // GetVatUe returns the monthly VAT-UE recapitulative statement rows (informacja podsumowująca):
+  // WDT supplies grouped by the buyer's EU VAT id and WNT acquisitions grouped by the supplier's
+  // VAT id, both in PLN converted per transaction at the reference rate of the day preceding the
+  // tax point. Filed alongside JPK_V7M whenever WDT/WNT occurred in the month.
+  GetVatUe(request: GetVatUeRequest): Promise<GetVatUeResponse>;
   // GetFrs105Accounts re-groups the ledger into FRS 105 UK micro-entity line items (Income Statement +
   // Statement of Financial Position). A base-currency DRAFT: a filing-ready UK Ltd set needs GBP
   // conversion + isolation of the UK entity's transactions — surfaced in caveats, not done here.
@@ -8747,6 +9069,11 @@ export interface AdminService {
   GetPayables(request: GetPayablesRequest): Promise<GetPayablesResponse>;
   // GetReceivables returns the open Accounts-Receivable (1040) balance per bank-invoice order.
   GetReceivables(request: GetReceivablesRequest): Promise<GetReceivablesResponse>;
+  // GetAcctAlerts returns the accounting section's attention flags in one call — the red tab dots:
+  // open AP/AR (+ untagged/negative anomalies), past months still open, current-month
+  // reconciliation drift (non-advisory blocks only), unmatched bank inbox lines and dead-letter
+  // events. Aggregates existing reads server-side so the UI needs one request instead of six.
+  GetAcctAlerts(request: GetAcctAlertsRequest): Promise<GetAcctAlertsResponse>;
   // Fixed-asset register + straight-line depreciation.
   CreateFixedAsset(request: CreateFixedAssetRequest): Promise<CreateFixedAssetResponse>;
   ListFixedAssets(request: ListFixedAssetsRequest): Promise<ListFixedAssetsResponse>;
@@ -11955,6 +12282,9 @@ export function createAdminServiceClient(
       const path = `api/admin/tech-card/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
+      if (request.vatCountryCode) {
+        queryParams.push(`vatCountryCode=${encodeURIComponent(request.vatCountryCode.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -12042,6 +12372,11 @@ export function createAdminServiceClient(
       if (request.skuSeason?.year) {
         queryParams.push(`skuSeason.year=${encodeURIComponent(request.skuSeason.year.toString())}`)
       }
+      if (request.categoryIds) {
+        request.categoryIds.forEach((x) => {
+          queryParams.push(`categoryIds=${encodeURIComponent(x.toString())}`)
+        })
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -12054,6 +12389,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListTechCards",
       }) as Promise<ListTechCardsResponse>;
+    },
+    GetTechCardReadiness(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/readiness/${request.techCardId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardReadiness",
+      }) as Promise<GetTechCardReadinessResponse>;
     },
     GetStylePipeline(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/pipeline`; // eslint-disable-line quotes
@@ -12522,6 +12877,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AdjustMaterialStock",
       }) as Promise<AdjustMaterialStockResponse>;
+    },
+    BatchIssueMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/issue-batch`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "BatchIssueMaterialStock",
+      }) as Promise<BatchIssueMaterialStockResponse>;
     },
     GetMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.materialId) {
@@ -13838,6 +14210,12 @@ export function createAdminServiceClient(
       if (request.offset) {
         queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
+      if (request.q) {
+        queryParams.push(`q=${encodeURIComponent(request.q.toString())}`)
+      }
+      if (request.order) {
+        queryParams.push(`order=${encodeURIComponent(request.order.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -14177,6 +14555,26 @@ export function createAdminServiceClient(
         method: "GetUkVatReturn",
       }) as Promise<GetUkVatReturnResponse>;
     },
+    GetVatUe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/reports/vat-ue`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.month) {
+        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetVatUe",
+      }) as Promise<GetVatUeResponse>;
+    },
     GetFrs105Accounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/frs105`; // eslint-disable-line quotes
       const body = null;
@@ -14438,6 +14836,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetReceivables",
       }) as Promise<GetReceivablesResponse>;
+    },
+    GetAcctAlerts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounting/alerts`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAcctAlerts",
+      }) as Promise<GetAcctAlertsResponse>;
     },
     CreateFixedAsset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/fixed-assets`; // eslint-disable-line quotes

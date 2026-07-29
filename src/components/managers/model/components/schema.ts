@@ -52,8 +52,7 @@ export function mapModelToForm(model: common_Model): ModelFormData {
   return {
     name: insert?.name || '',
     comment: insert?.comment || '',
-    gender:
-      insert?.gender && insert.gender !== 'GENDER_ENUM_UNKNOWN' ? insert.gender : '',
+    gender: insert?.gender && insert.gender !== 'GENDER_ENUM_UNKNOWN' ? insert.gender : '',
     defaultSizeIds: insert?.defaultSizeIds ?? [],
     measurements,
     mediaIds,

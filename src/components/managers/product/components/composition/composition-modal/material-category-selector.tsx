@@ -1,37 +1,30 @@
 import { composition } from 'constants/garment-composition';
-import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import Select from 'ui/components/select';
 
 interface MaterialCategorySelectorProps {
   selectedCategory: string;
   onCategoryChange: (category: string) => void;
 }
 
+// Which slice of the fibre dictionary to browse. A select, not a row of buttons: seven categories
+// with names like "Blends (natural + synthetic)" cost four wrapped lines as chips and one line here.
 export function MaterialCategorySelector({
   selectedCategory,
   onCategoryChange,
 }: MaterialCategorySelectorProps) {
-  const categories = Object.keys(composition.garment_composition);
+  const items = Object.keys(composition.garment_composition).map((category) => ({
+    value: category,
+    label: category,
+  }));
 
   return (
-    <div>
-      <Text variant='uppercase'>material categories:</Text>
-      <div className='grid lg:grid-cols-4 grid-cols-1 gap-2'>
-        {categories.map((category) => (
-          <Button
-            key={category}
-            size='lg'
-            onClick={() => onCategoryChange(category)}
-            className={cn(
-              'uppercase border border-textInactiveColor bg-bgColor hover:bg-textColor hover:text-bgColor',
-              selectedCategory === category && 'bg-textColor text-bgColor',
-            )}
-          >
-            {category}
-          </Button>
-        ))}
-      </div>
-    </div>
+    <Select
+      name='fibre-category'
+      items={items}
+      value={selectedCategory}
+      onValueChange={onCategoryChange}
+      placeholder='fibre category'
+      fullWidth
+    />
   );
 }

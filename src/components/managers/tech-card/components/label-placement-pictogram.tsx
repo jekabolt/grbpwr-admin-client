@@ -92,6 +92,49 @@ const hangPoint = (mark: Mark | null): [number, number] => {
   return [mark.cx, mark.cy];
 };
 
+// The silhouette's drawing box — the denominator that turns a marker's viewBox coordinates into
+// the frame percentages a Canvas Pin takes.
+const GARMENT_W = 64;
+const GARMENT_H = 72;
+
+// THE single placement -> position source, shared by the badge pictogram above and the garment map
+// in labels-checklist.tsx. Returns the marker's centre as PERCENTAGES of the frame (what
+// ui/components/canvas' Pin takes), so a placement string and its pin can never drift apart: change
+// the placement, the pin moves, because both read PLACEMENT_MARKS. null = empty or unrecognised
+// placement — the caller lists that label as "not placed" instead of guessing a spot.
+export function placementPinPosition(placement?: string): { x: number; y: number } | null {
+  const region = resolvePlacementRegion(placement);
+  if (!region) return null;
+  const [cx, cy] = hangPoint(PLACEMENT_MARKS[region]);
+  return { x: (cx / GARMENT_W) * 100, y: (cy / GARMENT_H) * 100 };
+}
+
+// The faint garment outline, stretched to fill its positioned parent (a Canvas). preserveAspect
+// is off on purpose: the pins are placed in frame percentages, so the drawing has to occupy the
+// frame exactly or the two would disagree. Stroke stays hairline-thin at any scale.
+export function GarmentMapSilhouette({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox={`0 0 ${GARMENT_W} ${GARMENT_H}`}
+      preserveAspectRatio='none'
+      className={cn('absolute inset-0 h-full w-full text-textColor', className)}
+      aria-hidden='true'
+      xmlns='http://www.w3.org/2000/svg'
+    >
+      <path
+        d={GARMENT_D}
+        fill='none'
+        stroke='currentColor'
+        strokeWidth={1}
+        vectorEffect='non-scaling-stroke'
+        strokeLinejoin='round'
+        strokeLinecap='round'
+        opacity={0.45}
+      />
+    </svg>
+  );
+}
+
 // A swing-tag hanging from (x, y): the attach dot, a short string, and a pointed tag with a hole.
 function HangingTag({ x, y }: { x: number; y: number }) {
   return (
@@ -283,30 +326,34 @@ export function LabelPlacementBadge({
         <button
           type='button'
           aria-label={`placement: ${placementText}; attachment: ${attachmentText}`}
-          className='relative flex h-14 w-12 shrink-0 items-center justify-center border border-textInactiveColor bg-textColor/5 text-textColor focus:outline-none focus-visible:border-textColor'
+          className='relative flex h-11 w-9 shrink-0 items-center justify-center border border-borderColor bg-bgZebra text-textColor focus:outline-none focus-visible:border-textColor'
         >
           <LabelPlacementPictogram
             placement={placement}
             attachment={attachment}
-            className='h-12 w-9'
+            className='h-9 w-7'
           />
-          <span className='absolute -bottom-px -right-px flex h-4 w-4 items-center justify-center border border-textInactiveColor bg-bgColor text-textColor'>
-            <AttachmentGlyph attachment={attachment} className='h-3 w-3' />
+          <span className='absolute -bottom-px -right-px flex h-3.5 w-3.5 items-center justify-center border border-borderColor bg-bgColor text-textColor'>
+            <AttachmentGlyph attachment={attachment} className='h-2.5 w-2.5' />
           </span>
         </button>
       }
     >
-      <div className='flex w-44 flex-col items-center gap-2'>
+      {/* The per-row detail the badge exists for: the same pictogram enlarged, the attachment
+          glyph spelled out, and the raw placement text underneath. */}
+      <div className='flex w-40 flex-col items-center gap-1.5'>
         <LabelPlacementPictogram
           placement={placement}
           attachment={attachment}
-          className='h-24 w-[4.5rem]'
+          className='h-20 w-16'
         />
         <div className='flex items-center gap-1.5'>
           <AttachmentGlyph attachment={attachment} className='h-4 w-4' />
-          <Text size='small'>{attachmentText}</Text>
+          <Text size='micro' component='span'>
+            {attachmentText}
+          </Text>
         </div>
-        <Text variant='inactive' size='small' className='text-center leading-tight'>
+        <Text size='micro' variant='label' className='text-center leading-tight'>
           {placementText}
         </Text>
       </div>

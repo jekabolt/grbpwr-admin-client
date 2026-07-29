@@ -22,7 +22,7 @@ function useLinkName(link: TaskLink) {
     queryFn: async (): Promise<ResolvedLink> => {
       try {
         if (link.kind === 'techcard') {
-          const r: any = await adminService.GetTechCard({ id: link.id });
+          const r: any = await adminService.GetTechCard({ id: link.id, vatCountryCode: undefined });
           return { name: r?.techCard?.techCard?.name || null };
         }
         if (link.kind === 'product') {

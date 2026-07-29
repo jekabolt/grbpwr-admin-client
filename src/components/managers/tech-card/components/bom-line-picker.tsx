@@ -6,7 +6,10 @@ import { TechCardFormData } from './schema';
 // colourway recipes reference BOM lines through this, so adding/removing/reordering a BOM line never
 // renumbers anything — the reference is the line's own key, not its position.
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+// Same box metrics as <Input>/<Select> so a BOM-line reference is indistinguishable from any
+// other field on the card.
+const cell =
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
 
 const SECTION_SHORT: Record<string, string> = {
   TECH_CARD_BOM_SECTION_FABRIC: 'fabric',
@@ -23,7 +26,10 @@ const SECTION_SHORT: Record<string, string> = {
 
 type BomLineLite = { lineKey?: string; name?: string; section?: string };
 
-function sectionShort(section?: string): string {
+// The one-word section name. `techCardBomSectionOptions` carries operator-facing labels with
+// parentheticals ("hardware (пуговицы / молнии / кнопки)") that don't fit a Pill, so the BOM tile
+// and the catalog plate badge read from here instead.
+export function sectionShort(section?: string): string {
   if (!section) return '';
   return SECTION_SHORT[section] ?? section.replace('TECH_CARD_BOM_SECTION_', '').toLowerCase();
 }

@@ -28,6 +28,8 @@ export function Materials() {
     setParams(
       (prev) => {
         // Switching tab drops the other tab's filters so a stale ?section=/?type= can't leak across.
+        // ?material= is the exception, and deliberately so: it names one article across all four
+        // views (the open card on catalog, the ledger filter on movements), so it follows the user.
         const p = new URLSearchParams();
         if (prev.get('material')) p.set('material', prev.get('material')!);
         p.set('tab', id);

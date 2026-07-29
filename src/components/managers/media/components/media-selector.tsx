@@ -17,6 +17,9 @@ interface MediaSelectorProps {
   showVideos?: boolean;
   isDeleteAccepted?: boolean;
   triggerClassName?: string;
+  /** Custom trigger element (rendered through Radix `asChild`) in place of the default button —
+   *  lets a caller demote the library to a quiet "browse all…" beside an inline add strip. */
+  trigger?: React.ReactNode;
   saveSelectedMedia: (media: common_MediaFull[]) => void;
 }
 
@@ -34,6 +37,7 @@ export function MediaSelector({
   showVideos = true,
   isDeleteAccepted = false,
   triggerClassName,
+  trigger,
   saveSelectedMedia,
 }: MediaSelectorProps) {
   const [open, setOpen] = useState(false);
@@ -182,13 +186,15 @@ export function MediaSelector({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
       <DialogPrimitive.Trigger asChild>
-        <Button
-          variant='main'
-          size='lg'
-          className={triggerClassName ?? 'whitespace-nowrap cursor-pointer'}
-        >
-          {label}
-        </Button>
+        {trigger ?? (
+          <Button
+            variant='main'
+            size='lg'
+            className={triggerClassName ?? 'whitespace-nowrap cursor-pointer'}
+          >
+            {label}
+          </Button>
+        )}
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-overlay' />

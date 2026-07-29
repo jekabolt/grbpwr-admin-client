@@ -44,10 +44,7 @@ export function sizeMatchesGender(name: string, modelGender?: string): boolean {
 
 export type SizeGroup = { key: SizeCategoryKey; label: string; sizes: common_Size[] };
 
-export function groupSizesByCategory(
-  sizes: common_Size[],
-  modelGender?: string,
-): SizeGroup[] {
+export function groupSizesByCategory(sizes: common_Size[], modelGender?: string): SizeGroup[] {
   const buckets: Record<SizeCategoryKey, common_Size[]> = {
     tops: [],
     bottoms: [],

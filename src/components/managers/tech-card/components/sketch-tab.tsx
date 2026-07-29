@@ -1,12 +1,16 @@
 import { common_MediaFull, common_TechCard, common_TechCardMediaKind } from 'api/proto-http/admin';
 import { techCardMediaKindOptions } from 'constants/filter';
-import { cn } from 'lib/utility';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
+import { Accordion } from 'ui/components/accordion';
 import { type AnnotatedCallout } from 'ui/components/annotated-image';
 import { Button } from 'ui/components/button';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
+import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
+import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
+import Textarea from 'ui/components/text-area';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
@@ -43,61 +47,42 @@ type FormCallout = {
   posY?: string;
 };
 
-function Section({
-  title,
-  className,
-  children,
-}: {
-  title: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className={cn('space-y-4 border border-textInactiveColor p-4', className)}>
-      <Text variant='uppercase' size='large'>
-        {title}
-      </Text>
-      {children}
-    </section>
-  );
-}
-
 // Media resolves to a URL only a tick after it's picked; an unresolved id is skipped (not rendered
 // blank), so this gates which field-array rows become gallery images.
 const mediaUrl = (full?: common_MediaFull): string =>
   full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
 
-// The editable body of a callout's sticky note: just its text. The structured fields (part,
-// dimensions, number, which image it's pinned to) live in the collapsed "all callouts" list
-// below, so the note that pops on a pin stays small and legible — a place to write, not a form.
+// The editable body of a callout's note: just its text. The structured fields (part, dimensions,
+// number, which image it's pinned to) live in the "callouts" accordion below, so the note that pops
+// on a pin stays small and legible — a place to write, not a form.
 function CalloutNoteBody({ index }: { index: number }) {
   const { control } = useFormContext<TechCardFormData>();
   const { field } = useController({ control, name: `callouts.${index}.description` });
   return (
-    <textarea
+    <Textarea
       {...field}
       value={field.value ?? ''}
-      rows={3}
+      rows={2}
       maxLength={2000}
       placeholder='describe this callout…'
-      onKeyDown={(e) => {
+      onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Escape') {
           e.preventDefault();
           e.currentTarget.blur();
         }
       }}
-      className='w-full resize-none border border-textInactiveColor bg-bgColor p-1.5 text-textBaseSize text-textColor placeholder:text-labelColor focus:border-textColor focus:outline-none'
+      className='min-h-[38px] resize-none'
     />
   );
 }
 
-// The tech-card adapter over the shared FocusedAnnotator: binds one media list (moodboard OR
-// technical) + its callouts to the gallery grammar. It owns the tech-card-specific data — the
-// `{ mediaId, kind }` media rows, the structured `{ part, description, dimensions }` callouts, the
-// per-image "kind" select, and "set as preview" — and hands the shared component only resolved
-// views + callbacks, so moodboard/sketch behave exactly as before while the fitting reuses the same
-// component with its own bindings.
-function TechCardFocusedGallery({
+// The tech-card adapter over the shared FocusedAnnotator, driven in GRID layout: every view is on
+// screen at once carrying its own pins, so front and back can be read together without clicking
+// between them. It owns the tech-card-specific data — the `{ mediaId, kind }` media rows, the
+// structured `{ part, description, dimensions }` callouts, the per-image "kind" select, and "set as
+// preview" — and hands the shared component only resolved views + callbacks, so moodboard/sketch
+// behave exactly as before while the fitting reuses the same component with its own bindings.
+function TechCardGallery({
   listName,
   mediaById,
   onPickedMedia,
@@ -214,6 +199,7 @@ function TechCardFocusedGallery({
 
   return (
     <FocusedAnnotator
+      layout='grid'
       views={views}
       calloutsFor={calloutsFor}
       onAddCallout={addCalloutTo}
@@ -243,6 +229,7 @@ function TechCardFocusedGallery({
       notesMode={notesMode}
       pinSize={pinSize}
       emptyLabel={emptyLabel}
+      fallbackAspect='3/4'
       previewFirst
       mediaLabel={mediaLabel}
       carouselLabel={`${isMoodboard ? 'moodboard' : 'sketch'} images`}
@@ -250,22 +237,23 @@ function TechCardFocusedGallery({
         const index = mediaFA.fields.findIndex((f) => f.mediaId === view.mediaId);
         if (index < 0) return null;
         return (
-          <div className='flex items-end justify-between gap-3'>
-            <div className='min-w-0 flex-1'>
+          // wraps rather than squeezing: a 180px tile cannot hold the select and the button side
+          // by side, and a crushed select is worse than a second line.
+          <div className='flex flex-wrap items-end gap-1.5'>
+            <div className='min-w-[92px] flex-1'>
               <SelectField name={`${listName}.${index}.kind`} label='kind' items={kindOptions} />
             </div>
-            <div className='flex shrink-0 flex-col items-end gap-1'>
+            <div className='shrink-0'>
               {index === 0 ? (
-                <Text variant='label' size='small' className='uppercase'>
-                  preview image
-                </Text>
+                <Pill tone='mut'>preview</Pill>
               ) : (
                 <Button
                   type='button'
                   variant='secondary'
+                  size='xs'
                   // first item = the card's preview / thumbnail (proto: idea preview_url)
                   onClick={() => mediaFA.move(index, 0)}
-                  className='px-2 py-1 uppercase'
+                  className='cursor-pointer'
                 >
                   set as preview
                 </Button>
@@ -278,16 +266,11 @@ function TechCardFocusedGallery({
   );
 }
 
-// The full, structured callout editor — number, part code, dimensions, which image it is pinned
-// to, and the note. Collapsed by default (the pins + their pop-out notes carry the day-to-day
-// flow); this is the escape hatch for renumbering, re-pinning, or reaching an un-pinned callout.
-function CalloutsList({
-  mediaById,
-  view,
-}: {
-  mediaById: Map<number, common_MediaFull>;
-  view: 'technical' | 'moodboard';
-}) {
+// The full, structured callout editor — number, part code, dimensions, which image it is pinned to,
+// and the note. With every view on screen carrying its own pins, this list's job narrows to
+// reaching UNPINNED callouts (a callout survives its image being removed), so it announces how many
+// there are and opens itself when any exist.
+function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
   const { control } = useFormContext<TechCardFormData>();
   const { fields, remove } = useFieldArray({ control, name: 'callouts' });
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
@@ -300,7 +283,8 @@ function CalloutsList({
     kind?: string;
   }>;
   const media = view === 'moodboard' ? moodboardMedia : technicalMedia;
-  const [open, setOpen] = useState(false);
+  // null = the user hasn't touched the disclosure, so it follows the unpinned count.
+  const [open, setOpen] = useState<boolean | null>(null);
 
   const viewMediaIds = useMemo(() => new Set(media.map((m) => m.mediaId)), [media]);
   // A callout belongs to this list when pinned to one of the view's images; an un-pinned callout
@@ -312,6 +296,8 @@ function CalloutsList({
   const visibleFields = fields
     .map((f, index) => ({ f, index }))
     .filter(({ index }) => inView(index));
+  const unpinned = visibleFields.filter(({ index }) => !callouts[index]?.mediaId).length;
+  const isOpen = open ?? unpinned > 0;
 
   const pinOptions = [
     { value: 0, label: '(unpinned)' },
@@ -324,78 +310,85 @@ function CalloutsList({
   ];
 
   return (
-    <div className='border-t border-textInactiveColor pt-3'>
-      <button
-        type='button'
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className='flex w-full cursor-pointer items-center justify-between gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-      >
-        <Text variant='uppercase' size='small'>
-          all callouts {visibleFields.length ? `(${visibleFields.length})` : ''}
+    <Accordion
+      open={isOpen}
+      onOpenChange={setOpen}
+      title={
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='group'
+          component='span'
+          className='font-bold'
+        >
+          callouts ({visibleFields.length})
         </Text>
-        <Text variant='label' size='small' className='uppercase'>
-          {open ? '− hide' : '+ show'}
-        </Text>
-      </button>
-
-      {open && (
-        <div className='mt-3 space-y-3'>
-          {visibleFields.length === 0 ? (
-            <Text variant='label' size='small'>
-              no callouts yet. turn on “add callout”, then click the image above
-            </Text>
-          ) : (
-            visibleFields.map(({ f, index }) => (
-              <div key={f.id} className='space-y-2 border border-textInactiveColor p-3'>
-                <div className='flex items-center justify-between'>
-                  <Text variant='uppercase' size='small'>
-                    callout {index + 1}
-                  </Text>
+      }
+      meta={unpinned > 0 ? <Pill tone='attention'>{unpinned} unpinned</Pill> : undefined}
+    >
+      <div className='space-y-2'>
+        {visibleFields.length === 0 ? (
+          <Text size='micro' variant='label'>
+            no callouts yet. turn on “add callout”, then click any image above
+          </Text>
+        ) : (
+          visibleFields.map(({ f, index }) => (
+            <div key={f.id} className='space-y-2 border border-borderColor p-2'>
+              <div className='flex items-center gap-1.5'>
+                {/* Auto-assigned (nextNumber = max+1) and referenced BY number by
+                    pieces/operations/issues — read-only so hand-edits can't collide with the
+                    sequence. Kept in the field array so it still round-trips. */}
+                <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano leading-none tabular-nums text-bgColor'>
+                  {callouts[index]?.number ?? index + 1}
+                </span>
+                <Text
+                  size='micro'
+                  variant='uppercase'
+                  tracking='group'
+                  component='span'
+                  className='font-bold'
+                >
+                  callout
+                </Text>
+                {!callouts[index]?.mediaId && <Pill tone='attention'>unpinned</Pill>}
+                <div className='ml-auto shrink-0'>
                   <Button
                     type='button'
                     variant='secondary'
+                    size='xs'
                     aria-label='remove callout'
                     onClick={() => remove(index)}
+                    className='cursor-pointer'
                   >
                     ✕
                   </Button>
                 </div>
-                <div className='grid grid-cols-1 gap-2 lg:grid-cols-4'>
-                  {/* Auto-assigned (nextNumber = max+1) and referenced BY number by
-                      pieces/operations/issues — read-only so hand-edits can't collide with the
-                      sequence. Kept in the field array so it still round-trips. */}
-                  <div className='space-y-2'>
-                    <Text className='leading-none lowercase'>number</Text>
-                    <Text variant='label' className='tabular-nums'>
-                      {callouts[index]?.number ?? index + 1}
-                    </Text>
-                  </div>
-                  <ComboField
-                    name={`callouts.${index}.part`}
-                    label='part (код детали)'
-                    options={pieceCodeOptions}
-                  />
-                  <InputField name={`callouts.${index}.dimensions`} label='dimensions' />
-                  <SelectField
-                    name={`callouts.${index}.mediaId`}
-                    label='pinned to'
-                    items={pinOptions}
-                    valueAsNumber
-                  />
-                </div>
-                <TextareaField
-                  name={`callouts.${index}.description`}
-                  label='description'
-                  rows={2}
-                  maxLength={2000}
+              </div>
+              <div className='grid grid-cols-1 gap-2 lg:grid-cols-3'>
+                <ComboField
+                  name={`callouts.${index}.part`}
+                  label='part (код детали)'
+                  options={pieceCodeOptions}
+                />
+                <InputField name={`callouts.${index}.dimensions`} label='dimensions' />
+                <SelectField
+                  name={`callouts.${index}.mediaId`}
+                  label='pinned to'
+                  items={pinOptions}
+                  valueAsNumber
                 />
               </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
+              <TextareaField
+                name={`callouts.${index}.description`}
+                label='description'
+                rows={2}
+                maxLength={2000}
+              />
+            </div>
+          ))
+        )}
+      </div>
+    </Accordion>
   );
 }
 
@@ -407,22 +400,21 @@ function MoodboardComments() {
   const { field } = useController({ control, name: 'notes' });
   const id = useId();
   return (
-    <div className='space-y-1 border-t border-textInactiveColor pt-3'>
-      <label htmlFor={id}>
-        <Text variant='label' size='small' className='uppercase' component='span'>
-          general comments
-        </Text>
+    <div>
+      <GroupLabel>general comments</GroupLabel>
+      <label htmlFor={id} className='sr-only'>
+        general comments
       </label>
-      <textarea
-        id={id}
+      <Textarea
         {...field}
+        id={id}
         value={field.value ?? ''}
-        rows={4}
+        rows={3}
         maxLength={2000}
         placeholder='overall notes on the moodboard, references, direction…'
-        className='w-full resize-none border border-textInactiveColor bg-bgColor p-2 text-textBaseSize text-textColor placeholder:text-labelColor focus:border-textColor focus:outline-none'
+        className='resize-none'
       />
-      <Text variant='label' size='small'>
+      <Text size='micro' variant='label' className='mt-px'>
         shared with the card’s notes field
       </Text>
     </div>
@@ -432,7 +424,7 @@ function MoodboardComments() {
 // Sketch sheet — owns the resolved-media map shared by both surfaces (moodboard + technical) so a
 // freshly-picked image can be annotated without a save/reload. Media ids are unique across the
 // two lists, so one shared map serves both. `view` splits the two independent media lists
-// (technicalMedia vs moodboardMedia) across two constructor tabs.
+// (technicalMedia vs moodboardMedia) across two constructor tabs; both render the same grid.
 export function SketchTab({
   techCard,
   view = 'sketch',
@@ -458,8 +450,12 @@ export function SketchTab({
 
   if (view === 'moodboard') {
     return (
-      <Section title='moodboard (mood / reference / swatches)'>
-        <TechCardFocusedGallery
+      <section className='flex flex-col gap-2.5'>
+        <SectionHeader
+          title='moodboard'
+          question='— mood, reference and swatch images; pin a note on any of them'
+        />
+        <TechCardGallery
           listName='moodboardMedia'
           mediaById={mediaById}
           onPickedMedia={onPicked}
@@ -469,15 +465,19 @@ export function SketchTab({
           addLabel='add moodboard image'
           purpose='moodboard reference'
         />
-        <CalloutsList mediaById={mediaById} view='moodboard' />
+        <CalloutsList view='moodboard' />
         <MoodboardComments />
-      </Section>
+      </section>
     );
   }
 
   return (
-    <Section title='technical sketch'>
-      <TechCardFocusedGallery
+    <section className='flex flex-col gap-2.5'>
+      <SectionHeader
+        title='technical sketch'
+        question='— front / back / detail views, each carrying the numbered callouts the construction tab points at'
+      />
+      <TechCardGallery
         listName='technicalMedia'
         mediaById={mediaById}
         onPickedMedia={onPicked}
@@ -487,7 +487,7 @@ export function SketchTab({
         addLabel='add sketch'
         purpose='tech sketch'
       />
-      <CalloutsList mediaById={mediaById} view='technical' />
-    </Section>
+      <CalloutsList view='technical' />
+    </section>
   );
 }

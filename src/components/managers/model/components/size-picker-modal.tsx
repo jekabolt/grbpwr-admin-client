@@ -1,16 +1,26 @@
-import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { common_SizeSkuSystem } from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
+import { Chip, ChipRow } from 'ui/components/chip';
+import { GroupLabel } from 'ui/components/group-label';
+import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
-import { groupSizesByCategory } from './size-categories';
+import { useSizeSystems } from './use-size-systems';
 
-// Reusable modal size selector grouped by category (tops/bottoms/tailored/shoes),
-// filtered by the given gender. Used by the model default-sizes field and the
-// fitting sizing section. Selection state lives in the caller.
+/**
+ * Size selector — a POPOVER anchored to its trigger, not a dialog.
+ *
+ * It used to be a 720 × 640 centred modal with apply/cancel. Picking a size is a one-click
+ * decision you want to see land: the chips behind the panel update as you click, which is the
+ * whole reason to anchor rather than overlay. There is nothing to apply and nothing to cancel —
+ * clicking a chip toggles it in the caller's state immediately.
+ *
+ * `scope='other'` is the tech card's case: the permitted systems are already rendered inline on
+ * the page, so the panel's remaining job is the systems the category does NOT default to.
+ * `scope='all'` (the default) is the model's case, where nothing is rendered inline.
+ *
+ * The name is kept for the two existing call sites; `SizePickerPopover` is the alias to migrate to.
+ */
 export function SizePickerModal({
   selectedIds,
   onToggle,
@@ -19,6 +29,8 @@ export function SizePickerModal({
   triggerLabel = 'select sizes',
   title = 'sizes',
   triggerClassName,
+  scope = 'all',
+  disabled,
 }: {
   selectedIds: number[];
   onToggle: (id: number) => void;
@@ -29,103 +41,70 @@ export function SizePickerModal({
   triggerLabel?: string;
   title?: string;
   triggerClassName?: string;
+  /** 'other' shows only what the category filtered out (its permitted systems are inline already). */
+  scope?: 'all' | 'other';
+  disabled?: boolean;
 }) {
-  const { dictionary } = useDictionary();
-  const [open, setOpen] = useState(false);
+  const { permitted, other } = useSizeSystems({ gender, allowedSizeSystems, selectedIds });
+  const groups = scope === 'other' ? other : [...permitted, ...other];
 
   const selected = new Set(selectedIds);
-  const filteredSizes = useMemo(() => {
-    const sizes = dictionary?.sizes ?? [];
-    if (!allowedSizeSystems?.length) return sizes;
-    const allow = new Set(allowedSizeSystems);
-    return sizes.filter(
-      (s) => allow.has(s.skuSystem ?? 'SIZE_SKU_SYSTEM_UNKNOWN') || selected.has(s.id ?? 0),
-    );
-  }, [dictionary?.sizes, allowedSizeSystems, selectedIds]);
-
-  const groups = useMemo(
-    () => groupSizesByCategory(filteredSizes, gender),
-    [filteredSizes, gender],
-  );
+  const genderNote =
+    gender && gender !== 'GENDER_ENUM_UNKNOWN' ? 'filtered by target gender' : 'all genders';
 
   return (
-    <DialogPrimitives.Root open={open} onOpenChange={setOpen}>
-      <DialogPrimitives.Trigger asChild>
-        <Button type='button' variant='main' className={cn('uppercase', triggerClassName)}>
-          {triggerLabel}
-          {selectedIds.length ? ` (${selectedIds.length})` : ''}
-        </Button>
-      </DialogPrimitives.Trigger>
-      <DialogPrimitives.Portal>
-        <DialogPrimitives.Overlay className='fixed inset-0 z-50 h-screen bg-overlay' />
-        <DialogPrimitives.Content
+    <GenericPopover
+      title={title}
+      className='w-[270px] max-w-[calc(100vw-1.5rem)]'
+      triggerProps={{ disabled }}
+      openElement={
+        <span
           className={cn(
-            'fixed z-50 flex flex-col border border-textInactiveColor bg-bgColor text-textColor',
-            'inset-x-2 bottom-2 top-2 p-3',
-            'lg:inset-x-auto lg:left-1/2 lg:top-1/2 lg:bottom-auto lg:h-[min(85vh,640px)] lg:w-[min(92vw,720px)] lg:-translate-x-1/2 lg:-translate-y-1/2',
+            'inline-flex items-center gap-1 border border-borderColor bg-bgColor px-2.5 py-1',
+            'text-micro uppercase tracking-label',
+            disabled ? 'text-textInactiveColor' : 'text-textColor hover:border-textColor',
+            triggerClassName,
           )}
         >
-          <div className='flex shrink-0 items-center justify-between border-b border-textInactiveColor pb-2'>
-            <DialogPrimitives.Title className='text-lg uppercase'>{title}</DialogPrimitives.Title>
-            <DialogPrimitives.Close asChild>
-              <Button type='button'>[x]</Button>
-            </DialogPrimitives.Close>
-          </div>
-          <DialogPrimitives.Description className='sr-only'>
-            Select sizes by category
-          </DialogPrimitives.Description>
-
-          <Text variant='inactive' size='small' className='py-2'>
-            {gender && gender !== 'GENDER_ENUM_UNKNOWN'
-              ? 'showing sizes for the selected gender'
-              : 'all sizes shown'}
+          {triggerLabel}
+          {selectedIds.length ? ` (${selectedIds.length})` : ''} ▾
+        </span>
+      }
+    >
+      <div className='flex flex-col'>
+        {groups.length === 0 ? (
+          <Text size='micro' variant='label'>
+            {scope === 'other' ? 'no other systems for this category' : 'no sizes available'}
           </Text>
-
-          <div className='min-h-0 flex-1 space-y-5 overflow-y-auto'>
-            {groups.length === 0 ? (
-              <Text variant='inactive'>no sizes available</Text>
-            ) : (
-              groups.map((group) => (
-                <div key={group.key} className='space-y-2'>
-                  <Text variant='uppercase' size='small'>
-                    {group.label}
-                  </Text>
-                  <div className='flex flex-wrap gap-2'>
-                    {group.sizes.map((s) => {
-                      const id = s.id ?? 0;
-                      const on = selected.has(id);
-                      return (
-                        <button
-                          type='button'
-                          key={id}
-                          onClick={() => onToggle(id)}
-                          aria-pressed={on}
-                          className={cn(
-                            'border px-2 py-1 text-textBaseSize uppercase transition-colors',
-                            on
-                              ? 'border-textColor bg-textColor text-bgColor'
-                              : 'border-textInactiveColor text-textColor hover:border-textInactiveColor',
-                          )}
-                        >
-                          {formatSizeName(s.name)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className='flex shrink-0 justify-end border-t border-textInactiveColor pt-3'>
-            <DialogPrimitives.Close asChild>
-              <Button type='button' variant='main' size='lg' className='uppercase'>
-                done
-              </Button>
-            </DialogPrimitives.Close>
-          </div>
-        </DialogPrimitives.Content>
-      </DialogPrimitives.Portal>
-    </DialogPrimitives.Root>
+        ) : (
+          groups.map((group, gi) => (
+            <div key={group.key}>
+              <GroupLabel className={gi === 0 ? 'mt-0' : undefined}>{group.label}</GroupLabel>
+              <ChipRow>
+                {group.sizes.map((s) => {
+                  const id = s.id ?? 0;
+                  return (
+                    <Chip
+                      key={id}
+                      selected={selected.has(id)}
+                      pressed={selected.has(id)}
+                      onClick={() => onToggle(id)}
+                    >
+                      {formatSizeName(s.name)}
+                    </Chip>
+                  );
+                })}
+              </ChipRow>
+            </div>
+          ))
+        )}
+        <Text size='micro' variant='label' className='mt-2'>
+          {selectedIds.length} selected · {genderNote}
+        </Text>
+      </div>
+    </GenericPopover>
   );
 }
+
+/** Preferred name — the component is a popover, not a modal. */
+export const SizePickerPopover = SizePickerModal;

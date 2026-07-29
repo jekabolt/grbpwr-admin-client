@@ -1,52 +1,42 @@
-import { composition } from 'constants/garment-composition';
+import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
-import { MaterialRow } from './material-row';
 
 interface MaterialsListProps {
   compositionGarment: [string, string][];
-  selectedPart: string;
   isSelected: (materialKey: string) => boolean;
-  getPercentageForMaterial: (materialKey: string) => number;
   onToggleMaterial: (materialKey: string, materialCode: string) => void;
-  onPercentageChange: (materialKey: string, value: string) => void;
-  totalPercentage: number;
 }
 
+// The fibre catalog for the currently browsed category, as toggle chips. Picking one adds a 0% row
+// to the selected part above; picking it again removes it. A scroll box rather than a grid of cards
+// so the dialog stays a narrow column no matter how long the category is.
 export function MaterialsList({
   compositionGarment,
-  selectedPart,
   isSelected,
-  getPercentageForMaterial,
   onToggleMaterial,
-  onPercentageChange,
-  totalPercentage,
 }: MaterialsListProps) {
-  const partLabel =
-    composition.garment_parts[selectedPart as keyof typeof composition.garment_parts];
-
+  if (compositionGarment.length === 0) {
+    return (
+      <Text variant='label' size='micro'>
+        no fibres in this category
+      </Text>
+    );
+  }
   return (
-    <div>
-      <div className='flex justify-between items-center'>
-        <Text variant='uppercase'>
-          Materials for {partLabel} (Total: {totalPercentage}%)
-        </Text>
-        <Text variant='inactive' className='uppercase'>
-          Click materials to select/deselect, then set percentages
-        </Text>
-      </div>
-      <div className='grid lg:grid-cols-4 grid-cols-1 gap-2 overflow-y-auto'>
-        {compositionGarment.map(([key, value]) => (
-          <MaterialRow
+    <div className='max-h-40 overflow-y-auto border border-borderColor p-1.5'>
+      <ChipRow>
+        {compositionGarment.map(([key, code]) => (
+          <Chip
             key={key}
-            materialKey={key}
-            materialCode={value}
-            isSelected={isSelected(key)}
-            percentage={getPercentageForMaterial(key)}
-            onToggle={() => onToggleMaterial(key, value)}
-            onPercentageChange={(val) => onPercentageChange(key, val)}
-          />
+            selected={isSelected(key)}
+            pressed={isSelected(key)}
+            title={code}
+            onClick={() => onToggleMaterial(key, code)}
+          >
+            {key}
+          </Chip>
         ))}
-      </div>
+      </ChipRow>
     </div>
   );
 }

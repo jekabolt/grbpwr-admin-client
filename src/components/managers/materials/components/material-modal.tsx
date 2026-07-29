@@ -11,9 +11,11 @@ import { techCardBomSectionOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { fieldErrorSummary } from 'utils/field-errors';
@@ -22,7 +24,9 @@ import { mediaThumbUrl } from './material-thumb';
 import { materialPurposeOptions, resolveMaterialPurpose } from './purpose-options';
 import { useSaveMaterial } from './useMaterials';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+// Same box metrics as <Input> — every control in the admin is a 1px box at 3px/7px, 22px min.
+const cell =
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none';
 
 // CTI typing (S15/PLM-rework Q5): material_class selects which typed attribute set below applies.
 // MATERIAL_CLASS_UNKNOWN is not offered as a choice — legacy rows are resolved to FABRIC or OTHER
@@ -287,19 +291,9 @@ const saveErrorMessage = (e: unknown): string => {
   return fieldErrorSummary(e, 'Failed to save material');
 };
 
-// A titled group header — the flat 16-field dialog (#51) is now split into labelled identity /
-// attributes / composition / warehouse sections so the form reads as steps, not one wall of inputs.
-function SectionHeader({ title, right }: { title: string; right?: ReactNode }) {
-  return (
-    <div className='mt-1 flex items-center justify-between gap-2 border-b border-textInactiveColor pb-1'>
-      <Text variant='uppercase' size='small'>
-        {title}
-      </Text>
-      {right}
-    </div>
-  );
-}
-
+// The flat 16-field dialog (#51) is split into labelled identity / attributes / composition /
+// warehouse groups so the form reads as steps, not one wall of inputs. `GroupLabel` is the shared
+// primitive for exactly this — a sub-group divider one step below a section rule.
 const grid = 'grid grid-cols-1 gap-2 sm:grid-cols-2';
 
 export function MaterialModal({
@@ -596,13 +590,15 @@ export function MaterialModal({
       // Block save while composition is present but doesn't sum to 100 (#37) — flagged inline too.
       confirmDisabled={save.isPending || !compValid}
     >
-      <div className='flex w-full flex-col gap-3 lg:w-[36rem]'>
+      <div className='flex w-full flex-col gap-2 lg:w-[36rem]'>
         {/* ---- IDENTITY -------------------------------------------------------------------- */}
-        <SectionHeader title='identity' />
+        <GroupLabel>identity</GroupLabel>
         {/* #39: catalog image — image_id is the write-side ref; MediaSelector handles upload +
             crop (reused as-is from the product/archive thumbnail pattern). */}
         <div className='flex flex-col gap-1'>
-          <Text size='small'>image</Text>
+          <Text variant='label' size='micro' tracking='label' className='uppercase'>
+            image
+          </Text>
           <MediaPreviewWithSelector
             mediaUrl={mediaThumbUrl(image)}
             aspectRatio={['1:1', 'Custom']}
@@ -618,7 +614,9 @@ export function MaterialModal({
         </div>
         <div className={grid}>
           <label className='sm:col-span-2 flex flex-col gap-1'>
-            <Text size='small'>name *</Text>
+            <Text variant='label' size='micro' tracking='label' className='uppercase'>
+              name *
+            </Text>
             <input
               className={cell}
               value={d.name}
@@ -626,7 +624,9 @@ export function MaterialModal({
             />
           </label>
           <label className='flex flex-col gap-1'>
-            <Text size='small'>material class</Text>
+            <Text variant='label' size='micro' tracking='label' className='uppercase'>
+              material class
+            </Text>
             <select
               className={cell}
               value={d.materialClass}
@@ -644,7 +644,9 @@ export function MaterialModal({
               the class (see changeClass + submit), so the control is hidden but the field persists. */}
           {!derivedSection(d.materialClass) && (
             <label className='flex flex-col gap-1'>
-              <Text size='small'>section</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                section
+              </Text>
               <select
                 className={cell}
                 value={d.section}
@@ -659,7 +661,9 @@ export function MaterialModal({
             </label>
           )}
           <label className='flex flex-col gap-1'>
-            <Text size='small'>unit</Text>
+            <Text variant='label' size='micro' tracking='label' className='uppercase'>
+              unit
+            </Text>
             <input
               className={cell}
               placeholder='m / pcs / kg'
@@ -668,7 +672,9 @@ export function MaterialModal({
             />
           </label>
           <label className='flex flex-col gap-1'>
-            <Text size='small'>supplier</Text>
+            <Text variant='label' size='micro' tracking='label' className='uppercase'>
+              supplier
+            </Text>
             <input
               className={cell}
               value={d.supplier}
@@ -678,22 +684,26 @@ export function MaterialModal({
         </div>
 
         {/* ---- SOURCING (collapsible) — edge fields lifted out of the identity block -------- */}
-        <SectionHeader
-          title='sourcing'
-          right={
-            <button
+        <GroupLabel
+          action={
+            <Button
               type='button'
-              className='text-small uppercase underline'
+              size='xs'
+              variant='underline'
               onClick={() => setSourcingOpen((v) => !v)}
             >
               {sourcingOpen ? 'hide' : 'show'}
-            </button>
+            </Button>
           }
-        />
+        >
+          sourcing
+        </GroupLabel>
         {sourcingOpen && (
           <div className={grid}>
             <label className='sm:col-span-2 flex flex-col gap-1'>
-              <Text size='small'>supplier ref</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                supplier ref
+              </Text>
               <input
                 className={cell}
                 value={d.supplierRef}
@@ -703,14 +713,16 @@ export function MaterialModal({
             {/* #40: sample vs production vs both — persisted on common_Material.purpose (defaults to
                 BOTH; a legacy/unset value round-trips as BOTH via resolveMaterialPurpose). */}
             <div className='sm:col-span-2 flex flex-col gap-1'>
-              <Text size='small'>purpose</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                purpose
+              </Text>
               <div className='flex gap-2'>
                 {materialPurposeOptions.map((o) => (
                   <Button
                     key={o.value}
                     type='button'
                     variant={purpose === o.value ? 'main' : 'secondary'}
-                    className='uppercase'
+                    size='sm'
                     onClick={() => setPurpose(o.value)}
                   >
                     {o.label}
@@ -722,12 +734,14 @@ export function MaterialModal({
         )}
 
         {/* ---- ATTRIBUTES ------------------------------------------------------------------ */}
-        <SectionHeader title='attributes' />
+        <GroupLabel>attributes</GroupLabel>
         {d.materialClass === 'MATERIAL_CLASS_FABRIC' && (
           <div className='flex flex-col gap-2'>
             <div className={grid}>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>width (cm)</Text>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  width (cm)
+                </Text>
                 <input
                   className={cell}
                   inputMode='decimal'
@@ -736,7 +750,9 @@ export function MaterialModal({
                 />
               </label>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>weight (gsm)</Text>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  weight (gsm)
+                </Text>
                 <input
                   className={cell}
                   inputMode='decimal'
@@ -747,17 +763,21 @@ export function MaterialModal({
             </div>
             {/* direction / shrinkage / roll length behind a disclosure so width + gsm stay the
                 primary fabric fields; all three still persist on fabricAttrs regardless of state. */}
-            <button
+            <Button
               type='button'
-              className='w-fit text-small uppercase underline'
+              size='xs'
+              variant='underline'
+              className='w-fit'
               onClick={() => setFabricAdvancedOpen((v) => !v)}
             >
               {fabricAdvancedOpen ? 'hide advanced specs' : 'advanced fabric specs'}
-            </button>
+            </Button>
             {fabricAdvancedOpen && (
               <div className={grid}>
                 <label className='flex flex-col gap-1'>
-                  <Text size='small'>fabric direction</Text>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    fabric direction
+                  </Text>
                   <select
                     className={cell}
                     value={d.fabric.fabricDirection}
@@ -771,7 +791,9 @@ export function MaterialModal({
                   </select>
                 </label>
                 <label className='flex flex-col gap-1'>
-                  <Text size='small'>shrinkage (%)</Text>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    shrinkage (%)
+                  </Text>
                   <input
                     className={cell}
                     inputMode='decimal'
@@ -780,7 +802,9 @@ export function MaterialModal({
                   />
                 </label>
                 <label className='flex flex-col gap-1'>
-                  <Text size='small'>roll length (m)</Text>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    roll length (m)
+                  </Text>
                   <input
                     className={cell}
                     inputMode='decimal'
@@ -796,7 +820,9 @@ export function MaterialModal({
         {d.materialClass === 'MATERIAL_CLASS_HARDWARE' && (
           <div className={grid}>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>diameter (mm)</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                diameter (mm)
+              </Text>
               <input
                 className={cell}
                 inputMode='decimal'
@@ -805,7 +831,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>dimensions</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                dimensions
+              </Text>
               <input
                 className={cell}
                 value={d.hardware.dimensions}
@@ -813,7 +841,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>finish</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                finish
+              </Text>
               <input
                 className={cell}
                 value={d.hardware.finish}
@@ -821,7 +851,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>base material</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                base material
+              </Text>
               <input
                 className={cell}
                 value={d.hardware.baseMaterial}
@@ -829,7 +861,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>weight (g)</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                weight (g)
+              </Text>
               <input
                 className={cell}
                 inputMode='decimal'
@@ -843,7 +877,9 @@ export function MaterialModal({
         {d.materialClass === 'MATERIAL_CLASS_THREAD' && (
           <div className={grid}>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>ticket / tex</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                ticket / tex
+              </Text>
               <input
                 className={cell}
                 value={d.thread.ticketTex}
@@ -851,7 +887,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>length per cone (m)</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                length per cone (m)
+              </Text>
               <input
                 className={cell}
                 inputMode='decimal'
@@ -860,7 +898,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>needle reco</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                needle reco
+              </Text>
               <input
                 className={cell}
                 value={d.thread.needleReco}
@@ -873,7 +913,9 @@ export function MaterialModal({
         {d.materialClass === 'MATERIAL_CLASS_PACKAGING' && (
           <div className={grid}>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>substrate</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                substrate
+              </Text>
               <input
                 className={cell}
                 value={d.packaging.substrate}
@@ -881,7 +923,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>dimensions</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                dimensions
+              </Text>
               <input
                 className={cell}
                 value={d.packaging.dimensions}
@@ -889,7 +933,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>gsm</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                gsm
+              </Text>
               <input
                 className={cell}
                 inputMode='decimal'
@@ -898,7 +944,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>print method</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                print method
+              </Text>
               <input
                 className={cell}
                 value={d.packaging.printMethod}
@@ -936,6 +984,7 @@ export function MaterialModal({
                       <Button
                         type='button'
                         variant='secondary'
+                        size='xs'
                         className='shrink-0'
                         aria-label='remove attribute'
                         onClick={() => removeKvRow(i)}
@@ -946,12 +995,7 @@ export function MaterialModal({
                   ))
                 )}
                 <div>
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    className='uppercase'
-                    onClick={addKvRow}
-                  >
+                  <Button type='button' variant='secondary' size='sm' onClick={addKvRow}>
                     + field
                   </Button>
                 </div>
@@ -960,10 +1004,10 @@ export function MaterialModal({
               // Legacy non-object JSON — can't be split into name/value rows, so it's shown read-only
               // and round-trips unchanged on save (buildOtherAttrs returns otherAttrsRaw for raw mode).
               <div className='flex flex-col gap-1'>
-                <Text variant='label' size='small'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
                   legacy value — read-only
                 </Text>
-                <div className='overflow-x-auto whitespace-pre-wrap break-words border border-textInactiveColor bg-bgColor px-2 py-1 text-small text-labelColor'>
+                <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-bgZebra px-[7px] py-[3px] text-micro text-labelColor'>
                   {d.otherAttrsRaw}
                 </div>
               </div>
@@ -972,16 +1016,15 @@ export function MaterialModal({
         )}
 
         {/* ---- COMPOSITION (#37) — guided wizard ------------------------------------------- */}
-        <SectionHeader
-          title='composition'
-          right={
+        <GroupLabel
+          action={
             compFilled.length > 0 ? (
-              <Text variant={compValid ? 'label' : 'error'} size='small'>
-                total {Number(compTotal.toFixed(2))}%{compValid ? ' ✓' : ' / 100'}
-              </Text>
+              <Pill tone={compValid ? 'ok' : 'warn'}>{Number(compTotal.toFixed(2))}%</Pill>
             ) : undefined
           }
-        />
+        >
+          composition
+        </GroupLabel>
         <div className='flex flex-col gap-2'>
           {legacyComposition && (
             <Text variant='inactive' size='small'>
@@ -989,17 +1032,11 @@ export function MaterialModal({
             </Text>
           )}
           {compFilled.length > 0 ? (
-            <div className='flex flex-wrap gap-1.5'>
+            <div className='flex flex-wrap gap-1'>
               {compFilled.map((r, i) => (
-                <div
-                  key={i}
-                  className='flex items-baseline gap-1.5 border border-textInactiveColor px-2 py-1'
-                >
-                  <Text size='small'>{fiberName(r.fiberCode)}</Text>
-                  <Text size='small' variant='inactive'>
-                    {r.percent.trim() ? `${r.percent}%` : '—'}
-                  </Text>
-                </div>
+                <Pill key={i} tone='ink'>
+                  {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : '—'}
+                </Pill>
               ))}
             </div>
           ) : (
@@ -1015,12 +1052,7 @@ export function MaterialModal({
             </Text>
           )}
           <div>
-            <Button
-              type='button'
-              variant='secondary'
-              className='uppercase'
-              onClick={() => setCompOpen(true)}
-            >
+            <Button type='button' variant='secondary' size='sm' onClick={() => setCompOpen(true)}>
               {compFilled.length > 0 ? 'edit composition' : '＋ add composition'}
             </Button>
           </div>
@@ -1034,31 +1066,31 @@ export function MaterialModal({
         />
 
         {/* ---- WAREHOUSE (collapsible, #51) ------------------------------------------------ */}
-        <SectionHeader
-          title='warehouse'
-          right={
-            <button
+        <GroupLabel
+          action={
+            <Button
               type='button'
-              className='text-small uppercase underline'
+              size='xs'
+              variant='underline'
               onClick={() => setWarehouseOpen((v) => !v)}
             >
               {warehouseOpen ? 'hide' : 'show'}
-            </button>
+            </Button>
           }
-        />
+        >
+          warehouse
+        </GroupLabel>
         {warehouseOpen && (
           <div className={grid}>
             {/* #68: code is backend-generated; locked/auto by default with an explicit override. */}
             <label className='flex flex-col gap-1'>
               <div className='flex items-center justify-between gap-2'>
-                <Text size='small'>code {codeOverride ? '' : '(auto)'}</Text>
-                <button
-                  type='button'
-                  className='text-small uppercase underline'
-                  onClick={toggleCodeOverride}
-                >
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  code {codeOverride ? '' : '(auto)'}
+                </Text>
+                <Button type='button' size='xs' variant='underline' onClick={toggleCodeOverride}>
                   {codeOverride ? 'use auto' : 'customize'}
-                </button>
+                </Button>
               </div>
               <input
                 className={cn(cell, !codeOverride && 'cursor-not-allowed text-textInactiveColor')}
@@ -1075,7 +1107,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>min stock ({d.unit.trim() || 'unit'})</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                min stock ({d.unit.trim() || 'unit'})
+              </Text>
               <input
                 className={cell}
                 inputMode='decimal'
@@ -1085,7 +1119,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>color</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                color
+              </Text>
               <input
                 className={cell}
                 value={d.color}
@@ -1093,7 +1129,9 @@ export function MaterialModal({
               />
             </label>
             <label className='flex flex-col gap-1'>
-              <Text size='small'>pantone</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                pantone
+              </Text>
               <input
                 className={cell}
                 value={d.pantone}
@@ -1101,7 +1139,9 @@ export function MaterialModal({
               />
             </label>
             <label className='sm:col-span-2 flex flex-col gap-1'>
-              <Text size='small'>notes</Text>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                notes
+              </Text>
               <input
                 className={cell}
                 value={d.notes}

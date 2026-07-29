@@ -99,6 +99,13 @@ const patternSchema = z.object({
   url: z.string().optional().default(''),
   filename: z.string().optional().default(''),
   sizeBytes: z.number().optional().default(0),
+  // Rev.N of this sheet within its size. 0 = "assign one": the server numbers a url it has not seen
+  // on this card before and preserves the number for one it has, so the client only ever pins a
+  // version deliberately (the factory's own numbering).
+  version: z.number().optional().default(0),
+  // Server-owned; round-tripped read-only so the grid can show when a PDF actually arrived. Sending
+  // it back is harmless — the write path drops it and carries the stored value forward by url.
+  uploadedAt: z.string().optional().default(''),
 });
 
 const DEFAULT_ISSUE_SEVERITY: common_TechCardIssueSeverity = 'TECH_CARD_ISSUE_SEVERITY_MEDIUM';
@@ -122,6 +129,10 @@ const signoffSchema = z.object({
   signedBy: z.string().optional().default(''),
   signedAt: z.string().optional().default(''), // YYYY-MM-DD in the UI
   note: z.string().optional().default(''),
+  // Fingerprint of the section's content when it was approved. Server-owned — the write path
+  // recomputes it — but carried on the form so the card can compare it against
+  // techCard.sectionDigests and tell a live sign-off from a stale one after a reload.
+  signedDigest: z.string().optional().default(''),
 });
 
 const mediaItemSchema = z.object({
@@ -255,50 +266,52 @@ const colorwaySchema = z.object({
 
 // One BOM article — a pure material-catalog entry. The per-colourway colour, placement and
 // consumption live on colourway usages, not here.
-const bomItemSchema = z.object({
-  section: z.string().optional().default(DEFAULT_BOM_SECTION),
-  name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
-  supplier: z.string().optional().default(''),
-  supplierRef: z.string().optional().default(''),
-  color: z.string().optional().default(''), // base/reference colour (per-colourway colour is on the usage)
-  composition: z.string().optional().default(''),
-  spec: z.string().optional().default(''),
-  unit: z.string().optional().default(''),
-  unitPrice: z.string().optional().default(''), // decimal as string
-  currency: z.string().optional().default(''),
-  comment: z.string().optional().default(''),
-  // fabric data for the cutter (edited in BomItemRow)
-  fabricWidth: z.string().optional().default(''),
-  fabricWeightGsm: z.string().optional().default(''),
-  fabricDirection: z.string().optional().default('TECH_CARD_FABRIC_DIRECTION_UNKNOWN'),
-  wastagePercent: z.string().optional().default(''),
-  // optional link to a catalog Material (0 = unlinked free-text line). The line keeps its own
-  // snapshot fields regardless of the link.
-  materialId: z.number().optional().default(0),
-  // Stable line identity (Q9/§2.3). `id` is the server PK (read-only, 0 = not yet saved); `lineKey`
-  // is the client-generated ULID minted when the row is created in the UI, round-tripped so the
-  // server keyed-reconciles by it and downstream refs (operations/pieces/usages) stay valid.
-  id: z.number().optional().default(0),
-  lineKey: z.string().optional().default(''),
-}).superRefine((item, ctx) => {
-  // `name` is required only on an UNLINKED line — server parity, mirroring parseTechCardBomItems,
-  // which requires a name only when material_id == 0. A LINKED line takes its identity from the
-  // catalog material: the server resolves the name by link on the read path rather than storing a
-  // copy, so requiring a form-level name here would demand a value the operator cannot edit and
-  // that the wire does not want. (A released card is unaffected either way — tech_card_release
-  // snapshots the whole enriched read model as JSON, so a frozen spec keeps the name it shipped.)
-  //
-  // It stays a superRefine rather than a plain .min(1) precisely because the rule is conditional;
-  // the issue is emitted on path ['name'] so it addresses as `bomItems.3.name` and the editor's
-  // deep-link can walk the operator straight to the offending input.
-  if ((item.materialId ?? 0) === 0 && !item.name?.trim()) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'Material name is required',
-      path: ['name'],
-    });
-  }
-});
+const bomItemSchema = z
+  .object({
+    section: z.string().optional().default(DEFAULT_BOM_SECTION),
+    name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
+    supplier: z.string().optional().default(''),
+    supplierRef: z.string().optional().default(''),
+    color: z.string().optional().default(''), // base/reference colour (per-colourway colour is on the usage)
+    composition: z.string().optional().default(''),
+    spec: z.string().optional().default(''),
+    unit: z.string().optional().default(''),
+    unitPrice: z.string().optional().default(''), // decimal as string
+    currency: z.string().optional().default(''),
+    comment: z.string().optional().default(''),
+    // fabric data for the cutter (edited in BomItemRow)
+    fabricWidth: z.string().optional().default(''),
+    fabricWeightGsm: z.string().optional().default(''),
+    fabricDirection: z.string().optional().default('TECH_CARD_FABRIC_DIRECTION_UNKNOWN'),
+    wastagePercent: z.string().optional().default(''),
+    // optional link to a catalog Material (0 = unlinked free-text line). The line keeps its own
+    // snapshot fields regardless of the link.
+    materialId: z.number().optional().default(0),
+    // Stable line identity (Q9/§2.3). `id` is the server PK (read-only, 0 = not yet saved); `lineKey`
+    // is the client-generated ULID minted when the row is created in the UI, round-tripped so the
+    // server keyed-reconciles by it and downstream refs (operations/pieces/usages) stay valid.
+    id: z.number().optional().default(0),
+    lineKey: z.string().optional().default(''),
+  })
+  .superRefine((item, ctx) => {
+    // `name` is required only on an UNLINKED line — server parity, mirroring parseTechCardBomItems,
+    // which requires a name only when material_id == 0. A LINKED line takes its identity from the
+    // catalog material: the server resolves the name by link on the read path rather than storing a
+    // copy, so requiring a form-level name here would demand a value the operator cannot edit and
+    // that the wire does not want. (A released card is unaffected either way — tech_card_release
+    // snapshots the whole enriched read model as JSON, so a frozen spec keeps the name it shipped.)
+    //
+    // It stays a superRefine rather than a plain .min(1) precisely because the rule is conditional;
+    // the issue is emitted on path ['name'] so it addresses as `bomItems.3.name` and the editor's
+    // deep-link can walk the operator straight to the offending input.
+    if ((item.materialId ?? 0) === 0 && !item.name?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Material name is required',
+        path: ['name'],
+      });
+    }
+  });
 
 // One construction-description aspect (Sheet «Титул», lower block): freeform text + optional
 // reference images. key is silhouette/collar/fastening/… or a custom aspect.
@@ -390,6 +403,9 @@ const costingSchema = z.object({
   defectPercent: z.string().optional().default(''),
   currency: z.string().optional().default(''),
   notes: z.string().optional().default(''),
+  // This style's own gross-margin target, 0..100. Empty = fall back to the house default, which the
+  // server resolves into costing.effectiveTargetMarginPct on the read.
+  targetMarginPct: z.string().optional().default(''),
 });
 
 export const emptyConstruction: z.input<typeof constructionSchema> = {
@@ -425,6 +441,7 @@ export const emptyCosting: z.input<typeof costingSchema> = {
   defectPercent: '',
   currency: '',
   notes: '',
+  targetMarginPct: '',
 };
 
 const techCardObject = z.object({
@@ -754,6 +771,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // size_bytes is int64 → arrives as a string from grpc-gateway; coerce to a real number
       // so the form value passes z.number() (a string would silently block save).
       sizeBytes: wireInt(p.sizeBytes),
+      version: p.version || 0,
+      uploadedAt: p.uploadedAt ?? '',
     })),
     // TODO(final-bump): productIds is no longer on TechCardInsert — a colourway now carries
     // its own product link.
@@ -905,6 +924,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           logisticsCost: decimalToInput(insert.costing.logisticsCost),
           overheadCost: decimalToInput(insert.costing.overheadCost),
           defectPercent: decimalToInput(insert.costing.defectPercent),
+          targetMarginPct: decimalToInput(insert.costing.targetMarginPct),
           currency: insert.costing.currency || '',
           notes: insert.costing.notes || '',
         }
@@ -931,6 +951,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         s.state && s.state !== 'TECH_CARD_SIGNOFF_STATE_UNKNOWN' ? s.state : DEFAULT_SIGNOFF_STATE,
       signedBy: s.signedBy || '',
       signedAt: timestampToDateInput(s.signedAt),
+      signedDigest: s.signedDigest || '',
       note: s.note || '',
     })),
   };
@@ -1008,6 +1029,7 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
       c?.defectPercent,
       c?.currency,
       c?.notes,
+      c?.targetMarginPct,
     ])
   ) {
     return undefined;
@@ -1018,6 +1040,9 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     packagingCost: inputToDecimal(c?.packagingCost),
     logisticsCost: inputToDecimal(c?.logisticsCost),
     overheadCost: inputToDecimal(c?.overheadCost),
+    // Empty = no style target; the server then resolves the house default into
+    // effectiveTargetMarginPct on the next read.
+    targetMarginPct: inputToDecimal(c?.targetMarginPct),
     defectPercent: inputToDecimal(c?.defectPercent),
     currency: c?.currency?.trim() || '',
     notes: c?.notes?.trim() || '',
@@ -1033,6 +1058,11 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     unitCostBase: undefined,
     orderCostBase: undefined,
     baseCurrency: undefined,
+    // Resolved target (this style's, else the house default) and the VAT context the colourway
+    // net_prices were computed at — all output-only, never sent back.
+    effectiveTargetMarginPct: undefined,
+    vatCountryCode: undefined,
+    vatRatePct: undefined,
   };
 }
 
@@ -1108,6 +1138,10 @@ export function mapFormToTechCardInsert(
         url: p.url?.trim() || '',
         filename: p.filename?.trim() || '',
         sizeBytes: p.sizeBytes || 0,
+        // Round-trip the revision so a re-save does not renumber existing sheets; a freshly
+        // uploaded row carries 0 and the server assigns MAX+1 for its size. uploadedAt is
+        // server-owned and deliberately not sent.
+        version: p.version || 0,
       })),
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
@@ -1126,42 +1160,44 @@ export function mapFormToTechCardInsert(
     })),
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
-    pieces: (data.pieces ?? []).filter((p) => !isBlankPiece(p)).map((p) => ({
-      lineKey: isUlid(p.lineKey) ? p.lineKey : ulid(),
-      name: p.name?.trim() || '',
-      // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
-      // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload
-      piecesPerGarment: p.piecesPerGarment || 1,
-      mirrored: p.mirrored ?? false,
-      grainline: p.grainline?.trim() || '',
-      fused: p.fused ?? false,
-      calloutNumber: p.calloutNumber || 0,
-      note: p.note?.trim() || '',
-      materials: (p.materials ?? [])
-        // drop fully-empty cells (no fabric, no fusing, no note) so the map stays sparse —
-        // a note-only cell (written by another client) must survive an unrelated save
-        .filter((m) => !!m.bomLineKey?.trim() || !!m.fusingBomLineKey?.trim() || !!m.note?.trim())
-        // A cell whose colourway never resolved (colorwayId missing upstream -> 0) is rejected by
-        // the server with a pathless error that blocks the whole card. Drop it instead: the cell
-        // could not have addressed a real colourway anyway.
-        .filter((m) => (m.colorwayIndex ?? 0) > 0)
-        .map((m) => {
-          const fabric = outBomRef(m.bomLineKey);
-          const fusing = outBomRef(m.fusingBomLineKey);
-          return {
-            // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
-            colorwayId: m.colorwayIndex || 0,
-            // durable line_key refs (§2.3) + a consistent positional index for the transition path.
-            bomLineKey: fabric.bomLineKey,
-            bomItemIndex: fabric.bomItemIndex,
-            fusingBomLineKey: fusing.bomLineKey,
-            fusingBomItemIndex: fusing.bomItemIndex,
-            bomItemId: undefined,
-            fusingBomItemId: undefined,
-            note: m.note?.trim() || '',
-          };
-        }),
-    })),
+    pieces: (data.pieces ?? [])
+      .filter((p) => !isBlankPiece(p))
+      .map((p) => ({
+        lineKey: isUlid(p.lineKey) ? p.lineKey : ulid(),
+        name: p.name?.trim() || '',
+        // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
+        // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload
+        piecesPerGarment: p.piecesPerGarment || 1,
+        mirrored: p.mirrored ?? false,
+        grainline: p.grainline?.trim() || '',
+        fused: p.fused ?? false,
+        calloutNumber: p.calloutNumber || 0,
+        note: p.note?.trim() || '',
+        materials: (p.materials ?? [])
+          // drop fully-empty cells (no fabric, no fusing, no note) so the map stays sparse —
+          // a note-only cell (written by another client) must survive an unrelated save
+          .filter((m) => !!m.bomLineKey?.trim() || !!m.fusingBomLineKey?.trim() || !!m.note?.trim())
+          // A cell whose colourway never resolved (colorwayId missing upstream -> 0) is rejected by
+          // the server with a pathless error that blocks the whole card. Drop it instead: the cell
+          // could not have addressed a real colourway anyway.
+          .filter((m) => (m.colorwayIndex ?? 0) > 0)
+          .map((m) => {
+            const fabric = outBomRef(m.bomLineKey);
+            const fusing = outBomRef(m.fusingBomLineKey);
+            return {
+              // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
+              colorwayId: m.colorwayIndex || 0,
+              // durable line_key refs (§2.3) + a consistent positional index for the transition path.
+              bomLineKey: fabric.bomLineKey,
+              bomItemIndex: fabric.bomItemIndex,
+              fusingBomLineKey: fusing.bomLineKey,
+              fusingBomItemIndex: fusing.bomItemIndex,
+              bomItemId: undefined,
+              fusingBomItemId: undefined,
+              note: m.note?.trim() || '',
+            };
+          }),
+      })),
     bomItems: bomLines.map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
       name: b.name?.trim() || '',
@@ -1259,6 +1295,12 @@ export function mapFormToTechCardInsert(
       signedBy: s.signedBy?.trim() || '',
       signedAt: s.signedAt ? dateInputToTimestamp(s.signedAt) : undefined,
       note: s.note?.trim() || '',
+      // Echoed back deliberately. A present digest tells the server "this is an ordinary save, the
+      // approval still covers what it covered" and is carried through; an EMPTY one means "approve
+      // this now" and asks the server to fingerprint what is being written. The approve/re-approve
+      // action clears it — that is how a stale sign-off is re-blessed, and why an unrelated save
+      // cannot silently re-bless one.
+      signedDigest: s.signedDigest?.trim() || '',
     })),
     // revisions removed from the write payload (Q1): the auto-journal is server-appended and
     // read-only (common_TechCard.revisions), never client-supplied.

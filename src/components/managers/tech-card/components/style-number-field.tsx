@@ -53,7 +53,7 @@ export function StyleNumberField({ isIdea }: { isIdea: boolean }) {
       render={({ field }) => (
         <FormItem>
           <FormLabel>{isIdea ? 'style number' : 'style number *'}</FormLabel>
-          <div className='flex items-start gap-2'>
+          <div className='flex items-start gap-1.5'>
             <div className='flex-1'>
               <FormControl>
                 <Input
@@ -73,7 +73,8 @@ export function StyleNumberField({ isIdea }: { isIdea: boolean }) {
             <Button
               type='button'
               variant='secondary'
-              className='shrink-0 whitespace-nowrap uppercase'
+              size='sm'
+              className='shrink-0 whitespace-nowrap'
               loading={suggesting}
               disabled={suggesting || !sku}
               title={sku ? 'propose a style number for this season' : 'pick a season first'}
@@ -84,12 +85,12 @@ export function StyleNumberField({ isIdea }: { isIdea: boolean }) {
           </div>
 
           {!sku && (
-            <Text variant='inactive' size='small'>
+            <Text size='micro' variant='label'>
               pick a season to enable suggest
             </Text>
           )}
           {suggestError && (
-            <Text variant='inactive' size='small' className='text-error'>
+            <Text size='micro' className='text-error'>
               {suggestError}
             </Text>
           )}

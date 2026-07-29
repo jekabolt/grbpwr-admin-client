@@ -25,8 +25,9 @@ export const buttonVariants = cva(
           'bg-textColor',
           'hover:bg-bgColor',
           'hover:text-textColor',
-          'disabled:bg-textInactiveColor',
-          'disabled:text-bgColor',
+          // Disabled reads as an outline, not a filled grey slab (reference grammar).
+          'disabled:bg-bgColor',
+          'disabled:text-textInactiveColor',
           'disabled:border-textInactiveColor',
           'leading-4',
           'text-center',
@@ -39,10 +40,11 @@ export const buttonVariants = cva(
           'hover:bg-textColor',
           'hover:text-bgColor',
           'hover:border-textInactiveColor',
-          'disabled:bg-textInactiveColor',
-          'disabled:bg-textInactiveColor',
-          'disabled:text-bgColor',
+          'disabled:bg-bgColor',
+          'disabled:text-textInactiveColor',
           'disabled:border-textInactiveColor',
+          'disabled:hover:bg-bgColor',
+          'disabled:hover:text-textInactiveColor',
           'leading-4',
           'text-center',
         ],
@@ -74,8 +76,12 @@ export const buttonVariants = cva(
         false: [],
       },
       size: {
-        sm: ['text-textBaseSize'],
+        // Inside a table row or a dense list.
+        xs: ['px-1.5', 'py-px', 'text-micro', 'uppercase', 'tracking-label'],
+        // Inside a panel — the default for everything that is not a page action.
+        sm: ['px-2.5', 'py-1', 'text-micro', 'uppercase', 'tracking-label'],
         default: ['text-textBaseSize'],
+        // Page-level actions only: Save, Release, Create.
         lg: ['py-2.5', 'px-4', 'text-textBaseSize'],
         giant: ['py-10', 'px-16', 'text-textGiantSmallSize', 'lg:text-textGiantSize'],
       },

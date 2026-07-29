@@ -44,6 +44,17 @@
      unlike textInactiveColor (#ccc ≈ 1.6:1, decorative only). */
   --color-labelColor: #666666; /* gray — secondary ink */
 
+  /* SURFACES
+     Two greys do two different jobs and must never be swapped:
+       borderColor #ccc — the OUTER outline of every box.
+       hairline   #e6e6e6 — the INNER rule between rows inside a box.
+     Getting this backwards is the most visible way to miss the reference. */
+  --color-hairline: #e6e6e6;
+  --color-pageBg: #f2f2f2; /* the canvas every panel sits on */
+  --color-bgZebra: #fafafa; /* stat cells, accordion headers, sub-rows */
+  --color-trackBg: #f0f0f0; /* bar tracks */
+  --color-progressBg: #e2e2e2;
+
   /* Accents */
   --color-red: #ff0000;
   --color-error: #ff0000; /* == red */
@@ -53,7 +64,10 @@
 
   /* Status-only (semantic, not accents) */
   --color-success: #0f7a34; /* green, ~4.6:1 on white */
-  --color-warning: #2323ff; /* blue — warnings read blue, not orange */
+  /* Blue, deliberately — do not "fix" this to orange. Mid-flight states (in review,
+     round 2, unsaved, changed-after-approval, stale) read blue in this system.
+     See tmp/ui-redesign/00-design-system.md → "Colour semantics". */
+  --color-warning: #2323ff;
 
   --color-overlay: rgba(0, 0, 0, 0.4);
 
@@ -69,13 +83,30 @@
   --font-family-sans: 'FeatureMono', 'Inter', 'Helvetica Neue', Arial, sans-serif;
   --font-family-mono: 'FeatureMono', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
-  /* TEXT — two working sizes (body 12 / heading 18) + bold for emphasis.
-     giant/giantSmall are display-only, reserved for the login + hero splash. */
-  --text-textBaseSize: 12px; /* body */
-  --text-small: 12px; /* alias of body — keeps size='small' on the 2-size system */
+  /* TEXT — body 12 with three sizes below it for chrome, plus heading 18.
+     giant/giantSmall are display-only, reserved for the login + hero splash.
+     Nothing outside src/ui may write text-[Npx]; use these. */
+  --text-textBaseSize: 12px; /* body, field values, table cells */
+  --text-small: 12px; /* deprecated alias of body — kept so size='small' still compiles */
+  --text-control: 11px; /* chips, buttons, tabs, option labels */
+  --text-micro: 10px; /* labels, pills, table headers, hints */
+  --text-nano: 9px; /* badges, pin numbers, band labels */
+  --text-stat: 16px; /* stat value */
+  --text-statBig: 22px; /* hero stat value */
   --text-lg: 18px; /* heading */
   --text-giantSmall: 110px; /* display (login/hero only) */
   --text-giant: 200px; /* display (login/hero only) */
+
+  /* TRACKING — uppercase labels only. Baked into the ui primitives so no screen
+     sets letter-spacing by hand. */
+  --tracking-pill: 0.03em; /* pills */
+  --tracking-label: 0.04em; /* buttons, stat labels, field labels */
+  --tracking-group: 0.05em; /* group labels, modal titles */
+  --tracking-section: 0.06em; /* section titles */
+
+  /* ELEVATION — floating layers only. Nothing inline ever has a shadow. */
+  --shadow-modal: 0 6px 22px rgba(0, 0, 0, 0.22);
+  --shadow-popover: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
 * {
@@ -91,6 +122,23 @@ body {
   font-family: var(--font-family-sans);
   font-weight: 400;
   line-height: 1.5;
+  /* The app canvas. Every panel is white-on-#f2f2f2 — that contrast is what gives
+     the UI its "sheet of paper" read. Layout must not paint white over this. */
+  background: var(--color-pageBg);
+  color: var(--color-textColor);
+}
+
+/* Print: the canvas must not come out grey, and hairlines must survive at print
+   DPI (they render near-invisible on paper). */
+@media print {
+  body {
+    background: #fff;
+  }
+  * {
+    --color-hairline: #cccccc;
+    --color-pageBg: #ffffff;
+    --color-bgZebra: #ffffff;
+  }
 }
 
 @layer utilities {
@@ -192,6 +240,37 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .nav-dropdown[data-state='open'],
   .nav-dropdown[data-state='closed'] {
+    animation: none;
+  }
+}
+
+/* Right-docked drawer (ui/components/drawer.tsx). Slides in from the edge it is
+   attached to, so it reads as pulled out rather than dropped on top. */
+@keyframes drawerIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes drawerOut {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.drawer-panel[data-state='open'] {
+  animation: drawerIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.drawer-panel[data-state='closed'] {
+  animation: drawerOut 140ms ease-in;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer-panel[data-state='open'],
+  .drawer-panel[data-state='closed'] {
     animation: none;
   }
 }

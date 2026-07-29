@@ -63,13 +63,22 @@ export function CatalogTab() {
       },
       { replace: true },
     );
-  const [editing, setEditing] = useState<common_Material | undefined>();
-  const [editOpen, setEditOpen] = useState(false);
+  // ?material=<id> IS the open state of the article card (R-1), not a mirror of it — so the tech
+  // card's BOM plate ("open →") and any pasted link land on the material itself, cold load included.
+  // Creating has no id yet, so that one stays local.
+  const openId = Number(params.get('material')) || 0;
+  const [creating, setCreating] = useState(false);
   const [pricesOf, setPricesOf] = useState<common_Material | undefined>();
 
   const { data, isLoading } = useMaterials(section, includeArchived, true, purpose);
   const archive = useArchiveMaterial();
   const materials = useMemo(() => data?.materials ?? [], [data]);
+  // Material.id is int64 -> arrives as a STRING from grpc-gateway despite the generated `number`.
+  // An id that matches nothing here — deleted, or archived/filtered out of the list this page asked
+  // for — resolves to undefined and the modal simply never opens: the plain catalog stays on screen
+  // instead of a spinner or a blank form. The stale param is left in the URL on purpose, because the
+  // movements tab reads the same key as its ledger filter and index.tsx carries it across tabs.
+  const opened = openId ? materials.find((m) => Number(m.id) === openId) : undefined;
 
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -116,13 +125,13 @@ export function CatalogTab() {
     );
   };
 
-  const openCreate = () => {
-    setEditing(undefined);
-    setEditOpen(true);
-  };
-  const openEdit = (m: common_Material) => {
-    setEditing(m);
-    setEditOpen(true);
+  const openCreate = () => setCreating(true);
+  // Opening/closing goes through the URL (replace, like every other filter here — this must not
+  // stack a history entry per card opened) so the address bar always names what is on screen.
+  const openEdit = (m: common_Material) => patch({ material: String(m.id ?? '') });
+  const closeDetail = () => {
+    setCreating(false);
+    patch({ material: '' });
   };
 
   return (
@@ -300,7 +309,11 @@ export function CatalogTab() {
         </div>
       )}
 
-      <MaterialModal open={editOpen} onOpenChange={setEditOpen} material={editing} />
+      <MaterialModal
+        open={creating || opened != null}
+        onOpenChange={(v) => !v && closeDetail()}
+        material={creating ? undefined : opened}
+      />
       <MaterialPricesModal
         open={pricesOf != null}
         onOpenChange={(v) => !v && setPricesOf(undefined)}

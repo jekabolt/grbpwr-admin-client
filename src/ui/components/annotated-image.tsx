@@ -55,9 +55,11 @@ export type AnnotatedCallout = {
 // Pin — the numbered marker. forwardRef + prop-spread so it can be a Popover.Anchor.
 // ---------------------------------------------------------------------------
 
+// Reference `.pin`: a 16px ink circle carrying a 9px white number. `md` is one step up for the
+// large annotate surfaces (a 16px drag target is fiddly on a full-bleed sketch).
 const pinSizes = {
-  sm: 'size-[18px] text-[10px]',
-  md: 'size-6 text-[11px]',
+  sm: 'size-4 text-nano',
+  md: 'size-5 text-nano',
 } as const;
 
 type CalloutPinProps = {
@@ -78,13 +80,15 @@ export const CalloutPin = forwardRef<HTMLButtonElement, CalloutPinProps>(functio
       ref={ref}
       type='button'
       className={cn(
-        'flex items-center justify-center rounded-full border-2 font-medium leading-none tabular-nums transition-colors',
+        // 1px everywhere (the system's only 2px rules are the section header, the active tab and a
+        // selected tile). The ring is white on a filled pin so it still reads on a dark photo.
+        'flex items-center justify-center rounded-full border leading-none tabular-nums transition-colors',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
         pinSizes[size],
         hasText
           ? 'border-bgColor bg-textColor text-bgColor'
           : 'border-textColor bg-bgColor text-textColor',
-        active && 'outline outline-2 outline-offset-2 outline-textColor',
+        active && 'outline outline-1 outline-offset-2 outline-textColor',
         draggable ? 'cursor-move' : 'cursor-pointer',
         className,
       )}
@@ -96,8 +100,11 @@ export const CalloutPin = forwardRef<HTMLButtonElement, CalloutPinProps>(functio
 });
 
 // ---------------------------------------------------------------------------
-// Note shell — the card visual. Body (`children`) is caller-supplied so each surface keeps
-// its own RHF-bound fields; this only owns the frame, the number, and the remove control.
+// Note shell — the popover panel grammar (white, 1px INK border, --shadow-popover, 240px; head
+// ruled below in 10px bold uppercase; body px-2 py-1.5). Identical to `ui/components/popover`'s
+// shell, hand-rolled here because the SAME card is also rendered INLINE in show-all mode, where a
+// portalled Radix popover is not available. Body (`children`) is caller-supplied so each surface
+// keeps its own RHF-bound fields; this only owns the frame, the number, and the remove control.
 // ---------------------------------------------------------------------------
 
 function StickyNote({
@@ -125,32 +132,38 @@ function StickyNote({
       onPointerDown={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
       className={cn(
-        'w-64 max-w-[min(16rem,72vw)] border border-textColor bg-bgColor text-left',
-        'shadow-[0_2px_10px_rgba(0,0,0,0.12)]',
+        'w-60 max-w-[min(15rem,72vw)] border border-textColor bg-bgColor text-left',
+        'shadow-[var(--shadow-popover)]',
         className,
       )}
     >
-      <div className='flex items-center justify-between gap-2 border-b border-textInactiveColor px-2 py-1'>
-        <span className='flex min-w-0 items-center gap-1.5'>
-          <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-[10px] leading-none tabular-nums text-bgColor'>
-            {number}
-          </span>
-          <Text variant='label' size='small' className='truncate uppercase'>
-            {title || 'note'}
-          </Text>
+      <div className='flex items-center gap-1.5 border-b border-borderColor px-2 py-1'>
+        <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano leading-none tabular-nums text-bgColor'>
+          {number}
         </span>
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='group'
+          component='span'
+          className='min-w-0 truncate font-bold'
+        >
+          {title || 'note'}
+        </Text>
+      </div>
+      <div className='px-2 py-1.5'>
+        {children}
         {editable && onRemove && (
           <button
             type='button'
             onClick={onRemove}
             aria-label={`remove callout ${number}`}
-            className='shrink-0 px-1 leading-none text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+            className='mt-1.5 cursor-pointer text-micro uppercase tracking-label text-labelColor hover:text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
           >
-            [x]
+            ✕ remove pin
           </button>
         )}
       </div>
-      <div className='p-2'>{children}</div>
     </div>
   );
 }
@@ -301,9 +314,11 @@ export function ImageCallout({
                 ref={contentRef}
                 side='top'
                 align='center'
-                sideOffset={8}
+                sideOffset={6}
                 collisionPadding={10}
-                className='z-[var(--z-popover)] focus:outline-none'
+                // `group` + `relative` so the tail below can read Radix's resolved `data-side`
+                // and hang off the correct edge of the panel.
+                className='group relative z-[var(--z-popover)] focus:outline-none'
                 // Never auto-focus on open — opening is driven by hover/focus "peek"; the pin's
                 // onClick focuses the content explicitly when the user actually wants to edit.
                 onOpenAutoFocus={(e) => e.preventDefault()}
@@ -323,7 +338,19 @@ export function ImageCallout({
                 >
                   {renderNote({ close })}
                 </StickyNote>
-                <Popover.Arrow className='fill-bgColor' width={12} height={6} />
+                {/* The reference's tail: an 8px square rotated 45°, inheriting the panel's ink
+                    border on the two outward sides so it reads as the panel pointing rather than
+                    as a separate diamond. Painted after the panel, so its white fill hides the
+                    border segment it sits on. */}
+                <span
+                  aria-hidden
+                  className={cn(
+                    'absolute left-1/2 size-2 -translate-x-1/2 rotate-45 border-textColor bg-bgColor',
+                    'group-data-[side=top]:-bottom-[5px] group-data-[side=top]:border-b group-data-[side=top]:border-r',
+                    'group-data-[side=bottom]:-top-[5px] group-data-[side=bottom]:border-l group-data-[side=bottom]:border-t',
+                    'group-data-[side=left]:hidden group-data-[side=right]:hidden',
+                  )}
+                />
               </Popover.Content>
             </Popover.Portal>
           )}
@@ -364,6 +391,8 @@ export type AnnotatedImageProps = {
   /** Force show-all inline notes (a "view" toggle); also implied by zooming in 'auto' mode. */
   showAllNotes?: boolean;
   pinSize?: keyof typeof pinSizes;
+  /** Narrow the note card (a 240px panel over a 180px grid tile needs trimming). */
+  noteClassName?: string;
   /** Overlaid on the frame's top-right (e.g. a remove-photo control). */
   cornerSlot?: ReactNode;
 };
@@ -398,6 +427,7 @@ type StageProps = {
   /** Render every note inline instead of a hover Popover. */
   showAll: boolean;
   pinSize: keyof typeof pinSizes;
+  noteClassName?: string;
   cornerSlot?: ReactNode;
   /** A plain (non-drag) click on empty canvas in VIEW mode. The inline tile passes this to open
    *  the enlarged view; the enlarged view leaves it undefined so a plain click there does
@@ -423,6 +453,7 @@ function Stage({
   zoom,
   showAll,
   pinSize,
+  noteClassName,
   cornerSlot,
   onBackgroundView,
 }: StageProps) {
@@ -665,8 +696,11 @@ function Stage({
     <div
       ref={wrapRef}
       className={cn(
-        'relative select-none overflow-hidden border border-textInactiveColor',
-        zoom && 'touch-none',
+        'relative select-none border border-borderColor',
+        // Clipping is only needed while the stage can pan/zoom (the enlarged view). Inline the
+        // media is object-cover and never overflows, so leaving overflow visible lets a show-all
+        // note card spill past a narrow grid tile instead of being sliced in half by the frame.
+        zoom && 'touch-none overflow-hidden',
         frameClassName,
         cursorClass,
       )}
@@ -708,6 +742,7 @@ function Stage({
               showAll={showAll}
               editable={editable}
               pinSize={pinSize}
+              noteClassName={noteClassName}
               dragging={dragState?.key === c.key}
               dragPos={dragState}
               onPinPointerDown={(e) => startPinDrag(c.key, e)}
@@ -728,7 +763,7 @@ function Stage({
             e.stopPropagation();
             resetZoom();
           }}
-          className='absolute bottom-1 left-1 z-[4] cursor-pointer border border-textInactiveColor bg-bgColor px-1 text-textBaseSize leading-none tabular-nums hover:bg-textColor hover:text-bgColor'
+          className='absolute bottom-1 left-1 z-[4] cursor-pointer border border-borderColor bg-bgColor px-1.5 py-px text-micro leading-none tabular-nums hover:bg-textColor hover:text-bgColor'
         >
           {Math.round(scale * 100)}%
         </button>
@@ -764,6 +799,7 @@ export function AnnotatedImage({
   notesMode = 'hover',
   showAllNotes = false,
   pinSize = 'md',
+  noteClassName,
   cornerSlot,
 }: AnnotatedImageProps) {
   const [enlarged, setEnlarged] = useState(false);
@@ -799,6 +835,7 @@ export function AnnotatedImage({
     onMove,
     onRemove,
     pinSize,
+    noteClassName,
   } as const;
 
   return (
@@ -825,15 +862,21 @@ export function AnnotatedImage({
                 Enlarged view. Scroll or pinch to zoom, drag to pan; hover a pin to read its note.
               </Dialog.Description>
 
-              <div className='flex shrink-0 items-center justify-between gap-4 border-b border-textInactiveColor px-3 py-2'>
-                <Text variant='label' size='small' className='truncate uppercase'>
+              <div className='flex shrink-0 items-center justify-between gap-4 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+                <Text
+                  size='micro'
+                  variant='uppercase'
+                  tracking='group'
+                  component='span'
+                  className='truncate font-bold'
+                >
                   {alt}
                 </Text>
                 <Dialog.Close
                   aria-label='close enlarged view'
-                  className='shrink-0 cursor-pointer border border-textInactiveColor px-2 py-0.5 text-textBaseSize uppercase leading-none hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                  className='shrink-0 cursor-pointer border border-borderColor bg-bgColor px-2.5 py-1 text-micro uppercase leading-none tracking-label hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                 >
-                  close [x]
+                  close ✕
                 </Dialog.Close>
               </div>
 
@@ -849,6 +892,9 @@ export function AnnotatedImage({
                   {...shared}
                   zoom
                   showAll
+                  // The enlarged view has room for the full-width note card — a narrowing meant
+                  // for a grid tile must not leak into it.
+                  noteClassName={undefined}
                   frameClassName='max-w-full'
                   frameStyle={{ width: `min(95%, calc((100dvh - 6rem) * ${arNum}))` }}
                 />

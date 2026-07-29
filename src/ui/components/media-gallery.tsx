@@ -66,7 +66,7 @@ export function MediaGallery({
                 />
               )}
               {isVid && (
-                <span className='absolute bottom-0.5 right-0.5 bg-black/70 px-1 text-[9px] uppercase leading-tight text-white'>
+                <span className='absolute bottom-0.5 right-0.5 bg-black/70 px-1 text-nano uppercase leading-tight text-white'>
                   video
                 </span>
               )}

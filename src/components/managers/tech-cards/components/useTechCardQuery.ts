@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { adminService } from 'api/api';
 import {
   common_GenderEnum,
+  common_SkuSeason,
   common_TechCardInsert,
   common_TechCardStage,
 } from 'api/proto-http/admin';
@@ -10,10 +11,13 @@ export type TechCardFilter = {
   stage?: common_TechCardStage;
   gender?: common_GenderEnum;
   brand?: string;
-  season?: string;
+  skuSeason?: common_SkuSeason;
   name?: string;
   productId?: number;
   purpose?: string;
+  // One id is enough at whatever level of the tree the operator picked: the server matches a card
+  // whose category_id OR top/sub/type equals any of these, so the client never expands the tree.
+  categoryIds?: number[];
 };
 
 export const techCardKeys = {
@@ -22,6 +26,11 @@ export const techCardKeys = {
   list: (filter: TechCardFilter) => [...techCardKeys.lists(), filter] as const,
   details: () => [...techCardKeys.all, 'detail'] as const,
   detail: (id: number) => [...techCardKeys.details(), id] as const,
+  // Nested UNDER detail(id) so it is invalidated by every mutation that already invalidates the card
+  // detail (UpdateTechCard, the colourway recipes, the fitting resolvers…). The checklist is scored
+  // against the card's own saved facts, so "the card changed" is exactly when it must be refetched —
+  // there is no separate invalidation to remember to add.
+  readiness: (id: number) => [...techCardKeys.detail(id), 'readiness'] as const,
   pipeline: () => [...techCardKeys.all, 'pipeline'] as const,
 };
 
@@ -40,8 +49,9 @@ export function useInfiniteTechCards(filter: TechCardFilter = {}, limit: number 
         brand: filter.brand ?? '',
         name: filter.name ?? '',
         purpose: filter.purpose,
-        skuSeason: undefined,
+        skuSeason: filter.skuSeason,
         productId: filter.productId ?? 0,
+        categoryIds: filter.categoryIds,
       });
       const techCards = response.techCards || [];
       const total = response.total ?? 0;
@@ -67,11 +77,25 @@ export function useStylePipeline(cardsPerStage = 6) {
   });
 }
 
+// Stage/release checklist (GetTechCardReadiness): what the SERVER says is still missing before this
+// style can advance a stage or be released, evaluated against the saved card.
+// ADVISORY — it reports, it does not authorise. Stage and approval_state stay free-standing fields
+// on UpdateTechCard, so nothing read from here may disable a control or refuse a save.
+export function useTechCardReadiness(techCardId: number | undefined) {
+  return useQuery({
+    queryKey: techCardKeys.readiness(techCardId!),
+    queryFn: () => adminService.GetTechCardReadiness({ techCardId: techCardId! }),
+    enabled: !!techCardId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useTechCard(id: number | undefined) {
   return useQuery({
     queryKey: techCardKeys.detail(id!),
     queryFn: async () => {
-      const response = await adminService.GetTechCard({ id: id! });
+      // No vat_country_code: the margin numbers are wanted at the company's domestic rate.
+      const response = await adminService.GetTechCard({ id: id!, vatCountryCode: undefined });
       return response.techCard;
     },
     enabled: !!id,

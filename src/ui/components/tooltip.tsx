@@ -44,7 +44,9 @@ export default function Tooltip({
           sideOffset={6}
           collisionPadding={8}
           className={cn(
-            'z-[var(--z-popover)] border border-textInactiveColor bg-bgColor px-2.5 py-2 text-textColor shadow',
+            // Reference metrics: 10px, hairline-grey box, tight padding, no arrow.
+            // A tooltip is a footnote, not a panel — it must not compete with a popover.
+            'z-[var(--z-popover)] border border-borderColor bg-bgColor px-1.5 py-1 text-micro text-textColor',
             className,
           )}
         >
