@@ -57,6 +57,62 @@ export function parseSelectedCare(value: string): SelectedInstructions {
   return out;
 }
 
+/**
+ * A short name for a slot, for when there is 44px to say which one is empty.
+ * Falls back to the first word of the category, so a new category still labels
+ * itself rather than rendering blank.
+ */
+const SLOT_LABEL: Record<string, string> = {
+  Washing: 'wash',
+  Bleaching: 'bleach',
+  Drying: 'dry',
+  Ironing: 'iron',
+  [`${PROFESSIONAL_CARE}-Dry Cleaning`]: 'dry cl',
+  [`${PROFESSIONAL_CARE}-Wet Cleaning`]: 'wet cl',
+};
+
+export type CareSlot = {
+  key: string;
+  category: string;
+  subCategory?: string;
+  /** 44px-wide label for an empty slot. */
+  label: string;
+  /** Spoken form, for the title on an empty slot. */
+  name: string;
+};
+
+/**
+ * Every pick the tag can hold, in the order the codes are stored — one per
+ * category, except Professional Care which holds one dry and one wet.
+ *
+ * This is what lets the picker show the tag as a SET: a category with no pick is
+ * an empty slot in a known position, not an absence you have to notice.
+ */
+export const CARE_SLOTS: CareSlot[] = Object.entries(careInstruction.care_instructions).flatMap(
+  ([category, methods]) => {
+    if (category !== PROFESSIONAL_CARE) {
+      return [
+        {
+          key: category,
+          category,
+          label: SLOT_LABEL[category] ?? category.split(' ')[0].toLowerCase(),
+          name: category.toLowerCase(),
+        },
+      ];
+    }
+    return Object.keys(methods as Record<string, unknown>).map((subCategory) => {
+      const key = `${category}-${subCategory}`;
+      return {
+        key,
+        category,
+        subCategory,
+        label: SLOT_LABEL[key] ?? subCategory.split(' ')[0].toLowerCase(),
+        name: subCategory.toLowerCase(),
+      };
+    });
+  },
+);
+
 /** Split a stored care value into its codes. Empty and whitespace-only both yield []. */
 export function careCodes(value: string): string[] {
   return value

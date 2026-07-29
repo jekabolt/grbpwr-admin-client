@@ -3,22 +3,26 @@ import { GroupLabel } from 'ui/components/group-label';
 import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
+import { cn } from 'lib/utility';
 import { CARE_CODE_META } from './care-codes';
 
+// One swatch footprint, shared by a filled symbol and an empty slot so a gap in the tag lines up
+// with the picks around it instead of being a differently-sized hole.
+const SWATCH = 'flex w-11 flex-col items-center justify-center gap-0.5 border p-1';
+
 /**
- * One selected care symbol as it appears OUTSIDE the picker: on the field, and on a colourway's
- * read-only display. Shared so those two can never drift — they are the same token in two places.
+ * One selected care symbol as it appears OUTSIDE the picker: on the field, on a colourway's
+ * read-only display, and on the tag rail inside the modal. Shared so those can never drift — they
+ * are the same token in three places.
  *
  * Both the picture and the code are shown: the code is what prints on the tag and what a spec is
  * checked against, the picture is what a person actually reads.
  */
-export function CareSymbol({ code }: { code: string }) {
+export function CareSymbol({ code, onRemove }: { code: string; onRemove?: () => void }) {
   const meta = CARE_CODE_META[code];
-  return (
-    <span
-      title={meta?.name ?? code}
-      className='flex w-11 flex-col items-center gap-0.5 border border-borderColor p-1'
-    >
+  const label = meta?.name ?? code;
+  const symbol = (
+    <>
       {meta?.img ? (
         <img src={meta.img} alt={meta.name} className='size-6' />
       ) : (
@@ -28,6 +32,49 @@ export function CareSymbol({ code }: { code: string }) {
       )}
       <Text component='span' size='nano' variant='label' className='truncate uppercase'>
         {code}
+      </Text>
+    </>
+  );
+
+  if (!onRemove) {
+    return (
+      <span title={label} className={cn(SWATCH, 'border-borderColor')}>
+        {symbol}
+      </span>
+    );
+  }
+  return (
+    <button
+      type='button'
+      title={`${label} — click to remove`}
+      onClick={onRemove}
+      className={cn(
+        SWATCH,
+        // hover: OUTSIDE the arbitrary variant — `[&_img]:hover:` would key off hovering the image
+        // itself, so the swatch would only react over part of its own surface.
+        'border-borderColor hover:border-error hover:[&_span]:text-error',
+        // The symbol is artwork, not ink — dim it rather than trying to recolour it.
+        'hover:[&_img]:opacity-40',
+      )}
+    >
+      {symbol}
+    </button>
+  );
+}
+
+/**
+ * A category with no pick yet, holding its place in the tag. Dashed because the outline is a
+ * placeholder rather than a border, and labelled because "which one is missing" is the only thing
+ * an empty slot has to say.
+ */
+export function CareSlotEmpty({ label, name }: { label: string; name: string }) {
+  return (
+    <span
+      title={`no ${name} symbol picked`}
+      className={cn(SWATCH, 'border-dashed border-borderColor')}
+    >
+      <Text component='span' size='nano' variant='label' className='text-center uppercase'>
+        {label}
       </Text>
     </span>
   );
