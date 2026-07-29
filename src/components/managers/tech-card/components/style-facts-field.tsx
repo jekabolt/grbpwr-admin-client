@@ -6,7 +6,6 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
@@ -220,13 +219,6 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
             care is pickable symbols that render on labels and the storefront, not typed prose. */}
         <CarePicker name='careInstructions' label='care instructions' editMode={canEdit} />
         <CareSummary name='careInstructions' />
-        <CalloutBox tone='note'>
-          <Text size='micro' variant='label'>
-            Saved as a canonical ISO-3758 code string (e.g. “MWN,DNB,TDL”) — this already feeds the
-            care-label generator. <b>Backend gap:</b> symbol-accurate labels & storefront care need
-            a STRUCTURED backend care field; today care round-trips as one plain string.
-          </Text>
-        </CalloutBox>
         {canEdit && changed.length > 0 && (
           <div className='flex flex-wrap items-center gap-2'>
             <Pill tone='attention'>{saving ? 'saving…' : 'staged for save'}</Pill>

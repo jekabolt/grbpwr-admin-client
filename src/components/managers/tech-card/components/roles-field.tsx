@@ -1,7 +1,8 @@
 import { common_TechCardRole, common_TechCardRoleAssignment } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
+import { useState } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
-import Select from 'ui/components/select';
+import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { useAdmins, useAssignRole, useRemoveRoleAssignment, useRoleAssignments } from './useRoles';
@@ -20,11 +21,6 @@ const ROLES: { role: common_TechCardRole; label: string }[] = [
   { role: 'TECH_CARD_ROLE_APPROVER', label: 'approver' },
 ];
 
-// Radix Select forbids an empty-string item value, so the "pick someone" row needs the same '0'
-// sentinel the category browser uses — and re-pinning the value to it after every pick keeps the
-// control reading as an action ("+ add designer…") rather than as a filled field.
-const NONE = '0';
-
 function RoleRow({
   techCardId,
   role,
@@ -42,6 +38,7 @@ function RoleRow({
   const { data: adminsData } = useAdmins();
   const assign = useAssignRole(techCardId);
   const remove = useRemoveRoleAssignment(techCardId);
+  const [addOpen, setAddOpen] = useState(false);
 
   const admins = adminsData?.admins ?? [];
   const mine = assignments.filter((a) => a.role === role);
@@ -50,6 +47,7 @@ function RoleRow({
 
   const add = (adminId: number) => {
     if (!adminId) return;
+    setAddOpen(false);
     assign.mutate(
       { role, adminId },
       { onError: (e) => showMessage(fieldErrorSummary(e, 'could not assign role'), 'error') },
@@ -62,47 +60,70 @@ function RoleRow({
     });
   };
 
-  const items = [
-    { value: NONE, label: `+ add ${label}…` },
-    ...available.map((a) => ({ value: String(a.id), label: a.username || `#${a.id}` })),
-  ];
-
   return (
-    <div className='space-y-px border-b border-hairline pb-2 last:border-b-0 last:pb-0'>
+    <div className='space-y-1 border-b border-hairline pb-2 last:border-b-0 last:pb-0'>
       {/* same 10px uppercase field label the form fields render, without the form plumbing */}
       <Text size='micro' variant='label' tracking='label' className='uppercase leading-none'>
         {label}
       </Text>
-      <div className='flex flex-wrap items-center gap-1'>
-        {mine.length === 0 && (
+      {/* Who holds the role and the way to add one are two different things, so they get a real
+          column gap — as one flow at chip spacing the "+" read as another assigned person. */}
+      <div className='flex flex-wrap items-center gap-x-5 gap-y-1'>
+        {mine.length === 0 ? (
           <Text size='micro' variant='label' component='span'>
             — none —
           </Text>
+        ) : (
+          <ChipRow>
+            {mine.map((a) => (
+              <Chip
+                key={a.id}
+                selected
+                title={a.assignedBy ? `assigned by ${a.assignedBy}` : undefined}
+                onRemove={canEdit ? () => drop(a.id) : undefined}
+              >
+                {a.adminUsername || `#${a.adminId}`}
+              </Chip>
+            ))}
+          </ChipRow>
         )}
-        <ChipRow>
-          {mine.map((a) => (
-            <Chip
-              key={a.id}
-              selected
-              title={a.assignedBy ? `assigned by ${a.assignedBy}` : undefined}
-              onRemove={canEdit ? () => drop(a.id) : undefined}
-            >
-              {a.adminUsername || `#${a.adminId}`}
-            </Chip>
-          ))}
-        </ChipRow>
+        {canEdit && available.length > 0 && (
+          // A 220px select for a list of usernames claimed a whole row and read as a field holding
+          // a value. Adding a person is an act, so it's a "+" that opens the app's popover shell —
+          // the same grammar as every other small picker here.
+          <GenericPopover
+            open={addOpen}
+            onOpenChange={setAddOpen}
+            title={`add ${label}`}
+            className='w-[200px]'
+            triggerProps={{
+              disabled: assign.isPending,
+              'aria-label': `add ${label}`,
+            }}
+            openElement={
+              // A span, not a Chip button: the popover trigger is already a button.
+              <Chip dashed className={assign.isPending ? 'opacity-50' : 'hover:border-textColor'}>
+                {assign.isPending ? '…' : '+'}
+              </Chip>
+            }
+          >
+            <div className='flex flex-col'>
+              {available.map((a) => (
+                <button
+                  key={a.id}
+                  type='button'
+                  className='border-b border-hairline py-1 text-left last:border-b-0 hover:bg-bgZebra'
+                  onClick={() => add(a.id ?? 0)}
+                >
+                  <Text size='micro' component='span'>
+                    {a.username || `#${a.id}`}
+                  </Text>
+                </button>
+              ))}
+            </div>
+          </GenericPopover>
+        )}
       </div>
-      {canEdit && available.length > 0 && (
-        <Select
-          name={`role-${role}`}
-          className='max-w-[220px]'
-          items={items}
-          value={NONE}
-          placeholder={`+ add ${label}…`}
-          disabled={assign.isPending}
-          onValueChange={(v?: string) => add(Number(v) || 0)}
-        />
-      )}
     </div>
   );
 }
