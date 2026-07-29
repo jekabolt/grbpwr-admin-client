@@ -2,9 +2,12 @@ import { common_EmailCampaignFull, common_EmailCampaignStatus } from 'api/proto-
 import { STATUS_LABELS, TOPIC_LABELS } from 'constants/email-campaign';
 import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { epochSecondsToRfc3339 } from './map-schema-to-campaign';
+import { useDeleteCampaign } from './useCampaign';
 
 // Brand-token status chips: gray for inert states, warning (amber) for in-flight,
 // red only for cancelled (loss). No coral/pastel washes.
@@ -36,7 +39,12 @@ function fmtDate(epoch: number | string | undefined): string {
 
 export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull }) {
   const navigate = useNavigate();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteCampaign = useDeleteCampaign();
   const status = (campaign.status || 'EMAIL_CAMPAIGN_STATUS_UNKNOWN') as common_EmailCampaignStatus;
+  // A sending campaign is mid-dispatch — deleting it would orphan its recipient ledger, so hide
+  // the action for that state only.
+  const deletable = status !== 'EMAIL_CAMPAIGN_STATUS_SENDING';
   const subject =
     campaign.variants?.[0]?.subjectI18n?.find((s) => s?.languageId === 1)?.subject ||
     campaign.variants?.[0]?.subjectI18n?.[0]?.subject ||
@@ -52,11 +60,39 @@ export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull 
         : 'not scheduled';
 
   return (
-    <button
-      type='button'
-      onClick={() => navigate(`${ROUTES.emailCampaigns}/${campaign.id}`)}
-      className='group flex h-full flex-col gap-3 border border-textInactiveColor p-4 text-left transition-colors hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-    >
+    <div className='relative h-full'>
+      {deletable && (
+        <button
+          type='button'
+          aria-label='delete campaign'
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirmDelete(true);
+          }}
+          className='absolute right-1.5 top-1.5 z-10 border border-textInactiveColor bg-bgColor px-1.5 leading-none text-textInactiveColor transition-colors hover:border-error hover:text-error'
+        >
+          ✕
+        </button>
+      )}
+      <ConfirmationModal
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title='delete campaign'
+        confirmLabel='delete'
+        onConfirm={() => {
+          deleteCampaign.mutate(campaign.id ?? 0);
+          setConfirmDelete(false);
+        }}
+      >
+        <Text size='small'>
+          delete “{campaign.name || 'untitled campaign'}”? this can’t be undone.
+        </Text>
+      </ConfirmationModal>
+      <button
+        type='button'
+        onClick={() => navigate(`${ROUTES.emailCampaigns}/${campaign.id}`)}
+        className='group flex h-full w-full flex-col gap-3 border border-textInactiveColor p-4 text-left transition-colors hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+      >
       <div className='flex items-start justify-between gap-2'>
         <Text variant='uppercase' className='truncate group-hover:text-bgColor'>
           {campaign.name || 'untitled campaign'}
@@ -92,6 +128,7 @@ export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull 
           {when}
         </Text>
       </div>
-    </button>
+      </button>
+    </div>
   );
 }
