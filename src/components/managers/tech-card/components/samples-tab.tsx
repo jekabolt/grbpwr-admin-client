@@ -1,3 +1,4 @@
+import { adminService } from 'api/api';
 import {
   common_Dictionary,
   common_Fitting,
@@ -10,7 +11,7 @@ import { formatTechCardDate } from 'components/managers/tech-cards/components/ut
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -61,11 +62,33 @@ import {
   useSaveSample,
   useTechCardReleases,
 } from './useSamples';
+import {
+  COMMIT_ORDER,
+  useStagedChanges,
+  useStagedSnapshot,
+  useTechCardStaging,
+} from './useTechCardStaging';
 
 // Samples (сэмплы) of a style (NF-04): a board of photo tiles (one per sewn prototype), not a
 // dense table — that read poorly once a style had more than a couple of samples, and buried the
 // one thing a tile should say at a glance (what it is, its state, how it fit). Deep-linkable via
 // ?sample= (R-1); opening one replaces the board with its two-column editor (10.3).
+//
+// ─── phase 19: the sample EDITOR stages, its ledgers stay instant ─────────────────────────────
+// The editor is a genuine draft form — a dozen fields edited, then saved — so it no longer owns a
+// save button: it stages into the card's one save under `sample:<id>`, one staged change per
+// sample. Several samples can therefore be edited before one Save, which is exactly why the board
+// tiles mark the staged ones (the editor that owns those edits is unmounted the moment you go
+// back to the board).
+//
+// Creating and deleting a sample stay INSTANT, like roles (19.5): both are ledger actions on the
+// server's identity, not draft edits, and a "+ sample" that did nothing until you found the header
+// save would be a worse card than the one this phase is fixing.
+
+// One staged change per sample. The prefix is shared with the board so a tile can tell whether the
+// sample it draws has edits waiting.
+const SAMPLE_STAGING_PREFIX = 'sample:';
+const stagingKeyFor = (sampleId: number) => `${SAMPLE_STAGING_PREFIX}${sampleId}`;
 
 // Sample status → Pill tone. done is finished (green), scrapped is dead (red), in sewing is
 // mid-flight and needs a human (blue — never amber), planned is neutral.
@@ -92,6 +115,17 @@ export function SamplesTab({
   const { data, isLoading } = useSamples(techCardId);
   const samples = data?.samples ?? [];
   const expanded = params.get('sample') ?? '';
+  const staging = useTechCardStaging();
+  const stagedChanges = useStagedChanges();
+  // Edits staged on a sample the user has since closed live only in the header count — the board is
+  // where they would look for them, so the tile says so too.
+  const stagedSampleIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const c of stagedChanges)
+      if (c.key.startsWith(SAMPLE_STAGING_PREFIX))
+        ids.add(Number(c.key.slice(SAMPLE_STAGING_PREFIX.length)));
+    return ids;
+  }, [stagedChanges]);
   // Shared with the open sample's FITTINGS rows (same grouping, same cache) — the board's
   // "N fittings · latest verdict" line costs no extra request.
   const { bySample: fittingsBySample } = useSampleFittings(techCardId);
@@ -194,6 +228,7 @@ export function SamplesTab({
               sizeName={sizeName(s.sample?.sizeId)}
               colorwayName={colorwayName(s.sample?.colorwayId)}
               fittings={(s.id ? fittingsBySample.get(s.id) : undefined) ?? []}
+              staged={!!s.id && stagedSampleIds.has(s.id)}
               onOpen={() => setExpanded(String(s.id))}
             />
           ))}
@@ -226,6 +261,7 @@ function SampleCard({
   sizeName,
   colorwayName,
   fittings,
+  staged,
   onOpen,
 }: {
   sample: common_Sample;
@@ -233,6 +269,7 @@ function SampleCard({
   sizeName: string;
   colorwayName: string;
   fittings: common_Fitting[];
+  staged: boolean;
   onOpen: () => void;
 }) {
   const thumb = sampleThumbUrl(sample);
@@ -266,6 +303,7 @@ function SampleCard({
         <Pill tone={statusTone(sample.sample?.status)}>
           {sampleStatusLabel(sample.sample?.status)}
         </Pill>
+        {staged && <Pill tone='attention'>staged</Pill>}
         <Text size='micro' variant='label' component='span' className='ml-auto tabular-nums'>
           {cost || '—'}
         </Text>
@@ -320,6 +358,39 @@ function draftFrom(s?: common_Sample): Draft {
     previousSampleId: i?.previousSampleId ?? 0,
   };
 }
+
+// Draft fields in the operator's words. Also the field list `changedFields` walks, so a field added
+// to Draft without a label here is a field the header would silently stop counting.
+const DRAFT_LABELS: Record<keyof Draft, string> = {
+  purpose: 'purpose',
+  sizeId: 'size',
+  colorwayId: 'colourway',
+  status: 'status',
+  fabricSource: 'fabric',
+  notes: 'notes',
+  startedAt: 'started',
+  finishedAt: 'finished',
+  mediaIds: 'photos',
+  patternUrl: 'pattern url',
+  patternNote: 'pattern note',
+  roundNumber: 'round',
+  specReleaseId: 'spec release',
+  previousSampleId: 'previous sample',
+};
+
+// What the editor moved off the server's copy — the header's label has to be a fact, and "dirty"
+// is not one: typing a value and typing it back is not a change to save. mediaIds is an array, so
+// everything compares by serialised value rather than by identity.
+function changedFields(base: Draft, draft: Draft): string[] {
+  return (Object.keys(DRAFT_LABELS) as (keyof Draft)[])
+    .filter((k) => JSON.stringify(base[k]) !== JSON.stringify(draft[k]))
+    .map((k) => DRAFT_LABELS[k]);
+}
+
+// What a re-opened editor needs to show the edits it staged. `media` rides along because the draft
+// only holds media IDS: without the resolved records the gallery would come back empty and the
+// operator would think their photos were dropped.
+type SampleSnapshot = { draft: Draft; media: common_MediaFull[] };
 
 // Style colourways (R1: a colourway is a product; techCardId === styleId), resolved from the
 // live techCard read — techCard.colorways is AdminColorwayRef[], not the form's legacy empty
@@ -411,6 +482,11 @@ function SampleEditor({
   const save = useSaveSample();
   const del = useDeleteSample();
   const sampleId = sample.id ?? 0;
+  const staging = useTechCardStaging();
+  // Read-only view of what is staged, kept OUT of the staging effect's deps on purpose — see the
+  // two-contexts note in useTechCardStaging.
+  const stagedSnapshot = useStagedSnapshot();
+  const stagingKey = stagingKeyFor(sampleId);
 
   // GetSample resolves the composed cost (never present on list rows).
   const { data: full } = useSample(sampleId, !!sampleId && canReadCosting);
@@ -438,6 +514,28 @@ function SampleEditor({
     setMediaById(m);
   }, [sample, dirty]);
 
+  // Pick up edits this sample already had staged. Unlike every other converted panel this editor
+  // UNMOUNTS while its change is still staged — go back to the board, open another sample — so on
+  // the way back in it must show what is staged rather than the server's copy, which would look
+  // like the edits were dropped and would be overwritten by the next keystroke.
+  //
+  // The same claim also serves the refresh path (19.6) when the draft is restored BEFORE the sample
+  // is opened. It cannot serve the other order (already open when the banner is pressed), and a
+  // sample that was not the one in ?sample= has no editor to hand a snapshot back to — so a reload
+  // restores at most the sample you were looking at. That is the honest limit of a panel whose
+  // instances come and go, not something the count lies about: an unclaimed snapshot stages nothing.
+  const claimed = useRef(false);
+  useEffect(() => {
+    if (claimed.current || !staging || !sampleId) return;
+    claimed.current = true;
+    const live = stagedSnapshot(stagingKey) as SampleSnapshot | undefined;
+    const snap = live ?? (staging.takeSnapshot(stagingKey) as SampleSnapshot | undefined);
+    if (!snap) return;
+    setD(snap.draft);
+    setMediaById(new Map((snap.media ?? []).filter((m) => m.id).map((m) => [m.id!, m])));
+    setDirty(true);
+  }, [staging, sampleId, stagingKey]);
+
   const set = (patch: Partial<Draft>) => {
     setDirty(true);
     setD((prev) => ({ ...prev, ...patch }));
@@ -454,6 +552,11 @@ function SampleEditor({
   const mediaLinks = d.mediaIds
     .map((id) => mediaById.get(id))
     .filter((m): m is common_MediaFull => m != null);
+
+  // The server's copy is the baseline the staged label counts against.
+  const base = useMemo(() => draftFrom(sample), [sample]);
+  const changed = useMemo(() => changedFields(base, d), [base, d]);
+  const staged = canEdit && changed.length > 0;
 
   const { bySample } = useSampleFittings(techCardId);
   const fittings = bySample.get(sampleId) ?? [];
@@ -498,12 +601,24 @@ function SampleEditor({
     set({ mediaIds: [...d.mediaIds, ...fresh.map((m) => m.id!).filter(Boolean)] });
   };
 
-  const submit = async () => {
+  // The editor's mutation, unwrapped: it THROWS instead of toasting, because the header's one save
+  // reports the outcome now — it needs the rejection to name this sample in the partial-failure
+  // banner and keep everything after it staged (19.3). saveSampleErrorMessage runs HERE so a
+  // rejected lock reads as "this SAMPLE was changed", not as the card-level 409 sentence the
+  // header's generic formatter would print.
+  async function commitSample() {
+    if (!sampleId) return;
     try {
+      // Read the lock version right before the write. The staged change outlives this editor — it
+      // unmounts the moment you go back to the board — while the sample's instant sub-panels (dev
+      // expenses, substitutions, material movements) keep writing to it, so a version frozen at the
+      // last render would 409 the operator's OWN staged edit away at save time. The narrower window
+      // this leaves (read → write) is still guarded by S25. A failed read is not fatal: fall back
+      // to what the editor loaded and let the server arbitrate.
+      const fresh = await adminService.GetSample({ id: sampleId }).catch(() => undefined);
       await save.mutateAsync({
         id: sampleId,
-        // S25: echo the lock_version the editor loaded — a stale value is rejected (409).
-        expectedLockVersion: sample.lockVersion ?? 0,
+        expectedLockVersion: fresh?.sample?.lockVersion ?? sample.lockVersion ?? 0,
         sample: {
           techCardId,
           purpose: d.purpose,
@@ -522,16 +637,51 @@ function SampleEditor({
           previousSampleId: d.previousSampleId || 0,
         },
       });
-      setDirty(false);
-      showMessage('Sample saved', 'success');
     } catch (e) {
-      showMessage(saveSampleErrorMessage(e), 'error');
+      throw new Error(saveSampleErrorMessage(e));
     }
+  }
+
+  // Hand the mutation to the card's one save, keyed per sample so several samples can be edited
+  // before one Save. Re-staged on EVERY edit because `commit` closes over this render's draft — a
+  // stale closure would write the sample as it stood one keystroke ago. Unstaged as soon as the
+  // draft matches the server again, so the header count never claims work that is not there.
+  useEffect(() => {
+    if (!staging || !sampleId || !canEdit) return;
+    if (changed.length === 0) {
+      staging.unstage(stagingKey);
+      return;
+    }
+    staging.stage({
+      key: stagingKey,
+      // Naming the fields beats counting them while the list is short enough to read at a glance.
+      label: `сэмпл #${sample.number ?? sampleId} — ${
+        changed.length <= 3 ? changed.join('/') : `${changed.length} fields`
+      }`,
+      order: COMMIT_ORDER.samples,
+      commit: commitSample,
+      // Dropping dirty re-arms the load effect, so the committed sample reloads from the server
+      // (with its new lock version and the server-assigned round number).
+      settle: () => setDirty(false),
+      snapshot: { draft: d, media: mediaLinks } satisfies SampleSnapshot,
+    });
+    // commitSample is redefined every render by design (it reads the current draft); depending on
+    // it here would restage twice per keystroke for no gain, so the state it reads is the dep list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staging, sampleId, stagingKey, canEdit, changed, d, sample.number]);
+
+  // Staged edits are not lost work — they ride the card's Save — but the operator still needs a way
+  // to say "forget these". Dropping dirty re-arms the load effect, which restores the server's copy.
+  const discardEdits = () => {
+    staging?.unstage(stagingKey);
+    setDirty(false);
   };
 
   const confirmDelete = () =>
     del.mutate(sampleId, {
       onSuccess: () => {
+        // Nothing may stay staged against a row that no longer exists.
+        staging?.unstage(stagingKey);
         showMessage('Sample deleted', 'success');
         onClose();
       },
@@ -541,12 +691,9 @@ function SampleEditor({
   return (
     <div className='flex flex-col'>
       <div className='mb-2.5 flex flex-wrap items-center gap-2 border-b-2 border-textColor pb-1'>
-        <Button
-          type='button'
-          variant='secondary'
-          size='sm'
-          onClick={() => (dirty ? setDiscardOpen(true) : onClose())}
-        >
+        {/* Going back to the board no longer risks anything: the edits are staged and counted in
+            the header, and the tile they belong to says so. */}
+        <Button type='button' variant='secondary' size='sm' onClick={onClose}>
           ← samples ({sampleCount})
         </Button>
         <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
@@ -554,7 +701,7 @@ function SampleEditor({
           {liveColorwayName}
         </Text>
         <Pill tone={statusTone(d.status)}>{sampleStatusLabel(d.status)}</Pill>
-        {dirty ? <Pill tone='attention'>unsaved</Pill> : null}
+        {staged ? <Pill tone='attention'>staged</Pill> : null}
       </div>
 
       {/* 10.3 — photos + facts left, the whole activity trail right, nothing collapsed. */}
@@ -873,32 +1020,33 @@ function SampleEditor({
         </div>
       </div>
 
-      {/* One primary action (save) on the right; the destructive delete sits beside it but demoted
-          to a secondary outline and guarded by a confirm; close/back stays clear on the left. */}
-      <div className='mt-2.5 flex items-center justify-between gap-2 border-t border-borderColor pt-2'>
-        <Button
-          type='button'
-          variant='secondary'
-          size='sm'
-          onClick={() => (dirty ? setDiscardOpen(true) : onClose())}
-        >
+      {/* No save button: this editor stages into the card's one Save (19). What is left is the
+          state of those edits, a way to drop them, and the destructive delete — demoted to a
+          secondary outline and guarded by a confirm. close/back stays clear on the left. */}
+      <div className='mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-borderColor pt-2'>
+        <Button type='button' variant='secondary' size='sm' onClick={onClose}>
           close
         </Button>
-        <div className='flex items-center gap-2'>
+        <div className='flex flex-wrap items-center gap-2'>
+          {staged && (
+            <>
+              <Pill tone='attention'>{save.isPending ? 'saving…' : 'staged for save'}</Pill>
+              <Text size='micro' variant='label' component='span'>
+                included in the card’s Save
+              </Text>
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                onClick={() => setDiscardOpen(true)}
+              >
+                discard
+              </Button>
+            </>
+          )}
           {canEdit && (
             <Button type='button' variant='secondary' size='sm' onClick={() => setDeleteOpen(true)}>
               delete
-            </Button>
-          )}
-          {canEdit && (
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              disabled={save.isPending}
-              onClick={submit}
-            >
-              {save.isPending ? 'saving…' : 'save'}
             </Button>
           )}
         </div>
@@ -918,12 +1066,15 @@ function SampleEditor({
       <ConfirmationModal
         open={discardOpen}
         onOpenChange={setDiscardOpen}
-        onConfirm={onClose}
+        onConfirm={discardEdits}
         width='sm'
-        title='discard unsaved changes?'
+        title='discard staged edits?'
         confirmLabel='discard'
       >
-        <Text size='micro'>This sample has unsaved edits — closing will discard them.</Text>
+        <Text size='micro'>
+          These edits are staged for the card’s Save — discarding drops them and restores this
+          sample from the server.
+        </Text>
       </ConfirmationModal>
     </div>
   );

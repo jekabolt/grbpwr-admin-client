@@ -37,6 +37,7 @@ import {
   useCreateColorway,
   useUpdateColorwayRecipe,
 } from './useColorwayRecipe';
+import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
 // Phase-02 field metrics: a full 1px box, 3px/7px padding, 22px min height — identical to <Input>,
 // so a control in this locally-managed editor is indistinguishable from an RHF-bound one elsewhere.
@@ -108,8 +109,50 @@ type LabDipDraft = {
 };
 
 // What the grid tile needs to know about a recipe that is only fully known inside its editor: the
-// LIVE material count (including rows added but not yet saved) and whether anything is unsaved.
-type RecipeStatus = { count: number; dirty: boolean };
+// LIVE material count (including rows added but not yet saved) and whether anything here is waiting
+// on the card's Save.
+type RecipeStatus = { count: number; staged: boolean };
+
+// What the recipe editor needs to rebuild itself after a refresh (19.6). A UsageDraft is already
+// plain strings and arrays, so it goes over as-is — there is no Map to flatten. The lab-dip draft is
+// six strings and is stored as itself.
+type RecipeSnapshot = { usages: UsageDraft[] };
+
+// The operator's word for a colourway — never its numeric id: a staged change labelled
+// «колорвей 4127» names nothing anybody can find in the swatch grid.
+function colorwayTitle(cw: common_AdminColorwayRef): string {
+  return cw.colorCode?.trim() || cw.baseSku?.trim() || `#${cw.colorwayId}`;
+}
+
+// THE OPTIMISTIC LOCK, READ AT COMMIT TIME — never at render time. Both colourway writes echo the
+// ref's lockVersion, which IS the shared tech_card.lock_version. Under one staged save the card body
+// commits first (COMMIT_ORDER 0) and bumps that version, and so does every colourway write queued
+// ahead of this one. A version captured when this panel rendered is therefore already stale by the
+// time the header reaches it, and the save would 409 against its own card body. So re-read it
+// immediately before each write — the same move the size chart makes with GetStyleSizeChart.
+async function readColorwayVersion(
+  techCardId: number,
+  colorwayId: number,
+  fallback: number,
+): Promise<number> {
+  const res = await adminService.GetTechCard({ id: techCardId, vatCountryCode: undefined });
+  const ref = res.techCard?.colorways?.find((c) => c.colorwayId === colorwayId);
+  return ref?.lockVersion ?? res.techCard?.lockVersion ?? fallback;
+}
+
+// How many recipe lines this draft actually changes against what the server returned. The header's
+// label has to be a FACT, and the write is a FULL REPLACE — counting every line it sends would claim
+// work nobody did. Keyed by bom_line_key, which is what the write itself is keyed by.
+function changedLines(base: UsageDraft[], next: UsageDraft[]): number {
+  const sig = (u: UsageDraft) => JSON.stringify(toWire(u));
+  const before = new Map(base.map((u) => [u.bomLineKey, sig(u)]));
+  const keys = new Set(next.map((u) => u.bomLineKey));
+  let n = 0;
+  // added (no such key before) or edited (same key, different payload)
+  for (const u of next) if (before.get(u.bomLineKey) !== sig(u)) n += 1;
+  for (const key of before.keys()) if (!keys.has(key)) n += 1; // removed
+  return n;
+}
 
 // UpdateColorway is a field-masked write. This mask lists ONLY the six lab-dip leaves INSIDE `development`,
 // so a save touches exactly those columns and nothing else on the colourway. Everything else in the
@@ -181,7 +224,7 @@ function hasLabDipRound(d: LabDipDraft): boolean {
   );
 }
 
-// One row of the timeline. `unsaved` marks the round the draft is currently editing — the only row
+// One row of the timeline. `staged` marks the round the draft is currently editing — the only row
 // that is not straight off the server's journal.
 type TimelineRound = {
   key: string;
@@ -192,7 +235,7 @@ type TimelineRound = {
   decidedBy: string;
   rejectReason: string;
   comment: string;
-  unsaved?: boolean;
+  staged?: boolean;
 };
 
 function fromRecordedRound(r: common_ColorwayLabDipRound, i: number): TimelineRound {
@@ -220,8 +263,9 @@ function roundOutcome(r: TimelineRound): string {
 
 // Build the field-masked UpdateColorway request that persists ONLY this colourway's lab-dip state. Every
 // non-lab-dip key is sent undefined AND left out of the mask, so merchandising / media / prices / tags and
-// the rest of `development` are untouched. expected_colorway_version echoes the ref's own lockVersion (the
-// shared tech_card.lock_version) for the optimistic lock.
+// the rest of `development` are untouched. expected_colorway_version is passed IN rather than read off the
+// ref: under the card's one save the shared tech_card.lock_version has usually moved since this panel
+// rendered, so the caller reads it fresh (readColorwayVersion) right before the write.
 function buildLabDipRequest(
   cw: common_AdminColorwayRef,
   draft: LabDipDraft,
@@ -301,10 +345,12 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+// The lock version is read fresh immediately before the write, so a 409 here is a genuinely
+// concurrent edit by someone else — not this card's own save racing itself.
 function labDipSaveErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
   if (status === 409)
-    return 'This colourway changed since you loaded it — its lab-dip state was reloaded, re-apply your change.';
+    return 'Someone else changed this colourway while you were saving — reload and re-apply the lab-dip change.';
   return e instanceof Error ? e.message : 'Failed to save lab-dip';
 }
 
@@ -312,6 +358,9 @@ function labDipSaveErrorMessage(e: unknown): string {
 // the tech-card detail, which is the read that carries colorways[].labDip* (the latest round), each ref's
 // lockVersion AND colorways[].labDipRounds (the journal the timeline draws). A save appends to or amends
 // that journal server-side, so refetching the detail is what makes the new round appear.
+//
+// The mutation is fired through mutateAsync from the staged commit, so a rejection propagates to the
+// header instead of being swallowed here — the header is what reports the outcome now (19.3).
 function useUpdateColorwayLabDip(techCardId: number) {
   const qc = useQueryClient();
   return useMutation({
@@ -760,78 +809,77 @@ function UsageRowEditor({
 // them — a colourway with no rounds has genuinely never had a swatch submitted, and the timeline says
 // exactly that rather than inventing an R1 out of a PENDING baseline.
 //
-// PERSISTENCE: its OWN save button and its OWN RPC — UpdateColorway's `development` submessage under
-// LAB_DIP_UPDATE_MASK, a field mask naming ONLY the six lab-dip leaves. That subpath mask keeps the rest
-// of `development` (devCode / name / pantone / devHex / swatch / usages) intact, so no read-merge is
-// needed (and none is possible — no read path returns those dev identity fields). That write now REACHES
-// THE DATABASE: the server used to ignore UpdateColorway's `development` entirely, so every save this
-// panel made was a no-op that still reported success. If you are wondering why the panel suddenly
-// works, that is why — nothing changed on this side. The server keys each write by round_number, so
-// saving round 3 leaves rounds 1-2 standing and the journal grows one entry per round.
+// PERSISTENCE: UpdateColorway's `development` submessage under LAB_DIP_UPDATE_MASK, a field mask naming
+// ONLY the six lab-dip leaves. That subpath mask keeps the rest of `development` (devCode / name / pantone
+// / devHex / swatch / usages) intact, so no read-merge is needed (and none is possible — no read path
+// returns those dev identity fields). That write now REACHES THE DATABASE: the server used to ignore
+// UpdateColorway's `development` entirely, so every save this panel made was a no-op that still reported
+// success. If you are wondering why the panel suddenly works, that is why — nothing changed on this side.
+// The server keys each write by round_number, so saving round 3 leaves rounds 1-2 standing and the journal
+// grows one entry per round.
 //
-// The action buttons only stage into the draft; nothing reaches the server until `save lab-dip`. Until
-// then the staged round is drawn on the timeline marked UNSAVED, so an approve or a reject is visible
-// where it will land instead of only as a pill on the toolbar.
+// Phase 19: the RPC is still this panel's, but the BUTTON is not. There is one save on the card and this
+// panel STAGES into it (key `labDip:<colorwayId>`, COMMIT_ORDER.labDip). The action buttons only move the
+// draft; nothing reaches the server until the card's Save runs. Until then the staged round is drawn on
+// the timeline marked STAGED, so an approve or a reject is visible where it will land rather than only as
+// a pill on the toolbar.
 function LabDipTimeline({
   colorway,
   techCardId,
   lockVersion,
   canEdit,
   swatchHex,
-  onDirtyChange,
+  onStagedChange,
 }: {
   colorway: common_AdminColorwayRef;
   techCardId: number;
   lockVersion: number;
   canEdit: boolean;
   swatchHex?: string;
-  onDirtyChange: (dirty: boolean) => void;
+  onStagedChange: (staged: boolean) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
-  const qc = useQueryClient();
   const save = useUpdateColorwayLabDip(techCardId);
+  const staging = useTechCardStaging();
+  // A colourway the card has not created yet has no id to write against — it must not stage.
+  const colorwayId = colorway.colorwayId ?? 0;
+  const stagingKey = `labDip:${colorwayId}`;
   const [dirty, setDirty] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reasonDraft, setReasonDraft] = useState('');
-  // Initialise from the ref's labDip* fields; re-sync after a save's refetch unless there are unsaved
-  // edits (mirrors the usages editor).
-  const [draft, setDraft] = useState<LabDipDraft>(() => fromRefLabDip(colorway));
+  // What the server says this colourway's lab-dip is: the editor's starting point AND the baseline the
+  // draft is diffed against below.
+  const stored = useMemo(() => fromRefLabDip(colorway), [colorway]);
+  const [draft, setDraft] = useState<LabDipDraft>(stored);
+  // Re-sync after a save's refetch, unless there are unstaged-but-unsaved edits (mirrors the usages
+  // editor) — a refetch must never silently overwrite work the operator has not committed.
   useEffect(() => {
     if (dirty) return;
-    setDraft(fromRefLabDip(colorway));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    colorway.labDipStatus,
-    colorway.labDipRound,
-    colorway.labDipSubmittedAt,
-    colorway.labDipDecidedAt,
-    colorway.labDipDecidedBy,
-    colorway.labDipRejectReason,
-    dirty,
-  ]);
+    setDraft(stored);
+  }, [stored, dirty]);
+
+  // Claim any edit this panel had staged when the tab was refreshed (19.6). Declared AFTER the re-sync
+  // above on purpose: both run in the same mount flush and the LAST setDraft is the one that sticks, so
+  // the restored draft has to be second. Claims exactly once — takeSnapshot removes what it returns.
   useEffect(() => {
-    onDirtyChange(dirty);
-  }, [dirty, onDirtyChange]);
+    if (!staging || !colorwayId) return;
+    const snap = staging.takeSnapshot(stagingKey) as LabDipDraft | undefined;
+    if (!snap) return;
+    setDraft(snap);
+    setDirty(true);
+  }, [staging, colorwayId, stagingKey]);
+
+  // Dirty says a control was touched; STAGED says the six values would actually write something else.
+  // Poking a status and putting it back must not leave the header counting a change that writes nothing.
+  const changed = useMemo(() => JSON.stringify(draft) !== JSON.stringify(stored), [draft, stored]);
+  const staged = dirty && changed;
+
+  useEffect(() => {
+    onStagedChange(staged);
+  }, [staged, onStagedChange]);
 
   const set = (patch: Partial<LabDipDraft>) => {
     setDirty(true);
     setDraft((d) => ({ ...d, ...patch }));
-  };
-
-  const submit = () => {
-    save.mutate(buildLabDipRequest(colorway, draft, colorway.lockVersion ?? lockVersion), {
-      onSuccess: () => {
-        setDirty(false);
-        showMessage('Lab-dip saved', 'success');
-      },
-      onError: (e) => {
-        // 409 = stale optimistic lock: refetch so the ref (and its lockVersion) refresh; the operator then
-        // re-applies the edit against the fresh version.
-        if ((e as { status?: number })?.status === 409)
-          qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
-        showMessage(labDipSaveErrorMessage(e), 'error');
-      },
-    });
   };
 
   const recorded = useMemo<TimelineRound[]>(
@@ -841,14 +889,63 @@ function LabDipTimeline({
   const round = parseInt(draft.labDipRound, 10) || 0;
   const started = hasLabDipRound(draft) || recorded.length > 0;
 
-  // The server's journal, with the UNSAVED draft laid over the round it edits (or appended when the
-  // action buttons have staged a round the server has not seen yet). Only while `dirty`: an untouched
-  // draft is just a mirror of the latest recorded round, and drawing it a second time — or minting a
-  // row for a colourway that has no rounds at all — is the fabricated history this panel refuses.
+  // The panel's mutation, unwrapped: it THROWS instead of toasting, because the header's one save is what
+  // reports the outcome now — it needs the rejection to name this panel in the partial-failure banner and
+  // to keep everything queued after it staged (19.3).
+  async function commitLabDip() {
+    if (!colorwayId) return;
+    try {
+      const expected = await readColorwayVersion(techCardId, colorwayId, lockVersion);
+      await save.mutateAsync(buildLabDipRequest(colorway, draft, expected));
+    } catch (e) {
+      // Re-throw carrying this panel's copy: the header prints the message it is handed.
+      throw new Error(labDipSaveErrorMessage(e));
+    }
+  }
+
+  // Hand the mutation to the card's one save. Re-staged on EVERY edit because `commit` closes over this
+  // render's draft — a stale closure would write the edit before last. One key PER COLOURWAY: several
+  // colourways can be edited before a single save and each is its own RPC, so each is its own line in the
+  // header's list.
+  useEffect(() => {
+    if (!staging || !colorwayId || !canEdit) return;
+    if (!staged) {
+      staging.unstage(stagingKey);
+      return;
+    }
+    staging.stage({
+      key: stagingKey,
+      label: `колорвей ${colorwayTitle(colorway)} · lab-dip R${round || 1}`,
+      order: COMMIT_ORDER.labDip,
+      commit: commitLabDip,
+      settle: () => setDirty(false),
+      snapshot: draft,
+    });
+    // commitLabDip is redefined every render by design (it reads current state); depending on it here
+    // would restage on every keystroke for no gain, so the state it reads is the dep list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    staging,
+    stagingKey,
+    colorwayId,
+    canEdit,
+    staged,
+    draft,
+    round,
+    colorway,
+    lockVersion,
+    techCardId,
+  ]);
+
+  // The server's journal, with the STAGED draft laid over the round it edits (or appended when the
+  // action buttons have moved a round the server has not seen yet). Only while it is actually staged: an
+  // untouched draft is just a mirror of the latest recorded round, and drawing it a second time — or
+  // minting a row for a colourway that has no rounds at all — is the fabricated history this panel
+  // refuses.
   const rounds = useMemo<TimelineRound[]>(() => {
-    if (!dirty || !hasLabDipRound(draft)) return recorded;
+    if (!staged || !hasLabDipRound(draft)) return recorded;
     const n = round || 1;
-    const staged: TimelineRound = {
+    const pending: TimelineRound = {
       key: `staged-${n}`,
       round: n,
       status: draft.labDipStatus,
@@ -857,15 +954,15 @@ function LabDipTimeline({
       decidedBy: draft.labDipDecidedBy,
       rejectReason: draft.labDipRejectReason,
       comment: '',
-      unsaved: true,
+      staged: true,
     };
     const at = recorded.findIndex((r) => r.round === n);
-    if (at < 0) return [...recorded, staged];
+    if (at < 0) return [...recorded, pending];
     // The draft carries no comment field, so keep the recorded one rather than blanking it on screen.
     const next = [...recorded];
-    next[at] = { ...staged, comment: recorded[at].comment };
+    next[at] = { ...pending, comment: recorded[at].comment };
     return next;
-  }, [recorded, dirty, draft, round]);
+  }, [recorded, staged, draft, round]);
 
   const approve = () =>
     set({ labDipStatus: APPROVED, labDipDecidedAt: todayInput(), labDipRejectReason: '' });
@@ -943,7 +1040,7 @@ function LabDipTimeline({
                       {outcome}
                     </Text>
                   )}
-                  {r.unsaved && <Pill tone='attention'>unsaved</Pill>}
+                  {r.staged && <Pill tone='attention'>staged</Pill>}
                   <LabDipPill status={r.status} />
                 </span>
               }
@@ -1067,24 +1164,23 @@ function LabDipTimeline({
 
           <div className='ml-auto flex items-center gap-1.5'>
             {/* Only when the timeline is not already carrying the marker on the round being edited —
-                two `unsaved` pills side by side say nothing the first one did not. */}
-            {dirty && !rounds.some((r) => r.unsaved) && <Pill tone='attention'>unsaved</Pill>}
+                two `staged` pills side by side say nothing the first one did not. */}
+            {staged && !rounds.some((r) => r.staged) && (
+              <Pill tone='attention'>{save.isPending ? 'saving…' : 'staged'}</Pill>
+            )}
             <Button type='button' variant='secondary' size='sm' onClick={newRound}>
               + new round
             </Button>
-            {/* Lab-dip keeps its OWN save + RPC, separate from the recipe's. */}
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              disabled={save.isPending || !dirty}
-              loading={save.isPending}
-              onClick={submit}
-            >
-              save lab-dip
-            </Button>
           </div>
         </div>
+      )}
+
+      {/* No save button of its own any more: the lab-dip write is queued behind the card's one Save,
+          which is what reports whether it landed. */}
+      {canEdit && staged && (
+        <Text size='micro' variant='label'>
+          included in the card’s Save
+        </Text>
       )}
     </div>
   );
@@ -1125,6 +1221,11 @@ function CompositionBar({ fibers, skipped }: ReturnType<typeof deriveComposition
 // One colourway's recipe, rendered BELOW the swatch grid rather than inside an accordion, so the
 // grid stays on screen while you edit and you can hop between colourways. Every editor stays mounted
 // (the caller only hides the inactive ones) — an unsaved draft must survive that hop.
+//
+// Phase 19: the recipe RPC (UpdateColorwayRecipe, full-replace) is still this panel's, but the button
+// is not — the panel STAGES into the card's one save under `recipe:<colorwayId>`, one key per
+// colourway, so three colourways edited before a single Save are three lines in the header's list and
+// three separate writes.
 function ColorwayRecipeEditor({
   colorway,
   bomItems,
@@ -1150,26 +1251,52 @@ function ColorwayRecipeEditor({
   canEdit: boolean;
   onStatus: (colorwayId: number, status: RecipeStatus) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
   const save = useUpdateColorwayRecipe(techCardId);
+  const staging = useTechCardStaging();
+  // A colourway the card has not created yet has no id to write against — it must not stage.
+  const colorwayId = colorway.colorwayId ?? 0;
+  const stagingKey = `recipe:${colorwayId}`;
+  const title = colorwayTitle(colorway);
   const [dirty, setDirty] = useState(false);
-  const [labDipDirty, setLabDipDirty] = useState(false);
-  // CRITICAL (full-replace): initialise from the LIVE read (colorway.usages), never from empty. Re-sync
-  // when the read changes (after a save's refetch) unless the user has unsaved edits.
-  const [usages, setUsages] = useState<UsageDraft[]>(() =>
-    (colorway.usages ?? []).map((u) => fromRead(u, bomItems)),
+  const [labDipStaged, setLabDipStaged] = useState(false);
+  // CRITICAL (full-replace): the draft starts from the LIVE read (colorway.usages), never from empty.
+  // This is also the baseline the header's line count is measured against.
+  const baseline = useMemo(
+    () => (colorway.usages ?? []).map((u) => fromRead(u, bomItems)),
+    [colorway.usages, bomItems],
   );
+  const [usages, setUsages] = useState<UsageDraft[]>(baseline);
+  // Re-sync when the read changes (after a save's refetch) unless the user has uncommitted edits.
   useEffect(() => {
     if (dirty) return;
-    setUsages((colorway.usages ?? []).map((u) => fromRead(u, bomItems)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [colorway.usages, dirty]);
+    setUsages(baseline);
+  }, [baseline, dirty]);
 
-  // Feed the grid tile: the live material count and whether anything here is unsaved.
-  const colorwayId = colorway.colorwayId ?? 0;
+  // Claim any edits this panel had staged when the tab was refreshed (19.6). Declared AFTER the re-sync
+  // above on purpose: both run in the same mount flush and the LAST setUsages is the one that sticks, so
+  // the restored rows have to be second. Claims exactly once — takeSnapshot removes what it returns.
   useEffect(() => {
-    onStatus(colorwayId, { count: usages.length, dirty: dirty || labDipDirty });
-  }, [colorwayId, usages.length, dirty, labDipDirty, onStatus]);
+    if (!staging || !colorwayId) return;
+    const snap = staging.takeSnapshot(stagingKey) as RecipeSnapshot | undefined;
+    if (!snap) return;
+    setUsages(snap.usages);
+    setDirty(true);
+  }, [staging, colorwayId, stagingKey]);
+
+  // Dirty says a control was touched; STAGED says the recipe would actually write something else, and
+  // `lines` is what the header's label counts. Typing a value and typing it back must not leave the
+  // header claiming work that is not there.
+  const lines = useMemo(() => changedLines(baseline, usages), [baseline, usages]);
+  const staged = dirty && lines > 0;
+  // Memoised so re-staging for an unrelated reason (a lock version, a title) hands the store the SAME
+  // snapshot object and it can skip the re-render — the lab-dip's snapshot is its draft state, which
+  // is identity-stable for the same reason.
+  const snapshot = useMemo<RecipeSnapshot>(() => ({ usages }), [usages]);
+
+  // Feed the grid tile: the live material count and whether anything here is waiting on the Save.
+  useEffect(() => {
+    onStatus(colorwayId, { count: usages.length, staged: staged || labDipStaged });
+  }, [colorwayId, usages.length, staged, labDipStaged, onStatus]);
 
   const setRow = (i: number, patch: Partial<UsageDraft>) => {
     setDirty(true);
@@ -1198,37 +1325,71 @@ function ColorwayRecipeEditor({
     setUsages((prev) => prev.filter((_, idx) => idx !== i));
   };
 
-  const submit = () => {
-    // M8: never silently drop a half-filled row. A usage without a BOM article can't be persisted
-    // (bom_line_key is the recipe key) — block the save and name the offending rows instead of the
-    // old `usages.filter(u => u.bomLineKey)` that made them vanish with a bare "Recipe saved".
-    const incomplete = usages.map((u, i) => (u.bomLineKey ? -1 : i + 1)).filter((n) => n > 0);
-    if (incomplete.length > 0) {
-      showMessage(
-        `Pick a BOM article for material ${incomplete.join(', ')} (or remove ${
+  // M8: never silently drop a half-filled row. A usage without a BOM article cannot be persisted
+  // (bom_line_key is the recipe key), so it is named here and refused at commit — instead of the old
+  // `usages.filter(u => u.bomLineKey)` that made those rows vanish under a bare "Recipe saved". Named
+  // on screen too, because with no save button of its own the first the operator would otherwise hear
+  // of it is the card's Save stopping halfway.
+  const incomplete = usages.map((u, i) => (u.bomLineKey ? 0 : i + 1)).filter((n) => n > 0);
+
+  // The panel's mutation, unwrapped: it THROWS instead of toasting, because the header's one save is
+  // what reports the outcome now — it needs the rejection to name this panel in the partial-failure
+  // banner and to keep everything queued after it staged (19.3).
+  async function commitRecipe() {
+    if (!colorwayId) return;
+    if (incomplete.length > 0)
+      throw new Error(
+        `pick a BOM article for material ${incomplete.join(', ')} (or remove ${
           incomplete.length === 1 ? 'it' : 'them'
-        }) before saving`,
-        'error',
+        })`,
       );
+    try {
+      const expected = await readColorwayVersion(techCardId, colorwayId, lockVersion);
+      await save.mutateAsync({
+        colorwayId,
+        expectedColorwayVersion: expected,
+        usages: usages.map(toWire),
+      });
+    } catch (e) {
+      // Re-throw carrying this panel's copy: the header prints the message it is handed.
+      throw new Error(recipeSaveErrorMessage(e));
+    }
+  }
+
+  // Hand the mutation to the card's one save. Re-staged on EVERY edit because `commit` closes over this
+  // render's rows — a stale closure would write the edit before last. Unstaged the moment the recipe
+  // matches the server again, so the header count never claims work that is not there.
+  useEffect(() => {
+    if (!staging || !colorwayId || !canEdit) return;
+    if (!staged) {
+      staging.unstage(stagingKey);
       return;
     }
-    save.mutate(
-      {
-        colorwayId: colorway.colorwayId ?? 0,
-        expectedColorwayVersion: lockVersion,
-        usages: usages.map(toWire),
-      },
-      {
-        onSuccess: () => {
-          setDirty(false);
-          showMessage('Recipe saved', 'success');
-        },
-        onError: (e) => showMessage(recipeSaveErrorMessage(e), 'error'),
-      },
-    );
-  };
+    staging.stage({
+      key: stagingKey,
+      label: `колорвей ${title} · recipe — ${lines} ${lines === 1 ? 'line' : 'lines'}`,
+      order: COMMIT_ORDER.recipe,
+      commit: commitRecipe,
+      settle: () => setDirty(false),
+      snapshot,
+    });
+    // commitRecipe is redefined every render by design (it reads current state); depending on it here
+    // would restage on every keystroke for no gain, so the state it reads is the dep list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    staging,
+    stagingKey,
+    colorwayId,
+    canEdit,
+    staged,
+    lines,
+    usages,
+    snapshot,
+    title,
+    lockVersion,
+    techCardId,
+  ]);
 
-  const title = colorway.colorCode?.trim() || colorway.baseSku?.trim() || `#${colorway.colorwayId}`;
   const derived = useMemo(() => deriveComposition(usages, bomItems), [usages, bomItems]);
 
   return (
@@ -1238,7 +1399,7 @@ function ColorwayRecipeEditor({
         question={[colorway.baseSku, `${usages.length} material${usages.length === 1 ? '' : 's'}`]
           .filter(Boolean)
           .join(' · ')}
-        action={dirty ? <Pill tone='attention'>unsaved</Pill> : undefined}
+        action={staged ? <Pill tone='attention'>staged</Pill> : undefined}
       />
 
       {usages.length === 0 ? (
@@ -1267,6 +1428,15 @@ function ColorwayRecipeEditor({
 
       <CompositionBar {...derived} />
 
+      {canEdit && staged && incomplete.length > 0 && (
+        <CalloutBox tone='warning'>
+          <Text size='micro' component='span'>
+            выберите артикул BOM для материала {incomplete.join(', ')} — иначе сохранение карточки
+            остановится на этом рецепте
+          </Text>
+        </CalloutBox>
+      )}
+
       {canEdit && (
         <Toolbar>
           <Button
@@ -1284,21 +1454,21 @@ function ColorwayRecipeEditor({
             </Text>
           )}
           <ToolbarSpacer />
-          {/* The recipe keeps its OWN save + RPC (UpdateColorwayRecipe), separate from lab-dip's. */}
-          <Button
-            type='button'
-            variant='main'
-            size='sm'
-            disabled={save.isPending || !dirty}
-            loading={save.isPending}
-            onClick={submit}
-          >
-            save recipe
-          </Button>
+          {/* No save button of its own any more: the recipe write is queued behind the card's one
+              Save, which is what reports whether it landed. */}
+          {staged && (
+            <>
+              <Pill tone='attention'>{save.isPending ? 'saving…' : 'staged for save'}</Pill>
+              <Text size='micro' variant='label' component='span'>
+                included in the card’s Save
+              </Text>
+            </>
+          )}
         </Toolbar>
       )}
 
-      {/* Dye approval is a SEPARATE concern from the material recipe — its own group, its own save. */}
+      {/* Dye approval is a SEPARATE concern from the material recipe — its own group and its own RPC,
+          staged separately so a lab-dip verdict and a recipe edit are two lines in the header. */}
       <GroupLabel>dye · lab-dip</GroupLabel>
       <LabDipTimeline
         colorway={colorway}
@@ -1306,7 +1476,7 @@ function ColorwayRecipeEditor({
         lockVersion={lockVersion}
         canEdit={canEdit}
         swatchHex={swatchHex}
-        onDirtyChange={setLabDipDirty}
+        onStagedChange={setLabDipStaged}
       />
     </div>
   );
@@ -1329,7 +1499,7 @@ function ColorwayTile({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const code = colorway.colorCode?.trim() || colorway.baseSku?.trim() || `#${colorway.colorwayId}`;
+  const code = colorwayTitle(colorway);
   const count = status?.count ?? colorway.usages?.length ?? 0;
   const completeness = bomCount > 0 ? `${count}/${bomCount}` : String(count);
 
@@ -1357,7 +1527,7 @@ function ColorwayTile({
             {completeness}
           </Text>
         )}
-        {status?.dirty && <Pill tone='attention'>unsaved</Pill>}
+        {status?.staged && <Pill tone='attention'>staged</Pill>}
       </div>
     </Tile>
   );
@@ -1368,6 +1538,10 @@ function ColorwayTile({
 // coming back (ping-pong). This spins up a minimal DRAFT (colour only, via CreateColorway) without
 // leaving the tech card. It occupies the SAME slot below the grid as a recipe, opened from the
 // dashed `+ colourway` tile.
+//
+// KEEPS ITS OWN BUTTON, deliberately — like roles-field (19.5). Creating a colourway is not a draft
+// edit of this card: it mints the row every other panel here then refers to, so it has to exist
+// before the card's Save runs, not with it.
 function CreateColorwayForm({
   techCardId,
   usedCodes,
@@ -1456,7 +1630,8 @@ function CreateColorwayForm({
 }
 
 // Colourway recipes (H1/§2.3): the constructor view of each colourway's material recipe, now that the
-// read-path surfaces usages. Edited per colourway and saved via UpdateColorwayRecipe (full-replace).
+// read-path surfaces usages. Edited per colourway and written by UpdateColorwayRecipe (full-replace),
+// staged into the card's one save rather than fired from here (19).
 //
 // Colour is the subject here, so the roster leads with the swatch: a grid of tiles that STAYS ON
 // SCREEN while a recipe is edited underneath it — the accordion this replaced hid every sibling the
@@ -1528,12 +1703,14 @@ export function ColorwayRecipes({
   const [selected, setSelected] = useState<number | 'new' | null>(null);
   const activeId = selected === 'new' ? null : selected ?? colorways[0]?.colorwayId ?? null;
 
-  // Live per-colourway recipe state, reported up by each editor so the grid can badge it.
+  // Live per-colourway recipe state, reported up by each editor so the grid can badge it — including
+  // the colourways whose editor is currently hidden, which is the point: a staged edit two swatches
+  // away must be visible without opening it.
   const [statuses, setStatuses] = useState<Record<number, RecipeStatus>>({});
   const reportStatus = useCallback((colorwayId: number, next: RecipeStatus) => {
     setStatuses((prev) => {
       const cur = prev[colorwayId];
-      if (cur && cur.count === next.count && cur.dirty === next.dirty) return prev;
+      if (cur && cur.count === next.count && cur.staged === next.staged) return prev;
       return { ...prev, [colorwayId]: next };
     });
   }, []);
@@ -1541,8 +1718,8 @@ export function ColorwayRecipes({
   return (
     <div className='flex flex-col gap-2.5'>
       <Text size='micro' variant='label'>
-        Which catalog article goes on each part, and how much. Saved per colourway, separately from
-        the tech-card save.
+        Which catalog article goes on each part, and how much. Each colourway is its own write, and
+        every one you edit goes out with the card’s Save.
       </Text>
 
       <Tiles min={120}>
