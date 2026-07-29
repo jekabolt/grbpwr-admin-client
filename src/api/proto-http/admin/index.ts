@@ -3520,6 +3520,17 @@ export type SendCampaignNowRequest = {
 export type SendCampaignNowResponse = {
 };
 
+export type AutoTranslateEmailCampaignRequest = {
+  id: number | undefined;
+  // overwrite re-translates all locales/fields; false (default) fills only what's missing.
+  overwrite: boolean | undefined;
+};
+
+export type AutoTranslateEmailCampaignResponse = {
+  // translated_count is the number of strings translated across all locales.
+  translatedCount: number | undefined;
+};
+
 export type ScheduleCampaignRequest = {
   id: number | undefined;
   scheduleAt: number | undefined;
@@ -8628,6 +8639,10 @@ export interface AdminService {
   RenderCampaignPreview(request: RenderCampaignPreviewRequest): Promise<RenderCampaignPreviewResponse>;
   SendTestEmail(request: SendTestEmailRequest): Promise<SendTestEmailResponse>;
   SendCampaignNow(request: SendCampaignNowRequest): Promise<SendCampaignNowResponse>;
+  // AutoTranslateEmailCampaign fills the non-English locales' subject + block translations from
+  // the English source via an LLM, for the admin to review before launch. overwrite=false only
+  // fills what's missing; true re-translates everything.
+  AutoTranslateEmailCampaign(request: AutoTranslateEmailCampaignRequest): Promise<AutoTranslateEmailCampaignResponse>;
   ScheduleCampaign(request: ScheduleCampaignRequest): Promise<ScheduleCampaignResponse>;
   PauseCampaign(request: PauseCampaignRequest): Promise<PauseCampaignResponse>;
   ResumeCampaign(request: ResumeCampaignRequest): Promise<ResumeCampaignResponse>;
@@ -10958,6 +10973,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SendCampaignNow",
       }) as Promise<SendCampaignNowResponse>;
+    },
+    AutoTranslateEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/email-campaigns/${request.id}/auto-translate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AutoTranslateEmailCampaign",
+      }) as Promise<AutoTranslateEmailCampaignResponse>;
     },
     ScheduleCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
