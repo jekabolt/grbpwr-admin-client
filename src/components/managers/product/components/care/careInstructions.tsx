@@ -3,8 +3,9 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { CareMethodsList } from './care-card';
+import { CareMethodsList, CareSlotEmpty, CareSymbol } from './care-card';
 import { careInstruction } from './careInstruction';
+import { CARE_CODE_META, CARE_SLOTS } from './care-codes';
 
 interface SelectedInstructions {
   [category: string]: string;
@@ -38,10 +39,15 @@ function isNested(methods: Record<string, unknown>): boolean {
  * shell's `width` prop exists to end.
  *
  * Categories are CHIPS, not buttons. They are a filter over one list — the same grammar as the
- * card's chip filter bar — and rendering them as buttons made six equally-weighted "actions" out of
- * what is really one selected state. The count on each chip is load-bearing: a care tag is read as
- * a set, so "which of the six have I answered" is the question this dialog exists to answer, and it
- * used to be invisible until you clicked through every tab.
+ * card's chip filter bar — and rendering them as buttons made five equally-weighted "actions" out
+ * of what is really one selected state.
+ *
+ * Above them is the TAG RAIL, which is the point of the dialog. A care tag is read as a set, so the
+ * question being answered here is "is it complete", and a tabbed picker hides the answer by
+ * construction: four of the five categories are always off-screen. The rail holds one slot per
+ * possible pick — dashed and labelled while empty — so a missing symbol is a visible hole rather
+ * than something you have to go looking for. Clicking a symbol on the rail removes it, which is the
+ * only way to undo a pick without first navigating back to the tab it was made on.
  *
  * Selection is per category (picking a second wash symbol replaces the first), so the chip count is
  * always 0 or 1 outside Professional Care, which has one per sub-category.
@@ -96,9 +102,45 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
           </CalloutBox>
         )}
 
-        {/* Sticky so the category set stays reachable while scrolling a long grid; the ink rule
-            under it keeps the chips from floating over the tiles as they pass beneath. */}
-        <div className='sticky top-0 z-10 -mx-2.5 border-b border-hairline bg-bgColor px-2.5 pb-2'>
+        {/* Sticky so the tag and the category set stay reachable while scrolling a long grid; the
+            ink rule under it keeps them from floating over the tiles as they pass beneath. */}
+        <div className='sticky top-0 z-10 -mx-2.5 space-y-2 border-b border-hairline bg-bgColor px-2.5 pb-2'>
+          {/* The thing being assembled. Without it the dialog never shows its own output: you pick
+              across five tabs and can only verify the result by closing and reading the field. */}
+          <div className='flex items-center gap-2 border border-borderColor bg-bgZebra px-2 py-1'>
+            <Text
+              component='span'
+              size='nano'
+              variant='label'
+              tracking='group'
+              className='w-12 shrink-0 uppercase'
+            >
+              on the tag
+            </Text>
+            {/* items-stretch so an empty slot matches the height of a filled one — a gap has to
+                line up with its neighbours to read as a gap rather than as a smaller thing. */}
+            <div className='flex flex-1 flex-wrap items-stretch gap-1.5'>
+              {CARE_SLOTS.map((slot) =>
+                selectedInstructions[slot.key] ? (
+                  <CareSymbol
+                    key={slot.key}
+                    code={selectedInstructions[slot.key]}
+                    onRemove={() =>
+                      onSelectCareInstruction(
+                        slot.category,
+                        CARE_CODE_META[selectedInstructions[slot.key]]?.name ?? '',
+                        selectedInstructions[slot.key],
+                        slot.subCategory,
+                      )
+                    }
+                  />
+                ) : (
+                  <CareSlotEmpty key={slot.key} label={slot.label} name={slot.name} />
+                ),
+              )}
+            </div>
+          </div>
+
           <ChipRow>
             {careCategories.map((category) => {
               const count = countByCategory[category] ?? 0;
@@ -129,7 +171,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
         <Text size='micro' variant='label'>
           {totalPicked === 0
             ? 'nothing picked yet — one symbol per category; picking again in the same category replaces it'
-            : `${totalPicked} symbol${totalPicked === 1 ? '' : 's'} on the tag · click a selected one to remove it`}
+            : `${totalPicked} of ${CARE_SLOTS.length} picked · click a symbol on the tag above to remove it`}
         </Text>
       </div>
     </ConfirmationModal>
