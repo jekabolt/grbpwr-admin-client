@@ -1,4 +1,5 @@
 import { common_BuyerInsert } from 'api/proto-http/frontend';
+import { localeLabel } from 'constants/constants';
 import { STATUS } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
@@ -6,10 +7,13 @@ import Text from 'ui/components/text';
 
 interface Props {
   buyer: common_BuyerInsert | undefined;
+  // Site locale captured on the order at purchase — the language its transactional
+  // emails are localized in. Lives on the order, not the buyer.
+  locale?: string;
   isPrinting: boolean;
 }
 
-export function Buyer({ buyer, isPrinting }: Props) {
+export function Buyer({ buyer, locale, isPrinting }: Props) {
   return (
     <div className='flex flex-col gap-1'>
       <Text variant='uppercase' className='font-bold'>
@@ -37,6 +41,11 @@ export function Buyer({ buyer, isPrinting }: Props) {
       <Text variant='uppercase'>
         {`phone: `}
         <span className='select-all'>{buyer?.phone}</span>
+      </Text>
+
+      <Text variant='uppercase'>
+        {`email locale: `}
+        <span className='select-all'>{localeLabel(locale)}</span>
       </Text>
 
       <Text
