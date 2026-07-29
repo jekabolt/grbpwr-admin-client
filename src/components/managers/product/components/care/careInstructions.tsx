@@ -1,8 +1,8 @@
-import { cn } from 'lib/utility';
-import { FC, useState } from 'react';
-import { Button } from 'ui/components/button';
+import { FC, useMemo, useState } from 'react';
+import { CalloutBox } from 'ui/components/callout-box';
+import { Chip, ChipRow } from 'ui/components/chip';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { CareCompositionModal } from '../care-composition-modal';
 import { CareMethodsList } from './care-card';
 import { careInstruction } from './careInstruction';
 
@@ -25,6 +25,27 @@ interface CareInstructionsProps {
   legacyValue?: string;
 }
 
+// Whether a category's methods are nested one level deeper (Professional Care → dry / wet), which
+// is the only thing that changes the body layout.
+function isNested(methods: Record<string, unknown>): boolean {
+  const first = Object.values(methods)[0];
+  return !!first && typeof first === 'object' && !('code' in (first as object));
+}
+
+/**
+ * The care picker, on the app's one modal shell (phase 04) instead of the bespoke dialog it used to
+ * carry — that one hard-coded `lg:h-[600px] lg:w-4/5`, which is exactly the ad-hoc modal sizing the
+ * shell's `width` prop exists to end.
+ *
+ * Categories are CHIPS, not buttons. They are a filter over one list — the same grammar as the
+ * card's chip filter bar — and rendering them as buttons made six equally-weighted "actions" out of
+ * what is really one selected state. The count on each chip is load-bearing: a care tag is read as
+ * a set, so "which of the six have I answered" is the question this dialog exists to answer, and it
+ * used to be invisible until you clicked through every tab.
+ *
+ * Selection is per category (picking a second wash symbol replaces the first), so the chip count is
+ * always 0 or 1 outside Professional Care, which has one per sub-category.
+ */
 export const CareInstructions: FC<CareInstructionsProps> = ({
   isCareTableOpen,
   selectedInstructions,
@@ -33,76 +54,84 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
   legacyValue,
 }) => {
   const careCategories = Object.keys(careInstruction.care_instructions);
-  const [selectedCare, setSelectedCare] = useState<string | null>('Washing');
-  const nestedCareMethods = Object.values(
-    careInstruction.care_instructions[
-      selectedCare as keyof typeof careInstruction.care_instructions
-    ],
-  )[0]?.code;
+  const [selectedCare, setSelectedCare] = useState<string>('Washing');
 
-  const handleSelectCare = (category: string) => {
-    setSelectedCare(category);
-  };
+  const methods = careInstruction.care_instructions[
+    selectedCare as keyof typeof careInstruction.care_instructions
+  ] as Record<string, unknown>;
+  const nested = isNested(methods);
+
+  // How many picks each category holds — Professional Care counts its sub-categories, everything
+  // else is one or nothing.
+  const countByCategory = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const category of careCategories) {
+      out[category] = Object.keys(selectedInstructions).filter(
+        (k) => k === category || k.startsWith(`${category}-`),
+      ).length;
+    }
+    return out;
+  }, [careCategories, selectedInstructions]);
+
+  const totalPicked = Object.values(selectedInstructions).filter(Boolean).length;
 
   return (
-    <CareCompositionModal
-      title='care'
+    <ConfirmationModal
       open={isCareTableOpen}
-      onOpenChange={close}
-      footer={
-        <div className='flex justify-end items-center gap-2'>
-          <Button size='lg' variant='secondary' onClick={close}>
-            Cancel
-          </Button>
-          <Button size='lg' variant='main' onClick={close}>
-            Save
-          </Button>
-        </div>
-      }
+      onOpenChange={(o) => !o && close()}
+      onConfirm={close}
+      onCancel={close}
+      title='care instructions'
+      confirmLabel='done'
+      cancelLabel='close'
+      // A grid of 40 symbols is a browser, not a form.
+      width='lg'
     >
-      <div className='space-y-6'>
+      <div className='flex flex-col gap-2.5'>
         {legacyValue && (
-          <Text
-            variant='inactive'
-            size='small'
-            className='border border-warning bg-highlightColor/10 p-2'
-          >
-            current: {legacyValue} — picking an option below replaces this text
-          </Text>
+          <CalloutBox tone='warning'>
+            <Text size='micro'>
+              currently stored as free text: “{legacyValue}” — picking a symbol below replaces it
+            </Text>
+          </CalloutBox>
         )}
-        <div className='flex gap-3 sticky top-0 bg-bgColor'>
-          {careCategories.map((category) => (
-            <Button
-              key={category}
-              size='lg'
-              variant='secondary'
-              onClick={() => handleSelectCare(category)}
-              className={cn('uppercase', selectedCare === category && 'bg-textInactiveColor')}
-            >
-              {category}
-            </Button>
-          ))}
-        </div>
-        {selectedCare && (
-          <div
-            className={cn('w-full', {
-              'flex flex-col space-y-4': !nestedCareMethods,
-              'grid grid-cols-2 lg:grid-cols-4 gap-2': nestedCareMethods,
+
+        {/* Sticky so the category set stays reachable while scrolling a long grid; the ink rule
+            under it keeps the chips from floating over the tiles as they pass beneath. */}
+        <div className='sticky top-0 z-10 -mx-2.5 border-b border-hairline bg-bgColor px-2.5 pb-2'>
+          <ChipRow>
+            {careCategories.map((category) => {
+              const count = countByCategory[category] ?? 0;
+              return (
+                <Chip
+                  key={category}
+                  selected={selectedCare === category}
+                  pressed={selectedCare === category}
+                  onClick={() => setSelectedCare(category)}
+                >
+                  {category}
+                  {count > 0 && ` · ${count}`}
+                </Chip>
+              );
             })}
-          >
-            <CareMethodsList
-              methods={
-                careInstruction.care_instructions[
-                  selectedCare as keyof typeof careInstruction.care_instructions
-                ]
-              }
-              selectedCare={selectedCare}
-              selectedInstructions={selectedInstructions}
-              onSelectCareInstruction={onSelectCareInstruction}
-            />
-          </div>
-        )}
+          </ChipRow>
+        </div>
+
+        <div className={nested ? 'flex flex-col gap-4' : ''}>
+          <CareMethodsList
+            methods={methods}
+            selectedCare={selectedCare}
+            selectedInstructions={selectedInstructions}
+            onSelectCareInstruction={onSelectCareInstruction}
+          />
+        </div>
+
+        <Text size='micro' variant='label'>
+          {totalPicked === 0
+            ? 'nothing picked yet — one symbol per category; picking again in the same category replaces it'
+            : `${totalPicked} symbol${totalPicked === 1 ? '' : 's'} on the tag · click a selected one to remove it`}
+        </Text>
       </div>
-    </CareCompositionModal>
+    </ConfirmationModal>
   );
 };
